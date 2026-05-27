@@ -31,6 +31,15 @@ grep -q '.metareview/knowledge/metareview.jsonl' docs/quickstart.md
 grep -q 'docs/metareview/reviews/' docs/quickstart.md
 grep -q 'metaswarm remains the lifecycle owner' docs/quickstart.md
 grep -q 'docs/quickstart.md' README.md
+grep -q '^## What Is This?' README.md
+grep -q '^## Install$' README.md
+grep -q 'codex plugin marketplace add dsifry/metareview-marketplace' README.md
+grep -q 'claude plugin marketplace add dsifry/metareview-marketplace' README.md
+grep -q '^## Recommended With metaswarm$' README.md
+grep -q '^## How The Workflow Works$' README.md
+grep -q '^## How Humans Use It$' README.md
+grep -q '^## How Coding Agents Use It$' README.md
+grep -q '^## Philosophy$' README.md
 grep -q 'metareview review task-done' skills/review-task-done/SKILL.md
 grep -q 'metareview review task-done' commands/review-task-done.md
 grep -q 'metareview review epic-ready' skills/review-epic-ready/SKILL.md
