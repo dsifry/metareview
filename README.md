@@ -90,36 +90,50 @@ Expected mode is `metaswarm-extension`. In that mode, metareview should extend m
 
 ## How The Workflow Works
 
-```text
-Spec / plan / design / decomposition
-        |
-        v
-metareview review artifact <path>
-        |
-        v
-Implementation chunk claims done
-        |
-        v
-metareview review task-done <task-id-or-path> --base <ref> --evidence <file>
-        |
-        v
-Epic or parent task locally complete
-        |
-        v
-metareview review epic-ready <epic-id-or-path>
-        |
-        v
-Branch ready for PR or merge
-        |
-        v
-metareview review pr-ready --base <ref>
-        |
-        v
-Confirmed PR merge
-        |
-        v
-metareview learn --post-merge <pr-number> --base <pre-merge-ref>
+```mermaid
+flowchart TD
+    intent[Original intent, issue, spec, or human request]
+    artifact[Review artifact<br/>metareview review artifact path]
+    approved{Approved with no blockers?}
+    revise[Revise artifact]
+    decompose[Decompose into epics, tasks, or work units]
+    child[Child unit decomposition]
+    childReview[Fractal decomposition review<br/>review each child plan/artifact]
+    childApproved{Child review passes?}
+    childRevise[Revise child decomposition]
+    implement[Implement smallest ready work unit]
+    taskDone[Task-done review<br/>metareview review task-done target --base ref --evidence file]
+    taskPass{Task review passes?}
+    fix[Fix blockers and rerun with previous run]
+    moreChildren{More child units?}
+    parentIntent{Parent intent preserved?}
+    parentRevise[Reconcile drift against original intent]
+    epicReady[Epic-ready review<br/>metareview review epic-ready target]
+    epicPass{Epic review passes?}
+    prReady[PR-ready review<br/>metareview review pr-ready --base ref]
+    prPass{PR review passes?}
+    merge[Push, PR, merge]
+    learn[Post-merge learning<br/>metareview learn --post-merge pr --base pre-merge-ref]
+
+    intent --> artifact --> approved
+    approved -- no --> revise --> artifact
+    approved -- yes --> decompose --> child
+    child --> childReview --> childApproved
+    childApproved -- no --> childRevise --> childReview
+    childApproved -- yes --> implement --> taskDone --> taskPass
+    taskPass -- no --> fix --> taskDone
+    taskPass -- yes --> moreChildren
+    moreChildren -- yes --> child
+    moreChildren -- no --> parentIntent
+    parentIntent -- no --> parentRevise --> childReview
+    parentIntent -- yes --> epicReady --> epicPass
+    epicPass -- no --> childReview
+    epicPass -- yes --> prReady --> prPass
+    prPass -- no --> fix --> prReady
+    prPass -- yes --> merge --> learn
 ```
+
+The decomposition loop is intentionally fractal: a parent plan can be decomposed into child epics, each child can be decomposed again, and each level gets reviewed before implementation continues. After the iteration converges, metareview checks back against the original parent intent so accumulated local fixes do not quietly drift away from the user request.
 
 Every review produces Markdown artifacts under `docs/metareview/` and local transient state under `.metareview/`. A blocking finding is current work. Fix it, re-run with `--previous-run <run-id>`, and do not claim completion until the review reports `PASS` or `PASS_ADVISORY` with zero blockers.
 

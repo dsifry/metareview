@@ -39,6 +39,10 @@ grep -q '^## Works even better with metaswarm!$' README.md
 grep -q 'https://github.com/dsifry/metaswarm' README.md
 grep -q 'multi-agent orchestration framework' README.md
 grep -q '^## How The Workflow Works$' README.md
+grep -q '^```mermaid$' README.md
+grep -q 'Fractal decomposition review' README.md
+grep -q 'Child unit decomposition' README.md
+grep -q 'Parent intent preserved?' README.md
 grep -q '^## How Humans Use It$' README.md
 grep -q '^## How Coding Agents Use It$' README.md
 grep -q '^## Philosophy$' README.md
