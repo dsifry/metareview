@@ -48,9 +48,10 @@ if (pkg.files.includes("lib/")) throw new Error("package still advertises lib/ a
 for (const required of ["bin/", "cmd/", "internal/", "go.mod"]) {
   if (!pkg.files.includes(required)) throw new Error(`package files missing ${required}`);
 }
-for (const required of ["docs/quickstart.md", "docs/README.codex.md", "docs/README.claude.md", "docs/index.html", "docs/integrations/", "INSTALL.md", "AGENTS.md", "CLAUDE.md"]) {
+for (const required of ["docs/quickstart.md", "docs/README.codex.md", "docs/README.claude.md", "docs/index.html", "docs/integrations/", "INSTALL.md", "AGENTS.md", "CLAUDE.md", "LICENSE"]) {
   if (!pkg.files.includes(required)) throw new Error(`package files missing ${required}`);
 }
+if (!fs.readFileSync("LICENSE", "utf8").startsWith("MIT License")) throw new Error("LICENSE must contain MIT text");
 if (!JSON.stringify(pkg).includes("post-merge-learning")) throw new Error("package metadata does not advertise post-merge learning");
 if (!JSON.stringify(pkg).includes("Go 1.22")) throw new Error("package metadata does not describe Go runtime expectation");
 if (pkg.scripts.build !== "go build -o bin/metareview ./cmd/metareview") throw new Error("package build script must create bin/metareview");

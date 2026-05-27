@@ -23,6 +23,7 @@
     "INSTALL.md",
     "AGENTS.md",
     "CLAUDE.md",
+    "LICENSE",
     ".codex-plugin/",
     ".claude-plugin/"
   ],
