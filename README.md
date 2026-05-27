@@ -31,6 +31,21 @@ metareview brings the discipline of structured, adversarial agent workflows to t
 
 The goal is not another loose "please review this" prompt. The goal is a review harness with named gates, explicit evidence, deterministic blocker policy, durable Markdown artifacts, and knowledge feedback loops that help future agents avoid repeating mistakes.
 
+## Agentic Review Patterns
+
+metareview is built around review patterns that work well when humans and coding agents are collaborating:
+
+- **Adversarial multi-agent reviews:** run independent reviewer lenses such as architecture, code quality, security, test adequacy, product/user impact, and acceptance completeness against the same artifact or diff.
+- **Iterations with hard gates:** treat critical, high, and spec-contract findings as blockers; revise the work and re-run review with `--previous-run <run-id>` until blockers are cleared.
+- **Fractal review loops:** decompose large work into epics, tasks, and child plans, then review each level before implementation proceeds.
+- **Cross-level intent checks:** after multiple revision loops, compare the accepted child work back to the parent plan and original user request.
+- **Evidence-backed reviews:** attach test output, validation commands, acceptance notes, and PR context so reviewers judge the real work product, not a summary.
+- **Deterministic local reviewers:** use stable local rules for baseline gates so agents cannot skip known failure modes or bury blockers in prose.
+- **Specialist optional reviewers:** bring in business analysts, user advocates, interaction designers, copywriters, SREs, security reviewers, and release engineers when the artifact needs those perspectives.
+- **Repository-knowledge priming:** load service inventories, Beads knowledge, session history, and GitHub history so reviewers catch duplicated services, stale assumptions, and prior mistakes.
+- **Review artifact accountability:** write durable Markdown context and review logs so future humans and agents can inspect what was reviewed, what blocked, and why it passed.
+- **Post-merge reflection:** after a PR lands, extract accepted learnings, discarded candidates, and reviewer calibration so the next review starts smarter.
+
 ## Install
 
 ### npm Package

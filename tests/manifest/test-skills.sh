@@ -45,6 +45,17 @@ grep -q 'Intent-drift review' README.md
 grep -q 'Post-merge learning' README.md
 grep -q 'Repository knowledge review' README.md
 grep -q '^## What Is This?' README.md
+grep -q '^## Agentic Review Patterns$' README.md
+grep -q 'Adversarial multi-agent reviews' README.md
+grep -q 'Iterations with hard gates' README.md
+grep -q 'Fractal review loops' README.md
+grep -q 'Cross-level intent checks' README.md
+grep -q 'Evidence-backed reviews' README.md
+grep -q 'Deterministic local reviewers' README.md
+grep -q 'Specialist optional reviewers' README.md
+grep -q 'Repository-knowledge priming' README.md
+grep -q 'Review artifact accountability' README.md
+grep -q 'Post-merge reflection' README.md
 grep -q '^## Install$' README.md
 grep -q 'codex plugin marketplace add dsifry/metareview-marketplace' README.md
 grep -q 'claude plugin marketplace add dsifry/metareview-marketplace' README.md
