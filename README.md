@@ -66,7 +66,9 @@ npm run build
 
 See [INSTALL.md](INSTALL.md), [docs/README.codex.md](docs/README.codex.md), and [docs/README.claude.md](docs/README.claude.md) for details.
 
-## Recommended With metaswarm
+## Works even better with metaswarm!
+
+[metaswarm](https://github.com/dsifry/metaswarm) is a multi-agent orchestration framework for Claude Code, Codex CLI, and Gemini CLI. It coordinates specialized agent roles, Beads-backed task graphs, Superpowers workflows, adversarial design and plan review gates, TDD-oriented work-unit execution, PR shepherding, and post-merge learning across a full software development lifecycle.
 
 metareview is useful on its own, but it is designed to be strongest when installed alongside [metaswarm](https://github.com/dsifry/metaswarm), Superpowers, and Beads.
 

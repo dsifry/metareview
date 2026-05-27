@@ -35,7 +35,9 @@ grep -q '^## What Is This?' README.md
 grep -q '^## Install$' README.md
 grep -q 'codex plugin marketplace add dsifry/metareview-marketplace' README.md
 grep -q 'claude plugin marketplace add dsifry/metareview-marketplace' README.md
-grep -q '^## Recommended With metaswarm$' README.md
+grep -q '^## Works even better with metaswarm!$' README.md
+grep -q 'https://github.com/dsifry/metaswarm' README.md
+grep -q 'multi-agent orchestration framework' README.md
 grep -q '^## How The Workflow Works$' README.md
 grep -q '^## How Humans Use It$' README.md
 grep -q '^## How Coding Agents Use It$' README.md
