@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+VERSION="$(node -p "require('$ROOT/package.json').version")"
 
 node -e '
 const fs = require("fs");
@@ -76,7 +77,7 @@ done
 
 npm run build >/tmp/metareview-build-test.out
 test -x "$ROOT/bin/metareview"
-"$ROOT/bin/metareview" --version | grep -q '^0\.1\.0$'
+"$ROOT/bin/metareview" --version | grep -q "^${VERSION}$"
 
 pack_json="$(cd "$ROOT" && npm pack --dry-run --json)"
 PACK_JSON="$pack_json" node - <<'NODE'
@@ -87,7 +88,7 @@ if (!files.includes("bin/metareview")) {
 }
 NODE
 
-"$ROOT/cli/metareview.js" --version | grep -q '^0\.1\.0$'
+"$ROOT/cli/metareview.js" --version | grep -q "^${VERSION}$"
 "$ROOT/cli/metareview.js" --help | grep -q 'metareview review task-done'
 "$ROOT/cli/metareview.js" --help | grep -q 'metareview review epic-ready'
 "$ROOT/cli/metareview.js" --help | grep -q 'metareview review pr-ready'

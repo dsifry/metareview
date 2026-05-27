@@ -12,6 +12,7 @@ if [ -f tests/lib/test-state.sh ]; then bash tests/lib/test-state.sh; fi
 if [ -f tests/lib/test-context-pack.sh ]; then bash tests/lib/test-context-pack.sh; fi
 if [ -f tests/lib/test-artifact-review.sh ]; then bash tests/lib/test-artifact-review.sh; fi
 if [ -f tests/go/test-cli-baseline.sh ]; then bash tests/go/test-cli-baseline.sh; fi
+if [ -f tests/go/test-npm-wrapper-cwd.sh ]; then bash tests/go/test-npm-wrapper-cwd.sh; fi
 if [ -f tests/go/test-setup-check.sh ]; then bash tests/go/test-setup-check.sh; fi
 if [ -f tests/go/test-artifact-review.sh ]; then bash tests/go/test-artifact-review.sh; fi
 if [ -f tests/go/test-git-context.sh ]; then bash tests/go/test-git-context.sh; fi

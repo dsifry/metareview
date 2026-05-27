@@ -12,7 +12,7 @@ const args = process.argv.slice(2);
 
 let command;
 let commandArgs;
-let options = { cwd: root, stdio: 'inherit' };
+let options = { cwd: process.cwd(), stdio: 'inherit' };
 
 if (fs.existsSync(packagedBinary)) {
   command = packagedBinary;
@@ -20,6 +20,7 @@ if (fs.existsSync(packagedBinary)) {
 } else if (fs.existsSync(goEntrypoint)) {
   command = 'go';
   commandArgs = ['run', './cmd/metareview', ...args];
+  options = { cwd: root, stdio: 'inherit' };
 } else {
   console.error('No packaged metareview binary or Go source checkout found.');
   console.error(`Expected packaged binary: ${packagedBinary}`);

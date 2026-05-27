@@ -7,7 +7,7 @@ cd "$ROOT"
 go test ./...
 
 version="$(go run ./cmd/metareview --version)"
-test "$version" = "0.1.0"
+test "$version" = "0.1.1"
 
 help="$(go run ./cmd/metareview --help)"
 printf '%s\n' "$help" | grep -q 'metareview setup --check'
