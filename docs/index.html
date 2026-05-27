@@ -3,186 +3,723 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>metareview - Local Review Gates for Coding Agents</title>
-  <meta name="description" content="metareview is a local-first review harness for specs, plans, code chunks, epics, PR readiness, and post-merge learning.">
+  <title>metareview - Review Gates for Agentic Software Work</title>
+  <meta name="description" content="metareview is a local-first review harness for coding agents: plan review, code review, task-done gates, PR readiness, and post-merge learning.">
   <style>
     :root {
-      --bg: #0f172a;
-      --panel: #111827;
-      --surface: #1f2937;
-      --border: #374151;
-      --text: #f9fafb;
-      --muted: #cbd5e1;
-      --accent: #38bdf8;
-      --green: #34d399;
-      --yellow: #facc15;
-      --red: #fb7185;
+      --ink: #151515;
+      --paper: #fbfbf7;
+      --surface: #ffffff;
+      --soft: #f0f2ed;
+      --line: #d8ddd2;
+      --muted: #595f56;
+      --green: #1f7a4d;
+      --green-soft: #dff2e8;
+      --gold: #a86a12;
+      --gold-soft: #f8ead2;
+      --red: #a8323f;
+      --red-soft: #f6dce0;
+      --blue: #2b6678;
+      --blue-soft: #dfeff3;
+      --code: #101412;
     }
+
     * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
     body {
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
+      background: var(--paper);
+      color: var(--ink);
       line-height: 1.6;
     }
-    .container {
-      max-width: 980px;
+
+    a { color: var(--blue); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+
+    .wrap {
+      max-width: 1120px;
       margin: 0 auto;
       padding: 0 24px;
     }
-    header {
-      padding: 56px 0 36px;
-      border-bottom: 1px solid var(--border);
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(251, 251, 247, 0.94);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(12px);
     }
-    h1 {
-      margin: 0 0 12px;
-      font-size: 44px;
-      line-height: 1.1;
+
+    .nav .wrap {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 60px;
+      gap: 20px;
+    }
+
+    .brand {
+      font-weight: 800;
+      color: var(--ink);
+      text-decoration: none;
       letter-spacing: 0;
     }
-    h2 {
-      margin: 0 0 18px;
-      font-size: 26px;
-      letter-spacing: 0;
-    }
-    h3 {
-      margin: 24px 0 10px;
-      font-size: 18px;
-      letter-spacing: 0;
-    }
-    p, li {
-      color: var(--muted);
-      font-size: 16px;
-    }
-    a { color: var(--accent); }
-    section {
-      padding: 38px 0;
-      border-bottom: 1px solid var(--border);
-    }
-    pre {
-      overflow-x: auto;
-      padding: 18px;
-      border: 1px solid var(--border);
-      background: var(--panel);
-      border-radius: 8px;
-    }
-    code {
-      font-family: "SF Mono", Menlo, Consolas, monospace;
+
+    .links {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 14px;
       font-size: 14px;
     }
-    .grid {
+
+    .links a { color: var(--muted); text-decoration: none; }
+    .links a:hover { color: var(--ink); }
+
+    .hero {
+      padding: 72px 0 56px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .hero-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 14px;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      gap: 36px;
+      align-items: center;
     }
-    .card {
-      border: 1px solid var(--border);
-      background: var(--surface);
-      border-radius: 8px;
-      padding: 16px;
-    }
-    .pipeline {
-      display: grid;
-      gap: 8px;
-      margin-top: 18px;
-    }
-    .step {
-      display: grid;
-      grid-template-columns: 140px 1fr;
-      gap: 16px;
-      align-items: start;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 14px;
-      background: var(--surface);
-    }
-    .label {
+
+    .eyebrow {
+      margin: 0 0 14px;
       color: var(--green);
+      font-weight: 800;
+      font-size: 13px;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0 0 18px;
+      font-size: clamp(42px, 7vw, 76px);
+      line-height: 0.96;
+      letter-spacing: 0;
+    }
+
+    .lede {
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(18px, 2.3vw, 22px);
+      max-width: 720px;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 10px 14px;
+      border: 1px solid var(--ink);
+      border-radius: 6px;
+      background: var(--ink);
+      color: white;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .button.secondary {
+      background: transparent;
+      color: var(--ink);
+    }
+
+    .terminal {
+      border: 1px solid var(--ink);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--code);
+      box-shadow: 10px 10px 0 var(--soft);
+    }
+
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 34px;
+      padding: 0 12px;
+      background: #e6e9df;
+      border-bottom: 1px solid var(--ink);
+      color: var(--muted);
+      font-size: 13px;
       font-weight: 700;
     }
-    .warn { color: var(--yellow); }
-    .block { color: var(--red); }
-    footer {
-      padding: 32px 0 48px;
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 1px solid var(--ink);
+    }
+
+    .dot.red { background: var(--red-soft); }
+    .dot.gold { background: var(--gold-soft); }
+    .dot.green { background: var(--green-soft); }
+
+    pre {
+      margin: 0;
+      overflow-x: auto;
+      padding: 20px;
+      color: #e8f4ed;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    code {
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.95em;
+    }
+
+    section {
+      padding: 58px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: clamp(30px, 4vw, 46px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .section-intro {
+      max-width: 820px;
+      font-size: 19px;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: 34px;
+      align-items: start;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 20px;
+    }
+
+    .panel strong { color: var(--ink); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .card {
+      min-height: 190px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 20px;
+    }
+
+    .card p { font-size: 15px; margin-bottom: 0; }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      margin-bottom: 12px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--soft);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .tag.green { background: var(--green-soft); color: var(--green); border-color: #a9dabc; }
+    .tag.gold { background: var(--gold-soft); color: var(--gold); border-color: #e7c58b; }
+    .tag.red { background: var(--red-soft); color: var(--red); border-color: #e5a7ae; }
+    .tag.blue { background: var(--blue-soft); color: var(--blue); border-color: #a8ced8; }
+
+    .pipeline {
+      display: grid;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 72px minmax(180px, 260px) 1fr;
+      gap: 16px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 16px;
+    }
+
+    .num {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 42px;
+      height: 42px;
+      border: 1px solid var(--ink);
+      border-radius: 50%;
+      color: var(--ink);
+      font-weight: 900;
+      background: var(--paper);
+    }
+
+    .step p { margin: 0; font-size: 15px; }
+
+    .loop {
+      margin-top: 28px;
+      border: 1px solid var(--ink);
+      border-radius: 8px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .loop-head {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--ink);
+      background: var(--soft);
+      font-weight: 900;
+    }
+
+    .loop-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+    }
+
+    .loop-cell {
+      min-height: 150px;
+      padding: 18px;
+      border-right: 1px solid var(--line);
+    }
+
+    .loop-cell:last-child { border-right: 0; }
+    .loop-cell p { font-size: 15px; margin-bottom: 0; }
+
+    .quote {
+      padding: 28px;
+      border-left: 6px solid var(--green);
+      background: var(--green-soft);
+      border-radius: 8px;
+      color: var(--ink);
+      font-size: clamp(23px, 3vw, 32px);
+      line-height: 1.2;
+      font-weight: 900;
+    }
+
+    .checklist {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px 26px;
+      margin: 26px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .checklist li {
+      position: relative;
+      padding-left: 28px;
       color: var(--muted);
     }
-    @media (max-width: 640px) {
-      h1 { font-size: 34px; }
-      .step { grid-template-columns: 1fr; }
+
+    .checklist li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 9px;
+      width: 12px;
+      height: 12px;
+      border: 2px solid var(--green);
+      border-radius: 50%;
+      background: var(--green-soft);
+    }
+
+    .commands {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 24px;
+    }
+
+    .commands .terminal { box-shadow: none; }
+
+    footer {
+      padding: 36px 0 54px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 860px) {
+      .hero-grid,
+      .split,
+      .grid,
+      .commands,
+      .checklist {
+        grid-template-columns: 1fr;
+      }
+
+      .step {
+        grid-template-columns: 50px 1fr;
+      }
+
+      .step div:last-child {
+        grid-column: 2;
+      }
+
+      .loop-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .loop-cell {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .loop-cell:last-child { border-bottom: 0; }
+    }
+
+    @media (max-width: 620px) {
+      .nav { position: static; }
+      .nav .wrap { align-items: flex-start; flex-direction: column; padding-top: 14px; padding-bottom: 14px; }
+      .links { justify-content: flex-start; }
+      .hero { padding-top: 46px; }
+      section { padding: 42px 0; }
     }
   </style>
 </head>
 <body>
-  <header>
-    <div class="container">
-      <h1>metareview</h1>
-      <p>Local-first review gates and learning for coding agents: specs, plans, task-done code chunks, epics, PR readiness, and post-merge follow-up.</p>
+  <nav class="nav">
+    <div class="wrap">
+      <a class="brand" href="#">metareview</a>
+      <div class="links">
+        <a href="https://github.com/dsifry/metareview">GitHub</a>
+        <a href="https://github.com/dsifry/metareview/blob/main/INSTALL.md">Install</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#setup">Setup</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">Local review gates for coding agents</p>
+        <h1>What metaswarm does for development, metareview does for review.</h1>
+        <p class="lede">metareview gives humans and agents a repeatable review harness for plans, specs, decomposition, task-sized code changes, PR readiness, and post-merge learning.</p>
+        <div class="hero-actions">
+          <a class="button" href="#setup">Install it</a>
+          <a class="button secondary" href="https://github.com/dsifry/metareview">Read the repo</a>
+        </div>
+      </div>
+      <div class="terminal" aria-label="metareview command example">
+        <div class="terminal-bar">
+          <span class="dot red"></span>
+          <span class="dot gold"></span>
+          <span class="dot green"></span>
+          review gate
+        </div>
+        <pre><code>$ npm install -g metareview
+$ metareview setup --check
+mode: metaswarm-extension
+
+$ metareview review task-done task-42 \
+  --base main \
+  --evidence /tmp/evidence.txt
+
+verdict: BLOCKED
+finding: acceptance evidence missing
+next: fix, re-run with --previous-run</code></pre>
+      </div>
     </div>
   </header>
 
-  <main class="container">
+  <main>
     <section>
-      <h2>Quick Start</h2>
-      <pre><code>npm install -g metareview
+      <div class="wrap split">
+        <div>
+          <h2>The problem is not that agents cannot write code.</h2>
+          <p class="section-intro">The problem is that agents are too willing to declare victory.</p>
+        </div>
+        <div>
+          <p>A coding agent can finish a task, summarize what it thinks it did, and sound confident while missing the acceptance contract, duplicating an existing service path, skipping a test, or drifting away from the original intent.</p>
+          <p>Humans compensate by doing the orchestration themselves: rereading the spec, checking the diff, asking for tests, reviewing the plan, comparing back to the parent issue, and remembering the repo-specific gotchas the agent forgot.</p>
+          <p>metareview turns that work into named review gates with durable artifacts, blocker policy, repository knowledge, and post-merge learning.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="quote">A review is not a vibe check. It is a state transition.</div>
+      </div>
+    </section>
+
+    <section id="workflow">
+      <div class="wrap">
+        <h2>The review pipeline</h2>
+        <p class="section-intro">Use the smallest gate that matches the decision in front of you. Review early, review at boundaries, and keep blockers as work until a fresh pass clears them.</p>
+        <div class="pipeline">
+          <div class="step">
+            <div class="num">1</div>
+            <div><h3>Artifact Review</h3></div>
+            <div><p>Review specs, implementation plans, architecture notes, designs, decomposition docs, and other written intent before agents start coding.</p></div>
+          </div>
+          <div class="step">
+            <div class="num">2</div>
+            <div><h3>Task-Done Review</h3></div>
+            <div><p>Review a local task-sized change before an agent says it is done. Check acceptance, tests, diff scope, service boundaries, and evidence.</p></div>
+          </div>
+          <div class="step">
+            <div class="num">3</div>
+            <div><h3>Epic-Ready Review</h3></div>
+            <div><p>When child tasks pass, review whether the parent is actually ready. Look for integration gaps, drift, missing rollback paths, and partial completion hidden across subtasks.</p></div>
+          </div>
+          <div class="step">
+            <div class="num">4</div>
+            <div><h3>PR-Ready Review</h3></div>
+            <div><p>Before push, PR creation, or merge readiness, inspect the whole branch as a product: intent, diff, tests, docs, open findings, and GitHub context.</p></div>
+          </div>
+          <div class="step">
+            <div class="num">5</div>
+            <div><h3>Post-Merge Learning</h3></div>
+            <div><p>After merge, extract useful lessons, calibrate reviewers, update local knowledge, and prune stale or obvious notes before they become noise.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>Fractal review, not one big pass at the end</h2>
+        <p class="section-intro">Large work decomposes. The reviews should decompose too.</p>
+        <div class="loop">
+          <div class="loop-head">Original intent → parent plan → child plans → task changes → parent intent check</div>
+          <div class="loop-grid">
+            <div class="loop-cell">
+              <span class="tag blue">Plan</span>
+              <h3>Review the parent</h3>
+              <p>Is the plan feasible, complete, testable, and aligned with the user request?</p>
+            </div>
+            <div class="loop-cell">
+              <span class="tag gold">Decompose</span>
+              <h3>Review the children</h3>
+              <p>Do task boundaries make sense? Are dependencies explicit? Does every child have acceptance criteria?</p>
+            </div>
+            <div class="loop-cell">
+              <span class="tag red">Block</span>
+              <h3>Fix and re-run</h3>
+              <p>Blocking findings are not commentary. They are current work until a fresh review clears them.</p>
+            </div>
+            <div class="loop-cell">
+              <span class="tag green">Reconcile</span>
+              <h3>Return to intent</h3>
+              <p>After iterations, compare the accepted work back to the original goal so local fixes did not change the mission.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap split">
+        <div>
+          <h2>It learns the repo instead of pretending every repo is the same.</h2>
+          <p class="section-intro">metareview is local-first. It looks for the knowledge your team already wrote down and adds to it when reviews teach something durable.</p>
+        </div>
+        <div class="panel">
+          <p><strong>Knowledge sources:</strong> service inventories, Beads knowledge, prior review artifacts, git history, GitHub PR context, session history, and local docs.</p>
+          <p><strong>Knowledge outputs:</strong> Markdown review files under <code>docs/metareview/</code>, local JSONL run/finding state under <code>.metareview/</code>, and curated learning for future reviews.</p>
+          <p><strong>Pruning rule:</strong> do not keep facts just because they are specific. Stale, self-evident, and overly narrow notes should be discarded.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>Use cases</h2>
+        <p class="section-intro">metareview is useful whenever the next step should depend on evidence instead of confidence.</p>
+        <div class="grid">
+          <div class="card">
+            <span class="tag green">Before coding</span>
+            <h3>Spec and plan review</h3>
+            <p>Challenge requirements, architecture, feasibility, failure paths, scope, and acceptance before implementation starts.</p>
+          </div>
+          <div class="card">
+            <span class="tag gold">During execution</span>
+            <h3>Task-done review</h3>
+            <p>Review small local code chunks while the agent still has context and before the work is allowed to advance.</p>
+          </div>
+          <div class="card">
+            <span class="tag blue">Across epics</span>
+            <h3>Decomposition review</h3>
+            <p>Review parent/child task boundaries, dependency order, acceptance coverage, and integration risk.</p>
+          </div>
+          <div class="card">
+            <span class="tag red">Before push</span>
+            <h3>PR readiness</h3>
+            <p>Check the branch against original intent, tests, docs, review evidence, and open blockers before asking others to review.</p>
+          </div>
+          <div class="card">
+            <span class="tag green">After merge</span>
+            <h3>Learning capture</h3>
+            <p>Turn review feedback and repeated corrections into repo knowledge that future agents can retrieve.</p>
+          </div>
+          <div class="card">
+            <span class="tag blue">Always</span>
+            <h3>Service boundary protection</h3>
+            <p>Use service inventories and local knowledge to catch duplicated codepaths and parallel services before they harden.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>Review patterns</h2>
+        <p class="section-intro">The useful patterns are simple, but they have to be enforced.</p>
+        <ul class="checklist">
+          <li>Adversarial multi-reviewer passes with named perspectives.</li>
+          <li>Hard blockers for critical findings, spec-contract failures, and acceptance gaps.</li>
+          <li>Fresh re-review with <code>--previous-run</code> instead of self-certification.</li>
+          <li>Evidence-backed decisions: diff, tests, acceptance notes, and GitHub context.</li>
+          <li>Fractal review loops for decomposed epics and child plans.</li>
+          <li>Intent preservation after repeated local revisions.</li>
+          <li>Optional specialist reviewers: security, SRE, product, UX, copy, and business analysis.</li>
+          <li>Post-merge reflection with explicit discard of noisy learnings.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap split">
+        <div>
+          <h2>Works even better with metaswarm.</h2>
+          <p class="section-intro">metaswarm owns the development lifecycle. metareview deepens the review gates inside that lifecycle.</p>
+        </div>
+        <div>
+          <p>Use <a href="https://github.com/dsifry/metaswarm">metaswarm</a> for issue intake, planning, orchestration, TDD-oriented work units, PR shepherding, and lifecycle coordination.</p>
+          <p>Use metareview at the decision points: artifact review before implementation, task-done review after local chunks, epic-ready review after child tasks, PR-ready review before branch handoff, and post-merge learning after the work lands.</p>
+          <p>When metaswarm, Superpowers, and Beads are already present, metareview extends those structures instead of creating parallel ones.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>How it actually works</h2>
+        <p class="section-intro">There is no server to trust and no proprietary review memory to rent back later. The harness is a Go CLI, plugin skills, Markdown rubrics, and repo-local artifacts.</p>
+        <div class="grid">
+          <div class="card">
+            <h3>CLI gates</h3>
+            <p><code>metareview</code> runs setup checks, context packing, lifecycle reviews, and post-merge learning from the repository checkout.</p>
+          </div>
+          <div class="card">
+            <h3>Markdown artifacts</h3>
+            <p>Review logs and context packs are human-readable files under <code>docs/metareview/</code>.</p>
+          </div>
+          <div class="card">
+            <h3>Local state</h3>
+            <p>Transient runs and findings use JSONL under <code>.metareview/</code>, keeping review mechanics inspectable.</p>
+          </div>
+          <div class="card">
+            <h3>Knowledge discovery</h3>
+            <p>metareview looks for service inventories, Beads knowledge, prior sessions, GitHub context, and existing repo docs.</p>
+          </div>
+          <div class="card">
+            <h3>Plugin surfaces</h3>
+            <p>Codex and Claude Code skills expose the same review gates to coding agents during normal work.</p>
+          </div>
+          <div class="card">
+            <h3>Git-native sync</h3>
+            <p>Durable knowledge can travel with the repo through git instead of living only in a hosted reviewer.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="setup">
+      <div class="wrap">
+        <h2>Set it up</h2>
+        <p class="section-intro">Install the CLI, or add the plugin to the agent runtime you already use.</p>
+        <div class="commands">
+          <div class="terminal">
+            <div class="terminal-bar">npm CLI</div>
+            <pre><code>npm install -g metareview
 metareview setup --check
-metareview review task-done &lt;task-id-or-path&gt; --base main --evidence /tmp/evidence.txt</code></pre>
-      <p>In source checkout mode, build first with <code>npm run build</code> or run commands through <code>go run ./cmd/metareview</code>.</p>
-    </section>
-
-    <section>
-      <h2>Install Paths</h2>
-      <div class="grid">
-        <div class="card">
-          <h3>Standalone CLI</h3>
-          <p>Use the npm package or source checkout. Run <code>setup --bootstrap-prereqs --dry-run</code> before adding Superpowers, Beads, metaswarm-compatible files, or registries.</p>
-        </div>
-        <div class="card">
-          <h3>Codex</h3>
-          <p>Install the plugin, then use <code>$setup</code>, <code>$review-task-done</code>, <code>$review-epic-ready</code>, <code>$review-pr-ready</code>, and <code>$learn-post-merge</code>.</p>
-        </div>
-        <div class="card">
-          <h3>Claude Code</h3>
-          <p>Install the plugin, then use <code>/setup</code>, <code>/review-task-done</code>, <code>/review-epic-ready</code>, <code>/review-pr-ready</code>, and <code>/learn-post-merge</code>.</p>
+metareview status</code></pre>
+          </div>
+          <div class="terminal">
+            <div class="terminal-bar">Codex plugin</div>
+            <pre><code>codex plugin marketplace add dsifry/metareview
+codex plugin add metareview@metareview</code></pre>
+          </div>
+          <div class="terminal">
+            <div class="terminal-bar">Claude Code plugin</div>
+            <pre><code>claude plugin marketplace add dsifry/metareview
+claude plugin install metareview@metareview</code></pre>
+          </div>
+          <div class="terminal">
+            <div class="terminal-bar">source checkout</div>
+            <pre><code>git clone https://github.com/dsifry/metareview.git
+cd metareview
+npm install
+npm run build
+./bin/metareview setup --check</code></pre>
+          </div>
         </div>
       </div>
     </section>
 
     <section>
-      <h2>Review Lifecycle</h2>
-      <div class="pipeline">
-        <div class="step"><div class="label">artifact</div><div>Review specs, plans, decompositions, designs, and documentation before implementation.</div></div>
-        <div class="step"><div class="label">task-done</div><div>Review each local code chunk before an agent claims it is complete.</div></div>
-        <div class="step"><div class="label">epic-ready</div><div>Review parent readiness once child tasks are complete and accepted.</div></div>
-        <div class="step"><div class="label">pr-ready</div><div>Review the branch before push, PR creation, or merge readiness.</div></div>
-        <div class="step"><div class="label">post-merge</div><div>Extract lessons from merged PRs into durable local knowledge.</div></div>
+      <div class="wrap">
+        <h2>Try a first local review</h2>
+        <p class="section-intro">Point metareview at an existing doc, spec, or plan. Artifact review creates a review scaffold and context pack that a human or agent can use for the actual review.</p>
+        <div class="terminal">
+          <div class="terminal-bar">artifact review</div>
+          <pre><code>metareview review artifact docs/quickstart.md
+
+# creates docs/metareview/reviews/...md
+# initial verdict: NOT_REVIEWED</code></pre>
+        </div>
       </div>
-    </section>
-
-    <section>
-      <h2>Blocking Policy</h2>
-      <p>A <span class="block">blocking finding</span> is current work. Fix it, re-run with <code>--previous-run &lt;run-id&gt;</code>, and do not claim completion until the gate reports <code>PASS</code> or <code>PASS_ADVISORY</code> with zero blockers.</p>
-    </section>
-
-    <section>
-      <h2>Metaswarm Fit</h2>
-      <p>When metaswarm, Superpowers, and Beads are present, metaswarm remains the lifecycle owner. metareview augments that workflow with deeper review gates and Markdown-first evidence under <code>docs/metareview/</code>.</p>
-      <p>When used standalone, metareview remains local-first and can create fallback knowledge files until Beads knowledge is available.</p>
-    </section>
-
-    <section>
-      <h2>Docs</h2>
-      <ul>
-        <li><a href="../INSTALL.md">Installation</a></li>
-        <li><a href="quickstart.md">Quickstart</a></li>
-        <li><a href="README.codex.md">Codex guide</a></li>
-        <li><a href="README.claude.md">Claude Code guide</a></li>
-      </ul>
     </section>
   </main>
 
-  <footer class="container">
-    metareview is Markdown-friendly, git-native, and designed for local review accountability.
+  <footer>
+    <div class="wrap">
+      <p>metareview is Markdown-friendly, git-native, and built for review accountability. See <a href="https://github.com/dsifry/metareview/blob/main/INSTALL.md">INSTALL.md</a>, <a href="quickstart.md">quickstart</a>, <a href="README.codex.md">Codex guide</a>, and <a href="README.claude.md">Claude Code guide</a>.</p>
+    </div>
   </footer>
 </body>
 </html>
