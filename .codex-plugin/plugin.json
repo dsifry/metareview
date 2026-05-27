@@ -1,0 +1,47 @@
+{
+  "name": "metareview",
+  "version": "0.1.0",
+  "description": "Go-based metaswarm-compatible internal review harness for plans, specs, decompositions, task-done code review, acceptance evidence, PR readiness, and post-merge learning",
+  "author": {
+    "name": "David Sifry"
+  },
+  "homepage": "https://github.com/dsifry/metareview",
+  "repository": "https://github.com/dsifry/metareview",
+  "license": "MIT",
+  "keywords": [
+    "review",
+    "code-review",
+    "quality-gates",
+    "metaswarm",
+    "beads",
+    "codex",
+    "post-merge-learning"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "metareview",
+    "shortDescription": "Internal review harness, adversarial gates, and post-merge learning for Codex",
+    "longDescription": "Use metareview to run metaswarm-compatible internal reviews over specs, plans, decompositions, artifacts, task-done code changes, acceptance evidence, PR readiness, and post-merge learning with durable Markdown artifacts and JSONL state. Packaged releases use a built Go binary; source checkout mode requires Go 1.22+.",
+    "developerName": "David Sifry",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/dsifry/metareview",
+    "privacyPolicyURL": "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement",
+    "termsOfServiceURL": "https://docs.github.com/en/site-policy/github-terms/github-terms-of-service",
+    "defaultPrompt": [
+      "Use metareview to set up internal review gates for this repository.",
+      "Use metareview to review this artifact.",
+      "Use metareview to run task-done code review.",
+      "Use metareview to run epic-ready review.",
+      "Use metareview to run pr-ready review.",
+      "Use metareview to run post-merge learning.",
+      "Use metareview to show review status."
+    ],
+    "brandColor": "#374151",
+    "screenshots": []
+  }
+}

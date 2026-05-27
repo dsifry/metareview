@@ -1,0 +1,12 @@
+{
+  "name": "metareview",
+  "version": "0.1.0",
+  "description": "Go-based metaswarm-compatible internal review harness for plans, specs, decompositions, task-done code review, acceptance evidence, PR readiness, and post-merge learning. Packaged releases use bin/metareview; source checkout mode requires Go 1.22+.",
+  "author": {
+    "name": "David Sifry"
+  },
+  "homepage": "https://github.com/dsifry/metareview",
+  "repository": "https://github.com/dsifry/metareview",
+  "license": "MIT",
+  "keywords": ["review", "code-review", "task-done", "epic-ready", "pr-ready", "post-merge-learning", "quality-gates", "metaswarm", "beads"]
+}

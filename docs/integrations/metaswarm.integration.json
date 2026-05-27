@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "name": "metaswarm",
+  "inspectedRepository": "metaswarm repository checkout",
+  "surfaces": [
+    {
+      "kind": "instruction",
+      "path": "AGENTS.md",
+      "purpose": "Codex-facing workflow rules, quality gates, Beads usage, and completion requirements."
+    },
+    {
+      "kind": "instruction",
+      "path": "CLAUDE.md",
+      "purpose": "Claude-facing command list, design/plan gates, self-reflection, and lifecycle enforcement."
+    },
+    {
+      "kind": "command",
+      "path": ".claude/commands/start-task.md",
+      "purpose": "Starts the metaswarm task pipeline."
+    },
+    {
+      "kind": "command",
+      "path": ".claude/commands/pr-shepherd.md",
+      "purpose": "Monitors PRs through CI, review comments, and merge readiness."
+    },
+    {
+      "kind": "command",
+      "path": ".claude/commands/self-reflect.md",
+      "purpose": "Captures learnings before branch finish or after merge."
+    },
+    {
+      "kind": "skill",
+      "path": "skills/orchestrated-execution/SKILL.md",
+      "purpose": "Four-phase work-unit loop with validation and adversarial review."
+    },
+    {
+      "kind": "skill",
+      "path": "skills/pr-shepherd/SKILL.md",
+      "purpose": "PR monitoring, CI handling, review comment handling, and merge readiness."
+    },
+    {
+      "kind": "skill",
+      "path": "skills/plan-review-gate/SKILL.md",
+      "purpose": "Adversarial plan review before implementation."
+    },
+    {
+      "kind": "rubric",
+      "path": "rubrics/adversarial-review-rubric.md",
+      "purpose": "Fresh reviewer rubric for work-unit adversarial review."
+    }
+  ],
+  "contract": {
+    "flow": [
+      {
+        "stage": "task-done",
+        "metareview": "metareview review task-done <task-id-or-path>",
+        "effect": "Run when a work unit claims done; unresolved blocking findings block local task closure."
+      },
+      {
+        "stage": "epic-ready",
+        "metareview": "metareview review epic-ready <epic-id-or-path>",
+        "effect": "Run after all child tasks pass; integration, acceptance, and intent-drift blockers prevent epic landing."
+      },
+      {
+        "stage": "pr-ready",
+        "metareview": "metareview review pr-ready --base <base-ref>",
+        "effect": "Run before PR push or merge readiness to catch branch-level blockers."
+      },
+      {
+        "stage": "post-merge-learning",
+        "metareview": "metareview learn --post-merge <pr-number> --base <pre-merge-ref>",
+        "effect": "Run after confirmed PR merge to curate durable learning, discarded candidates, and reviewer calibration."
+      }
+    ],
+    "postMergeLearning": {
+      "command": "metareview learn --post-merge <pr-number> --base <pre-merge-ref>",
+      "strictByDefault": false,
+      "failureBehavior": "Learning failures are advisory by default; callers block release cleanup only when they explicitly opt into strict mode."
+    },
+    "hookInstallation": {
+      "inScope": false,
+      "reason": "Automatic hook installation is out of scope for this slice; callers invoke the documented command contract explicitly."
+    }
+  }
+}

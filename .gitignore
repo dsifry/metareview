@@ -1,0 +1,13 @@
+.worktrees/
+bin/metareview
+node_modules/
+*.log
+.DS_Store
+
+# metareview: keep ephemeral review state local while syncing durable learning state
+.metareview/*
+!.metareview/knowledge/
+.metareview/knowledge/*
+!.metareview/knowledge/metareview.jsonl
+!.metareview/calibration.jsonl
+!.metareview/learning-runs.jsonl

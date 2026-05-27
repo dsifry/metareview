@@ -1,0 +1,55 @@
+{
+  "name": "metareview",
+  "version": "0.1.0",
+  "description": "Go-based metaswarm-compatible internal review harness for plans, specs, decompositions, code, acceptance evidence, PR readiness, and post-merge learning",
+  "bin": {
+    "metareview": "cli/metareview.js"
+  },
+  "files": [
+    "bin/",
+    "cli/",
+    "cmd/",
+    "internal/",
+    "go.mod",
+    "skills/",
+    "commands/",
+    "rubrics/",
+    "templates/",
+    "docs/quickstart.md",
+    "docs/README.codex.md",
+    "docs/README.claude.md",
+    "docs/index.html",
+    "docs/integrations/",
+    "INSTALL.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".codex-plugin/",
+    ".claude-plugin/"
+  ],
+  "keywords": [
+    "review",
+    "code-review",
+    "post-merge-learning",
+    "metaswarm",
+    "beads",
+    "codex",
+    "claude-code",
+    "quality-gates"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dsifry/metareview"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "metareview": {
+    "runtime": "Packaged releases should provide bin/metareview. Source checkout mode requires Go 1.22+ and falls back to go run ./cmd/metareview."
+  },
+  "scripts": {
+    "build": "go build -o bin/metareview ./cmd/metareview",
+    "prepack": "npm run build",
+    "test": "bash tests/run-all.sh"
+  }
+}

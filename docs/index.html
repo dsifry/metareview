@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>metareview - Local Review Gates for Coding Agents</title>
+  <meta name="description" content="metareview is a local-first review harness for specs, plans, code chunks, epics, PR readiness, and post-merge learning.">
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --surface: #1f2937;
+      --border: #374151;
+      --text: #f9fafb;
+      --muted: #cbd5e1;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --yellow: #facc15;
+      --red: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+    header {
+      padding: 56px 0 36px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 44px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 0 0 18px;
+      font-size: 26px;
+      letter-spacing: 0;
+    }
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+    p, li {
+      color: var(--muted);
+      font-size: 16px;
+    }
+    a { color: var(--accent); }
+    section {
+      padding: 38px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    pre {
+      overflow-x: auto;
+      padding: 18px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 8px;
+    }
+    code {
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .pipeline {
+      display: grid;
+      gap: 8px;
+      margin-top: 18px;
+    }
+    .step {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 16px;
+      align-items: start;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      background: var(--surface);
+    }
+    .label {
+      color: var(--green);
+      font-weight: 700;
+    }
+    .warn { color: var(--yellow); }
+    .block { color: var(--red); }
+    footer {
+      padding: 32px 0 48px;
+      color: var(--muted);
+    }
+    @media (max-width: 640px) {
+      h1 { font-size: 34px; }
+      .step { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>metareview</h1>
+      <p>Local-first review gates and learning for coding agents: specs, plans, task-done code chunks, epics, PR readiness, and post-merge follow-up.</p>
+    </div>
+  </header>
+
+  <main class="container">
+    <section>
+      <h2>Quick Start</h2>
+      <pre><code>npm install -g metareview
+metareview setup --check
+metareview review task-done &lt;task-id-or-path&gt; --base main --evidence /tmp/evidence.txt</code></pre>
+      <p>In source checkout mode, build first with <code>npm run build</code> or run commands through <code>go run ./cmd/metareview</code>.</p>
+    </section>
+
+    <section>
+      <h2>Install Paths</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Standalone CLI</h3>
+          <p>Use the npm package or source checkout. Run <code>setup --bootstrap-prereqs --dry-run</code> before adding Superpowers, Beads, metaswarm-compatible files, or registries.</p>
+        </div>
+        <div class="card">
+          <h3>Codex</h3>
+          <p>Install the plugin, then use <code>$setup</code>, <code>$review-task-done</code>, <code>$review-epic-ready</code>, <code>$review-pr-ready</code>, and <code>$learn-post-merge</code>.</p>
+        </div>
+        <div class="card">
+          <h3>Claude Code</h3>
+          <p>Install the plugin, then use <code>/setup</code>, <code>/review-task-done</code>, <code>/review-epic-ready</code>, <code>/review-pr-ready</code>, and <code>/learn-post-merge</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Review Lifecycle</h2>
+      <div class="pipeline">
+        <div class="step"><div class="label">artifact</div><div>Review specs, plans, decompositions, designs, and documentation before implementation.</div></div>
+        <div class="step"><div class="label">task-done</div><div>Review each local code chunk before an agent claims it is complete.</div></div>
+        <div class="step"><div class="label">epic-ready</div><div>Review parent readiness once child tasks are complete and accepted.</div></div>
+        <div class="step"><div class="label">pr-ready</div><div>Review the branch before push, PR creation, or merge readiness.</div></div>
+        <div class="step"><div class="label">post-merge</div><div>Extract lessons from merged PRs into durable local knowledge.</div></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Blocking Policy</h2>
+      <p>A <span class="block">blocking finding</span> is current work. Fix it, re-run with <code>--previous-run &lt;run-id&gt;</code>, and do not claim completion until the gate reports <code>PASS</code> or <code>PASS_ADVISORY</code> with zero blockers.</p>
+    </section>
+
+    <section>
+      <h2>Metaswarm Fit</h2>
+      <p>When metaswarm, Superpowers, and Beads are present, metaswarm remains the lifecycle owner. metareview augments that workflow with deeper review gates and Markdown-first evidence under <code>docs/metareview/</code>.</p>
+      <p>When used standalone, metareview remains local-first and can create fallback knowledge files until Beads knowledge is available.</p>
+    </section>
+
+    <section>
+      <h2>Docs</h2>
+      <ul>
+        <li><a href="../INSTALL.md">Installation</a></li>
+        <li><a href="quickstart.md">Quickstart</a></li>
+        <li><a href="README.codex.md">Codex guide</a></li>
+        <li><a href="README.claude.md">Claude Code guide</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="container">
+    metareview is Markdown-friendly, git-native, and designed for local review accountability.
+  </footer>
+</body>
+</html>

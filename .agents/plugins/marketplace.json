@@ -1,0 +1,21 @@
+{
+  "name": "metareview-marketplace",
+  "interface": {
+    "displayName": "metareview Marketplace"
+  },
+  "plugins": [
+    {
+      "name": "metareview",
+      "description": "task-done, epic-ready, pr-ready, artifact review, post-merge learning, and metaswarm-compatible quality gates. Packaged releases use bin/metareview; source checkout mode requires Go 1.22+.",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Coding"
+    }
+  ]
+}
