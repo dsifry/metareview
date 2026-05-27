@@ -10,6 +10,7 @@ const files = [
   "package.json",
   ".codex-plugin/plugin.json",
   ".claude-plugin/plugin.json",
+  ".claude-plugin/marketplace.json",
   ".agents/plugins/marketplace.json"
 ];
 for (const file of files) {
@@ -18,12 +19,16 @@ for (const file of files) {
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const codex = JSON.parse(fs.readFileSync(".codex-plugin/plugin.json", "utf8"));
 const claude = JSON.parse(fs.readFileSync(".claude-plugin/plugin.json", "utf8"));
+const claudeMarketplace = JSON.parse(fs.readFileSync(".claude-plugin/marketplace.json", "utf8"));
 if (pkg.name !== "metareview") throw new Error("package name mismatch");
 if (codex.name !== "metareview") throw new Error("codex plugin name mismatch");
 if (claude.name !== "metareview") throw new Error("claude plugin name mismatch");
 if (pkg.version !== codex.version || pkg.version !== claude.version) {
   throw new Error("version mismatch");
 }
+if (claudeMarketplace.name !== "metareview") throw new Error("claude marketplace name mismatch");
+if (claudeMarketplace.plugins[0].name !== "metareview") throw new Error("claude marketplace plugin name mismatch");
+if (claudeMarketplace.plugins[0].version !== pkg.version) throw new Error("claude marketplace version mismatch");
 if (codex.skills !== "./skills/") throw new Error("codex skills path mismatch");
 if (!JSON.stringify(codex).includes("task-done")) throw new Error("codex plugin does not advertise task-done review");
 if (!JSON.stringify(claude).includes("task-done")) throw new Error("claude plugin does not advertise task-done review");

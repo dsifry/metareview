@@ -24,7 +24,7 @@ printf '%s\n' "$setup_json" | grep -q '"mode": "standalone-full"'
 printf '%s\n' "$setup_json" | grep -q '"serviceInventory": true'
 
 status="$("$TMP/metareview" status)"
-printf '%s\n' "$status" | grep -q 'metareview 0.1.1'
+printf '%s\n' "$status" | grep -q 'metareview 0.1.2'
 printf '%s\n' "$status" | grep -q 'beads: present'
 
 context_path="$("$TMP/metareview" context build docs/plan.md)"

@@ -36,34 +36,41 @@ go run ./cmd/metareview setup --check
 
 ## Codex Plugin
 
-Install from a marketplace once metareview is published there:
+Install from the GitHub marketplace manifest:
 
 ```bash
-codex plugin marketplace add dsifry/metareview-marketplace
-codex
+codex plugin marketplace add dsifry/metareview
+codex plugin add metareview@metareview
 ```
 
-Open `/plugins`, select the metareview marketplace, and install `metareview`.
+Restart Codex after installation so the plugin skills are loaded.
 
-For local development from this checkout:
+For local CLI development, use the source checkout flow above. To validate the Codex marketplace metadata from a local checkout without installing globally:
 
 ```bash
 codex plugin marketplace add /path/to/metareview
-codex
+codex plugin list --marketplace metareview
 ```
 
 Then use the Codex skills with `$setup`, `$review-task-done`, `$review-epic-ready`, `$review-pr-ready`, `$review-artifact`, `$learn-post-merge`, and `$status`.
 
 ## Claude Code Plugin
 
-Install from a marketplace once metareview is published there:
+Install from the GitHub marketplace manifest:
 
 ```bash
-claude plugin marketplace add dsifry/metareview-marketplace
-claude plugin install metareview
+claude plugin marketplace add dsifry/metareview
+claude plugin install metareview@metareview
 ```
 
-For local development, install from the repository/plugin source supported by your Claude Code build. Then use `/setup`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/review-artifact`, `/learn-post-merge`, and `/status`.
+For local development:
+
+```bash
+claude plugin marketplace add /path/to/metareview
+claude plugin install metareview@metareview
+```
+
+Then use `/setup`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/review-artifact`, `/learn-post-merge`, and `/status`.
 
 ## Standalone Setup
 
@@ -94,7 +101,7 @@ metareview setup --check
 metareview review artifact docs/quickstart.md
 ```
 
-Successful advisory reviews produce `PASS_ADVISORY`; blocking reviews must be fixed before the work is called done. Treat every blocking finding as open work until a re-review clears it.
+Artifact reviews create a Markdown review scaffold under `docs/metareview/reviews/` with an initial `NOT_REVIEWED` verdict. Deterministic lifecycle gates such as `task-done`, `epic-ready`, and `pr-ready` report `PASS`, `PASS_ADVISORY`, or blocking findings. Treat every blocking finding as open work until a re-review clears it.
 
 ## Agent Workflow
 

@@ -1,5 +1,5 @@
 {
-  "name": "metareview-marketplace",
+  "name": "metareview",
   "interface": {
     "displayName": "metareview Marketplace"
   },
@@ -8,8 +8,9 @@
       "name": "metareview",
       "description": "task-done, epic-ready, pr-ready, artifact review, post-merge learning, and metaswarm-compatible quality gates. Packaged releases use bin/metareview; source checkout mode requires Go 1.22+.",
       "source": {
-        "source": "local",
-        "path": "./"
+        "source": "url",
+        "url": "https://github.com/dsifry/metareview.git",
+        "ref": "main"
       },
       "policy": {
         "installation": "AVAILABLE",
