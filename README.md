@@ -2,6 +2,23 @@
 
 Local-first review gates and learning for specs, plans, code, epics, PRs, and post-merge follow-up. Metareview is Go-backed, Markdown-friendly, and designed to run standalone or as a deeper review engine inside metaswarm, Superpowers, and Beads workflows.
 
+## Use Cases
+
+metareview is for any moment where a human or coding agent needs a second, structured pass before moving work forward:
+
+- **Spec review:** check whether requirements are complete, testable, internally consistent, and aligned with the original user intent.
+- **Plan review:** challenge implementation plans before work starts, including sequencing, scope control, missing failure paths, and acceptance gates.
+- **Architecture review:** evaluate service boundaries, data flow, ownership, coupling, scalability, security, and fit with existing repository patterns.
+- **Feasibility review:** identify technical unknowns, external dependencies, risky assumptions, migration hazards, and places where a spike is needed.
+- **Decomposition review:** inspect epics, child tasks, dependency graphs, work-unit boundaries, and DoD coverage before agents start executing.
+- **Fractal child-plan review:** recursively review decomposed child plans and sub-epics until every level is implementation-ready.
+- **Code review:** review local task-sized code chunks before an agent claims done, with repository context and deterministic blocker handling.
+- **Test and acceptance review:** verify that tests, acceptance criteria, validation evidence, and edge cases prove the intended behavior.
+- **PR readiness review:** check branch-level completeness before push, PR creation, or merge readiness.
+- **Intent-drift review:** after iterative revisions, compare the result back to the original request so local fixes do not quietly change the mission.
+- **Post-merge learning:** extract durable lessons from merged work, review feedback, failures, and session history into local knowledge.
+- **Repository knowledge review:** use service inventories, Beads knowledge, session history, and prior GitHub context to avoid duplicate services and repeated mistakes.
+
 ## What Is This?
 
 metareview brings the discipline of structured, adversarial agent workflows to the review side of software development. It gives humans and coding agents repeatable gates for:

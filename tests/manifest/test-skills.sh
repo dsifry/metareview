@@ -31,6 +31,19 @@ grep -q '.metareview/knowledge/metareview.jsonl' docs/quickstart.md
 grep -q 'docs/metareview/reviews/' docs/quickstart.md
 grep -q 'metaswarm remains the lifecycle owner' docs/quickstart.md
 grep -q 'docs/quickstart.md' README.md
+grep -q '^## Use Cases$' README.md
+grep -q 'Spec review' README.md
+grep -q 'Plan review' README.md
+grep -q 'Architecture review' README.md
+grep -q 'Feasibility review' README.md
+grep -q 'Decomposition review' README.md
+grep -q 'Fractal child-plan review' README.md
+grep -q 'Code review' README.md
+grep -q 'Test and acceptance review' README.md
+grep -q 'PR readiness review' README.md
+grep -q 'Intent-drift review' README.md
+grep -q 'Post-merge learning' README.md
+grep -q 'Repository knowledge review' README.md
 grep -q '^## What Is This?' README.md
 grep -q '^## Install$' README.md
 grep -q 'codex plugin marketplace add dsifry/metareview-marketplace' README.md
