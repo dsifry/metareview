@@ -45,6 +45,14 @@ grep -q 'Intent-drift review' README.md
 grep -q 'Post-merge learning' README.md
 grep -q 'Repository knowledge review' README.md
 grep -q '^## What Is This?' README.md
+grep -q 'initial repository analysis' README.md
+grep -q 'docs/SERVICE_INVENTORY.md' README.md
+grep -q 'CodeRabbit' README.md
+grep -q 'Greptile' README.md
+grep -q 'nonproprietary' README.md
+grep -q 'user-readable' README.md
+grep -q 'Markdown/JSONL-friendly' README.md
+grep -q 'pruning stale' README.md
 grep -q '^## Agentic Review Patterns$' README.md
 grep -q 'Adversarial multi-agent reviews' README.md
 grep -q 'Iterations with hard gates' README.md

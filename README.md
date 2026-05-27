@@ -29,7 +29,11 @@ metareview brings the discipline of structured, adversarial agent workflows to t
 - checking whether a branch is ready to push, open as a PR, or merge
 - extracting post-merge learning into durable local knowledge
 
-The goal is not another loose "please review this" prompt. The goal is a review harness with named gates, explicit evidence, deterministic blocker policy, durable Markdown artifacts, and knowledge feedback loops that help future agents avoid repeating mistakes.
+On first use in an existing repository, metareview performs the same kind of initial repository analysis that experienced reviewers do manually: it looks for existing architecture notes, service inventories, Beads knowledge, prior sessions, and GitHub history. If no service registry exists, setup can create a metareview-compatible `docs/SERVICE_INVENTORY.md` seed so future reviews have a shared map of important services, ownership boundaries, and repeated code paths.
+
+Unlike proprietary SaaS review products such as CodeRabbit, Greptile, and similar hosted reviewers, metareview keeps this learning local, nonproprietary, and user-readable. Its knowledgebase is Markdown/JSONL-friendly and can be synced through git. Each time review feedback is resolved and work is merged, metareview can incorporate useful lessons, idiosyncratic repository decisions, and reviewer calibration while pruning stale, overly specific, or self-evident entries as the codebase evolves.
+
+The goal is not another loose "please review this" prompt. The goal is a review harness with named gates, explicit evidence, deterministic blocker policy, durable Markdown artifacts, service registry context, and knowledge feedback loops that help future agents avoid repeating mistakes.
 
 ## Agentic Review Patterns
 
