@@ -51,6 +51,8 @@ if (!JSON.stringify(JSON.parse(fs.readFileSync(".agents/plugins/marketplace.json
   throw new Error("marketplace does not advertise post-merge learning");
 }
 if (pkg.files.includes("lib/")) throw new Error("package still advertises lib/ as shipped runtime");
+if (fs.existsSync("lib")) throw new Error("legacy JS implementation directory must not exist");
+if (fs.existsSync("tests/lib")) throw new Error("legacy JS implementation tests must not exist");
 for (const required of ["bin/", "cmd/", "internal/", "go.mod"]) {
   if (!pkg.files.includes(required)) throw new Error(`package files missing ${required}`);
 }

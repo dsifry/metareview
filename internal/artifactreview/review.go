@@ -106,7 +106,7 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
 		SchemaVersion: 1,
 		ID:            runID, Scope: "artifact",
 		Target: map[string]string{"type": "path", "path": target},
-		Status: "open", Verdict: "NOT_REVIEWED", ExecutionMode: "in-session-emulated",
+		Status: "open", Verdict: "NOT_REVIEWED", ExecutionMode: "pending-parallel-subagents",
 		PreviousRunID: prev, BaseSHA: head, HeadSHA: head, ContextPath: ctx.ContextRel, ReviewPath: reviewRel,
 		Reviewers:  []string{"feasibility", "completeness", "scope-alignment", "architecture", "intent-preservation"},
 		FindingIDs: []string{}, SourceRefs: []map[string]string{{"type": "path", "path": target}},
@@ -126,11 +126,11 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
 		"Run ID: " + markdown.InlineCode(runID) + "\n\n" +
 		"Target: " + markdown.InlineCode(target) + "\n\n" +
 		"Context pack: " + markdown.InlineCode(ctx.ContextRel) + "\n\n" +
-		"Execution mode: `in-session-emulated`\n\n" +
+		"Execution mode: `pending-parallel-subagents`\n\n" +
 		"Previous run: " + markdown.InlineCode(prevDisplay) + "\n\n" +
 		"## Verdict\n\nNOT_REVIEWED\n\n" +
-		"## Completion Requirements\n\nThis scaffold is not a completed review. It blocks downstream gates until all required reviewer rows are populated and the verdict is `PASS` or `PASS_ADVISORY` with zero blocking findings.\n\n" +
-		"## Reviewer Prompts\n\nUse `rubrics/artifact-review-rubric.md` and the context pack above. Run these lenses independently before aggregation:\n\n" +
+		"## Completion Requirements\n\nThis scaffold is not a completed review. Artifact review defaults to parallel subagents for the five required lenses. The artifact-review workflow is explicit authorization to delegate those lenses. Only use `in-session-emulated` when subagents are unavailable or the human explicitly requested no delegation; if used, state that the review is not independently adversarial and treat it as weaker evidence. Completion requires every required reviewer row to be populated, each reviewer to have a verdict, blocking findings to be fixed and re-reviewed or explicitly human-accepted, and the aggregate verdict to be the actual artifact-review verdict returned by the reviewer set rather than a fixed example result.\n\n" +
+		"## Reviewer Prompts\n\nUse `rubrics/artifact-review-rubric.md` and the context pack above. Run these lenses as parallel subagents by default before aggregation:\n\n" +
 		"- Feasibility\n" +
 		"- Completeness\n" +
 		"- Scope and alignment\n" +

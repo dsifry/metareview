@@ -11,7 +11,7 @@ import (
 	"unicode/utf8"
 )
 
-const maxDiffBytes = 60000
+const maxDiffBytes = 120000
 const maxUntrackedFiles = 20
 const maxUntrackedFileBytes = 4000
 

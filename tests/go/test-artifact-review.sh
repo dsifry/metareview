@@ -40,11 +40,17 @@ test "$artifact_code" -eq 1
 review_path="$(cat "$TMP/artifact.out")"
 test -f "$repo/$review_path"
 grep -q 'NOT_REVIEWED' "$repo/$review_path"
+grep -q 'Execution mode: `pending-parallel-subagents`' "$repo/$review_path"
+grep -q 'Artifact review defaults to parallel subagents' "$repo/$review_path"
+grep -q 'Only use `in-session-emulated` when subagents are unavailable or the human explicitly requested no delegation' "$repo/$review_path"
+grep -q 'not independently adversarial' "$repo/$review_path"
 grep -q 'Artifact review scaffold created but not completed' "$TMP/artifact.err"
 test -f .metareview/runs.jsonl
 test -f .metareview/findings.jsonl
 test -f docs/metareview/FINDINGS.md
 first_run="$(node -e "const fs=require('fs'); const lines=fs.readFileSync('.metareview/runs.jsonl','utf8').trim().split('\\n').map(JSON.parse); console.log(lines[0].id)")"
+first_mode="$(node -e "const fs=require('fs'); const lines=fs.readFileSync('.metareview/runs.jsonl','utf8').trim().split('\\n').map(JSON.parse); console.log(lines[0].executionMode)")"
+test "$first_mode" = "pending-parallel-subagents"
 
 second_review="$("$TMP/metareview" review artifact docs/plan.md --previous-run "$first_run" --scaffold-only)"
 test -f "$repo/$second_review"

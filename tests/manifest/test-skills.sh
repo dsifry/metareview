@@ -80,6 +80,22 @@ grep -q '^## How Coding Agents Use It$' README.md
 grep -q '^## Philosophy$' README.md
 grep -q 'metareview review task-done' skills/review-task-done/SKILL.md
 grep -q -- '--scaffold-only' skills/review-artifact/SKILL.md
+grep -q 'parallel subagents by default' skills/review-artifact/SKILL.md
+grep -q 'explicit authorization' skills/review-artifact/SKILL.md
+grep -q 'not independently adversarial' skills/review-artifact/SKILL.md
+grep -q 'Feasibility, Completeness, Scope and alignment, Architecture, Intent preservation' skills/review-artifact/SKILL.md
+grep -q 'return the actual artifact-review verdict' skills/review-artifact/SKILL.md
+grep -q 'parallel subagents by default' docs/quickstart.md
+grep -q 'in-session-emulated' docs/quickstart.md
+grep -q 'weaker evidence' docs/quickstart.md
+grep -q 'not independently adversarial' docs/README.codex.md
+grep -q 'weaker evidence' docs/README.codex.md
+grep -q 'not independently adversarial' docs/README.claude.md
+grep -q 'weaker evidence' docs/README.claude.md
+if [ -d lib ] || [ -d tests/lib ]; then
+  echo "legacy JS implementation and tests must not exist" >&2
+  exit 1
+fi
 grep -q -- '--scaffold-only' docs/quickstart.md
 grep -q 'metareview review task-done' commands/review-task-done.md
 grep -q 'metareview review epic-ready' skills/review-epic-ready/SKILL.md
