@@ -40,7 +40,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dsifry/metareview"
+    "url": "git+https://github.com/dsifry/metareview.git"
   },
   "engines": {
     "node": ">=18"
