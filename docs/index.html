@@ -704,13 +704,14 @@ npm run build
     <section>
       <div class="wrap">
         <h2>Try a first local review</h2>
-        <p class="section-intro">Point metareview at an existing doc, spec, or plan. Artifact review creates a review scaffold and context pack that a human or agent can use for the actual review.</p>
+        <p class="section-intro">Point metareview at an existing doc, spec, or plan. Artifact review creates a review scaffold and context pack, then fails closed until the reviewer rows and verdict are completed.</p>
         <div class="terminal">
           <div class="terminal-bar">artifact review</div>
           <pre><code>metareview review artifact docs/quickstart.md
 
 # creates docs/metareview/reviews/...md
-# initial verdict: NOT_REVIEWED</code></pre>
+# initial verdict: NOT_REVIEWED
+# exits nonzero unless --scaffold-only is explicit</code></pre>
         </div>
       </div>
     </section>

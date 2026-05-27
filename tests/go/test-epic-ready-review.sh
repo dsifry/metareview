@@ -82,6 +82,52 @@ test "$code" -eq 1
 unresolved_review="$(cat "$TMP/unresolved.out")"
 grep -q "Unresolved child blockers" "$repo/$unresolved_review"
 
+repo="$TMP/incomplete-child-artifact"
+mkdir -p "$repo/.beads" "$repo/docs/metareview/reviews"
+cd "$repo"
+git init -q
+git config user.email test-user
+git config user.name "Test User"
+{
+  write_issue '{"id":"epic-2b","title":"Child artifact incomplete","description":"Close only after child review passes.","children":["task-1"]}'
+  write_issue '{"id":"task-1","title":"Child task","description":"Implement child safely."}'
+} > .beads/issues.jsonl
+cat > docs/metareview/reviews/child-artifact.md <<'REVIEW'
+# metareview: artifact review
+
+Run ID: `mrv-child-artifact`
+
+Target: `task-1`
+
+## Verdict
+
+NOT_REVIEWED
+
+## Reviewer Results
+
+| Reviewer | Verdict | Blocking | Warnings | Notes |
+| --- | --- | ---: | ---: | --- |
+
+## Findings
+
+No reviewer findings recorded yet.
+REVIEW
+printf "initial\n" > docs/change.md
+git add .
+git commit -qm "initial"
+base="$(git rev-parse HEAD)"
+printf "updated\n" > docs/change.md
+git add .
+git commit -qm "change"
+
+set +e
+"$TMP/metareview" review epic-ready epic-2b --base "$base" > "$TMP/incomplete-child-artifact.out" 2>"$TMP/incomplete-child-artifact.err"
+code=$?
+set -e
+test "$code" -eq 1
+incomplete_child_artifact_review="$(cat "$TMP/incomplete-child-artifact.out")"
+grep -q "Unresolved child blockers" "$repo/$incomplete_child_artifact_review"
+
 repo="$TMP/clean"
 mkdir -p "$repo/.beads" "$repo/docs/metareview/reviews" "$repo/docs"
 cd "$repo"

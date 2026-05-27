@@ -44,6 +44,56 @@ func TestForTargetIncludesFindingsStateEvenWhenMarkdownOmitsIDs(t *testing.T) {
 	}
 }
 
+func TestArtifactNotReviewedIsUnresolved(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "artifact.md"), artifactReviewMarkdown("mrv-artifact", "docs/spec.md", "NOT_REVIEWED", nil))
+
+	logs, err := ForTarget(root, "docs/spec.md")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 || !logs[0].HasUnresolvedBlockers {
+		t.Fatalf("expected NOT_REVIEWED artifact to be unresolved: %+v", logs)
+	}
+}
+
+func TestArtifactMissingRequiredReviewerRowsIsUnresolved(t *testing.T) {
+	root := t.TempDir()
+	rows := []string{
+		"| Feasibility | PASS | 0 | 0 | ok |",
+		"| Completeness | PASS | 0 | 0 | ok |",
+	}
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "artifact.md"), artifactReviewMarkdown("mrv-artifact", "docs/spec.md", "PASS", rows))
+
+	logs, err := ForTarget(root, "docs/spec.md")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 || !logs[0].HasUnresolvedBlockers {
+		t.Fatalf("expected missing reviewer rows to be unresolved: %+v", logs)
+	}
+}
+
+func TestCompletedArtifactReviewIsNotUnresolved(t *testing.T) {
+	root := t.TempDir()
+	rows := []string{
+		"| Feasibility | PASS | 0 | 0 | ok |",
+		"| Completeness | PASS | 0 | 0 | ok |",
+		"| Scope and alignment | PASS | 0 | 0 | ok |",
+		"| Architecture | PASS | 0 | 0 | ok |",
+		"| Intent preservation | PASS | 0 | 0 | ok |",
+	}
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "artifact.md"), artifactReviewMarkdown("mrv-artifact", "docs/spec.md", "PASS", rows))
+
+	logs, err := ForTarget(root, "docs/spec.md")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 || logs[0].HasUnresolvedBlockers {
+		t.Fatalf("expected completed artifact review not to be unresolved: %+v", logs)
+	}
+}
+
 func reviewMarkdown(runID, target, verdict, findingID string) string {
 	finding := "No blocking findings.\n"
 	if findingID != "" {
@@ -54,6 +104,19 @@ func reviewMarkdown(runID, target, verdict, findingID string) string {
 		"Target: `" + target + "`\n\n" +
 		"## Verdict\n\n" + verdict + "\n\n" +
 		"## Findings\n\n" + finding
+}
+
+func artifactReviewMarkdown(runID, target, verdict string, rows []string) string {
+	table := "| Reviewer | Verdict | Blocking | Warnings | Notes |\n| --- | --- | ---: | ---: | --- |\n"
+	for _, row := range rows {
+		table += row + "\n"
+	}
+	return "# metareview: artifact review\n\n" +
+		"Run ID: `" + runID + "`\n\n" +
+		"Target: `" + target + "`\n\n" +
+		"## Verdict\n\n" + verdict + "\n\n" +
+		"## Reviewer Results\n\n" + table + "\n" +
+		"## Findings\n\nNo blocking findings.\n"
 }
 
 func mustWrite(t *testing.T, path, text string) {

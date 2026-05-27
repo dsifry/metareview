@@ -79,6 +79,8 @@ grep -q '^## How Humans Use It$' README.md
 grep -q '^## How Coding Agents Use It$' README.md
 grep -q '^## Philosophy$' README.md
 grep -q 'metareview review task-done' skills/review-task-done/SKILL.md
+grep -q -- '--scaffold-only' skills/review-artifact/SKILL.md
+grep -q -- '--scaffold-only' docs/quickstart.md
 grep -q 'metareview review task-done' commands/review-task-done.md
 grep -q 'metareview review epic-ready' skills/review-epic-ready/SKILL.md
 grep -q 'metareview review epic-ready' commands/review-epic-ready.md

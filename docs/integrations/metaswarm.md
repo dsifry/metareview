@@ -19,6 +19,7 @@ The machine-readable descriptor is `docs/integrations/metaswarm.integration.json
 
 | Metaswarm stage | Metareview command | Gate behavior |
 | --- | --- | --- |
+| Artifact ready for implementation | `metareview review artifact <path>` | Creates a fail-closed scaffold; remains blocking while verdict is `NOT_REVIEWED`, reviewer rows are incomplete, or blockers remain. |
 | Work unit claims done | `metareview review task-done <task-id-or-path>` | Blocks task closure on unresolved blocking findings. |
 | Epic locally complete | `metareview review epic-ready <epic-id-or-path>` | Blocks epic landing on integration, acceptance, or intent-drift findings. |
 | PR ready to push or merge | `metareview review pr-ready --base <base-ref>` | Blocks PR readiness on branch-level blockers. |

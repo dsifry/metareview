@@ -15,6 +15,7 @@ type Summary struct {
 	RunID                 string   `json:"runId"`
 	Target                string   `json:"target"`
 	Verdict               string   `json:"verdict"`
+	Kind                  string   `json:"kind"`
 	FindingIDs            []string `json:"findingIds"`
 	HasUnresolvedBlockers bool     `json:"hasUnresolvedBlockers"`
 }
@@ -81,6 +82,8 @@ func parseMarkdown(rel, text string) Summary {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		switch {
+		case strings.HasPrefix(line, "# metareview:"):
+			summary.Kind = reviewKind(line)
 		case strings.HasPrefix(line, "Run ID:"):
 			summary.RunID = firstInlineCode(line)
 		case strings.HasPrefix(line, "Target:"):
@@ -92,10 +95,96 @@ func parseMarkdown(rel, text string) Summary {
 			summary.FindingIDs = appendUnique(summary.FindingIDs, id)
 		}
 	}
-	if strings.Contains(text, "NEEDS_REVISION") {
+	if verdictIsUnresolved(summary.Verdict) || strings.Contains(text, "NEEDS_REVISION") {
+		summary.HasUnresolvedBlockers = true
+	}
+	if summary.Kind == "artifact" && !artifactReviewComplete(lines) {
 		summary.HasUnresolvedBlockers = true
 	}
 	return summary
+}
+
+func reviewKind(line string) string {
+	lower := strings.ToLower(line)
+	switch {
+	case strings.Contains(lower, "artifact review"):
+		return "artifact"
+	case strings.Contains(lower, "task-done review"):
+		return "task-done"
+	case strings.Contains(lower, "epic-ready review"):
+		return "epic-ready"
+	case strings.Contains(lower, "pr-ready review"):
+		return "pr-ready"
+	default:
+		return ""
+	}
+}
+
+func verdictIsUnresolved(verdict string) bool {
+	switch strings.ToUpper(strings.TrimSpace(verdict)) {
+	case "", "NOT_REVIEWED", "ESCALATE", "NEEDS_REVISION":
+		return true
+	default:
+		return false
+	}
+}
+
+func artifactReviewComplete(lines []string) bool {
+	required := map[string]bool{
+		"feasibility":        false,
+		"completeness":       false,
+		"scopeandalignment":  false,
+		"architecture":       false,
+		"intentpreservation": false,
+	}
+	for _, line := range lines {
+		columns := markdownTableColumns(line)
+		if len(columns) < 2 {
+			continue
+		}
+		name := normalizedReviewer(columns[0])
+		if _, ok := required[name]; !ok {
+			continue
+		}
+		if reviewerVerdictComplete(columns[1]) {
+			required[name] = true
+		}
+	}
+	for _, complete := range required {
+		if !complete {
+			return false
+		}
+	}
+	return true
+}
+
+func markdownTableColumns(line string) []string {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "|") || !strings.HasSuffix(line, "|") {
+		return nil
+	}
+	raw := strings.Split(strings.Trim(line, "|"), "|")
+	columns := make([]string, 0, len(raw))
+	for _, column := range raw {
+		columns = append(columns, strings.TrimSpace(column))
+	}
+	return columns
+}
+
+func normalizedReviewer(value string) string {
+	value = strings.ToLower(value)
+	value = strings.ReplaceAll(value, "&", "and")
+	replacer := strings.NewReplacer("-", "", "_", "", "/", "", " ", "")
+	return replacer.Replace(value)
+}
+
+func reviewerVerdictComplete(value string) bool {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "PASS", "PASS_ADVISORY", "NEEDS_REVISION", "ESCALATE", "NOT_APPLICABLE":
+		return true
+	default:
+		return false
+	}
 }
 
 func mergeFindings(summary *Summary, records []findingRecord) {

@@ -52,6 +52,11 @@
   "contract": {
     "flow": [
       {
+        "stage": "artifact",
+        "metareview": "metareview review artifact <path>",
+        "effect": "Create a fail-closed artifact review scaffold; NOT_REVIEWED, missing reviewer rows, and blocking findings prevent implementation readiness."
+      },
+      {
         "stage": "task-done",
         "metareview": "metareview review task-done <task-id-or-path>",
         "effect": "Run when a work unit claims done; unresolved blocking findings block local task closure."

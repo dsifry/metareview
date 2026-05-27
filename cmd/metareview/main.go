@@ -29,7 +29,7 @@ Usage:
   metareview status
   metareview context build <path>
   metareview context diff [--base <ref>]
-  metareview review artifact <path> [--previous-run <run-id>]
+  metareview review artifact <path> [--previous-run <run-id>] [--scaffold-only]
   metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--evidence <path>]
   metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--evidence <path>]
   metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--evidence <path>] [--github-pr <number>]
@@ -41,7 +41,7 @@ Commands:
   status                     Print repository review capability status
   context build <path>       Build a Markdown context pack for an artifact
   context diff               Print git diff context as JSON
-  review artifact <path>     Create an artifact review scaffold
+  review artifact <path>     Create an incomplete artifact review scaffold
   review task-done <target>  Run task-done code review
   review epic-ready <target> Run epic-ready integration review
   review pr-ready            Run PR-ready branch review
@@ -115,10 +115,15 @@ func main() {
 
 	if len(args) >= 3 && args[0] == "review" && args[1] == "artifact" {
 		previousRun := ""
+		scaffoldOnly := false
 		for i := 3; i < len(args); i++ {
 			if args[i] == "--previous-run" {
 				previousRun = flagValue(args, i, "--previous-run")
 				i++
+				continue
+			}
+			if args[i] == "--scaffold-only" {
+				scaffoldOnly = true
 				continue
 			}
 			fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
@@ -127,6 +132,11 @@ func main() {
 		result, err := artifactreview.Create(mustCwd(), args[2], previousRun, time.Now())
 		exitOnErr(err)
 		fmt.Println(result.ReviewRel)
+		if !scaffoldOnly {
+			fmt.Fprintln(os.Stderr, "Artifact review scaffold created but not completed.")
+			fmt.Fprintln(os.Stderr, "Complete all required reviewer rows and update the verdict to PASS or PASS_ADVISORY with zero blockers, or re-run with --scaffold-only when only scaffold creation is intended.")
+			os.Exit(1)
+		}
 		return
 	}
 

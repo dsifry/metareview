@@ -129,7 +129,13 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
 		"Execution mode: `in-session-emulated`\n\n" +
 		"Previous run: " + markdown.InlineCode(prevDisplay) + "\n\n" +
 		"## Verdict\n\nNOT_REVIEWED\n\n" +
-		"## Reviewer Prompts\n\nUse `rubrics/artifact-review-rubric.md` and the context pack above.\n\n" +
+		"## Completion Requirements\n\nThis scaffold is not a completed review. It blocks downstream gates until all required reviewer rows are populated and the verdict is `PASS` or `PASS_ADVISORY` with zero blocking findings.\n\n" +
+		"## Reviewer Prompts\n\nUse `rubrics/artifact-review-rubric.md` and the context pack above. Run these lenses independently before aggregation:\n\n" +
+		"- Feasibility\n" +
+		"- Completeness\n" +
+		"- Scope and alignment\n" +
+		"- Architecture\n" +
+		"- Intent preservation\n\n" +
 		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Warnings | Notes |\n| --- | --- | ---: | ---: | --- |\n\n" +
 		"## Findings\n\nNo reviewer findings recorded yet.\n"
 	if err := os.WriteFile(reviewPath, []byte(content), 0o644); err != nil {

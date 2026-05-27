@@ -1,0 +1,788 @@
+# metareview task-done context
+
+Run ID: `mrv-20260527-182139850897000-task-done-2026-05-27-fail-closed-artifact-review-gates-5243a194`
+
+## Task
+
+# Fail-Closed Artifact Review Gates
+
+## Problem
+
+`metareview review artifact <path>` currently creates a scaffold and exits successfully while the generated review remains incomplete. The generated run record and Markdown review use `NOT_REVIEWED`, contain no reviewer results, and leave `.metareview/findings.jsonl` empty. In the warmstart-tng run that triggered this work, an agent treated the successful command as review completion even though zero adversarial reviewers had actually run.
+
+This is a product and process hazard: the command is named like a completed review, but artifact review completion is delegated to manual agent behavior.
+
+## Evidence
+
+- `internal/artifactreview/review.go` sets artifact review status to `open` and verdict to `NOT_REVIEWED`.
+- `internal/artifactreview/review.go` writes an empty reviewer table and "No reviewer findings recorded yet."
+- `cmd/metareview/main.go` exits zero after printing the scaffold path for `review artifact`.
+- `internal/reviewlog/reviewlog.go` marks unresolved blockers when Markdown contains `NEEDS_REVISION`, but it does not treat `NOT_REVIEWED` as unresolved.
+- `internal/reviewers/prready.go` and `internal/reviewers/epicready.go` only block on unresolved blockers or `NEEDS_REVISION`, so unfinished artifact reviews can be ignored by later gates.
+- `skills/review-artifact/SKILL.md` says agents must run the five lenses manually, but the gate rule does not make `NOT_REVIEWED` or missing reviewer rows explicitly blocking.
+
+## Goals
+
+1. Artifact review scaffolds must be clearly incomplete and must not be mistaken for a completed review.
+2. Downstream gates must fail closed when they see an artifact review with `NOT_REVIEWED`, `ESCALATE`, missing verdict, or missing required reviewer rows.
+3. The review-artifact skill and docs must state that `NOT_REVIEWED` is blocking until all required reviewer lenses are completed.
+4. Existing scaffold generation remains available for agents that need a review workspace.
+
+## Non-Goals
+
+- Do not implement LLM or subagent orchestration inside the Go CLI in this slice.
+- Do not replace metaswarm as lifecycle owner.
+- Do not change deterministic task-done, epic-ready, or pr-ready reviewer logic except for how they consume incomplete prior artifact reviews.
+
+## Proposed Behavior
+
+### Artifact Scaffold Command
+
+`metareview review artifact <path>` will still create the context pack and review log, but it must report that the review is incomplete. To avoid breaking existing automation more than necessary, the primary behavior change is:
+
+- The command exits nonzero after creating a `NOT_REVIEWED` scaffold.
+- Stderr explains that the artifact scaffold is not a passing review and lists the completion requirements.
+- A new `--scaffold-only` flag keeps the current zero-exit behavior for explicit scaffold generation.
+
+The printed stdout path remains the review log path so agents and scripts can still find the artifact.
+
+### Review Log Semantics
+
+Review log discovery must treat these artifact states as unresolved blockers:
+
+- missing verdict
+- `NOT_REVIEWED`
+- `ESCALATE`
+- `NEEDS_REVISION`
+- required artifact reviewer table has no completed row for any of: feasibility, completeness, scope-alignment, architecture, intent-preservation
+
+`PASS` remains acceptable only when no unresolved blocking findings are present. `PASS_ADVISORY` is acceptable only with zero blockers.
+
+### Skill And Docs
+
+The review-artifact skill and quickstart docs must say:
+
+- `review artifact` creates an incomplete scaffold unless the review log is later completed.
+- Agents must populate all five reviewer rows or explicitly mark a lens `NOT_APPLICABLE`.
+- Agents must re-run with `--previous-run <run-id>` after fixes.
+- Completion requires `PASS` or `PASS_ADVISORY` with zero blockers.
+
+## Test Plan
+
+Add tests before production code:
+
+1. CLI: `metareview review artifact docs/plan.md` creates the scaffold, prints its path, and exits nonzero while the review remains `NOT_REVIEWED`.
+2. CLI: `metareview review artifact docs/plan.md --scaffold-only` creates the same scaffold and exits zero.
+3. Review log discovery: `NOT_REVIEWED` artifact logs report `HasUnresolvedBlockers = true`.
+4. Review log discovery: artifact logs with missing required reviewer rows report unresolved blockers.
+5. Epic-ready: an epic with a child or related review log in `NOT_REVIEWED` fails with an unresolved review blocker.
+6. PR-ready: branch readiness fails when prior review logs include incomplete artifact reviews.
+7. Completed artifact review fixture with all five required rows and `PASS` is accepted by discovery and does not block downstream gates.
+8. Manifest/docs tests cover the new `--scaffold-only` flag and updated instructions.
+
+## Acceptance Criteria
+
+- The failure reproduced from warmstart-tng cannot recur silently: a scaffold-only artifact review is visibly non-passing and blocks downstream gates.
+- Existing agents can still request a scaffold explicitly with `--scaffold-only`.
+- Tests prove both fail-closed behavior and the explicit scaffold-only escape hatch.
+- `go test ./...` and `bash tests/run-all.sh` pass.
+
+
+## Git
+
+- Base: `1c427bd61dfb2332576a3929dac368f78799f802`
+- Head: `1c427bd61dfb2332576a3929dac368f78799f802`
+- Branch: `main`
+- Gate effect: `gate`
+
+## Changed Files
+
+- INSTALL.md
+- README.md
+- cmd/metareview/main.go
+- docs/README.claude.md
+- docs/README.codex.md
+- docs/index.html
+- docs/integrations/metaswarm.integration.json
+- docs/integrations/metaswarm.md
+- docs/quickstart.md
+- internal/artifactreview/review.go
+- internal/reviewlog/reviewlog.go
+- internal/reviewlog/reviewlog_test.go
+- lib/artifact-review.js
+- skills/review-artifact/SKILL.md
+- tests/go/test-artifact-review.sh
+- tests/go/test-epic-ready-review.sh
+- tests/go/test-pr-ready-review.sh
+- docs/specs/2026-05-27-fail-closed-artifact-review-gates.md
+
+## Diff
+
+````diff
+
+
+diff --git a/INSTALL.md b/INSTALL.md
+index ba739ef..a784707 100644
+--- a/INSTALL.md
++++ b/INSTALL.md
+@@ -101,7 +101,7 @@ metareview setup --check
+ metareview review artifact docs/quickstart.md
+ ```
+ 
+-Artifact reviews create a Markdown review scaffold under `docs/metareview/reviews/` with an initial `NOT_REVIEWED` verdict. Deterministic lifecycle gates such as `task-done`, `epic-ready`, and `pr-ready` report `PASS`, `PASS_ADVISORY`, or blocking findings. Treat every blocking finding as open work until a re-review clears it.
++Artifact reviews create a Markdown review scaffold under `docs/metareview/reviews/` with an initial `NOT_REVIEWED` verdict. The default artifact command exits nonzero because the scaffold is not a completed review. Use `--scaffold-only` only when you explicitly want scaffold creation without passing the gate. Deterministic lifecycle gates such as `task-done`, `epic-ready`, and `pr-ready` report `PASS`, `PASS_ADVISORY`, or blocking findings. Treat every blocking finding and every `NOT_REVIEWED` artifact as open work until a re-review clears it.
+ 
+ ## Agent Workflow
+ 
+diff --git a/README.md b/README.md
+index 32ff901..7e3f5cb 100644
+--- a/README.md
++++ b/README.md
+@@ -171,7 +171,7 @@ flowchart TD
+ 
+ The decomposition loop is intentionally fractal: a parent plan can be decomposed into child epics, each child can be decomposed again, and each level gets reviewed before implementation continues. After the iteration converges, metareview checks back against the original parent intent so accumulated local fixes do not quietly drift away from the user request.
+ 
+-Every review produces Markdown artifacts under `docs/metareview/` and local transient state under `.metareview/`. A blocking finding is current work. Fix it, re-run with `--previous-run <run-id>`, and do not claim completion until the review reports `PASS` or `PASS_ADVISORY` with zero blockers.
++Every review produces Markdown artifacts under `docs/metareview/` and local transient state under `.metareview/`. A blocking finding is current work. A `NOT_REVIEWED` artifact scaffold is also current work, not a pass. Fix it, re-run with `--previous-run <run-id>`, and do not claim completion until the review reports `PASS` or `PASS_ADVISORY` with zero blockers.
+ 
+ ## How Humans Use It
+ 
+@@ -185,7 +185,7 @@ metareview review pr-ready --base main
+ metareview learn --post-merge 42 --base pre-merge-sha
+ ```
+ 
+-Use the smallest gate that matches the decision you are making. If you are deciding whether a plan is good enough, use `artifact`. If you are deciding whether a task is done, use `task-done`. If you are deciding whether a branch is ready, use `pr-ready`.
++Use the smallest gate that matches the decision you are making. If you are deciding whether a plan is good enough, use `artifact`; the default command creates a `NOT_REVIEWED` scaffold and exits nonzero until the required reviewer rows and final verdict are completed. Use `--scaffold-only` only for explicit scaffold generation. If you are deciding whether a task is done, use `task-done`. If you are deciding whether a branch is ready, use `pr-ready`.
+ 
+ ## How Coding Agents Use It
+ 
+diff --git a/cmd/metareview/main.go b/cmd/metareview/main.go
+index 51197f2..6c98f8e 100644
+--- a/cmd/metareview/main.go
++++ b/cmd/metareview/main.go
+@@ -29,7 +29,7 @@ Usage:
+   metareview status
+   metareview context build <path>
+   metareview context diff [--base <ref>]
+-  metareview review artifact <path> [--previous-run <run-id>]
++  metareview review artifact <path> [--previous-run <run-id>] [--scaffold-only]
+   metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--evidence <path>]
+   metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--evidence <path>]
+   metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--evidence <path>] [--github-pr <number>]
+@@ -41,7 +41,7 @@ Commands:
+   status                     Print repository review capability status
+   context build <path>       Build a Markdown context pack for an artifact
+   context diff               Print git diff context as JSON
+-  review artifact <path>     Create an artifact review scaffold
++  review artifact <path>     Create an incomplete artifact review scaffold
+   review task-done <target>  Run task-done code review
+   review epic-ready <target> Run epic-ready integration review
+   review pr-ready            Run PR-ready branch review
+@@ -115,18 +115,28 @@ func main() {
+ 
+ 	if len(args) >= 3 && args[0] == "review" && args[1] == "artifact" {
+ 		previousRun := ""
++		scaffoldOnly := false
+ 		for i := 3; i < len(args); i++ {
+ 			if args[i] == "--previous-run" {
+ 				previousRun = flagValue(args, i, "--previous-run")
+ 				i++
+ 				continue
+ 			}
++			if args[i] == "--scaffold-only" {
++				scaffoldOnly = true
++				continue
++			}
+ 			fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
+ 			os.Exit(2)
+ 		}
+ 		result, err := artifactreview.Create(mustCwd(), args[2], previousRun, time.Now())
+ 		exitOnErr(err)
+ 		fmt.Println(result.ReviewRel)
++		if !scaffoldOnly {
++			fmt.Fprintln(os.Stderr, "Artifact review scaffold created but not completed.")
++			fmt.Fprintln(os.Stderr, "Complete all required reviewer rows and update the verdict to PASS or PASS_ADVISORY with zero blockers, or re-run with --scaffold-only when only scaffold creation is intended.")
++			os.Exit(1)
++		}
+ 		return
+ 	}
+ 
+diff --git a/docs/README.claude.md b/docs/README.claude.md
+index 9f5477b..edc59a9 100644
+--- a/docs/README.claude.md
++++ b/docs/README.claude.md
+@@ -42,7 +42,7 @@ go run ./cmd/metareview review task-done <task-id-or-path> --base <base-ref> --e
+ 
+ ## Agent Contract
+ 
+-Claude Code agents must resolve every blocking finding before claiming completion. Re-run the review with `--previous-run <run-id>` after fixes. `PASS_ADVISORY` is acceptable only when the report has zero blocking findings.
++Claude Code agents must resolve every blocking finding before claiming completion. A `NOT_REVIEWED` artifact scaffold is also blocking; complete the required reviewer rows and final verdict before treating the artifact as reviewed. Re-run the review with `--previous-run <run-id>` after fixes. `PASS_ADVISORY` is acceptable only when the report has zero blocking findings.
+ 
+ Commit durable review and context Markdown under `docs/metareview/`. Leave transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local.
+ 
+diff --git a/docs/README.codex.md b/docs/README.codex.md
+index 2850c9d..874c104 100644
+--- a/docs/README.codex.md
++++ b/docs/README.codex.md
+@@ -49,7 +49,7 @@ In a source checkout without a packaged binary, prefix commands with `go run ./c
+ 
+ ## Agent Contract
+ 
+-Codex agents must not claim work complete while a blocking finding remains open. Fix blockers, re-run with `--previous-run <run-id>`, and proceed only after `PASS` or `PASS_ADVISORY` with zero blockers.
++Codex agents must not claim work complete while a blocking finding remains open or while an artifact review remains `NOT_REVIEWED`. The default artifact command exits nonzero after scaffold creation until agents complete the required reviewer rows and final verdict. Fix blockers, re-run with `--previous-run <run-id>`, and proceed only after `PASS` or `PASS_ADVISORY` with zero blockers.
+ 
+ Commit durable review artifacts under `docs/metareview/`. Keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local.
+ 
+diff --git a/docs/index.html b/docs/index.html
+index e70fc9e..7aa4b7d 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -704,13 +704,14 @@ npm run build
+     <section>
+       <div class="wrap">
+         <h2>Try a first local review</h2>
+-        <p class="section-intro">Point metareview at an existing doc, spec, or plan. Artifact review creates a review scaffold and context pack that a human or agent can use for the actual review.</p>
++        <p class="section-intro">Point metareview at an existing doc, spec, or plan. Artifact review creates a review scaffold and context pack, then fails closed until the reviewer rows and verdict are completed.</p>
+         <div class="terminal">
+           <div class="terminal-bar">artifact review</div>
+           <pre><code>metareview review artifact docs/quickstart.md
+ 
+ # creates docs/metareview/reviews/...md
+-# initial verdict: NOT_REVIEWED</code></pre>
++# initial verdict: NOT_REVIEWED
++# exits nonzero unless --scaffold-only is explicit</code></pre>
+         </div>
+       </div>
+     </section>
+diff --git a/docs/integrations/metaswarm.integration.json b/docs/integrations/metaswarm.integration.json
+index 7223248..a5f2d88 100644
+--- a/docs/integrations/metaswarm.integration.json
++++ b/docs/integrations/metaswarm.integration.json
+@@ -51,6 +51,11 @@
+   ],
+   "contract": {
+     "flow": [
++      {
++        "stage": "artifact",
++        "metareview": "metareview review artifact <path>",
++        "effect": "Create a fail-closed artifact review scaffold; NOT_REVIEWED, missing reviewer rows, and blocking findings prevent implementation readiness."
++      },
+       {
+         "stage": "task-done",
+         "metareview": "metareview review task-done <task-id-or-path>",
+diff --git a/docs/integrations/metaswarm.md b/docs/integrations/metaswarm.md
+index 223d8e6..91986e3 100644
+--- a/docs/integrations/metaswarm.md
++++ b/docs/integrations/metaswarm.md
+@@ -19,6 +19,7 @@ The machine-readable descriptor is `docs/integrations/metaswarm.integration.json
+ 
+ | Metaswarm stage | Metareview command | Gate behavior |
+ | --- | --- | --- |
++| Artifact ready for implementation | `metareview review artifact <path>` | Creates a fail-closed scaffold; remains blocking while verdict is `NOT_REVIEWED`, reviewer rows are incomplete, or blockers remain. |
+ | Work unit claims done | `metareview review task-done <task-id-or-path>` | Blocks task closure on unresolved blocking findings. |
+ | Epic locally complete | `metareview review epic-ready <epic-id-or-path>` | Blocks epic landing on integration, acceptance, or intent-drift findings. |
+ | PR ready to push or merge | `metareview review pr-ready --base <base-ref>` | Blocks PR readiness on branch-level blockers. |
+diff --git a/docs/quickstart.md b/docs/quickstart.md
+index eac7452..b2025b5 100644
+--- a/docs/quickstart.md
++++ b/docs/quickstart.md
+@@ -30,9 +30,9 @@ metareview review pr-ready --base <base-ref>
+ metareview learn --post-merge <pr-number> --base <pre-merge-ref>
+ ```
+ 
+-`artifact` reviews specs, plans, and docs. `task-done` runs after a local task or chunk claims done. `epic-ready` runs when child tasks are complete. `pr-ready` runs before push or merge readiness. `learn --post-merge` runs after confirmed PR merge.
++`artifact` creates an incomplete review scaffold for specs, plans, and docs. The command exits nonzero while the scaffold is still `NOT_REVIEWED`; complete every required reviewer row and update the verdict before treating the artifact as reviewed. Use `--scaffold-only` only when scaffold creation itself is the intended action. `task-done` runs after a local task or chunk claims done. `epic-ready` runs when child tasks are complete. `pr-ready` runs before push or merge readiness. `learn --post-merge` runs after confirmed PR merge.
+ 
+-If a review reports any blocking finding, fix it and re-run with `--previous-run <run-id>` until the result is `PASS` or `PASS_ADVISORY` with zero blockers.
++If a review reports any blocking finding or remains `NOT_REVIEWED`, fix it and re-run with `--previous-run <run-id>` until the result is `PASS` or `PASS_ADVISORY` with zero blockers.
+ 
+ ## 3. Metaswarm Fit
+ 
+diff --git a/internal/artifactreview/review.go b/internal/artifactreview/review.go
+index 75102fe..1097b86 100644
+--- a/internal/artifactreview/review.go
++++ b/internal/artifactreview/review.go
+@@ -129,7 +129,13 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
+ 		"Execution mode: `in-session-emulated`\n\n" +
+ 		"Previous run: " + markdown.InlineCode(prevDisplay) + "\n\n" +
+ 		"## Verdict\n\nNOT_REVIEWED\n\n" +
+-		"## Reviewer Prompts\n\nUse `rubrics/artifact-review-rubric.md` and the context pack above.\n\n" +
++		"## Completion Requirements\n\nThis scaffold is not a completed review. It blocks downstream gates until all required reviewer rows are populated and the verdict is `PASS` or `PASS_ADVISORY` with zero blocking findings.\n\n" +
++		"## Reviewer Prompts\n\nUse `rubrics/artifact-review-rubric.md` and the context pack above. Run these lenses independently before aggregation:\n\n" +
++		"- Feasibility\n" +
++		"- Completeness\n" +
++		"- Scope and alignment\n" +
++		"- Architecture\n" +
++		"- Intent preservation\n\n" +
+ 		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Warnings | Notes |\n| --- | --- | ---: | ---: | --- |\n\n" +
+ 		"## Findings\n\nNo reviewer findings recorded yet.\n"
+ 	if err := os.WriteFile(reviewPath, []byte(content), 0o644); err != nil {
+diff --git a/internal/reviewlog/reviewlog.go b/internal/reviewlog/reviewlog.go
+index 06d3dcd..2961169 100644
+--- a/internal/reviewlog/reviewlog.go
++++ b/internal/reviewlog/reviewlog.go
+@@ -15,6 +15,7 @@ type Summary struct {
+ 	RunID                 string   `json:"runId"`
+ 	Target                string   `json:"target"`
+ 	Verdict               string   `json:"verdict"`
++	Kind                  string   `json:"kind"`
+ 	FindingIDs            []string `json:"findingIds"`
+ 	HasUnresolvedBlockers bool     `json:"hasUnresolvedBlockers"`
+ }
+@@ -81,6 +82,8 @@ func parseMarkdown(rel, text string) Summary {
+ 	lines := strings.Split(text, "\n")
+ 	for i, line := range lines {
+ 		switch {
++		case strings.HasPrefix(line, "# metareview:"):
++			summary.Kind = reviewKind(line)
+ 		case strings.HasPrefix(line, "Run ID:"):
+ 			summary.RunID = firstInlineCode(line)
+ 		case strings.HasPrefix(line, "Target:"):
+@@ -92,12 +95,98 @@ func parseMarkdown(rel, text string) Summary {
+ 			summary.FindingIDs = appendUnique(summary.FindingIDs, id)
+ 		}
+ 	}
+-	if strings.Contains(text, "NEEDS_REVISION") {
++	if verdictIsUnresolved(summary.Verdict) || strings.Contains(text, "NEEDS_REVISION") {
++		summary.HasUnresolvedBlockers = true
++	}
++	if summary.Kind == "artifact" && !artifactReviewComplete(lines) {
+ 		summary.HasUnresolvedBlockers = true
+ 	}
+ 	return summary
+ }
+ 
++func reviewKind(line string) string {
++	lower := strings.ToLower(line)
++	switch {
++	case strings.Contains(lower, "artifact review"):
++		return "artifact"
++	case strings.Contains(lower, "task-done review"):
++		return "task-done"
++	case strings.Contains(lower, "epic-ready review"):
++		return "epic-ready"
++	case strings.Contains(lower, "pr-ready review"):
++		return "pr-ready"
++	default:
++		return ""
++	}
++}
++
++func verdictIsUnresolved(verdict string) bool {
++	switch strings.ToUpper(strings.TrimSpace(verdict)) {
++	case "", "NOT_REVIEWED", "ESCALATE", "NEEDS_REVISION":
++		return true
++	default:
++		return false
++	}
++}
++
++func artifactReviewComplete(lines []string) bool {
++	required := map[string]bool{
++		"feasibility":        false,
++		"completeness":       false,
++		"scopeandalignment":  false,
++		"architecture":       false,
++		"intentpreservation": false,
++	}
++	for _, line := range lines {
++		columns := markdownTableColumns(line)
++		if len(columns) < 2 {
++			continue
++		}
++		name := normalizedReviewer(columns[0])
++		if _, ok := required[name]; !ok {
++			continue
++		}
++		if reviewerVerdictComplete(columns[1]) {
++			required[name] = true
++		}
++	}
++	for _, complete := range required {
++		if !complete {
++			return false
++		}
++	}
++	return true
++}
++
++func markdownTableColumns(line string) []string {
++	line = strings.TrimSpace(line)
++	if !strings.HasPrefix(line, "|") || !strings.HasSuffix(line, "|") {
++		return nil
++	}
++	raw := strings.Split(strings.Trim(line, "|"), "|")
++	columns := make([]string, 0, len(raw))
++	for _, column := range raw {
++		columns = append(columns, strings.TrimSpace(column))
++	}
++	return columns
++}
++
++func normalizedReviewer(value string) string {
++	value = strings.ToLower(value)
++	value = strings.ReplaceAll(value, "&", "and")
++	replacer := strings.NewReplacer("-", "", "_", "", "/", "", " ", "")
++	return replacer.Replace(value)
++}
++
++func reviewerVerdictComplete(value string) bool {
++	switch strings.ToUpper(strings.TrimSpace(value)) {
++	case "PASS", "PASS_ADVISORY", "NEEDS_REVISION", "ESCALATE", "NOT_APPLICABLE":
++		return true
++	default:
++		return false
++	}
++}
++
+ func mergeFindings(summary *Summary, records []findingRecord) {
+ 	for _, record := range records {
+ 		if record.RunID != summary.RunID {
+diff --git a/internal/reviewlog/reviewlog_test.go b/internal/reviewlog/reviewlog_test.go
+index 88dc2e2..0aa0532 100644
+--- a/internal/reviewlog/reviewlog_test.go
++++ b/internal/reviewlog/reviewlog_test.go
+@@ -44,6 +44,56 @@ func TestForTargetIncludesFindingsStateEvenWhenMarkdownOmitsIDs(t *testing.T) {
+ 	}
+ }
+ 
++func TestArtifactNotReviewedIsUnresolved(t *testing.T) {
++	root := t.TempDir()
++	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "artifact.md"), artifactReviewMarkdown("mrv-artifact", "docs/spec.md", "NOT_REVIEWED", nil))
++
++	logs, err := ForTarget(root, "docs/spec.md")
++	if err != nil {
++		t.Fatalf("target logs: %v", err)
++	}
++	if len(logs) != 1 || !logs[0].HasUnresolvedBlockers {
++		t.Fatalf("expected NOT_REVIEWED artifact to be unresolved: %+v", logs)
++	}
++}
++
++func TestArtifactMissingRequiredReviewerRowsIsUnresolved(t *testing.T) {
++	root := t.TempDir()
++	rows := []string{
++		"| Feasibility | PASS | 0 | 0 | ok |",
++		"| Completeness | PASS | 0 | 0 | ok |",
++	}
++	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "artifact.md"), artifactReviewMarkdown("mrv-artifact", "docs/spec.md", "PASS", rows))
++
++	logs, err := ForTarget(root, "docs/spec.md")
++	if err != nil {
++		t.Fatalf("target logs: %v", err)
++	}
++	if len(logs) != 1 || !logs[0].HasUnresolvedBlockers {
++		t.Fatalf("expected missing reviewer rows to be unresolved: %+v", logs)
++	}
++}
++
++func TestCompletedArtifactReviewIsNotUnresolved(t *testing.T) {
++	root := t.TempDir()
++	rows := []string{
++		"| Feasibility | PASS | 0 | 0 | ok |",
++		"| Completeness | PASS | 0 | 0 | ok |",
++		"| Scope and alignment | PASS | 0 | 0 | ok |",
++		"| Architecture | PASS | 0 | 0 | ok |",
++		"| Intent preservation | PASS | 0 | 0 | ok |",
++	}
++	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "artifact.md"), artifactReviewMarkdown("mrv-artifact", "docs/spec.md", "PASS", rows))
++
++	logs, err := ForTarget(root, "docs/spec.md")
++	if err != nil {
++		t.Fatalf("target logs: %v", err)
++	}
++	if len(logs) != 1 || logs[0].HasUnresolvedBlockers {
++		t.Fatalf("expected completed artifact review not to be unresolved: %+v", logs)
++	}
++}
++
+ func reviewMarkdown(runID, target, verdict, findingID string) string {
+ 	finding := "No blocking findings.\n"
+ 	if findingID != "" {
+@@ -56,6 +106,19 @@ func reviewMarkdown(runID, target, verdict, findingID string) string {
+ 		"## Findings\n\n" + finding
+ }
+ 
++func artifactReviewMarkdown(runID, target, verdict string, rows []string) string {
++	table := "| Reviewer | Verdict | Blocking | Warnings | Notes |\n| --- | --- | ---: | ---: | --- |\n"
++	for _, row := range rows {
++		table += row + "\n"
++	}
++	return "# metareview: artifact review\n\n" +
++		"Run ID: `" + runID + "`\n\n" +
++		"Target: `" + target + "`\n\n" +
++		"## Verdict\n\n" + verdict + "\n\n" +
++		"## Reviewer Results\n\n" + table + "\n" +
++		"## Findings\n\nNo blocking findings.\n"
++}
++
+ func mustWrite(t *testing.T, path, text string) {
+ 	t.Helper()
+ 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+diff --git a/lib/artifact-review.js b/lib/artifact-review.js
+index f2803b7..3b46b4b 100644
+--- a/lib/artifact-review.js
++++ b/lib/artifact-review.js
+@@ -120,6 +120,10 @@ Previous run: ${inlineCode(runRecord.previousRunId || 'none')}
+ 
+ NOT_REVIEWED
+ 
++## Completion Requirements
++
++This scaffold is not a completed review. It blocks downstream gates until all required reviewer rows are populated and the verdict is \`PASS\` or \`PASS_ADVISORY\` with zero blocking findings.
++
+ ## Reviewer Prompts
+ 
+ Use \`rubrics/artifact-review-rubric.md\` and the context pack above. Run these lenses independently before aggregation:
+diff --git a/skills/review-artifact/SKILL.md b/skills/review-artifact/SKILL.md
+index 8229843..25a918c 100644
+--- a/skills/review-artifact/SKILL.md
++++ b/skills/review-artifact/SKILL.md
+@@ -9,14 +9,16 @@ Use when reviewing a Markdown artifact before implementation or before a gate is
+ 
+ ## Workflow
+ 
+-1. Run `metareview review artifact <path>`.
++1. Run `metareview review artifact <path>` to create the review scaffold. The command exits nonzero while the review is still `NOT_REVIEWED`; this is expected and is blocking.
+ 2. Read the generated context pack and review log path.
+ 3. Use `rubrics/artifact-review-rubric.md`.
+ 4. Run the listed reviewer lenses independently. If true subagents are unavailable, record `in-session-emulated`.
+-5. Update the review log with verdict, findings, and evidence.
++5. Update the review log with reviewer rows, verdict, findings, and evidence.
+ 6. Blocking findings must cite file lines, artifact sections, command output, or task IDs.
+ 7. For a re-review, run `metareview review artifact <path> --previous-run <run-id>` so the new run links to the prior attempt.
+ 
++Use `metareview review artifact <path> --scaffold-only` only when explicitly creating a scaffold without claiming the review is complete.
++
+ ## Gate Rule
+ 
+-Do not call an artifact implementation-ready while blocking findings remain unresolved unless the human explicitly accepts the risk.
++Do not call an artifact implementation-ready while the verdict is `NOT_REVIEWED`, `ESCALATE`, `NEEDS_REVISION`, missing required reviewer rows, or while blocking findings remain unresolved unless the human explicitly accepts the risk.
+diff --git a/tests/go/test-artifact-review.sh b/tests/go/test-artifact-review.sh
+index 9d9b926..8013f8f 100644
+--- a/tests/go/test-artifact-review.sh
++++ b/tests/go/test-artifact-review.sh
+@@ -32,14 +32,23 @@ test -f "$repo/$context_path"
+ grep -q 'Use constructor injection' "$repo/$context_path"
+ grep -q 'Existing services' "$repo/$context_path"
+ 
+-review_path="$("$TMP/metareview" review artifact docs/plan.md)"
++set +e
++"$TMP/metareview" review artifact docs/plan.md > "$TMP/artifact.out" 2>"$TMP/artifact.err"
++artifact_code=$?
++set -e
++test "$artifact_code" -eq 1
++review_path="$(cat "$TMP/artifact.out")"
+ test -f "$repo/$review_path"
+ grep -q 'NOT_REVIEWED' "$repo/$review_path"
++grep -q 'Artifact review scaffold created but not completed' "$TMP/artifact.err"
+ test -f .metareview/runs.jsonl
+ test -f .metareview/findings.jsonl
+ test -f docs/metareview/FINDINGS.md
+ first_run="$(node -e "const fs=require('fs'); const lines=fs.readFileSync('.metareview/runs.jsonl','utf8').trim().split('\\n').map(JSON.parse); console.log(lines[0].id)")"
+ 
+-second_review="$("$TMP/metareview" review artifact docs/plan.md --previous-run "$first_run")"
++second_review="$("$TMP/metareview" review artifact docs/plan.md --previous-run "$first_run" --scaffold-only)"
+ test -f "$repo/$second_review"
+ grep -q "Previous run: \`$first_run\`" "$repo/$second_review"
++
++scaffold_review="$("$TMP/metareview" review artifact docs/plan.md --scaffold-only)"
++test -f "$repo/$scaffold_review"
+diff --git a/tests/go/test-epic-ready-review.sh b/tests/go/test-epic-ready-review.sh
+index 026715c..01280d2 100644
+--- a/tests/go/test-epic-ready-review.sh
++++ b/tests/go/test-epic-ready-review.sh
+@@ -82,6 +82,52 @@ test "$code" -eq 1
+ unresolved_review="$(cat "$TMP/unresolved.out")"
+ grep -q "Unresolved child blockers" "$repo/$unresolved_review"
+ 
++repo="$TMP/incomplete-child-artifact"
++mkdir -p "$repo/.beads" "$repo/docs/metareview/reviews"
++cd "$repo"
++git init -q
++git config user.email test-user
++git config user.name "Test User"
++{
++  write_issue '{"id":"epic-2b","title":"Child artifact incomplete","description":"Close only after child review passes.","children":["task-1"]}'
++  write_issue '{"id":"task-1","title":"Child task","description":"Implement child safely."}'
++} > .beads/issues.jsonl
++cat > docs/metareview/reviews/child-artifact.md <<'REVIEW'
++# metareview: artifact review
++
++Run ID: `mrv-child-artifact`
++
++Target: `task-1`
++
++## Verdict
++
++NOT_REVIEWED
++
++## Reviewer Results
++
++| Reviewer | Verdict | Blocking | Warnings | Notes |
++| --- | --- | ---: | ---: | --- |
++
++## Findings
++
++No reviewer findings recorded yet.
++REVIEW
++printf "initial\n" > docs/change.md
++git add .
++git commit -qm "initial"
++base="$(git rev-parse HEAD)"
++printf "updated\n" > docs/change.md
++git add .
++git commit -qm "change"
++
++set +e
++"$TMP/metareview" review epic-ready epic-2b --base "$base" > "$TMP/incomplete-child-artifact.out" 2>"$TMP/incomplete-child-artifact.err"
++code=$?
++set -e
++test "$code" -eq 1
++incomplete_child_artifact_review="$(cat "$TMP/incomplete-child-artifact.out")"
++grep -q "Unresolved child blockers" "$repo/$incomplete_child_artifact_review"
++
+ repo="$TMP/clean"
+ mkdir -p "$repo/.beads" "$repo/docs/metareview/reviews" "$repo/docs"
+ cd "$repo"
+diff --git a/tests/go/test-pr-ready-review.sh b/tests/go/test-pr-ready-review.sh
+index a6ee584..e151728 100644
+--- a/tests/go/test-pr-ready-review.sh
++++ b/tests/go/test-pr-ready-review.sh
+@@ -71,6 +71,43 @@ test "$code" -eq 1
+ unresolved_review="$(cat "$TMP/unresolved.out")"
+ grep -q "Unresolved review blockers" "$repo/$unresolved_review"
+ 
++repo="$TMP/incomplete-artifact"
++init_repo "$repo"
++base="$(git rev-parse HEAD)"
++mkdir -p docs/metareview/reviews
++cat > docs/metareview/reviews/spec-not-reviewed.md <<'REVIEW'
++# metareview: artifact review
++
++Run ID: `mrv-spec-not-reviewed`
++
++Target: `docs/spec.md`
++
++## Verdict
++
++NOT_REVIEWED
++
++## Reviewer Results
++
++| Reviewer | Verdict | Blocking | Warnings | Notes |
++| --- | --- | ---: | ---: | --- |
++
++## Findings
++
++No reviewer findings recorded yet.
++REVIEW
++printf "'use strict';\nmodule.exports = input => JSON.parse(input); // incomplete artifact\n" > lib/parser.js
++git add .
++git commit -qm "branch change"
++printf "bash tests/run-all.sh exited 0\n" > "$TMP/incomplete-artifact-evidence.md"
++set +e
++"$TMP/metareview" review pr-ready --base "$base" --evidence "$TMP/incomplete-artifact-evidence.md" > "$TMP/incomplete-artifact.out" 2>"$TMP/incomplete-artifact.err"
++code=$?
++set -e
++test "$code" -eq 1
++incomplete_artifact_review="$(cat "$TMP/incomplete-artifact.out")"
++grep -q "Unresolved review blockers" "$repo/$incomplete_artifact_review"
++grep -q "docs/spec.md" "$repo/$incomplete_artifact_review"
++
+ repo="$TMP/missing-validation"
+ init_repo "$repo"
+ base="$(git rev-parse HEAD)"
+--- docs/specs/2026-05-27-fail-closed-artifact-review-gates.md
++# Fail-Closed Artifact Review Gates
++
++## Problem
++
++`metareview review artifact <path>` currently creates a scaffold and exits successfully while the generated review remains incomplete. The generated run record and Markdown review use `NOT_REVIEWED`, contain no reviewer results, and leave `.metareview/findings.jsonl` empty. In the warmstart-tng run that triggered this work, an agent treated the successful command as review completion even though zero adversarial reviewers had actually run.
++
++This is a product and process hazard: the command is named like a completed review, but artifact review completion is delegated to manual agent behavior.
++
++## Evidence
++
++- `internal/artifactreview/review.go` sets artifact review status to `open` and verdict to `NOT_REVIEWED`.
++- `internal/artifactreview/review.go` writes an empty reviewer table and "No reviewer findings recorded yet."
++- `cmd/metareview/main.go` exits zero after printing the scaffold path for `review artifact`.
++- `internal/reviewlog/reviewlog.go` marks unresolved blockers when Markdown contains `NEEDS_REVISION`, but it does not treat `NOT_REVIEWED` as unresolved.
++- `internal/reviewers/prready.go` and `internal/reviewers/epicready.go` only block on unresolved blockers or `NEEDS_REVISION`, so unfinished artifact reviews can be ignored by later gates.
++- `skills/review-artifact/SKILL.md` says agents must run the five lenses manually, but the gate rule does not make `NOT_REVIEWED` or missing reviewer rows explicitly blocking.
++
++## Goals
++
++1. Artifact review scaffolds must be clearly incomplete and must not be mistaken for a completed review.
++2. Downstream gates must fail closed when they see an artifact review with `NOT_REVIEWED`, `ESCALATE`, missing verdict, or missing required reviewer rows.
++3. The review-artifact skill and docs must state that `NOT_REVIEWED` is blocking until all required reviewer lenses are completed.
++4. Existing scaffold generation remains available for agents that need a review workspace.
++
++## Non-Goals
++
++- Do not implement LLM or subagent orchestration inside the Go CLI in this slice.
++- Do not replace metaswarm as lifecycle owner.
++- Do not change deterministic task-done, epic-ready, or pr-ready reviewer logic except for how they consume incomplete prior artifact reviews.
++
++## Proposed Behavior
++
++### Artifact Scaffold Command
++
++`metareview review artifact <path>` will still create the context pack and review log, but it must report that the review is incomplete. To avoid breaking existing automation more than necessary, the primary behavior change is:
++
++- The command exits nonzero after creating a `NOT_REVIEWED` scaffold.
++- Stderr explains that the artifact scaffold is not a passing review and lists the completion requirements.
++- A new `--scaffold-only` flag keeps the current zero-exit behavior for explicit scaffold generation.
++
++The printed stdout path remains the review log path so agents and scripts can still find the artifact.
++
++### Review Log Semantics
++
++Review log discovery must treat these artifact states as unresolved blockers:
++
++- missing verdict
++- `NOT_REVIEWED`
++- `ESCALATE`
++- `NEEDS_REVISION`
++- required artifact reviewer table has no completed row for any of: feasibility, completeness, scope-alignment, architecture, intent-preservation
++
++`PASS` remains acceptable only when no unresolved blocking findings are present. `PASS_ADVISORY` is acceptable only with zero blockers.
++
++### Skill And Docs
++
++The review-artifact skill and quickstart docs must say:
++
++- `review artifact` creates an incomplete scaffold unless the review log is later completed.
++- Agents must populate all five reviewer rows or explicitly mark a lens `NOT_APPLICABLE`.
++- Agents must re-run with `--previous-run <run-id>` after fixes.
++- Completion requires `PASS` or `PASS_ADVISORY` with zero blockers.
++
++## Test Plan
++
++Add tests before production code:
++
++1. CLI: `metareview review artifact docs/plan.md` creates the scaffold, prints its path, and exits nonzero while the review remains `NOT_REVIEWED`.
++2. CLI: `met
+````
+
+## Knowledge And Registries
+
+Service inventory: none
+
+No service inventory found.
+
+Knowledge facts:
+
+No Beads knowledge facts found.
+
+## Evidence
+
+Verification evidence:
+- go test ./internal/reviewlog ./internal/artifactreview ./cmd/metareview exited 0
+- bash tests/go/test-artifact-review.sh exited 0
+- bash tests/go/test-pr-ready-review.sh exited 0
+- bash tests/go/test-epic-ready-review.sh exited 0
+- go test ./... exited 0
+- bash tests/run-all.sh exited 0
+- git diff --check exited 0
+

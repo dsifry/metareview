@@ -71,6 +71,43 @@ test "$code" -eq 1
 unresolved_review="$(cat "$TMP/unresolved.out")"
 grep -q "Unresolved review blockers" "$repo/$unresolved_review"
 
+repo="$TMP/incomplete-artifact"
+init_repo "$repo"
+base="$(git rev-parse HEAD)"
+mkdir -p docs/metareview/reviews
+cat > docs/metareview/reviews/spec-not-reviewed.md <<'REVIEW'
+# metareview: artifact review
+
+Run ID: `mrv-spec-not-reviewed`
+
+Target: `docs/spec.md`
+
+## Verdict
+
+NOT_REVIEWED
+
+## Reviewer Results
+
+| Reviewer | Verdict | Blocking | Warnings | Notes |
+| --- | --- | ---: | ---: | --- |
+
+## Findings
+
+No reviewer findings recorded yet.
+REVIEW
+printf "'use strict';\nmodule.exports = input => JSON.parse(input); // incomplete artifact\n" > lib/parser.js
+git add .
+git commit -qm "branch change"
+printf "bash tests/run-all.sh exited 0\n" > "$TMP/incomplete-artifact-evidence.md"
+set +e
+"$TMP/metareview" review pr-ready --base "$base" --evidence "$TMP/incomplete-artifact-evidence.md" > "$TMP/incomplete-artifact.out" 2>"$TMP/incomplete-artifact.err"
+code=$?
+set -e
+test "$code" -eq 1
+incomplete_artifact_review="$(cat "$TMP/incomplete-artifact.out")"
+grep -q "Unresolved review blockers" "$repo/$incomplete_artifact_review"
+grep -q "docs/spec.md" "$repo/$incomplete_artifact_review"
+
 repo="$TMP/missing-validation"
 init_repo "$repo"
 base="$(git rev-parse HEAD)"
