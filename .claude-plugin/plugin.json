@@ -1,6 +1,6 @@
 {
   "name": "metareview",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Go-based metaswarm-compatible internal review harness for plans, specs, decompositions, task-done code review, acceptance evidence, PR readiness, and post-merge learning. Packaged releases use bin/metareview; source checkout mode requires Go 1.22+.",
   "author": {
     "name": "David Sifry"

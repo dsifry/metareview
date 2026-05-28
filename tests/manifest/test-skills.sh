@@ -29,8 +29,14 @@ grep -q 'metareview learn --post-merge <pr-number> --base <pre-merge-ref>' docs/
 grep -q '.metareview/findings.jsonl' docs/quickstart.md
 grep -q '.metareview/knowledge/metareview.jsonl' docs/quickstart.md
 grep -q 'docs/metareview/reviews/' docs/quickstart.md
+grep -q 'Do not ignore `docs/metareview/`' docs/quickstart.md
+grep -q 'exact file entries' docs/quickstart.md
 grep -q 'metaswarm remains the lifecycle owner' docs/quickstart.md
 grep -q 'docs/quickstart.md' README.md
+grep -q 'Do not ignore `docs/metareview/`' README.md
+grep -q 'whole `.metareview/` directory' README.md
+grep -q 'Do not ignore `docs/metareview/`' INSTALL.md
+grep -q 'whole `.metareview/` directory' INSTALL.md
 grep -q '^## Use Cases$' README.md
 grep -q 'Spec review' README.md
 grep -q 'Plan review' README.md

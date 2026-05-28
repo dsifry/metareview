@@ -115,7 +115,14 @@ metareview review pr-ready --base <base-ref>
 metareview learn --post-merge <pr-number> --base <pre-merge-ref>
 ```
 
-Commit durable Markdown artifacts under `docs/metareview/`. Keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local unless a future contract says otherwise.
+Commit durable Markdown artifacts under `docs/metareview/`. Keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local unless a future contract says otherwise. In ordinary project repositories, prefer exact `.gitignore` entries:
+
+```gitignore
+.metareview/findings.jsonl
+.metareview/runs.jsonl
+```
+
+Do not ignore `docs/metareview/` or the whole `.metareview/` directory.
 
 ## Update
 

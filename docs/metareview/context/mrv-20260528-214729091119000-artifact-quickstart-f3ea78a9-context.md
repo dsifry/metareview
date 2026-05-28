@@ -1,3 +1,17 @@
+# metareview context: docs/quickstart.md
+
+Run ID: `mrv-20260528-214729091119000-artifact-quickstart-f3ea78a9`
+
+## Target
+
+- Path: `docs/quickstart.md`
+- Repository mode: `metaswarm-extension`
+- Git branch: `main`
+- Git head: `5d6c412`
+
+## Artifact Excerpt
+
+````markdown
 # metareview Quickstart
 
 For full installation paths, see [`../INSTALL.md`](../INSTALL.md). For coding-agent instructions, see [`README.codex.md`](README.codex.md), [`README.claude.md`](README.claude.md), [`../AGENTS.md`](../AGENTS.md), and [`../CLAUDE.md`](../CLAUDE.md).
@@ -74,3 +88,21 @@ Codex users invoke metareview through `$setup`, `$review-artifact`, `$review-tas
 Claude Code users invoke the same workflows through `/setup`, `/review-artifact`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/learn-post-merge`, and `/status`.
 
 Direct CLI usage remains the source of truth when plugin skills are unavailable.
+
+````
+
+## Service Inventory
+
+No service inventory found.
+
+## Knowledge Facts
+
+No Beads knowledge facts found.
+
+## Suggested Reviewers
+
+- feasibility
+- completeness
+- scope/alignment
+- architecture
+- intent preservation

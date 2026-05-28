@@ -199,6 +199,13 @@ Coding agents should treat metareview as a completion gate, not an optional comm
 
 Agents must not say work is done while a blocking finding remains unresolved. They should commit durable review/context artifacts when the repository's artifact policy says to do so, and keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local.
 
+When configuring `.gitignore` in ordinary project repositories, ignore those transient files with exact file entries. Do not ignore `docs/metareview/` or the whole `.metareview/` directory, because durable learning, calibration, and fallback knowledge can live there:
+
+```gitignore
+.metareview/findings.jsonl
+.metareview/runs.jsonl
+```
+
 ## Core Commands
 
 ```bash

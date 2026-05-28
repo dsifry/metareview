@@ -1,6 +1,6 @@
 {
   "name": "metareview",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Go-based metaswarm-compatible internal review harness for plans, specs, decompositions, code, acceptance evidence, PR readiness, and post-merge learning",
   "bin": {
     "metareview": "cli/metareview.js"
