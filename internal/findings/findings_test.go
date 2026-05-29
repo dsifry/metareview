@@ -8,6 +8,68 @@ import (
 	"testing"
 )
 
+func TestCountByClassSeparatesBlockersAdvisoriesFollowUpsAndWarnings(t *testing.T) {
+	records := []Record{
+		{Classification: "spec-contract", Severity: "medium"},
+		{Classification: "advisory", Severity: "medium"},
+		{Classification: "follow-up", Severity: "low"},
+		{Classification: "novel", Severity: "high"},
+	}
+	counts := CountByClass(records)
+	if counts.Blocking != 1 || counts.Advisory != 1 || counts.FollowUp != 1 || counts.Warnings != 1 {
+		t.Fatalf("unexpected counts: %+v", counts)
+	}
+}
+
+func TestReconcileTracksOpenFindingsAcrossAncestorChain(t *testing.T) {
+	root := t.TempDir()
+	target := map[string]string{"type": "beads-task", "id": "task-1"}
+	runA := Run{ID: "mrv-a", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	blocker := unsafeEval("eval is introduced.")
+	blocker.Fingerprint = "security:eval:lib/example.js"
+	if _, err := Reconcile(root, runA, []Input{blocker}, Options{}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	runB := Run{ID: "mrv-b", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "bbb"}
+	result, err := Reconcile(root, runB, []Input{blocker}, Options{PreviousRunID: "mrv-a", PreviousRunIDs: []string{"mrv-a"}})
+	if err != nil {
+		t.Fatalf("reconcile repeat run: %v", err)
+	}
+	if len(result.OpenFindings) != 1 || result.OpenBlockingCount != 1 {
+		t.Fatalf("repeated open finding should remain unresolved: %+v", result)
+	}
+
+	runC := Run{ID: "mrv-c", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "ccc"}
+	result, err = Reconcile(root, runC, nil, Options{PreviousRunID: "mrv-b", PreviousRunIDs: []string{"mrv-a", "mrv-b"}})
+	if err != nil {
+		t.Fatalf("reconcile closure run: %v", err)
+	}
+	if result.OpenBlockingCount != 0 || len(result.OpenFindings) != 0 {
+		t.Fatalf("ancestor finding should close when absent from current run: %+v", result)
+	}
+
+	records := readRecords(t, root)
+	if !hasRecord(records, "mrvf-a-001", "fixed") {
+		t.Fatalf("ancestor finding should be marked fixed: %+v", records)
+	}
+}
+
+func TestReconcileReturnsOpenFindingsForCurrentTarget(t *testing.T) {
+	root := t.TempDir()
+	target := map[string]string{"type": "beads-task", "id": "task-1"}
+	run := Run{ID: "mrv-a", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	blocker := unsafeEval("eval is introduced.")
+	blocker.Fingerprint = "security:eval:lib/example.js"
+	result, err := Reconcile(root, run, []Input{blocker}, Options{})
+	if err != nil {
+		t.Fatalf("reconcile first run: %v", err)
+	}
+	if len(result.OpenFindings) != 1 || result.OpenFindings[0].Status != "open" {
+		t.Fatalf("current target open findings should be returned: %+v", result)
+	}
+}
+
 func TestReconcileFindingsLifecycle(t *testing.T) {
 	root := t.TempDir()
 	target := map[string]string{"type": "beads-task", "id": "task-1"}

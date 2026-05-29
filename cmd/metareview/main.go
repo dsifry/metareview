@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,9 +31,9 @@ Usage:
   metareview context build <path>
   metareview context diff [--base <ref>]
   metareview review artifact <path> [--previous-run <run-id>] [--scaffold-only]
-  metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--evidence <path>]
-  metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--evidence <path>]
-  metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--evidence <path>] [--github-pr <number>]
+  metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
+  metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
+  metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>]
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
 
 Commands:
@@ -150,6 +151,9 @@ func main() {
 			case "--previous-run":
 				options.PreviousRunID = flagValue(args, i, "--previous-run")
 				i++
+			case "--max-attempts":
+				options.MaxAttempts = mustPositiveInt(flagValue(args, i, "--max-attempts"), "--max-attempts")
+				i++
 			case "--evidence":
 				options.EvidencePath = flagValue(args, i, "--evidence")
 				i++
@@ -177,6 +181,9 @@ func main() {
 			case "--previous-run":
 				options.PreviousRunID = flagValue(args, i, "--previous-run")
 				i++
+			case "--max-attempts":
+				options.MaxAttempts = mustPositiveInt(flagValue(args, i, "--max-attempts"), "--max-attempts")
+				i++
 			case "--evidence":
 				options.EvidencePath = flagValue(args, i, "--evidence")
 				i++
@@ -203,6 +210,9 @@ func main() {
 				i++
 			case "--previous-run":
 				options.PreviousRunID = flagValue(args, i, "--previous-run")
+				i++
+			case "--max-attempts":
+				options.MaxAttempts = mustPositiveInt(flagValue(args, i, "--max-attempts"), "--max-attempts")
 				i++
 			case "--evidence":
 				options.EvidencePath = flagValue(args, i, "--evidence")
@@ -332,6 +342,15 @@ func flagValue(args []string, index int, name string) string {
 		os.Exit(2)
 	}
 	return args[index+1]
+}
+
+func mustPositiveInt(value, name string) int {
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 1 {
+		fmt.Fprintf(os.Stderr, "%s must be an integer greater than 0\n", name)
+		os.Exit(2)
+	}
+	return parsed
 }
 
 func present(value bool) string {

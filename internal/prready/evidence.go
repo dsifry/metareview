@@ -1,6 +1,7 @@
 package prready
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/dsifry/metareview/internal/githubcontext"
@@ -8,12 +9,13 @@ import (
 )
 
 type EvidenceInput struct {
-	Summary     string
-	Validation  []string
-	TaskReviews []ReviewEvidence
-	EpicReviews []ReviewEvidence
-	Blockers    []Blocker
-	GitHub      githubcontext.Context
+	Summary       string
+	Validation    []string
+	TaskReviews   []ReviewEvidence
+	EpicReviews   []ReviewEvidence
+	Blockers      []Blocker
+	CurrentReview *ReviewEvidence
+	GitHub        githubcontext.Context
 }
 
 type ReviewEvidence struct {
@@ -22,6 +24,11 @@ type ReviewEvidence struct {
 	Path                  string
 	FindingIDs            []string
 	HasUnresolvedBlockers bool
+	AttemptNumber         int
+	MaxAttempts           int
+	BlockingFindingCount  int
+	AdvisoryFindingCount  int
+	FollowUpFindingCount  int
 }
 
 type Blocker struct {
@@ -37,6 +44,11 @@ func FromReviewLog(log reviewlog.Summary) ReviewEvidence {
 		Path:                  log.Path,
 		FindingIDs:            log.FindingIDs,
 		HasUnresolvedBlockers: log.HasUnresolvedBlockers,
+		AttemptNumber:         log.AttemptNumber,
+		MaxAttempts:           log.MaxAttempts,
+		BlockingFindingCount:  log.BlockingFindingCount,
+		AdvisoryFindingCount:  log.AdvisoryFindingCount,
+		FollowUpFindingCount:  log.FollowUpFindingCount,
 	}
 }
 
@@ -58,6 +70,11 @@ func RenderEvidence(input EvidenceInput) string {
 	builder.WriteString("### Blocker Status\n\n")
 	builder.WriteString(blockerList(input.Blockers))
 	builder.WriteString("\n\n")
+	if input.CurrentReview != nil {
+		builder.WriteString("### Current PR Review\n\n")
+		builder.WriteString(reviewList([]ReviewEvidence{*input.CurrentReview}, "No current review evidence."))
+		builder.WriteString("\n\n")
+	}
 	builder.WriteString("### External GitHub Review Context\n\n")
 	builder.WriteString(githubcontext.RenderMarkdown(input.GitHub))
 	return builder.String()
@@ -72,6 +89,12 @@ func reviewList(reviews []ReviewEvidence, empty string) string {
 		status := review.Verdict
 		if review.HasUnresolvedBlockers {
 			status += " with unresolved blockers"
+		}
+		if review.AttemptNumber > 0 && review.MaxAttempts > 0 {
+			status += fmt.Sprintf(" attempt %d/%d", review.AttemptNumber, review.MaxAttempts)
+		}
+		if review.BlockingFindingCount > 0 || review.AdvisoryFindingCount > 0 || review.FollowUpFindingCount > 0 {
+			status += fmt.Sprintf(" findings: blocking %d, advisory %d, follow-up %d", review.BlockingFindingCount, review.AdvisoryFindingCount, review.FollowUpFindingCount)
 		}
 		line := "- " + firstNonEmpty(review.Target, "unknown") + ": " + firstNonEmpty(status, "unknown")
 		if review.Path != "" {

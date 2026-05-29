@@ -71,3 +71,35 @@ func TestRenderEvidenceRedactsGitHubText(t *testing.T) {
 		t.Fatalf("expected redaction marker:\n%s", markdown)
 	}
 }
+
+func TestRenderEvidenceIncludesAttemptCountsAndEscalation(t *testing.T) {
+	body := RenderEvidence(EvidenceInput{
+		Summary:    "branch summary",
+		Validation: []string{"go test ./... exited 0"},
+		TaskReviews: []ReviewEvidence{{
+			Target:                "task-1",
+			Verdict:               "ESCALATED",
+			Path:                  "docs/metareview/reviews/task.md",
+			HasUnresolvedBlockers: true,
+			AttemptNumber:         3,
+			MaxAttempts:           3,
+			BlockingFindingCount:  1,
+			AdvisoryFindingCount:  2,
+			FollowUpFindingCount:  1,
+		}},
+		CurrentReview: &ReviewEvidence{
+			Target:                "current branch",
+			Verdict:               "ESCALATED",
+			Path:                  "docs/metareview/reviews/pr.md",
+			HasUnresolvedBlockers: true,
+			AttemptNumber:         2,
+			MaxAttempts:           2,
+			BlockingFindingCount:  1,
+			AdvisoryFindingCount:  1,
+		},
+	})
+	if !strings.Contains(body, "task-1: ESCALATED with unresolved blockers attempt 3/3 findings: blocking 1, advisory 2, follow-up 1") ||
+		!strings.Contains(body, "current branch: ESCALATED with unresolved blockers attempt 2/2 findings: blocking 1, advisory 1, follow-up 0") {
+		t.Fatalf("expected attempt count and escalation in evidence:\n%s", body)
+	}
+}

@@ -3,21 +3,32 @@ package reviewlog
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/dsifry/metareview/internal/runchain"
 )
 
 type Summary struct {
-	Path                  string   `json:"path"`
-	RunID                 string   `json:"runId"`
-	Target                string   `json:"target"`
-	Verdict               string   `json:"verdict"`
-	Kind                  string   `json:"kind"`
-	FindingIDs            []string `json:"findingIds"`
-	HasUnresolvedBlockers bool     `json:"hasUnresolvedBlockers"`
+	Path                  string            `json:"path"`
+	RunID                 string            `json:"runId"`
+	Target                string            `json:"target"`
+	Verdict               string            `json:"verdict"`
+	Kind                  string            `json:"kind"`
+	FindingIDs            []string          `json:"findingIds"`
+	HasUnresolvedBlockers bool              `json:"hasUnresolvedBlockers"`
+	AttemptNumber         int               `json:"attemptNumber,omitempty"`
+	MaxAttempts           int               `json:"maxAttempts,omitempty"`
+	BlockingFindingCount  int               `json:"blockingFindingCount,omitempty"`
+	AdvisoryFindingCount  int               `json:"advisoryFindingCount,omitempty"`
+	FollowUpFindingCount  int               `json:"followUpFindingCount,omitempty"`
+	WarningFindingCount   int               `json:"warningFindingCount,omitempty"`
+	RunChain              []runchain.Record `json:"runChain,omitempty"`
+	Warnings              []string          `json:"warnings,omitempty"`
 }
 
 type findingRecord struct {
@@ -34,6 +45,10 @@ var findingIDPattern = regexp.MustCompile(`mrvf-[A-Za-z0-9._@/-]+`)
 
 func Discover(root string) ([]Summary, error) {
 	records, err := readFindings(root)
+	if err != nil {
+		return nil, err
+	}
+	runs, err := runchain.ReadRuns(root)
 	if err != nil {
 		return nil, err
 	}
@@ -58,6 +73,7 @@ func Discover(root string) ([]Summary, error) {
 		}
 		summary := parseMarkdown(rel, string(bytes))
 		mergeFindings(&summary, records)
+		mergeRunMetadata(&summary, runs)
 		logs = append(logs, summary)
 	}
 	return logs, nil
@@ -122,7 +138,7 @@ func reviewKind(line string) string {
 
 func verdictIsUnresolved(verdict string) bool {
 	switch strings.ToUpper(strings.TrimSpace(verdict)) {
-	case "", "NOT_REVIEWED", "ESCALATE", "NEEDS_REVISION":
+	case "", "NOT_REVIEWED", "ESCALATE", "ESCALATED", "NEEDS_REVISION":
 		return true
 	default:
 		return false
@@ -199,6 +215,38 @@ func mergeFindings(summary *Summary, records []findingRecord) {
 			summary.HasUnresolvedBlockers = true
 		}
 	}
+}
+
+func mergeRunMetadata(summary *Summary, runs []runchain.Record) {
+	if summary.RunID == "" {
+		return
+	}
+	byID := map[string]runchain.Record{}
+	for _, run := range runs {
+		byID[run.ID] = run
+	}
+	current, ok := byID[summary.RunID]
+	if !ok {
+		return
+	}
+	summary.AttemptNumber = current.AttemptNumber
+	summary.MaxAttempts = current.MaxAttempts
+	summary.BlockingFindingCount = current.BlockingFindingCount
+	summary.AdvisoryFindingCount = current.AdvisoryFindingCount
+	summary.FollowUpFindingCount = current.FollowUpFindingCount
+	summary.WarningFindingCount = current.WarningFindingCount
+	if current.WarningFindingCount > 0 {
+		summary.Warnings = append(summary.Warnings, "unknown finding classification present")
+	}
+	if current.Verdict == "ESCALATED" {
+		summary.HasUnresolvedBlockers = true
+	}
+	chain, err := runchain.ChainTo(runs, summary.RunID)
+	if err != nil {
+		summary.Warnings = append(summary.Warnings, fmt.Sprintf("run chain unavailable: %v", err))
+		return
+	}
+	summary.RunChain = chain
 }
 
 func readFindings(root string) ([]findingRecord, error) {

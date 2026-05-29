@@ -15,6 +15,7 @@ import (
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewers"
 	"github.com/dsifry/metareview/internal/reviewlog"
+	"github.com/dsifry/metareview/internal/runchain"
 	"github.com/dsifry/metareview/internal/state"
 )
 
@@ -23,6 +24,7 @@ type Options struct {
 	PreviousRunID string
 	EvidencePath  string
 	GitHubPR      string
+	MaxAttempts   int
 	Now           time.Time
 }
 
@@ -35,26 +37,33 @@ type Result struct {
 }
 
 type runRecord struct {
-	SchemaVersion int                 `json:"schemaVersion"`
-	ID            string              `json:"id"`
-	Scope         string              `json:"scope"`
-	Target        map[string]string   `json:"target"`
-	Status        string              `json:"status"`
-	Verdict       string              `json:"verdict"`
-	ExecutionMode string              `json:"executionMode"`
-	PreviousRunID *string             `json:"previousRunId"`
-	BaseSHA       string              `json:"baseSha"`
-	HeadSHA       string              `json:"headSha"`
-	ContextPath   string              `json:"contextPackPath"`
-	ReviewPath    string              `json:"reviewLogPath"`
-	Reviewers     []string            `json:"reviewers"`
-	FindingIDs    []string            `json:"findingIds"`
-	SourceRefs    []map[string]string `json:"sourceRefs"`
-	GateEffect    string              `json:"gateEffect"`
-	CreatedAt     string              `json:"createdAt"`
-	UpdatedAt     string              `json:"updatedAt"`
-	RepoRoot      string              `json:"repoRoot"`
-	GitHead       string              `json:"gitHead"`
+	SchemaVersion        int                 `json:"schemaVersion"`
+	ID                   string              `json:"id"`
+	Scope                string              `json:"scope"`
+	Target               map[string]string   `json:"target"`
+	Status               string              `json:"status"`
+	Verdict              string              `json:"verdict"`
+	ExecutionMode        string              `json:"executionMode"`
+	PreviousRunID        string              `json:"previousRunId,omitempty"`
+	AttemptNumber        int                 `json:"attemptNumber"`
+	MaxAttempts          int                 `json:"maxAttempts"`
+	BaseSHA              string              `json:"baseSha"`
+	HeadSHA              string              `json:"headSha"`
+	ContextPath          string              `json:"contextPackPath"`
+	ReviewPath           string              `json:"reviewLogPath"`
+	Reviewers            []string            `json:"reviewers"`
+	FindingIDs           []string            `json:"findingIds"`
+	SourceRefs           []map[string]string `json:"sourceRefs"`
+	GateEffect           string              `json:"gateEffect"`
+	BlockingFindingCount int                 `json:"blockingFindingCount"`
+	AdvisoryFindingCount int                 `json:"advisoryFindingCount"`
+	FollowUpFindingCount int                 `json:"followUpFindingCount"`
+	WarningFindingCount  int                 `json:"warningFindingCount"`
+	EscalationReason     string              `json:"escalationReason"`
+	CreatedAt            string              `json:"createdAt"`
+	UpdatedAt            string              `json:"updatedAt"`
+	RepoRoot             string              `json:"repoRoot"`
+	GitHead              string              `json:"gitHead"`
 }
 
 type fileSnapshot struct {
@@ -138,47 +147,69 @@ func Create(root string, options Options) (Result, error) {
 		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, reviewGit, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect)), 0o644); err != nil {
 			return err
 		}
-		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{PreviousRunID: options.PreviousRunID})
+		chain, err := runchain.Resolve(root, runchain.Options{
+			Scope:         "pr-ready",
+			Target:        targetRecord,
+			PreviousRunID: options.PreviousRunID,
+			MaxAttempts:   options.MaxAttempts,
+		})
 		if err != nil {
 			return err
 		}
-		blocking := len(reconciled.Findings) > 0
-		verdict := "PASS"
-		status := "passed"
-		if blocking {
-			verdict = "NEEDS_REVISION"
-			status = "needs-revision"
-		} else if gateEffect == "advisory" {
-			verdict = "PASS_ADVISORY"
+		previousRunIDs := make([]string, 0, len(chain.Chain))
+		for _, link := range chain.Chain {
+			previousRunIDs = append(previousRunIDs, link.ID)
 		}
+		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{PreviousRunID: options.PreviousRunID, PreviousRunIDs: previousRunIDs})
+		if err != nil {
+			return err
+		}
+		counts := findings.CountByClass(reconciled.OpenFindings)
+		verdict, status, blocking, escalationReason := verdictForCounts(counts, gateEffect, chain.AttemptNumber, chain.MaxAttempts)
 		result.Verdict = verdict
 		result.Blocking = blocking
 		record := runRecord{
-			SchemaVersion: 1,
-			ID:            runID,
-			Scope:         "pr-ready",
-			Target:        targetRecord,
-			Status:        status,
-			Verdict:       verdict,
-			ExecutionMode: "deterministic-local",
-			PreviousRunID: optionalString(options.PreviousRunID),
-			BaseSHA:       git.BaseSHA,
-			HeadSHA:       git.HeadSHA,
-			ContextPath:   contextRel,
-			ReviewPath:    reviewRel,
-			Reviewers:     reviewerNames,
-			FindingIDs:    findingIDs(reconciled.Findings),
-			SourceRefs:    []map[string]string{{"type": "branch", "id": targetRecord["id"]}},
-			GateEffect:    gateEffect,
-			CreatedAt:     now.UTC().Format(time.RFC3339Nano),
-			UpdatedAt:     now.UTC().Format(time.RFC3339Nano),
-			RepoRoot:      root,
-			GitHead:       git.HeadSHA,
+			SchemaVersion:        1,
+			ID:                   runID,
+			Scope:                "pr-ready",
+			Target:               targetRecord,
+			Status:               status,
+			Verdict:              verdict,
+			ExecutionMode:        "deterministic-local",
+			PreviousRunID:        options.PreviousRunID,
+			AttemptNumber:        chain.AttemptNumber,
+			MaxAttempts:          chain.MaxAttempts,
+			BaseSHA:              git.BaseSHA,
+			HeadSHA:              git.HeadSHA,
+			ContextPath:          contextRel,
+			ReviewPath:           reviewRel,
+			Reviewers:            reviewerNames,
+			FindingIDs:           findingIDs(reconciled.OpenFindings),
+			SourceRefs:           []map[string]string{{"type": "branch", "id": targetRecord["id"]}},
+			GateEffect:           gateEffect,
+			BlockingFindingCount: counts.Blocking,
+			AdvisoryFindingCount: counts.Advisory,
+			FollowUpFindingCount: counts.FollowUp,
+			WarningFindingCount:  counts.Warnings,
+			EscalationReason:     escalationReason,
+			CreatedAt:            now.UTC().Format(time.RFC3339Nano),
+			UpdatedAt:            now.UTC().Format(time.RFC3339Nano),
+			RepoRoot:             root,
+			GitHead:              git.HeadSHA,
 		}
 		if err := state.AppendJSONL(runsPath, record); err != nil {
 			return err
 		}
-		return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, verdict, reconciled.Findings, prEvidence)), 0o644)
+		meta := reviewMetadata{
+			AttemptNumber:        chain.AttemptNumber,
+			MaxAttempts:          chain.MaxAttempts,
+			RunChain:             chain.Chain,
+			BlockingFindingCount: counts.Blocking,
+			AdvisoryFindingCount: counts.Advisory,
+			FollowUpFindingCount: counts.FollowUp,
+			WarningFindingCount:  counts.Warnings,
+		}
+		return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, verdict, reconciled.OpenFindings, prEvidence, meta)), 0o644)
 	}()
 	if err != nil {
 		restoreSnapshots(snapshots)
@@ -472,7 +503,33 @@ func contextMarkdown(runID string, git gitcontext.Context, knowledgeContext know
 		"## Suggested PR Evidence\n\n" + prEvidence + "\n"
 }
 
-func reviewMarkdown(runID, contextRel, previousRun, gateEffect, verdict string, records []findings.Record, prEvidence string) string {
+type reviewMetadata struct {
+	AttemptNumber        int
+	MaxAttempts          int
+	RunChain             []runchain.Record
+	BlockingFindingCount int
+	AdvisoryFindingCount int
+	FollowUpFindingCount int
+	WarningFindingCount  int
+}
+
+func verdictForCounts(counts findings.ClassCounts, gateEffect string, attemptNumber, maxAttempts int) (string, string, bool, string) {
+	blocking := counts.Blocking > 0
+	nonBlocking := counts.Advisory > 0 || counts.FollowUp > 0 || counts.Warnings > 0
+	if blocking && attemptNumber >= maxAttempts {
+		reason := fmt.Sprintf("blocking findings remain after attempt %d of %d", attemptNumber, maxAttempts)
+		return "ESCALATED", "escalated", true, reason
+	}
+	if blocking {
+		return "NEEDS_REVISION", "needs-revision", true, ""
+	}
+	if gateEffect == "advisory" || nonBlocking {
+		return "PASS_ADVISORY", "passed", false, ""
+	}
+	return "PASS", "passed", false, ""
+}
+
+func reviewMarkdown(runID, contextRel, previousRun, gateEffect, verdict string, records []findings.Record, prEvidence string, meta reviewMetadata) string {
 	return "# metareview: pr-ready review\n\n" +
 		"Run ID: " + markdown.InlineCode(runID) + "\n\n" +
 		"Target: `current branch`\n\n" +
@@ -483,8 +540,9 @@ func reviewMarkdown(runID, contextRel, previousRun, gateEffect, verdict string, 
 		"## Verdict\n\n" + verdict + "\n\n" +
 		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n" +
 		reviewerTable(records) + "\n\n" +
-		"## Findings\n\n" + findingsMarkdown(records) + "\n" +
-		"\n## Suggested PR Evidence\n\n" + prEvidence + "\n"
+		findingsMarkdown(records) + "\n" +
+		"\n## Suggested PR Evidence\n\n" + prEvidence + "\n" +
+		runChainMarkdown(runID, verdict, meta)
 }
 
 func reviewLogsMarkdown(logs []reviewlog.Summary) string {
@@ -517,41 +575,98 @@ func knowledgeMarkdown(context knowledge.Context) string {
 func reviewerTable(records []findings.Record) string {
 	lines := make([]string, 0, len(reviewerNames))
 	for _, reviewer := range reviewerNames {
-		var titles []string
+		var blockers, nonBlockers []string
 		for _, record := range records {
-			if record.Reviewer == reviewer {
-				titles = append(titles, record.Title)
+			if record.Reviewer != reviewer {
+				continue
+			}
+			counts := findings.CountByClass([]findings.Record{record})
+			if counts.Blocking > 0 {
+				blockers = append(blockers, record.Title)
+			} else {
+				nonBlockers = append(nonBlockers, record.Title)
 			}
 		}
 		verdict := "PASS"
-		if len(titles) > 0 {
-			verdict = "NEEDS_REVISION"
-		}
 		note := "No blocking findings."
-		if len(titles) > 0 {
-			note = strings.Join(titles, "; ")
+		if len(blockers) > 0 {
+			verdict = "NEEDS_REVISION"
+			note = strings.Join(blockers, "; ")
+		} else if len(nonBlockers) > 0 {
+			verdict = "PASS_ADVISORY"
+			note = strings.Join(nonBlockers, "; ")
 		}
-		lines = append(lines, fmt.Sprintf("| %s | %s | %d | %s |", reviewer, verdict, len(titles), note))
+		lines = append(lines, fmt.Sprintf("| %s | %s | %d | %s |", reviewer, verdict, len(blockers), note))
 	}
 	return strings.Join(lines, "\n")
 }
 
 func findingsMarkdown(records []findings.Record) string {
-	if len(records) == 0 {
-		return "No blocking findings.\n"
+	return classifiedFindingsMarkdown(records)
+}
+
+func classifiedFindingsMarkdown(records []findings.Record) string {
+	sections := []struct {
+		title string
+		label string
+	}{
+		{title: "## Blocking Findings", label: "blocking"},
+		{title: "## Advisory Findings", label: "advisory"},
+		{title: "## Follow-up Findings", label: "follow-up"},
+		{title: "## Warnings", label: "warning"},
 	}
-	sections := make([]string, 0, len(records))
-	for _, record := range records {
-		sections = append(sections, "### "+record.ID+": "+record.Title+"\n\n"+
-			"- Reviewer: "+record.Reviewer+"\n"+
-			"- Severity: "+record.Severity+"\n"+
-			"- Classification: "+record.Classification+"\n"+
-			"- Finding: "+record.Finding+"\n"+
-			"- Expected: "+record.Expected+"\n"+
-			"- Found: "+record.Found+"\n"+
-			"- Recommendation: "+record.Recommendation+"\n")
+	var output []string
+	for _, section := range sections {
+		var items []string
+		for _, record := range records {
+			if classForDisplay(record) != section.label {
+				continue
+			}
+			items = append(items, "### "+record.ID+": "+record.Title+"\n\n"+
+				"- Reviewer: "+record.Reviewer+"\n"+
+				"- Severity: "+record.Severity+"\n"+
+				"- Classification: "+record.Classification+"\n"+
+				"- Finding: "+record.Finding+"\n"+
+				"- Expected: "+record.Expected+"\n"+
+				"- Found: "+record.Found+"\n"+
+				"- Recommendation: "+record.Recommendation+"\n")
+		}
+		body := "No findings in this class.\n"
+		if len(items) > 0 {
+			body = strings.Join(items, "\n")
+		}
+		output = append(output, section.title+"\n\n"+body)
 	}
-	return strings.Join(sections, "\n")
+	return strings.Join(output, "\n\n")
+}
+
+func classForDisplay(record findings.Record) string {
+	counts := findings.CountByClass([]findings.Record{record})
+	switch {
+	case counts.Blocking > 0:
+		return "blocking"
+	case counts.Advisory > 0:
+		return "advisory"
+	case counts.FollowUp > 0:
+		return "follow-up"
+	default:
+		return "warning"
+	}
+}
+
+func runChainMarkdown(runID, verdict string, meta reviewMetadata) string {
+	if verdict != "ESCALATED" {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString("\n## Run Chain\n\n")
+	for _, link := range meta.RunChain {
+		builder.WriteString(fmt.Sprintf("- %s: %s attempt %d/%d\n", link.ID, link.Verdict, link.AttemptNumber, link.MaxAttempts))
+	}
+	builder.WriteString(fmt.Sprintf("- %s: %s attempt %d/%d\n", runID, verdict, meta.AttemptNumber, meta.MaxAttempts))
+	builder.WriteString("\n## Unresolved Blocker Summary\n\n")
+	builder.WriteString(fmt.Sprintf("- Blocking: %d\n- Advisory: %d\n- Follow-up: %d\n- Warnings: %d\n", meta.BlockingFindingCount, meta.AdvisoryFindingCount, meta.FollowUpFindingCount, meta.WarningFindingCount))
+	return builder.String()
 }
 
 func snapshot(path string) fileSnapshot {
@@ -634,11 +749,4 @@ func findingIDs(records []findings.Record) []string {
 		ids = append(ids, record.ID)
 	}
 	return ids
-}
-
-func optionalString(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
 }

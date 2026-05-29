@@ -3,6 +3,7 @@ package reviewlog
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -91,6 +92,52 @@ func TestCompletedArtifactReviewIsNotUnresolved(t *testing.T) {
 	}
 	if len(logs) != 1 || logs[0].HasUnresolvedBlockers {
 		t.Fatalf("expected completed artifact review not to be unresolved: %+v", logs)
+	}
+}
+
+func TestEscalatedVerdictIsUnresolved(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "ESCALATED", ""))
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 || !logs[0].HasUnresolvedBlockers {
+		t.Fatalf("expected ESCALATED to be unresolved: %+v", logs)
+	}
+}
+
+func TestDiscoverMergesRunAttemptMetadata(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "ESCALATED", ""))
+	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"), `{"id":"mrv-root","scope":"task-done","target":{"type":"path","id":"task-1"},"verdict":"NEEDS_REVISION","attemptNumber":1,"maxAttempts":3}`+"\n"+
+		`{"id":"mrv-task","scope":"task-done","target":{"type":"path","id":"task-1"},"verdict":"ESCALATED","previousRunId":"mrv-root","attemptNumber":3,"maxAttempts":3,"blockingFindingCount":1,"advisoryFindingCount":2,"followUpFindingCount":1}`+"\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	log := logs[0]
+	if log.AttemptNumber != 3 || log.MaxAttempts != 3 || log.BlockingFindingCount != 1 || log.AdvisoryFindingCount != 2 || log.FollowUpFindingCount != 1 {
+		t.Fatalf("expected run metadata merged into summary: %+v", log)
+	}
+	if len(log.RunChain) != 2 || log.RunChain[0].ID != "mrv-root" || log.RunChain[1].ID != "mrv-task" {
+		t.Fatalf("expected full run chain in summary: %+v", log.RunChain)
+	}
+}
+
+func TestDiscoverSurfacesUnknownClassificationWarning(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "PASS_ADVISORY", ""))
+	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"), `{"id":"mrv-task","attemptNumber":1,"maxAttempts":3,"warningFindingCount":1}`+"\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs[0].Warnings) != 1 || !strings.Contains(logs[0].Warnings[0], "unknown finding classification") {
+		t.Fatalf("expected unknown-classification warning in review log summary: %+v", logs[0].Warnings)
 	}
 }
 

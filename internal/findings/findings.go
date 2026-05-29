@@ -21,7 +21,8 @@ type Run struct {
 }
 
 type Options struct {
-	PreviousRunID string
+	PreviousRunID  string
+	PreviousRunIDs []string
 }
 
 type Evidence struct {
@@ -74,6 +75,7 @@ type Record struct {
 type Result struct {
 	Findings          []Record `json:"findings"`
 	NewFindings       []Record `json:"newFindings"`
+	OpenFindings      []Record `json:"openFindings"`
 	OpenBlockingCount int      `json:"openBlockingCount"`
 }
 
@@ -83,6 +85,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	if err != nil {
 		return Result{}, err
 	}
+	previousRuns := previousRunSet(options)
 	currentFingerprints := map[string]bool{}
 	for _, finding := range current {
 		if finding.Fingerprint != "" {
@@ -92,8 +95,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	now := nowISO()
 	updated := make([]Record, 0, len(existing))
 	for _, record := range existing {
-		if options.PreviousRunID != "" &&
-			record.RunID == options.PreviousRunID &&
+		if previousRuns[record.RunID] &&
 			sameTarget(firstTarget(record.Target, run.Target), run.Target) &&
 			record.Status == "open" &&
 			record.Fingerprint != "" &&
@@ -128,6 +130,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		return Result{}, err
 	}
 	activeCurrent := make([]Record, 0, len(current))
+	openFindings := openForTarget(all, run.Target)
 	for _, record := range all {
 		if record.Status == "open" &&
 			record.Fingerprint != "" &&
@@ -139,7 +142,8 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	return Result{
 		Findings:          activeCurrent,
 		NewFindings:       newRecords,
-		OpenBlockingCount: len(unresolvedBlockingFrom(all)),
+		OpenFindings:      openFindings,
+		OpenBlockingCount: CountByClass(openFindings).Blocking,
 	}, nil
 }
 
@@ -187,7 +191,7 @@ func normalize(run Run, finding Input, index int, createdAt string) Record {
 		RunID:              run.ID,
 		Reviewer:           finding.Reviewer,
 		Severity:           finding.Severity,
-		Classification:     finding.Classification,
+		Classification:     canonicalClass(finding.Classification),
 		Status:             "open",
 		Title:              finding.Title,
 		Finding:            finding.Finding,
@@ -213,12 +217,94 @@ func unresolvedBlockingFrom(records []Record) []Record {
 		if record.Status != "open" {
 			continue
 		}
-		if record.Classification == "spec-contract" ||
-			(record.Classification == "blocking" && (record.Severity == "critical" || record.Severity == "high")) {
+		if classForCount(record.Classification, record.Severity) == "blocking" {
 			blockers = append(blockers, record)
 		}
 	}
 	return blockers
+}
+
+type ClassCounts struct {
+	Blocking int
+	Advisory int
+	FollowUp int
+	Warnings int
+}
+
+func CountByClass(records []Record) ClassCounts {
+	var counts ClassCounts
+	for _, record := range records {
+		switch classForCount(record.Classification, record.Severity) {
+		case "blocking":
+			counts.Blocking++
+		case "advisory":
+			counts.Advisory++
+		case "follow-up":
+			counts.FollowUp++
+		default:
+			counts.Warnings++
+		}
+	}
+	return counts
+}
+
+func canonicalClass(classification string) string {
+	classification = strings.ToLower(strings.TrimSpace(strings.ReplaceAll(classification, "_", "-")))
+	switch classification {
+	case "blocker", "spec-contract":
+		return "spec-contract"
+	case "blocking":
+		return "blocking"
+	case "advisory":
+		return "advisory"
+	case "follow-up", "followup":
+		return "follow-up"
+	default:
+		return "warning"
+	}
+}
+
+func classForCount(classification, severity string) string {
+	switch canonicalClass(classification) {
+	case "spec-contract":
+		return "blocking"
+	case "blocking":
+		switch strings.ToLower(strings.TrimSpace(severity)) {
+		case "critical", "high":
+			return "blocking"
+		default:
+			return "warning"
+		}
+	case "advisory":
+		return "advisory"
+	case "follow-up":
+		return "follow-up"
+	default:
+		return "warning"
+	}
+}
+
+func openForTarget(records []Record, target any) []Record {
+	open := make([]Record, 0, len(records))
+	for _, record := range records {
+		if record.Status == "open" && sameTarget(firstTarget(record.Target, target), target) {
+			open = append(open, record)
+		}
+	}
+	return open
+}
+
+func previousRunSet(options Options) map[string]bool {
+	ids := map[string]bool{}
+	if options.PreviousRunID != "" {
+		ids[options.PreviousRunID] = true
+	}
+	for _, id := range options.PreviousRunIDs {
+		if id != "" {
+			ids[id] = true
+		}
+	}
+	return ids
 }
 
 func findingsPath(root string) string {
