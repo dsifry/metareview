@@ -187,6 +187,27 @@ func TestResolveAllowsEscalatedSameTargetAtDifferentHead(t *testing.T) {
 	if decision.AttemptNumber != 1 {
 		t.Fatalf("expected fresh first attempt after changed head, got %+v", decision)
 	}
+	if len(decision.ResetRunIDs) != 1 || decision.ResetRunIDs[0] != "mrv-a" {
+		t.Fatalf("expected reset run id for changed-head escalation, got %+v", decision.ResetRunIDs)
+	}
+}
+
+func TestResolveReturnsEscalatedChainResetRunIDs(t *testing.T) {
+	root := t.TempDir()
+	writeRun(t, root, `{"id":"mrv-a","scope":"task-done","target":{"type":"path","id":"docs/spec.md"},"verdict":"NEEDS_REVISION","attemptNumber":1,"maxAttempts":3,"headSha":"abc123"}`)
+	writeRun(t, root, `{"id":"mrv-b","scope":"task-done","target":{"type":"path","id":"docs/spec.md"},"verdict":"NEEDS_REVISION","previousRunId":"mrv-a","attemptNumber":2,"maxAttempts":3,"headSha":"abc123"}`)
+	writeRun(t, root, `{"id":"mrv-c","scope":"task-done","target":{"type":"path","id":"docs/spec.md"},"verdict":"ESCALATED","previousRunId":"mrv-b","attemptNumber":3,"maxAttempts":3,"headSha":"abc123"}`)
+	decision, err := Resolve(root, Options{
+		Scope:   "task-done",
+		Target:  map[string]string{"type": "path", "id": "docs/spec.md"},
+		HeadSHA: "def456",
+	})
+	if err != nil {
+		t.Fatalf("changed-head escalation should allow fresh chain: %v", err)
+	}
+	if strings.Join(decision.ResetRunIDs, ",") != "mrv-a,mrv-b,mrv-c" {
+		t.Fatalf("expected full escalated chain reset ids, got %+v", decision.ResetRunIDs)
+	}
 }
 
 func TestResolveRejectsInvalidMaxAttempts(t *testing.T) {

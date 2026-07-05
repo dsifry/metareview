@@ -170,7 +170,11 @@ func Create(root string, options Options) (Result, error) {
 		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect)), 0o644); err != nil {
 			return err
 		}
-		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{PreviousRunID: options.PreviousRunID, PreviousRunIDs: previousRunIDs})
+		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{
+			PreviousRunID:  options.PreviousRunID,
+			PreviousRunIDs: previousRunIDs,
+			ResetRunIDs:    chain.ResetRunIDs,
+		})
 		if err != nil {
 			return err
 		}

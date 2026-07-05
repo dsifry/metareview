@@ -26,6 +26,7 @@ type Decision struct {
 	PreviousRun   *Record
 	RootRun       *Record
 	Chain         []Record
+	ResetRunIDs   []string
 }
 
 type Record struct {
@@ -59,6 +60,7 @@ func Resolve(root string, options Options) (Decision, error) {
 	if err != nil {
 		return Decision{}, err
 	}
+	resetRunIDs := escalatedResetRunIDs(records, options.Scope, options.Target, options.HeadSHA)
 	if options.PreviousRunID != "" {
 		chain, err := ChainTo(records, options.PreviousRunID)
 		if err != nil {
@@ -81,12 +83,12 @@ func Resolve(root string, options Options) (Decision, error) {
 		if max == 0 {
 			max = effectiveMax(options.MaxAttempts)
 		}
-		return Decision{AttemptNumber: previous.AttemptNumber + 1, MaxAttempts: max, PreviousRun: &previous, RootRun: &rootRun, Chain: chain}, nil
+		return Decision{AttemptNumber: previous.AttemptNumber + 1, MaxAttempts: max, PreviousRun: &previous, RootRun: &rootRun, Chain: chain, ResetRunIDs: resetRunIDs}, nil
 	}
 	if escalated, ok := escalatedForTarget(records, options.Scope, options.Target, options.HeadSHA); ok {
 		return Decision{}, fmt.Errorf("same target already escalated in run %s", escalated.ID)
 	}
-	return Decision{AttemptNumber: 1, MaxAttempts: effectiveMax(options.MaxAttempts)}, nil
+	return Decision{AttemptNumber: 1, MaxAttempts: effectiveMax(options.MaxAttempts), ResetRunIDs: resetRunIDs}, nil
 }
 
 func ReadRuns(root string) ([]Record, error) {
@@ -160,6 +162,35 @@ func escalatedForTarget(records []Record, scope string, target map[string]string
 		}
 	}
 	return Record{}, false
+}
+
+func escalatedResetRunIDs(records []Record, scope string, target map[string]string, headSHA string) []string {
+	headSHA = strings.TrimSpace(headSHA)
+	if headSHA == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ids []string
+	for _, record := range records {
+		recordHead := strings.TrimSpace(record.HeadSHA)
+		if record.Scope == scope &&
+			sameTarget(record.Target, target) &&
+			strings.EqualFold(record.Verdict, "ESCALATED") &&
+			recordHead != "" &&
+			recordHead != headSHA {
+			chain, err := ChainTo(records, record.ID)
+			if err != nil {
+				chain = []Record{record}
+			}
+			for _, link := range chain {
+				if !seen[link.ID] {
+					ids = append(ids, link.ID)
+					seen[link.ID] = true
+				}
+			}
+		}
+	}
+	return ids
 }
 
 func sameTarget(a, b map[string]string) bool {

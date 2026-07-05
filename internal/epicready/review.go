@@ -160,7 +160,11 @@ func Create(root, target string, options Options) (Result, error) {
 		for _, link := range chain.Chain {
 			previousRunIDs = append(previousRunIDs, link.ID)
 		}
-		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{PreviousRunID: options.PreviousRunID, PreviousRunIDs: previousRunIDs})
+		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{
+			PreviousRunID:  options.PreviousRunID,
+			PreviousRunIDs: previousRunIDs,
+			ResetRunIDs:    chain.ResetRunIDs,
+		})
 		if err != nil {
 			return err
 		}

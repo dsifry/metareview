@@ -23,6 +23,7 @@ type Run struct {
 type Options struct {
 	PreviousRunID  string
 	PreviousRunIDs []string
+	ResetRunIDs    []string
 }
 
 type Evidence struct {
@@ -50,6 +51,7 @@ type Record struct {
 	SchemaVersion      int        `json:"schemaVersion"`
 	ID                 string     `json:"id"`
 	RunID              string     `json:"runId"`
+	Scope              string     `json:"scope,omitempty"`
 	Reviewer           string     `json:"reviewer"`
 	Severity           string     `json:"severity"`
 	Classification     string     `json:"classification"`
@@ -86,6 +88,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		return Result{}, err
 	}
 	previousRuns := previousRunSet(options)
+	resetRuns := resetRunSet(options)
 	currentFingerprints := map[string]bool{}
 	for _, finding := range current {
 		if finding.Fingerprint != "" {
@@ -95,8 +98,16 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	now := nowISO()
 	updated := make([]Record, 0, len(existing))
 	for _, record := range existing {
-		if previousRuns[record.RunID] &&
-			sameTarget(firstTarget(record.Target, run.Target), run.Target) &&
+		if record.Status == "open" &&
+			record.Fingerprint != "" &&
+			currentFingerprints[record.Fingerprint] &&
+			sameRunTarget(record, run) {
+			record.Scope = firstNonEmpty(record.Scope, run.Scope)
+			record.GitHead = firstNonEmpty(run.GitHead, record.GitHead)
+			record.UpdatedAt = now
+		}
+		if (previousRuns[record.RunID] || resetFinding(record, run, resetRuns)) &&
+			sameRunTarget(record, run) &&
 			record.Status == "open" &&
 			record.Fingerprint != "" &&
 			!currentFingerprints[record.Fingerprint] {
@@ -110,7 +121,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 
 	activeExisting := map[string]bool{}
 	for _, record := range updated {
-		if record.Status == "open" && record.Fingerprint != "" && sameTarget(firstTarget(record.Target, run.Target), run.Target) {
+		if record.Status == "open" && record.Fingerprint != "" && sameRunTarget(record, run) {
 			activeExisting[record.Fingerprint] = true
 		}
 	}
@@ -130,12 +141,12 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		return Result{}, err
 	}
 	activeCurrent := make([]Record, 0, len(current))
-	openFindings := openForTarget(all, run.Target)
+	openFindings := openForRun(all, run)
 	for _, record := range all {
 		if record.Status == "open" &&
 			record.Fingerprint != "" &&
 			currentFingerprints[record.Fingerprint] &&
-			sameTarget(firstTarget(record.Target, run.Target), run.Target) {
+			sameRunTarget(record, run) {
 			activeCurrent = append(activeCurrent, record)
 		}
 	}
@@ -145,6 +156,41 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		OpenFindings:      openFindings,
 		OpenBlockingCount: CountByClass(openFindings).Blocking,
 	}, nil
+}
+
+func resetFinding(record Record, run Run, resetRuns map[string]bool) bool {
+	return resetRuns[record.RunID] && resetScopeMatches(record, run) && staleForCurrentHead(record, run)
+}
+
+func staleForCurrentHead(record Record, run Run) bool {
+	recordHead := strings.TrimSpace(record.GitHead)
+	runHead := strings.TrimSpace(run.GitHead)
+	return recordHead != "" && runHead != "" && recordHead != runHead
+}
+
+func sameRunTarget(record Record, run Run) bool {
+	return sameCompatibleScope(record, run) && sameTarget(firstTarget(record.Target, run.Target), run.Target)
+}
+
+func sameCompatibleScope(record Record, run Run) bool {
+	recordScope := strings.TrimSpace(record.Scope)
+	runScope := strings.TrimSpace(run.Scope)
+	return recordScope == "" || runScope == "" || recordScope == runScope
+}
+
+func resetScopeMatches(record Record, run Run) bool {
+	recordScope := strings.TrimSpace(record.Scope)
+	runScope := strings.TrimSpace(run.Scope)
+	return recordScope == "" || (runScope != "" && recordScope == runScope)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func RenderIndex(root string) error {
@@ -189,6 +235,7 @@ func normalize(run Run, finding Input, index int, createdAt string) Record {
 		SchemaVersion:      1,
 		ID:                 state.FindingID(run.ID, index),
 		RunID:              run.ID,
+		Scope:              run.Scope,
 		Reviewer:           finding.Reviewer,
 		Severity:           finding.Severity,
 		Classification:     canonicalClass(finding.Classification),
@@ -284,10 +331,10 @@ func classForCount(classification, severity string) string {
 	}
 }
 
-func openForTarget(records []Record, target any) []Record {
+func openForRun(records []Record, run Run) []Record {
 	open := make([]Record, 0, len(records))
 	for _, record := range records {
-		if record.Status == "open" && sameTarget(firstTarget(record.Target, target), target) {
+		if record.Status == "open" && sameRunTarget(record, run) {
 			open = append(open, record)
 		}
 	}
@@ -300,6 +347,16 @@ func previousRunSet(options Options) map[string]bool {
 		ids[options.PreviousRunID] = true
 	}
 	for _, id := range options.PreviousRunIDs {
+		if id != "" {
+			ids[id] = true
+		}
+	}
+	return ids
+}
+
+func resetRunSet(options Options) map[string]bool {
+	ids := map[string]bool{}
+	for _, id := range options.ResetRunIDs {
 		if id != "" {
 			ids[id] = true
 		}

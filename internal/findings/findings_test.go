@@ -70,6 +70,142 @@ func TestReconcileReturnsOpenFindingsForCurrentTarget(t *testing.T) {
 	}
 }
 
+func TestReconcileKeepsSameHeadOpenFindingsWithoutPreviousRun(t *testing.T) {
+	root := t.TempDir()
+	target := map[string]string{"type": "beads-task", "id": "task-1"}
+	runA := Run{ID: "mrv-a", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	if _, err := Reconcile(root, runA, []Input{unsafeEval("eval is introduced.")}, Options{}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	runB := Run{ID: "mrv-b", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	result, err := Reconcile(root, runB, nil, Options{})
+	if err != nil {
+		t.Fatalf("reconcile same-head fresh run: %v", err)
+	}
+	if result.OpenBlockingCount != 1 {
+		t.Fatalf("same-head fresh run should not clear open blockers, got %+v", result)
+	}
+}
+
+func TestReconcileKeepsDifferentHeadOpenFindingsWithoutResetRun(t *testing.T) {
+	root := t.TempDir()
+	target := map[string]string{"type": "beads-task", "id": "task-1"}
+	runA := Run{ID: "mrv-a", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	if _, err := Reconcile(root, runA, []Input{unsafeEval("eval is introduced.")}, Options{}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	runB := Run{ID: "mrv-b", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "bbb"}
+	result, err := Reconcile(root, runB, nil, Options{})
+	if err != nil {
+		t.Fatalf("reconcile changed-head fresh run: %v", err)
+	}
+	if result.OpenBlockingCount != 1 {
+		t.Fatalf("changed-head fresh run without reset should keep old blockers open: %+v", result)
+	}
+}
+
+func TestReconcileClosesExplicitResetRunFindingsAtDifferentHead(t *testing.T) {
+	root := t.TempDir()
+	target := map[string]string{"type": "beads-task", "id": "task-1"}
+	runA := Run{ID: "mrv-a", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	if _, err := Reconcile(root, runA, []Input{unsafeEval("eval is introduced.")}, Options{}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	runB := Run{ID: "mrv-b", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "bbb"}
+	result, err := Reconcile(root, runB, nil, Options{ResetRunIDs: []string{"mrv-a"}})
+	if err != nil {
+		t.Fatalf("reconcile reset run: %v", err)
+	}
+	if result.OpenBlockingCount != 0 || len(result.OpenFindings) != 0 {
+		t.Fatalf("explicit changed-head reset should clear absent old blockers: %+v", result)
+	}
+	if !hasRecord(readRecords(t, root), "mrvf-a-001", "fixed") {
+		t.Fatalf("old finding should be fixed after explicit changed-head reset")
+	}
+}
+
+func TestReconcileDoesNotResetDifferentScopeSameTarget(t *testing.T) {
+	root := t.TempDir()
+	target := map[string]string{"type": "path", "id": "docs/spec.md"}
+	runA := Run{ID: "mrv-a", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	if _, err := Reconcile(root, runA, []Input{unsafeEval("eval is introduced.")}, Options{}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	runB := Run{ID: "mrv-b", Scope: "epic-ready", Target: target, RepoRoot: root, GitHead: "bbb"}
+	result, err := Reconcile(root, runB, nil, Options{ResetRunIDs: []string{"mrv-a"}})
+	if err != nil {
+		t.Fatalf("reconcile cross-scope reset: %v", err)
+	}
+	if result.OpenBlockingCount != 0 {
+		t.Fatalf("different scope run should not inherit blocker count: %+v", result)
+	}
+	if !hasRecord(readRecords(t, root), "mrvf-a-001", "open") {
+		t.Fatalf("different scope reset should not close original finding")
+	}
+}
+
+func TestReconcileUpdatesRepeatedOpenFindingHead(t *testing.T) {
+	root := t.TempDir()
+	target := map[string]string{"type": "beads-task", "id": "task-1"}
+	runA := Run{ID: "mrv-a", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	blocker := unsafeEval("eval is introduced.")
+	if _, err := Reconcile(root, runA, []Input{blocker}, Options{}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	runB := Run{ID: "mrv-b", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "bbb"}
+	if _, err := Reconcile(root, runB, []Input{blocker}, Options{ResetRunIDs: []string{"mrv-a"}}); err != nil {
+		t.Fatalf("reconcile repeated finding: %v", err)
+	}
+	records := readRecords(t, root)
+	if len(records) != 1 || records[0].GitHead != "bbb" || records[0].RunID != "mrv-a" {
+		t.Fatalf("repeated open finding should update last-seen head without duplicating: %+v", records)
+	}
+
+	runC := Run{ID: "mrv-c", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "bbb"}
+	result, err := Reconcile(root, runC, nil, Options{ResetRunIDs: []string{"mrv-a"}})
+	if err != nil {
+		t.Fatalf("reconcile same-head reset: %v", err)
+	}
+	if result.OpenBlockingCount != 1 {
+		t.Fatalf("same-head reset should keep finding open after repeated observation: %+v", result)
+	}
+}
+
+func TestReconcileClosesOriginalFindingFromEscalatedResetChain(t *testing.T) {
+	root := t.TempDir()
+	target := map[string]string{"type": "beads-task", "id": "task-1"}
+	blocker := unsafeEval("eval is introduced.")
+	runA := Run{ID: "mrv-a", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	if _, err := Reconcile(root, runA, []Input{blocker}, Options{}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	runB := Run{ID: "mrv-b", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	if _, err := Reconcile(root, runB, []Input{blocker}, Options{PreviousRunID: "mrv-a", PreviousRunIDs: []string{"mrv-a"}}); err != nil {
+		t.Fatalf("reconcile second attempt: %v", err)
+	}
+	runC := Run{ID: "mrv-c", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	if _, err := Reconcile(root, runC, []Input{blocker}, Options{PreviousRunID: "mrv-b", PreviousRunIDs: []string{"mrv-a", "mrv-b"}}); err != nil {
+		t.Fatalf("reconcile escalated attempt: %v", err)
+	}
+
+	runD := Run{ID: "mrv-d", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "bbb"}
+	result, err := Reconcile(root, runD, nil, Options{ResetRunIDs: []string{"mrv-a", "mrv-b", "mrv-c"}})
+	if err != nil {
+		t.Fatalf("reconcile reset attempt: %v", err)
+	}
+	if result.OpenBlockingCount != 0 {
+		t.Fatalf("reset chain should close original finding when absent at new head: %+v", result)
+	}
+	if !hasRecord(readRecords(t, root), "mrvf-a-001", "fixed") {
+		t.Fatalf("original finding should be fixed after reset chain")
+	}
+}
+
 func TestReconcileFindingsLifecycle(t *testing.T) {
 	root := t.TempDir()
 	target := map[string]string{"type": "beads-task", "id": "task-1"}
