@@ -17,6 +17,7 @@ import (
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewers"
 	"github.com/dsifry/metareview/internal/reviewlog"
+	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/reviewstate"
 	"github.com/dsifry/metareview/internal/runchain"
 	"github.com/dsifry/metareview/internal/state"
@@ -743,6 +744,7 @@ func contextMarkdown(runID string, git gitcontext.Context, profile contextprofil
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		contextprofile.Markdown(profile) + "\n\n" +
 		contextprofile.ShardPlanMarkdown(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"}) + "\n\n" +
+		reviewManifestMarkdown("pr-ready", map[string]string{"type": "branch", "id": firstNonEmpty(git.Branch, git.HeadSHA)}, profile) + "\n\n" +
 		"## Changed Files\n\n" + markdownList(changed, "No changed files.") + "\n\n" +
 		"## Diff\n\n" + markdown.FencedCodeBlock("diff", strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")) + "\n\n" +
 		"## Review Logs\n\n" + reviewLogsMarkdown(logs) + "\n\n" +
@@ -750,6 +752,21 @@ func contextMarkdown(runID string, git gitcontext.Context, profile contextprofil
 		"## Validation Evidence\n\n" + firstNonEmpty(evidenceText, "No external validation evidence supplied.") + "\n\n" +
 		"## GitHub Context\n\n" + githubcontext.RenderMarkdown(ghCtx) + "\n\n" +
 		"## Suggested PR Evidence\n\n" + prEvidence + "\n"
+}
+
+func reviewManifestMarkdown(scope string, target map[string]string, profile contextprofile.Profile) string {
+	plan, err := contextprofile.PlanShards(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"})
+	if err != nil {
+		return "## Review Manifest\n\nUnable to generate review manifest: " + err.Error()
+	}
+	manifest := reviewmanifest.Build(reviewmanifest.Input{
+		Scope:            scope,
+		Target:           target,
+		Profile:          profile,
+		ShardPlan:        plan,
+		PathDispositions: reviewmanifest.GeneratedPathDispositions(profile.GeneratedExcludedFiles),
+	})
+	return reviewmanifest.Markdown(manifest, reviewmanifest.Aggregate(manifest))
 }
 
 type reviewMetadata struct {

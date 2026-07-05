@@ -14,6 +14,7 @@ import (
 	"github.com/dsifry/metareview/internal/markdown"
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewers"
+	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/runchain"
 	"github.com/dsifry/metareview/internal/state"
 	"github.com/dsifry/metareview/internal/tasksource"
@@ -388,10 +389,26 @@ func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Contex
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		contextprofile.Markdown(profile) + "\n\n" +
 		contextprofile.ShardPlanMarkdown(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"}) + "\n\n" +
+		reviewManifestMarkdown("task-done", map[string]string{"type": taskTargetType(task), "id": task.ID}, profile) + "\n\n" +
 		"## Changed Files\n\n" + markdownList(changed, "No changed files.") + "\n\n" +
 		"## Diff\n\n" + markdown.FencedCodeBlock("diff", strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")) + "\n\n" +
 		"## Knowledge And Registries\n\n" + knowledgeMarkdown(knowledgeContext) + "\n\n" +
 		"## Evidence\n\n" + firstNonEmpty(evidenceText, "No external validation evidence supplied.") + "\n"
+}
+
+func reviewManifestMarkdown(scope string, target map[string]string, profile contextprofile.Profile) string {
+	plan, err := contextprofile.PlanShards(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"})
+	if err != nil {
+		return "## Review Manifest\n\nUnable to generate review manifest: " + err.Error()
+	}
+	manifest := reviewmanifest.Build(reviewmanifest.Input{
+		Scope:            scope,
+		Target:           target,
+		Profile:          profile,
+		ShardPlan:        plan,
+		PathDispositions: reviewmanifest.GeneratedPathDispositions(profile.GeneratedExcludedFiles),
+	})
+	return reviewmanifest.Markdown(manifest, reviewmanifest.Aggregate(manifest))
 }
 
 func knowledgeMarkdown(context knowledge.Context) string {
