@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -37,17 +38,26 @@ type Context struct {
 	WorkingTreeDiff          string   `json:"workingTreeDiff"`
 	WorkingTreeDiffTruncated bool     `json:"workingTreeDiffTruncated"`
 	UntrackedExcerpts        string   `json:"untrackedExcerpts"`
+	RawDiffBytes             int      `json:"rawDiffBytes"`
+	FilteredDiffBytes        int      `json:"filteredDiffBytes"`
+	GeneratedExcludedFiles   []string `json:"generatedExcludedFiles"`
+	UntrackedOmittedCount    int      `json:"untrackedOmittedCount"`
+	UntrackedTruncatedCount  int      `json:"untrackedTruncatedCount"`
 }
 
 func Collect(root, requestedBase string) (Context, error) {
-	return collect(root, requestedBase, nil)
+	return collect(root, requestedBase, nil, nil)
 }
 
 func CollectWithExcludes(root, requestedBase string, excludes []string) (Context, error) {
-	return collect(root, requestedBase, excludes)
+	return collect(root, requestedBase, excludes, nil)
 }
 
-func collect(root, requestedBase string, excludes []string) (Context, error) {
+func CollectWithExcludesExcept(root, requestedBase string, excludes, exceptions []string) (Context, error) {
+	return collect(root, requestedBase, excludes, exceptions)
+}
+
+func collect(root, requestedBase string, excludes, exceptions []string) (Context, error) {
 	base, err := resolveBase(root, requestedBase)
 	if err != nil {
 		return Context{}, err
@@ -56,31 +66,60 @@ func collect(root, requestedBase string, excludes []string) (Context, error) {
 	if err != nil {
 		return Context{}, err
 	}
-	diff, diffTruncated, err := limitedGit(root, withPathspec([]string{"diff", base + "..HEAD"}, excludes)...)
+	effectiveExcludes := excludes
+	if len(exceptions) > 0 {
+		effectiveExcludes = exactExcludesExcept(root, base, excludes, exceptions)
+	}
+	diff, diffTruncated, branchFilteredDiffBytes, err := limitedGitMeasured(root, withPathspec([]string{"diff", base + "..HEAD"}, effectiveExcludes)...)
 	if err != nil {
 		return Context{}, err
 	}
-	stagedDiff, stagedDiffTruncated, err := limitedGit(root, withPathspec([]string{"diff", "--cached"}, excludes)...)
+	stagedDiff, stagedDiffTruncated, stagedFilteredDiffBytes, err := limitedGitMeasured(root, withPathspec([]string{"diff", "--cached"}, effectiveExcludes)...)
 	if err != nil {
 		return Context{}, err
 	}
-	workingTreeDiff, workingTreeDiffTruncated, err := limitedGit(root, withPathspec([]string{"diff"}, excludes)...)
+	workingTreeDiff, workingTreeDiffTruncated, workingTreeFilteredDiffBytes, err := limitedGitMeasured(root, withPathspec([]string{"diff"}, effectiveExcludes)...)
 	if err != nil {
 		return Context{}, err
 	}
-	workingTreeFiles := splitLines(tryGit(root, withPathspec([]string{"diff", "--name-only"}, excludes)...))
-	untrackedFiles := splitLines(tryGit(root, withPathspec([]string{"ls-files", "--others", "--exclude-standard"}, excludes)...))
-	untrackedExcerpts, err := readUntrackedExcerpts(root, untrackedFiles)
+	changedFiles := splitLines(tryGit(root, withPathspec([]string{"diff", "--name-only", base + "..HEAD"}, effectiveExcludes)...))
+	stagedFiles := splitLines(tryGit(root, withPathspec([]string{"diff", "--cached", "--name-only"}, effectiveExcludes)...))
+	workingTreeFiles := splitLines(tryGit(root, withPathspec([]string{"diff", "--name-only"}, effectiveExcludes)...))
+	untrackedFiles := splitLines(tryGit(root, withPathspec([]string{"ls-files", "--others", "--exclude-standard"}, effectiveExcludes)...))
+	untrackedExcerpts, untrackedOmittedCount, untrackedTruncatedCount, filteredUntrackedBytes, err := readUntrackedExcerpts(root, untrackedFiles)
 	if err != nil {
 		return Context{}, err
 	}
+	filteredDiffBytes := branchFilteredDiffBytes + stagedFilteredDiffBytes + workingTreeFilteredDiffBytes + filteredUntrackedBytes
+	rawDiffBytes := filteredDiffBytes
+	if len(effectiveExcludes) > 0 {
+		_, _, rawBranchBytes, err := limitedGitMeasured(root, "diff", base+"..HEAD")
+		if err != nil {
+			return Context{}, err
+		}
+		_, _, rawStagedBytes, err := limitedGitMeasured(root, "diff", "--cached")
+		if err != nil {
+			return Context{}, err
+		}
+		_, _, rawWorkingTreeBytes, err := limitedGitMeasured(root, "diff")
+		if err != nil {
+			return Context{}, err
+		}
+		rawUntrackedFiles := splitLines(tryGit(root, "ls-files", "--others", "--exclude-standard"))
+		_, _, _, rawUntrackedBytes, err := readUntrackedExcerpts(root, rawUntrackedFiles)
+		if err != nil {
+			return Context{}, err
+		}
+		rawDiffBytes = rawBranchBytes + rawStagedBytes + rawWorkingTreeBytes + rawUntrackedBytes
+	}
+	excludedGeneratedFiles := generatedExcludedFiles(root, base, effectiveExcludes, changedFiles, stagedFiles, workingTreeFiles, untrackedFiles)
 	return Context{
 		BaseSHA:                  base,
 		HeadSHA:                  head,
 		Branch:                   tryGit(root, "branch", "--show-current"),
 		StatusShort:              tryGit(root, "status", "--short"),
-		ChangedFiles:             splitLines(tryGit(root, withPathspec([]string{"diff", "--name-only", base + "..HEAD"}, excludes)...)),
-		StagedFiles:              splitLines(tryGit(root, withPathspec([]string{"diff", "--cached", "--name-only"}, excludes)...)),
+		ChangedFiles:             changedFiles,
+		StagedFiles:              stagedFiles,
 		UnstagedFiles:            workingTreeFiles,
 		WorkingTreeFiles:         workingTreeFiles,
 		UntrackedFiles:           untrackedFiles,
@@ -94,7 +133,107 @@ func collect(root, requestedBase string, excludes []string) (Context, error) {
 		WorkingTreeDiff:          workingTreeDiff,
 		WorkingTreeDiffTruncated: workingTreeDiffTruncated,
 		UntrackedExcerpts:        untrackedExcerpts,
+		RawDiffBytes:             rawDiffBytes,
+		FilteredDiffBytes:        filteredDiffBytes,
+		GeneratedExcludedFiles:   excludedGeneratedFiles,
+		UntrackedOmittedCount:    untrackedOmittedCount,
+		UntrackedTruncatedCount:  untrackedTruncatedCount,
 	}, nil
+}
+
+func exactExcludesExcept(root, base string, excludes, exceptions []string) []string {
+	exceptionSet := stringSet(normalizedPaths(exceptions))
+	rawFiles := [][]string{
+		splitLines(tryGit(root, "diff", "--name-only", base+"..HEAD")),
+		splitLines(tryGit(root, "diff", "--cached", "--name-only")),
+		splitLines(tryGit(root, "diff", "--name-only")),
+		splitLines(tryGit(root, "ls-files", "--others", "--exclude-standard")),
+	}
+	seen := map[string]bool{}
+	var result []string
+	for _, group := range rawFiles {
+		for _, file := range group {
+			file = filepath.ToSlash(filepath.Clean(file))
+			if file == "." || file == "" || exceptionSet[file] || !matchesAnyExclude(file, excludes) || seen[file] {
+				continue
+			}
+			seen[file] = true
+			result = append(result, file)
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func normalizedPaths(paths []string) []string {
+	result := make([]string, 0, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path != "" {
+			result = append(result, filepath.ToSlash(filepath.Clean(path)))
+		}
+	}
+	return result
+}
+
+func matchesAnyExclude(file string, excludes []string) bool {
+	for _, exclude := range excludes {
+		if matchesExclude(file, strings.TrimSpace(exclude)) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesExclude(file, exclude string) bool {
+	exclude = filepath.ToSlash(filepath.Clean(exclude))
+	if exclude == "." || exclude == "" {
+		return false
+	}
+	if strings.HasSuffix(exclude, "/**") {
+		prefix := strings.TrimSuffix(exclude, "/**")
+		return file == prefix || strings.HasPrefix(file, prefix+"/")
+	}
+	return file == exclude
+}
+
+func generatedExcludedFiles(root, base string, excludes []string, changedFiles, stagedFiles, workingTreeFiles, untrackedFiles []string) []string {
+	if len(excludes) == 0 {
+		return []string{}
+	}
+	filtered := stringSet(changedFiles, stagedFiles, workingTreeFiles, untrackedFiles)
+	rawFiles := [][]string{
+		splitLines(tryGit(root, "diff", "--name-only", base+"..HEAD")),
+		splitLines(tryGit(root, "diff", "--cached", "--name-only")),
+		splitLines(tryGit(root, "diff", "--name-only")),
+		splitLines(tryGit(root, "ls-files", "--others", "--exclude-standard")),
+	}
+	excluded := map[string]bool{}
+	for _, group := range rawFiles {
+		for _, file := range group {
+			if file != "" && !filtered[file] {
+				excluded[file] = true
+			}
+		}
+	}
+	result := make([]string, 0, len(excluded))
+	for file := range excluded {
+		result = append(result, file)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func stringSet(groups ...[]string) map[string]bool {
+	seen := map[string]bool{}
+	for _, group := range groups {
+		for _, value := range group {
+			if value != "" {
+				seen[value] = true
+			}
+		}
+	}
+	return seen
 }
 
 func withPathspec(args []string, excludes []string) []string {
@@ -171,11 +310,17 @@ func tryGit(root string, args ...string) string {
 }
 
 func limitedGit(root string, args ...string) (string, bool, error) {
+	out, truncated, _, err := limitedGitMeasured(root, args...)
+	return out, truncated, err
+}
+
+func limitedGitMeasured(root string, args ...string) (string, bool, int, error) {
 	out, err := git(root, args...)
 	if err != nil {
-		return "", false, err
+		return "", false, 0, err
 	}
-	return truncate(out, maxDiffBytes)
+	truncated, wasTruncated, err := truncate(out, maxDiffBytes)
+	return truncated, wasTruncated, len(out), err
 }
 
 func truncate(value string, limit int) (string, bool, error) {
@@ -208,31 +353,39 @@ func splitLines(value string) []string {
 	return result
 }
 
-func readUntrackedExcerpts(root string, files []string) (string, error) {
+func readUntrackedExcerpts(root string, files []string) (string, int, int, int, error) {
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
-		return "", err
+		return "", 0, 0, 0, err
 	}
 	limit := len(files)
 	if limit > maxUntrackedFiles {
 		limit = maxUntrackedFiles
 	}
+	omitted := len(files) - limit
 	sections := make([]string, 0, limit)
-	for _, rel := range files[:limit] {
+	truncatedCount := 0
+	totalBytes := 0
+	for index, rel := range files {
 		path, err := safeJoin(rootAbs, rel)
 		if err != nil {
-			return "", err
+			return "", 0, 0, 0, err
 		}
 		info, err := os.Stat(path)
 		if err != nil || !info.Mode().IsRegular() {
 			continue
 		}
+		totalBytes += int(info.Size())
+		if index >= limit {
+			continue
+		}
 		bytes, err := os.ReadFile(path)
 		if err != nil {
-			return "", err
+			return "", 0, 0, 0, err
 		}
 		text := string(bytes)
 		if len(text) > maxUntrackedFileBytes {
+			truncatedCount++
 			text = text[:maxUntrackedFileBytes]
 			for !utf8.ValidString(text) && len(text) > 0 {
 				text = text[:len(text)-1]
@@ -240,7 +393,7 @@ func readUntrackedExcerpts(root string, files []string) (string, error) {
 		}
 		sections = append(sections, untrackedExcerpt(rel, text))
 	}
-	return strings.Join(sections, "\n"), nil
+	return strings.Join(sections, "\n"), omitted, truncatedCount, totalBytes, nil
 }
 
 func safeJoin(rootAbs, rel string) (string, error) {

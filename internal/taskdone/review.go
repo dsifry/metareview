@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dsifry/metareview/internal/contextprofile"
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/knowledge"
@@ -81,11 +82,16 @@ func Create(root, target string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	git, err := gitcontext.CollectWithExcludes(root, options.Base, generatedMetareviewPathExcludes())
+	exceptions := generatedTargetExceptions(task.Path)
+	git, err := gitcontext.CollectWithExcludesExcept(root, options.Base, generatedMetareviewPathExcludes(), exceptions)
 	if err != nil {
 		return Result{}, err
 	}
-	reviewGit := filterGeneratedGitContext(git)
+	reviewGit := git
+	if len(exceptions) == 0 {
+		reviewGit = filterGeneratedGitContext(git)
+	}
+	profile := contextprofile.FromGit(reviewGit, contextprofile.Options{})
 	knowledgeContext, err := knowledge.Collect(root)
 	if err != nil {
 		return Result{}, err
@@ -113,7 +119,7 @@ func Create(root, target string, options Options) (Result, error) {
 	if report.Capabilities.Beads || report.Capabilities.Metaswarm {
 		gateEffect = "gate"
 	}
-	rawFindings := reviewers.RunTaskDone(reviewerContext(task, reviewGit, knowledgeContext, evidenceText))
+	rawFindings := reviewers.RunTaskDone(reviewerContext(task, reviewGit, profile, knowledgeContext, evidenceText))
 	targetRecord := map[string]string{"type": taskTargetType(task), "id": task.ID}
 	run := findings.Run{ID: runID, Scope: "task-done", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
 
@@ -125,7 +131,7 @@ func Create(root, target string, options Options) (Result, error) {
 		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
+		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, profile, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
 			return err
 		}
 		chain, err := runchain.Resolve(root, runchain.Options{
@@ -200,23 +206,28 @@ func Create(root, target string, options Options) (Result, error) {
 	return result, nil
 }
 
-func reviewerContext(task tasksource.Source, git gitcontext.Context, knowledgeContext knowledge.Context, evidenceText string) reviewers.Context {
-	filteredGit := filterGeneratedGitContext(git)
+func reviewerContext(task tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, evidenceText string) reviewers.Context {
 	return reviewers.Context{
 		Task: reviewers.TaskContext{Type: taskTargetType(task), ID: task.ID, Text: task.Body},
 		Git: reviewers.GitContext{
-			ChangedFiles:             filteredGit.ChangedFiles,
-			StagedFiles:              filteredGit.StagedFiles,
-			UnstagedFiles:            filteredGit.UnstagedFiles,
-			WorkingTreeFiles:         filteredGit.WorkingTreeFiles,
-			UntrackedFiles:           filteredGit.UntrackedFiles,
-			Diff:                     filteredGit.Diff,
-			StagedDiff:               filteredGit.StagedDiff,
-			WorkingTreeDiff:          filteredGit.WorkingTreeDiff,
-			UntrackedExcerpts:        filteredGit.UntrackedExcerpts,
-			DiffTruncated:            filteredGit.DiffTruncated,
-			StagedDiffTruncated:      filteredGit.StagedDiffTruncated,
-			WorkingTreeDiffTruncated: filteredGit.WorkingTreeDiffTruncated,
+			ChangedFiles:             git.ChangedFiles,
+			StagedFiles:              git.StagedFiles,
+			UnstagedFiles:            git.UnstagedFiles,
+			WorkingTreeFiles:         git.WorkingTreeFiles,
+			UntrackedFiles:           git.UntrackedFiles,
+			Diff:                     git.Diff,
+			StagedDiff:               git.StagedDiff,
+			WorkingTreeDiff:          git.WorkingTreeDiff,
+			UntrackedExcerpts:        git.UntrackedExcerpts,
+			DiffTruncated:            git.DiffTruncated,
+			StagedDiffTruncated:      git.StagedDiffTruncated,
+			WorkingTreeDiffTruncated: git.WorkingTreeDiffTruncated,
+			RawDiffBytes:             profile.RawDiffBytes,
+			FilteredDiffBytes:        profile.FilteredDiffBytes,
+			GeneratedExcludedFiles:   profile.GeneratedExcludedFiles,
+			UntrackedOmittedCount:    profile.UntrackedOmittedCount,
+			RiskLevel:                profile.RiskLevel,
+			RiskReasons:              profile.RiskReasons,
 		},
 		Knowledge:    reviewerKnowledge(knowledgeContext),
 		EvidenceText: evidenceText,
@@ -311,6 +322,13 @@ func isGeneratedMetareviewPath(path string) bool {
 		strings.HasPrefix(path, "docs/metareview/")
 }
 
+func generatedTargetExceptions(path string) []string {
+	if isGeneratedMetareviewPath(path) {
+		return []string{path}
+	}
+	return nil
+}
+
 func generatedMetareviewPathExcludes() []string {
 	return []string{".metareview", ".metareview/**", "docs/metareview", "docs/metareview/**"}
 }
@@ -355,7 +373,7 @@ func uniquePaths(root, target string, at time.Time) (string, string, string, err
 	}
 }
 
-func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Context, knowledgeContext knowledge.Context, evidenceText, gateEffect string) string {
+func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, evidenceText, gateEffect string) string {
 	changed := append([]string{}, git.ChangedFiles...)
 	changed = append(changed, git.StagedFiles...)
 	changed = append(changed, git.WorkingTreeFiles...)
@@ -368,6 +386,8 @@ func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Contex
 		"- Head: " + markdown.InlineCode(git.HeadSHA) + "\n" +
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
+		contextprofile.Markdown(profile) + "\n\n" +
+		contextprofile.ShardPlanMarkdown(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"}) + "\n\n" +
 		"## Changed Files\n\n" + markdownList(changed, "No changed files.") + "\n\n" +
 		"## Diff\n\n" + markdown.FencedCodeBlock("diff", strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")) + "\n\n" +
 		"## Knowledge And Registries\n\n" + knowledgeMarkdown(knowledgeContext) + "\n\n" +

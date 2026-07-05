@@ -37,7 +37,7 @@ Usage:
   metareview review artifact <path> [--previous-run <run-id>] [--scaffold-only]
   metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
   metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
-  metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>]
+  metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>] [--include-working-tree]
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
 
 Commands:
@@ -231,6 +231,8 @@ func main() {
 			case "--github-pr":
 				options.GitHubPR = flagValue(args, i, "--github-pr")
 				i++
+			case "--include-working-tree":
+				options.IncludeWorkingTree = true
 			default:
 				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
 				os.Exit(2)

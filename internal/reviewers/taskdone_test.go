@@ -57,6 +57,25 @@ func TestTaskDoneReviewersFlagArchitectureRisks(t *testing.T) {
 	assertFinding(t, duplicate, "architecture-reviewer", "high", "Possible duplicate code path")
 }
 
+func TestTaskDoneContextRiskPreflightsDomainReviewers(t *testing.T) {
+	findings := RunTaskDone(Context{
+		Task: TaskContext{Type: "beads-task", ID: "task-1", Text: "Acceptance: do not execute user input"},
+		Git: GitContext{
+			ChangedFiles:      []string{"lib/unsafe.js"},
+			Diff:              "+module.exports = input => ev" + "al(input);\n+// TO" + "DO: add tests later\n",
+			RawDiffBytes:      200000,
+			FilteredDiffBytes: 200000,
+			RiskLevel:         "context-risk",
+			RiskReasons:       []string{"LARGE_DIFF"},
+		},
+	})
+
+	if len(findings) != 1 {
+		t.Fatalf("context risk should preflight domain reviewers, got %+v", findings)
+	}
+	assertFinding(t, findings, "architecture-reviewer", "high", "Review context risk")
+}
+
 func TestTaskDoneReviewersAllowCleanValidatedChanges(t *testing.T) {
 	findings := RunTaskDone(Context{
 		Task: TaskContext{Type: "beads-task", ID: "task-1", Text: "Acceptance: parse JSON safely"},

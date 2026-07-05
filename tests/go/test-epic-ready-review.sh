@@ -196,6 +196,31 @@ set -e
 test "$missing_code" -eq 2
 grep -q "Missing value for --base" "$TMP/missing.err"
 
+repo="$TMP/generated-target-epic"
+mkdir -p "$repo/docs/metareview/reviews"
+cd "$repo"
+git init -q
+git config user.email test-user
+git config user.name "Test User"
+printf "# Generated Review Epic\n\nInitial\n" > docs/metareview/reviews/epic.md
+mkdir -p docs/metareview/context
+printf "Initial noise\n" > docs/metareview/context/noise.md
+git add .
+git commit -qm "initial"
+base="$(git rev-parse HEAD)"
+printf "# Generated Review Epic\n\nUpdated explicit generated target.\n" > docs/metareview/reviews/epic.md
+printf "noise artifact\n%.0s" {1..5000} > docs/metareview/context/noise.md
+git add .
+git commit -qm "generated epic target change"
+printf "epic evidence passed\n" > "$TMP/generated-epic-evidence.md"
+"$TMP/metareview" review epic-ready docs/metareview/reviews/epic.md --base "$base" --evidence "$TMP/generated-epic-evidence.md" > "$TMP/generated-epic.out"
+generated_epic_review="$(cat "$TMP/generated-epic.out")"
+generated_epic_context="docs/metareview/context/$(basename "$generated_epic_review" .md)-context.md"
+grep -q "docs/metareview/reviews/epic.md" "$repo/$generated_epic_review"
+grep -q "docs/metareview/reviews/epic.md" "$repo/$generated_epic_context"
+grep -q "diff --git a/docs/metareview/reviews/epic.md b/docs/metareview/reviews/epic.md" "$repo/$generated_epic_context"
+! grep -q "noise artifact" "$repo/$generated_epic_context"
+
 repo="$TMP/failure"
 mkdir -p "$repo/.beads" "$repo/docs"
 cd "$repo"

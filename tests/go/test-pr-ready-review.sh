@@ -175,7 +175,7 @@ cat > .metareview/findings.jsonl <<'JSONL'
 JSONL
 printf "'use strict';\nmodule.exports = input => JSON.parse(input); // working tree artifact relevance\n" > lib/parser.js
 printf "bash tests/run-all.sh exited 0\n" > "$TMP/unrelated-artifact-working-tree-evidence.md"
-"$TMP/metareview" review pr-ready --base "$base" --evidence "$TMP/unrelated-artifact-working-tree-evidence.md" > "$TMP/unrelated-artifact-working-tree.out"
+"$TMP/metareview" review pr-ready --base "$base" --include-working-tree --evidence "$TMP/unrelated-artifact-working-tree-evidence.md" > "$TMP/unrelated-artifact-working-tree.out"
 unrelated_artifact_working_tree_review="$(cat "$TMP/unrelated-artifact-working-tree.out")"
 grep -q "PASS" "$repo/$unrelated_artifact_working_tree_review"
 ! grep -q "Unresolved review blockers" "$repo/$unrelated_artifact_working_tree_review"
@@ -369,6 +369,36 @@ clean_review="$(cat "$TMP/clean.out")"
 grep -q "PASS" "$repo/$clean_review"
 grep -q "metareview PR Evidence" "$repo/$clean_review"
 grep -q "GitHub context unavailable" "$repo/$clean_review"
+
+repo="$TMP/dirty-working-tree-default"
+init_repo "$repo"
+base="$(git rev-parse HEAD)"
+printf "'use strict';\nmodule.exports = input => JSON.parse(input); // committed branch\n" > lib/parser.js
+git add .
+git commit -qm "branch change"
+printf "'use strict';\nmodule.exports = () => 'local only';\n" > lib/local-only.js
+printf "bash tests/run-all.sh exited 0\n" > "$TMP/dirty-default-evidence.md"
+set +e
+"$TMP/metareview" review pr-ready --base "$base" --evidence "$TMP/dirty-default-evidence.md" > "$TMP/dirty-default.out" 2>"$TMP/dirty-default.err"
+dirty_default_code=$?
+set -e
+test "$dirty_default_code" -eq 1
+dirty_default_review="$(cat "$TMP/dirty-default.out")"
+grep -q "Working tree changes excluded from PR-ready review" "$repo/$dirty_default_review"
+grep -q "lib/local-only.js" "$repo/$dirty_default_review"
+
+repo="$TMP/dirty-working-tree-included"
+init_repo "$repo"
+base="$(git rev-parse HEAD)"
+printf "'use strict';\nmodule.exports = input => JSON.parse(input); // committed branch\n" > lib/parser.js
+git add .
+git commit -qm "branch change"
+printf "'use strict';\nmodule.exports = () => 'local only';\n" > lib/local-only.js
+printf "bash tests/run-all.sh exited 0\n" > "$TMP/dirty-included-evidence.md"
+"$TMP/metareview" review pr-ready --base "$base" --include-working-tree --evidence "$TMP/dirty-included-evidence.md" > "$TMP/dirty-included.out"
+dirty_included_review="$(cat "$TMP/dirty-included.out")"
+grep -q "PASS" "$repo/$dirty_included_review"
+! grep -q "Working tree changes excluded from PR-ready review" "$repo/$dirty_included_review"
 
 repo="$TMP/github-available"
 init_repo "$repo"
