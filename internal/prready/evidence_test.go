@@ -103,3 +103,21 @@ func TestRenderEvidenceIncludesAttemptCountsAndEscalation(t *testing.T) {
 		t.Fatalf("expected attempt count and escalation in evidence:\n%s", body)
 	}
 }
+
+func TestRenderEvidenceDistinguishesStructuredValidation(t *testing.T) {
+	body := RenderEvidence(EvidenceInput{
+		Summary: "branch summary",
+		Validation: []string{
+			`structured validation: go test ./... exited 0 (exit 0)`,
+			`freeform fallback validation: npm run build exited 0 (exit 0)`,
+		},
+	})
+	for _, required := range []string{
+		"structured validation: go test ./... exited 0 (exit 0)",
+		"freeform fallback validation: npm run build exited 0 (exit 0)",
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("expected rendered validation summary %q:\n%s", required, body)
+		}
+	}
+}

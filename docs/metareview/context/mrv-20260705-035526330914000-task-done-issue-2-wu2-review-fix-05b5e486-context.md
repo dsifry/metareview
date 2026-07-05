@@ -1,0 +1,968 @@
+# metareview task-done context
+
+Run ID: `mrv-20260705-035526330914000-task-done-issue-2-wu2-review-fix-05b5e486`
+
+## Task
+
+Advisory task target: issue-2-wu2-review-fix
+
+## Git
+
+- Base: `84497bd410a8b7a037a0f7eaae73d2e95760181a`
+- Head: `6b7fd70ee60a18e144e4d3bbd10f8dc636c6b4dc`
+- Branch: `codex/issue-2-wu2`
+- Gate effect: `gate`
+
+## Changed Files
+
+- cmd/metareview/main.go
+- internal/evidence/github_checks.go
+- internal/evidence/github_checks_test.go
+- internal/evidence/receipt.go
+- internal/evidence/receipt_test.go
+- internal/evidence/runner.go
+- internal/evidence/runner_test.go
+- internal/prready/evidence_test.go
+- internal/prready/review.go
+- internal/reviewers/prready.go
+- internal/reviewers/prready_test.go
+- internal/reviewers/taskdone.go
+- internal/reviewers/taskdone_test.go
+- skills/review-pr-ready/SKILL.md
+- skills/review-task-done/SKILL.md
+- tests/go/test-cli-baseline.sh
+- tests/go/test-evidence.sh
+- tests/run-all.sh
+
+## Diff
+
+```diff
+diff --git a/cmd/metareview/main.go b/cmd/metareview/main.go
+index e984620..afa59c5 100644
+--- a/cmd/metareview/main.go
++++ b/cmd/metareview/main.go
+@@ -1,6 +1,7 @@
+ package main
+
+ import (
++    "context"
+     "encoding/json"
+     "errors"
+     "fmt"
+@@ -12,6 +13,7 @@ import (
+     "github.com/dsifry/metareview/internal/artifactreview"
+     "github.com/dsifry/metareview/internal/contextpack"
+     "github.com/dsifry/metareview/internal/epicready"
++    "github.com/dsifry/metareview/internal/evidence"
+     "github.com/dsifry/metareview/internal/gitcontext"
+     "github.com/dsifry/metareview/internal/learning"
+     "github.com/dsifry/metareview/internal/prready"
+@@ -30,6 +32,8 @@ Usage:
+   metareview status
+   metareview context build <path>
+   metareview context diff [--base <ref>]
++  metareview evidence run -- <command> [args...]
++  metareview evidence import --github-checks <pr-number> [--repo <owner/repo>]
+   metareview review artifact <path> [--previous-run <run-id>] [--scaffold-only]
+   metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
+   metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
+@@ -42,6 +46,8 @@ Commands:
+   status                     Print repository review capability status
+   context build <path>       Build a Markdown context pack for an artifact
+   context diff               Print git diff context as JSON
++  evidence run               Run a command and print a structured JSON receipt
++  evidence import            Import external validation receipts
+   review artifact <path>     Create an incomplete artifact review scaffold
+   review task-done <target>  Run task-done code review
+   review epic-ready <target> Run epic-ready integration review
+@@ -114,6 +120,11 @@ func main() {
+         return
+     }
+
++    if len(args) >= 1 && args[0] == "evidence" {
++        handleEvidence(args[1:])
++        return
++    }
++
+     if len(args) >= 3 && args[0] == "review" && args[1] == "artifact" {
+         previousRun := ""
+         scaffoldOnly := false
+@@ -274,6 +285,64 @@ func main() {
+     os.Exit(2)
+ }
+
++func handleEvidence(args []string) {
++    if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
++        fmt.Println("Usage: metareview evidence run -- <command> [args...]")
++        fmt.Println("       metareview evidence import --github-checks <pr-number> [--repo <owner/repo>]")
++        return
++    }
++    switch args[0] {
++    case "run":
++        separator := -1
++        for i := 1; i < len(args); i++ {
++            if args[i] == "--" {
++                separator = i
++                break
++            }
++        }
++        if separator == -1 || separator+1 >= len(args) {
++            fmt.Fprintln(os.Stderr, "Usage: metareview evidence run -- <command> [args...]")
++            os.Exit(2)
++        }
++        receipt, err := evidence.Run(context.Background(), args[separator+1:], evidence.RunOptions{})
++        exitOnErr(err)
++        bytes, err := json.Marshal(receipt)
++        exitOnErr(err)
++        fmt.Println(string(bytes))
++        if receipt.ExitCode != 0 {
++            os.Exit(receipt.ExitCode)
++        }
++    case "import":
++        pr := ""
++        repository := ""
++        for i := 1; i < len(args); i++ {
++            switch args[i] {
++            case "--github-checks":
++                pr = flagValue(args, i, "--github-checks")
++                i++
++            case "--repo":
++                repository = flagValue(args, i, "--repo")
++                i++
++            default:
++                fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
++                os.Exit(2)
++            }
++        }
++        if pr == "" {
++            fmt.Fprintln(os.Stderr, "Missing value for --github-checks")
++            os.Exit(2)
++        }
++        bundle, err := evidence.ImportGitHubChecks(context.Background(), pr, evidence.GitHubCheckOptions{Repo: repository})
++        exitOnErr(err)
++        bytes, err := bundle.JSONL()
++        exitOnErr(err)
++        fmt.Print(string(bytes))
++    default:
++        fmt.Fprintf(os.Stderr, "Unknown evidence command: %s\n", args[0])
++        os.Exit(2)
++    }
++}
++
+ func mustCwd() string {
+     cwd, err := os.Getwd()
+     exitOnErr(err)
+diff --git a/internal/evidence/github_checks.go b/internal/evidence/github_checks.go
+new file mode 100644
+index 0000000..f54cf6f
+--- /dev/null
++++ b/internal/evidence/github_checks.go
+@@ -0,0 +1,74 @@
++package evidence
++
++import (
++    "context"
++    "encoding/json"
++    "os/exec"
++    "strings"
++)
++
++type CommandRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
++
++type GitHubCheckOptions struct {
++    Repo   string
++    Runner CommandRunner
++}
++
++type ghCheck struct {
++    Name        string `json:"name"`
++    State       string `json:"state"`
++    Bucket      string `json:"bucket"`
++    StartedAt   string `json:"startedAt"`
++    CompletedAt string `json:"completedAt"`
++    Link        string `json:"link"`
++    Workflow    string `json:"workflow"`
++}
++
++func ImportGitHubChecks(ctx context.Context, pr string, options GitHubCheckOptions) (Bundle, error) {
++    runner := options.Runner
++    if runner == nil {
++        runner = defaultRunner
++    }
++    args := []string{"pr", "checks", pr, "--json", "name,state,bucket,startedAt,completedAt,link,workflow"}
++    if options.Repo != "" {
++        args = append(args, "--repo", options.Repo)
++    }
++    data, err := runner(ctx, "gh", args...)
++    if err != nil && len(data) == 0 {
++        return Bundle{}, err
++    }
++    var checks []ghCheck
++    if err := json.Unmarshal(data, &checks); err != nil {
++        return Bundle{}, err
++    }
++    receipts := make([]Receipt, 0, len(checks))
++    for _, check := range checks {
++        exitCode := 1
++        if checkSucceeded(check) {
++            exitCode = 0
++        }
++        summary := strings.TrimSpace(check.Name + " " + firstNonEmpty(check.Bucket, check.State))
++        receipts = append(receipts, Receipt{
++            SchemaVersion: 1,
++            Kind:          ReceiptKindCICheck,
++            Command:       []string{"gh", "pr", "checks", pr},
++            ExitCode:      exitCode,
++            Summary:       summary,
++            Covers:        []string{"github-check:" + check.Name},
++        })
++    }
++    return Bundle{Receipts: receipts}, nil
++}
++
++func checkSucceeded(check ghCheck) bool {
++    bucket := strings.ToLower(check.Bucket)
++    if bucket != "" {
++        return bucket == "pass"
++    }
++    state := strings.ToLower(check.State)
++    return state == "success" || state == "successful" || state == "pass" || state == "passed"
++}
++
++func defaultRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
++    return exec.CommandContext(ctx, name, args...).Output()
++}
+diff --git a/internal/evidence/github_checks_test.go b/internal/evidence/github_checks_test.go
+new file mode 100644
+index 0000000..13e677c
+--- /dev/null
++++ b/internal/evidence/github_checks_test.go
+@@ -0,0 +1,97 @@
++package evidence
++
++import (
++    "context"
++    "errors"
++    "testing"
++)
++
++func TestImportGitHubChecksCreatesCIReceipts(t *testing.T) {
++    bundle, err := ImportGitHubChecks(context.Background(), "3", GitHubCheckOptions{
++        Repo: "dsifry/metareview",
++        Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
++            assertContainsArg(t, args, "name,state,bucket,startedAt,completedAt,link,workflow")
++            return []byte(`[
++                {"name":"go test","bucket":"pass","state":"SUCCESS"},
++                {"name":"lint","bucket":"fail","state":"FAILURE"},
++                {"name":"deploy","bucket":"pending","state":"PENDING"},
++                {"name":"docs","bucket":"skipping","state":"SKIPPED"}
++            ]`), nil
++        },
++    })
++    if err != nil {
++        t.Fatalf("import checks: %v", err)
++    }
++    if len(bundle.Receipts) != 4 {
++        t.Fatalf("expected four receipts: %+v", bundle.Receipts)
++    }
++    if bundle.HasSuccessfulValidation(KindCICheck) {
++        t.Fatalf("mixed failed/pending/skipped checks must not satisfy ci-check validation: %+v", bundle.Receipts)
++    }
++    for _, receipt := range bundle.Receipts {
++        if receipt.Summary == "lint fail" && receipt.ExitCode == 0 {
++            t.Fatalf("failed check must not be successful: %+v", receipt)
++        }
++        if receipt.Summary == "deploy pending" && receipt.ExitCode == 0 {
++            t.Fatalf("pending check must not be successful: %+v", receipt)
++        }
++        if receipt.Summary == "docs skipping" && receipt.ExitCode == 0 {
++            t.Fatalf("skipped check must not be successful: %+v", receipt)
++        }
++    }
++}
++
++func TestImportGitHubChecksPassesWhenAllChecksSucceed(t *testing.T) {
++    bundle, err := ImportGitHubChecks(context.Background(), "3", GitHubCheckOptions{
++        Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
++            return []byte(`[
++                {"name":"go test","bucket":"pass"},
++                {"name":"lint","state":"SUCCESS"}
++            ]`), nil
++        },
++    })
++    if err != nil {
++        t.Fatalf("import checks: %v", err)
++    }
++    if !bundle.HasSuccessfulValidation(KindCICheck) {
++        t.Fatalf("all-success checks should satisfy ci-check validation: %+v", bundle.Receipts)
++    }
++}
++
++func TestImportGitHubChecksParsesPendingJSONDespiteExitCode(t *testing.T) {
++    bundle, err := ImportGitHubChecks(context.Background(), "3", GitHubCheckOptions{
++        Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
++            return []byte(`[{"name":"slow check","bucket":"pending","state":"PENDING"}]`), errors.New("exit status 8")
++        },
++    })
++    if err != nil {
++        t.Fatalf("pending checks with JSON should import as receipts, not unavailable context: %v", err)
++    }
++    if len(bundle.Receipts) != 1 || bundle.Receipts[0].ExitCode == 0 {
++        t.Fatalf("pending check should import as failed receipt: %+v", bundle.Receipts)
++    }
++    if bundle.HasSuccessfulValidation(KindCICheck) {
++        t.Fatalf("pending check set must not satisfy validation: %+v", bundle.Receipts)
++    }
++}
++
++func TestImportGitHubChecksReportsUnavailableContext(t *testing.T) {
++    _, err := ImportGitHubChecks(context.Background(), "3", GitHubCheckOptions{
++        Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
++            return nil, errors.New("gh auth required")
++        },
++    })
++    if err == nil {
++        t.Fatalf("expected unavailable gh context error")
++    }
++}
++
++func assertContainsArg(t *testing.T, args []string, expected string) {
++    t.Helper()
++    for _, arg := range args {
++        if arg == expected {
++            return
++        }
++    }
++    t.Fatalf("missing arg %q in %v", expected, args)
++}
+diff --git a/internal/evidence/receipt.go b/internal/evidence/receipt.go
+new file mode 100644
+index 0000000..fed5f5d
+--- /dev/null
++++ b/internal/evidence/receipt.go
+@@ -0,0 +1,307 @@
++package evidence
++
++import (
++    "bufio"
++    "bytes"
++    "encoding/json"
++    "errors"
++    "fmt"
++    "regexp"
++    "strings"
++    "time"
++)
++
++type Kind string
++
++const (
++    KindGeneric   Kind = "generic"
++    KindTests     Kind = "tests"
++    KindBuild     Kind = "build"
++    KindTypecheck Kind = "typecheck"
++    KindCoverage  Kind = "coverage"
++    KindCICheck   Kind = "ci-check"
++)
++
++const (
++    ReceiptKindValidation = "validation"
++    ReceiptKindRuntime    = "runtime"
++    ReceiptKindCICheck    = "ci-check"
++)
++
++type Receipt struct {
++    SchemaVersion int       `json:"schemaVersion"`
++    Kind          string    `json:"kind"`
++    Command       []string  `json:"command,omitempty"`
++    CWD           string    `json:"cwd,omitempty"`
++    ExitCode      int       `json:"exitCode"`
++    StartedAt     time.Time `json:"startedAt,omitempty"`
++    FinishedAt    time.Time `json:"finishedAt,omitempty"`
++    StdoutSHA256  string    `json:"stdoutSha256,omitempty"`
++    StderrSHA256  string    `json:"stderrSha256,omitempty"`
++    Summary       string    `json:"summary"`
++    Covers        []string  `json:"covers,omitempty"`
++}
++
++type Bundle struct {
++    Receipts     []Receipt
++    FreeformText string
++    Fallback     bool
++}
++
++type ParseOptions struct {
++    Strict bool
++    Now    time.Time
++    MaxAge time.Duration
++}
++
++var (
++    successPatterns = []*regexp.Regexp{
++        regexp.MustCompile(`(?m)^ok\s+\S+`),
++        regexp.MustCompile(`(?i)\b(go test|tests?|test suite).*\b(pass|passed|ok|exited 0)\b`),
++        regexp.MustCompile(`(?i)\b(npm run build|build|tsc --noEmit|typecheck|coverage).*\b(pass|passed|ok|success|exited 0)\b`),
++        regexp.MustCompile(`(?i)\bexited 0\b`),
++    }
++    failurePatterns = []*regexp.Regexp{
++        regexp.MustCompile(`(?i)\b(exit(ed)?|exit code)\s+[1-9][0-9]*\b`),
++        regexp.MustCompile(`(?i)\bFAIL\b`),
++        regexp.MustCompile(`(?i)\bfailed\b`),
++        regexp.MustCompile(`(?i)\berror:`),
++    }
++)
++
++func Parse(data []byte) (Bundle, error) {
++    return ParseWithOptions(data, ParseOptions{})
++}
++
++func ParseWithOptions(data []byte, options ParseOptions) (Bundle, error) {
++    scanner := bufio.NewScanner(bytes.NewReader(data))
++    var receipts []Receipt
++    jsonLines := 0
++    for scanner.Scan() {
++        line := strings.TrimSpace(scanner.Text())
++        if line == "" || !strings.HasPrefix(line, "{") {
++            continue
++        }
++        jsonLines++
++        receipt, err := parseReceiptLine([]byte(line), options)
++        if err != nil {
++            return Bundle{}, err
++        }
++        receipts = append(receipts, receipt)
++    }
++    if err := scanner.Err(); err != nil {
++        return Bundle{}, err
++    }
++    if jsonLines > 0 {
++        return Bundle{Receipts: receipts}, nil
++    }
++    return parseFreeform(data), nil
++}
++
++func parseReceiptLine(line []byte, options ParseOptions) (Receipt, error) {
++    var raw map[string]json.RawMessage
++    if err := json.Unmarshal(line, &raw); err != nil {
++        return Receipt{}, err
++    }
++    var receipt Receipt
++    if err := json.Unmarshal(line, &receipt); err != nil {
++        return Receipt{}, err
++    }
++    if receipt.SchemaVersion != 1 {
++        return Receipt{}, fmt.Errorf("unsupported evidence schemaVersion %d", receipt.SchemaVersion)
++    }
++    if _, ok := raw["exitCode"]; !ok {
++        return Receipt{}, errors.New("evidence receipt missing exitCode")
++    }
++    if strings.TrimSpace(receipt.Summary) == "" {
++        return Receipt{}, errors.New("evidence receipt missing summary")
++    }
++    if receipt.Kind == "" {
++        receipt.Kind = ReceiptKindValidation
++    }
++    if options.Strict {
++        if !options.Now.IsZero() && options.MaxAge > 0 {
++            finished := receipt.FinishedAt
++            if finished.IsZero() {
++                finished = receipt.StartedAt
++            }
++            if finished.IsZero() {
++                return Receipt{}, errors.New("strict evidence receipt missing timestamp")
++            }
++            if options.Now.Sub(finished) > options.MaxAge {
++                return Receipt{}, errors.New("strict evidence receipt is stale")
++            }
++        }
++    }
++    return receipt, nil
++}
++
++func parseFreeform(data []byte) Bundle {
++    text := strings.TrimSpace(string(data))
++    if text == "" {
++        return Bundle{FreeformText: text, Fallback: true}
++    }
++    exitCode := 1
++    if hasSuccessSignal(text) && !hasFailureSignal(text) {
++        exitCode = 0
++    }
++    return Bundle{
++        Receipts: []Receipt{{
++            SchemaVersion: 1,
++            Kind:          ReceiptKindValidation,
++            ExitCode:      exitCode,
++            Summary:       firstFreeformSummary(text),
++        }},
++        FreeformText: text,
++        Fallback:     true,
++    }
++}
++
++func hasSuccessSignal(text string) bool {
++    for _, pattern := range successPatterns {
++        if pattern.MatchString(text) {
++            return true
++        }
++    }
++    return false
++}
++
++func hasFailureSignal(text string) bool {
++    for _, pattern := range failurePatterns {
++        if pattern.MatchString(text) {
++            return true
++        }
++    }
++    return false
++}
++
++func firstFreeformSummary(text string) string {
++    for _, line := range strings.Split(text, "\n") {
++        line = strings.TrimSpace(line)
++        if line != "" {
++            return line
++        }
++    }
++    return "freeform evidence"
++}
++
++func (bundle Bundle) HasSuccessfulValidation(kind Kind) bool {
++    if kind == KindCICheck {
++        return bundle.allCIChecksSuccessful()
++    }
++    if kind == KindGeneric && bundle.hasFailedCICheck() {
++        return false
++    }
++    for _, receipt := range bundle.Receipts {
++        if receipt.ExitCode != 0 {
++            continue
++        }
++        if receipt.Kind != ReceiptKindValidation && receipt.Kind != ReceiptKindCICheck {
++            continue
++        }
++        if receiptMatchesKind(receipt, kind) {
++            return true
++        }
++    }
++    return false
++}
++
++func (bundle Bundle) hasFailedCICheck() bool {
++    for _, receipt := range bundle.Receipts {
++        if receipt.Kind == ReceiptKindCICheck && receipt.ExitCode != 0 {
++            return true
++        }
++    }
++    return false
++}
++
++func (bundle Bundle) onlyCIChecks() bool {
++    if len(bundle.Receipts) == 0 {
++        return false
++    }
++    for _, receipt := range bundle.Receipts {
++        if receipt.Kind != ReceiptKindCICheck {
++            return false
++        }
++    }
++    return true
++}
++
++func (bundle Bundle) allCIChecksSuccessful() bool {
++    seen := false
++    for _, receipt := range bundle.Receipts {
++        if receipt.Kind != ReceiptKindCICheck {
++            continue
++        }
++        seen = true
++        if receipt.ExitCode != 0 {
++            return false
++        }
++    }
++    return seen
++}
++
++func (bundle Bundle) ValidationSummaries() []string {
++    var summaries []string
++    for _, receipt := range bundle.Receipts {
++        if receipt.Kind != ReceiptKindValidation && receipt.Kind != ReceiptKindCICheck {
++            continue
++        }
++        prefix := "structured validation"
++        if bundle.Fallback {
++            prefix = "freeform fallback validation"
++        }
++        status := fmt.Sprintf("exit %d", receipt.ExitCode)
++        if receipt.Kind == ReceiptKindCICheck {
++            prefix = "structured ci-check"
++        }
++        summary := strings.TrimSpace(receipt.Summary)
++        if summary == "" {
++            summary = strings.Join(receipt.Command, " ")
++        }
++        summaries = append(summaries, fmt.Sprintf("%s: %s (%s)", prefix, summary, status))
++    }
++    return summaries
++}
++
++func (bundle Bundle) JSONL() ([]byte, error) {
++    var out bytes.Buffer
++    encoder := json.NewEncoder(&out)
++    for _, receipt := range bundle.Receipts {
++        if err := encoder.Encode(receipt); err != nil {
++            return nil, err
++        }
++    }
++    return out.Bytes(), nil
++}
++
++func receiptMatchesKind(receipt Receipt, kind Kind) bool {
++    if kind == "" || kind == KindGeneric {
++        return true
++    }
++    if kind == KindCICheck {
++        return receipt.Kind == ReceiptKindCICheck
++    }
++    text := strings.ToLower(strings.Join(append([]string{receipt.Summary}, receipt.Command...), " "))
++    switch kind {
++    case KindTests:
++        return strings.Contains(text, "test") || strings.Contains(text, "go test") || strings.Contains(text, "pytest") || strings.Contains(text, "vitest") || strings.Contains(text, "jest")
++    case KindBuild:
++        return strings.Contains(text, "build")
++    case KindTypecheck:
++        return strings.Contains(text, "tsc") || strings.Contains(text, "typecheck")
++    case KindCoverage:
++        return strings.Contains(text, "coverage")
++    default:
++        return strings.Contains(text, strings.ToLower(string(kind)))
++    }
++}
++
++func firstNonEmpty(values ...string) string {
++    for _, value := range values {
++        if strings.TrimSpace(value) != "" {
++            return strings.TrimSpace(value)
++        }
++    }
++    return ""
++}
+diff --git a/internal/evidence/receipt_test.go b/internal/evidence/receipt_test.go
+new file mode 100644
+index 0000000..488b51e
+--- /dev/null
++++ b/internal/evidence/receipt_test.go
+@@ -0,0 +1,104 @@
++package evidence
++
++import (
++    "testing"
++    "time"
++)
++
++func TestParseJSONLReceipts(t *testing.T) {
++    input := []byte(`{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"cwd":"/repo","exitCode":0,"startedAt":"2026-07-04T12:00:00Z","finishedAt":"2026-07-04T12:00:02Z","summary":"go test ./... exited 0"}` + "\n")
++    bundle, err := Parse(input)
++    if err != nil {
++        t.Fatalf("parse receipts: %v", err)
++    }
++    if !bundle.HasSuccessfulValidation(KindTests) {
++        t.Fatalf("expected successful validation: %+v", bundle)
++    }
++}
++
++func TestFailedReceiptDoesNotPassValidation(t *testing.T) {
++    input := []byte(`{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"exitCode":1,"summary":"tests passed before final failure"}` + "\n")
++    bundle, err := Parse(input)
++    if err != nil {
++        t.Fatalf("parse receipts: %v", err)
++    }
++    if bundle.HasSuccessfulValidation(KindTests) {
++        t.Fatalf("failed receipt must not pass validation")
++    }
++}
++
++func TestFreeformFallbackRecognizesCommonSuccess(t *testing.T) {
++    for _, text := range []string{
++        "ok  \tgithub.com/dsifry/metareview/internal/reviewlog\t0.132s",
++        "npm run build exited 0",
++        "tsc --noEmit exited 0",
++        "coverage gate passed: 95.4%",
++    } {
++        bundle, err := Parse([]byte(text))
++        if err != nil {
++            t.Fatalf("parse fallback %q: %v", text, err)
++        }
++        if !bundle.HasSuccessfulValidation(KindGeneric) {
++            t.Fatalf("expected fallback validation for %q", text)
++        }
++        if !bundle.Fallback {
++            t.Fatalf("expected fallback marker for %q", text)
++        }
++    }
++}
++
++func TestMalformedReceiptFailsStrictMode(t *testing.T) {
++    input := []byte(`{"schemaVersion":1,"kind":"validation","summary":"missing exit code"}` + "\n")
++    if _, err := Parse(input); err == nil {
++        t.Fatalf("default parse should fail missing exitCode")
++    }
++    if _, err := ParseWithOptions(input, ParseOptions{Strict: true}); err == nil {
++        t.Fatalf("strict parse should fail missing exitCode")
++    }
++}
++
++func TestMalformedReceiptMissingSummaryFails(t *testing.T) {
++    input := []byte(`{"schemaVersion":1,"kind":"validation","exitCode":0}` + "\n")
++    if _, err := Parse(input); err == nil {
++        t.Fatalf("parse should fail missing summary")
++    }
++}
++
++func TestStaleReceiptFailsStrictMode(t *testing.T) {
++    input := []byte(`{"schemaVersion":1,"kind":"validation","exitCode":0,"finishedAt":"2026-07-04T12:00:00Z","summary":"go test ./... exited 0"}` + "\n")
++    _, err := ParseWithOptions(input, ParseOptions{
++        Strict: true,
++        Now:    time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC),
++        MaxAge: time.Hour,
++    })
++    if err == nil {
++        t.Fatalf("strict parse should fail stale receipt")
++    }
++}
++
++func TestContradictoryReceiptUsesExitCodeAsAuthority(t *testing.T) {
++    input := []byte(`{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"exitCode":1,"summary":"all tests passed"}` + "\n")
++    bundle, err := Parse(input)
++    if err != nil {
++        t.Fatalf("parse receipts: %v", err)
++    }
++    if bundle.HasSuccessfulValidation(KindGeneric) {
++        t.Fatalf("exitCode 1 must not satisfy validation")
++    }
++}
++
++func TestFailedCICheckPreventsGenericValidation(t *testing.T) {
++    input := []byte(
++        `{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"exitCode":0,"summary":"go test ./... exited 0"}` + "\n" +
++            `{"schemaVersion":1,"kind":"ci-check","command":["gh","pr","checks","3"],"exitCode":1,"summary":"lint fail"}` + "\n")
++    bundle, err := Parse(input)
++    if err != nil {
++        t.Fatalf("parse mixed receipts: %v", err)
++    }
++    if bundle.HasSuccessfulValidation(KindGeneric) {
++        t.Fatalf("failed ci-check must prevent generic validation")
++    }
++    if !bundle.HasSuccessfulValidation(KindTests) {
++        t.Fatalf("specific local test validation should remain visible")
++    }
++}
+diff --git a/internal/evidence/runner.go b/internal/evidence/runner.go
+new file mode 100644
+index 0000000..249ba9d
+--- /dev/null
++++ b/internal/evidence/runner.go
+@@ -0,0 +1,84 @@
++package evidence
++
++import (
++    "bytes"
++    "context"
++    "crypto/sha256"
++    "encoding/hex"
++    "errors"
++    "os"
++    "os/exec"
++    "strconv"
++    "strings"
++    "time"
++)
++
++type RunOptions struct {
++    Kind   string
++    CWD    string
++    Covers []string
++    Env    []string
++    Now    func() time.Time
++}
++
++func Run(ctx context.Context, command []string, options RunOptions) (Receipt, error) {
++    if len(command) == 0 {
++        return Receipt{}, errors.New("evidence command is required")
++    }
++    now := options.Now
++    if now == nil {
++        now = time.Now
++    }
++    cwd := options.CWD
++    if cwd == "" {
++        var err error
++        cwd, err = os.Getwd()
++        if err != nil {
++            return Receipt{}, err
++        }
++    }
++    kind := options.Kind
++    if kind == "" {
++        kind = ReceiptKindValidation
++    }
++    started := now().UTC()
++    cmd := exec.CommandContext(ctx, command[0], command[1:]...)
++    cmd.Dir = cwd
++    if len(options.Env) > 0 {
++        cmd.Env = append(os.Environ(), options.Env...)
++    }
++    var stdout bytes.Buffer
++    var stderr bytes.Buffer
++    cmd.Stdout = &stdout
++    cmd.Stderr = &stderr
++    err := cmd.Run()
++    finished := now().UTC()
++    exitCode := 0
++    if err != nil {
++        exitCode = 1
++        var exitErr *exec.ExitError
++        if errors.As(err, &exitErr) {
++            exitCode = exitErr.ExitCode()
++            err = nil
++        }
++    }
++    receipt := Receipt{
++        SchemaVersion: 1,
++        Kind:          kind,
++        Command:       command,
++        CWD:           cwd,
++        ExitCode:      exitCode,
++        StartedAt:     started,
++        FinishedAt:    finished,
++        StdoutSHA256:  sha256Hex(stdout.Bytes()),
++        StderrSHA256:  sha256Hex(stderr.Bytes()),
++        Summary:       strings.Join(command, " ") + " exited " + strconv.Itoa(exitCode),
++        Covers:        options.Covers,
++    }
++    return receipt, err
++}
++
++func sha256Hex(data []byte) string {
++    sum := sha256.Sum256(data)
++    return hex.EncodeToString(sum[:])
++}
+diff --git a/internal/evidence/runner_test.go b/internal/evidence/runner_test.go
+new file mode 100644
+index 0000000..0d25b0c
+--- /dev/null
++++ b/internal/evidence/runner_test.go
+@@ -0,0 +1,36 @@
++package evidence
++
++import (
++    "context"
++    "testing"
++)
++
++func TestRunCapturesSuccessfulCommandReceipt(t *testing.T) {
++    receipt, err := Run(context.Background(), []string{"sh", "-c", "printf hello"}, RunOptions{})
++    if err != nil {
++        t.Fatalf("run command: %v", err)
++    }
++    if receipt.ExitCode != 0 {
++        t.Fatalf("expected exit 0: %+v", receipt)
++    }
++    if receipt.StdoutSHA256 == "" || receipt.StderrSHA256 == "" {
++        t.Fatalf("expected output hashes: %+v", receipt)
++    }
++    if r
+
+diff --git a/internal/evidence/receipt.go b/internal/evidence/receipt.go
+index fed5f5d..a603240 100644
+--- a/internal/evidence/receipt.go
++++ b/internal/evidence/receipt.go
+@@ -189,7 +189,7 @@ func (bundle Bundle) HasSuccessfulValidation(kind Kind) bool {
+     if kind == KindCICheck {
+         return bundle.allCIChecksSuccessful()
+     }
+-    if kind == KindGeneric && bundle.hasFailedCICheck() {
++    if bundle.hasFailedValidation(kind) {
+         return false
+     }
+     for _, receipt := range bundle.Receipts {
+@@ -206,27 +206,21 @@ func (bundle Bundle) HasSuccessfulValidation(kind Kind) bool {
+     return false
+ }
+
+-func (bundle Bundle) hasFailedCICheck() bool {
++func (bundle Bundle) hasFailedValidation(kind Kind) bool {
+     for _, receipt := range bundle.Receipts {
+-        if receipt.Kind == ReceiptKindCICheck && receipt.ExitCode != 0 {
++        if receipt.ExitCode == 0 {
++            continue
++        }
++        if receipt.Kind != ReceiptKindValidation && receipt.Kind != ReceiptKindCICheck {
++            continue
++        }
++        if kind == "" || kind == KindGeneric || receiptMatchesKind(receipt, kind) {
+             return true
+         }
+     }
+     return false
+ }
+
+-func (bundle Bundle) onlyCIChecks() bool {
+-    if len(bundle.Receipts) == 0 {
+-        return false
+-    }
+-    for _, receipt := range bundle.Receipts {
+-        if receipt.Kind != ReceiptKindCICheck {
+-            return false
+-        }
+-    }
+-    return true
+-}
+-
+ func (bundle Bundle) allCIChecksSuccessful() bool {
+     seen := false
+     for _, receipt := range bundle.Receipts {
+diff --git a/internal/evidence/receipt_test.go b/internal/evidence/receipt_test.go
+index 488b51e..ed841b9 100644
+--- a/internal/evidence/receipt_test.go
++++ b/internal/evidence/receipt_test.go
+@@ -102,3 +102,19 @@ func TestFailedCICheckPreventsGenericValidation(t *testing.T) {
+         t.Fatalf("specific local test validation should remain visible")
+     }
+ }
++
++func TestFailedValidationReceiptPreventsGenericValidation(t *testing.T) {
++    input := []byte(
++        `{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"exitCode":0,"summary":"go test ./... exited 0"}` + "\n" +
++            `{"schemaVersion":1,"kind":"validation","command":["go","vet","./..."],"exitCode":1,"summary":"go vet ./... exited 1"}` + "\n")
++    bundle, err := Parse(input)
++    if err != nil {
++        t.Fatalf("parse mixed receipts: %v", err)
++    }
++    if bundle.HasSuccessfulValidation(KindGeneric) {
++        t.Fatalf("failed validation receipt must prevent generic validation")
++    }
++    if !bundle.HasSuccessfulValidation(KindTests) {
++        t.Fatalf("specific successful test validation should remain visible")
++    }
++}
+
+```
+
+## Knowledge And Registries
+
+Service inventory: none
+
+No service inventory found.
+
+Knowledge facts:
+
+No Beads knowledge facts found.
+
+## Evidence
+
+{"schemaVersion":1,"kind":"validation","command":["go","test","./internal/evidence","./internal/reviewers","./internal/prready"],"cwd":"/Users/dsifry/Developer/metareview/.worktrees/issue-2-wu2","exitCode":0,"startedAt":"2026-07-05T03:54:59.154851Z","finishedAt":"2026-07-05T03:54:59.708729Z","stdoutSha256":"dceae5a37833eeb38b7a1a552b6c9a2b64a74f26418e0be42462685f0dc8ce4d","stderrSha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","summary":"go test ./internal/evidence ./internal/reviewers ./internal/prready exited 0"}
+{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"cwd":"/Users/dsifry/Developer/metareview/.worktrees/issue-2-wu2","exitCode":0,"startedAt":"2026-07-05T03:54:59.786691Z","finishedAt":"2026-07-05T03:55:00.12423Z","stdoutSha256":"c5bf51b8d16faee511cf027a21bdbde318264886e4aa534c49c531face18b4e1","stderrSha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","summary":"go test ./... exited 0"}
+{"schemaVersion":1,"kind":"validation","command":["bash","tests/run-all.sh"],"cwd":"/Users/dsifry/Developer/metareview/.worktrees/issue-2-wu2","exitCode":0,"startedAt":"2026-07-05T03:55:00.230396Z","finishedAt":"2026-07-05T03:55:21.113989Z","stdoutSha256":"7ffeffbe5589bd2c366fad83e21410548fc41b6d228ad6c2a00bd6b210ece612","stderrSha256":"2bdaf97dbb5c8ec8319c8b5e0a4fc379528af40b511befe365922dbf0e376f6b","summary":"bash tests/run-all.sh exited 0"}
+{"schemaVersion":1,"kind":"validation","command":["git","diff","--check"],"cwd":"/Users/dsifry/Developer/metareview/.worktrees/issue-2-wu2","exitCode":0,"startedAt":"2026-07-05T03:55:21.206662Z","finishedAt":"2026-07-05T03:55:21.227089Z","stdoutSha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stderrSha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","summary":"git diff --check exited 0"}

@@ -13,6 +13,8 @@ help="$(go run ./cmd/metareview --help)"
 printf '%s\n' "$help" | grep -q 'metareview setup --check'
 printf '%s\n' "$help" | grep -q 'metareview context build <path>'
 printf '%s\n' "$help" | grep -q 'metareview context diff'
+printf '%s\n' "$help" | grep -q 'metareview evidence run --'
+printf '%s\n' "$help" | grep -q 'metareview evidence import --github-checks'
 printf '%s\n' "$help" | grep -q 'metareview review artifact <path>'
 printf '%s\n' "$help" | grep -q -- '--scaffold-only'
 printf '%s\n' "$help" | grep -q 'metareview review task-done'

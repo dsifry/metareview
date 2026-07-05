@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"github.com/dsifry/metareview/internal/artifactreview"
 	"github.com/dsifry/metareview/internal/contextpack"
 	"github.com/dsifry/metareview/internal/epicready"
+	"github.com/dsifry/metareview/internal/evidence"
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/learning"
 	"github.com/dsifry/metareview/internal/prready"
@@ -30,6 +32,8 @@ Usage:
   metareview status
   metareview context build <path>
   metareview context diff [--base <ref>]
+  metareview evidence run -- <command> [args...]
+  metareview evidence import --github-checks <pr-number> [--repo <owner/repo>]
   metareview review artifact <path> [--previous-run <run-id>] [--scaffold-only]
   metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
   metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
@@ -42,6 +46,8 @@ Commands:
   status                     Print repository review capability status
   context build <path>       Build a Markdown context pack for an artifact
   context diff               Print git diff context as JSON
+  evidence run               Run a command and print a structured JSON receipt
+  evidence import            Import external validation receipts
   review artifact <path>     Create an incomplete artifact review scaffold
   review task-done <target>  Run task-done code review
   review epic-ready <target> Run epic-ready integration review
@@ -111,6 +117,11 @@ func main() {
 		bytes, err := json.MarshalIndent(result, "", "  ")
 		exitOnErr(err)
 		fmt.Println(string(bytes))
+		return
+	}
+
+	if len(args) >= 1 && args[0] == "evidence" {
+		handleEvidence(args[1:])
 		return
 	}
 
@@ -272,6 +283,85 @@ func main() {
 	fmt.Fprintf(os.Stderr, "Unknown command: %s\n", args[0])
 	printHelp()
 	os.Exit(2)
+}
+
+func handleEvidence(args []string) {
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		fmt.Println("Usage: metareview evidence run -- <command> [args...]")
+		fmt.Println("       metareview evidence import --github-checks <pr-number> [--repo <owner/repo>]")
+		return
+	}
+	switch args[0] {
+	case "run":
+		separator := -1
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--" {
+				separator = i
+				break
+			}
+		}
+		if separator == -1 || separator+1 >= len(args) {
+			fmt.Fprintln(os.Stderr, "Usage: metareview evidence run -- <command> [args...]")
+			os.Exit(2)
+		}
+		receipt, runErr := evidence.Run(context.Background(), args[separator+1:], evidence.RunOptions{})
+		if runErr != nil && receipt.SchemaVersion == 0 {
+			exitOnErr(runErr)
+		}
+		bytes, err := json.Marshal(receipt)
+		exitOnErr(err)
+		fmt.Println(string(bytes))
+		if runErr != nil {
+			fmt.Fprintln(os.Stderr, runErr)
+			if receipt.ExitCode != 0 {
+				os.Exit(receipt.ExitCode)
+			}
+			os.Exit(1)
+		}
+		if receipt.ExitCode != 0 {
+			os.Exit(receipt.ExitCode)
+		}
+	case "import":
+		pr := ""
+		repository := ""
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--github-checks":
+				pr = flagValue(args, i, "--github-checks")
+				i++
+			case "--repo":
+				repository = flagValue(args, i, "--repo")
+				i++
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
+				os.Exit(2)
+			}
+		}
+		if pr == "" {
+			fmt.Fprintln(os.Stderr, "Missing value for --github-checks")
+			os.Exit(2)
+		}
+		bundle, err := evidence.ImportGitHubChecks(context.Background(), pr, evidence.GitHubCheckOptions{Repo: repository})
+		exitOnErr(err)
+		bytes, err := bundle.JSONL()
+		exitOnErr(err)
+		fmt.Print(string(bytes))
+		if bundleExitCode(bundle) != 0 {
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown evidence command: %s\n", args[0])
+		os.Exit(2)
+	}
+}
+
+func bundleExitCode(bundle evidence.Bundle) int {
+	for _, receipt := range bundle.Receipts {
+		if receipt.ExitCode != 0 {
+			return 1
+		}
+	}
+	return 0
 }
 
 func mustCwd() string {

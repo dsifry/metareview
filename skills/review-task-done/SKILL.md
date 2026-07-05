@@ -13,7 +13,15 @@ Run this before saying a coding task is done.
 metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--evidence <path>]
 ```
 
-Use `--base` to define the reviewed diff. Use `--previous-run` when re-reviewing after fixes. Use `--evidence` for validation output such as test logs.
+Use `--base` to define the reviewed diff. Use `--previous-run` when re-reviewing after fixes. Use `--evidence` for validation output such as structured receipts or test logs.
+
+Prefer structured evidence receipts:
+
+```bash
+go run ./cmd/metareview evidence run -- go test ./...
+```
+
+Freeform evidence remains accepted as a fallback, but receipts preserve command, exit code, timestamps, and output hashes.
 
 ## Workflow
 

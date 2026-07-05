@@ -100,3 +100,38 @@ func TestPRReadyReviewersAllowCleanBranch(t *testing.T) {
 		t.Fatalf("clean PR-ready context should not produce findings: %+v", findings)
 	}
 }
+
+func TestPRReadyReviewersAcceptStructuredValidationReceipt(t *testing.T) {
+	findings := RunPRReady(PRReadyContext{
+		EvidenceText:       `{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"exitCode":0,"summary":"go test ./... exited 0"}`,
+		PREvidenceMarkdown: "## metareview PR Evidence\n\n### Summary\n\nParser hardening.\n\n### Validation\n\n- structured validation: go test ./... exited 0 (exit 0)\n",
+	})
+	if len(findings) != 0 {
+		t.Fatalf("structured validation receipt should satisfy PR-ready: %+v", findings)
+	}
+}
+
+func TestPRReadyReviewersRejectFailedStructuredValidationReceipt(t *testing.T) {
+	findings := RunPRReady(PRReadyContext{
+		EvidenceText:       `{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"exitCode":1,"summary":"tests passed before final failure"}`,
+		PREvidenceMarkdown: "## metareview PR Evidence\n\n### Summary\n\nParser hardening.\n\n### Validation\n\n- structured validation: go test ./... exited 1 (exit 1)\n",
+	})
+	assertFinding(t, findings, "validation-reviewer", "high", "Missing validation evidence")
+}
+
+func TestPRReadyReviewersRejectMalformedStructuredValidationReceipt(t *testing.T) {
+	findings := RunPRReady(PRReadyContext{
+		EvidenceText:       `{"schemaVersion":1,"kind":"validation","summary":"missing exitCode defaults to zero"}`,
+		PREvidenceMarkdown: "## metareview PR Evidence\n\n### Summary\n\nParser hardening.\n\n### Validation\n\n- malformed validation receipt\n",
+	})
+	assertFinding(t, findings, "validation-reviewer", "high", "Missing validation evidence")
+}
+
+func TestPRReadyReviewersRejectMixedFailedCICheckReceipt(t *testing.T) {
+	findings := RunPRReady(PRReadyContext{
+		EvidenceText: `{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"exitCode":0,"summary":"go test ./... exited 0"}` + "\n" +
+			`{"schemaVersion":1,"kind":"ci-check","command":["gh","pr","checks","3"],"exitCode":1,"summary":"lint fail"}`,
+		PREvidenceMarkdown: "## metareview PR Evidence\n\n### Summary\n\nParser hardening.\n\n### Validation\n\n- structured validation: go test ./... exited 0 (exit 0)\n- structured ci-check: lint fail (exit 1)\n",
+	})
+	assertFinding(t, findings, "validation-reviewer", "high", "Missing validation evidence")
+}

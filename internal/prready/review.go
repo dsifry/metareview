@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dsifry/metareview/internal/evidence"
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/githubcontext"
@@ -80,7 +81,7 @@ func Create(root string, options Options) (Result, error) {
 		now = time.Now()
 	}
 	report := repo.Detect(root)
-	git, err := gitcontext.Collect(root, options.Base)
+	git, err := gitcontext.CollectWithExcludes(root, options.Base, generatedMetareviewPathExcludes())
 	if err != nil {
 		return Result{}, err
 	}
@@ -550,6 +551,12 @@ func uniqueStrings(values []string) []string {
 }
 
 func validationLines(text string) []string {
+	bundle, err := evidence.Parse([]byte(text))
+	if err == nil {
+		if summaries := bundle.ValidationSummaries(); len(summaries) > 0 {
+			return summaries
+		}
+	}
 	var lines []string
 	for _, line := range strings.Split(text, "\n") {
 		if strings.TrimSpace(line) != "" {
@@ -645,6 +652,10 @@ func isGeneratedMetareviewPath(path string) bool {
 	return strings.HasPrefix(path, ".metareview/") ||
 		path == ".metareview" ||
 		strings.HasPrefix(path, "docs/metareview/")
+}
+
+func generatedMetareviewPathExcludes() []string {
+	return []string{".metareview", ".metareview/**", "docs/metareview", "docs/metareview/**"}
 }
 
 func readEvidence(path string) (string, error) {

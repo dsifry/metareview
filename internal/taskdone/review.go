@@ -81,7 +81,7 @@ func Create(root, target string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	git, err := gitcontext.Collect(root, options.Base)
+	git, err := gitcontext.CollectWithExcludes(root, options.Base, generatedMetareviewPathExcludes())
 	if err != nil {
 		return Result{}, err
 	}
@@ -309,6 +309,10 @@ func isGeneratedMetareviewPath(path string) bool {
 	return strings.HasPrefix(path, ".metareview/") ||
 		path == ".metareview" ||
 		strings.HasPrefix(path, "docs/metareview/")
+}
+
+func generatedMetareviewPathExcludes() []string {
+	return []string{".metareview", ".metareview/**", "docs/metareview", "docs/metareview/**"}
 }
 
 func reviewerKnowledge(context knowledge.Context) reviewers.KnowledgeContext {

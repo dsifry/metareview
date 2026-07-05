@@ -10,6 +10,7 @@ bash tests/manifest/test-skills.sh
 if [ -f tests/go/test-cli-baseline.sh ]; then bash tests/go/test-cli-baseline.sh; fi
 if [ -f tests/go/test-npm-wrapper-cwd.sh ]; then bash tests/go/test-npm-wrapper-cwd.sh; fi
 if [ -f tests/go/test-setup-check.sh ]; then bash tests/go/test-setup-check.sh; fi
+if [ -f tests/go/test-evidence.sh ]; then bash tests/go/test-evidence.sh; fi
 if [ -f tests/go/test-artifact-review.sh ]; then bash tests/go/test-artifact-review.sh; fi
 if [ -f tests/go/test-git-context.sh ]; then bash tests/go/test-git-context.sh; fi
 if [ -f tests/go/test-task-source.sh ]; then bash tests/go/test-task-source.sh; fi

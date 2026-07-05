@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dsifry/metareview/internal/evidence"
 	"github.com/dsifry/metareview/internal/findings"
 )
 
@@ -51,7 +52,7 @@ func RunPRReady(context PRReadyContext) []Finding {
 			Fingerprint:    "pr:unresolved-review-blockers:" + strings.Join(blocked, "|"),
 		}))
 	}
-	if !validationPattern.MatchString(context.EvidenceText) {
+	if !hasPRValidationEvidence(context.EvidenceText) {
 		results = append(results, finding(Finding{
 			Reviewer:       "validation-reviewer",
 			Severity:       "high",
@@ -80,6 +81,14 @@ func RunPRReady(context PRReadyContext) []Finding {
 	results = append(results, branchDiffFindings(context)...)
 	results = append(results, externalGitHubFindings(context.GitHub)...)
 	return results
+}
+
+func hasPRValidationEvidence(text string) bool {
+	bundle, err := evidence.Parse([]byte(text))
+	if err != nil {
+		return false
+	}
+	return bundle.HasSuccessfulValidation(evidence.KindGeneric)
 }
 
 func unresolvedPRReviewTargets(logs []PRReviewLog) []string {
