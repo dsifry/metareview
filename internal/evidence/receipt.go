@@ -189,7 +189,7 @@ func (bundle Bundle) HasSuccessfulValidation(kind Kind) bool {
 	if kind == KindCICheck {
 		return bundle.allCIChecksSuccessful()
 	}
-	if kind == KindGeneric && bundle.hasFailedCICheck() {
+	if bundle.hasFailedValidation(kind) {
 		return false
 	}
 	for _, receipt := range bundle.Receipts {
@@ -206,25 +206,19 @@ func (bundle Bundle) HasSuccessfulValidation(kind Kind) bool {
 	return false
 }
 
-func (bundle Bundle) hasFailedCICheck() bool {
+func (bundle Bundle) hasFailedValidation(kind Kind) bool {
 	for _, receipt := range bundle.Receipts {
-		if receipt.Kind == ReceiptKindCICheck && receipt.ExitCode != 0 {
+		if receipt.ExitCode == 0 {
+			continue
+		}
+		if receipt.Kind != ReceiptKindValidation && receipt.Kind != ReceiptKindCICheck {
+			continue
+		}
+		if kind == "" || kind == KindGeneric || receiptMatchesKind(receipt, kind) {
 			return true
 		}
 	}
 	return false
-}
-
-func (bundle Bundle) onlyCIChecks() bool {
-	if len(bundle.Receipts) == 0 {
-		return false
-	}
-	for _, receipt := range bundle.Receipts {
-		if receipt.Kind != ReceiptKindCICheck {
-			return false
-		}
-	}
-	return true
 }
 
 func (bundle Bundle) allCIChecksSuccessful() bool {

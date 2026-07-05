@@ -102,3 +102,19 @@ func TestFailedCICheckPreventsGenericValidation(t *testing.T) {
 		t.Fatalf("specific local test validation should remain visible")
 	}
 }
+
+func TestFailedValidationReceiptPreventsGenericValidation(t *testing.T) {
+	input := []byte(
+		`{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"exitCode":0,"summary":"go test ./... exited 0"}` + "\n" +
+			`{"schemaVersion":1,"kind":"validation","command":["go","vet","./..."],"exitCode":1,"summary":"go vet ./... exited 1"}` + "\n")
+	bundle, err := Parse(input)
+	if err != nil {
+		t.Fatalf("parse mixed receipts: %v", err)
+	}
+	if bundle.HasSuccessfulValidation(KindGeneric) {
+		t.Fatalf("failed validation receipt must prevent generic validation")
+	}
+	if !bundle.HasSuccessfulValidation(KindTests) {
+		t.Fatalf("specific successful test validation should remain visible")
+	}
+}
