@@ -58,17 +58,17 @@
       },
       {
         "stage": "task-done",
-        "metareview": "metareview review task-done <task-id-or-path>",
+        "metareview": "metareview review task-done <task-id-or-path> --base <base-ref> --evidence <file>",
         "effect": "Run when a work unit claims done; unresolved blocking findings block local task closure."
       },
       {
         "stage": "epic-ready",
-        "metareview": "metareview review epic-ready <epic-id-or-path>",
+        "metareview": "metareview review epic-ready <epic-id-or-path> --base <base-ref> --evidence <file>",
         "effect": "Run after all child tasks pass; integration, acceptance, and intent-drift blockers prevent epic landing."
       },
       {
         "stage": "pr-ready",
-        "metareview": "metareview review pr-ready --base <base-ref>",
+        "metareview": "metareview review pr-ready --base <base-ref> --evidence <file>",
         "effect": "Run before PR push or merge readiness to catch branch-level blockers."
       },
       {

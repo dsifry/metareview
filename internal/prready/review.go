@@ -170,7 +170,11 @@ func Create(root string, options Options) (Result, error) {
 		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect)), 0o644); err != nil {
 			return err
 		}
-		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{PreviousRunID: options.PreviousRunID, PreviousRunIDs: previousRunIDs})
+		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{
+			PreviousRunID:  options.PreviousRunID,
+			PreviousRunIDs: previousRunIDs,
+			ResetRunIDs:    chain.ResetRunIDs,
+		})
 		if err != nil {
 			return err
 		}
@@ -235,6 +239,7 @@ func resolveRunChain(root string, targetRecord map[string]string, options Option
 		Target:        targetRecord,
 		PreviousRunID: options.PreviousRunID,
 		MaxAttempts:   options.MaxAttempts,
+		HeadSHA:       git.HeadSHA,
 	})
 	if err == nil {
 		if options.PreviousRunID == "" && len(chain.Chain) == 0 {
@@ -258,6 +263,7 @@ func resolveRunChain(root string, targetRecord map[string]string, options Option
 		Scope:       "pr-ready",
 		Target:      targetRecord,
 		MaxAttempts: options.MaxAttempts,
+		HeadSHA:     git.HeadSHA,
 	})
 	if fallbackErr != nil {
 		return runchain.Decision{}, nil, fallbackErr
@@ -311,7 +317,13 @@ func legacyPRReadyTargetMatch(root string, log reviewlog.Summary, targetRecord m
 	if git.Branch == "" || identity.Branch == "" {
 		return false, false
 	}
-	return identity.Branch == git.Branch, true
+	if identity.Branch != git.Branch {
+		return false, true
+	}
+	if git.HeadSHA != "" && identity.Head != "" && identity.Head != git.HeadSHA {
+		return false, true
+	}
+	return true, true
 }
 
 func historicalPRReadyRunIDsForCurrentTarget(root string, logs []reviewlog.Summary, targetRecord map[string]string, git gitcontext.Context) []string {
@@ -463,7 +475,12 @@ func reviewerGitHub(context githubcontext.Context) reviewers.PRGitHubContext {
 	for _, item := range context.Reviews {
 		entries = append(entries, reviewers.PRGitHubEntry{Author: item.Author, URL: item.URL, State: item.State, Body: item.Body})
 	}
-	return reviewers.PRGitHubContext{Available: context.Available, UnavailableReason: context.UnavailableReason, Entries: entries}
+	return reviewers.PRGitHubContext{
+		Available:         context.Available,
+		UnavailableReason: context.UnavailableReason,
+		ReviewDecision:    context.ReviewDecision,
+		Entries:           entries,
+	}
 }
 
 func latestLogsByTarget(logs []reviewlog.Summary) []reviewlog.Summary {

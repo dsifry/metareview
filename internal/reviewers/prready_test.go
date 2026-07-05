@@ -49,6 +49,51 @@ func TestPRReadyReviewersIncludeGitHubExternalBlockersWhenAvailable(t *testing.T
 	assertFinding(t, findings, "external-reviewer", "high", "External GitHub review blocker")
 }
 
+func TestPRReadyReviewersIgnoreSupersededGitHubReviewBlockersAfterApproval(t *testing.T) {
+	findings := RunPRReady(PRReadyContext{
+		EvidenceText:       "bash tests/run-all.sh exited 0",
+		PREvidenceMarkdown: "## metareview PR Evidence\n\n### Validation\n\n- bash tests/run-all.sh exited 0\n",
+		GitHub: PRGitHubContext{
+			Available:      true,
+			ReviewDecision: "APPROVED",
+			Entries: []PRGitHubEntry{{
+				Author: "coderabbitai",
+				URL:    "https://github.com/acme/repo/pull/7#pullrequestreview-1",
+				State:  "CHANGES_REQUESTED",
+				Body:   "BLOCKER: earlier finding fixed by later commit",
+			}, {
+				Author: "coderabbitai",
+				URL:    "https://github.com/acme/repo/pull/7#pullrequestreview-2",
+				State:  "APPROVED",
+				Body:   "",
+			}},
+		},
+	})
+
+	if len(findings) != 0 {
+		t.Fatalf("superseded GitHub review blockers should not block after approval: %+v", findings)
+	}
+}
+
+func TestPRReadyReviewersKeepCommentedGitHubReviewBlockersAfterApproval(t *testing.T) {
+	findings := RunPRReady(PRReadyContext{
+		EvidenceText:       "bash tests/run-all.sh exited 0",
+		PREvidenceMarkdown: "## metareview PR Evidence\n\n### Validation\n\n- bash tests/run-all.sh exited 0\n",
+		GitHub: PRGitHubContext{
+			Available:      true,
+			ReviewDecision: "APPROVED",
+			Entries: []PRGitHubEntry{{
+				Author: "reviewer",
+				URL:    "https://github.com/acme/repo/pull/7#pullrequestreview-3",
+				State:  "COMMENTED",
+				Body:   "BLOCKER: please resolve this before merging",
+			}},
+		},
+	})
+
+	assertFinding(t, findings, "external-reviewer", "high", "External GitHub review blocker")
+}
+
 func TestPRReadyReviewersDoNotCopyGitHubBodyIntoFindings(t *testing.T) {
 	externalBody := "BLOCKER token=redaction-test-value"
 	findings := RunPRReady(PRReadyContext{

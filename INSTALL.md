@@ -101,19 +101,31 @@ metareview setup --check
 metareview review artifact docs/quickstart.md
 ```
 
-Artifact reviews create a Markdown review scaffold under `docs/metareview/reviews/` with an initial `NOT_REVIEWED` verdict. The default artifact command exits nonzero because the scaffold is not a completed review. Artifact review runs the required lenses as parallel subagents by default; use `in-session-emulated` only when subagents are unavailable or the human requests no delegation, and mark that result as not independently adversarial and weaker evidence. Use `--scaffold-only` only when you explicitly want scaffold creation without passing the gate. Deterministic lifecycle gates such as `task-done`, `epic-ready`, and `pr-ready` report `PASS`, `PASS_ADVISORY`, or blocking findings. Treat every blocking finding and every `NOT_REVIEWED` artifact as open work until a re-review clears it.
+Artifact reviews create a Markdown review scaffold under `docs/metareview/reviews/` with an initial `NOT_REVIEWED` verdict. The default artifact command exits nonzero because the scaffold is not a completed review. Artifact review runs the required lenses as parallel subagents by default; use `in-session-emulated` only when subagents are unavailable or the human requests no delegation, and mark that result as not independently adversarial and weaker evidence. Use `--scaffold-only` only when you explicitly want scaffold creation without passing the gate.
+
+Deterministic lifecycle gates such as `task-done`, `epic-ready`, and `pr-ready` use this result contract: `PASS`/`PASS_ADVISORY` proceed only with zero blockers; `NEEDS_REVISION` repairs via `--previous-run`; `ESCALATED` stops same-target retries; human must narrow, split, or redesign the target. Exit handling: `0` means verify a passing verdict; `1` with a review path means follow that log; nonzero without a path means read stderr. `NOT_REVIEWED` artifact scaffolds are also blocking until completed.
 
 ## Agent Workflow
 
 Use the smallest gate that matches the lifecycle point:
 
 ```bash
+tmp_evidence="$(mktemp)"
+metareview evidence run -- go test ./... > "$tmp_evidence"
+metareview evidence run -- git diff --check >> "$tmp_evidence"
+
 metareview review artifact <path>
-metareview review task-done <task-id-or-path> --base <base-ref> --evidence <file>
-metareview review epic-ready <epic-id-or-path>
-metareview review pr-ready --base <base-ref>
+metareview review task-done <task-id-or-path> --base <base-ref> --evidence "$tmp_evidence"
+metareview review epic-ready <epic-id-or-path> --base <base-ref> --evidence "$tmp_evidence"
+metareview review pr-ready --base <base-ref> --evidence "$tmp_evidence"
 metareview learn --post-merge <pr-number> --base <pre-merge-ref>
 ```
+
+After a GitHub PR exists, append CI receipts with `metareview evidence import --github-checks <pr-number> [--repo <owner/repo>] >> "$tmp_evidence"`.
+
+Task-done and PR-ready parse receipt files as validation evidence; epic-ready reads the supplied evidence text for child-completion signals.
+
+Task-done, epic-ready, and PR-ready context packs include context profiles, generated-artifact filtering, and shard plans for risky diffs. Task-done and PR-ready also include Review Manifest coverage accounting.
 
 Commit durable Markdown artifacts under `docs/metareview/`. Keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local unless a future contract says otherwise. In ordinary project repositories, prefer exact `.gitignore` entries:
 
@@ -146,4 +158,5 @@ bash tests/run-all.sh
 
 - `No packaged metareview binary or Go source checkout found`: run `npm run build` in a source checkout or install a packaged release.
 - `setup --check` reports advisory mode: install or configure metaswarm, Superpowers, and Beads if full lifecycle integration is desired.
-- Review returns blockers: fix the cited issues and re-run with `--previous-run <run-id>` until the verdict is `PASS` or `PASS_ADVISORY`.
+- Review returns `NEEDS_REVISION`: fix the cited blockers and re-run with `--previous-run <run-id>`.
+- Review returns `ESCALATED`: stop same-target retries; human must narrow, split, or redesign the target.

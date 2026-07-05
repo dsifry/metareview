@@ -40,7 +40,7 @@ The goal is not another loose "please review this" prompt. The goal is a review 
 metareview is built around review patterns that work well when humans and coding agents are collaborating:
 
 - **Adversarial multi-agent reviews:** run independent reviewer lenses such as architecture, code quality, security, test adequacy, product/user impact, and acceptance completeness against the same artifact or diff.
-- **Iterations with hard gates:** treat critical, high, and spec-contract findings as blockers; revise the work and re-run review with `--previous-run <run-id>` until blockers are cleared.
+- **Iterations with hard gates:** treat critical, high, and spec-contract findings as blockers; retry only while the gate reports `NEEDS_REVISION`, and stop autonomous retries on `ESCALATED`.
 - **Fractal review loops:** decompose large work into epics, tasks, and child plans, then review each level before implementation proceeds.
 - **Cross-level intent checks:** after multiple revision loops, compare the accepted child work back to the parent plan and original user request.
 - **Evidence-backed reviews:** attach test output, validation commands, acceptance notes, and PR context so reviewers judge the real work product, not a summary.
@@ -49,6 +49,19 @@ metareview is built around review patterns that work well when humans and coding
 - **Repository-knowledge priming:** load service inventories, Beads knowledge, session history, and GitHub history so reviewers catch duplicated services, stale assumptions, and prior mistakes.
 - **Review artifact accountability:** write durable Markdown context and review logs so future humans and agents can inspect what was reviewed, what blocked, and why it passed.
 - **Post-merge reflection:** after a PR lands, extract accepted learnings, discarded candidates, and reviewer calibration so the next review starts smarter.
+
+## What Changed From 0.4.0 To 0.6.0
+
+0.6.0 made metareview more useful for real agent work by adding concrete coverage accounting around the review surface:
+
+- **Structured evidence receipts:** `metareview evidence run -- <command>` records validation commands as JSON receipts with exit codes, timestamps, summaries, and output hashes. `metareview evidence import --github-checks <pr-number>` imports GitHub check results into the same receipt format. Task-done and PR-ready parse those receipts as validation evidence; epic-ready accepts the same evidence file as child-completion context.
+- **Context preflight:** task-done, epic-ready, and PR-ready reviews now include a Context Profile that records raw and filtered diff size, generated review-artifact exclusions, omitted or truncated untracked files, and context-risk reasons.
+- **Shard planning:** large or risky diffs get deterministic Context Shard Plans so agents can split review work by source paths while preserving a shared source diff hash.
+- **Review Manifest aggregation:** task-done and PR-ready context packs now account for source paths, generated path dispositions, shard assignments, manifest hashes, static runtime status, and manifest blockers.
+- **Stateful PR-ready projection:** PR-ready reconciles prior findings by target and run chain, so resolved or unrelated blockers do not keep blocking a later branch review.
+- **0.6.0 metadata alignment:** npm, Codex plugin, Claude Code plugin, and Go source checkout version reporting now agree on `0.6.0`.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release notes.
 
 ## Install
 
@@ -144,9 +157,9 @@ flowchart TD
     moreChildren{More child units?}
     parentIntent{Parent intent preserved?}
     parentRevise[Reconcile drift against original intent]
-    epicReady[Epic-ready review<br/>metareview review epic-ready target]
+    epicReady[Epic-ready review<br/>metareview review epic-ready target --base ref --evidence file]
     epicPass{Epic review passes?}
-    prReady[PR-ready review<br/>metareview review pr-ready --base ref]
+    prReady[PR-ready review<br/>metareview review pr-ready --base ref --evidence file]
     prPass{PR review passes?}
     merge[Push, PR, merge]
     learn[Post-merge learning<br/>metareview learn --post-merge pr --base pre-merge-ref]
@@ -157,31 +170,48 @@ flowchart TD
     child --> childReview --> childApproved
     childApproved -- no --> childRevise --> childReview
     childApproved -- yes --> implement --> taskDone --> taskPass
-    taskPass -- no --> fix --> taskDone
-    taskPass -- yes --> moreChildren
+    taskPass -- NEEDS_REVISION --> fix --> taskDone
+    taskPass -- ESCALATED --> escalate
+    taskPass -- PASS/PASS_ADVISORY --> moreChildren
     moreChildren -- yes --> child
     moreChildren -- no --> parentIntent
     parentIntent -- no --> parentRevise --> childReview
     parentIntent -- yes --> epicReady --> epicPass
-    epicPass -- no --> childReview
-    epicPass -- yes --> prReady --> prPass
-    prPass -- no --> fix --> prReady
-    prPass -- yes --> merge --> learn
+    epicPass -- NEEDS_REVISION --> childReview
+    epicPass -- ESCALATED --> escalate
+    epicPass -- PASS/PASS_ADVISORY --> prReady --> prPass
+    prPass -- NEEDS_REVISION --> fix --> prReady
+    prPass -- ESCALATED --> escalate
+    prPass -- PASS/PASS_ADVISORY --> merge --> learn
+    escalate[Human narrows, splits, or redesigns target]
 ```
 
 The decomposition loop is intentionally fractal: a parent plan can be decomposed into child epics, each child can be decomposed again, and each level gets reviewed before implementation continues. After the iteration converges, metareview checks back against the original parent intent so accumulated local fixes do not quietly drift away from the user request.
 
-Every review produces Markdown artifacts under `docs/metareview/` and local transient state under `.metareview/`. A blocking finding is current work. A `NOT_REVIEWED` artifact scaffold is also current work, not a pass. Artifact review runs the five required lenses as parallel subagents by default; `in-session-emulated` fallback is weaker evidence and must say the review is not independently adversarial. Fix blockers, re-run with `--previous-run <run-id>`, and do not claim completion until the review reports `PASS` or `PASS_ADVISORY` with zero blockers.
+Every review produces Markdown artifacts under `docs/metareview/` and local transient state under `.metareview/`. A blocking finding is current work. A `NOT_REVIEWED` artifact scaffold is also current work, not a pass. Artifact review runs the five required lenses as parallel subagents by default; `in-session-emulated` fallback is weaker evidence and must say the review is not independently adversarial.
+
+Lifecycle gate results have a small operating contract:
+
+- `PASS`: proceed.
+- `PASS_ADVISORY`: proceed only when the review reports zero blocking findings.
+- `NEEDS_REVISION`: fix blockers, then re-run the same gate with `--previous-run <run-id>`.
+- `ESCALATED`: stop same-target retries; human must narrow, split, or redesign the target.
+
+Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr.
 
 ## How Humans Use It
 
 Humans use metareview to make review timing explicit:
 
 ```bash
+tmp_evidence="$(mktemp)"
+metareview evidence run -- go test ./... > "$tmp_evidence"
+metareview evidence run -- git diff --check >> "$tmp_evidence"
+
 metareview review artifact docs/spec.md
-metareview review task-done docs/tasks/task-001.md --base main --evidence /tmp/evidence.txt
-metareview review epic-ready docs/epics/epic-001.md
-metareview review pr-ready --base main
+metareview review task-done docs/tasks/task-001.md --base main --evidence "$tmp_evidence"
+metareview review epic-ready docs/epics/epic-001.md --base main --evidence "$tmp_evidence"
+metareview review pr-ready --base main --evidence "$tmp_evidence"
 metareview learn --post-merge 42 --base pre-merge-sha
 ```
 
@@ -197,7 +227,7 @@ Coding agents should treat metareview as a completion gate, not an optional comm
 - Before push, PR creation, or merge, run `pr-ready`.
 - After merge, run `learn --post-merge` so repository knowledge improves.
 
-Agents must not say work is done while a blocking finding remains unresolved. They should commit durable review/context artifacts when the repository's artifact policy says to do so, and keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local.
+Agents must not say work is done while a blocking finding remains unresolved or while a gate is `NEEDS_REVISION` or `ESCALATED`. They should commit durable review/context artifacts when the repository's artifact policy says to do so, and keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local.
 
 When configuring `.gitignore` in ordinary project repositories, ignore those transient files with exact file entries. Do not ignore `docs/metareview/` or the whole `.metareview/` directory, because durable learning, calibration, and fallback knowledge can live there:
 
@@ -211,10 +241,12 @@ When configuring `.gitignore` in ordinary project repositories, ignore those tra
 ```bash
 metareview setup --check
 metareview setup --bootstrap-prereqs --dry-run
+metareview evidence run -- <command> [args...]
+metareview evidence import --github-checks <pr-number> [--repo <owner/repo>]
 metareview review artifact <path>
 metareview review task-done <task-id-or-path> --base <base-ref> --evidence <file>
-metareview review epic-ready <epic-id-or-path>
-metareview review pr-ready --base <base-ref>
+metareview review epic-ready <epic-id-or-path> --base <base-ref> --evidence <file>
+metareview review pr-ready --base <base-ref> --evidence <file>
 metareview learn --post-merge <pr-number> --base <pre-merge-ref>
 metareview status
 ```
@@ -234,6 +266,7 @@ metareview follows a few practical rules:
 ## More Docs
 
 - [INSTALL.md](INSTALL.md) - installation paths and troubleshooting
+- [CHANGELOG.md](CHANGELOG.md) - release notes
 - [docs/quickstart.md](docs/quickstart.md) - short operator guide
 - [docs/README.codex.md](docs/README.codex.md) - Codex plugin usage
 - [docs/README.claude.md](docs/README.claude.md) - Claude Code plugin usage

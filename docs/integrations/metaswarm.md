@@ -20,10 +20,12 @@ The machine-readable descriptor is `docs/integrations/metaswarm.integration.json
 | Metaswarm stage | Metareview command | Gate behavior |
 | --- | --- | --- |
 | Artifact ready for implementation | `metareview review artifact <path>` | Creates a fail-closed scaffold; remains blocking while verdict is `NOT_REVIEWED`, reviewer rows are incomplete, or blockers remain. |
-| Work unit claims done | `metareview review task-done <task-id-or-path>` | Blocks task closure on unresolved blocking findings. |
-| Epic locally complete | `metareview review epic-ready <epic-id-or-path>` | Blocks epic landing on integration, acceptance, or intent-drift findings. |
-| PR ready to push or merge | `metareview review pr-ready --base <base-ref>` | Blocks PR readiness on branch-level blockers. |
+| Work unit claims done | `metareview review task-done <task-id-or-path> --base <base-ref> --evidence <file>` | Blocks task closure on unresolved blocking findings. |
+| Epic locally complete | `metareview review epic-ready <epic-id-or-path> --base <base-ref> --evidence <file>` | Blocks epic landing on integration, acceptance, or intent-drift findings. |
+| PR ready to push or merge | `metareview review pr-ready --base <base-ref> --evidence <file>` | Blocks PR readiness on branch-level blockers. |
 | Confirmed PR merge | `metareview learn --post-merge <pr-number> --base <pre-merge-ref>` | Curates accepted/discarded learning and reviewer calibration. |
+
+For lifecycle gates, `NEEDS_REVISION` means metaswarm should repair and re-run the same gate with `--previous-run <run-id>`. `ESCALATED` means the same-target autonomous loop is exhausted; human must narrow, split, or redesign the target.
 
 Post-merge learning is advisory by default. In normal mode, a learning failure should be recorded and release cleanup may continue. In strict mode, the caller treats a nonzero learning exit as blocking release cleanup until the learning run succeeds or is explicitly waived.
 
