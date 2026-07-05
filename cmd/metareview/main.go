@@ -304,11 +304,20 @@ func handleEvidence(args []string) {
 			fmt.Fprintln(os.Stderr, "Usage: metareview evidence run -- <command> [args...]")
 			os.Exit(2)
 		}
-		receipt, err := evidence.Run(context.Background(), args[separator+1:], evidence.RunOptions{})
-		exitOnErr(err)
+		receipt, runErr := evidence.Run(context.Background(), args[separator+1:], evidence.RunOptions{})
+		if runErr != nil && receipt.SchemaVersion == 0 {
+			exitOnErr(runErr)
+		}
 		bytes, err := json.Marshal(receipt)
 		exitOnErr(err)
 		fmt.Println(string(bytes))
+		if runErr != nil {
+			fmt.Fprintln(os.Stderr, runErr)
+			if receipt.ExitCode != 0 {
+				os.Exit(receipt.ExitCode)
+			}
+			os.Exit(1)
+		}
 		if receipt.ExitCode != 0 {
 			os.Exit(receipt.ExitCode)
 		}
@@ -337,10 +346,22 @@ func handleEvidence(args []string) {
 		bytes, err := bundle.JSONL()
 		exitOnErr(err)
 		fmt.Print(string(bytes))
+		if bundleExitCode(bundle) != 0 {
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown evidence command: %s\n", args[0])
 		os.Exit(2)
 	}
+}
+
+func bundleExitCode(bundle evidence.Bundle) int {
+	for _, receipt := range bundle.Receipts {
+		if receipt.ExitCode != 0 {
+			return 1
+		}
+	}
+	return 0
 }
 
 func mustCwd() string {

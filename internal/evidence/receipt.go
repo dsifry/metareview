@@ -76,45 +76,54 @@ func Parse(data []byte) (Bundle, error) {
 func ParseWithOptions(data []byte, options ParseOptions) (Bundle, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	var receipts []Receipt
-	jsonLines := 0
+	receiptLines := 0
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "{") {
 			continue
 		}
-		jsonLines++
-		receipt, err := parseReceiptLine([]byte(line), options)
+		receipt, ok, err := parseReceiptLine([]byte(line), options)
 		if err != nil {
 			return Bundle{}, err
 		}
+		if !ok {
+			continue
+		}
+		receiptLines++
 		receipts = append(receipts, receipt)
 	}
 	if err := scanner.Err(); err != nil {
 		return Bundle{}, err
 	}
-	if jsonLines > 0 {
+	if receiptLines > 0 {
 		return Bundle{Receipts: receipts}, nil
 	}
 	return parseFreeform(data), nil
 }
 
-func parseReceiptLine(line []byte, options ParseOptions) (Receipt, error) {
+func parseReceiptLine(line []byte, options ParseOptions) (Receipt, bool, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(line, &raw); err != nil {
-		return Receipt{}, err
+		if bytes.Contains(line, []byte("schemaVersion")) {
+			return Receipt{}, false, err
+		}
+		return Receipt{}, false, nil
+	}
+	if _, ok := raw["schemaVersion"]; !ok {
+		return Receipt{}, false, nil
 	}
 	var receipt Receipt
 	if err := json.Unmarshal(line, &receipt); err != nil {
-		return Receipt{}, err
+		return Receipt{}, false, err
 	}
 	if receipt.SchemaVersion != 1 {
-		return Receipt{}, fmt.Errorf("unsupported evidence schemaVersion %d", receipt.SchemaVersion)
+		return Receipt{}, false, fmt.Errorf("unsupported evidence schemaVersion %d", receipt.SchemaVersion)
 	}
 	if _, ok := raw["exitCode"]; !ok {
-		return Receipt{}, errors.New("evidence receipt missing exitCode")
+		return Receipt{}, false, errors.New("evidence receipt missing exitCode")
 	}
 	if strings.TrimSpace(receipt.Summary) == "" {
-		return Receipt{}, errors.New("evidence receipt missing summary")
+		return Receipt{}, false, errors.New("evidence receipt missing summary")
 	}
 	if receipt.Kind == "" {
 		receipt.Kind = ReceiptKindValidation
@@ -126,14 +135,14 @@ func parseReceiptLine(line []byte, options ParseOptions) (Receipt, error) {
 				finished = receipt.StartedAt
 			}
 			if finished.IsZero() {
-				return Receipt{}, errors.New("strict evidence receipt missing timestamp")
+				return Receipt{}, false, errors.New("strict evidence receipt missing timestamp")
 			}
 			if options.Now.Sub(finished) > options.MaxAge {
-				return Receipt{}, errors.New("strict evidence receipt is stale")
+				return Receipt{}, false, errors.New("strict evidence receipt is stale")
 			}
 		}
 	}
-	return receipt, nil
+	return receipt, true, nil
 }
 
 func parseFreeform(data []byte) Bundle {

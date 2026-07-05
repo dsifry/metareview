@@ -47,6 +47,19 @@ func TestFreeformFallbackRecognizesCommonSuccess(t *testing.T) {
 	}
 }
 
+func TestFreeformFallbackIgnoresBracePrefixedNonReceiptLines(t *testing.T) {
+	bundle, err := Parse([]byte("note: command logged structured-ish text\n{this was not a receipt}\nbash tests/run-all.sh exited 0"))
+	if err != nil {
+		t.Fatalf("parse fallback with brace-prefixed note: %v", err)
+	}
+	if !bundle.HasSuccessfulValidation(KindGeneric) {
+		t.Fatalf("expected freeform fallback validation: %+v", bundle)
+	}
+	if !bundle.Fallback {
+		t.Fatalf("expected fallback marker")
+	}
+}
+
 func TestMalformedReceiptFailsStrictMode(t *testing.T) {
 	input := []byte(`{"schemaVersion":1,"kind":"validation","summary":"missing exit code"}` + "\n")
 	if _, err := Parse(input); err == nil {
