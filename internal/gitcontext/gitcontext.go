@@ -40,6 +40,14 @@ type Context struct {
 }
 
 func Collect(root, requestedBase string) (Context, error) {
+	return collect(root, requestedBase, nil)
+}
+
+func CollectWithExcludes(root, requestedBase string, excludes []string) (Context, error) {
+	return collect(root, requestedBase, excludes)
+}
+
+func collect(root, requestedBase string, excludes []string) (Context, error) {
 	base, err := resolveBase(root, requestedBase)
 	if err != nil {
 		return Context{}, err
@@ -48,20 +56,20 @@ func Collect(root, requestedBase string) (Context, error) {
 	if err != nil {
 		return Context{}, err
 	}
-	diff, diffTruncated, err := limitedGit(root, "diff", base+"..HEAD")
+	diff, diffTruncated, err := limitedGit(root, withPathspec([]string{"diff", base + "..HEAD"}, excludes)...)
 	if err != nil {
 		return Context{}, err
 	}
-	stagedDiff, stagedDiffTruncated, err := limitedGit(root, "diff", "--cached")
+	stagedDiff, stagedDiffTruncated, err := limitedGit(root, withPathspec([]string{"diff", "--cached"}, excludes)...)
 	if err != nil {
 		return Context{}, err
 	}
-	workingTreeDiff, workingTreeDiffTruncated, err := limitedGit(root, "diff")
+	workingTreeDiff, workingTreeDiffTruncated, err := limitedGit(root, withPathspec([]string{"diff"}, excludes)...)
 	if err != nil {
 		return Context{}, err
 	}
-	workingTreeFiles := splitLines(tryGit(root, "diff", "--name-only"))
-	untrackedFiles := splitLines(tryGit(root, "ls-files", "--others", "--exclude-standard"))
+	workingTreeFiles := splitLines(tryGit(root, withPathspec([]string{"diff", "--name-only"}, excludes)...))
+	untrackedFiles := splitLines(tryGit(root, withPathspec([]string{"ls-files", "--others", "--exclude-standard"}, excludes)...))
 	untrackedExcerpts, err := readUntrackedExcerpts(root, untrackedFiles)
 	if err != nil {
 		return Context{}, err
@@ -71,14 +79,14 @@ func Collect(root, requestedBase string) (Context, error) {
 		HeadSHA:                  head,
 		Branch:                   tryGit(root, "branch", "--show-current"),
 		StatusShort:              tryGit(root, "status", "--short"),
-		ChangedFiles:             splitLines(tryGit(root, "diff", "--name-only", base+"..HEAD")),
-		StagedFiles:              splitLines(tryGit(root, "diff", "--cached", "--name-only")),
+		ChangedFiles:             splitLines(tryGit(root, withPathspec([]string{"diff", "--name-only", base + "..HEAD"}, excludes)...)),
+		StagedFiles:              splitLines(tryGit(root, withPathspec([]string{"diff", "--cached", "--name-only"}, excludes)...)),
 		UnstagedFiles:            workingTreeFiles,
 		WorkingTreeFiles:         workingTreeFiles,
 		UntrackedFiles:           untrackedFiles,
-		DiffStat:                 tryGit(root, "diff", "--stat", base+"..HEAD"),
-		StagedStat:               tryGit(root, "diff", "--cached", "--stat"),
-		WorkingTreeStat:          tryGit(root, "diff", "--stat"),
+		DiffStat:                 tryGit(root, withPathspec([]string{"diff", "--stat", base + "..HEAD"}, excludes)...),
+		StagedStat:               tryGit(root, withPathspec([]string{"diff", "--cached", "--stat"}, excludes)...),
+		WorkingTreeStat:          tryGit(root, withPathspec([]string{"diff", "--stat"}, excludes)...),
 		Diff:                     diff,
 		DiffTruncated:            diffTruncated,
 		StagedDiff:               stagedDiff,
@@ -87,6 +95,21 @@ func Collect(root, requestedBase string) (Context, error) {
 		WorkingTreeDiffTruncated: workingTreeDiffTruncated,
 		UntrackedExcerpts:        untrackedExcerpts,
 	}, nil
+}
+
+func withPathspec(args []string, excludes []string) []string {
+	if len(excludes) == 0 {
+		return args
+	}
+	out := append([]string{}, args...)
+	out = append(out, "--", ".")
+	for _, exclude := range excludes {
+		exclude = strings.TrimSpace(exclude)
+		if exclude != "" {
+			out = append(out, ":(exclude)"+exclude)
+		}
+	}
+	return out
 }
 
 func resolveBase(root, requestedBase string) (string, error) {
