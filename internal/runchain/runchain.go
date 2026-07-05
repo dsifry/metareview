@@ -17,6 +17,7 @@ type Options struct {
 	Target        map[string]string
 	PreviousRunID string
 	MaxAttempts   int
+	HeadSHA       string
 }
 
 type Decision struct {
@@ -36,6 +37,7 @@ type Record struct {
 	PreviousRunID        string            `json:"previousRunId"`
 	AttemptNumber        int               `json:"attemptNumber"`
 	MaxAttempts          int               `json:"maxAttempts"`
+	HeadSHA              string            `json:"headSha"`
 	BlockingFindingCount int               `json:"blockingFindingCount"`
 	AdvisoryFindingCount int               `json:"advisoryFindingCount"`
 	FollowUpFindingCount int               `json:"followUpFindingCount"`
@@ -71,7 +73,7 @@ func Resolve(root string, options Options) (Decision, error) {
 		if strings.EqualFold(previous.Verdict, "ESCALATED") {
 			return Decision{}, fmt.Errorf("previous run %s already escalated", options.PreviousRunID)
 		}
-		if escalated, ok := escalatedForTarget(records, options.Scope, options.Target); ok && escalated.ID != previous.ID {
+		if escalated, ok := escalatedForTarget(records, options.Scope, options.Target, options.HeadSHA); ok && escalated.ID != previous.ID {
 			return Decision{}, fmt.Errorf("same target already escalated in run %s", escalated.ID)
 		}
 		rootRun := chain[0]
@@ -81,7 +83,7 @@ func Resolve(root string, options Options) (Decision, error) {
 		}
 		return Decision{AttemptNumber: previous.AttemptNumber + 1, MaxAttempts: max, PreviousRun: &previous, RootRun: &rootRun, Chain: chain}, nil
 	}
-	if escalated, ok := escalatedForTarget(records, options.Scope, options.Target); ok {
+	if escalated, ok := escalatedForTarget(records, options.Scope, options.Target, options.HeadSHA); ok {
 		return Decision{}, fmt.Errorf("same target already escalated in run %s", escalated.ID)
 	}
 	return Decision{AttemptNumber: 1, MaxAttempts: effectiveMax(options.MaxAttempts)}, nil
@@ -148,9 +150,12 @@ func ChainTo(records []Record, runID string) ([]Record, error) {
 	return chain, nil
 }
 
-func escalatedForTarget(records []Record, scope string, target map[string]string) (Record, bool) {
+func escalatedForTarget(records []Record, scope string, target map[string]string, headSHA string) (Record, bool) {
 	for _, record := range records {
 		if record.Scope == scope && sameTarget(record.Target, target) && strings.EqualFold(record.Verdict, "ESCALATED") {
+			if strings.TrimSpace(headSHA) != "" && strings.TrimSpace(record.HeadSHA) != "" && strings.TrimSpace(record.HeadSHA) != strings.TrimSpace(headSHA) {
+				continue
+			}
 			return record, true
 		}
 	}

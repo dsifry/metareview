@@ -29,6 +29,7 @@ type PRReviewLog struct {
 type PRGitHubContext struct {
 	Available         bool
 	UnavailableReason string
+	ReviewDecision    string
 	Entries           []PRGitHubEntry
 }
 
@@ -146,7 +147,12 @@ func externalGitHubFindings(context PRGitHubContext) []Finding {
 		return nil
 	}
 	var results []Finding
+	reviewDecision := strings.ToUpper(strings.TrimSpace(context.ReviewDecision))
 	for _, entry := range context.Entries {
+		state := strings.ToUpper(strings.TrimSpace(entry.State))
+		if reviewDecision == "APPROVED" && (state == "CHANGES_REQUESTED" || state == "REQUEST_CHANGES") {
+			continue
+		}
 		text := strings.ToUpper(entry.State + "\n" + entry.Body)
 		if !strings.Contains(text, "CHANGES_REQUESTED") &&
 			!strings.Contains(text, "REQUEST_CHANGES") &&

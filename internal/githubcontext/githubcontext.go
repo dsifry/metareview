@@ -21,6 +21,7 @@ type Context struct {
 	URL               string
 	Title             string
 	Body              string
+	ReviewDecision    string
 	Comments          []Entry
 	Reviews           []Entry
 }
@@ -37,6 +38,7 @@ type prView struct {
 	URL      string    `json:"url"`
 	Title    string    `json:"title"`
 	Body     string    `json:"body"`
+	Decision string    `json:"reviewDecision"`
 	Comments []comment `json:"comments"`
 	Reviews  []review  `json:"reviews"`
 }
@@ -84,7 +86,7 @@ func Collect(root, prNumber string) (Context, error) {
 	if _, err := command(root, "gh", "auth", "status"); err != nil {
 		return unavailable("gh-auth-unavailable", prNumber), nil
 	}
-	out, err := command(root, "gh", "pr", "view", prNumber, "--json", "number,url,title,body,comments,reviews")
+	out, err := command(root, "gh", "pr", "view", prNumber, "--json", "number,url,title,body,reviewDecision,comments,reviews")
 	if err != nil {
 		return unavailable("github-pr-unavailable", prNumber), nil
 	}
@@ -93,14 +95,15 @@ func Collect(root, prNumber string) (Context, error) {
 		return Context{}, err
 	}
 	ctx := Context{
-		Available: true,
-		PRNumber:  prNumber,
-		Remote:    strings.TrimSpace(remote),
-		URL:       Redact(parsed.URL),
-		Title:     excerpt(Redact(parsed.Title)),
-		Body:      excerpt(Redact(parsed.Body)),
-		Comments:  make([]Entry, 0, len(parsed.Comments)),
-		Reviews:   make([]Entry, 0, len(parsed.Reviews)),
+		Available:      true,
+		PRNumber:       prNumber,
+		Remote:         strings.TrimSpace(remote),
+		URL:            Redact(parsed.URL),
+		Title:          excerpt(Redact(parsed.Title)),
+		Body:           excerpt(Redact(parsed.Body)),
+		ReviewDecision: excerpt(Redact(parsed.Decision)),
+		Comments:       make([]Entry, 0, len(parsed.Comments)),
+		Reviews:        make([]Entry, 0, len(parsed.Reviews)),
 	}
 	for _, item := range parsed.Comments {
 		ctx.Comments = append(ctx.Comments, Entry{
@@ -173,6 +176,11 @@ func RenderMarkdown(ctx Context) string {
 	builder.WriteString("- Title: ")
 	builder.WriteString(excerpt(Redact(ctx.Title)))
 	builder.WriteString("\n")
+	if strings.TrimSpace(ctx.ReviewDecision) != "" {
+		builder.WriteString("- Review decision: ")
+		builder.WriteString(excerpt(Redact(ctx.ReviewDecision)))
+		builder.WriteString("\n")
+	}
 	if strings.TrimSpace(ctx.Body) != "" {
 		builder.WriteString("- Body excerpt: ")
 		builder.WriteString(excerpt(Redact(ctx.Body)))

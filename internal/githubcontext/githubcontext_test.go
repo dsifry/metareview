@@ -80,10 +80,11 @@ func TestCollectSummarizesAndRedactsGitHubText(t *testing.T) {
 	credentialValue := "redaction-test-value"
 	bearerValue := "redaction-bearer-value"
 	payload := map[string]any{
-		"number": 12,
-		"url":    "https://github.com/acme/repo/pull/12",
-		"title":  "Improve parser",
-		"body":   "PR body contains token=" + credentialValue,
+		"number":         12,
+		"url":            "https://github.com/acme/repo/pull/12",
+		"title":          "Improve parser",
+		"body":           "PR body contains token=" + credentialValue,
+		"reviewDecision": "APPROVED",
 		"comments": []map[string]any{{
 			"author": map[string]any{"login": "alice"},
 			"url":    "https://github.com/acme/repo/pull/12#issuecomment-1",
@@ -122,6 +123,9 @@ func TestCollectSummarizesAndRedactsGitHubText(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "https://github.com/acme/repo/pull/12#issuecomment-1") {
 		t.Fatalf("rendered markdown missing comment provenance:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Review decision: APPROVED") {
+		t.Fatalf("rendered markdown missing review decision:\n%s", rendered)
 	}
 	if len([]rune(ctx.Comments[0].Body)) > maxExcerptRunes+len(redactionMarker)+8 {
 		t.Fatalf("comment excerpt was not bounded: %d", len([]rune(ctx.Comments[0].Body)))

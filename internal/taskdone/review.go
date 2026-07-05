@@ -140,6 +140,7 @@ func Create(root, target string, options Options) (Result, error) {
 			Target:        targetRecord,
 			PreviousRunID: options.PreviousRunID,
 			MaxAttempts:   options.MaxAttempts,
+			HeadSHA:       git.HeadSHA,
 		})
 		if err != nil {
 			return err
