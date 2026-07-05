@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dsifry/metareview/internal/evidence"
 	"github.com/dsifry/metareview/internal/findings"
 )
 
@@ -51,7 +52,6 @@ type KnowledgeFact struct {
 
 var evalPattern = regexp.MustCompile(`\beval\s*\(`)
 var todoPattern = regexp.MustCompile(`(?i)\b(TODO|FIXME)\b`)
-var validationPattern = regexp.MustCompile(`(?i)tests?.*(pass|passed|exited 0|ok)`)
 var inventoryPathPattern = regexp.MustCompile(`[A-Za-z0-9_./-]+\.(go|js|ts|tsx|jsx|py|rb)`)
 
 func RunTaskDone(context Context) []Finding {
@@ -73,7 +73,7 @@ func RunTaskDone(context Context) []Finding {
 		}))
 	}
 
-	if len(changedSource) > 0 && !hasTestChange(context.Git) && !validationPattern.MatchString(context.EvidenceText) {
+	if len(changedSource) > 0 && !hasTestChange(context.Git) && !hasSuccessfulValidationEvidence(context.EvidenceText) {
 		sortedSource := append([]string{}, changedSource...)
 		sort.Strings(sortedSource)
 		results = append(results, finding(Finding{
@@ -119,6 +119,14 @@ func RunTaskDone(context Context) []Finding {
 
 	results = append(results, duplicatePathFindings(context.Knowledge, changedSource)...)
 	return results
+}
+
+func hasSuccessfulValidationEvidence(text string) bool {
+	bundle, err := evidence.Parse([]byte(text))
+	if err != nil {
+		return false
+	}
+	return bundle.HasSuccessfulValidation(evidence.KindGeneric)
 }
 
 func finding(input Finding) Finding {

@@ -72,6 +72,44 @@ func TestTaskDoneReviewersAllowCleanValidatedChanges(t *testing.T) {
 	}
 }
 
+func TestTaskDoneReviewersAcceptStructuredValidationReceipt(t *testing.T) {
+	findings := RunTaskDone(Context{
+		Task: TaskContext{Type: "beads-task", ID: "task-1", Text: "Acceptance: parse JSON safely"},
+		Git: GitContext{
+			ChangedFiles: []string{"lib/safe.js"},
+			Diff:         "+module.exports = input => JSON.parse(input);\n",
+		},
+		EvidenceText: `{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"exitCode":0,"summary":"go test ./... exited 0"}`,
+	})
+	if len(findings) != 0 {
+		t.Fatalf("structured validation receipt should satisfy validation: %+v", findings)
+	}
+}
+
+func TestTaskDoneReviewersRejectFailedStructuredValidationReceipt(t *testing.T) {
+	findings := RunTaskDone(Context{
+		Task: TaskContext{Type: "beads-task", ID: "task-1", Text: "Acceptance: parse JSON safely"},
+		Git: GitContext{
+			ChangedFiles: []string{"lib/safe.js"},
+			Diff:         "+module.exports = input => JSON.parse(input);\n",
+		},
+		EvidenceText: `{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"exitCode":1,"summary":"tests passed before final failure"}`,
+	})
+	assertFinding(t, findings, "test-reviewer", "high", "Missing test changes")
+}
+
+func TestTaskDoneReviewersRejectMalformedStructuredValidationReceipt(t *testing.T) {
+	findings := RunTaskDone(Context{
+		Task: TaskContext{Type: "beads-task", ID: "task-1", Text: "Acceptance: parse JSON safely"},
+		Git: GitContext{
+			ChangedFiles: []string{"lib/safe.js"},
+			Diff:         "+module.exports = input => JSON.parse(input);\n",
+		},
+		EvidenceText: `{"schemaVersion":1,"kind":"validation","summary":"missing exitCode defaults to zero"}`,
+	})
+	assertFinding(t, findings, "test-reviewer", "high", "Missing test changes")
+}
+
 func assertFinding(t *testing.T, findings []Finding, reviewer, severity, titlePart string) {
 	t.Helper()
 	for _, finding := range findings {

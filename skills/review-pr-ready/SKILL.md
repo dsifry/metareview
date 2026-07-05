@@ -13,7 +13,16 @@ Run this before pushing a PR branch or asking external reviewers to spend time.
 metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--evidence <path>] [--github-pr <number>]
 ```
 
-Use `--base` for the reviewed branch diff, `--previous-run` after fixing blockers, `--evidence` for test output, and `--github-pr` to include available GitHub PR context.
+Use `--base` for the reviewed branch diff, `--previous-run` after fixing blockers, `--evidence` for structured receipts or test output, and `--github-pr` to include available GitHub PR context.
+
+Prefer structured evidence receipts:
+
+```bash
+go run ./cmd/metareview evidence run -- go test ./...
+go run ./cmd/metareview evidence import --github-checks <pr-number>
+```
+
+Freeform evidence remains accepted as a fallback, but receipts preserve command, exit code, timestamps, and output hashes.
 
 ## Workflow
 

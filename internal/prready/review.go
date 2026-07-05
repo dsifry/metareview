@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dsifry/metareview/internal/evidence"
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/githubcontext"
@@ -550,6 +551,12 @@ func uniqueStrings(values []string) []string {
 }
 
 func validationLines(text string) []string {
+	bundle, err := evidence.Parse([]byte(text))
+	if err == nil {
+		if summaries := bundle.ValidationSummaries(); len(summaries) > 0 {
+			return summaries
+		}
+	}
 	var lines []string
 	for _, line := range strings.Split(text, "\n") {
 		if strings.TrimSpace(line) != "" {
