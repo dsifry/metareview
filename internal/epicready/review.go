@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dsifry/metareview/internal/contextprofile"
 	"github.com/dsifry/metareview/internal/epicsource"
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/gitcontext"
@@ -83,11 +84,16 @@ func Create(root, target string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	git, err := gitcontext.Collect(root, options.Base)
+	exceptions := generatedTargetExceptions(epic.Path)
+	git, err := gitcontext.CollectWithExcludesExcept(root, options.Base, generatedMetareviewPathExcludes(), exceptions)
 	if err != nil {
 		return Result{}, err
 	}
-	reviewGit := filterGeneratedGitContext(git)
+	reviewGit := git
+	if len(exceptions) == 0 {
+		reviewGit = filterGeneratedGitContext(git)
+	}
+	profile := contextprofile.FromGit(reviewGit, contextprofile.Options{})
 	knowledgeContext, err := knowledge.Collect(root)
 	if err != nil {
 		return Result{}, err
@@ -125,7 +131,7 @@ func Create(root, target string, options Options) (Result, error) {
 	if report.Capabilities.Beads || report.Capabilities.Metaswarm {
 		gateEffect = "gate"
 	}
-	rawFindings := reviewers.RunEpicReady(reviewerContext(epic, children, reviewGit, knowledgeContext, childLogs, evidenceText))
+	rawFindings := reviewers.RunEpicReady(reviewerContext(epic, children, reviewGit, profile, knowledgeContext, childLogs, evidenceText))
 	targetRecord := map[string]string{"type": epicTargetType(epic), "id": epic.ID}
 	run := findings.Run{ID: runID, Scope: "epic-ready", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
 
@@ -137,7 +143,7 @@ func Create(root, target string, options Options) (Result, error) {
 		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, epic, children, reviewGit, knowledgeContext, childLogs, evidenceText, gateEffect)), 0o644); err != nil {
+		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, epic, children, reviewGit, profile, knowledgeContext, childLogs, evidenceText, gateEffect)), 0o644); err != nil {
 			return err
 		}
 		chain, err := runchain.Resolve(root, runchain.Options{
@@ -212,13 +218,15 @@ func Create(root, target string, options Options) (Result, error) {
 	return result, nil
 }
 
-func reviewerContext(epic epicsource.Source, children []tasksource.Source, git gitcontext.Context, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string) reviewers.EpicReadyContext {
+func reviewerContext(epic epicsource.Source, children []tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string) reviewers.EpicReadyContext {
 	return reviewers.EpicReadyContext{
 		Epic:     reviewers.EpicContext{ID: epic.ID, Title: epic.Title, Body: epic.Body},
 		Children: reviewerChildren(children),
 		Git: reviewers.EpicGitContext{
 			ChangedFiles: git.ChangedFiles,
 			Diff:         strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n"),
+			RiskLevel:    profile.RiskLevel,
+			RiskReasons:  profile.RiskReasons,
 		},
 		ReviewLogs:   reviewerLogs(logs),
 		Knowledge:    reviewers.EpicKnowledgeContext{ServiceInventory: knowledgeContext.ServiceInventory},
@@ -430,6 +438,17 @@ func isGeneratedMetareviewPath(path string) bool {
 		strings.HasPrefix(path, "docs/metareview/")
 }
 
+func generatedMetareviewPathExcludes() []string {
+	return []string{".metareview", ".metareview/**", "docs/metareview", "docs/metareview/**"}
+}
+
+func generatedTargetExceptions(path string) []string {
+	if isGeneratedMetareviewPath(path) {
+		return []string{path}
+	}
+	return nil
+}
+
 func readEvidence(path string) (string, error) {
 	if path == "" {
 		return "", nil
@@ -458,7 +477,7 @@ func uniquePaths(root, target string, at time.Time) (string, string, string, err
 	}
 }
 
-func contextMarkdown(runID string, epic epicsource.Source, children []tasksource.Source, git gitcontext.Context, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText, gateEffect string) string {
+func contextMarkdown(runID string, epic epicsource.Source, children []tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText, gateEffect string) string {
 	changed := append([]string{}, git.ChangedFiles...)
 	changed = append(changed, git.StagedFiles...)
 	changed = append(changed, git.WorkingTreeFiles...)
@@ -472,6 +491,8 @@ func contextMarkdown(runID string, epic epicsource.Source, children []tasksource
 		"- Head: " + markdown.InlineCode(git.HeadSHA) + "\n" +
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
+		contextprofile.Markdown(profile) + "\n\n" +
+		contextprofile.ShardPlanMarkdown(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"}) + "\n\n" +
 		"## Changed Files\n\n" + markdownList(changed, "No changed files.") + "\n\n" +
 		"## Diff\n\n" + markdown.FencedCodeBlock("diff", strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")) + "\n\n" +
 		"## Child Review Logs\n\n" + reviewLogsMarkdown(logs) + "\n\n" +

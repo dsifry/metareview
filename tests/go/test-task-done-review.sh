@@ -75,6 +75,29 @@ set -e
 test "$missing2_code" -eq 2
 grep -q "Missing value for --base" "$TMP/missing2.err"
 
+mkdir -p "$TMP/generated-target/docs/metareview/reviews"
+cd "$TMP/generated-target"
+git init -q
+git config user.email test-user
+git config user.name "Test User"
+printf "# Generated Review\n\nInitial\n" > docs/metareview/reviews/target.md
+mkdir -p docs/metareview/context
+printf "Initial noise\n" > docs/metareview/context/noise.md
+git add .
+git commit -qm "initial"
+generated_base="$(git rev-parse HEAD)"
+printf "# Generated Review\n\nUpdated review artifact under explicit target.\n" > docs/metareview/reviews/target.md
+printf "noise artifact\n%.0s" {1..5000} > docs/metareview/context/noise.md
+git add .
+git commit -qm "generated target change"
+printf "bash tests/run-all.sh exited 0\n" > "$TMP/generated-target-evidence.md"
+"$TMP/metareview" review task-done docs/metareview/reviews/target.md --base "$generated_base" --evidence "$TMP/generated-target-evidence.md" > "$TMP/generated-target.out"
+generated_target_review="$(cat "$TMP/generated-target.out")"
+grep -q "docs/metareview/reviews/target.md" "$generated_target_review"
+grep -q "docs/metareview/reviews/target.md" "$(dirname "$generated_target_review")/../context/$(basename "$generated_target_review" .md)-context.md"
+grep -q "diff --git a/docs/metareview/reviews/target.md b/docs/metareview/reviews/target.md" "$(dirname "$generated_target_review")/../context/$(basename "$generated_target_review" .md)-context.md"
+! grep -q "noise artifact" "$(dirname "$generated_target_review")/../context/$(basename "$generated_target_review" .md)-context.md"
+
 mkdir -p "$TMP/failure/lib" "$TMP/failure/.beads"
 cd "$TMP/failure"
 git init -q

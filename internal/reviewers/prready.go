@@ -9,12 +9,14 @@ import (
 )
 
 type PRReadyContext struct {
-	Git                GitContext
-	Knowledge          KnowledgeContext
-	EvidenceText       string
-	PREvidenceMarkdown string
-	ReviewLogs         []PRReviewLog
-	GitHub             PRGitHubContext
+	Git                   GitContext
+	Knowledge             KnowledgeContext
+	EvidenceText          string
+	PREvidenceMarkdown    string
+	ReviewLogs            []PRReviewLog
+	GitHub                PRGitHubContext
+	IncludeWorkingTree    bool
+	WorkingTreeDirtyFiles []string
 }
 
 type PRReviewLog struct {
@@ -39,6 +41,19 @@ type PRGitHubEntry struct {
 
 func RunPRReady(context PRReadyContext) []Finding {
 	var results []Finding
+	if !context.IncludeWorkingTree && len(context.WorkingTreeDirtyFiles) > 0 {
+		results = append(results, finding(Finding{
+			Reviewer:       "pr-readiness-reviewer",
+			Severity:       "high",
+			Title:          "Working tree changes excluded from PR-ready review",
+			Finding:        "PR-ready reviews the committed branch diff by default, but non-generated staged, unstaged, or untracked files are present.",
+			Expected:       "PR-ready runs on a clean working tree, or the caller explicitly opts into reviewing local dirt with --include-working-tree.",
+			Found:          "Dirty files: " + strings.Join(context.WorkingTreeDirtyFiles, ", "),
+			Evidence:       []findings.Evidence{{Type: "git-status"}},
+			Recommendation: "Commit, stash, or remove the local files, or rerun with --include-working-tree when the local changes are intentionally part of the review.",
+			Fingerprint:    "pr:working-tree-dirty:" + strings.Join(context.WorkingTreeDirtyFiles, "|"),
+		}))
+	}
 	if blocked := unresolvedPRReviewTargets(context.ReviewLogs); len(blocked) > 0 {
 		results = append(results, finding(Finding{
 			Reviewer:       "pr-readiness-reviewer",

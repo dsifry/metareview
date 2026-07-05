@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dsifry/metareview/internal/contextprofile"
 	"github.com/dsifry/metareview/internal/evidence"
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/gitcontext"
@@ -22,12 +23,13 @@ import (
 )
 
 type Options struct {
-	Base          string
-	PreviousRunID string
-	EvidencePath  string
-	GitHubPR      string
-	MaxAttempts   int
-	Now           time.Time
+	Base               string
+	PreviousRunID      string
+	EvidencePath       string
+	GitHubPR           string
+	MaxAttempts        int
+	IncludeWorkingTree bool
+	Now                time.Time
 }
 
 type Result struct {
@@ -86,6 +88,12 @@ func Create(root string, options Options) (Result, error) {
 		return Result{}, err
 	}
 	reviewGit := filterGeneratedGitContext(git)
+	dirtyFiles := workingTreeDirtyFiles(reviewGit)
+	analysisGit := reviewGit
+	if !options.IncludeWorkingTree {
+		analysisGit = branchOnlyGitContext(reviewGit)
+	}
+	profile := contextprofile.FromGit(analysisGit, contextprofile.Options{})
 	knowledgeContext, err := knowledge.Collect(root)
 	if err != nil {
 		return Result{}, err
@@ -116,12 +124,12 @@ func Create(root string, options Options) (Result, error) {
 		Target:           targetRecord,
 		PreviousRunIDs:   previousRunIDs,
 		HistoricalRunIDs: historicalPRReadyRunIDsForCurrentTarget(root, logs, targetRecord, git),
-		ChangedPaths:     reviewedPaths(reviewGit),
+		ChangedPaths:     reviewedPaths(analysisGit),
 		CurrentTarget:    targetRecord,
 	})
 	reviewLogs := append(latestLogsByTarget(projection.CurrentReviewLogs()), blockerLogs(projection.CurrentBlockers())...)
 	prEvidence := RenderEvidence(EvidenceInput{
-		Summary:     branchSummary(reviewGit),
+		Summary:     branchSummary(analysisGit),
 		Validation:  validationLines(evidenceText),
 		TaskReviews: taskReviewEvidence(reviewLogs),
 		EpicReviews: epicReviewEvidence(reviewLogs),
@@ -147,7 +155,7 @@ func Create(root string, options Options) (Result, error) {
 	if report.Capabilities.Beads || report.Capabilities.Metaswarm {
 		gateEffect = "gate"
 	}
-	rawFindings := reviewers.RunPRReady(reviewerContext(reviewGit, knowledgeContext, reviewLogs, evidenceText, prEvidence, ghCtx))
+	rawFindings := reviewers.RunPRReady(reviewerContext(analysisGit, profile, knowledgeContext, reviewLogs, evidenceText, prEvidence, ghCtx, options.IncludeWorkingTree, dirtyFiles))
 	run := findings.Run{ID: runID, Scope: "pr-ready", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
 
 	result := Result{RunID: runID, ReviewRel: reviewRel, ContextRel: contextRel}
@@ -158,7 +166,7 @@ func Create(root string, options Options) (Result, error) {
 		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, reviewGit, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect)), 0o644); err != nil {
+		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect)), 0o644); err != nil {
 			return err
 		}
 		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{PreviousRunID: options.PreviousRunID, PreviousRunIDs: previousRunIDs})
@@ -389,7 +397,7 @@ func legacyRecoverableRunchainError(err error) bool {
 	return strings.Contains(message, "previous run ") && (strings.Contains(message, " not found") || strings.Contains(message, " chain missing "))
 }
 
-func reviewerContext(git gitcontext.Context, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText, prEvidence string, ghCtx githubcontext.Context) reviewers.PRReadyContext {
+func reviewerContext(git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText, prEvidence string, ghCtx githubcontext.Context, includeWorkingTree bool, dirtyFiles []string) reviewers.PRReadyContext {
 	return reviewers.PRReadyContext{
 		Git: reviewers.GitContext{
 			ChangedFiles:             git.ChangedFiles,
@@ -404,12 +412,20 @@ func reviewerContext(git gitcontext.Context, knowledgeContext knowledge.Context,
 			DiffTruncated:            git.DiffTruncated,
 			StagedDiffTruncated:      git.StagedDiffTruncated,
 			WorkingTreeDiffTruncated: git.WorkingTreeDiffTruncated,
+			RawDiffBytes:             profile.RawDiffBytes,
+			FilteredDiffBytes:        profile.FilteredDiffBytes,
+			GeneratedExcludedFiles:   profile.GeneratedExcludedFiles,
+			UntrackedOmittedCount:    profile.UntrackedOmittedCount,
+			RiskLevel:                profile.RiskLevel,
+			RiskReasons:              profile.RiskReasons,
 		},
-		Knowledge:          reviewerKnowledge(knowledgeContext),
-		EvidenceText:       evidenceText,
-		PREvidenceMarkdown: prEvidence,
-		ReviewLogs:         reviewerLogs(logs),
-		GitHub:             reviewerGitHub(ghCtx),
+		Knowledge:             reviewerKnowledge(knowledgeContext),
+		EvidenceText:          evidenceText,
+		PREvidenceMarkdown:    prEvidence,
+		ReviewLogs:            reviewerLogs(logs),
+		GitHub:                reviewerGitHub(ghCtx),
+		IncludeWorkingTree:    includeWorkingTree,
+		WorkingTreeDirtyFiles: dirtyFiles,
 	}
 }
 
@@ -534,6 +550,33 @@ func reviewedPaths(git gitcontext.Context) []string {
 	paths = append(paths, git.WorkingTreeFiles...)
 	paths = append(paths, git.UntrackedFiles...)
 	return uniqueStrings(paths)
+}
+
+func workingTreeDirtyFiles(git gitcontext.Context) []string {
+	var paths []string
+	paths = append(paths, git.StagedFiles...)
+	paths = append(paths, git.UnstagedFiles...)
+	paths = append(paths, git.WorkingTreeFiles...)
+	paths = append(paths, git.UntrackedFiles...)
+	return uniqueStrings(paths)
+}
+
+func branchOnlyGitContext(git gitcontext.Context) gitcontext.Context {
+	git.StagedFiles = nil
+	git.UnstagedFiles = nil
+	git.WorkingTreeFiles = nil
+	git.UntrackedFiles = nil
+	git.StagedStat = ""
+	git.WorkingTreeStat = ""
+	git.StagedDiff = ""
+	git.WorkingTreeDiff = ""
+	git.UntrackedExcerpts = ""
+	git.StagedDiffTruncated = false
+	git.WorkingTreeDiffTruncated = false
+	git.UntrackedOmittedCount = 0
+	git.RawDiffBytes = len(git.Diff)
+	git.FilteredDiffBytes = len(git.Diff)
+	return git
 }
 
 func uniqueStrings(values []string) []string {
@@ -686,7 +729,7 @@ func uniquePaths(root string, at time.Time) (string, string, string, error) {
 	}
 }
 
-func contextMarkdown(runID string, git gitcontext.Context, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string, ghCtx githubcontext.Context, prEvidence, gateEffect string) string {
+func contextMarkdown(runID string, git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string, ghCtx githubcontext.Context, prEvidence, gateEffect string) string {
 	changed := append([]string{}, git.ChangedFiles...)
 	changed = append(changed, git.StagedFiles...)
 	changed = append(changed, git.WorkingTreeFiles...)
@@ -698,6 +741,8 @@ func contextMarkdown(runID string, git gitcontext.Context, knowledgeContext know
 		"- Head: " + markdown.InlineCode(git.HeadSHA) + "\n" +
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
+		contextprofile.Markdown(profile) + "\n\n" +
+		contextprofile.ShardPlanMarkdown(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"}) + "\n\n" +
 		"## Changed Files\n\n" + markdownList(changed, "No changed files.") + "\n\n" +
 		"## Diff\n\n" + markdown.FencedCodeBlock("diff", strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")) + "\n\n" +
 		"## Review Logs\n\n" + reviewLogsMarkdown(logs) + "\n\n" +

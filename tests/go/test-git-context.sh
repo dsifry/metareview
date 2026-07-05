@@ -44,6 +44,10 @@ assert(context.stagedDiff.includes('staged'), 'staged diff missing');
 assert(context.workingTreeDiff.includes('unstaged'), 'unstaged diff missing');
 assert(context.untrackedExcerpts.includes('+module.exports = input => eval(input);'), 'untracked excerpt should be added-line style');
 assert.strictEqual(context.stagedDiffTruncated, false, 'staged truncation flag mismatch');
+assert(context.rawDiffBytes > 0, 'raw diff bytes should be recorded');
+assert.strictEqual(context.filteredDiffBytes, context.rawDiffBytes, 'unfiltered context should have equal raw and filtered bytes');
+assert.deepStrictEqual(context.generatedExcludedFiles, [], 'no generated files should be excluded without pathspec filters');
+assert.strictEqual(context.untrackedOmittedCount, 0, 'untracked omission count mismatch');
 NODE
 
 set +e

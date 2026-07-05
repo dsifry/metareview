@@ -32,6 +32,8 @@ type EpicChild struct {
 type EpicGitContext struct {
 	ChangedFiles []string
 	Diff         string
+	RiskLevel    string
+	RiskReasons  []string
 }
 
 type EpicReviewLog struct {
@@ -49,6 +51,19 @@ var servicePathPattern = regexp.MustCompile(`(?i)(service|controller|worker|clie
 
 func RunEpicReady(context EpicReadyContext) []Finding {
 	var results []Finding
+	if context.Git.RiskLevel == "context-risk" {
+		return append(results, epicFinding(Finding{
+			Reviewer:       "architecture-reviewer",
+			Severity:       "high",
+			Title:          "Review context risk",
+			Finding:        "The epic-ready review is running with incomplete or oversized source context.",
+			Expected:       "Epic closure is reviewed with complete branch context or an explicit shard plan.",
+			Found:          "Risk reasons: " + strings.Join(context.Git.RiskReasons, ", "),
+			Evidence:       []findings.Evidence{{Type: "context", Path: "contextProfile"}},
+			Recommendation: "Resolve the context risk before declaring the epic ready.",
+			Fingerprint:    "epic:context-risk:" + strings.Join(context.Git.RiskReasons, "|"),
+		}))
+	}
 	if hasEvalContradiction(context.Children) {
 		results = append(results, epicFinding(Finding{
 			Reviewer:       "epic-integration-reviewer",

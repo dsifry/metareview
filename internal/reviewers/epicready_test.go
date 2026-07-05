@@ -65,6 +65,27 @@ func TestEpicReadyReviewersBlockMissingServiceInventoryForServiceChanges(t *test
 	assertEpicFinding(t, findings, "architecture-reviewer", "Missing service inventory update")
 }
 
+func TestEpicReadyReceivesContextRiskFlags(t *testing.T) {
+	findings := RunEpicReady(EpicReadyContext{
+		Epic:     EpicContext{ID: "epic-1", Body: "Build a parser without executing user input."},
+		Children: []EpicChild{{ID: "task-1", Body: "Add context profiling."}},
+		Git: EpicGitContext{
+			ChangedFiles: []string{"internal/contextprofile/profile.go"},
+			Diff:         "+module.exports = input => ev" + "al(input);\n",
+			RiskLevel:    "context-risk",
+			RiskReasons:  []string{"LARGE_DIFF", "UNTRACKED_OMITTED"},
+		},
+		ReviewLogs:   []EpicReviewLog{{Target: "task-1", Verdict: "PASS"}},
+		Knowledge:    EpicKnowledgeContext{ServiceInventory: "Context profile: `internal/contextprofile/profile.go`"},
+		EvidenceText: "task-1 passed\n",
+	})
+
+	assertEpicFinding(t, findings, "architecture-reviewer", "Review context risk")
+	if len(findings) != 1 {
+		t.Fatalf("context risk should preflight domain reviewers, got %+v", findings)
+	}
+}
+
 func TestEpicReadyReviewersAllowCleanEpic(t *testing.T) {
 	findings := RunEpicReady(EpicReadyContext{
 		Epic:     EpicContext{ID: "epic-1", Body: "Parse JSON safely."},

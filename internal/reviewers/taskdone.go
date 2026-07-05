@@ -3,6 +3,7 @@ package reviewers
 import (
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dsifry/metareview/internal/evidence"
@@ -37,6 +38,12 @@ type GitContext struct {
 	DiffTruncated            bool
 	StagedDiffTruncated      bool
 	WorkingTreeDiffTruncated bool
+	RawDiffBytes             int
+	FilteredDiffBytes        int
+	GeneratedExcludedFiles   []string
+	UntrackedOmittedCount    int
+	RiskLevel                string
+	RiskReasons              []string
 }
 
 type KnowledgeContext struct {
@@ -56,6 +63,19 @@ var inventoryPathPattern = regexp.MustCompile(`[A-Za-z0-9_./-]+\.(go|js|ts|tsx|j
 
 func RunTaskDone(context Context) []Finding {
 	var results []Finding
+	if context.Git.RiskLevel == "context-risk" {
+		return append(results, finding(Finding{
+			Reviewer:       "architecture-reviewer",
+			Severity:       "high",
+			Title:          "Review context risk",
+			Finding:        "The reviewer did not receive complete or bounded source context, so task closure cannot be trusted.",
+			Expected:       "Large or incomplete review contexts are split, sharded, or rerun with complete source context before task closure.",
+			Found:          contextRiskFound(context.Git),
+			Evidence:       []findings.Evidence{{Type: "context", Path: "contextProfile"}},
+			Recommendation: "Split the task, use the generated shard plan, or rerun the review with complete context.",
+			Fingerprint:    "architecture:context-risk:" + strings.Join(context.Git.RiskReasons, "|"),
+		}))
+	}
 	lines := addedLines(context.Git)
 	changedSource := sourceFiles(context.Git)
 
@@ -119,6 +139,27 @@ func RunTaskDone(context Context) []Finding {
 
 	results = append(results, duplicatePathFindings(context.Knowledge, changedSource)...)
 	return results
+}
+
+func contextRiskFound(git GitContext) string {
+	var parts []string
+	if len(git.RiskReasons) > 0 {
+		parts = append(parts, "Reasons: "+strings.Join(git.RiskReasons, ", "))
+	}
+	if git.RawDiffBytes > 0 || git.FilteredDiffBytes > 0 {
+		parts = append(parts, "Raw diff bytes: "+intString(git.RawDiffBytes)+", filtered diff bytes: "+intString(git.FilteredDiffBytes))
+	}
+	if git.UntrackedOmittedCount > 0 {
+		parts = append(parts, "Untracked files omitted: "+intString(git.UntrackedOmittedCount))
+	}
+	if len(parts) == 0 {
+		return "Context profile reported risk."
+	}
+	return strings.Join(parts, "; ")
+}
+
+func intString(value int) string {
+	return strconv.Itoa(value)
 }
 
 func hasSuccessfulValidationEvidence(text string) bool {
