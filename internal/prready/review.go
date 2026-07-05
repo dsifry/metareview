@@ -15,6 +15,7 @@ import (
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewers"
 	"github.com/dsifry/metareview/internal/reviewlog"
+	"github.com/dsifry/metareview/internal/reviewstate"
 	"github.com/dsifry/metareview/internal/runchain"
 	"github.com/dsifry/metareview/internal/state"
 )
@@ -88,7 +89,12 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	targetRecord := map[string]string{"type": "branch", "id": firstNonEmpty(git.Branch, git.HeadSHA)}
 	logs, err := reviewlog.Discover(root)
+	if err != nil {
+		return Result{}, err
+	}
+	chain, previousRunIDs, err := resolveRunChain(root, targetRecord, options, logs, git)
 	if err != nil {
 		return Result{}, err
 	}
@@ -104,13 +110,21 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	reviewLogs := append(latestLogsByTarget(logs), blockerLogs(blockers)...)
+	projection := reviewstate.ProjectRecords(logs, blockers, reviewstate.Options{
+		Scope:            "pr-ready",
+		Target:           targetRecord,
+		PreviousRunIDs:   previousRunIDs,
+		HistoricalRunIDs: historicalPRReadyRunIDsForCurrentTarget(root, logs, targetRecord, git),
+		ChangedPaths:     reviewedPaths(reviewGit),
+		CurrentTarget:    targetRecord,
+	})
+	reviewLogs := append(latestLogsByTarget(projection.CurrentReviewLogs()), blockerLogs(projection.CurrentBlockers())...)
 	prEvidence := RenderEvidence(EvidenceInput{
 		Summary:     branchSummary(reviewGit),
 		Validation:  validationLines(evidenceText),
 		TaskReviews: taskReviewEvidence(reviewLogs),
 		EpicReviews: epicReviewEvidence(reviewLogs),
-		Blockers:    blockerEvidence(blockers),
+		Blockers:    blockerEvidence(projection.CurrentBlockers()),
 		GitHub:      ghCtx,
 	})
 
@@ -133,7 +147,6 @@ func Create(root string, options Options) (Result, error) {
 		gateEffect = "gate"
 	}
 	rawFindings := reviewers.RunPRReady(reviewerContext(reviewGit, knowledgeContext, reviewLogs, evidenceText, prEvidence, ghCtx))
-	targetRecord := map[string]string{"type": "branch", "id": firstNonEmpty(git.Branch, git.HeadSHA)}
 	run := findings.Run{ID: runID, Scope: "pr-ready", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
 
 	result := Result{RunID: runID, ReviewRel: reviewRel, ContextRel: contextRel}
@@ -146,19 +159,6 @@ func Create(root string, options Options) (Result, error) {
 		}
 		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, reviewGit, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect)), 0o644); err != nil {
 			return err
-		}
-		chain, err := runchain.Resolve(root, runchain.Options{
-			Scope:         "pr-ready",
-			Target:        targetRecord,
-			PreviousRunID: options.PreviousRunID,
-			MaxAttempts:   options.MaxAttempts,
-		})
-		if err != nil {
-			return err
-		}
-		previousRunIDs := make([]string, 0, len(chain.Chain))
-		for _, link := range chain.Chain {
-			previousRunIDs = append(previousRunIDs, link.ID)
 		}
 		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{PreviousRunID: options.PreviousRunID, PreviousRunIDs: previousRunIDs})
 		if err != nil {
@@ -217,6 +217,175 @@ func Create(root string, options Options) (Result, error) {
 		return Result{}, err
 	}
 	return result, nil
+}
+
+func resolveRunChain(root string, targetRecord map[string]string, options Options, logs []reviewlog.Summary, git gitcontext.Context) (runchain.Decision, []string, error) {
+	chain, err := runchain.Resolve(root, runchain.Options{
+		Scope:         "pr-ready",
+		Target:        targetRecord,
+		PreviousRunID: options.PreviousRunID,
+		MaxAttempts:   options.MaxAttempts,
+	})
+	if err == nil {
+		if options.PreviousRunID == "" && len(chain.Chain) == 0 {
+			if escalated, ok := legacyEscalatedPRReadyForTarget(root, logs, targetRecord, git); ok {
+				return runchain.Decision{}, nil, fmt.Errorf("same target already escalated in run %s", escalated)
+			}
+		}
+		return chain, runIDsFromChain(chain.Chain), nil
+	}
+	if options.PreviousRunID == "" || !legacyRecoverableRunchainError(err) {
+		return runchain.Decision{}, nil, err
+	}
+	previousRunIDs, legacyErr := legacyPreviousRunIDsForPRReady(root, logs, options.PreviousRunID, targetRecord, git)
+	if legacyErr != nil {
+		return runchain.Decision{}, nil, legacyErr
+	}
+	if len(previousRunIDs) == 0 {
+		return runchain.Decision{}, nil, err
+	}
+	fallback, fallbackErr := runchain.Resolve(root, runchain.Options{
+		Scope:       "pr-ready",
+		Target:      targetRecord,
+		MaxAttempts: options.MaxAttempts,
+	})
+	if fallbackErr != nil {
+		return runchain.Decision{}, nil, fallbackErr
+	}
+	return fallback, previousRunIDs, nil
+}
+
+func legacyPreviousRunIDsForPRReady(root string, logs []reviewlog.Summary, previousRunID string, targetRecord map[string]string, git gitcontext.Context) ([]string, error) {
+	ids := reviewstate.LegacyPreviousRunIDs(logs, previousRunID)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	byID := map[string]reviewlog.Summary{}
+	for _, log := range logs {
+		if log.RunID != "" {
+			byID[log.RunID] = log
+		}
+	}
+	for _, id := range ids {
+		log, ok := byID[id]
+		if !ok || log.Kind != "pr-ready" || !legacyPRReadyTargetMatches(root, log, targetRecord, git) {
+			return nil, nil
+		}
+		if strings.EqualFold(log.Verdict, "ESCALATED") {
+			return nil, fmt.Errorf("previous run %s already escalated", id)
+		}
+	}
+	if escalated, ok := legacyEscalatedPRReadyForTarget(root, logs, targetRecord, git); ok {
+		return nil, fmt.Errorf("same target already escalated in run %s", escalated)
+	}
+	return ids, nil
+}
+
+func legacyPRReadyTargetMatches(root string, log reviewlog.Summary, targetRecord map[string]string, git gitcontext.Context) bool {
+	matches, known := legacyPRReadyTargetMatch(root, log, targetRecord, git)
+	return known && matches
+}
+
+func legacyPRReadyTargetMatch(root string, log reviewlog.Summary, targetRecord map[string]string, git gitcontext.Context) (bool, bool) {
+	target := strings.TrimSpace(log.Target)
+	if target != "current branch" && target != targetRecord["id"] {
+		return false, true
+	}
+	if target != "current branch" {
+		return true, true
+	}
+	identity, err := readLegacyPRReadyContextIdentity(root, log.ContextRel)
+	if err != nil {
+		return false, false
+	}
+	if git.Branch == "" || identity.Branch == "" {
+		return false, false
+	}
+	return identity.Branch == git.Branch, true
+}
+
+func historicalPRReadyRunIDsForCurrentTarget(root string, logs []reviewlog.Summary, targetRecord map[string]string, git gitcontext.Context) []string {
+	var ids []string
+	for _, log := range logs {
+		if log.RunID == "" || log.Kind != "pr-ready" {
+			continue
+		}
+		matches, known := legacyPRReadyTargetMatch(root, log, targetRecord, git)
+		if known && !matches {
+			ids = append(ids, log.RunID)
+		}
+	}
+	return ids
+}
+
+func legacyEscalatedPRReadyForTarget(root string, logs []reviewlog.Summary, targetRecord map[string]string, git gitcontext.Context) (string, bool) {
+	for _, log := range logs {
+		if log.RunID == "" || log.Kind != "pr-ready" || !strings.EqualFold(log.Verdict, "ESCALATED") {
+			continue
+		}
+		if legacyPRReadyTargetMatches(root, log, targetRecord, git) {
+			return log.RunID, true
+		}
+	}
+	return "", false
+}
+
+type legacyPRReadyContextIdentity struct {
+	Branch string
+	Head   string
+}
+
+func readLegacyPRReadyContextIdentity(root, rel string) (legacyPRReadyContextIdentity, error) {
+	rel = strings.TrimSpace(rel)
+	if rel == "" {
+		return legacyPRReadyContextIdentity{}, fmt.Errorf("legacy context path is required")
+	}
+	clean := filepath.Clean(rel)
+	if clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
+		return legacyPRReadyContextIdentity{}, fmt.Errorf("legacy context path escapes repository: %s", rel)
+	}
+	bytes, err := os.ReadFile(filepath.Join(root, clean))
+	if err != nil {
+		return legacyPRReadyContextIdentity{}, err
+	}
+	var identity legacyPRReadyContextIdentity
+	for _, line := range strings.Split(string(bytes), "\n") {
+		switch {
+		case strings.HasPrefix(line, "- Branch:"):
+			identity.Branch = firstInlineCodeValue(line)
+		case strings.HasPrefix(line, "- Head:"):
+			identity.Head = firstInlineCodeValue(line)
+		}
+	}
+	if identity.Branch == "" && identity.Head == "" {
+		return legacyPRReadyContextIdentity{}, fmt.Errorf("legacy context lacks branch and head identity")
+	}
+	return identity, nil
+}
+
+func firstInlineCodeValue(line string) string {
+	start := strings.Index(line, "`")
+	if start < 0 {
+		return ""
+	}
+	end := strings.Index(line[start+1:], "`")
+	if end < 0 {
+		return ""
+	}
+	return line[start+1 : start+1+end]
+}
+
+func runIDsFromChain(chain []runchain.Record) []string {
+	ids := make([]string, 0, len(chain))
+	for _, link := range chain {
+		ids = append(ids, link.ID)
+	}
+	return ids
+}
+
+func legacyRecoverableRunchainError(err error) bool {
+	message := err.Error()
+	return strings.Contains(message, "previous run ") && (strings.Contains(message, " not found") || strings.Contains(message, " chain missing "))
 }
 
 func reviewerContext(git gitcontext.Context, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText, prEvidence string, ghCtx githubcontext.Context) reviewers.PRReadyContext {
@@ -354,6 +523,30 @@ func branchSummary(git gitcontext.Context) string {
 		return branch + " has no committed file changes in the reviewed diff."
 	}
 	return branch + " changes " + strings.Join(git.ChangedFiles, ", ")
+}
+
+func reviewedPaths(git gitcontext.Context) []string {
+	var paths []string
+	paths = append(paths, git.ChangedFiles...)
+	paths = append(paths, git.StagedFiles...)
+	paths = append(paths, git.UnstagedFiles...)
+	paths = append(paths, git.WorkingTreeFiles...)
+	paths = append(paths, git.UntrackedFiles...)
+	return uniqueStrings(paths)
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
 }
 
 func validationLines(text string) []string {

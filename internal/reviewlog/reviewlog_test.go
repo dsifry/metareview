@@ -95,6 +95,53 @@ func TestCompletedArtifactReviewIsNotUnresolved(t *testing.T) {
 	}
 }
 
+func TestPassReviewMentioningHistoricalNeedsRevisionIsNotUnresolved(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"),
+		"# metareview: task-done review\n\n"+
+			"Run ID: `mrv-task`\n\n"+
+			"Target: `task-1`\n\n"+
+			"## Verdict\n\nPASS\n\n"+
+			"## Notes\n\nPrevious run mrv-old was NEEDS_REVISION; this run fixed it.\n\n"+
+			"## Findings\n\nNo blocking findings.\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected one log, got %+v", logs)
+	}
+	if logs[0].HasUnresolvedBlockers {
+		t.Fatalf("historical NEEDS_REVISION prose must not poison PASS: %+v", logs[0])
+	}
+}
+
+func TestDiscoverParsesLegacyPreviousRunFromMarkdown(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"),
+		"# metareview: pr-ready review\n\n"+
+			"Run ID: `mrv-task`\n\n"+
+			"Target: `current branch`\n\n"+
+			"Context pack: `docs/metareview/context/mrv-task-context.md`\n\n"+
+			"Previous run: `mrv-root`\n\n"+
+			"## Verdict\n\nNEEDS_REVISION\n")
+
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatalf("discover logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected one log, got %+v", logs)
+	}
+	if logs[0].PreviousRunID != "mrv-root" {
+		t.Fatalf("expected previous run from Markdown, got %+v", logs[0])
+	}
+	if logs[0].ContextRel != "docs/metareview/context/mrv-task-context.md" {
+		t.Fatalf("expected context pack from Markdown, got %+v", logs[0])
+	}
+}
+
 func TestEscalatedVerdictIsUnresolved(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "ESCALATED", ""))
