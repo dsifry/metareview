@@ -18,15 +18,33 @@ metareview setup --bootstrap-prereqs --dry-run
 
 The dry run does not install Superpowers, Beads, or metaswarm. Non-dry-run bootstrap requires explicit confirmation.
 
-## 2. Run Reviews At The Right Gate
+## 2. Capture Validation Evidence
+
+Prefer structured receipts over prose evidence:
+
+```bash
+tmp_evidence="$(mktemp)"
+metareview evidence run -- go test ./... > "$tmp_evidence"
+metareview evidence run -- git diff --check >> "$tmp_evidence"
+```
+
+After a GitHub PR exists, CI checks can be imported into the same evidence file:
+
+```bash
+metareview evidence import --github-checks <pr-number> --repo <owner/repo> >> "$tmp_evidence"
+```
+
+Freeform evidence files still work as a fallback, but receipts preserve command, working directory, exit code, timestamps, summary, and output hashes. Task-done and PR-ready parse receipt files as validation evidence; epic-ready reads the supplied evidence text for child-completion signals.
+
+## 3. Run Reviews At The Right Gate
 
 Use the smallest gate that matches the work:
 
 ```bash
 metareview review artifact <path>
-metareview review task-done <task-id-or-path>
-metareview review epic-ready <epic-id-or-path>
-metareview review pr-ready --base <base-ref>
+metareview review task-done <task-id-or-path> --base <base-ref> --evidence "$tmp_evidence"
+metareview review epic-ready <epic-id-or-path> --base <base-ref> --evidence "$tmp_evidence"
+metareview review pr-ready --base <base-ref> --evidence "$tmp_evidence"
 metareview learn --post-merge <pr-number> --base <pre-merge-ref>
 ```
 
@@ -34,13 +52,15 @@ metareview learn --post-merge <pr-number> --base <pre-merge-ref>
 
 If a review reports any blocking finding or remains `NOT_REVIEWED`, fix it and re-run with `--previous-run <run-id>` until the result is `PASS` or `PASS_ADVISORY` with zero blockers.
 
-## 3. Metaswarm Fit
+Task-done, epic-ready, and PR-ready context packs now include a Context Profile and Context Shard Plan when risk requires sharding. Task-done and PR-ready also include a Review Manifest that accounts for source paths, generated path dispositions, shard assignments, manifest hashes, and manifest blockers.
+
+## 4. Metaswarm Fit
 
 When metaswarm, Superpowers, and Beads are present, metaswarm remains the lifecycle owner. Metareview supplies deeper review commands and durable artifacts. The integration contract is in `docs/integrations/metaswarm.md`.
 
 In standalone mode, metareview still runs advisory reviews and can use `.metareview/knowledge/metareview.jsonl` until Beads knowledge is available.
 
-## 4. What To Commit
+## 5. What To Commit
 
 Commit:
 
@@ -67,7 +87,7 @@ For ordinary project repositories, use exact file entries for transient state. D
 
 The repository `.gitignore` keeps transient state local while allowing fallback learning knowledge and calibration to sync through git.
 
-## 5. Agent Syntax
+## 6. Agent Syntax
 
 Codex users invoke metareview through `$setup`, `$review-artifact`, `$review-task-done`, `$review-epic-ready`, `$review-pr-ready`, `$learn-post-merge`, and `$status`.
 

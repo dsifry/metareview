@@ -50,6 +50,19 @@ metareview is built around review patterns that work well when humans and coding
 - **Review artifact accountability:** write durable Markdown context and review logs so future humans and agents can inspect what was reviewed, what blocked, and why it passed.
 - **Post-merge reflection:** after a PR lands, extract accepted learnings, discarded candidates, and reviewer calibration so the next review starts smarter.
 
+## What Changed From 0.4.0 To 0.6.0
+
+0.6.0 made metareview more useful for real agent work by adding concrete coverage accounting around the review surface:
+
+- **Structured evidence receipts:** `metareview evidence run -- <command>` records validation commands as JSON receipts with exit codes, timestamps, summaries, and output hashes. `metareview evidence import --github-checks <pr-number>` imports GitHub check results into the same receipt format. Task-done and PR-ready parse those receipts as validation evidence; epic-ready accepts the same evidence file as child-completion context.
+- **Context preflight:** task-done, epic-ready, and PR-ready reviews now include a Context Profile that records raw and filtered diff size, generated review-artifact exclusions, omitted or truncated untracked files, and context-risk reasons.
+- **Shard planning:** large or risky diffs get deterministic Context Shard Plans so agents can split review work by source paths while preserving a shared source diff hash.
+- **Review Manifest aggregation:** task-done and PR-ready context packs now account for source paths, generated path dispositions, shard assignments, manifest hashes, static runtime status, and manifest blockers.
+- **Stateful PR-ready projection:** PR-ready reconciles prior findings by target and run chain, so resolved or unrelated blockers do not keep blocking a later branch review.
+- **0.6.0 metadata alignment:** npm, Codex plugin, Claude Code plugin, and Go source checkout version reporting now agree on `0.6.0`.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release notes.
+
 ## Install
 
 ### npm Package
@@ -144,9 +157,9 @@ flowchart TD
     moreChildren{More child units?}
     parentIntent{Parent intent preserved?}
     parentRevise[Reconcile drift against original intent]
-    epicReady[Epic-ready review<br/>metareview review epic-ready target]
+    epicReady[Epic-ready review<br/>metareview review epic-ready target --base ref --evidence file]
     epicPass{Epic review passes?}
-    prReady[PR-ready review<br/>metareview review pr-ready --base ref]
+    prReady[PR-ready review<br/>metareview review pr-ready --base ref --evidence file]
     prPass{PR review passes?}
     merge[Push, PR, merge]
     learn[Post-merge learning<br/>metareview learn --post-merge pr --base pre-merge-ref]
@@ -178,10 +191,14 @@ Every review produces Markdown artifacts under `docs/metareview/` and local tran
 Humans use metareview to make review timing explicit:
 
 ```bash
+tmp_evidence="$(mktemp)"
+metareview evidence run -- go test ./... > "$tmp_evidence"
+metareview evidence run -- git diff --check >> "$tmp_evidence"
+
 metareview review artifact docs/spec.md
-metareview review task-done docs/tasks/task-001.md --base main --evidence /tmp/evidence.txt
-metareview review epic-ready docs/epics/epic-001.md
-metareview review pr-ready --base main
+metareview review task-done docs/tasks/task-001.md --base main --evidence "$tmp_evidence"
+metareview review epic-ready docs/epics/epic-001.md --base main --evidence "$tmp_evidence"
+metareview review pr-ready --base main --evidence "$tmp_evidence"
 metareview learn --post-merge 42 --base pre-merge-sha
 ```
 
@@ -211,10 +228,12 @@ When configuring `.gitignore` in ordinary project repositories, ignore those tra
 ```bash
 metareview setup --check
 metareview setup --bootstrap-prereqs --dry-run
+metareview evidence run -- <command> [args...]
+metareview evidence import --github-checks <pr-number> [--repo <owner/repo>]
 metareview review artifact <path>
 metareview review task-done <task-id-or-path> --base <base-ref> --evidence <file>
-metareview review epic-ready <epic-id-or-path>
-metareview review pr-ready --base <base-ref>
+metareview review epic-ready <epic-id-or-path> --base <base-ref> --evidence <file>
+metareview review pr-ready --base <base-ref> --evidence <file>
 metareview learn --post-merge <pr-number> --base <pre-merge-ref>
 metareview status
 ```
@@ -234,6 +253,7 @@ metareview follows a few practical rules:
 ## More Docs
 
 - [INSTALL.md](INSTALL.md) - installation paths and troubleshooting
+- [CHANGELOG.md](CHANGELOG.md) - release notes
 - [docs/quickstart.md](docs/quickstart.md) - short operator guide
 - [docs/README.codex.md](docs/README.codex.md) - Codex plugin usage
 - [docs/README.claude.md](docs/README.claude.md) - Claude Code plugin usage

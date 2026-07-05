@@ -453,18 +453,35 @@
 $ metareview setup --check
 mode: metaswarm-extension
 
+$ metareview evidence run -- go test ./... \
+  > /tmp/metareview-evidence.jsonl
+
 $ metareview review task-done task-42 \
   --base main \
-  --evidence /tmp/evidence.txt
+  --evidence /tmp/metareview-evidence.jsonl
 
 verdict: BLOCKED
-finding: acceptance evidence missing
+finding: context-risk requires shard review
 next: fix, re-run with --previous-run</code></pre>
       </div>
     </div>
   </header>
 
   <main>
+    <section>
+      <div class="wrap split">
+        <div>
+          <h2>0.6.0 adds evidence receipts, context profiles, and review manifests.</h2>
+          <p class="section-intro">The 0.4.0 to 0.6.0 work focused on making review gates more actionable for real agents working in large or messy repos.</p>
+        </div>
+        <div class="panel">
+          <p><strong>Receipts:</strong> validation commands and GitHub checks can be captured as structured evidence with exit codes, timestamps, summaries, and output hashes.</p>
+          <p><strong>Profiles and shards:</strong> task-done, epic-ready, and PR-ready reviews now record diff size, generated artifact exclusions, omitted or truncated context, and deterministic shard plans when the review surface is too large or risky.</p>
+          <p><strong>Manifests:</strong> Task-done and PR-ready Review Manifest sections account for source paths, generated dispositions, shard coverage, source-manifest hashes, and aggregate blockers.</p>
+        </div>
+      </div>
+    </section>
+
     <section>
       <div class="wrap split">
         <div>
