@@ -4,8 +4,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dsifry/metareview/internal/contextprofile"
 	"github.com/dsifry/metareview/internal/findings"
+	"github.com/dsifry/metareview/internal/gitcontext"
+	"github.com/dsifry/metareview/internal/knowledge"
 	"github.com/dsifry/metareview/internal/runchain"
+	"github.com/dsifry/metareview/internal/tasksource"
 )
 
 func TestReviewMarkdownSeparatesNonBlockingFindings(t *testing.T) {
@@ -47,5 +51,55 @@ func TestRunChainMarkdownIncludesEscalationDetails(t *testing.T) {
 		if !strings.Contains(md, required) {
 			t.Fatalf("run chain markdown missing %q:\n%s", required, md)
 		}
+	}
+}
+
+func TestContextMarkdownIncludesReviewManifest(t *testing.T) {
+	body := contextMarkdown(
+		"mrv-task",
+		tasksource.Source{ID: "task-1", Body: "Review manifest task"},
+		gitcontext.Context{BaseSHA: "base", HeadSHA: "head", Branch: "feature", ChangedFiles: []string{"internal/a.go"}},
+		contextprofile.Profile{Files: []contextprofile.FileProfile{{Path: "internal/a.go", DiffBytes: 10}}},
+		knowledge.Context{},
+		"go test ./... exited 0",
+		"gate",
+	)
+
+	for _, required := range []string{
+		"## Review Manifest",
+		"Manifest verdict:",
+		"Runtime assessment: static-only; runtime not assessed",
+		"internal/a.go",
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("task-done context missing %q:\n%s", required, body)
+		}
+	}
+}
+
+func TestContextMarkdownDispositionsGeneratedReviewArtifacts(t *testing.T) {
+	body := contextMarkdown(
+		"mrv-task",
+		tasksource.Source{ID: "task-1", Body: "Review manifest task"},
+		gitcontext.Context{BaseSHA: "base", HeadSHA: "head", Branch: "feature", ChangedFiles: []string{"internal/a.go"}},
+		contextprofile.Profile{
+			Files:                  []contextprofile.FileProfile{{Path: "internal/a.go", DiffBytes: 10}},
+			GeneratedExcludedFiles: []string{"docs/metareview/context/generated-context.md"},
+		},
+		knowledge.Context{},
+		"go test ./... exited 0",
+		"gate",
+	)
+
+	for _, required := range []string{
+		"docs/metareview/context/generated-context.md: generated",
+		"metareview generated review artifact excluded from source manifest",
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("task-done context missing generated disposition %q:\n%s", required, body)
+		}
+	}
+	if strings.Contains(body, "missing disposition for docs/metareview/context/generated-context.md") {
+		t.Fatalf("task-done context should not flag generated review artifact as missing disposition:\n%s", body)
 	}
 }

@@ -4,7 +4,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dsifry/metareview/internal/contextprofile"
 	"github.com/dsifry/metareview/internal/findings"
+	"github.com/dsifry/metareview/internal/gitcontext"
+	"github.com/dsifry/metareview/internal/githubcontext"
+	"github.com/dsifry/metareview/internal/knowledge"
 	"github.com/dsifry/metareview/internal/runchain"
 )
 
@@ -47,5 +51,59 @@ func TestRunChainMarkdownIncludesEscalationDetails(t *testing.T) {
 		if !strings.Contains(md, required) {
 			t.Fatalf("run chain markdown missing %q:\n%s", required, md)
 		}
+	}
+}
+
+func TestContextMarkdownIncludesReviewManifest(t *testing.T) {
+	body := contextMarkdown(
+		"mrv-pr",
+		gitcontext.Context{BaseSHA: "base", HeadSHA: "head", Branch: "feature", ChangedFiles: []string{"internal/a.go"}},
+		contextprofile.Profile{Files: []contextprofile.FileProfile{{Path: "internal/a.go", DiffBytes: 10}}},
+		knowledge.Context{},
+		nil,
+		"go test ./... exited 0",
+		githubcontext.Context{},
+		"## metareview PR Evidence\n\nvalidation",
+		"gate",
+	)
+
+	for _, required := range []string{
+		"## Review Manifest",
+		"Manifest verdict:",
+		"Runtime assessment: static-only; runtime not assessed",
+		"internal/a.go",
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("pr-ready context missing %q:\n%s", required, body)
+		}
+	}
+}
+
+func TestContextMarkdownDispositionsGeneratedReviewArtifacts(t *testing.T) {
+	body := contextMarkdown(
+		"mrv-pr",
+		gitcontext.Context{BaseSHA: "base", HeadSHA: "head", Branch: "feature", ChangedFiles: []string{"internal/a.go"}},
+		contextprofile.Profile{
+			Files:                  []contextprofile.FileProfile{{Path: "internal/a.go", DiffBytes: 10}},
+			GeneratedExcludedFiles: []string{"docs/metareview/reviews/generated-review.md"},
+		},
+		knowledge.Context{},
+		nil,
+		"go test ./... exited 0",
+		githubcontext.Context{},
+		"## metareview PR Evidence\n\nvalidation",
+		"gate",
+	)
+
+	for _, required := range []string{
+		"docs/metareview/reviews/generated-review.md: generated",
+		"metareview generated review artifact excluded from source manifest",
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("pr-ready context missing generated disposition %q:\n%s", required, body)
+		}
+	}
+	if strings.Contains(body, "missing disposition for docs/metareview/reviews/generated-review.md") {
+		t.Fatalf("pr-ready context should not flag generated review artifact as missing disposition:\n%s", body)
 	}
 }
