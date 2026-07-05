@@ -40,7 +40,7 @@ The goal is not another loose "please review this" prompt. The goal is a review 
 metareview is built around review patterns that work well when humans and coding agents are collaborating:
 
 - **Adversarial multi-agent reviews:** run independent reviewer lenses such as architecture, code quality, security, test adequacy, product/user impact, and acceptance completeness against the same artifact or diff.
-- **Iterations with hard gates:** treat critical, high, and spec-contract findings as blockers; revise the work and re-run review with `--previous-run <run-id>` until blockers are cleared.
+- **Iterations with hard gates:** treat critical, high, and spec-contract findings as blockers; retry only while the gate reports `NEEDS_REVISION`, and stop autonomous retries on `ESCALATED`.
 - **Fractal review loops:** decompose large work into epics, tasks, and child plans, then review each level before implementation proceeds.
 - **Cross-level intent checks:** after multiple revision loops, compare the accepted child work back to the parent plan and original user request.
 - **Evidence-backed reviews:** attach test output, validation commands, acceptance notes, and PR context so reviewers judge the real work product, not a summary.
@@ -170,21 +170,34 @@ flowchart TD
     child --> childReview --> childApproved
     childApproved -- no --> childRevise --> childReview
     childApproved -- yes --> implement --> taskDone --> taskPass
-    taskPass -- no --> fix --> taskDone
-    taskPass -- yes --> moreChildren
+    taskPass -- NEEDS_REVISION --> fix --> taskDone
+    taskPass -- ESCALATED --> escalate
+    taskPass -- PASS/PASS_ADVISORY --> moreChildren
     moreChildren -- yes --> child
     moreChildren -- no --> parentIntent
     parentIntent -- no --> parentRevise --> childReview
     parentIntent -- yes --> epicReady --> epicPass
-    epicPass -- no --> childReview
-    epicPass -- yes --> prReady --> prPass
-    prPass -- no --> fix --> prReady
-    prPass -- yes --> merge --> learn
+    epicPass -- NEEDS_REVISION --> childReview
+    epicPass -- ESCALATED --> escalate
+    epicPass -- PASS/PASS_ADVISORY --> prReady --> prPass
+    prPass -- NEEDS_REVISION --> fix --> prReady
+    prPass -- ESCALATED --> escalate
+    prPass -- PASS/PASS_ADVISORY --> merge --> learn
+    escalate[Human narrows, splits, or redesigns target]
 ```
 
 The decomposition loop is intentionally fractal: a parent plan can be decomposed into child epics, each child can be decomposed again, and each level gets reviewed before implementation continues. After the iteration converges, metareview checks back against the original parent intent so accumulated local fixes do not quietly drift away from the user request.
 
-Every review produces Markdown artifacts under `docs/metareview/` and local transient state under `.metareview/`. A blocking finding is current work. A `NOT_REVIEWED` artifact scaffold is also current work, not a pass. Artifact review runs the five required lenses as parallel subagents by default; `in-session-emulated` fallback is weaker evidence and must say the review is not independently adversarial. Fix blockers, re-run with `--previous-run <run-id>`, and do not claim completion until the review reports `PASS` or `PASS_ADVISORY` with zero blockers.
+Every review produces Markdown artifacts under `docs/metareview/` and local transient state under `.metareview/`. A blocking finding is current work. A `NOT_REVIEWED` artifact scaffold is also current work, not a pass. Artifact review runs the five required lenses as parallel subagents by default; `in-session-emulated` fallback is weaker evidence and must say the review is not independently adversarial.
+
+Lifecycle gate results have a small operating contract:
+
+- `PASS`: proceed.
+- `PASS_ADVISORY`: proceed only when the review reports zero blocking findings.
+- `NEEDS_REVISION`: fix blockers, then re-run the same gate with `--previous-run <run-id>`.
+- `ESCALATED`: stop same-target retries; human must narrow, split, or redesign the target.
+
+Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr.
 
 ## How Humans Use It
 
@@ -214,7 +227,7 @@ Coding agents should treat metareview as a completion gate, not an optional comm
 - Before push, PR creation, or merge, run `pr-ready`.
 - After merge, run `learn --post-merge` so repository knowledge improves.
 
-Agents must not say work is done while a blocking finding remains unresolved. They should commit durable review/context artifacts when the repository's artifact policy says to do so, and keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local.
+Agents must not say work is done while a blocking finding remains unresolved or while a gate is `NEEDS_REVISION` or `ESCALATED`. They should commit durable review/context artifacts when the repository's artifact policy says to do so, and keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local.
 
 When configuring `.gitignore` in ordinary project repositories, ignore those transient files with exact file entries. Do not ignore `docs/metareview/` or the whole `.metareview/` directory, because durable learning, calibration, and fallback knowledge can live there:
 
