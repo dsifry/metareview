@@ -19,6 +19,8 @@ type Summary struct {
 	Target                string            `json:"target"`
 	Verdict               string            `json:"verdict"`
 	Kind                  string            `json:"kind"`
+	PreviousRunID         string            `json:"previousRunId,omitempty"`
+	ContextRel            string            `json:"contextRel,omitempty"`
 	FindingIDs            []string          `json:"findingIds"`
 	HasUnresolvedBlockers bool              `json:"hasUnresolvedBlockers"`
 	AttemptNumber         int               `json:"attemptNumber,omitempty"`
@@ -104,6 +106,10 @@ func parseMarkdown(rel, text string) Summary {
 			summary.RunID = firstInlineCode(line)
 		case strings.HasPrefix(line, "Target:"):
 			summary.Target = firstInlineCode(line)
+		case strings.HasPrefix(line, "Previous run:"):
+			summary.PreviousRunID = previousRunID(firstInlineCode(line))
+		case strings.HasPrefix(line, "Context pack:"):
+			summary.ContextRel = firstInlineCode(line)
 		case strings.TrimSpace(line) == "## Verdict":
 			summary.Verdict = nextNonEmpty(lines, i+1)
 		}
@@ -111,13 +117,21 @@ func parseMarkdown(rel, text string) Summary {
 			summary.FindingIDs = appendUnique(summary.FindingIDs, id)
 		}
 	}
-	if verdictIsUnresolved(summary.Verdict) || strings.Contains(text, "NEEDS_REVISION") {
+	if verdictIsUnresolved(summary.Verdict) {
 		summary.HasUnresolvedBlockers = true
 	}
 	if summary.Kind == "artifact" && !artifactReviewComplete(lines) {
 		summary.HasUnresolvedBlockers = true
 	}
 	return summary
+}
+
+func previousRunID(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.EqualFold(value, "none") {
+		return ""
+	}
+	return value
 }
 
 func reviewKind(line string) string {
