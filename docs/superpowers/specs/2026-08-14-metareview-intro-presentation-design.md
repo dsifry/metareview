@@ -22,7 +22,8 @@ real, sourced evidence — the bugs it has caught and the outcomes it produces.
 
 ## Final slide order (16)
 
-1. **Title** — terminal boot: a `pr-ready` gate resolves to `PASS`.
+1. **Title** — terminal boot: a `pr-ready` gate resolves to `PASS`. The `PASS` is an
+   illustrative boot animation, not a record of a live gate run.
 2. **First, the factory** — metaswarm's 11-phase build pipeline (Research → Plan →
    Plan Validation → Design Review Gate → Decompose → Dependency Check → Orchestrated
    Execution → Final Review → PR Creation → PR Shepherd → Close+Learn), review phases
@@ -58,7 +59,14 @@ Eyebrow markers: title = `MRV`, content slides `01`–`14`, close = `✓`.
 
 All numbers mined from this machine (`~/.codex/sessions/**`, `~/.claude/projects/**`,
 each repo's `.metareview/runs.jsonl` + `findings.jsonl`, `docs/metareview/**`, `docs/specs/**`,
-README, and live `gh` queries as `dsifry`). Two research corrections were applied:
+README, and live `gh` queries as `dsifry`). Two research corrections were applied.
+
+**Reproducibility / auditability:** the ledger- and `gh`-derived figures (62 blocked, 48
+fixed, 80.3% first-pass, per-repo PR stats) are reproducible from committed state — each
+repo's `.metareview/*.jsonl` plus `gh pr`/`gh api` queries. The session-*scale* figures
+(1,610 sessions, 2,911 fix-loops, 73%) are derived from machine-local session transcripts
+under `~/.codex` and `~/.claude`, which are private and not committable; those are therefore
+directional (file-presence counts), and the deck labels them as such.
 
 - **"Issues caught" = 62** completions blocked (NEEDS_REVISION + ESCALATED) across the
   committed run ledgers of four repos (metareview, metafactory, theguide, warmstart-tng);
@@ -78,10 +86,11 @@ Outcomes / PR complexity (via `gh`, all four repos are solo-dev):
 Value estimate (explicitly illustrative, not measured):
 - 62 catches × 2–4 hrs each ≈ 120–240 hrs; at $150k/yr ≈ $72/hr → ≈ $8.6k–17k.
 
-Scale (file-presence counts, defensible; per-gate run-occurrence counts dropped as inflated):
-- **1,705** Codex sessions invoked a gate (2026-05-26 → 2026-08-11); by repo: theguide 827,
-  metafactory 558, metareview 173, warmstart-tng 51, repofortify 1. **2,911** used --previous-run.
-  A blocking verdict appears in 73% of recorded sessions.
+Scale (file-presence counts, directional; per-gate run-occurrence counts dropped as inflated):
+- **1,610** Codex sessions across the five repos ran a gate (2026-05-26 → 2026-08-11):
+  theguide 827, metafactory 558, metareview 173, warmstart-tng 51, repofortify 1 (sum = 1,610;
+  the deck hero and the per-repo bars use this same total, so they reconcile). **2,911** used
+  --previous-run. A blocking verdict appears in 73% of recorded sessions.
 
 Verbatim catches used on slides (all sourced in-deck via card captions):
 - `eval(input)` critical + `// TODO: add tests later` high — task-done-issue-2-wu3.
@@ -97,7 +106,9 @@ metareview should bring to the review process." — `~/.codex/history.jsonl`.
 ## Honesty caveats encoded in the deck
 
 - No causal "fewer cycles vs. a baseline" claim — no ungated control; outcomes are descriptive.
-- No "fewer *human* review rounds" claim — all four repos are solo-dev (0% independent human review).
+- No "fewer *human* review rounds" claim — across ~830 merged PRs, `gh` review data shows no
+  review submitted by a non-author human account (only bot reviewers + the author's own
+  comments appear). Low human-round counts reflect team size, not metareview.
 - Cross-repo CHANGES_REQUESTED rates are confounded (different bot-reviewer mixes); only the
   within-metafactory 2% fact is used.
 - 62 is a floor; hours & dollars are labeled estimates.
