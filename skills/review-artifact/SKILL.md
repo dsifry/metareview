@@ -12,7 +12,7 @@ Use when reviewing a Markdown artifact before implementation or before a gate is
 1. Run `metareview review artifact <path>` to create the review scaffold. The command exits nonzero while the review is still `NOT_REVIEWED`; this is expected and is blocking.
 2. Read the generated context pack and review log path.
 3. Use `rubrics/artifact-review-rubric.md`.
-4. Run the required lenses as parallel subagents by default: Feasibility, Completeness, Scope and alignment, Architecture, Intent preservation. Invoking this artifact-review workflow is explicit authorization to delegate those lenses.
+4. Run the required lenses as parallel subagents by default: Feasibility, Completeness, Scope and alignment, Architecture, Intent preservation, Security. Invoking this artifact-review workflow is explicit authorization to delegate those lenses. The Security lens uses `rubrics/security-review-rubric.md` (OWASP classes scoped to a diff review).
 5. Only fall back to `in-session-emulated` when subagents are unavailable or the human explicitly requests no delegation. If falling back, state that the review is not independently adversarial and treat it as weaker evidence.
 6. Update the review log with reviewer rows, per-reviewer verdicts, findings, evidence, execution mode, and the aggregate verdict.
 7. Always return the actual artifact-review verdict from the reviewer set. Do not substitute a fixed example verdict; `NEEDS_REVISION` and `ESCALATE` are valid review results when supported by findings.
