@@ -12,10 +12,12 @@ lens checked whether the model was tidy, not whether it was right. Lens count go
 ### Added
 
 - New **Security** lens (`rubrics/security-review-rubric.md`) for the artifact-review rubric:
-  OWASP A01-A10 classes scoped to a diff review (broken access control/IDOR, injection,
-  cryptographic failures/secrets, SSRF, XSS/escaping, insecure design, auth/session failures,
-  deserialization/integrity, security misconfiguration). Explicitly does not double-report issues
-  the deterministic gates already catch (the `eval(` gate covers bare eval injection).
+  OWASP Top 10 (2021 edition) classes scoped to a diff review (broken access control/IDOR,
+  injection, cryptographic failures/secrets, SSRF, XSS/escaping, insecure design, auth/session
+  failures, deserialization/integrity, security misconfiguration). Covers A01-A05, A07, A08, A10
+  + XSS; A06 (vulnerable components) and A09 (logging/monitoring) are deliberately excluded as
+  non-diff-reviewable. Explicitly does not double-report issues the deterministic gates already
+  catch (the `eval(` gate covers bare eval injection).
 - Security lens added to the required-lens set in `rubrics/artifact-review-rubric.md` and
   `skills/review-artifact/SKILL.md` (now 6 required lenses: Feasibility, Completeness,
   Scope-and-Alignment, Architecture, Intent-Preservation, Security).

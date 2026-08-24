@@ -44,10 +44,6 @@ Use this rubric for specs, plans, designs, decompositions, architecture docs, pr
   is compile-checked, not a find-and-replace; untyped containers (`dict`, `object`) where a named
   typed struct/record would make the shape explicit; stringly-typed data that a typed enum would
   prevent from drifting. Prefer the typed form unless the diff is intentionally dynamic.
-- Check data-structure Big-O efficiency: a list used for membership/lookup where a set/map is
-  O(1); nested loops over the same/growing collection (O(n^2)); repeated linear scans; choosing a
-  structure whose access pattern doesn't match the operation (linear search where a hash/index
-  exists).
 - Check redundancy: a new column storing derivable data (a cached total/count/formatted string)
   with no invalidation that can drift; a value duplicated across two tables with no
   single-source-of-truth rule; god-tables/fat interfaces mixing concerns.

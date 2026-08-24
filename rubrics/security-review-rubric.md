@@ -5,12 +5,17 @@ for security vulnerabilities the change introduces or fails to prevent — the O
 diff-review can see (no runtime/audit-log checks). This is a *diff-scoped* lens: judge whether
 the change preserves or weakens security, not whether the whole codebase is hardened.
 
-Mined from metaswarm's `rubrics/security-review-rubric.md` (OWASP A01–A10), scoped to what a
-diff review can verify. Per docs/METAREVIEW_IMPROVEMENTS.md H1: metareview's original 5 lenses were
-all artifact-shape checks (Feasibility, Completeness, Scope, Architecture, Intent); none prompted
-a reviewer to look for vulnerabilities, so metareview under-recalled on security goldens vs
-vanilla. This 6th lens closes that gap at ~zero marginal cost (lenses are Haiku subagents —
-~0.04% of cost; the orchestrator dominates — see SPEC §6.3.1).
+Mined from metaswarm's `rubrics/security-review-rubric.md` (OWASP Top 10, 2021 edition),
+scoped to the classes a diff review can verify: A01-A05, A07, A08, A10, plus XSS/escaping.
+A06 (vulnerable/outdated components) and A09 (logging & monitoring failures) are deliberately
+excluded as non-diff-reviewable (A06 needs a dependency-manifest audit + external CVE DB; A09 is
+runtime/config posture, rarely visible in a diff).
+
+Per docs/METAREVIEW_IMPROVEMENTS.md H1: metareview's original 5 lenses were all artifact-shape
+checks (Feasibility, Completeness, Scope, Architecture, Intent); none prompted a reviewer to
+look for vulnerabilities, so metareview under-recalled on security goldens vs vanilla. This 6th
+lens closes that gap at ~zero marginal cost (lenses are Haiku subagents — ~0.04% of cost; the
+orchestrator dominates — see SPEC §6.3.1).
 
 ## Verdicts
 
