@@ -245,6 +245,14 @@ persona-anti-overlap pattern.
 - Block on a behavioral change in the diff with no test modifications, a test that asserts
   nothing (false-confidence), or a test that exercises only a mock. Do not double-report
   `eval(` or `missing-test` issues the deterministic gates already catch.
+- **Missing-test ownership (precedence):** the deterministic `missing-test` gate owns
+  *absence of a test file for changed code* (free, exact). Completeness owns *missing
+  verification for a requirement when no test code is in the diff at all*. Testing-quality
+  owns *tests that exist but lie* (false-confidence, stale-after-behavior-change,
+  mock-not-real-logic). The three do not overlap: a changed-behavior cell with NO test file
+  -> deterministic gate; a requirement with no test code in the diff -> Completeness; a test
+  that exists but doesn't verify the new behavior -> Testing-quality. Do not re-report a
+  finding another lens or gate already caught.
 - Does NOT flag: security vulnerabilities (defer to Security); architecture soundness (defer to
   Architecture); migration safety (defer to Data-migration); whether tests exist at all when no
   test code is in the diff (defer to Completeness for "missing verification").

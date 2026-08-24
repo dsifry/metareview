@@ -78,7 +78,9 @@ diff, not generic "add more tests" advice.
   Architecture).
 - Do NOT flag migration safety, schema drift, or data loss (defer to Data-migration).
 - Do NOT flag whether tests exist at all when no test code is in the diff (defer to
-  Completeness for "missing verification").
+  Completeness for "missing verification"; the deterministic `missing-test` gate owns absence
+  of a test file for changed code). Testing-quality owns tests that EXIST but lie; it does not
+  own missing-test-file or missing-verification-for-a-requirement.
 - Do NOT re-report `eval(` or `missing-test` issues the deterministic gates already catch.
 
 ## Evidence Rules
