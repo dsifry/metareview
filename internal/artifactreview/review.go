@@ -129,13 +129,16 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
 		"Execution mode: `pending-parallel-subagents`\n\n" +
 		"Previous run: " + markdown.InlineCode(prevDisplay) + "\n\n" +
 		"## Verdict\n\nNOT_REVIEWED\n\n" +
-		"## Completion Requirements\n\nThis scaffold is not a completed review. Artifact review defaults to parallel subagents for the five required lenses. The artifact-review workflow is explicit authorization to delegate those lenses. Only use `in-session-emulated` when subagents are unavailable or the human explicitly requested no delegation; if used, state that the review is not independently adversarial and treat it as weaker evidence. Completion requires every required reviewer row to be populated, each reviewer to have a verdict, blocking findings to be fixed and re-reviewed or explicitly human-accepted, and the aggregate verdict to be the actual artifact-review verdict returned by the reviewer set rather than a fixed example result.\n\n" +
+		"## Completion Requirements\n\nThis scaffold is not a completed review. Artifact review defaults to parallel subagents for the eight required lenses. The artifact-review workflow is explicit authorization to delegate those lenses. Only use `in-session-emulated` when subagents are unavailable or the human explicitly requested no delegation; if used, state that the review is not independently adversarial and treat it as weaker evidence. Completion requires every required reviewer row to be populated, each reviewer to have a verdict, blocking findings to be fixed and re-reviewed or explicitly human-accepted, and the aggregate verdict to be the actual artifact-review verdict returned by the reviewer set rather than a fixed example result.\n\n" +
 		"## Reviewer Prompts\n\nUse `rubrics/artifact-review-rubric.md` and the context pack above. Run these lenses as parallel subagents by default before aggregation:\n\n" +
 		"- Feasibility\n" +
 		"- Completeness\n" +
 		"- Scope and alignment\n" +
 		"- Architecture\n" +
-		"- Intent preservation\n\n" +
+		"- Intent preservation\n" +
+		"- Security (see `rubrics/security-review-rubric.md`)\n" +
+		"- Testing-quality (see `rubrics/testing-quality-rubric.md`)\n" +
+		"- Data-migration (see `rubrics/data-migration-rubric.md`)\n\n" +
 		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Warnings | Notes |\n| --- | --- | ---: | ---: | --- |\n\n" +
 		"## Findings\n\nNo reviewer findings recorded yet.\n"
 	if err := os.WriteFile(reviewPath, []byte(content), 0o644); err != nil {
