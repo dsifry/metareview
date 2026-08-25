@@ -108,7 +108,7 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
 		Target: map[string]string{"type": "path", "path": target},
 		Status: "open", Verdict: "NOT_REVIEWED", ExecutionMode: "pending-parallel-subagents",
 		PreviousRunID: prev, BaseSHA: head, HeadSHA: head, ContextPath: ctx.ContextRel, ReviewPath: reviewRel,
-		Reviewers:  []string{"feasibility", "completeness", "scope-alignment", "architecture", "intent-preservation"},
+		Reviewers:  []string{"feasibility", "completeness", "scope-alignment", "architecture", "intent-preservation", "security", "testing-quality", "data-migration"},
 		FindingIDs: []string{}, SourceRefs: []map[string]string{{"type": "path", "path": target}},
 		CreatedAt: now, UpdatedAt: now, RepoRoot: root, GitHead: head,
 	}
@@ -141,7 +141,7 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
 		"- Data-migration (see `rubrics/data-migration-rubric.md`)\n\n" +
 		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Warnings | Notes |\n| --- | --- | ---: | ---: | --- |\n\n" +
 		"## Orchestrator Notes (not findings)\n\n" +
-		"Orchestrator context and synthesis go here (e.g. checkout sparse, filtered file-not-found artifacts, consolidation narrative). This section is audit trail only — it is NOT a finding stream. Do not extract sentences from here as review findings; only the `## Findings` section (lens subagent output) contains review findings.\n\n" +
+		"Orchestrator context and synthesis go here (e.g. checkout sparse, filtered file-not-found artifacts, consolidation narrative). This section is audit trail only — it is NOT a finding stream. Do not extract sentences from here as review findings; only the `## Findings` section and its classified `## Blocking Findings`, `## Advisory Findings`, `## Follow-up Findings`, and `## Warnings` sections contain review findings.\n\n" +
 		"## Findings\n\nNo reviewer findings recorded yet.\n"
 	if err := os.WriteFile(reviewPath, []byte(content), 0o644); err != nil {
 		return Result{}, err

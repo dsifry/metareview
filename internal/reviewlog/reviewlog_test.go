@@ -83,6 +83,9 @@ func TestCompletedArtifactReviewIsNotUnresolved(t *testing.T) {
 		"| Scope and alignment | PASS | 0 | 0 | ok |",
 		"| Architecture | PASS | 0 | 0 | ok |",
 		"| Intent preservation | PASS | 0 | 0 | ok |",
+		"| Security | PASS | 0 | 0 | ok |",
+		"| Testing-quality | PASS | 0 | 0 | ok |",
+		"| Data-migration | PASS | 0 | 0 | ok |",
 	}
 	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "artifact.md"), artifactReviewMarkdown("mrv-artifact", "docs/spec.md", "PASS", rows))
 
