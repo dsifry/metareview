@@ -298,3 +298,22 @@ Every blocking finding must cite at least one concrete source:
 - review log section
 
 Session-derived facts are hints unless the finding is about intent or process history.
+
+## Output Structure (orchestrator notes vs findings)
+
+The review markdown has two distinct prose sections; keep them separate:
+
+- **`## Orchestrator Notes (not findings)`** — orchestrator context and synthesis (checkout
+  sparse, filtered file-not-found artifacts, consolidation narrative, "all N lenses returned").
+  This is **audit trail only**. It is NOT a finding stream. Downstream consumers (and the
+  harnesseval extractor) MUST NOT extract sentences from here as review findings.
+- **`## Findings`** (and the classified `## Blocking Findings` / `## Advisory Findings` /
+  `## Follow-up Findings` / `## Warnings` sections) — the only source of review findings. These
+  come from the LLM lens subagents. The deterministic gates (eval-injection, missing-test, etc.)
+  remain `blocking` findings for metareview's own verdict; downstream eval extractors should
+  skip findings sourced from `metareview-deterministic/*` and `metareview-session` (they are
+  gate verdicts / orchestrator prose, not lens findings).
+
+The orchestrator's job is to plan and aggregate, not to produce review findings. Its prose is
+audit trail; the lenses produce the findings. Putting orchestrator narrative into the findings
+stream adds hallucination (harnesseval adjudicates orchestrator prose at ~92% hallucination).
