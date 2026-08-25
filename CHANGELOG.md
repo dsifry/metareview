@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.8.0 - 2026-08-24
+
+0.8.0 re-stances every lens as **adversarial** rather than collaborative: each lens now assumes
+there may be a fundamental mistake hiding in the design and hunts for it instead of confirming
+the artifact is well-shaped. The reviewer is not hostile to the author (intent is assumed good)
+but is hostile to unexamined assumptions; each lens is allowed to conclude the best improvement
+is to throw away part or all of the proposed design. Two new lenses (Testing-quality and
+Data-migration) take the lens set 6 -> 8, the Security and Architecture lenses gain targeted
+grafts, and a new anchored confidence rubric plus a per-lens "what you don't flag" suppression
+list (anti-overlap) are introduced. Driven by harnesseval eval signal and mined from metaswarm +
+Compound Engineering.
+
+### Added
+
+- New **Testing-quality** lens for the artifact-review rubric: false-confidence tests (tests
+  that pass regardless of correctness), behavioral-change-without-test-work (behavior changes
+  but no test was added or updated), and mocks-not-real-logic (mocks that stub the very logic
+  under test).
+- New **Data-migration** lens for the artifact-review rubric: schema-drift, irreversible
+  migrations, missing backfills, and dual-write gaps.
+- New **anchored confidence rubric**: 0/25/50/75/100 scores paired with P0-P3 severity bands.
+- New per-lens **"what you don't flag" suppression list** (anti-overlap), mined from Compound
+  Engineering, so each lens explicitly records the findings it leaves to other lenses or gates.
+- Security lens grafts: IDOR/ownership scoping, injection variants (command/NoSQL/
+  deserialization), SSRF protocol-bypass, and secrets-in-logs.
+- Architecture lens grafts: sentinel-meaning-change, cascading-failure, stand-in-guard-fidelity,
+  and api-contract-breaking-change.
+
+### Changed
+
+- All lenses now take an **adversarial stance**: assume there may be a fundamental mistake
+  hiding in the design; hunt for it; do not confirm the artifact is well-shaped. The reviewer is
+  not hostile to the author (intent assumed good) but is hostile to unexamined assumptions. Each
+  lens is allowed to conclude the best improvement is to throw away part or all of the proposed
+  design.
+- Lens count 6 -> 8 (Feasibility, Completeness, Scope-and-Alignment, Architecture,
+  Intent-Preservation, Security, Testing-quality, Data-migration).
+
+### Notes
+
+- Mined from metaswarm + Compound Engineering. Non-diff-reviewable items (STRIDE
+  threat-modeling, pnpm audit/CVE, release 7-gate pipeline, project-vertical checks,
+  plan-time architect gating) are deliberately excluded.
+
 ## 0.7.0 - 2026-08-24
 
 0.7.0 adds a dedicated **Security** lens to the artifact-review rubric and deepens the

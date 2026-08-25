@@ -166,6 +166,9 @@ func artifactReviewComplete(lines []string) bool {
 		"scopeandalignment":  false,
 		"architecture":       false,
 		"intentpreservation": false,
+		"security":           false,
+		"testingquality":     false,
+		"datamigration":      false,
 	}
 	for _, line := range lines {
 		columns := markdownTableColumns(line)
