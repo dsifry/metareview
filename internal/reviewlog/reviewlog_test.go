@@ -58,36 +58,56 @@ func TestArtifactNotReviewedIsUnresolved(t *testing.T) {
 	}
 }
 
-func TestArtifactMissingRequiredReviewerRowsIsUnresolved(t *testing.T) {
-	root := t.TempDir()
-	rows := []string{
-		"| Feasibility | PASS | 0 | 0 | ok |",
-		"| Completeness | PASS | 0 | 0 | ok |",
-	}
-	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "artifact.md"), artifactReviewMarkdown("mrv-artifact", "docs/spec.md", "PASS", rows))
+// allArtifactReviewerRows is the complete set of 8 required reviewer rows for a 0.8.0
+// artifact review (the baseline a completed review must have).
+var allArtifactReviewerRows = []string{
+	"| Feasibility | PASS | 0 | 0 | ok |",
+	"| Completeness | PASS | 0 | 0 | ok |",
+	"| Scope and alignment | PASS | 0 | 0 | ok |",
+	"| Architecture | PASS | 0 | 0 | ok |",
+	"| Intent preservation | PASS | 0 | 0 | ok |",
+	"| Security | PASS | 0 | 0 | ok |",
+	"| Testing-quality | PASS | 0 | 0 | ok |",
+	"| Data-migration | PASS | 0 | 0 | ok |",
+}
 
-	logs, err := ForTarget(root, "docs/spec.md")
-	if err != nil {
-		t.Fatalf("target logs: %v", err)
-	}
-	if len(logs) != 1 || !logs[0].HasUnresolvedBlockers {
-		t.Fatalf("expected missing reviewer rows to be unresolved: %+v", logs)
+func TestArtifactMissingRequiredReviewerRowsIsUnresolved(t *testing.T) {
+	// Each required lens must be enforced: remove exactly one from the complete set and
+	// assert the review is unresolved. Covers the original 5 + the 3 new 0.8.0 lenses
+	// (Security, Testing-quality, Data-migration) — the prior 2-row fixture only omitted
+	// Feasibility/Completeness and so did not exercise the new enforcement.
+	for _, omit := range []string{
+		"Feasibility", "Completeness", "Scope and alignment", "Architecture",
+		"Intent preservation", "Security", "Testing-quality", "Data-migration",
+	} {
+		omit := omit
+		t.Run("missing_"+strings.ReplaceAll(strings.ReplaceAll(omit, " ", "_"), "-", "_"), func(t *testing.T) {
+			root := t.TempDir()
+			rows := make([]string, 0, len(allArtifactReviewerRows))
+			for _, r := range allArtifactReviewerRows {
+				if strings.Contains(r, omit) {
+					continue
+				}
+				rows = append(rows, r)
+			}
+			mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "artifact.md"),
+				artifactReviewMarkdown("mrv-artifact", "docs/spec.md", "PASS", rows))
+
+			logs, err := ForTarget(root, "docs/spec.md")
+			if err != nil {
+				t.Fatalf("target logs: %v", err)
+			}
+			if len(logs) != 1 || !logs[0].HasUnresolvedBlockers {
+				t.Fatalf("expected missing %s reviewer row to be unresolved: %+v", omit, logs)
+			}
+		})
 	}
 }
 
 func TestCompletedArtifactReviewIsNotUnresolved(t *testing.T) {
 	root := t.TempDir()
-	rows := []string{
-		"| Feasibility | PASS | 0 | 0 | ok |",
-		"| Completeness | PASS | 0 | 0 | ok |",
-		"| Scope and alignment | PASS | 0 | 0 | ok |",
-		"| Architecture | PASS | 0 | 0 | ok |",
-		"| Intent preservation | PASS | 0 | 0 | ok |",
-		"| Security | PASS | 0 | 0 | ok |",
-		"| Testing-quality | PASS | 0 | 0 | ok |",
-		"| Data-migration | PASS | 0 | 0 | ok |",
-	}
-	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "artifact.md"), artifactReviewMarkdown("mrv-artifact", "docs/spec.md", "PASS", rows))
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "artifact.md"),
+		artifactReviewMarkdown("mrv-artifact", "docs/spec.md", "PASS", allArtifactReviewerRows))
 
 	logs, err := ForTarget(root, "docs/spec.md")
 	if err != nil {
