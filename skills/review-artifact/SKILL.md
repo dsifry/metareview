@@ -21,6 +21,24 @@ Use when reviewing a Markdown artifact before implementation or before a gate is
 
 Use `metareview review artifact <path> --scaffold-only` only when explicitly creating a scaffold without claiming the review is complete.
 
+## Orchestrator Discipline
+
+The orchestrator (the host agent running this workflow) is a thin dispatcher and aggregator; the
+lenses do the analysis. Most review cost lives in the orchestrator and lens subagent turns, so
+keep the orchestrator lean:
+
+- **Be terse.** Run the commands, dispatch the lenses, write the review log, return the verdict.
+  Do not narrate plans, reasoning, or progress.
+- **Trust the lenses; do not re-verify.** After the lenses return, write each lens's findings and
+  verdict into the review log and aggregate the verdict. Do not re-read files, re-run `git diff`,
+  or re-check lens findings — the lenses already did that work. Re-verifying adds orchestrator
+  turns (cost) without improving the review.
+- **Keep the aggregation small.** Write each lens's findings into the review log as that lens
+  returns (per-lens edits), not held in one large final write. The orchestrator's final reply is
+  the verdict plus a one-line summary, not a re-emission of the findings. On large diffs a single
+  findings-laden message can overflow the model's per-message output limit and truncate the
+  review; per-lens writes avoid this.
+
 ## Gate Rule
 
 A review execution is incomplete while required reviewer rows are missing, any reviewer lacks a verdict, or the aggregate verdict is `NOT_REVIEWED`. Do not call an artifact implementation-ready while the verdict is `ESCALATE` or `NEEDS_REVISION`, required reviewer rows are missing, reviewer verdicts are missing, or blocking findings remain unresolved unless the human explicitly accepts the risk.
