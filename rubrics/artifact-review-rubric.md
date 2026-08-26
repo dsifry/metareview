@@ -317,3 +317,9 @@ The review markdown has two distinct prose sections; keep them separate:
 The orchestrator's job is to plan and aggregate, not to produce review findings. Its prose is
 audit trail; the lenses produce the findings. Putting orchestrator narrative into the findings
 stream adds hallucination (harnesseval adjudicates orchestrator prose at ~92% hallucination).
+
+Write each lens's findings into the review log as that lens returns (per-lens edits), and keep the
+orchestrator's final reply to the verdict plus a one-line summary — do not re-emit the findings in
+the final message. On large diffs a single findings-laden message can overflow the model's
+per-message output limit and truncate the review; per-lens writes avoid this (see Orchestrator
+Discipline in `skills/review-artifact/SKILL.md`).

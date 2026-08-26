@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.8.2 - 2026-08-26
+
+0.8.2 adds **orchestrator discipline** guidance to the review-artifact skill: the orchestrator
+(the host agent running the workflow) is a thin dispatcher and aggregator, and the lenses do the
+analysis. Three efficiencies that cut orchestrator cost without affecting lens recall or
+precision.
+
+### Added
+
+- **Be terse.** The orchestrator runs the commands, dispatches the lenses, writes the review log,
+  and returns the verdict — no planning or progress narration. (Orchestrator output tokens.)
+- **Trust the lenses; do not re-verify.** After the lenses return, the orchestrator writes each
+  lens's findings and verdict into the review log and aggregates the verdict. It does not re-read
+  files, re-run `git diff`, or re-check lens findings — the lenses already did that work.
+  (Orchestrator turns.)
+- **Keep the aggregation small.** Each lens's findings are written to the review log as that lens
+  returns (per-lens edits), not held in one large final write; the orchestrator's final reply is
+  the verdict plus a one-line summary, not a re-emission of the findings. On large diffs a single
+  findings-laden message can overflow the model's per-message output limit and truncate the
+  review; per-lens writes avoid this.
+
+### Fixed
+
+- `.claude-plugin/marketplace.json` plugin version had drifted to 0.6.0 while `package.json`
+  advanced to 0.8.0; resynced to 0.8.2 (the manifest version-consistency test now passes).
+
+### Notes
+
+- Validated in the harnesseval lab (branch `mrv-0.8.1-slim-orchestration`). The 0.8.1 experiment
+  bundled a fourth fix (embed the diff in the prompt and forbid lens file-exploration) that cut
+  tokens further but cost recall — it lost a golden that requires surrounding-file context the
+  embedded diff did not show — so 0.8.2 reverts it: lenses keep file access, as in 0.8.0. 0.8.2
+  keeps the three orchestrator-side fixes above, which reduced orchestrator tokens with no
+  recall/precision regression.
+- The lens set (8 adversarial lenses), rubric content, and deterministic gates are unchanged from
+  0.8.0. The only change to the Go binary is the reported version string; behavior is identical.
+
 ## 0.8.0 - 2026-08-24
 
 0.8.0 re-stances every lens as **adversarial** rather than collaborative: each lens now assumes
