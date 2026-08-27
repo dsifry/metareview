@@ -1,6 +1,7 @@
 package taskdone
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/dsifry/metareview/internal/reviewers"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/runchain"
+	"github.com/dsifry/metareview/internal/shardpack"
 	"github.com/dsifry/metareview/internal/state"
 	"github.com/dsifry/metareview/internal/tasksource"
 )
@@ -26,6 +28,8 @@ type Options struct {
 	EvidencePath  string
 	MaxAttempts   int
 	Now           time.Time
+	// ShardWriter is the pack-writing seam; nil uses the real filesystem.
+	ShardWriter shardpack.Writer
 }
 
 type Result struct {
@@ -93,6 +97,14 @@ func Create(root, target string, options Options) (Result, error) {
 		reviewGit = filterGeneratedGitContext(git)
 	}
 	profile := contextprofile.FromGit(reviewGit, contextprofile.Options{})
+	shardPlan, err := contextprofile.PlanShards(profile, reviewGit.BranchFiles, contextprofile.ShardOptions{
+		MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard,
+		Scope:            "task-done",
+		TargetID:         task.ID,
+	})
+	if err != nil {
+		return Result{}, err
+	}
 	knowledgeContext, err := knowledge.Collect(root)
 	if err != nil {
 		return Result{}, err
@@ -124,6 +136,32 @@ func Create(root, target string, options Options) (Result, error) {
 	targetRecord := map[string]string{"type": taskTargetType(task), "id": task.ID}
 	run := findings.Run{ID: runID, Scope: "task-done", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
 
+	packWriter := options.ShardWriter
+	if packWriter == nil {
+		packWriter = shardpack.New(shardpack.OSDeps())
+	}
+	packDir := ""
+	packRollback := func() error { return nil }
+	if len(shardPlan.Shards) > 0 {
+		packDir = shardpack.Dir(root, "task-done", task.ID, shardPlan.PlanHash)
+		packRollback, err = packWriter.Write(root, shardPlan, shardpack.Header{
+			Scope:    "task-done",
+			TargetID: task.ID,
+			Base:     reviewGit.BaseSHA,
+			Head:     reviewGit.HeadSHA,
+			Budget:   contextprofile.DefaultMaxBytesPerShard,
+		}, reviewGit.BranchFiles)
+		if err != nil {
+			// Write can fail after the new pack set is already in place; the
+			// rollback it returns restores the previous set, so run it rather
+			// than leaving the failed run's packs behind.
+			if packRollback != nil {
+				_ = packRollback()
+			}
+			return Result{}, err
+		}
+	}
+
 	result := Result{RunID: runID, ReviewRel: reviewRel, ContextRel: contextRel}
 	err = func() error {
 		if err := os.MkdirAll(filepath.Dir(contextPath), 0o755); err != nil {
@@ -132,7 +170,7 @@ func Create(root, target string, options Options) (Result, error) {
 		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, profile, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
+		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, profile, shardPlan, packDir, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
 			return err
 		}
 		chain, err := runchain.Resolve(root, runchain.Options{
@@ -207,7 +245,17 @@ func Create(root, target string, options Options) (Result, error) {
 	if err != nil {
 		restoreSnapshots(snapshots)
 		removeEmptyDirs(root)
+		// The rollback error must not replace the error that caused the rollback.
+		if rollbackErr := packRollback(); rollbackErr != nil {
+			return Result{}, errors.Join(err, rollbackErr)
+		}
 		return Result{}, err
+	}
+	if len(shardPlan.Shards) > 0 {
+		// The run is already recorded on disk. Prune only removes obsolete
+		// transient pack directories, so its failure must not discard the run
+		// identifiers the caller needs.
+		_ = packWriter.Prune(root, "task-done", task.ID, shardPlan.PlanHash)
 	}
 	return result, nil
 }
@@ -379,7 +427,7 @@ func uniquePaths(root, target string, at time.Time) (string, string, string, err
 	}
 }
 
-func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, evidenceText, gateEffect string) string {
+func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, plan contextprofile.ShardPlan, packDir string, knowledgeContext knowledge.Context, evidenceText, gateEffect string) string {
 	changed := append([]string{}, git.ChangedFiles...)
 	changed = append(changed, git.StagedFiles...)
 	changed = append(changed, git.WorkingTreeFiles...)
@@ -393,19 +441,15 @@ func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Contex
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		contextprofile.Markdown(profile) + "\n\n" +
-		contextprofile.ShardPlanMarkdown(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"}) + "\n\n" +
-		reviewManifestMarkdown("task-done", map[string]string{"type": taskTargetType(task), "id": task.ID}, profile) + "\n\n" +
+		contextprofile.ShardPlanMarkdown(plan, shardpack.Rel(packDir)) + "\n\n" +
+		reviewManifestMarkdown("task-done", map[string]string{"type": taskTargetType(task), "id": task.ID}, profile, plan) + "\n\n" +
 		"## Changed Files\n\n" + markdownList(changed, "No changed files.") + "\n\n" +
 		"## Diff\n\n" + markdown.FencedCodeBlock("diff", strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")) + "\n\n" +
 		"## Knowledge And Registries\n\n" + knowledgeMarkdown(knowledgeContext) + "\n\n" +
 		"## Evidence\n\n" + firstNonEmpty(evidenceText, "No external validation evidence supplied.") + "\n"
 }
 
-func reviewManifestMarkdown(scope string, target map[string]string, profile contextprofile.Profile) string {
-	plan, err := contextprofile.PlanShards(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"})
-	if err != nil {
-		return "## Review Manifest\n\nUnable to generate review manifest: " + err.Error()
-	}
+func reviewManifestMarkdown(scope string, target map[string]string, profile contextprofile.Profile, plan contextprofile.ShardPlan) string {
 	manifest := reviewmanifest.Build(reviewmanifest.Input{
 		Scope:            scope,
 		Target:           target,

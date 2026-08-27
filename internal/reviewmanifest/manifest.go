@@ -366,7 +366,7 @@ func sourceManifestHash(manifest Manifest) string {
 	}
 	builder.WriteString("diff=" + manifest.ShardPlan.SourceDiffHash + "\n")
 	for _, shard := range canonicalShardPlan(manifest.ShardPlan).Shards {
-		builder.WriteString(fmt.Sprintf("shard=%s|%d|%s\n", shard.ID, shard.ByteCount, strings.Join(cleanSortedUnique(shard.Paths), ",")))
+		builder.WriteString(fmt.Sprintf("shard=%s|%d|%s\n", shard.ID, shard.Bytes, strings.Join(cleanSortedUnique(shard.Paths), ",")))
 	}
 	sum := sha256.Sum256([]byte(builder.String()))
 	return hex.EncodeToString(sum[:])[:16]

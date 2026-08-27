@@ -1,6 +1,7 @@
 package prready
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/reviewstate"
 	"github.com/dsifry/metareview/internal/runchain"
+	"github.com/dsifry/metareview/internal/shardpack"
 	"github.com/dsifry/metareview/internal/state"
 )
 
@@ -31,6 +33,8 @@ type Options struct {
 	MaxAttempts        int
 	IncludeWorkingTree bool
 	Now                time.Time
+	// ShardWriter is the pack-writing seam; nil uses the real filesystem.
+	ShardWriter shardpack.Writer
 }
 
 type Result struct {
@@ -95,6 +99,14 @@ func Create(root string, options Options) (Result, error) {
 		analysisGit = branchOnlyGitContext(reviewGit)
 	}
 	profile := contextprofile.FromGit(analysisGit, contextprofile.Options{})
+	shardPlan, err := contextprofile.PlanShards(profile, analysisGit.BranchFiles, contextprofile.ShardOptions{
+		MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard,
+		Scope:            "pr-ready",
+		TargetID:         shardTargetID(analysisGit),
+	})
+	if err != nil {
+		return Result{}, err
+	}
 	knowledgeContext, err := knowledge.Collect(root)
 	if err != nil {
 		return Result{}, err
@@ -159,6 +171,34 @@ func Create(root string, options Options) (Result, error) {
 	rawFindings := reviewers.RunPRReady(reviewerContext(analysisGit, profile, knowledgeContext, reviewLogs, evidenceText, prEvidence, ghCtx, options.IncludeWorkingTree, dirtyFiles))
 	run := findings.Run{ID: runID, Scope: "pr-ready", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
 
+	// Packs are written before the review body so the context pack can name them,
+	// and are undone by packRollback if anything later in the run fails.
+	packWriter := options.ShardWriter
+	if packWriter == nil {
+		packWriter = shardpack.New(shardpack.OSDeps())
+	}
+	packDir := ""
+	packRollback := func() error { return nil }
+	if len(shardPlan.Shards) > 0 {
+		packDir = shardpack.Dir(root, "pr-ready", shardTargetID(analysisGit), shardPlan.PlanHash)
+		packRollback, err = packWriter.Write(root, shardPlan, shardpack.Header{
+			Scope:    "pr-ready",
+			TargetID: shardTargetID(analysisGit),
+			Base:     analysisGit.BaseSHA,
+			Head:     analysisGit.HeadSHA,
+			Budget:   contextprofile.DefaultMaxBytesPerShard,
+		}, analysisGit.BranchFiles)
+		if err != nil {
+			// Write can fail after the new pack set is already in place; the
+			// rollback it returns restores the previous set, so run it rather
+			// than leaving the failed run's packs behind.
+			if packRollback != nil {
+				_ = packRollback()
+			}
+			return Result{}, err
+		}
+	}
+
 	result := Result{RunID: runID, ReviewRel: reviewRel, ContextRel: contextRel}
 	err = func() error {
 		if err := os.MkdirAll(filepath.Dir(contextPath), 0o755); err != nil {
@@ -167,7 +207,7 @@ func Create(root string, options Options) (Result, error) {
 		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect)), 0o644); err != nil {
+		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, shardPlan, packDir, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect)), 0o644); err != nil {
 			return err
 		}
 		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{
@@ -228,7 +268,17 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		restoreSnapshots(snapshots)
 		removeEmptyDirs(root)
+		// The rollback error must not replace the error that caused the rollback.
+		if rollbackErr := packRollback(); rollbackErr != nil {
+			return Result{}, errors.Join(err, rollbackErr)
+		}
 		return Result{}, err
+	}
+	if len(shardPlan.Shards) > 0 {
+		// The run is already recorded on disk. Prune only removes obsolete
+		// transient pack directories, so its failure must not discard the run
+		// identifiers the caller needs.
+		_ = packWriter.Prune(root, "pr-ready", shardTargetID(analysisGit), shardPlan.PlanHash)
 	}
 	return result, nil
 }
@@ -592,8 +642,15 @@ func branchOnlyGitContext(git gitcontext.Context) gitcontext.Context {
 	git.StagedDiffTruncated = false
 	git.WorkingTreeDiffTruncated = false
 	git.UntrackedOmittedCount = 0
-	git.RawDiffBytes = len(git.Diff)
-	git.FilteredDiffBytes = len(git.Diff)
+	git.UntrackedTruncatedCount = 0
+	// Prefer the measured branch bytes; never recompute from the truncated text.
+	if git.BranchFilteredDiffBytes > 0 {
+		git.RawDiffBytes = git.BranchRawDiffBytes
+		git.FilteredDiffBytes = git.BranchFilteredDiffBytes
+	} else {
+		git.RawDiffBytes = len(git.Diff)
+		git.FilteredDiffBytes = len(git.Diff)
+	}
 	return git
 }
 
@@ -747,7 +804,7 @@ func uniquePaths(root string, at time.Time) (string, string, string, error) {
 	}
 }
 
-func contextMarkdown(runID string, git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string, ghCtx githubcontext.Context, prEvidence, gateEffect string) string {
+func contextMarkdown(runID string, git gitcontext.Context, profile contextprofile.Profile, plan contextprofile.ShardPlan, packDir string, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string, ghCtx githubcontext.Context, prEvidence, gateEffect string) string {
 	changed := append([]string{}, git.ChangedFiles...)
 	changed = append(changed, git.StagedFiles...)
 	changed = append(changed, git.WorkingTreeFiles...)
@@ -760,8 +817,8 @@ func contextMarkdown(runID string, git gitcontext.Context, profile contextprofil
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		contextprofile.Markdown(profile) + "\n\n" +
-		contextprofile.ShardPlanMarkdown(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"}) + "\n\n" +
-		reviewManifestMarkdown("pr-ready", map[string]string{"type": "branch", "id": firstNonEmpty(git.Branch, git.HeadSHA)}, profile) + "\n\n" +
+		contextprofile.ShardPlanMarkdown(plan, shardpack.Rel(packDir)) + "\n\n" +
+		reviewManifestMarkdown("pr-ready", map[string]string{"type": "branch", "id": firstNonEmpty(git.Branch, git.HeadSHA)}, profile, plan) + "\n\n" +
 		"## Changed Files\n\n" + markdownList(changed, "No changed files.") + "\n\n" +
 		"## Diff\n\n" + markdown.FencedCodeBlock("diff", strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")) + "\n\n" +
 		"## Review Logs\n\n" + reviewLogsMarkdown(logs) + "\n\n" +
@@ -771,11 +828,7 @@ func contextMarkdown(runID string, git gitcontext.Context, profile contextprofil
 		"## Suggested PR Evidence\n\n" + prEvidence + "\n"
 }
 
-func reviewManifestMarkdown(scope string, target map[string]string, profile contextprofile.Profile) string {
-	plan, err := contextprofile.PlanShards(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"})
-	if err != nil {
-		return "## Review Manifest\n\nUnable to generate review manifest: " + err.Error()
-	}
+func reviewManifestMarkdown(scope string, target map[string]string, profile contextprofile.Profile, plan contextprofile.ShardPlan) string {
 	manifest := reviewmanifest.Build(reviewmanifest.Input{
 		Scope:            scope,
 		Target:           target,
@@ -1032,4 +1085,8 @@ func findingIDs(records []findings.Record) []string {
 		ids = append(ids, record.ID)
 	}
 	return ids
+}
+
+func shardTargetID(git gitcontext.Context) string {
+	return firstNonEmpty(git.Branch, git.HeadSHA)
 }
