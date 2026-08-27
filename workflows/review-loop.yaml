@@ -1,0 +1,17 @@
+workflow: review-loop
+version: 1
+vars:
+  REVIEWER:     {default: claude-opus-5}
+  JUDGE:        {required: true}
+  REV_EFFORT:   {default: low}
+  JUDGE_EFFORT: {default: medium}
+states: [discover, adjudicate, done, failed]
+transitions:
+  - {from: discover,   to: done,       gate: findings_empty,     outcome: clean}
+  - {from: discover,   to: adjudicate, gate: findings_nonempty}
+  - {from: adjudicate, to: done,       gate: confirmed_empty,    outcome: clean}
+  - {from: adjudicate, to: done,       gate: confirmed_nonempty, outcome: reviewed}
+nodes:
+  discover:   {kind: review-lenses,        exec: subagent, lenses: 8, model: $REVIEWER, effort: $REV_EFFORT}
+  adjudicate: {kind: match-then-adjudicate, exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
+repo_mode: advisory

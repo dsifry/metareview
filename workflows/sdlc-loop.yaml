@@ -1,0 +1,23 @@
+workflow: sdlc-loop
+version: 1
+vars:
+  REVIEWER:     {default: claude-opus-5}
+  JUDGE:        {required: true}
+  REV_EFFORT:   {default: low}
+  JUDGE_EFFORT: {default: medium}
+states: [discover, adjudicate, fix, verify, done, failed]
+transitions:                                  # ordered
+  - {from: discover,   to: adjudicate, gate: findings_nonempty}
+  - {from: adjudicate, to: fix,        gate: confirmed_nonempty}
+  - {from: fix,        to: verify,     gate: commit_exists}
+  - {from: verify,     to: done,       gate: all_fixed,   outcome: fixed}
+  - {from: verify,     to: discover,   gate: bugs_remain, loop: true}
+nodes:
+  discover:   {kind: review-lenses,        exec: subagent, lenses: 8, model: $REVIEWER, effort: $REV_EFFORT}
+  adjudicate: {kind: match-then-adjudicate, exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
+  fix:        {kind: agent-edit,            exec: inline}
+  verify:     {kind: still-present,         exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
+convergence:
+  any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]
+repo_mode: advisory
+# on_overflow: {cmd: ["./notify-overflow.sh"], timeout: 30}   # requires --allow-custom-cmds <sha256>
