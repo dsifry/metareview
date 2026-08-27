@@ -29,6 +29,26 @@ Before saying work is done, run the appropriate metareview gate.
 
 Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr.
 
+## Process Overrides
+
+A blocking finding is normally cleared by fixing it. When that is not possible and the workflow is
+deliberately stepped outside of — an escalation — record it rather than working around it:
+
+```bash
+metareview override request <finding-id> --reason "<why the workflow was exited>" [--escalation "<context>"]
+metareview override grant   <finding-id> --reason "<why the exception is accepted>"
+metareview override list [--pending]
+```
+
+- **Requesting** is available to whoever is driving the run, including an orchestrating agent. It does
+  **not** clear the gate: the finding keeps blocking and `override list --pending` exits nonzero, so CI
+  stays red.
+- **Granting** is the acknowledgement, and must come from outside the workflow — a human, or an authority
+  explicitly designated as such. A reviewing agent never grants an override on its own findings.
+- Both halves are recorded with actor, timestamp and reason, rendered under "Process Overrides" in
+  `docs/metareview/FINDINGS.md`, and an override is never a fix (`fixedInRunId` stays empty), so post-merge
+  learning can analyse exceptions separately from resolutions.
+
 ## Lifecycle Placement
 
 - Before implementing a plan or spec: review the artifact.

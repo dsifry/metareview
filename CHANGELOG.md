@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Process overrides.** `metareview override request|grant|list` records that the review workflow was
+  deliberately stepped outside of. Requesting is available to whoever drives the run (an orchestrating
+  agent included) and does not clear the gate — the finding keeps blocking and `override list --pending`
+  exits nonzero, so CI stays red until an authority outside the workflow grants it. Both halves record
+  actor, timestamp and reason; overrides render under "Process Overrides" in `docs/metareview/FINDINGS.md`
+  and never read as fixes (`fixedInRunId` stays empty), so exceptions can be analysed separately from
+  resolutions.
+
 ## 0.8.2 - 2026-08-26
 
 0.8.2 adds **orchestrator discipline** guidance to the review-artifact skill: the orchestrator

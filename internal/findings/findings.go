@@ -68,10 +68,20 @@ type Record struct {
 	Fingerprint        string     `json:"fingerprint"`
 	Target             any        `json:"target"`
 	FixedInRunID       string     `json:"fixedInRunId,omitempty"`
-	CreatedAt          string     `json:"createdAt"`
-	UpdatedAt          string     `json:"updatedAt"`
-	RepoRoot           string     `json:"repoRoot"`
-	GitHead            string     `json:"gitHead"`
+
+	// Process-exception provenance (see override.go). An override is never a fix:
+	// FixedInRunID stays empty.
+	OverrideRequestedBy   string `json:"overrideRequestedBy,omitempty"`
+	OverrideRequestedAt   string `json:"overrideRequestedAt,omitempty"`
+	OverrideRequestReason string `json:"overrideRequestReason,omitempty"`
+	OverrideEscalation    string `json:"overrideEscalation,omitempty"`
+	OverrideGrantedBy     string `json:"overrideGrantedBy,omitempty"`
+	OverrideGrantedAt     string `json:"overrideGrantedAt,omitempty"`
+	OverrideGrantReason   string `json:"overrideGrantReason,omitempty"`
+	CreatedAt             string `json:"createdAt"`
+	UpdatedAt             string `json:"updatedAt"`
+	RepoRoot              string `json:"repoRoot"`
+	GitHead               string `json:"gitHead"`
 }
 
 type Result struct {
@@ -121,7 +131,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 
 	activeExisting := map[string]bool{}
 	for _, record := range updated {
-		if record.Status == "open" && record.Fingerprint != "" && sameRunTarget(record, run) {
+		if record.Status != "fixed" && record.Fingerprint != "" && sameRunTarget(record, run) {
 			activeExisting[record.Fingerprint] = true
 		}
 	}
@@ -215,7 +225,13 @@ func RenderIndexWithRecords(root string, records []Record) error {
 		}
 		body = strings.Join(lines, "\n")
 	}
-	return os.WriteFile(path, []byte("# metareview Findings\n\n"+body+"\n"), 0o644)
+	document := "# metareview Findings\n\n" + body + "\n"
+	if overrides := overrideLines(records); len(overrides) > 0 {
+		document += "\n## Process Overrides\n\n" +
+			"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
+			strings.Join(overrides, "\n") + "\n"
+	}
+	return os.WriteFile(path, []byte(document), 0o644)
 }
 
 func UnresolvedBlocking(root string) ([]Record, error) {
@@ -261,7 +277,7 @@ func normalize(run Run, finding Input, index int, createdAt string) Record {
 func unresolvedBlockingFrom(records []Record) []Record {
 	blockers := make([]Record, 0)
 	for _, record := range records {
-		if record.Status != "open" {
+		if !Blocks(record.Status) {
 			continue
 		}
 		if classForCount(record.Classification, record.Severity) == "blocking" {
@@ -334,7 +350,7 @@ func classForCount(classification, severity string) string {
 func openForRun(records []Record, run Run) []Record {
 	open := make([]Record, 0, len(records))
 	for _, record := range records {
-		if record.Status == "open" && sameRunTarget(record, run) {
+		if Blocks(record.Status) && sameRunTarget(record, run) {
 			open = append(open, record)
 		}
 	}
