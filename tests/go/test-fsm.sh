@@ -52,7 +52,7 @@ FINDINGS='{"findings":[{"issue_text":"nil deref in f.go","file":"f.go","line":3,
 VARS=(--var JUDGE=gpt-5.2 --var JUDGE_EFFORT=medium)
 
 # ---- --help, workflows, --agent-prompt, forbidden phrase ---------------------------------------------
-$MRV --help | grep -q 'metareview fsm'
+$MRV --help | grep 'metareview fsm' >/dev/null
 fsm workflows; expect OK 0
 assert_eq "$(field 'workflows.1.name')" sdlc-loop "workflows lists sdlc-loop"
 [ "$(field 'workflows.0.hash')" != "" ]
@@ -140,7 +140,7 @@ fsm export --run "$CHILD" --out fixtures/again; expect OK 0
 fsm export --run "$CHILD" --out fixtures/again; expect_err ERR_EXPORT_DEST 2
 # state on the child carries lineage; the status section lists both
 fsm state --run "$CHILD"; expect OK 0; assert_eq "$(field attempt)" 2 "attempt"; assert_eq "$(field parent_run_id)" "$ID" "parent id"
-$MRV status | grep -q "^fsm runs:"; $MRV status | grep -q "$CHILD  done  fixed  mock"
+$MRV status | grep "^fsm runs:" >/dev/null; $MRV status | grep "$CHILD  done  fixed  mock" >/dev/null
 # --run precedence: env default warns, flag wins, malformed and unknown ids
 MRV_RUN_ID="$ID" fsm state; expect OK 0; assert_eq "$(field warnings.0.code)" RUN_ID_FROM_ENV "env warning"
 MRV_RUN_ID="$ID" fsm state --run "$CHILD"; expect OK 0; assert_eq "$(field run_id)" "$CHILD" "flag wins"
