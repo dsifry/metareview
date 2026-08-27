@@ -23,6 +23,9 @@ func TestTime(t *testing.T) {
 	if err := json.Unmarshal([]byte(`"2026-08-26T12:00:00+03:00"`), &back); err == nil {
 		t.Fatalf("offset form must be rejected")
 	}
+	if err := json.Unmarshal([]byte(`"not-a-timeZ"`), &back); err == nil {
+		t.Fatalf("unparseable Z string must be rejected")
+	}
 	if err := json.Unmarshal([]byte(`123`), &back); err == nil {
 		t.Fatalf("non-string must be rejected")
 	}

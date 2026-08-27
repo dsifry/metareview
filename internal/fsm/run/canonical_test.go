@@ -24,6 +24,9 @@ func TestCanonicalNormalForm(t *testing.T) {
 		{"key-order-preserved", `{"z":1,"a":2}`, `{"z":1,"a":2}`},
 		{"scalar", ` "str" `, `"str"`},
 		{"nested-array", `[ {"k":[ 1, { "m": null } ] } ]`, `[{"k":[1,{"m":null}]}]`},
+		{"nested-object-then-scalar", `{"a":{"b":1},"c":2}`, `{"a":{"b":1},"c":2}`},
+		{"mixed", `{"a":[1],"b":true,"c":{"d":false},"e":null,"f":"s"}`, `{"a":[1],"b":true,"c":{"d":false},"e":null,"f":"s"}`},
+		{"empty-containers", `{"a":{},"b":[]}`, `{"a":{},"b":[]}`},
 	}
 	for _, c := range cases {
 		got, err := Canonical([]byte(c.in))
@@ -52,6 +55,8 @@ func TestCanonicalRejects(t *testing.T) {
 		{"empty", ``},
 		{"dup-top", `{"a":1,"a":2}`},
 		{"dup-depth3", `{"a":{"b":[{"c":1,"c":2}]}}`},
+		{"dup-after-nested", `{"a":{"b":1},"a":2}`},
+		{"dup-in-array-object", `[{"x":1},{"y":1,"y":2}]`},
 		{"trailing-garbage", `{"a":1} x`},
 	}
 	for _, c := range cases {
@@ -70,6 +75,9 @@ func TestOutputHashAndLineHash(t *testing.T) {
 	}
 	if OutputHash(raw) != OutputHash(canon) {
 		t.Fatalf("OutputHash must be stable under canonicalization")
+	}
+	if OutputHash([]byte("not json")) != OutputHash([]byte("{")) || OutputHash([]byte("{")) == OutputHash([]byte("{}")) {
+		t.Fatalf("invalid JSON must hash deterministically as the empty canonical form")
 	}
 	line := []byte(`{"seq":1}`)
 	lsum := sha256.Sum256(line)
@@ -118,7 +126,7 @@ func canonLen(s string) int {
 }
 
 func TestCapText(t *testing.T) {
-	for _, s := range []string{"", "a", "aé", "ab\ncd", "q\"b\\", "x\u2028y", "\x01ctl", "é"} {
+	for _, s := range []string{"", "a", "aé", "ab\ncd", "q\"b\\", "x\u2028y", "\x01ctl", "é", "a\xffb", "\ufffd!"} {
 		for max := 0; max <= 12; max++ {
 			got, trunc := CapText(s, max)
 			if l := canonLen(got); max >= 2 && l > max {

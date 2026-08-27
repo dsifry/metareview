@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"unicode/utf8"
 )
@@ -23,16 +22,12 @@ func Canonical(raw []byte) ([]byte, error) {
 	if err := rejectDuplicateKeys(raw); err != nil {
 		return nil, err
 	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(json.RawMessage(raw)); err != nil {
-		return nil, fmt.Errorf("canonical: %w", err)
-	}
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+	// Encoding a valid RawMessage cannot fail, so the error is discarded.
+	return marshalCanonical(json.RawMessage(raw)), nil
 }
 
-// rejectDuplicateKeys walks the token stream and fails on a repeated key within any object.
+// rejectDuplicateKeys walks the token stream and fails on a repeated key within any object, at any
+// depth. raw must already be valid JSON.
 func rejectDuplicateKeys(raw []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -42,40 +37,41 @@ func rejectDuplicateKeys(raw []byte) error {
 		expectKey bool
 	}
 	var stack []*frame
+	valueDone := func() {
+		if len(stack) > 0 && stack[len(stack)-1].object {
+			stack[len(stack)-1].expectKey = true
+		}
+	}
 	for {
 		tok, err := dec.Token()
-		if err == io.EOF {
+		if err != nil { // only io.EOF is possible after json.Valid
 			return nil
 		}
-		if err != nil {
-			return fmt.Errorf("canonical: %w", err)
-		}
-		if len(stack) > 0 {
-			top := stack[len(stack)-1]
-			if top.object && top.expectKey {
-				if d, ok := tok.(json.Delim); ok && d == '}' {
-					stack = stack[:len(stack)-1]
-					continue
-				}
-				key := tok.(string)
-				if _, dup := top.keys[key]; dup {
-					return fmt.Errorf("canonical: duplicate key %q", key)
-				}
-				top.keys[key] = struct{}{}
-				top.expectKey = false
+		if len(stack) > 0 && stack[len(stack)-1].object && stack[len(stack)-1].expectKey {
+			if d, ok := tok.(json.Delim); ok && d == '}' {
+				stack = stack[:len(stack)-1]
+				valueDone()
 				continue
 			}
+			top := stack[len(stack)-1]
+			key := tok.(string) // a key position always holds a string in valid JSON
+			if _, dup := top.keys[key]; dup {
+				return fmt.Errorf("canonical: duplicate key %q", key)
+			}
+			top.keys[key] = struct{}{}
+			top.expectKey = false
+			continue
 		}
 		switch d, ok := tok.(json.Delim); {
 		case ok && d == '{':
 			stack = append(stack, &frame{object: true, keys: map[string]struct{}{}, expectKey: true})
 		case ok && d == '[':
 			stack = append(stack, &frame{})
-		case ok && (d == '}' || d == ']'):
-			stack = stack[:len(stack)-1]
-		}
-		if len(stack) > 0 && stack[len(stack)-1].object {
-			stack[len(stack)-1].expectKey = true
+		case ok:
+			stack = stack[:len(stack)-1] // ']' (a '}' in key position was handled above)
+			valueDone()
+		default:
+			valueDone()
 		}
 	}
 }
@@ -113,24 +109,21 @@ func Key(node string, iter int) string { return node + "@" + strconv.Itoa(iter) 
 // \n \r \t as two bytes; other control characters and U+2028/U+2029 as six; everything else verbatim).
 func CapText(s string, max int) (string, bool) {
 	if max < 2 {
-		return "", s != "" || max < 2
+		return "", true // even "" encodes to two bytes
 	}
 	total := 2 // opening and closing quotes
 	cut := 0
 	for i, r := range s {
+		_, size := utf8.DecodeRuneInString(s[i:])
 		n := encodedRuneLen(r)
 		if r == utf8.RuneError {
-			if _, size := utf8.DecodeRuneInString(s[i:]); size == 1 {
-				n = 6 // invalid byte: encoder emits \ufffd
-			} else {
-				n = 3 // a genuine U+FFFD is written verbatim
-			}
+			n = 3 // an invalid byte is replaced by a literal U+FFFD; a genuine U+FFFD is written verbatim
 		}
 		if total+n > max {
 			return s[:cut], true
 		}
 		total += n
-		cut = i + utf8.RuneLen(r)
+		cut = i + size
 	}
 	return s, false
 }
