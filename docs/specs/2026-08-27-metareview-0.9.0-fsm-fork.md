@@ -41,7 +41,7 @@
 
 ## 1. Packages and owned amendments
 ```
-internal/fsm/machine   fork.go (Fork, VerifyOrigin), diff.go (Diff); load: ERR_FORK_INCOMPLETE check
+internal/fsm/machine   fork.go (Fork, VerifyOrigin), diff.go (DiffRuns); load: ERR_FORK_INCOMPLETE check
 internal/fsm/record    record.go (Terminal, Exists)                — imports machine (View), internal/runchain (Record type); its own writer, no internal/state
 internal/fsm/export    export.go (Export, redaction)               — imports run, machine (types), workflow (parse sidecar)
 internal/fsm/kind      decision.go (Decision)                      — spec 4's package; this spec owns the addition (returns machine.Decision)
@@ -159,7 +159,7 @@ this order: `parent_missing` (`ERR_RUN_NOT_FOUND`) | `parent_unreadable` (any ot
 ## 4. `Diff`
 ```go
 type Decision struct { Raw, Effective *bool }   // declared in machine; produced by kind.Decision
-func Diff(a, b run.Log, decide func(kind string, verdict json.RawMessage) Decision) (Report, error)   // the CLI passes kind.Decision
+func DiffRuns(a, b run.Log, decide func(kind string, verdict json.RawMessage) Decision) (Report, error)   // named DiffRuns: machine.Diff is the git-diff input type; the CLI passes kind.Decision
 type Report struct { A, B string; SameWorkflow bool /* WorkflowHash equal */; CommonPrefixSeq int64; Outcomes [2]run.Outcome; Calls []CallRow; Transitions []TransRow }
 type CallRow struct { Node string; Iter int; Kind, InputHash string; A, B *CallSide; RawSame, DecisionSame, ConfidenceSame, Same bool }
 type CallSide struct { Index int; Model, Effort string; Raw, Effective *bool; Confidence float64; Error string }

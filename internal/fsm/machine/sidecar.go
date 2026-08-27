@@ -125,6 +125,8 @@ func (f FSSidecar) List(runID string) ([]string, error) {
 type MemSidecar struct {
 	mu    sync.Mutex
 	files map[string][]byte
+	// WriteErr, when set, is returned by Write (a test seam for the fork's step-8 sweep).
+	WriteErr error
 }
 
 func (m *MemSidecar) key(runID, name string) string { return runID + "/" + name }
@@ -133,6 +135,9 @@ func (m *MemSidecar) key(runID, name string) string { return runID + "/" + name 
 func (m *MemSidecar) Write(runID, name string, b []byte) error {
 	if err := checkSidecarArgs(runID, name); err != nil {
 		return err
+	}
+	if m.WriteErr != nil {
+		return m.WriteErr
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

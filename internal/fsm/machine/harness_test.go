@@ -213,14 +213,31 @@ func (f *failingGit) CommonDir(ctx context.Context) (string, error) {
 // countingStore fails the Nth append (1-based) or a named method.
 type countingStore struct {
 	run.RunStore
-	mu       sync.Mutex
-	appends  int
-	failAt   int
-	failType string
-	failOp   string
-	events   int
-	failEvAt int // fail the Nth EventsWithLines call
-	err      error
+	mu          sync.Mutex
+	appends     int
+	failAt      int
+	failType    string
+	failOp      string
+	events      int
+	failEvAt    int // fail the Nth EventsWithLines call
+	err         error
+	failLockRun string // "child": fail Lock for any run other than the first locked one
+	firstLock   string
+	maxEvents   int  // overrides MaxEvents() when non-zero (the fork's in-memory count check)
+	torn        bool // report a torn tail on every read (the memory store is never torn)
+}
+
+func (c *countingStore) MaxEvents() int {
+	if c.maxEvents != 0 {
+		return c.maxEvents
+	}
+	return c.RunStore.MaxEvents()
+}
+func (c *countingStore) Create(id string, first run.Event) (run.FoldState, error) {
+	if c.failOp == "Create" {
+		return run.FoldState{}, c.err
+	}
+	return c.RunStore.Create(id, first)
 }
 
 func (c *countingStore) Append(id string, st run.FoldState, ev run.Event) (run.FoldState, error) {
@@ -237,6 +254,12 @@ func (c *countingStore) Lock(id string) (func(), error) {
 	if c.failOp == "Lock" {
 		return nil, c.err
 	}
+	if c.firstLock == "" {
+		c.firstLock = id
+	}
+	if c.failLockRun == "child" && id != c.firstLock {
+		return nil, c.err
+	}
 	return c.RunStore.Lock(id)
 }
 func (c *countingStore) EventsWithLines(id string) (run.Log, [][]byte, error) {
@@ -247,7 +270,11 @@ func (c *countingStore) EventsWithLines(id string) (run.Log, [][]byte, error) {
 	if c.failOp == "Events" || (c.failEvAt != 0 && n == c.failEvAt) {
 		return run.Log{}, nil, c.err
 	}
-	return c.RunStore.EventsWithLines(id)
+	log, lines, err := c.RunStore.EventsWithLines(id)
+	if c.torn && err == nil {
+		log.Torn = &run.TornTail{Offset: 1, Bytes: []byte("{")}
+	}
+	return log, lines, err
 }
 func (c *countingStore) RepairTail(id string) error {
 	if c.failOp == "Repair" {
