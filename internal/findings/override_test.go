@@ -1,6 +1,7 @@
 package findings
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,5 +244,105 @@ func TestListOverrides(t *testing.T) {
 	}
 	if len(pending) != 0 {
 		t.Fatalf("a granted override must not stay pending: %+v", pending)
+	}
+}
+
+func TestGrantRequiresAnActor(t *testing.T) {
+	root := t.TempDir()
+	seedRecord(t, root, openBlocker("mrvf-1"))
+	if err := GrantOverride(root, "mrvf-1", OverrideGrant{Reason: "a perfectly good explanation", Now: "t"}); err == nil {
+		t.Fatal("a grant with no actor must be refused")
+	}
+	if loadOne(t, root).Status != "open" {
+		t.Fatal("the refused grant must not change the record")
+	}
+}
+
+func TestGrantOnAnAlreadyOverriddenFindingIsRefused(t *testing.T) {
+	root := t.TempDir()
+	seedRecord(t, root, openBlocker("mrvf-1"))
+	grant := OverrideGrant{By: "human", Reason: "acknowledged the exception once", Now: "t"}
+	if err := GrantOverride(root, "mrvf-1", grant); err != nil {
+		t.Fatal(err)
+	}
+	if err := GrantOverride(root, "mrvf-1", grant); err == nil {
+		t.Fatal("an overridden finding must not be overridden again")
+	}
+}
+
+func TestOverridesAreOrderedNewestFirst(t *testing.T) {
+	root := t.TempDir()
+	first, second := openBlocker("mrvf-1"), openBlocker("mrvf-2")
+	second.Fingerprint = "pr:architecture:other"
+	if err := writeJSONL(findingsPath(root), []Record{first, second}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequestOverride(root, "mrvf-1", OverrideRequest{
+		By: "orchestrator", Reason: "the earlier of two exceptions", Now: "2026-08-27T01:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequestOverride(root, "mrvf-2", OverrideRequest{
+		By: "orchestrator", Reason: "the later of two exceptions", Now: "2026-08-27T09:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := ListOverrides(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 || all[0].ID != "mrvf-2" {
+		t.Fatalf("overrides must be newest first, got %+v", all)
+	}
+}
+
+func TestOverrideReadErrorsSurface(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".metareview"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(findingsPath(root), []byte("{not json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ListOverrides(root); err == nil {
+		t.Fatal("ListOverrides must surface an unreadable findings file")
+	}
+	if _, err := PendingOverrides(root); err == nil {
+		t.Fatal("PendingOverrides must surface an unreadable findings file")
+	}
+	if err := RequestOverride(root, "mrvf-1", OverrideRequest{By: "a", Reason: "a good enough reason here", Now: "t"}); err == nil {
+		t.Fatal("RequestOverride must surface an unreadable findings file")
+	}
+}
+
+func TestOverrideWriteErrorSurfaces(t *testing.T) {
+	root := t.TempDir()
+	seedRecord(t, root, openBlocker("mrvf-1"))
+	restore := saveRecords
+	saveRecords = func(string, []Record) error { return errors.New("disk full") }
+	t.Cleanup(func() { saveRecords = restore })
+
+	err := RequestOverride(root, "mrvf-1", OverrideRequest{
+		By: "orchestrator", Reason: "an explanation of the exception", Now: "t",
+	})
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("err = %v, want the injected write failure", err)
+	}
+}
+
+func TestOverrideLoadErrorSurfacesThroughTheSeam(t *testing.T) {
+	root := t.TempDir()
+	seedRecord(t, root, openBlocker("mrvf-1"))
+	restore := loadRecords
+	loadRecords = func(string) ([]Record, error) { return nil, errors.New("io boom") }
+	t.Cleanup(func() { loadRecords = restore })
+
+	if _, err := ListOverrides(root); err == nil || !strings.Contains(err.Error(), "io boom") {
+		t.Fatalf("ListOverrides err = %v, want the injected failure", err)
+	}
+	if err := GrantOverride(root, "mrvf-1", OverrideGrant{
+		By: "human", Reason: "acknowledged the exception", Now: "t",
+	}); err == nil || !strings.Contains(err.Error(), "io boom") {
+		t.Fatalf("GrantOverride err = %v, want the injected failure", err)
 	}
 }

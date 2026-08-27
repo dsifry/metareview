@@ -19,6 +19,14 @@ const (
 // cannot be explained in a sentence is not an override, it is a shrug.
 const minOverrideReason = 12
 
+// Storage seam. The override commands read and write findings through these so
+// their failure paths are testable without depending on filesystem permissions
+// (which do not fail for a root test runner).
+var (
+	loadRecords = readJSONL
+	saveRecords = writeJSONL
+)
+
 // OverrideRequest is filed by whoever stepped outside the workflow — typically
 // the orchestrating agent, which may request but never grant.
 type OverrideRequest struct {
@@ -88,7 +96,7 @@ func GrantOverride(root, findingID string, grant OverrideGrant) error {
 
 // ListOverrides returns every requested or granted override, newest first.
 func ListOverrides(root string) ([]Record, error) {
-	records, err := readJSONL(findingsPath(root))
+	records, err := loadRecords(findingsPath(root))
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +128,7 @@ func PendingOverrides(root string) ([]Record, error) {
 
 func mutateFinding(root, findingID string, apply func(*Record) error) error {
 	path := findingsPath(root)
-	records, err := readJSONL(path)
+	records, err := loadRecords(path)
 	if err != nil {
 		return err
 	}
@@ -137,7 +145,7 @@ func mutateFinding(root, findingID string, apply func(*Record) error) error {
 	if err := apply(&records[index]); err != nil {
 		return err
 	}
-	if err := writeJSONL(path, records); err != nil {
+	if err := saveRecords(path, records); err != nil {
 		return err
 	}
 	return RenderIndexWithRecords(root, records)
