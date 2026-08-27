@@ -245,8 +245,15 @@ func appendLine(path, line string) error {
 
 func TestReadersAcceptOneMiBLines(t *testing.T) {
 	root := t.TempDir()
-	long := `{"schemaVersion":1,"id":"mrv-long","scope":"pr-ready","target":{"type":"branch","id":"feature"},` +
-		`"status":"passed","verdict":"PASS","escalationReason":"` + strings.Repeat("x", 300_000) + `"}`
+	prefix := `{"schemaVersion":1,"id":"mrv-long","scope":"pr-ready","target":{"type":"branch","id":"feature"},` +
+		`"status":"passed","verdict":"PASS","escalationReason":"`
+	suffix := `"}`
+	// Size the fixture from the constant so the test exercises the documented
+	// 1 MiB boundary rather than merely exceeding bufio's 64 KiB default.
+	long := prefix + strings.Repeat("x", maxJSONLLineBytes-len(prefix)-len(suffix)) + suffix
+	if len(long) != maxJSONLLineBytes {
+		t.Fatalf("fixture line is %d bytes, want exactly %d", len(long), maxJSONLLineBytes)
+	}
 	if len(long) <= 64*1024 {
 		t.Fatalf("fixture line is only %d bytes; it must exceed bufio's default", len(long))
 	}

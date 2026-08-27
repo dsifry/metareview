@@ -500,3 +500,45 @@ func TestReadersAcceptOneMiBLines(t *testing.T) {
 		t.Fatalf("records = %d, want 1", len(records))
 	}
 }
+
+// TestReadJSONLAcceptsExactlyMaxLine pins the boundary the constant documents:
+// bufio rejects a token equal to the buffer maximum, so a record of exactly
+// maxJSONLLineBytes is only readable when the buffer is one byte larger.
+func TestReadJSONLAcceptsExactlyMaxLine(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".metareview", "findings.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := Record{SchemaVersion: 1, ID: "mrvf-max", RunID: "mrv-1", Scope: "task-done", Status: "open",
+		Classification: "blocking", Severity: "high", Fingerprint: "security:eval",
+		Target: map[string]string{"type": "task", "id": "t-1"}}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Grow Found until the encoded line is exactly maxJSONLLineBytes. The first
+	// pass sizes it roughly; the second corrects for the added field's own bytes.
+	pad := maxJSONLLineBytes - len(data)
+	for i := 0; i < 2; i++ {
+		record.Found = strings.Repeat("x", pad)
+		data, err = json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pad += maxJSONLLineBytes - len(data)
+	}
+	if len(data) != maxJSONLLineBytes {
+		t.Fatalf("fixture line is %d bytes, want exactly %d", len(data), maxJSONLLineBytes)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	records, err := readJSONL(path)
+	if err != nil {
+		t.Fatalf("a line of exactly %d bytes must be readable: %v", maxJSONLLineBytes, err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+}
