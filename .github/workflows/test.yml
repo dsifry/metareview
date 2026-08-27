@@ -8,9 +8,18 @@ on:
 permissions:
   contents: read
 
+# A new push supersedes in-flight runs for the same ref, so stale runs cannot
+# report after newer ones.
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The behavioral suite runs dozens of shell scripts; without this a hung
+    # script would hold a runner for the six-hour default.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:

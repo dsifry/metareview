@@ -18,11 +18,15 @@ permissions:
   checks: read
   statuses: read
 
+concurrency:
+  group: gtg-${{ github.event.inputs.pr_number || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   gtg-check:
     name: Merge Ready (gtg)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Setup Python
@@ -39,42 +43,57 @@ jobs:
 
       - name: Determine PR number
         id: pr
+        env:
+          INPUT_PR: ${{ github.event.inputs.pr_number }}
+          EVENT_PR: ${{ github.event.pull_request.number }}
         run: |
-          if [ -n "${{ github.event.inputs.pr_number }}" ]; then
-            echo "number=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
+          if [ -n "$INPUT_PR" ]; then
+            echo "number=$INPUT_PR" >> "$GITHUB_OUTPUT"
           else
-            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            echo "number=$EVENT_PR" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Wait for CI checks
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.pr.outputs.number }}
+          REPO: ${{ github.repository }}
         run: |
-          echo "Waiting for CI checks to complete..."
-          PR=${{ steps.pr.outputs.number }}
-          for i in $(seq 1 30); do
-            # Exclude self and the review bots from the pending count.
-            REAL_PENDING=$(gh pr checks "$PR" --repo ${{ github.repository }} 2>&1 \
-              | grep "pending" | grep -v "Merge Ready" | grep -v "CodeRabbit" | grep -v "Cursor Bugbot" \
-              | wc -l | tr -d ' ')
-            if [ "$REAL_PENDING" = "0" ]; then
-              echo "All CI checks complete."
-              break
+          # Ask the API directly rather than parsing `gh pr checks`, whose error
+          # text on "no checks yet" contains no "pending" line and would otherwise
+          # read as "everything finished" — letting gtg run before CI reports.
+          SHA="$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)"
+          echo "Waiting for checks on $SHA ..."
+          for i in $(seq 1 60); do
+            RUNS="$(gh api "repos/$REPO/commits/$SHA/check-runs" --paginate \
+              --jq '.check_runs[] | select(.name != "Merge Ready (gtg)" and .name != "CodeRabbit" and .name != "Cursor Bugbot") | .status' || echo "api-error")"
+            if [ "$RUNS" = "api-error" ]; then
+              echo "  API error, retrying in 10s... ($i/60)"; sleep 10; continue
             fi
-            echo "  $REAL_PENDING check(s) still pending, waiting 10s... ($i/30)"
+            TOTAL="$(printf '%s\n' "$RUNS" | grep -c . || true)"
+            PENDING="$(printf '%s\n' "$RUNS" | grep -vc completed || true)"
+            # No checks at all yet is "not ready", not "all done".
+            if [ "$TOTAL" -gt 0 ] && [ "$PENDING" -eq 0 ]; then
+              echo "All CI checks complete ($TOTAL)."
+              exit 0
+            fi
+            echo "  $PENDING of $TOTAL check(s) still running, waiting 10s... ($i/60)"
             sleep 10
           done
+          echo "::warning::Timed out waiting for CI checks; gtg may report them as failing"
 
       - name: Check PR readiness
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.pr.outputs.number }}
+          REPO: ${{ github.repository }}
         run: |
           set -o pipefail
-          echo "Checking PR #${{ steps.pr.outputs.number }} readiness..."
+          echo "Checking PR #$PR readiness..."
 
           set +e
-          gtg ${{ steps.pr.outputs.number }} \
-            --repo ${{ github.repository }} \
+          gtg "$PR" \
+            --repo "$REPO" \
             --semantic-codes \
             --format text \
             --verbose \
@@ -90,7 +109,7 @@ jobs:
 
           case $EXIT_CODE in
             0)
-              echo "::notice::PR #${{ steps.pr.outputs.number }} is ready to merge"
+              echo "::notice::PR #$PR is ready to merge"
               ;;
             1)
               # Exit 1 = actionable comments. gtg still classifies dismissed bot
