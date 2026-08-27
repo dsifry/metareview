@@ -194,6 +194,10 @@ type View struct {
 	FailedGate *run.GateData
 }
 
+// Decision is a judge verdict's decision as spec 3 §4 compares it: Raw is the kind's decision field, Effective the
+// kind's per-call rule applied to it (nil whenever Raw is nil). Declared here because kind imports machine.
+type Decision struct{ Raw, Effective *bool }
+
 // NodeView describes the current state's node.
 type NodeView struct {
 	Name, Kind, Exec   string
@@ -211,6 +215,7 @@ const (
 	CodeMockMismatch       = "ERR_MOCK_MISMATCH"
 	CodeBadRepoMode        = "ERR_BAD_REPO_MODE"
 	CodeSidecar            = "ERR_SIDECAR"
+	CodeForkIncomplete     = "ERR_FORK_INCOMPLETE"
 	CodeRunTerminal        = "ERR_RUN_TERMINAL"
 	CodeWorkflowChanged    = "ERR_WORKFLOW_CHANGED"
 	CodeNodeMismatch       = "ERR_NODE_MISMATCH"

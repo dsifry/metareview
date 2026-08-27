@@ -1836,3 +1836,45 @@ func TestM9Residue(t *testing.T) {
 		t.Fatal("read bad id")
 	}
 }
+
+func TestOpenIncompleteFork(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	m := h.mustInit(InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, Base: "main"})
+	h.advance(m) // discover NEEDS_INPUT
+	parent := h.events(m)
+	child := "mrv-crafted-incomplete-fork"
+	evs := run.NewBuilder(child).Copy(parent, 2, int64(len(parent)), child, func(d *run.InitData) {
+		d.ParentRunID = m.runID
+		d.Lineage = []string{m.runID}
+		d.ForkedAtSeq = int64(len(parent))
+	})
+	st, err := h.store.Create(child, evs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := h.store.Lock(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range evs[1:] {
+		if st, err = h.store.Append(child, st, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unlock()
+	// no sidecar was written: the incomplete-fork check must fire before the sidecar read
+	if _, err := Open(ctx, h.deps, child, OpenOptions{}); !errs.Is(err, CodeForkIncomplete) {
+		t.Fatalf("expected ERR_FORK_INCOMPLETE, got %v", err)
+	}
+	list, _ := h.store.List()
+	for _, s := range list {
+		if s.RunID == child && !strings.Contains(s.Error, "incomplete fork") {
+			t.Fatalf("List must flag it: %+v", s)
+		}
+	}
+	// a root run is unaffected
+	if _, err := Open(ctx, h.deps, m.runID, OpenOptions{}); err != nil {
+		t.Fatal(err)
+	}
+}

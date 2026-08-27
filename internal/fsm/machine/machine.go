@@ -345,6 +345,9 @@ func (m *Machine) load(ctx context.Context, repair bool) (*session, error) {
 	st.ChainHead = log.Head
 	sess.st, sess.log = st, log
 	snap := st.Snapshot
+	if incompleteFork(snap) {
+		return nil, errs.E(CodeForkIncomplete, "fork was not completed; delete the run directory", "run", m.runID, "parent", snap.ParentRunID)
+	}
 	raw, err := deps.Sidecar.Read(m.runID, SidecarWorkflow)
 	if err != nil {
 		return nil, err
@@ -991,3 +994,12 @@ var sortedEventTypes = func() []string {
 	sort.Strings(s)
 	return s
 }()
+
+// incompleteFork is spec 3 §2 step 8: a forked child whose step-8 write did not finish (no rebaseline tree, or a tree
+// without the fix_baseline an agent-edit checkpoint requires). Checked before the sidecar read.
+func incompleteFork(snap run.Snapshot) bool {
+	if snap.ParentRunID == "" {
+		return false
+	}
+	return snap.Seq <= snap.ForkedAtSeq || (snap.Seq == snap.ForkedAtSeq+1 && snap.StateKind == run.KindAgentEdit)
+}

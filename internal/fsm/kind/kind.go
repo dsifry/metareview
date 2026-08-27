@@ -66,10 +66,11 @@ type Registry struct {
 	mock  bool
 }
 
-// New builds the registry; Mock must agree with the judge's type.
+// New builds the registry; Mock must agree with the judge's type. A nil judge is allowed (judge-less commands, spec 5
+// r4) with Mock false: executors reached without a judge fail ERR_EXECUTOR_FAILED{reason: no_judge}.
 func New(d Deps) (*Registry, error) {
 	_, isMock := d.Judge.(*judge.MockJudge)
-	if d.Judge == nil || isMock != d.Mock {
+	if isMock != d.Mock {
 		return nil, errs.E(CodeMockMismatch, "Mock must be true exactly when the judge is a MockJudge", "mock", fmt.Sprint(d.Mock))
 	}
 	r := &Registry{mock: d.Mock, kinds: map[string]machine.NodeKind{}, execs: map[string]machine.Executor{}}
@@ -400,6 +401,9 @@ func dedupCandidates(fs []run.Finding) []run.Finding {
 }
 
 func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (json.RawMessage, error) {
+	if e.judge == nil {
+		return nil, errNoJudge()
+	}
 	snap := in.Snap
 	cands := dedupCandidates(snap.Findings)
 	goldens := snap.Goldens
@@ -570,6 +574,9 @@ func (stillPresentKind) Reduce(_ run.Snapshot, out any) (run.Delta, error) {
 type stillPresentExec struct{ judge judge.Judge }
 
 func (e *stillPresentExec) Execute(ctx context.Context, in machine.ExecInput) (json.RawMessage, error) {
+	if e.judge == nil {
+		return nil, errNoJudge()
+	}
 	if len(in.Snap.AllFound) > run.MaxDeltaList {
 		return nil, errs.E(CodeTooManyBugs, fmt.Sprintf("%d bugs known (max %d)", len(in.Snap.AllFound), run.MaxDeltaList))
 	}

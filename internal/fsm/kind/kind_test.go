@@ -92,8 +92,11 @@ func TestK7Registry(t *testing.T) {
 	if _, err := New(Deps{Judge: realStub{}, Mock: true}); !errs.Is(err, CodeMockMismatch) {
 		t.Fatal("real judge with Mock")
 	}
-	if _, err := New(Deps{}); !errs.Is(err, CodeMockMismatch) {
-		t.Fatal("nil judge")
+	if _, err := New(Deps{Mock: true}); !errs.Is(err, CodeMockMismatch) {
+		t.Fatal("nil judge with Mock")
+	}
+	if nj, err := New(Deps{}); err != nil || nj.Mock() {
+		t.Fatalf("nil judge without Mock must build a judge-less registry: %v", err)
 	}
 	r := mustNew(t, m, true)
 	if !r.Mock() {
