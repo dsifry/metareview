@@ -71,7 +71,7 @@ In metaswarm repositories, use metareview to deepen metaswarm's existing review 
 
 ### Sharded review (diffs over the context limit)
 
-A branch diff over 120 KB cannot be held in one review context. metareview measures the real
+An exclude-filtered diff over 120,000 bytes cannot be held in one review context. metareview measures the real
 branch diff, cuts it into shards, and writes a prompt pack per shard under
 `.metareview/shards/<scope>/<target-slug>/<planHash>/`, with a `plan.json` naming every shard, its
 hash, and the directory the results belong in.
