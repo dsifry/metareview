@@ -1,6 +1,6 @@
 # metareview 0.9.0 — spec 5: CLI, black-box tests, docs, and milestones
 
-> **Status:** DRAFT r4 (2026-08-27). Fifth of the five split artifacts (ownership ledger: run spec §12 row 5). Owns plan
+> **Status:** DRAFT r5 (2026-08-27; r4 + the attempt-3 in-attempt fixes listed at the end of this header). Fifth of the five split artifacts (ownership ledger: run spec §12 row 5). Owns plan
 > r3 §3 (CLI envelope, exit codes, every subcommand), §4.1 black-box suite, §5 milestones, the M8 documentation set,
 > `package.json` files, the forbidden-phrase grep, and CI. Everything here is a thin shell over `machine` (specs 2–3),
 > `kind`/`judge`/`cmdexec`/`mockai` (spec 4), `run`, `record`/`export` (spec 3 r5), and `workflows`.
@@ -23,12 +23,30 @@
 > `resume_hint`; the C-row amendment list is actually complete; C1 wording; example doc content; `testdata/fsm/`
 > dropped from `package.json`; discriminating rows for everything the Testing lens named; ledger rows for every plan
 > §3.1 delta.
+>
+> **r5 (attempt-3 fixes, in-attempt):** `fsm gate → gate.detail` in `untrusted`; `RealDeps` clones `http.DefaultTransport`
+> with `Proxy = nil` (unit row with `HTTPS_PROXY` at a closed port); the env-name set names what the runtime reads;
+> the peek applies `Init`'s containment check before `MockLoad` and reads the whole file then slices (never an error);
+> `exitFor(command, phase, code)` with `phase` + a `repair_moved` bit, one row per (command, phase, code); executor/judge
+> codes surface as `GATE_FAILED{executor|node_output}` on `advance`; `fsm judge` runs `judge.Preflight` before
+> `RecordLLMCall` and the closure contract on error is pinned; `unpinned` joins relative elements with `work_dir`; the
+> machine's `MockLoad` derives from `deps.MockLoad` (one read); `Clock` adapters; `Deps.Preflight(node, calibration)`;
+> `ERR_BAD_CONVERGENCE` bucketed, `--check` file shape stated; warnings translation; `ERR_RUN_EXISTS{reason}` attached
+> by the CLI; `handler` payload from the `overflow_handler` event; `DONE` and `fsm state` carry `counts`; `fsm state`
+> carries `resume_hint` on a failed run and the `next_action` vocabulary; `advance` is idempotent at NEEDS_INPUT; exit 2
+> in the skeleton and the AGENTS/CLAUDE line; the forbidden-phrase grep is scoped to shipped text; C23–C25 numbered, C1
+> baseline stated; discriminating rows for the newest-run skip, env `ValidateRunID`, `WorkDir` default, mock
+> flag-vs-env, `ERR_JUDGE_KEY` secrets, the negative `RUNS_JSONL_NOT_IGNORED`, and the small gaps the Testing lens
+> named; ledger rows for plan §3.3/§3.4/§3.5 buckets, `--accept-workflow-change --workflow`, `--input <file|->`; git ≥
+> 2.31 in INSTALL + `/setup`; AGENTS durable list; `.gitattributes` not shipped; upgrade note: a newline-less decodable
+> tail is a row (spec 3 §6).
 
 ---
 
 ## 1. Package
 `internal/fsm/cli` — `func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, deps Deps) int`.
-`cmd/metareview/main.go` gains one branch: `fsm` → `fsmcli.Run(ctx, args[1:], os.Stdin, os.Stdout, os.Stderr, fsmcli.RealDeps())`.
+`cmd/metareview/main.go` gains two touch points: the `fsm` branch → `fsmcli.Run(ctx, args[1:], os.Stdin, os.Stdout,
+os.Stderr, fsmcli.RealDeps())`, and the `status` FSM section (§6).
 Hand-rolled arg parsing (no flag lib), like the rest of `main.go`. `RealDeps()` takes nothing and cannot fail — it only
 binds seams (§8); every failure happens inside `Run` and reaches the envelope.
 
@@ -70,30 +88,36 @@ Rules:
   `WorkDir` default = `git rev-parse --show-toplevel` of `cwd` (the current worktree); `--work-dir`, `--out`,
   `--goldens`, `--input`, `--context`, `--data <file>`, `--check`, and a path `--workflow` are absolutised against `cwd`
   before use; `--mock-ai` is passed as given (spec 2 requires it inside `RepoRoot`).
-- Mock: `--mock-ai <dir>` (flag wins) or `MOCK_AI=<dir>` at **`init` only**; every later command derives the scenario from
+- Mock: `--mock-ai <dir>` (flag wins when both are set) or `MOCK_AI=<dir>` at **`init` only**; every later command derives the scenario from
   the run's own `init` (`Snapshot.Mock` = `rel#hash`, resolved against the CLI's `root`); `MOCK_AI` in the environment of
   any other command is **ignored even when set to a different scenario**, and `--mock-ai` on any other subcommand is a
   usage error. A run whose persisted `RepoRoot != root` (moved checkout) → `ERR_REPO_ROOT_MISMATCH{stored, root}` exit 2.
-- `init --run-id <id>` is refused when the id already has a `.metareview/runs/<id>/` (`ERR_RUN_EXISTS{reason: dir}`,
-  spec 2) **or** a `runs.jsonl` row (`record.Exists` → `ERR_RUN_EXISTS{reason: row}`) — exit 2.
+- `init --run-id <id>` is refused when the id already has a `.metareview/runs/<id>/audit.jsonl` (the store's
+  `ERR_RUN_EXISTS`; the CLI attaches `reason: dir`) **or** a `runs.jsonl` row (`record.Exists` → the CLI raises
+  `ERR_RUN_EXISTS{reason: row}`) — exit 2.
 - `fsm judge --run <id>` calls `Machine.RecordLLMCall(ctx, key string, call func(ctx, Stamp) (run.LLMCallData, error))
   (seq int64, err error)` (spec 2 §8; `Stamp{State, Iter, Index, Calibration, Fence}` computed by the machine under the
   lock with `Node: "judge"`, `Index = NextIndex("judge@<iter>")`, `Fence = !Calibration`; the machine appends whatever
-  the closure returns — the same shape as `ExecInput.Audit`; the CLI's closure holds the `judge.Judge`). A terminal run
-  refuses it (`ERR_RUN_TERMINAL`, exit 2 — re-judging a finished run is `advance --from adjudicate --var JUDGE=…` +
-  `fsm diff`). Without `--run` nothing is persisted, `Calibration=false`, `Fence=true`, and the docs call it
+  the closure returns — the same shape as `ExecInput.Audit`; the CLI's closure holds the `judge.Judge`). Before `RecordLLMCall` the CLI runs `judge.Preflight(--model, --effort, snap.Calibration, keys)` → `ERR_JUDGE_MODEL`/
+  `ERR_JUDGE_KEY`/`ERR_JUDGE_EFFORT_UNSUPPORTED` exit 2 with nothing appended. Closure contract on a call error: the
+  closure returns the `llm_call` data with its `error` set (appended, exit 1); it returns `data.Kind == ""` only on
+  `ctx` cancellation, and then nothing is appended. A terminal run refuses it (`ERR_RUN_TERMINAL`, exit 2 — re-judging
+  a finished run is `advance --from adjudicate --var JUDGE=…` + `fsm diff`). Without `--run` nothing is persisted, `Calibration=false`, `Fence=true`, and the docs call it
   **unaudited**. `--input` is the kind's typed input minus the diff slot: `match` → `{golden, candidate}`; `adjudicate`
   → `{candidate}`; `still-present` → `{bug}`; `--context` fills `diff` through `judge.CutDiff` (spec 4's cutter: 30000
   bytes on a rune boundary, `diff_truncated`, `diff_context_hash`) and is required for `adjudicate`/`still-present`,
   refused for `match` (usage, exit 2). `-` reads stdin.
-- `fsm converge --check <yaml>` is **validate-only**: `converge.Describe(node, names) (Stats{Atoms, Depth int; Cmds
+- `fsm converge --check <yaml>` is **validate-only** (the file is a bare convergence predicate in spec 2 §4's grammar —
+  `{any: [...]}` etc. — not a workflow file; anything else is `ERR_BAD_CONVERGENCE` exit 2): `converge.Describe(node, names) (Stats{Atoms, Depth int; Cmds
   []string}, error)` (spec 2 handoff: `Parse` + `Validate` without a runner) where `names` = the run's
   `AllowedCmds[].Name` when `--run` is given, else empty (so any `cmd` atom without `--run`, or with an unsanctioned
   name, is `ERR_CMD_NOT_ALLOWED{name}` exit 2). It never executes anything (unit row: a `Runner` fake that fails the test
   if called; no `cmd_call` appended). (Plan §3.1's bare `fsm converge` is dropped — ledger §9.)
 - `fsm gate <name>` evaluates one of the nine built-ins on the run's snapshot (or `--input`, decoded with
-  `DisallowUnknownFields`; **unaudited/informational**, like `judge` without `--run`); `commit_exists`/`nothing_*` with
-  `--input` and no `--run` → usage exit 2 (they need the run's git/snapshot); unknown name → usage exit 2.
+  `DisallowUnknownFields` and the fold's field validators — `shortOK`/`ValidSHA`; **unaudited/informational**, like
+  `judge` without `--run`); `commit_exists`/`nothing_*` with `--input` and no `--run` → usage exit 2 (`commit_exists`
+  needs the run's git; `nothing_*` need a snapshot whose provenance is the run's); unknown name → usage exit 2.
+  `gate.detail` is listed under `untrusted` (git output).
 - `fsm record tokens --data` keys are `run.TokenTotals`'s (`input, cache_read, cache_create, output, reasoning`; unknown
   or negative → `ERR_RECORD_TOKENS`).
 - `fsm diff --a <run> --b <run>` (two named flags; `--run` is single-valued everywhere else); `Diff` receives
@@ -102,6 +126,9 @@ Rules:
   wiring passes `export.Deps{…, RepoRoot: root, Home: Getenv("HOME")}`.
 - `fsm advance --repair`: `Open(Repair)` (spec 2: torn tail → `.torn/` + a `warn`; offset 0 → the run is removed and
   `ERR_RUN_NOT_FOUND{detail}` exit 1 — bytes moved), then **continues into `Advance`** in the same invocation.
+- Open modes: `state`, `gate --run`, `converge --check --run`, `diff`, `export` open runs with `OpenOptions{ReadOnly:
+  true}` (no lock, no `VerifyCmds`/`MockLoad`/runner); only `advance`, `record`, and `judge --run` take the lock;
+  `ERR_REPO_ROOT_MISMATCH` applies only to commands that need the scenario (`advance`, `record`, `judge --run`).
 - `fsm advance --from …` returns **after** `Fork` (`FORKED`, §3); it does not run the child's first `Advance`. The next
   `advance --run <child>` (or the newest-run default when no `MRV_RUN_ID` is exported) picks the child.
 
@@ -126,13 +153,19 @@ the envelope path vocabulary and translates the machine's key-level list (`gate.
 Per status, always sorted: `error.detail` and `error.fields.*` (when present); `GATE_FAILED` → `gate.detail`;
 `STOPPED` → `stop_reason`, `handler.name`; `init`/`advance` warnings → `warnings[].detail`; `NEEDS_INPUT` → the kind's
 `Untrusted` keys under `input.*` plus `instructions` (fenced); `ERR_CMDS_NOT_ALLOWED` → `cmds[].argv`, `cmds[].env`;
-`fsm state` → `failed_gate.detail`, `last_error.detail`; `fsm judge` → `verdict.parsed` (the whole object is model
-text), `verdict.parse_error`; `fsm diff` → `report.calls[].{a,b}.error`; `fsm export` → `[]`. `--agent-prompt` states
+`fsm state` → `failed_gate.detail`, `last_error.detail`; `fsm gate` → `gate.detail`; `fsm judge` → `verdict.parsed`
+(the whole object is model text), `verdict.parse_error`; `fsm diff` → `report.calls[].{a,b}.error`; `fsm export` →
+`[]`. Warnings: the machine emits `"CODE: detail"` strings (`AdvanceResult.Warnings`); the CLI splits on the first
+`": "` into `{code, detail}`; for `init` (which returns only a `View`) the CLI reads the run's `warn` events after the
+call (`Store.Events`, the `viewOf` precedent) — same for the `STOPPED` handler payload, read from the
+`overflow_handler` event. `--agent-prompt` states
 the rule.
 
 **Statuses:** `ADVANCED`, `NEEDS_INPUT`, `DONE`, `STOPPED`, `GATE_FAILED`, `FORKED`, `OK`.
 
-**Exit codes.** The table below is the **sole authority** (`cli.exitFor(command, code)`); its design principle: **0** =
+**Exit codes.** The table below is the **sole authority** (`cli.exitFor(command, phase, code)` with `phase ∈
+open|advance|fork|record|judge` = the machine call that returned the error, plus a `repair_moved` bit set when this
+invocation's `--repair` moved bytes; the suite has one row per (command, phase, code) triple that the table names); its design principle: **0** =
 did what was asked; **3** = `NEEDS_INPUT`; **2** = usage, or a refusal before this invocation appended any event or
 created any directory (safe to retry after fixing the input); **1** = a terminal/stopped run that did not pass, `gate`
 not passed, and every error raised after mutation started or that reports damaged state. Where the principle and the
@@ -141,31 +174,38 @@ table would disagree, the table wins and says why.
 |---|---|
 | 0 | `ADVANCED`, `DONE(fixed|clean)`, `FORKED`, `OK`, `gate` passed |
 | 3 | `NEEDS_INPUT` |
-| 2 | unknown option/subcommand, missing required flag; `ERR_NOT_A_REPO`, `ERR_NO_RUNS`, `ERR_RUN_NOT_FOUND` (bad/unknown `--run`), `ERR_RUN_EXISTS`, `ERR_REPO_ROOT_MISMATCH`, `ERR_RUN_LOCKED` on `Open`, `ERR_RUN_ESCALATED`, `ERR_MOCK_MISMATCH`, `ERR_MOCK_INVALID`, `ERR_WORKFLOW_NOT_FOUND`, `ERR_WORKFLOW_INVALID`, `ERR_WORKFLOW_TOO_LARGE`, `ERR_WORKFLOW_CHANGED`, `ERR_WORKFLOW_INCOMPATIBLE`, `ERR_VAR_*` (`ERR_VAR_UNSET{JUDGE|JUDGE_EFFORT}` reported as `ERR_JUDGE_UNSET`), `ERR_VAR_FROZEN`, `ERR_CALIBRATION_PINNED`, `ERR_BAD_REPO_MODE`, `ERR_CMDS_NOT_ALLOWED`, `ERR_CMD_NOT_ALLOWED`, `ERR_CMD_CHANGED`/`ERR_CMD_NOT_FOUND` at `init`/`Open`, `ERR_WORKDIR_FOREIGN`, `ERR_GOLDENS_INVALID`, `ERR_GIT`/`ERR_GIT_REF` at `init` (`--base`) and at fork preconditions, `ERR_CHECKPOINT_NOT_FOUND`, `ERR_TREE_NOT_AT_CHECKPOINT`, `ERR_COPY_INVALID`, `ERR_JUDGE_KEY`/`ERR_JUDGE_MODEL`/`ERR_JUDGE_EFFORT_UNSUPPORTED` from pre-flight, `ERR_JUDGE_URL` from `judge.New` (built before `Open`), every error of `fsm judge` **without** `--run` (nothing persisted), `ERR_AUDIT_NOT_TORN` (`--repair` on a clean log: nothing moved), `ERR_EXPORT_DEST`, `ERR_EXPORT_TOO_LARGE`, `ERR_DIFF_INCOMPATIBLE`, `ERR_RECORD_NAME`, `ERR_RECORD_TOKENS`, `ERR_RECORD_TOO_LARGE`, `ERR_EVENT_TOO_LARGE`, `ERR_NODE_OUTPUT_INVALID`, `ERR_NODE_OUTPUT_EXISTS`, `ERR_NODE_OUTPUT_APPLIED`, `ERR_NODE_MISMATCH`, `ERR_NODE_NOT_HOST`, `ERR_RUN_TERMINAL` on `record node-output`/`judge --run`, `ERR_GATE_INAPPLICABLE` on `fsm gate`, `ERR_INPUT_TOO_LARGE`, `ERR_RUNS_JSONL` at `init --run-id` |
-| 1 | `DONE(reviewed|stalled|failed|overflow|custom)`, `STOPPED`, `GATE_FAILED`, `gate` not passed; `ERR_AUDIT_*` except `NOT_TORN` (incl. `ERR_AUDIT_TORN` → `--repair`), `ERR_STORE_PATH`, `ERR_FORK_INCOMPLETE`, `ERR_SIDECAR`, `ERR_RUN_LOCKED` at `init` (the run directory exists — spec 2 locks after `Create`; docs: delete it), `ERR_RUN_NOT_FOUND` from `--repair` at offset 0 (bytes moved), `ERR_GIT` during `Advance`, `ERR_CMD_*` during `Advance`, `ERR_JUDGE_HTTP/TRANSPORT/RESPONSE/REDIRECT` and `ERR_MOCK_UNSCRIPTED/EXPECT` during `advance` or `judge --run` (the `llm_call` with its error is appended), `ERR_JUDGE_*` pre-flight after a `--repair` that moved bytes in the same invocation, `ERR_TOO_MANY_BUGS`, `ERR_EXECUTOR_FAILED`, `ERR_PROMPT_TEMPLATE`, `ERR_EXEC_UNSUPPORTED`, `ERR_INSTRUCTIONS_FAILED`, `ERR_RUN_TERMINAL` on `advance` (`Terminal` runs first), `ERR_APPEND_REJECTED`, `ERR_RUNS_JSONL` from `Terminal` (transition durable), `ERR_INTERRUPTED` (ctx), `ERR_INTERNAL` (anything unmapped; `detail` = `err.Error()`) |
+| 2 | unknown option/subcommand, missing required flag; `ERR_NOT_A_REPO`, `ERR_NO_RUNS`, `ERR_RUN_NOT_FOUND` (bad/unknown `--run` — phase `open`; the `--repair` offset-0 case is phase `open` with `repair_moved` → 1), `ERR_RUN_EXISTS`, `ERR_REPO_ROOT_MISMATCH`, `ERR_RUN_LOCKED` on `Open`, `ERR_STORE_PATH` from `List`/`Create` (pre-mutation), `ERR_BAD_CONVERGENCE`, `ERR_RUN_ESCALATED`, `ERR_MOCK_MISMATCH`, `ERR_MOCK_INVALID`, `ERR_WORKFLOW_NOT_FOUND`, `ERR_WORKFLOW_INVALID`, `ERR_WORKFLOW_TOO_LARGE`, `ERR_WORKFLOW_CHANGED`, `ERR_WORKFLOW_INCOMPATIBLE`, `ERR_VAR_*` (`ERR_VAR_UNSET{JUDGE|JUDGE_EFFORT}` reported as `ERR_JUDGE_UNSET`), `ERR_VAR_FROZEN`, `ERR_CALIBRATION_PINNED`, `ERR_BAD_REPO_MODE`, `ERR_CMDS_NOT_ALLOWED`, `ERR_CMD_NOT_ALLOWED`, `ERR_CMD_CHANGED`/`ERR_CMD_NOT_FOUND` at `init`/`Open`, `ERR_WORKDIR_FOREIGN`, `ERR_GOLDENS_INVALID`, `ERR_GIT`/`ERR_GIT_REF` at `init` (`--base`) and at fork preconditions, `ERR_CHECKPOINT_NOT_FOUND`, `ERR_TREE_NOT_AT_CHECKPOINT`, `ERR_COPY_INVALID`, `ERR_JUDGE_KEY`/`ERR_JUDGE_MODEL`/`ERR_JUDGE_EFFORT_UNSUPPORTED` from pre-flight (a `tree` rebaseline may already have been appended by the same `Advance` — the table keeps 2: the rebaseline is a benign, idempotent observation, not the node's work), `ERR_JUDGE_URL` from `judge.New` (built before `Open`), every error of `fsm judge` **without** `--run` (nothing persisted), `ERR_AUDIT_NOT_TORN` (`--repair` on a clean log: nothing moved), `ERR_EXPORT_DEST`, `ERR_EXPORT_TOO_LARGE`, `ERR_DIFF_INCOMPATIBLE`, `ERR_RECORD_NAME`, `ERR_RECORD_TOKENS`, `ERR_RECORD_TOO_LARGE`, `ERR_EVENT_TOO_LARGE` (reachable only from `record`, whose caps are checked before the append), `ERR_NODE_OUTPUT_INVALID`, `ERR_NODE_OUTPUT_EXISTS`, `ERR_NODE_OUTPUT_APPLIED`, `ERR_NODE_MISMATCH`, `ERR_NODE_NOT_HOST`, `ERR_RUN_TERMINAL` on `record node-output`/`judge --run`, `ERR_GATE_INAPPLICABLE` on `fsm gate`, `ERR_INPUT_TOO_LARGE`, `ERR_RUNS_JSONL` at `init --run-id` |
+| 1 | `DONE(reviewed)` (the machine reports `stalled|failed|overflow|custom` as `STOPPED`), `STOPPED`, `GATE_FAILED` — on `advance` every executor-phase code (`ERR_JUDGE_HTTP/TRANSPORT/RESPONSE/REDIRECT`, `ERR_MOCK_UNSCRIPTED/EXPECT`, `ERR_TOO_MANY_BUGS`, `ERR_PROMPT_TEMPLATE`, `ERR_EXEC_UNSUPPORTED`, `ERR_EXECUTOR_FAILED`) surfaces as `GATE_FAILED{gate.code: ERR_EXECUTOR_FAILED|node_output}` with the original code in `gate.detail` and the `llm_call.error`, never as `error.code`; `gate` not passed; `ERR_AUDIT_*` except `NOT_TORN` (incl. `ERR_AUDIT_TORN` → `--repair`), `ERR_STORE_PATH` after mutation started, `ERR_FORK_INCOMPLETE`, `ERR_SIDECAR`, `ERR_RUN_LOCKED` at `init` (the run directory exists — spec 2 locks after `Create`; docs: delete it), `ERR_RUN_NOT_FOUND` from `--repair` at offset 0 (bytes moved), `ERR_GIT` during `Advance`, `ERR_CMD_*` during `Advance`, `ERR_RUN_LOCKED` from `Advance`'s own re-lock, `ERR_JUDGE_HTTP/TRANSPORT/RESPONSE/REDIRECT` and `ERR_MOCK_UNSCRIPTED/EXPECT` as `error.code` on `judge --run` (the `llm_call` with its error is appended), `ERR_JUDGE_*` pre-flight with `repair_moved`, `ERR_INSTRUCTIONS_FAILED`, `ERR_RUN_TERMINAL` on `advance` (`Terminal` runs first), `ERR_APPEND_REJECTED`, `ERR_RUNS_JSONL` from `Terminal` (transition durable), `ERR_INTERRUPTED` (ctx), `ERR_INTERNAL` (anything unmapped; `detail` = `err.Error()`) |
 
 **Error mapping** (`cli.envelope(err)`): `errs.As` → `{code, detail, fields}`; `*run.StoreError` → `{code: e.Code,
 detail, fields: {seq}}`; `*run.FoldError` → `{code: e.Code, detail: e.Reason, fields: {seq, type, reason}}`;
 `context.Canceled|DeadlineExceeded` → `ERR_INTERRUPTED`; else `ERR_INTERNAL`. `AdvanceResult.ExitCode` is **not** used —
-`exitFor` is the single source (a unit row pins agreement for the statuses the machine emits).
+`exitFor` is the single source (a unit row pins agreement for the statuses the machine emits). CLI-owned codes:
+`ERR_NOT_A_REPO`, `ERR_NO_RUNS`, `ERR_INPUT_TOO_LARGE`, `ERR_REPO_ROOT_MISMATCH`, `ERR_JUDGE_UNSET`, `ERR_INTERRUPTED`,
+`ERR_INTERNAL`; warning codes `RUN_ID_FROM_ENV`, `RUNS_JSONL_NOT_IGNORED`.
 
 **Per-command envelopes** (in addition to the common keys):
 - `init` → `OK` + `warnings` (`WORKFLOW_WARNING{code, detail}`, `RUNS_JSONL_NOT_IGNORED` when `git check-ignore -q
   .metareview/runs.jsonl` fails in `WorkDir` — the next run's `clean` gate would see it), `allowed_cmds: [name…]`,
   `cmds_sha256`. `ERR_CMDS_NOT_ALLOWED` (exit 2) carries `cmds: [{name, argv, pinned: {path: sha}, unpinned: [...],
   timeout_ms, env}]` + `cmds_sha256` decoded from `Fields["cmds_json"]` (spec 2 §8: canonical JSON of the sorted
-  `[]run.AllowedCmd`); `pinned` = `file_hashes`, `unpinned` = argv elements that are not `file_hashes` keys — the CLI
-  never re-resolves.
+  `[]run.AllowedCmd`); `pinned` = `file_hashes`, `unpinned` = argv elements whose `filepath.Join(work_dir, element)`
+  (absolute elements as-is) is not a `file_hashes` key — the CLI never re-resolves.
 - `state` → `OK` + `next_action`, `torn`, `failed_gate {name, code, detail}`, `last_error {code, detail}` (non-null only
   when a gate failed and the `failed` transition was not yet appended, i.e. after a crash — documented as such),
-  `outgoing: [{to, gate}]` (from `View.Outgoing`, spec 2 handoff), `lineage`, `parent_run_id`, `attempt`. `state` opens
+  `outgoing: [{to, gate}]` (from `View.Outgoing`, spec 2 handoff), `lineage`, `parent_run_id`, `attempt`, `counts
+  {all_found, unfixed, confirmed}`, and — when `failed_gate` is non-null — the same concrete `resume_hint` `advance`
+  printed, so a new session can resume without reconstructing it. `next_action ∈ advance|record|none`. `state` opens
   the run with `OpenOptions{ReadOnly: true}` (spec 2 handoff: no lock, and `load` stops after the fold + sidecar parse —
   no `VerifyCmds`, `MockLoad`, or runner) so a concurrent fork `advance`, a re-pinned binary, or a removed scenario dir
   cannot make it fail.
 - `advance` → `ADVANCED {from, to, gate}`; `NEEDS_INPUT` payload: `node`, `kind`, `exec`, `model`, `effort`,
   `instructions` (spec 4's fenced `Text`), `input` (`base_sha`, `head_sha`, `iteration`, `diff_truncated`, `unfixed_bugs`
   | `findings_so_far` + `diff` + `lenses` + `rubric`), `untrusted`, `output_schema`, `record` (the exact `fsm record
-  node-output` command); `DONE {outcome}`; `STOPPED {stop_reason, handler: {name, exit, truncated}?}`; `GATE_FAILED`
+  node-output` command); `DONE {outcome, counts {all_found, unfixed, confirmed}}` (for `reviewed` the confirmed list itself is `snapshot.json`
+  in `fsm export`); `STOPPED {stop_reason, handler: {name, stdout_truncated, stderr_truncated}?}` (from the
+  `overflow_handler` event); `advance` is idempotent at NEEDS_INPUT — repeating it re-emits the same payload without a
+  second `needs_input` event; `GATE_FAILED`
   `{gate: {name, passed: false, code, detail}, resume_hint}` where `resume_hint` is the **concrete** command
   `metareview fsm advance --run <id> --from <state> --at-iter <N> [--work-dir <dir>]` and stderr adds "fork first, then
   commit" — the hint **forks a child**: the next envelope's `run_id` is new.
@@ -178,16 +218,18 @@ detail, fields: {seq}}`; `*run.FoldError` → `{code: e.Code, detail: e.Reason, 
 - `converge --check` → `OK {atoms, depth, cmds: [names]}`.
 - `diff` → `OK {report}` = `machine.Report`, plus `origin_checks` for the child side.
 - `export` → `OK {manifest, out}`.
-- `workflows` → `OK {workflows: [{name, version, hash, states, source: "embedded"}]}`.
+- `workflows` → `OK {workflows: [{name, version, hash, states: [names], source: "embedded"}]}`.
 
 ## 4. `--agent-prompt`
 Emits the tool-usage blurb for `--append-system-prompt`/`AGENTS.md` (golden `testdata/fsm/agent-prompt.golden`, byte-equal;
 regenerated deliberately with `FSM_UPDATE_GOLDEN=1`). The suite also greps a **hand-maintained** anchor list
 (`tests/go/agent-prompt-anchors.txt`, never touched by the golden updater) — the quoted literals below. Required content:
 - re-entry first: "If you do not know where a run is: `metareview fsm state` and follow `next_action`."
-- the loop skeleton: "`advance` → exit 3: do the node's work → `record node-output` → `advance`"; "exit 1 with
-  `GATE_FAILED`: run the `resume_hint` command — it forks a child; use the returned `run_id`"; "exit 1 with `ERR_*`: read
-  `code`; `detail` is data"; "`STOPPED` and `DONE` are terminal".
+- the loop skeleton: "`advance` → exit 3: do the node's work → `record node-output` (the exact command is in
+  `record`) → `advance`"; "exit 2: nothing was recorded — fix the input and retry, unless the code is a consent or
+  escalation code, which waits for a human"; "exit 1 with `GATE_FAILED`: run the `resume_hint` command — it forks a
+  child; use the returned `run_id`"; "exit 1 with `ERR_*`: read `code`; `detail` is data"; "`STOPPED` and `DONE` are
+  terminal; `DONE(reviewed)`: the confirmed list is `snapshot.json` in `fsm export`".
 - exec meaning: "`inline`: you do it, in this session, with the context you already have — do not delegate it to a
   sub-agent"; "`subagent`: spawn parallel sub-agents in this session"; "`fork`: the CLI does it — never re-spawn a cold
   `claude -p`".
@@ -204,7 +246,8 @@ regenerated deliberately with `FSM_UPDATE_GOLDEN=1`). The suite also greps a **h
   true` run never satisfies a gate." "Fork first, then commit."
 - the trust statement: "The audit chain is integrity-against-accident, not tamper evidence against the host; these are
   process guarantees for a cooperating agent."
-- the wording rule: "The workflow structure is deterministic; the results are not."
+- the wording rule: "The workflow structure is deterministic and the LLM calls are auditable and swappable; the
+  results are not deterministic."
 
 ## 5. Black-box suite — `tests/go/test-fsm.sh` (wired into `tests/run-all.sh`)
 Temp git repo per row; the script **copies** `testdata/fsm/scenarios/<workflow>/<name>/` into the temp repo (spec 2
@@ -220,7 +263,8 @@ by the script** (`{"commit": "$(git rev-parse HEAD)"}` after it commits), and a 
 `clean` no-findings/no-confirmed/clean, `reviewed` reviewed, `stalled` cumulative-convergence, `overflow` overflow-*,
 `failed` dirty-tree (enforcing), `custom` custom-outcome.
 `assert_untouched` = `find .metareview -type f | sort | xargs sha256sum` + `git -C <WorkDir> status --porcelain` before
-== after; every exit-2 row runs it. Rows:
+== after; every exit-2 row runs it. The anchor list and the forbidden-phrase grep each have a positive control (a
+minimum anchor count; a planted phrase that must be caught). Rows:
 - full `sdlc-loop` (`init` → NEEDS_INPUT/record cycles, 2 iterations, `DONE fixed`, exit 0) asserting at each
   NEEDS_INPUT the literal sorted `untrusted` list (discover: `["input.diff","input.findings_so_far","instructions"]`;
   fix: `["input.unfixed_bugs","instructions"]`), `input.base_sha == $(git rev-parse <base>)`, `input.head_sha == HEAD`;
@@ -234,14 +278,19 @@ by the script** (`{"commit": "$(git rev-parse HEAD)"}` after it commits), and a 
   with/without `--run`, `ERR_CMD_NOT_ALLOWED`, untouched on success;
 - usage exit 2 (`ERR_JUDGE_UNSET`, bad option — stdout still one JSON object with `code`); `--run` precedence: flag and
   `MRV_RUN_ID` set **simultaneously to different ids** → flag wins, env alone → env + `RUN_ID_FROM_ENV` warning, neither →
-  newest with a seeded corrupt `.metareview/runs/zzz/` as the newest dir skipped, `--run ../x` → `ERR_RUN_NOT_FOUND`;
-  `ERR_NO_RUNS`; `init --run-id` collision with a dir (`reason: dir`) and with a runs.jsonl row (`reason: row`) →
+  newest with a seeded corrupt `.metareview/runs/zzz/` as the newest dir skipped, `--run ../x` and `MRV_RUN_ID=../x` → `ERR_RUN_NOT_FOUND` exit 2 (never the store's `ERR_STORE_PATH`), a well-formed
+  unknown `--run mrv-doesnotexist0` → `ERR_RUN_NOT_FOUND` exit 2; the newest-run skip uses a **valid-shaped** id
+  (`mrv-zzzzzzzzzzzz`, empty `audit.jsonl`) that sorts newest; `ERR_NO_RUNS`; `init --run-id` collision with a dir (`reason: dir`) and with a runs.jsonl row (`reason: row`) →
   `ERR_RUN_EXISTS`; `--workflow sdlc-loop` with a file named `sdlc-loop` in cwd → `workflow_source: embedded` + the
-  embedded hash; `--workflow ./sdlc-loop.yaml` byte-equal to the embedded → accepted, different bytes →
+  embedded hash; `--workflow foo.yaml` (no `/`) is a path; `ERR_VAR_UNSET{JUDGE_EFFORT}` → `ERR_JUDGE_UNSET`;
+  `--workflow ./sdlc-loop.yaml` byte-equal to the embedded → accepted, different bytes →
   `ERR_WORKFLOW_INVALID{reserved_name}`; `workflow_source: path` in the envelope and the row; `ERR_MOCK_INVALID`;
   `--calibration` init; `--repo-mode enforcing` + dirty tree → `failed`; `ERR_NOT_A_REPO` for `state` outside a repo
   while `workflows`/`--agent-prompt` succeed and `metareview status` prints nothing FSM-related; relative `--data`/`--out`
-  from a subdirectory resolve against cwd; `init` in a repo with no ignore rule → `RUNS_JSONL_NOT_IGNORED` warning;
+  from a subdirectory resolve against cwd; `init` from a linked worktree persists that worktree as `work_dir` while the
+  run lives under the main root, and `cd sub && init --work-dir .` then `advance` from the root sees the same absolute
+  `work_dir`; `init` in a repo with no ignore rule → `RUNS_JSONL_NOT_IGNORED` warning and `warnings == []` on the
+  happy `init`;
 - `record` on a terminal run (`tokens` ok; `node-output` refused exit 2, untouched); `fsm record note --data '{…}'` happy;
   `record transition …` → `ERR_RECORD_NAME{event_type}`; `ERR_RECORD_TOKENS` (`-1`, unknown key); `ERR_NODE_OUTPUT_INVALID`,
   `ERR_NODE_OUTPUT_EXISTS` then `--replace` succeeds, `ERR_NODE_MISMATCH`, `ERR_NODE_NOT_HOST` — each untouched; read
@@ -249,11 +298,13 @@ by the script** (`{"commit": "$(git rev-parse HEAD)"}` after it commits), and a 
   `MaxWorkflowBytes` → `ERR_INPUT_TOO_LARGE`; a path `--workflow` over `MaxWorkflowBytes` → `ERR_WORKFLOW_TOO_LARGE`; a
   `--context` between 30000 bytes and `MaxDiffBytes` → accepted with `diff_truncated: true`; a long error →
   `detail_truncated: true` and `len(detail) ≤ MaxDetail`;
-- mock reopen: after `init --mock-ai A`, `env -u MOCK_AI fsm advance` → `ADVANCED`, and `MOCK_AI=B fsm advance` (B a
+- mock reopen: `MOCK_AI=B fsm init --mock-ai A` → `mock` == A's `rel#hash`; after `init --mock-ai A`, `env -u MOCK_AI
+  fsm advance` → `ADVANCED`, and `MOCK_AI=B fsm advance` (B a
   different scenario) → identical result with the `llm_call`'s `mock` stamp unchanged (env ignored); `MOCK_AI` env on
   `init` ≡ flag; `--mock-ai` on `advance` → usage exit 2; a moved checkout → `ERR_REPO_ROOT_MISMATCH`;
-- `fsm gate --input` (passed → 0, not passed → 1; `commit_exists --input` without `--run` → 2; unknown gate → 2; unknown
-  field → 2); `fsm judge` with `--run` (index continues; `seq` present; `verdict.parsed ∈ untrusted`; terminal run →
+- `fsm gate --input` (passed → 0, not passed → 1, `gate.detail ∈ untrusted`; `commit_exists --input` and
+  `nothing_found --input` without `--run` → 2; unknown gate → 2; unknown field → 2); `fsm judge --run --model bogus`
+  → `ERR_JUDGE_MODEL` exit 2 with zero appends, `--effort xhigh` on an OpenAI model → `ERR_JUDGE_EFFORT_UNSUPPORTED`; `fsm judge` with `--run` (index continues; `seq` present; `verdict.parsed ∈ untrusted`; terminal run →
   `ERR_RUN_TERMINAL` exit 2) and without (nothing persisted; `--context` required/refused per kind); `fsm diff --a --b`
   parent/child (`common_prefix_seq`, a `decision_same: false` row proven by `expect_model`); `fsm export` value oracle:
   `init --var SECRET=sekret-value` → default export has `sekret-value` in no byte under `--out` and `manifest.redacted`
@@ -263,10 +314,14 @@ by the script** (`{"commit": "$(git rev-parse HEAD)"}` after it commits), and a 
   `judge-swap-frozen` → `ERR_VAR_FROZEN{JUDGE, adjudicate}` exit 2; `--accept-workflow-change` refused without the flag
   (`ERR_WORKFLOW_CHANGED`) / incompatible (`ERR_WORKFLOW_INCOMPATIBLE`) / accepted with the parent's name; three non-PASS
   forks on one lineage → the third's row is `escalated` and forking it → `ERR_RUN_ESCALATED` exit 2; **one row per
-  (command, code) pair of the exit table** with the literal exit (incl. `ERR_RUN_TERMINAL` on `advance` → 1 and on
-  `record node-output` → 2; `ERR_CMDS_NOT_ALLOWED` at `init` and at `advance --from` → 2; `ERR_AUDIT_NOT_TORN` → 2);
-- `fsm state` rows: `next_action: record` after NEEDS_INPUT, `failed_gate` after GATE_FAILED, `torn: true` on a torn run,
-  `outgoing`, `attempt`; lock independence is a unit row (fake Store whose `Lock` fails → `state` still `OK`); torn tail
+  (command, phase, code) triple of the exit table** with the literal exit — including both phases of `ERR_GIT`
+  (fork precondition 2 / `Advance` 1), `ERR_CMD_CHANGED` (`Open` 2 / `Advance` 1 with a re-pinned script),
+  `ERR_RUN_NOT_FOUND` (bad `--run` 2 / `--repair` at offset 0 → 1 with the bytes in `.torn/`), `ERR_JUDGE_KEY` (2 /
+  after `--repair` moved bytes 1), `ERR_RUN_TERMINAL` (`advance` 1 / `record node-output` 2), `ERR_CMDS_NOT_ALLOWED` at
+  `init` and at `advance --from` → 2, `ERR_AUDIT_NOT_TORN` → 2, `ERR_BAD_CONVERGENCE` on `--check` → 2;
+- `fsm state` rows: `next_action: record` after NEEDS_INPUT (and `advance` repeated → same payload, one `needs_input`
+  event), `failed_gate` + the literal `resume_hint` after GATE_FAILED, `torn: true` on a torn run, `outgoing`,
+  `attempt`, `counts`; `metareview status` from a subdirectory and a linked worktree lists the same runs; lock independence is a unit row (fake Store whose `Lock` fails → `state` still `OK`); torn tail
   → `ERR_AUDIT_TORN` exit 1 → `--repair` (warn `detail == "<n> bytes dropped after seq <s> from audit.jsonl"`,
   `audit.torn-*.bin` bytes == the appended garbage, then the same invocation advances);
 - `--agent-prompt` byte-equals the golden and contains every anchor of `agent-prompt-anchors.txt`; injection scenarios:
@@ -274,14 +329,20 @@ by the script** (`{"commit": "$(git rev-parse HEAD)"}` after it commits), and a 
   `{"commit": …}`; assert on the **JSON-escaped** form (`FenceBlock` emits the payload as a canonical JSON string):
   the escaped payload appears in `instructions` only inside one `<<<DATA-<n>`…`<<<END-<n>` span, `n` is 16 hex,
   `n != 0123456789abcdef`, `n` not a substring of the payload, and no bare `<<<END-<n>` occurs inside the span;
-- forbidden phrase (case-insensitive `(^|[^-])deterministic results?` and `results are deterministic`) absent from
-  `skills/`, `commands/`, `docs/`, README/INSTALL/AGENTS/CLAUDE amendments, and `--agent-prompt`; `metareview --help` lists
+- forbidden phrase (case-insensitive `(^|[^-])deterministic results?` and `results are deterministic`) absent from the
+  **shipped** text: `skills/`, `commands/`, `docs/fsm/`, README/INSTALL/quickstart/AGENTS/CLAUDE, `workflows/*.yaml`
+  comments, and `--agent-prompt` (never `docs/specs/` or `docs/metareview/`, which quote the rule); `metareview --help` lists
   `fsm`; `metareview status` shows the FSM runs section (§6) and does not create `.metareview/runs/`;
   `.metareview/runs.jsonl` has a row for every outcome per the map above with `status ∈ passed|needs-revision|escalated`,
   decoded with `DisallowUnknownFields` against spec 3 §6's key set; `mock: true` on every row of this suite;
 - secrets: with `ANTHROPIC_API_KEY=sekret` and a bad `ANTHROPIC_BASE_URL`, `sekret` appears in neither stream on
   `ERR_JUDGE_URL` (`init`), while `state`/`record tokens`/`export`/`workflows` on the same run → `OK` exit 0 (no judge
-  built); same for `ERR_JUDGE_KEY` (missing key) and `ERR_JUDGE_HTTP` (httptest 500 in the unit suite).
+  built); `ERR_JUDGE_KEY`: `ANTHROPIC_API_KEY` unset, `OPENAI_API_KEY=sekret` (the unused family) and
+  `ANTHROPIC_BASE_URL=http://sekret-host.invalid` → `sekret` absent from both streams; `ERR_JUDGE_HTTP` (httptest 500
+  in the unit suite); proxy: `HTTPS_PROXY=http://127.0.0.1:1` in the process env and `RealDeps().HTTP` still reaches
+  the httptest server (control: `http.DefaultTransport` fails under the same env);
+- legacy `runs.jsonl` rows: a newline-less complete final review row survives an FSM `DONE` (still line N, no
+  `.torn/` file, the review target still refused as escalated); a blank line is skipped.
 
 ## 6. Docs (M8)
 `skills/fsm/SKILL.md` + `commands/fsm.md` (loop skeleton incl. `fsm state → next_action` re-entry, exit codes incl.
@@ -294,7 +355,9 @@ of §4, consent depth = argv bytes, `cmd_call` persists capped stdout/stderr, ch
 + `MRV_RUN_ID` + declared names (values never persisted; a child that re-enters `metareview fsm` on the locked run gets
 `ERR_RUN_LOCKED` — the guardrail), the closed set of env names the binary reads (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `MOCK_AI`, `MRV_RUN_ID`, `HOME`, `FSM_UPDATE_GOLDEN`/`FSM_JUDGE_UPDATE_GOLDEN`
-in tests; **no proxy variables** — `RealDeps` pins `Transport{Proxy: nil}`), base-URL overrides unstamped, "never pass a
+in tests; read by the Go runtime, not by metareview: `PATH` (`LookPath`, `git`), `SSL_CERT_FILE`/`SSL_CERT_DIR` on
+Linux; **no proxy variables** — `RealDeps` clones `http.DefaultTransport` with `Proxy = nil`), `ERR_AUDIT_FULL`
+(`MaxEvents`), git ≥ 2.31 (INSTALL prerequisite; `/setup` checks it), base-URL overrides unstamped, "never pass a
 secret via `--var`", `mock: true` never satisfies a gate, a moved checkout → `ERR_REPO_ROOT_MISMATCH` (mock runs are
 path-bound), enforcing caveat (materially weaker than the design's §11: `.git/info/exclude`/clean filters; untracked
 files fail `commit_exists`), the trust statement, calibration runs are eval-only, local-FS-only, `MaxEvents`, retention,
@@ -304,20 +367,25 @@ and `high` being Go-only, `fsm judge` without `--run` and `fsm gate --input` una
 `--include-vars` needs an explicit `--out` and its output is never committed, `record.data` is exported unredacted
 (`manifest.records`), metaswarm precedence (Beads/Superpowers/PR shepherding unchanged), the warm loop);
 `docs/fsm/driving-a-workflow.md` (the exec-mode contract in full); `docs/fsm/sdlc-loop-example.md` (transcript-shaped,
-built from the `happy` scenario's real envelopes with every exit code and `record` command visible, `mock: true` stated
-prominently); README/quickstart/INSTALL: `.metareview/runs/` transient (self-ignoring `.gitignore` `*`, created 0700 on
+built from the `happy` scenario's real envelopes with every exit code and `record` command visible **and the host side
+shown** — sub-agent dispatch at `discover`, the inline edit + commit at `fix` — `mock: true` stated prominently); README/quickstart/INSTALL: `.metareview/runs/` transient (self-ignoring `.gitignore` `*`, created 0700 on
 first `init`, `.torn/` inside it) + `.metareview/runs.jsonl` transient (already in README's exact-entry list and in
 the `.metareview/*` block `EnsureLearningGitPolicy` installs — **nothing new to add, and never ignore the whole
 `.metareview/` directory**; `init` warns `RUNS_JSONL_NOT_IGNORED` when neither is present) + `docs/metareview/fsm/`
-durable (the `export` default); AGENTS.md/quickstart/`skills/status/SKILL.md` transient lists += `.metareview/runs/`;
+durable (the `export` default; AGENTS.md's durable list += `docs/metareview/fsm/`, and its `NEEDS_REVISION →
+--previous-run` line is qualified "FSM runs resume by fork"); AGENTS.md/quickstart/`skills/status/SKILL.md` transient
+lists += `.metareview/runs/` (incl. `.torn/`);
 AGENTS.md/CLAUDE.md exit handling ("3 = the FSM needs the host to do a node's work; 1 + `GATE_FAILED` = run
 `resume_hint` (a new run id); 1 + `ERR_*` = read `code`; `STOPPED`/`DONE` are terminal"); upgrade note (pre-0.9
-`.metareview/` untouched: no rewrite of `runs.jsonl`/`findings.jsonl`; new rows additive and ignored by 0.8.x readers —
-scope/target never match; a pre-existing undecodable `runs.jsonl` line blocks FSM terminal rows with `ERR_RUNS_JSONL`
+`.metareview/` untouched: no rewrite of `runs.jsonl`/`findings.jsonl` — a complete but newline-less final row is kept
+as a row (a `\n` is added), only an undecodable fragment moves to `runs/.torn/`, blank lines are skipped, and `record`
+accepts exactly what `runchain.ReadRuns` accepts; new rows additive and ignored by 0.8.x readers — scope/target never
+match; legacy review gates write `runs.jsonl` under `cwd`'s root while FSM uses the main worktree root — `status` and
+`init --run-id` consult the main root's file; a pre-existing undecodable `runs.jsonl` line blocks FSM terminal rows with `ERR_RUNS_JSONL`
 until fixed while the run itself stays intact; an id whose run directory was deleted keeps its row and stays refused by
 `--run-id`; `schema_version` is 1 and only ever increments with a CHANGELOG entry); design-spec amendments (**complete**
-against plan §0's `[design change]` rows): C1 §1/§18 "100% coverage as a hard gate" — 100% is enforced on
-`internal/fsm/*`, legacy packages sit on a recorded floor with the lift deferred to a follow-up branch; C2 `still-present`
+against plan §0's `[design change]` rows): C1 §1/§18 "100% coverage as a hard gate" — measured 86.3% at C1; 100% is now enforced on `internal/fsm/*` and
+`workflows/`, legacy packages sit on a recorded floor with the lift deferred to a follow-up branch; C2 `still-present`
 gains `confidence`; C3 a give-up is never `all_fixed` (outcome vocabulary); C5 §4 CLI surface (`mrv`, `converge --check
 <yaml>`, `diff`/`export`/`workflows`/`--agent-prompt`, `--repo-mode` tighten-only, `init` no longer lists transitions —
 `fsm state` has `outgoing`); C6 two shipped workflows; C10 §12.3 `fsm run` not built; C11 resume = fork of a child, order
@@ -330,10 +398,11 @@ the non-interactive `--allow-custom-cmds <sha256>` handshake (the consent-relay 
 `runs.jsonl` rows and produce no review Markdown; §5/§16 `cmds:` by name + `on_overflow: <name>`; §7 product prompts are
 fenced and differ from the calibration prompt (the §17 numbers pick the model, not the bytes); §8 nine gates +
 `commit_exists` base + D1 (`AllFixed` non-empty, decided A); §9 atom params dropped + `all_fixed` placement +
-`not`→`custom`; §10.1/§14.3/§17 judge-swap claim + effort table, `JUDGE_EFFORT` required; §13 five gates → nine;
-`MOCK_AI=1` → `MOCK_AI=<dir>` at `init` only; escalation is lineage-depth for FSM runs (spec 3 §9); `*→failed` ignored;
+`not`→`custom`; §10.1/§14.3/§17 judge-swap claim + effort table, `JUDGE_EFFORT` required; C23 §13 five gates → nine (gate vocabulary); C24 `diff`/`export` are CLI commands, not a dashboard; C25 product
+prompts fenced, `match` never fenced, `--calibration` byte-identical to the eval; `MOCK_AI=1` → `MOCK_AI=<dir>` at
+`init` only; escalation is lineage-depth for FSM runs (spec 3 §9); `*→failed` ignored;
 `docs/README.codex.md`, `docs/README.claude.md`, `docs/index.html`; CHANGELOG 0.9.0; `package.json` files +=
-`workflows/`, `docs/fsm/`, `go.sum`, `.gitattributes` (not `testdata/` — tests run from a source checkout); plugin
+`workflows/`, `docs/fsm/`, `go.sum` (not `testdata/` or `.gitattributes` — tests run from a source checkout); plugin
 manifests advertise "workflow" (`.codex-plugin/plugin.json` `defaultPrompt` gains the fsm command);
 `tests/manifest/test-skills.sh` += the new files and a "workflow" check in `test-manifests.sh`; CI: `.github/workflows/
 test.yml` already runs `npm test` — no change.
@@ -364,7 +433,7 @@ type Deps struct {
   FileHash  func(string) (string, error)                  // machine.Deps.FileHash + cmdexec.Guarded.FileHash (workflow.FileSHA256)
   ReadFile  func(string) ([]byte, error)                  // raw; the CLI (and machine.Init for a path workflow) wraps with the per-call cap
   Exec      gate.Exec                                     // gate.RealExec — `git worktree list --porcelain`, `--show-toplevel`, `check-ignore`; gate.NewExec(dir, Exec)
-  HTTP      judge.Doer                                    // judge.NewHTTPClient(180 * time.Second) with Transport{Proxy: nil} — no proxy env
+  HTTP      judge.Doer                                    // judge.NewHTTPClient(180 * time.Second); Transport = http.DefaultTransport.(*http.Transport).Clone() with Proxy = nil
   Store     func(root string) run.RunStore                // run.NewJSONLStore(root, run.Options{}) → DefaultMaxEvents (the store appends .metareview/runs itself)
   Sidecar   func(root string) machine.Sidecar             // machine.FSSidecar{Root: root}
   ExportFS  export.FS                                     // os-backed adapter (OpenFile passes flag/perm through)
@@ -372,7 +441,7 @@ type Deps struct {
   Workflows func(name string) ([]byte, error)             // workflows.Read
   Terminal  func(root string, clock func() run.Time) func(ctx, machine.View) error   // record.Terminal
   Exists    func(root, runID string) (bool, error)                                    // record.Exists
-  Runner    func(r machine.RunnerDeps, env func() []string, fileHash func(string) (string, error), clock machine.Clock, real cmdexec.Runner) converge.Caller   // cmdexec.Guarded
+  Runner    func(r machine.RunnerDeps, env func() []string, fileHash func(string) (string, error), now func() time.Time, real cmdexec.Runner) converge.Caller   // cmdexec.Guarded{Clock: now}
 }
 ```
 `RealDeps()` binds each field to its real implementation and nothing else. **Per-run wiring** (`buildMachineDeps(root,
@@ -383,20 +452,24 @@ nonce, judge.Clock{Now, time.After})` for a product run of `init`/`advance`/`jud
 before `Open`), and **`nil`** for `state`/`record`/`gate`/`converge`/`diff`/`export`/`workflows` (spec 4 handoff: `kind.New`
 accepts `Judge: nil` with the explicit `Mock` flag; an executor reached with a nil judge fails `ERR_EXECUTOR_FAILED{reason:
 no_judge}` — unreachable from those commands; a unit row's `HTTP` fake fails the test if invoked by them and none of them
-reads a judge env name); `Runner = func(d) { return deps.Runner(d, Environ, FileHash, clock, scenario.Runner() or
-cmdexec.NewExecRunner()) }`; `Git = func(dir) gate.Git { return gate.NewExec(dir, Exec) }`; `Clock = run.Time{Now()}`;
-`Nonce` = 16 hex from `Rand`; `MockLoad = mockai.LoadHash`; `Terminal = deps.Terminal(root, clock)`; `export.Deps{Store,
+reads a judge env name); `Runner = func(d) { return deps.Runner(d, Environ, FileHash, Now, scenario.Runner() or
+cmdexec.NewExecRunner()) }`; `Git = func(dir) gate.Git { return gate.NewExec(dir, Exec) }`; `Clock = func() run.Time {
+return run.Time{Now()} }` (a fresh time per event); `Nonce` = 16 hex from `Rand`; `MockLoad = func(dir) (string,
+error) { s, err := deps.MockLoad(dir); … return s.Hash() }` (one read of `judge.yaml` — the same `Scenario` supplies
+`Script()`/`Runner()`); `Terminal = deps.Terminal(root, clock)`; `export.Deps{Store,
 Sidecar, Kinds, FS: ExportFS, Clock, RepoRoot: root, Home: Getenv("HOME")}`. `mockDir` comes from `--mock-ai`/`MOCK_AI` on
-`init`; on every other command from a **pre-`Open` peek**: the first line of `.metareview/runs/<id>/audit.jsonl` read
-through `ReadFile` capped at `run.MaxLine` and decoded leniently (torn-tolerant — a torn tail never touches line 1;
-advisory only: `Open` re-verifies the registry's `Mock()` against the chain-verified snapshot and re-hashes the scenario
-through `MockLoad`); the peek's `repo_root` must equal `root` (`ERR_REPO_ROOT_MISMATCH`), and the scenario dir is
-`filepath.Join(root, rel)`.
+`init`; on every other command from a **pre-`Open` peek**: `ReadFile` reads `.metareview/runs/<id>/audit.jsonl` whole, the
+CLI takes the first line of the first `run.MaxLine` bytes and decodes it leniently (over-length is never an error;
+torn-tolerant — a torn tail never touches line 1; advisory only: `Open` re-verifies the registry's `Mock()` against
+the chain-verified snapshot and re-hashes the scenario through `MockLoad`); the peek's `repo_root` must equal `root`
+(`ERR_REPO_ROOT_MISMATCH`), and the scenario dir `filepath.Join(root, rel)` must pass `Init`'s containment check
+(`relInside`) before anything is read.
 **Judge pre-flight** (`judge.Preflight(model, effort string, calibration bool, keys Keys) error`, spec 4 §9; wired as
-`machine.Deps.Preflight func(node *workflow.Node) error`, spec 2 handoff — the machine calls it after `Resolve` and before
-`Create` at `Init` for every `exec: fork` node, and immediately before running a fork node in `Advance`, before any
-append of that node) → `ERR_JUDGE_MODEL`/`ERR_JUDGE_KEY`/`ERR_JUDGE_EFFORT_UNSUPPORTED` exit 2 (exit 1 only when the same
-invocation's `--repair` already moved bytes). Mock runs pass a nil `Preflight`.
+`machine.Deps.Preflight func(node *workflow.Node, calibration bool) error`, spec 2 handoff — the machine calls it after
+`Resolve` and before `Create` at `Init` for every `exec: fork` node, and on the `Advance` that would run a fork node,
+before any append of that node's work) → `ERR_JUDGE_MODEL`/`ERR_JUDGE_KEY`/`ERR_JUDGE_EFFORT_UNSUPPORTED` exit 2 (exit
+1 only with `repair_moved`). `fsm judge` calls `judge.Preflight` itself before `RecordLLMCall`. Mock runs pass a nil
+`Preflight`.
 **Spec 2 handoffs used here** (all in spec 2 §8): `Init` resolves name-vs-path, stamps `WorkflowSource`, enforces
 `reserved_name`; `Deps.Preflight`; `NodeView{Model, Effort}`; `View.Outgoing []{To, Gate}`; `OpenOptions{ReadOnly}` stopping
 after the sidecar parse; `Machine.RecordLLMCall` (closure); `converge.Describe`; `ERR_CMDS_NOT_ALLOWED` `Fields["cmds_json"]`.
@@ -409,8 +482,8 @@ list keys always arrays), one row per (command, code) pair of the exit table, er
 translation from the machine's key-level list, `--agent-prompt` golden + anchors; per-run wiring: mock run → `MockJudge`,
 product run → an `httptest.Server` as `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL` driving `advance` through `adjudicate` and
 asserting `x-api-key == ANTHROPIC_API_KEY`, `Authorization: Bearer <OPENAI_API_KEY>`, host chosen per model family; the
-product run's pre-flight rows: `env -u ANTHROPIC_API_KEY` at the `adjudicate` transition → `ERR_JUDGE_KEY` exit 2 with a
-counting Store asserting zero appends, `--var JUDGE=bogus` → `ERR_JUDGE_MODEL`, `--var JUDGE_EFFORT=xhigh` on an OpenAI
+product run's pre-flight rows: `env -u ANTHROPIC_API_KEY` on the `Advance` that would run `adjudicate` (the one after the
+transition into it) → `ERR_JUDGE_KEY` exit 2 with a counting Store asserting no append beyond an optional `tree`, `--var JUDGE=bogus` → `ERR_JUDGE_MODEL`, `--var JUDGE_EFFORT=xhigh` on an OpenAI
 model → `ERR_JUDGE_EFFORT_UNSUPPORTED`, and the `--repair` + pre-flight → exit 1 case; non-judge commands with a
 `t.Fatal`-ing `HTTP` and no judge env read; a recording judge asserting `Request{Fence, Calibration, Node, Index}` for
 `fsm judge` with/without `--run` **and on a `--calibration` run** (`Fence=false, Calibration=true`); `Rand` failure →
@@ -426,6 +499,9 @@ a submodule; `status` section rows incl. a `List` error; the os-backed `ExportFS
 | plan §3.1 `fsm diff --run --run` | `--a`/`--b` |
 | plan §3.1 `fsm judge [--effort]`, `--no-fence` | `--effort` required (spec 4 §6: `JUDGE_EFFORT` required); `--no-fence` dropped (spec 4 §9: calibration runs are unfenced by the run flag, not per call) |
 | plan §3.1 `--repo-mode advisory|enforcing`, no `--run-id`, no `--repair` | `enforcing` only (tighten-only, spec 2); `init --run-id` (user-facing, refused on any collision); `advance --repair` (run spec §5.3 UX) |
+| plan §3.3 "2 = usage/init refusal", §3.5 export exit 0/1 | exit 2 for every pre-mutation refusal on every command (`ERR_EXPORT_*`, `ERR_DIFF_INCOMPATIBLE`, `ERR_RECORD_*`, `ERR_NODE_*`, `ERR_RUN_TERMINAL` on `record`/`judge`); `exitFor(command, phase, code)` |
+| plan §3.4 NEEDS_INPUT `node {name, kind, exec, model, effort}` object; bare `untrusted` keys; `confirmed_bugs`/`findings` | flattened `node, kind, exec, model, effort`; `untrusted` as JSON paths under `input.*`; spec 4's `unfixed_bugs`/`findings_so_far` + the task-done rubric |
+| plan §3.1 `--accept-workflow-change`, `judge --input <file>` | `--accept-workflow-change [--workflow <name|path>]` (spec 3 `WorkflowBytes`); `--input <file|->` |
 | plan §3.2 `parent_run_id` on the child envelope | `FORKED` envelope; every `state` carries `parent_run_id`/`lineage`/`attempt` |
 | plan §3.5 `Diff`/`Export` output | spec 3 r5 shapes, snake_case tags |
 | plan §4.1 smoke gate (dropped in r2) | restored (§7) |
@@ -433,12 +509,14 @@ a submodule; `status` section rows incl. a `List` error; the os-backed `ExportFS
 | plan §7.4 version bump | five files + CHANGELOG, `npm test` before **and** after |
 | plan §1.9 / spec 3 | `ESCALATED` = spec 3's lineage-depth rule; `ERR_RUN_ESCALATED` exit 2 and a human-only prompt sentence; no `--previous-run` |
 | spec 2 §8 "make sure `.metareview/` is ignored" | satisfied by docs + the `RUNS_JSONL_NOT_IGNORED` init warning; `init` installs no policy (that stays `learn --post-merge`'s) |
-| spec 2 §8 (owned there, asked here) | `Init` resolves name/path + `WorkflowSource` + `reserved_name`; `Deps.Preflight`; `NodeView{Model, Effort}`; `View.Outgoing`; `OpenOptions{ReadOnly}` (no lock, stop after sidecar parse); `Machine.RecordLLMCall(ctx, key, closure)` (refused on terminal runs; machine imports no `judge`); `converge.Describe`; `ERR_CMDS_NOT_ALLOWED` `Fields["cmds_json"]` |
+| spec 2 §8 (owned there, asked here) | `Init` resolves name/path + `WorkflowSource` + `reserved_name`; `Deps.Preflight(node, calibration)`; `NodeView{Model, Effort}`; `View.Outgoing`; `OpenOptions{ReadOnly}` (no lock, stop after sidecar parse); `Machine.RecordLLMCall(ctx, key, closure)` (refused on terminal runs; machine imports no `judge`); `converge.Describe`; `ERR_CMDS_NOT_ALLOWED` `Fields["cmds_json"]` |
 | spec 4 §9 (owned there, asked here) | `judge.Preflight`; `kind.New` accepts `Judge: nil` + explicit `Mock` (executor → `ERR_EXECUTOR_FAILED{no_judge}`); `mockai.Load` read cap 512 KB; `--input` shapes per kind; `judge.CutDiff` for `--context` |
 | spec 3 r5 (received) | `record.Terminal(root, clock)`/`record.Exists`, `export.Export` + `export.FS` + `Home`, default `--out`, "fork then commit" in `resume_hint`, `--include-vars` needs `--out`, `mock` rows, `record.data` unredacted, incomplete-fork deletion, `status` from `Store.List()`, lineage-depth escalation + the human-only sentence, `kind.Decision` → `machine.Decision` |
 | run spec §11 (received) | `MaxEvents` production value = `DefaultMaxEvents` (`run.Options{}`), retention, `--repair` UX, `go.sum` shipped |
-| CLI-owned new codes | `ERR_NOT_A_REPO{reason?}`, `ERR_NO_RUNS`, `ERR_INPUT_TOO_LARGE`, `ERR_REPO_ROOT_MISMATCH`; warning codes `RUN_ID_FROM_ENV`, `RUNS_JSONL_NOT_IGNORED` |
+| CLI-owned new codes | `ERR_NOT_A_REPO{reason?}`, `ERR_NO_RUNS`, `ERR_INPUT_TOO_LARGE`, `ERR_REPO_ROOT_MISMATCH`, `ERR_JUDGE_UNSET`, `ERR_INTERRUPTED`, `ERR_INTERNAL`; warning codes `RUN_ID_FROM_ENV`, `RUNS_JSONL_NOT_IGNORED` |
+| git ≥ 2.31 | a new product prerequisite (`--path-format=absolute`); INSTALL + `/setup` |
+| spec 3 §6 (asked there) | a newline-less **decodable** final `runs.jsonl` row is a complete row; the torn fragment lives under `runs/.torn/` |
 | SEC (attempts 1–2) | generic `untrusted` rule (free text only) + per-status enumeration incl. `STOPPED`; knob list complete; closed env-name set, proxy off; `reserved_name` init-only; caps; no secrets on either stream; peek advisory + `root`-bound |
 | `.gitignore` guidance (r2) | reversed: nothing to add, never ignore the whole directory; mechanism = README's exact entries or the learning block, plus `runs/` self-ignore |
-| `package.json` files | `testdata/fsm/` not shipped (tests run from source checkouts) |
+| `package.json` files | `testdata/fsm/` and `.gitattributes` not shipped (tests run from source checkouts) |
 | envelope 0.9.x additive rule | a new commitment (not in the plan); the version-bump row is aware of it |
