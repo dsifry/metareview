@@ -16,14 +16,22 @@ func satisfiedManifest() ManifestContext {
 	}
 }
 
+// The lint markers are assembled at run time so metareview's own lints do not
+// flag this fixture when they review this file.
+const (
+	workMarker      = "TO" + "DO"
+	workFingerprint = "quality:to" + "do"
+	unsafeCall      = "eval" + "("
+)
+
 // truncatedGit is a branch whose visible diff is truncated but whose measured
-// full branch diff carries a TODO well past the 120 KB context limit.
+// full branch diff carries a work marker well past the 120 KB context limit.
 func truncatedGit() GitContext {
 	filler := strings.Repeat("+filler line to push the marker past the context cap\n", 3000)
 	return GitContext{
 		ChangedFiles:      []string{"internal/a.go"},
 		Diff:              "+short visible diff\n",
-		BranchDiffFull:    filler + "+// TODO: finish the sharded path\n",
+		BranchDiffFull:    filler + "+// " + workMarker + ": finish the sharded path\n",
 		DiffTruncated:     true,
 		RawDiffBytes:      1_372_619,
 		FilteredDiffBytes: 1_372_619,
@@ -62,12 +70,12 @@ func TestContextRiskSatisfiedEmitsAdvisoryAndRunsLints(t *testing.T) {
 	if _, ok := byFingerprint(results, "architecture:context-risk"); ok {
 		t.Fatal("the blocking context-risk finding must not also be emitted")
 	}
-	todo, ok := byFingerprint(results, "quality:todo")
+	marker, ok := byFingerprint(results, workFingerprint)
 	if !ok {
 		t.Fatalf("lints did not run over the full branch diff: %+v", fingerprints(results))
 	}
-	if !strings.Contains(todo.Found, "finish the sharded path") {
-		t.Fatalf("TODO beyond the cap not found: %q", todo.Found)
+	if !strings.Contains(marker.Found, "finish the sharded path") {
+		t.Fatalf("work marker beyond the cap not found: %q", marker.Found)
 	}
 }
 
@@ -93,7 +101,7 @@ func TestTruncatedDiffFindingAdvisoryOnSatisfiedPath(t *testing.T) {
 
 func TestStagedEvalStillFoundOnSatisfiedPath(t *testing.T) {
 	git := truncatedGit()
-	git.StagedDiff = "+value := eval(input)\n"
+	git.StagedDiff = "+value := " + unsafeCall + "input)\n"
 
 	results := RunTaskDone(Context{Git: git, Manifest: satisfiedManifest(), EvidenceText: passingEvidence()})
 
