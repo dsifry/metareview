@@ -463,7 +463,29 @@ func planJSON(plan contextprofile.ShardPlan, header Header) planFile {
 	return out
 }
 
-const resultContract = `Write your result to ` + "`<resultsDir>/shard-<id>.<shardHash>.result.json`" + ` with:
+// resultContractFor renders the result contract for one pack kind. A cross-shard
+// result is a different shape from a shard result — different file name, different
+// kind, no shardId — and reusing the shard wording told reviewers to write a file
+// the validator then ignored.
+func resultContractFor(crossShard bool) string {
+	if crossShard {
+		return "Write your result to `<resultsDir>/cross-shard.<planHash>.result.json` with:" + crossShardContractBody
+	}
+	return "Write your result to `<resultsDir>/shard-<id>.<shardHash>.result.json` with:" + shardContractBody
+}
+
+const crossShardContractBody = `
+
+  schemaVersion 1, id, kind "cross-shard", shardId "" (a cross-shard result must not
+  name a shard), shardHash "", planHash, verdict
+  (PASS|PASS_ADVISORY|NEEDS_REVISION|ESCALATED), reviewer, reviewedAt (RFC3339),
+  evidence[] (each entry needs path AND line > 0, or a note of at least 12 characters; at least one entry),
+  findings[] (severity low|medium|high|critical, disposition fixed|waived|accepted-risk|false-positive|
+  deferred|open, note, evidence[]), blockingCount.
+
+fixed and false-positive close a finding. waived, accepted-risk, deferred and open block at medium or above.`
+
+const shardContractBody = `
 
   schemaVersion 1, id, kind "shard", shardId, shardHash, planHash, verdict
   (PASS|PASS_ADVISORY|NEEDS_REVISION|ESCALATED), reviewer, reviewedAt (RFC3339),
@@ -501,7 +523,7 @@ func shardPack(plan contextprofile.ShardPlan, shard contextprofile.Shard, header
 	}
 	b.WriteString("\n## Review\n\nReview the diff below against `rubrics/task-done-review-rubric.md`. ")
 	b.WriteString("Report findings with file:line evidence.\n\n")
-	b.WriteString("## Result contract\n\n" + resultContract + "\n\n")
+	b.WriteString("## Result contract\n\n" + resultContractFor(false) + "\n\n")
 	b.WriteString("## Re-run\n\n" +
 		markdown.InlineCode(fmt.Sprintf("metareview review %s --base %s", header.Scope, header.Base)) + "\n\n")
 	for _, c := range shard.Chunks {
@@ -534,7 +556,7 @@ func crossShardPack(plan contextprofile.ShardPlan, header Header) string {
 		}
 	}
 	b.WriteString("\n## Review\n\nReview the integration seams across these shards using the shard results as input.\n\n")
-	b.WriteString("## Result contract\n\n" + resultContract + "\n")
+	b.WriteString("## Result contract\n\n" + resultContractFor(true) + "\n")
 	return b.String()
 }
 

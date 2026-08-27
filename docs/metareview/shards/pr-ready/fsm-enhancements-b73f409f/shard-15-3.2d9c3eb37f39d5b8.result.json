@@ -1,68 +1,68 @@
 {
   "schemaVersion": 1,
-  "id": "shard-15-3-review",
+  "id": "shard-15-3-rereview",
   "kind": "shard",
   "shardId": "shard-15-3",
   "shardHash": "2d9c3eb37f39d5b8",
-  "planHash": "2ee4294a41b3ad7b",
-  "verdict": "NEEDS_REVISION",
+  "planHash": "19c95b4224fc2837",
+  "verdict": "PASS",
   "reviewer": "claude-opus-5 task-done-rubric",
-  "reviewedAt": "2026-08-27T00:00:00Z",
+  "reviewedAt": "2026-08-27T22:40:21Z",
   "evidence": [
     {
       "path": "internal/taskdone/review.go",
-      "line": 101,
-      "note": "Checked shard plan construction, pack write and rollback ordering: PlanShards runs before knowledge collection, packWriter.Write returns a rollback that is invoked on its own failure and again if the review/context write closure fails, joined via errors.Join so the original error is preserved."
+      "line": 84,
+      "note": "Create now plans shards, ingests results, writes packs with rollback, and prunes/GCs only after the run is recorded; diff is complete (part 1/1, not truncated), no eval, no TODO/FIXME markers."
     },
     {
-      "path": "internal/taskdone/review.go",
-      "line": 258,
-      "note": "Checked the post-success housekeeping guard: Prune always runs, GC only when result.Blocking is false, and result.Blocking is assigned inside the closure before it returns, so the guard reads the settled verdict."
+      "path": "internal/taskdone/shardwiring_test.go",
+      "line": 1,
+      "note": "New 215-line test file exercising the shard-pack wiring through Create via a fakeWriter seam on Options.ShardWriter, with a real git repo whose branch diff exceeds the context cap so a multi-shard plan is actually produced."
+    },
+    {
+      "path": "internal/taskdone/shardwiring_test.go",
+      "line": 105,
+      "note": "TestTaskDonePlanIsWrittenAndPrunedWithMatchingHash asserts one Write and one Prune, a non-empty plan and plan hash, header scope/budget, non-empty branch files, and that the emitted context pack names the same plan hash and the .metareview/shards/task-done/ pack directory."
+    },
+    {
+      "path": "internal/taskdone/shardwiring_test.go",
+      "line": 141,
+      "note": "TestTaskDonePackWriteFailureFailsTheRun injects a Write error and asserts the run fails and leaves no review artifacts; TestTaskDonePackRollbackRunsWhenTheReviewFails chmods docs/metareview/reviews read-only and asserts exactly one rollback with zero Prune/GC calls."
+    },
+    {
+      "path": "internal/taskdone/shardwiring_test.go",
+      "line": 172,
+      "note": "TestTaskDoneHousekeepingFailuresDoNotDiscardTheRun (prune and gc subtests) proves swallowed housekeeping errors keep the RunID; TestTaskDoneDiscoversShardResults proves ingestShardResults calls Discover exactly once on a sharded run."
     },
     {
       "path": "internal/taskdone/review.go",
       "line": 278,
-      "note": "Checked ingestShardResults: explicit --shard-result/--cross-shard-result paths are copied into a fresh slice before append, Discover is skipped only when both the plan and the explicit list are empty, and the manifest is built with the same scope/target record used for the run."
+      "note": "go test -cover ./internal/taskdone/ reports 81.9% (was 24.6%); go tool cover -func on the new tests alone shows Create 83.0%, ingestShardResults 88.9%, manifestContext 100%, reviewerContext 100%, contextMarkdown 100%. All five tests PASS, none skipped."
     },
     {
       "path": "internal/taskdone/review.go",
-      "line": 552,
-      "note": "Checked that reviewMarkdown inserts the sharded section after the verdict token line so reviewlog still parses the first non-empty line under '## Verdict'."
-    },
-    {
-      "path": "cmd/metareview/main.go",
-      "line": 195,
-      "note": "Confirmed the new Options fields are actually wired to CLI flags for the task-done subcommand, so they are not dead configuration."
-    },
-    {
-      "path": "internal/taskdone/review.go",
-      "line": 84,
-      "note": "Ran go test ./internal/taskdone/... -coverprofile and go tool cover -func: Create 0.0%, ingestShardResults 0.0%, manifestContext 0.0%, reviewerContext 0.0%; package coverage 24.6%."
+      "line": 269,
+      "note": "GC is gated on !result.Blocking and result.Blocking is genuinely assigned inside the write closure at review.go:209, so the ordering claim in the comment holds."
     }
   ],
   "findings": [
     {
       "severity": "high",
-      "disposition": "open",
-      "note": "The new shard wiring in internal/taskdone has no test coverage. `go tool cover -func` on ./internal/taskdone reports Create 0.0%, ingestShardResults 0.0%, manifestContext 0.0% (package total 24.6%); the only test file is internal/taskdone/review_markdown_test.go, which contains no reference to shards. The structurally identical pr-ready implementation did ship tests (internal/prready/shardwiring_test.go and internal/prready/shardingestion_test.go exercise Create with an injected ShardWriter, including write-failure and rollback paths), so the seam is clearly testable and the omission is specific to taskdone. Untested behaviour here includes the rollback-on-write-failure path, the errors.Join rollback path, and the destructive housekeeping calls Prune and GC, which delete pack and result files on disk. Per the task-done rubric blocking policy ('Source changes lack relevant tests or explicit validation evidence'), this blocks. Fix: add taskdone equivalents of the prready shard wiring and ingestion tests using the existing ShardWriter seam.",
+      "disposition": "fixed",
+      "note": "Prior blocker: the shard-pack wiring in internal/taskdone/review.go (Create, ingestShardResults, manifestContext) shipped without tests, unlike the structurally identical pr-ready code. Resolved by internal/taskdone/shardwiring_test.go, which drives the wiring end to end through Create with a fake shardpack.Writer over a real oversized-diff git repo. The tests are substantive, not superficial: they assert the plan/header/branch-files actually handed to the writer, the plan hash and pack directory surfaced in the context pack, failure of the run on a Write error with no artifacts left behind, exactly one rollback and zero housekeeping calls when the review body fails, survival of the RunID through Prune and GC errors, and a single Discover call per sharded run. Package coverage 24.6% -> 81.9%; the wired functions are covered at 83.0%/88.9%/100%.",
       "evidence": [
         {
-          "path": "internal/taskdone/review.go",
-          "line": 84,
-          "note": "func Create: 0.0% statement coverage per go tool cover -func on the package profile."
+          "path": "internal/taskdone/shardwiring_test.go",
+          "line": 18,
+          "note": "fakeWriter implements the full shardpack.Writer seam (Write/Prune/Discover/GC) and counts every call, so the assertions bind to real behaviour rather than to compilation."
         },
         {
           "path": "internal/taskdone/review.go",
-          "line": 278,
-          "note": "func ingestShardResults: 0.0% statement coverage; no test in the repository references it."
-        },
-        {
-          "path": "internal/taskdone/review.go",
-          "line": 259,
-          "note": "packWriter.GC deletes superseded result files and is never exercised by a test."
+          "line": 138,
+          "note": "Options.ShardWriter is the injected seam the tests use; nil still falls back to shardpack.New(shardpack.OSDeps()) in production."
         }
       ]
     }
   ],
-  "blockingCount": 1
+  "blockingCount": 0
 }

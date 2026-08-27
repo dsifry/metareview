@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-review",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "19c95b4224fc2837",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5 cross-shard",
+  "reviewedAt": "2026-08-27T15:41:33-07:00",
+  "evidence": [
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 520,
+      "note": "Prompt-vs-ingestion seam (shard-03-2 vs shard-16-3): crossShardPack embeds the shared resultContract, which names kind \"shard\" and the file name shard-<id>.<shardHash>.result.json; reviewmanifest requires kind \"cross-shard\", an empty shardId and cross-shard.<planHash>.result.json. See the finding below."
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 1,
+      "note": "The only chunk-split file (2 parts across shard-16-2 and shard-16-3): go build ./..., go vet ./... and go test ./... are all clean, so no helper duplication, name collision or truncation crossed the chunk boundary and the file holds together as one unit."
+    },
+    {
+      "path": "internal/taskdone/review.go",
+      "line": 278,
+      "note": "shard-15-3 blocker vs the shard-1c re-cut: internal/taskdone unit coverage is now 81.9% and combined 89.4% (floor 87.0), and internal/taskdone/shardwiring_test.go asserts task-done scope and the .metareview/shards/task-done/ path rather than copying pr-ready's, so the wiring is exercised with the right scope."
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 301,
+      "note": "taskdone/prready wiring parity across shard-15-3 and shard-0e-2: both pass their own scope string to shardpack.Dir/Write/Discover/Prune/GC, both ingest before writing the pack, and both build the same reviewmanifest.Input shape; no scope leaks between the two paths."
+    },
+    {
+      "path": "testdata/fsm/agent-prompt.golden",
+      "line": 1,
+      "note": "Driver-contract seam across shards 09, 10-3, 1f and 19: `metareview fsm --agent-prompt` output is byte-identical to the golden, and every anchor line in tests/go/agent-prompt-anchors.txt is present in it verbatim."
+    },
+    {
+      "path": "workflows/sdlc-loop.yaml",
+      "line": 10,
+      "note": "Workflow-vs-doc seam across shards 00, 04, 1b and 1b/gates: every gate the sdlc-loop transcript names (findings_nonempty, confirmed_nonempty, commit_exists, all_fixed) exists in internal/fsm/gate/gates.go, the state list matches `fsm workflows`, and the doc's workflow_hash prefix bffb… matches the live embedded hash bffbd8a8…."
+    },
+    {
+      "path": "tests/coverage-floor.txt",
+      "line": 27,
+      "note": "CHANGELOG claim checked against the gate: bash tests/coverage.sh exits 0; every internal/fsm/* package and workflows report 100.0%, and no package regressed against its floor (internal/taskdone 89.4 vs floor 87.0) after the re-cut."
+    },
+    {
+      "path": "CLAUDE.md",
+      "line": 31,
+      "note": "Exit-code contract stated in three shards (CLAUDE.md in 0d, docs/fsm/driving-a-workflow.md in 13, the agent prompt in 1f/09) agrees on all four codes, on GATE_FAILED/resume_hint forking a child, and on consent/escalation codes waiting for a human."
+    },
+    {
+      "note": "Cross-cutting surface checks: version 0.9.0 is identical in internal/version, package.json, .claude-plugin/plugin.json, .codex-plugin/plugin.json, .claude-plugin/marketplace.json and CHANGELOG; every ERR_* code named in user-facing docs exists in the Go sources (only doc-wildcard prefixes and illustrative ERR_A/ERR_X placeholders do not)."
+    },
+    {
+      "note": "Whole-tree integration re-run green: go build ./..., go vet ./..., go test ./..., tests/coverage.sh, tests/manifest/test-manifests.sh, tests/manifest/test-skills.sh and tests/go/test-sharded-review.sh all exit 0, covering the plugin/command/skill manifest agreement and the sharded-review pipeline end to end."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The generated cross-shard prompt states a result contract the ingestion path rejects. crossShardPack (internal/shardpack/shardpack.go:520) reuses the shared resultContract constant verbatim, so cross-shard.md tells the reviewing agent to write `<resultsDir>/shard-<id>.<shardHash>.result.json` with kind \"shard\" and a shardId. reviewmanifest requires the opposite for a cross-shard result: kind \"cross-shard\" (resultBlockers emits \"cross-shard result unknown kind shard\"), an empty shardId (\"cross-shard result must not name a shard\"), and the file name cross-shard.<planHash>.result.json (resultNamePattern / ShardIDFromResultPath). An agent following the pack literally therefore produces a result that either is not discovered at all or turns into manifest blockers, and the gate can only be cleared by ignoring the pack — which is what happened on this very review. The 0.8.3 spec (docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md:167,179,206) and tests/go/test-sharded-review.sh:77-79 both state the correct form, and skills/commands claim \"Each pack states the exact contract\", so only the generated cross-shard pack is wrong. Neither the shardpack shard (shard-03-2) nor the reviewmanifest shard (shard-16-3) could see the contradiction alone. Fix: parameterise resultContract for the cross-shard pack (kind, file name, no shardId).",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 466,
+          "note": "resultContract literal: \"Write your result to `<resultsDir>/shard-<id>.<shardHash>.result.json`\" and \"kind \\\"shard\\\", shardId, shardHash\" — emitted unchanged by crossShardPack at line 536"
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 451,
+          "note": "crossShardBlockers calls resultBlockers(..., KindCrossShard) and adds \"cross-shard result must not name a shard\" when shardId is set"
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 62,
+          "note": "resultNamePattern accepts cross-shard.<16hex>.result.json, not the shard-<id> name the pack prescribes"
+        },
+        {
+          "path": "tests/go/test-sharded-review.sh",
+          "line": 77,
+          "note": "the black-box suite writes kind 'cross-shard' to cross-shard.<planHash>.result.json, confirming the pack text, not the code, is the wrong side"
+        }
+      ]
+    },
+    {
+      "severity": "high",
+      "disposition": "fixed",
+      "note": "shard-15-3 blocked because the new internal/taskdone shard-pack wiring had no tests (Create/ingestShardResults/manifestContext at 0.0%, package 24.6%). internal/taskdone/shardwiring_test.go now exercises that wiring: package unit coverage is 81.9% and combined 89.4% against a floor of 87.0, tests/coverage.sh passes, and the assertions are task-done-specific (header scope and .metareview/shards/task-done/ path) rather than copied from prready. Verified in the current tree after the re-cut; shard-1c re-reviewed and passed.",
+      "evidence": [
+        {
+          "path": "internal/taskdone/shardwiring_test.go",
+          "line": 123,
+          "note": "asserts writer.lastHdr.Scope == \"task-done\" and the .metareview/shards/task-done/ pack path"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 278,
+          "note": "ingestShardResults is now covered; go test -cover ./internal/taskdone reports 81.9%"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}
