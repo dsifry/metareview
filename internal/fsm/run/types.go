@@ -303,6 +303,10 @@ func SnapshotEqualIgnoringSeq(a, b Snapshot) bool {
 	return bytes.Equal(marshalCanonical(a), marshalCanonical(b))
 }
 
+// MarshalCanonical encodes v with HTML escaping disabled and no trailing
+// newline — the encoding every struct→JSON path in internal/fsm must use.
+func MarshalCanonical(v any) []byte { return marshalCanonical(v) }
+
 // marshalCanonical encodes v with HTML escaping disabled and no trailing newline.
 func marshalCanonical(v any) []byte {
 	var buf bytes.Buffer

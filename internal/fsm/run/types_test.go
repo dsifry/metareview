@@ -209,3 +209,9 @@ func TestReasonCodeTable(t *testing.T) {
 		}
 	}
 }
+
+func TestMarshalCanonicalExported(t *testing.T) {
+	if got := string(MarshalCanonical(map[string]string{"a": "<b>"})); got != `{"a":"<b>"}` {
+		t.Fatalf("got %s", got)
+	}
+}
