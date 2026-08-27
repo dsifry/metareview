@@ -338,6 +338,13 @@ func hasTestChange(git GitContext) bool {
 	return false
 }
 
+// addedLines returns the added lines the deterministic lints scan.
+//
+// Documentation is deliberately excluded. The lints look for code defects — an
+// eval( call, a TODO left behind — and a design document that *discusses* those
+// things is not one. Before the branch diff was measured untruncated, truncation
+// hid most prose by accident; once the whole diff became visible, metareview's own
+// specs about its lints started failing its own gate.
 func addedLines(git GitContext) []string {
 	// The branch part comes from the untruncated measured diff when there is one,
 	// so the lints see the bytes the packs carry rather than the truncated view.
@@ -345,14 +352,74 @@ func addedLines(git GitContext) []string {
 	if branch == "" {
 		branch = git.Diff
 	}
-	text := strings.Join([]string{branch, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")
 	var lines []string
+	for _, text := range []string{branch, git.StagedDiff, git.WorkingTreeDiff} {
+		lines = append(lines, addedSourceLines(text)...)
+	}
+	// Untracked excerpts are "--- <path>" headed rather than a diff.
+	lines = append(lines, addedUntrackedLines(git.UntrackedExcerpts)...)
+	return lines
+}
+
+// addedSourceLines walks a unified diff, tracking the file each hunk belongs to and
+// dropping the ones the lints should not judge.
+func addedSourceLines(text string) []string {
+	var lines []string
+	scan := true
 	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+		if strings.HasPrefix(line, "diff --git ") {
+			scan = lintable(diffHeaderPath(line))
+			continue
+		}
+		if strings.HasPrefix(line, "+++ ") {
+			if path := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(line, "+++ ")), "b/"); path != "" && path != "/dev/null" {
+				scan = lintable(path)
+			}
+			continue
+		}
+		if scan && strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
 			lines = append(lines, line)
 		}
 	}
 	return lines
+}
+
+func addedUntrackedLines(text string) []string {
+	var lines []string
+	scan := true
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "--- ") {
+			scan = lintable(strings.TrimSpace(strings.TrimPrefix(line, "--- ")))
+			continue
+		}
+		if scan && line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+// lintable reports whether a path carries code the deterministic lints judge.
+func lintable(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return true
+	}
+	// Markdown and the docs tree only: a .txt under src/ is content, not prose, and
+	// excluding it would silently widen the blind spot.
+	if strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".markdown") {
+		return false
+	}
+	return !strings.HasPrefix(path, "docs/")
+}
+
+// diffHeaderPath reads the post-image path out of a "diff --git a/x b/x" line.
+func diffHeaderPath(line string) string {
+	fields := strings.Fields(line)
+	if len(fields) < 4 {
+		return ""
+	}
+	return strings.TrimPrefix(fields[3], "b/")
 }
 
 func firstMatching(lines []string, pattern *regexp.Regexp) string {
