@@ -16,6 +16,7 @@ type Fake struct {
 	Porcelain string
 	Diffs     map[string]string // "from..to" → diff; "HEAD" → working diff
 	Tree      string            // WorkTree answer
+	Common    string            // CommonDir answer
 	Err       error
 	Calls     []string
 }
@@ -79,4 +80,9 @@ func (f *Fake) WorkingDiff(_ context.Context, max int) (string, bool, error) {
 func (f *Fake) WorkTree(context.Context) (string, error) {
 	f.call("WorkTree")
 	return f.Tree, f.Err
+}
+
+func (f *Fake) CommonDir(context.Context) (string, error) {
+	f.call("CommonDir")
+	return f.Common, f.Err
 }

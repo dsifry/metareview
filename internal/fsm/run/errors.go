@@ -37,6 +37,7 @@ const (
 	ReasonFixBaselineOrder   = "fix_baseline_order"
 	ReasonUnsanctionedCmd    = "unsanctioned_cmd"
 	ReasonBadOutcome         = "bad_outcome"
+	ReasonTokensNegative     = "tokens_negative"
 )
 
 // CodeFor returns the FoldError code for a reason (§2.4 table).

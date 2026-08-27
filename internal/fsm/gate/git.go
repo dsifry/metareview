@@ -39,6 +39,9 @@ type Git interface {
 	Diff(ctx context.Context, from, to string, max int) (diff string, truncated bool, err error)
 	// WorkingDiff returns `git diff HEAD` cut like Diff.
 	WorkingDiff(ctx context.Context, max int) (string, bool, error)
+	// CommonDir returns the absolute path of the repository's common git dir
+	// (shared by all worktrees), for the "same repository" check.
+	CommonDir(ctx context.Context) (string, error)
 	// WorkTree returns a content hash of the working tree (tracked + untracked,
 	// ignored excluded): `git add -A` into a scratch index, then `write-tree`.
 	WorkTree(ctx context.Context) (string, error)
@@ -224,6 +227,19 @@ func (g *execGit) WorkingDiff(ctx context.Context, max int) (string, bool, error
 	}
 	d, t := Cut(out, max)
 	return d, t, nil
+}
+
+// CommonDir resolves `git rev-parse --path-format=absolute --git-common-dir`.
+func (g *execGit) CommonDir(ctx context.Context) (string, error) {
+	out, code, err := g.run(ctx, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	dir := strings.TrimSpace(out)
+	if code != 0 || dir == "" {
+		return "", errs.E(CodeGit, "git-common-dir unavailable", "op", "rev-parse")
+	}
+	return dir, nil
 }
 
 // WorkTree hashes the working tree through a scratch index so content

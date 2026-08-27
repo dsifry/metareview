@@ -103,6 +103,12 @@ type TokenTotals struct {
 }
 
 // Add returns the field-wise sum.
+// Negative reports whether any counter is below zero (rejected by Apply so a
+// driver cannot pay down a budget with negative records).
+func (t TokenTotals) Negative() bool {
+	return t.Input < 0 || t.CacheRead < 0 || t.CacheCreate < 0 || t.Output < 0 || t.Reasoning < 0
+}
+
 func (t TokenTotals) Add(u TokenTotals) TokenTotals {
 	return TokenTotals{Input: t.Input + u.Input, CacheRead: t.CacheRead + u.CacheRead, CacheCreate: t.CacheCreate + u.CacheCreate, Output: t.Output + u.Output, Reasoning: t.Reasoning + u.Reasoning}
 }

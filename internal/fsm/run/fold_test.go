@@ -1038,3 +1038,35 @@ func indexOf(evs []Event, typ string) int {
 	}
 	return -1
 }
+
+func TestFoldTokensNegativeAndNextIndex(t *testing.T) {
+	b := NewBuilder(runA)
+	b.Init(baseInit())
+	b.Event(TypeNodeOutput, out(`{}`), WithNode("n"))
+	b.Event(TypeLLMCall, LLMCallData{Kind: "k", Model: "m", Index: 0, Verdict: json.RawMessage(`{}`), Tokens: TokenTotals{Input: 5}}, WithNode("n"))
+	st, err := FoldFull(b.Events())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.NextIndex("n@0") != 1 || st.NextIndex("zzz@0") != 0 {
+		t.Fatalf("NextIndex: %d", st.NextIndex("n@0"))
+	}
+	for name, tok := range map[string]TokenTotals{"input": {Input: -1}, "cache_read": {CacheRead: -1}, "cache_create": {CacheCreate: -1}, "output": {Output: -1}, "reasoning": {Reasoning: -1}} {
+		b2 := NewBuilder(runA)
+		b2.Init(baseInit())
+		b2.Event(TypeTokens, tok)
+		if _, err := Fold(b2.Events()); err == nil || err.(*FoldError).Reason != ReasonTokensNegative {
+			t.Errorf("tokens %s: %v", name, err)
+		}
+		b3 := NewBuilder(runA)
+		b3.Init(baseInit())
+		b3.Event(TypeNodeOutput, out(`{}`), WithNode("n"))
+		b3.Event(TypeLLMCall, LLMCallData{Kind: "k", Model: "m", Index: 0, Verdict: json.RawMessage(`{}`), Tokens: tok}, WithNode("n"))
+		if _, err := Fold(b3.Events()); err == nil || err.(*FoldError).Reason != ReasonTokensNegative {
+			t.Errorf("llm_call %s: %v", name, err)
+		}
+	}
+	if (TokenTotals{}).Negative() {
+		t.Fatal("zero is not negative")
+	}
+}

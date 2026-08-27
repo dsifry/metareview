@@ -7,7 +7,9 @@ vars:
   JUDGE_EFFORT: {required: true}   # Pareto-selected with JUDGE (spec §17); pinned to medium under --calibration
 states: [discover, adjudicate, fix, verify, done, failed]
 transitions:                                  # ordered
+  - {from: discover,   to: done,       gate: findings_empty,     outcome: clean}
   - {from: discover,   to: adjudicate, gate: findings_nonempty}
+  - {from: adjudicate, to: done,       gate: confirmed_empty,    outcome: clean}
   - {from: adjudicate, to: fix,        gate: confirmed_nonempty}
   - {from: fix,        to: verify,     gate: commit_exists}
   - {from: verify,     to: done,       gate: all_fixed,   outcome: fixed}
@@ -20,4 +22,7 @@ nodes:
 convergence:
   any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]
 repo_mode: advisory
-# on_overflow: {cmd: ["./notify-overflow.sh"], timeout: 30}   # requires --allow-custom-cmds <sha256>
+# Escape hatch (requires --allow-custom-cmds <sha256>; see docs/fsm):
+# cmds:
+#   notify: {argv: [bash, ./notify-overflow.sh], timeout: 30, env: [SLACK_WEBHOOK]}
+# on_overflow: notify

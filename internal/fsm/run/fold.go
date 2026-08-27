@@ -145,9 +145,15 @@ func Apply(st FoldState, ev Event) (FoldState, error) {
 		if p.Index != st.indexes[k] {
 			return FoldState{}, foldErr(ReasonStamp, ev)
 		}
+		if p.Tokens.Negative() {
+			return FoldState{}, foldErr(ReasonTokensNegative, ev)
+		}
 		next.indexes[k] = p.Index + 1
 		next.Tokens = next.Tokens.Add(p.Tokens)
 	case *TokenTotals:
+		if p.Negative() {
+			return FoldState{}, foldErr(ReasonTokensNegative, ev)
+		}
 		next.Tokens = next.Tokens.Add(*p)
 	case *CmdCallData:
 		if !sanctioned(st.AllowedCmds, p.Name) {
@@ -237,6 +243,9 @@ func FoldFull(events []Event) (FoldState, error) {
 
 // cow returns a state whose containers are fresh so that mutations never reach st. RawMessage
 // values (node outputs) are shared: they are never mutated in place.
+// NextIndex returns the llm_call index the next call under key must carry.
+func (st FoldState) NextIndex(key string) int { return st.indexes[key] }
+
 func (st FoldState) cow() FoldState {
 	next := st
 	next.Vars = cloneStringMap(st.Vars)

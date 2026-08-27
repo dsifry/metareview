@@ -99,6 +99,7 @@ func TestC2CmdAtom(t *testing.T) {
 	ctx := context.Background()
 	s := snap(2, 1, nil, 7, 1)
 	s.Vars = map[string]string{"JUDGE": "secret-model"}
+	s.NodeOutputs = map[string]json.RawMessage{"n@0": json.RawMessage(`{"big":true}`)}
 	fr := &fakeRunner{res: CmdResult{Stdout: []byte(`{"stop": true, "reason": "plateau"}`)}}
 	p, err := Parse(node(t, "{cmd: notify}"), fr)
 	if err != nil {
@@ -125,6 +126,9 @@ func TestC2CmdAtom(t *testing.T) {
 	}
 	if got.Iteration != 2 || got.Tokens.Input != 7 {
 		t.Fatal("payload carries the snapshot")
+	}
+	if strings.Contains(string(fr.stdins[0]), `"big"`) {
+		t.Fatal("payload must omit node outputs")
 	}
 	if s.Vars["JUDGE"] != "secret-model" {
 		t.Fatal("Payload must not mutate the snapshot")

@@ -261,6 +261,10 @@ func TestG2RealGit(t *testing.T) {
 	if out := git(t, dir, "diff", "--cached", "--name-only"); out != "" {
 		t.Fatalf("real index touched: %s", out)
 	}
+	common, err := g.CommonDir(ctx)
+	if err != nil || !filepath.IsAbs(common) || filepath.Base(common) != ".git" {
+		t.Fatalf("common dir %q %v", common, err)
+	}
 	wd, tr, err := g.WorkingDiff(ctx, 1<<20)
 	if err != nil || tr || !strings.Contains(wd, "+changed") {
 		t.Fatalf("working diff: %v %v", tr, err)
@@ -322,6 +326,9 @@ func TestG2ExecErrorBranches(t *testing.T) {
 	if _, err := g.WorkTree(ctx); !errs.Is(err, CodeGit) {
 		t.Fatal("worktree exit 128")
 	}
+	if _, err := g.CommonDir(ctx); !errs.Is(err, CodeGit) {
+		t.Fatal("common exit 128")
+	}
 	// exit 1 where it is not a legal answer, and malformed stdout
 	exit1 := NewExec("/", func(_ context.Context, _ string, _ []string, args ...string) ([]byte, []byte, int, error) {
 		return []byte("garbage"), nil, 1, nil
@@ -343,6 +350,9 @@ func TestG2ExecErrorBranches(t *testing.T) {
 	}
 	if _, err := exit1.WorkTree(ctx); !errs.Is(err, CodeGit) {
 		t.Fatal("worktree add exit 1")
+	}
+	if _, err := exit1.CommonDir(ctx); !errs.Is(err, CodeGit) {
+		t.Fatal("common exit 1")
 	}
 	// write-tree exit 1 / short output after a successful add
 	calls := 0
@@ -447,7 +457,11 @@ func TestG4FakeContract(t *testing.T) {
 	if tr, _ := f.WorkTree(ctx); tr != "t" {
 		t.Fatal("tree")
 	}
-	if len(f.Calls) != 10 {
+	f.Common = "/r/.git"
+	if c, _ := f.CommonDir(ctx); c != "/r/.git" {
+		t.Fatal("common")
+	}
+	if len(f.Calls) != 11 {
 		t.Fatalf("calls %v", f.Calls)
 	}
 	boom := errors.New("boom")

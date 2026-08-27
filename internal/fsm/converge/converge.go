@@ -245,9 +245,11 @@ func (c *cmdAtom) Evaluate(ctx context.Context, s run.Snapshot) (Result, error) 
 
 // Payload is the JSON handed to sanctioned commands: the snapshot with var
 // values replaced by their sha256 (commands are consented to run, not to
-// receive credentials).
+// receive credentials) and node outputs omitted (they are not the
+// convergence question and can be megabytes).
 func Payload(s run.Snapshot) []byte {
 	c := s.Clone()
+	c.NodeOutputs = nil
 	for k, v := range c.Vars {
 		sum := sha256.Sum256([]byte(v))
 		c.Vars[k] = "sha256:" + hex.EncodeToString(sum[:])
