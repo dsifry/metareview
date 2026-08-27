@@ -16,6 +16,7 @@ import (
 	"github.com/dsifry/metareview/internal/reviewers"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/runchain"
+	"github.com/dsifry/metareview/internal/shardpack"
 	"github.com/dsifry/metareview/internal/state"
 	"github.com/dsifry/metareview/internal/tasksource"
 )
@@ -26,6 +27,8 @@ type Options struct {
 	EvidencePath  string
 	MaxAttempts   int
 	Now           time.Time
+	// ShardWriter is the pack-writing seam; nil uses the real filesystem.
+	ShardWriter shardpack.Writer
 }
 
 type Result struct {
@@ -132,6 +135,26 @@ func Create(root, target string, options Options) (Result, error) {
 	targetRecord := map[string]string{"type": taskTargetType(task), "id": task.ID}
 	run := findings.Run{ID: runID, Scope: "task-done", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
 
+	packWriter := options.ShardWriter
+	if packWriter == nil {
+		packWriter = shardpack.New(shardpack.OSDeps())
+	}
+	packDir := ""
+	packRollback := func() error { return nil }
+	if len(shardPlan.Shards) > 0 {
+		packDir = shardpack.Dir(root, "task-done", task.ID, shardPlan.PlanHash)
+		packRollback, err = packWriter.Write(root, shardPlan, shardpack.Header{
+			Scope:    "task-done",
+			TargetID: task.ID,
+			Base:     reviewGit.BaseSHA,
+			Head:     reviewGit.HeadSHA,
+			Budget:   contextprofile.DefaultMaxBytesPerShard,
+		}, reviewGit.BranchFiles)
+		if err != nil {
+			return Result{}, err
+		}
+	}
+
 	result := Result{RunID: runID, ReviewRel: reviewRel, ContextRel: contextRel}
 	err = func() error {
 		if err := os.MkdirAll(filepath.Dir(contextPath), 0o755); err != nil {
@@ -140,7 +163,7 @@ func Create(root, target string, options Options) (Result, error) {
 		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, profile, shardPlan, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
+		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, profile, shardPlan, packDir, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
 			return err
 		}
 		chain, err := runchain.Resolve(root, runchain.Options{
@@ -215,7 +238,15 @@ func Create(root, target string, options Options) (Result, error) {
 	if err != nil {
 		restoreSnapshots(snapshots)
 		removeEmptyDirs(root)
+		if rollbackErr := packRollback(); rollbackErr != nil {
+			return Result{}, rollbackErr
+		}
 		return Result{}, err
+	}
+	if len(shardPlan.Shards) > 0 {
+		if err := packWriter.Prune(root, "task-done", task.ID, shardPlan.PlanHash); err != nil {
+			return Result{}, err
+		}
 	}
 	return result, nil
 }
@@ -387,7 +418,7 @@ func uniquePaths(root, target string, at time.Time) (string, string, string, err
 	}
 }
 
-func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, plan contextprofile.ShardPlan, knowledgeContext knowledge.Context, evidenceText, gateEffect string) string {
+func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, plan contextprofile.ShardPlan, packDir string, knowledgeContext knowledge.Context, evidenceText, gateEffect string) string {
 	changed := append([]string{}, git.ChangedFiles...)
 	changed = append(changed, git.StagedFiles...)
 	changed = append(changed, git.WorkingTreeFiles...)
@@ -401,7 +432,7 @@ func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Contex
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		contextprofile.Markdown(profile) + "\n\n" +
-		contextprofile.ShardPlanMarkdown(plan, "") + "\n\n" +
+		contextprofile.ShardPlanMarkdown(plan, packRelative(packDir)) + "\n\n" +
 		reviewManifestMarkdown("task-done", map[string]string{"type": taskTargetType(task), "id": task.ID}, profile, plan) + "\n\n" +
 		"## Changed Files\n\n" + markdownList(changed, "No changed files.") + "\n\n" +
 		"## Diff\n\n" + markdown.FencedCodeBlock("diff", strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")) + "\n\n" +
@@ -656,4 +687,15 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// packRelative renders a pack directory relative to the repository root.
+func packRelative(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	if idx := strings.Index(dir, ".metareview/shards/"); idx >= 0 {
+		return dir[idx:]
+	}
+	return dir
 }
