@@ -175,9 +175,10 @@ func VerifyCmds(allowed []run.AllowedCmd, workDir string, hash func(string) (str
 	return nil
 }
 
-// FileSHA256 hashes a regular file; directories and missing paths error.
+// FileSHA256 hashes a regular file, following symlinks (a symlinked script is
+// pinned by its target's contents); directories and missing paths error.
 func FileSHA256(path string) (string, error) {
-	st, err := os.Lstat(path)
+	st, err := os.Stat(path)
 	if err != nil {
 		return "", err
 	}

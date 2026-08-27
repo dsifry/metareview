@@ -1,0 +1,17 @@
+# source: harnesseval@19ff9a8 harnesseval/judge.py:22 sha256=43882bd12af0f8f41cd284ff1dc248919f06895e25cdcd7fd50d7a80c53214fc
+You are evaluating AI code review tools.
+Determine if the candidate issue matches the golden (expected) comment.
+
+Golden Comment (the issue we're looking for):
+{golden_comment}
+
+Candidate Issue (from the tool's review):
+{candidate}
+
+Instructions:
+- Determine if the candidate identifies the SAME underlying issue as the golden comment
+- Accept semantic matches - different wording is fine if it's the same problem
+- Focus on whether they point to the same bug, concern, or code issue
+
+Respond with ONLY a JSON object:
+{{"reasoning": "brief explanation", "match": true/false, "confidence": 0.0-1.0}}

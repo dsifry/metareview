@@ -28,8 +28,8 @@ type Diff struct {
 	Truncated bool
 }
 
-// MaxDiffBytes bounds the diff handed to kinds.
-const MaxDiffBytes = 1 << 20
+// MaxDiffBytes bounds the diff handed to kinds (a variable so tests can force truncation).
+var MaxDiffBytes = 1 << 20
 
 // ExecInput is everything a fork executor gets.
 type ExecInput struct {

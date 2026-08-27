@@ -1,0 +1,14 @@
+# source: harnesseval@19ff9a8 harnesseval/sdlc_loop.py:321 sha256=562691a1f484fc034a0e6a9734c3c9621909a2e70a2309755502f7b496763feb
+You are verifying whether a specific bug still exists in the current code.
+
+Original bug description (from a human reviewer):
+{golden_comment}
+
+Current diff (base..HEAD, after fixes were applied):
+```diff
+{repo and _diff(repo, base_ref)[:30000]}
+```
+
+Does the bug described above STILL EXIST in the current code? (True = bug is still present /
+not fixed. False = the bug has been fixed or no longer applies.)
+Respond with ONLY a JSON object: {{"reasoning": "...", "still_present": true/false}}

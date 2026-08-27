@@ -239,6 +239,14 @@ func TestM2ReviewLoop(t *testing.T) {
 	if v := m.View(); v.NextAction != NextRecord || v.Node.HasOutput {
 		t.Fatalf("view after needs_input: %+v", v)
 	}
+	if r.NeedsInput.Instructions.Input["diff_truncated"] != false {
+		t.Fatal("not truncated")
+	}
+	MaxDiffBytes = 2
+	if r := h.advance(m); r.NeedsInput.Instructions.Input["diff"] != "DI" || r.NeedsInput.Instructions.Input["diff_truncated"] != true {
+		t.Fatalf("truncated diff: %v", r.NeedsInput.Instructions.Input)
+	}
+	MaxDiffBytes = 1 << 20
 	// a second advance and a tokens record do not re-append needs_input
 	h.advance(m)
 	if _, err := m.Record(context.Background(), RecordOptions{Kind: RecordTokens, Data: json.RawMessage(`{"input":7,"output":3}`)}); err != nil {

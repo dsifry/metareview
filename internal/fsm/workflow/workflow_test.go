@@ -303,6 +303,51 @@ transitions:
   "*→failed": { on: gate_error }
 `
 
+func TestW2ReservedEnvAndBoundaries(t *testing.T) {
+	for _, name := range []string{"PATH", "HOME", "LANG", "TMPDIR", "BASH_ENV", "ENV", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "NODE_OPTIONS", "NODE_PATH", "PERL5OPT", "PERL5LIB", "RUBYOPT", "RUBYLIB", "JAVA_TOOL_OPTIONS", "SHELLOPTS", "PS4", "IFS", "CDPATH", "GLOBIGNORE", "PROMPT_COMMAND", "MRV_RUN_ID", "MRV_X", "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "GIT_DIR", "GIT_CONFIG_COUNT"} {
+		if r, _ := reasonOf(t, edit("env: [SLACK_WEBHOOK]", "env: ["+name+"]")); r != "bad_env" {
+			t.Errorf("reserved %s: %s", name, r)
+		}
+	}
+	// acceptance boundaries
+	for _, ok := range []string{edit("timeout: 30", "timeout: 1"), edit("timeout: 30", "timeout: 3600"), renameState(strings.Repeat("s", 32)), edit("env: [SLACK_WEBHOOK]", "env: [A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16]")} {
+		w := mustParse(t, ok)
+		_ = w
+	}
+	if w := mustParse(t, edit("timeout: 30", "timeout: 3600")); w.Cmds["notify"].Timeout != 3600*time.Second {
+		t.Fatal("3600 accepted")
+	}
+	if r, _ := reasonOf(t, renameState(strings.Repeat("s", 33))); r != "bad_state" {
+		t.Fatal("33-char state refused")
+	}
+	var vars []string
+	for i := 0; i < run.MaxVars-3; i++ {
+		vars = append(vars, "V"+strings.Repeat("A", i+1)+": {default: x}")
+	}
+	mustParse(t, edit("vars: { JUDGE: {required: true}, JUDGE_EFFORT: {required: true}, REVIEWER: {default: claude-opus-5} }", "vars: { JUDGE: {required: true}, JUDGE_EFFORT: {required: true}, REVIEWER: {default: claude-opus-5}, "+strings.Join(vars, ", ")+" }"))
+	var cmds []string
+	for i := 0; i < run.MaxAllowedCmds-1; i++ {
+		cmds = append(cmds, "  c"+strings.Repeat("x", i)+": { argv: [a] }")
+	}
+	mustParse(t, edit("  notify: { argv: [bash, ./scripts/notify.sh, --model, $JUDGE], timeout: 30, env: [SLACK_WEBHOOK] }", "  notify: { argv: [bash] }\n"+strings.Join(cmds, "\n")))
+	mustParse(t, edit("argv: [bash, ./scripts/notify.sh, --model, $JUDGE]", "argv: ["+strings.Repeat("a, ", run.MaxArgv-1)+"a]"))
+	// caller beats Default; $1 / ${X} left literal; nested maps not walked
+	w := mustParse(t, edit("lenses: 8 }", "lenses: 8, note: '$1 ${JUDGE} $', deep: {model: $JUDGE} }"))
+	r, eff, err := w.Resolve(map[string]string{"JUDGE": "j", "JUDGE_EFFORT": "e", "REVIEWER": "override"}, false)
+	if err != nil || eff["REVIEWER"] != "override" || r.Nodes["discover"].Model != "override" {
+		t.Fatalf("caller beats default: %v %v", err, eff)
+	}
+	if r.Nodes["discover"].Params["note"] != "$1 ${JUDGE} $" || r.Nodes["discover"].Params["deep"].(map[string]any)["model"] != "$JUDGE" {
+		t.Fatalf("literal/nested: %v", r.Nodes["discover"].Params)
+	}
+}
+
+// renameState renames the adjudicate state (not the kind) in the example.
+func renameState(name string) string {
+	s := strings.ReplaceAll(example, "adjudicate", name)
+	return strings.ReplaceAll(s, "match-then-"+name, "match-then-adjudicate")
+}
+
 func TestW2Warnings(t *testing.T) {
 	src := edit("  - { from: discover, to: done, gate: findings_empty, outcome: clean }\n", "")
 	src = strings.Replace(src, "  - { from: adjudicate, to: done, gate: confirmed_empty, outcome: clean }\n", "", 1)
@@ -436,11 +481,22 @@ func TestW4ResolveCmds(t *testing.T) {
 	if string(canon) != strings.TrimSpace(strings.ReplaceAll(string(fixture), "WORK", work)) {
 		t.Fatalf("preimage drift:\n%s\n%s", canon, fixture)
 	}
-	// the sha over the WORK-substituted fixture must equal CmdsSHA256 (the .sha256 file pins the fixture with WORK=/w)
-	if sha != CmdsSHA256(allowed) {
-		t.Fatal("ResolveCmds sha == CmdsSHA256")
+	// the pinned .sha256 (WORK=/w) must equal CmdsSHA256 of the list resolved in /w through the fakes
+	hashesW := map[string]string{"/bin/bash": "hb", "/w/scripts/notify.sh": "hs"}
+	lookW := func(name string) (string, error) {
+		switch name {
+		case "bash":
+			return "/bin/bash", nil
+		case "/w/scripts/notify.sh":
+			return name, nil
+		}
+		return "", errors.New("nf")
 	}
-	sum := sha256.Sum256([]byte(strings.TrimSpace(string(fixture))))
+	allowedW, shaW, err := ResolveCmds(r, "/w", lookW, hashFor2(hashesW))
+	if err != nil || shaW != wantSha || CmdsSHA256(allowedW) != wantSha {
+		t.Fatalf("pinned preimage sha: %s vs %s (%v)", shaW, wantSha, err)
+	}
+	sum := sha256.Sum256([]byte(strings.ReplaceAll(strings.TrimSpace(string(fixture)), "WORK", "/w")))
 	if hex.EncodeToString(sum[:]) != wantSha {
 		t.Fatalf("fixture sha256 %s != pinned %s", hex.EncodeToString(sum[:]), wantSha)
 	}
@@ -489,6 +545,19 @@ func TestW4ResolveCmds(t *testing.T) {
 	if err := VerifyCmds(allowed, work, hash); !errs.Is(err, CodeCmdChanged) || errs.As(err).Field("reason") != "appeared" || errs.As(err).Field("path") != filepath.Join(work, "--model") {
 		t.Fatalf("appeared: %v", err)
 	}
+	// symlinked script: hashed through the link (target contents), keyed by the argv path
+	link := filepath.Join(work, "scripts", "link.sh")
+	if err := os.Symlink(script, link); err != nil {
+		t.Fatal(err)
+	}
+	if h, err := FileSHA256(link); err != nil || h != hexSum("#!/bin/sh\n") {
+		t.Fatalf("symlink hashed through: %s %v", h, err)
+	}
+	dirLink := filepath.Join(work, "dirlink")
+	_ = os.Symlink(work, dirLink)
+	if _, err := FileSHA256(dirLink); !errs.Is(err, CodeCmdChanged) {
+		t.Fatal("symlink to a directory is irregular")
+	}
 	// FileSHA256: regular, directory, missing
 	h, err := FileSHA256(script)
 	if err != nil || h != hexSum("#!/bin/sh\n") {
@@ -508,6 +577,15 @@ func TestW4ResolveCmds(t *testing.T) {
 		if _, err := FileSHA256(unreadable); err == nil {
 			t.Fatal("unreadable")
 		}
+	}
+}
+
+func hashFor2(m map[string]string) func(string) (string, error) {
+	return func(p string) (string, error) {
+		if h, ok := m[p]; ok {
+			return h, nil
+		}
+		return "", errors.New("no such file")
 	}
 }
 

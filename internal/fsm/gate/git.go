@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -245,15 +246,12 @@ func (g *execGit) CommonDir(ctx context.Context) (string, error) {
 // changes (not just paths) move the hash. The scratch index lives in the
 // OS temp dir and is removed afterwards.
 func (g *execGit) WorkTree(ctx context.Context) (string, error) {
-	f, err := os.CreateTemp("", "mrv-index-*")
+	dir, err := os.MkdirTemp("", "mrv-index-*")
 	if err != nil {
 		return "", errs.Wrap(errs.E(CodeGit, "scratch index: "+err.Error(), "op", "write-tree"), err)
 	}
-	name := f.Name()
-	_ = f.Close()
-	_ = os.Remove(name)
-	defer os.Remove(name)
-	env := []string{"GIT_INDEX_FILE=" + name}
+	defer os.RemoveAll(dir)
+	env := []string{"GIT_INDEX_FILE=" + filepath.Join(dir, "index")}
 	if _, code, err := g.runEnv(ctx, env, "add", "-A", "--"); err != nil {
 		return "", err
 	} else if code != 0 {

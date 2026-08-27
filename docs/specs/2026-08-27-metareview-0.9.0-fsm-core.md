@@ -25,7 +25,7 @@
 > algorithm (§5.3b); `tree.Status` capped; `Workflow.Hash` preimage; `initial_terminal`, `unknown_var`, `bad_yaml` reasons
 > in order; `RepoMode` override tighten-only; token counters capped per record (`tokens_too_large`); `GIT_*` scrubbed by
 > prefix and excludes/attributes disabled for `WorkTree`; `Snapshot.Clone` keeps `TimeoutMS/Env`; `CmdsSHA256` uses
-> `run.MarshalCanonical`; `Sidecar.Read` capped + `O_NOFOLLOW` + `ValidateRunID`; `Untrusted` includes `error.detail`;
+> `run.MarshalCanonical`; `Sidecar.Read` capped + `O_NOFOLLOW` + `ValidateRunID`; every error Detail is untrusted (spec 5 marks `error.detail`);
 > ctx cancellation is returned, never a pseudo-gate; sidecar obligation for forks restated (child's own bytes).
 >
 > **Open for Dave — D1 (`AllFixed` needs a non-empty `AllFound`):**
@@ -172,7 +172,8 @@ argv element (including the rewritten `argv[0]`) that names an existing regular 
 FileHashes, TimeoutMS, Env}` (`Env` nil when none — `omitempty` keeps the preimage stable). **Preimage:**
 `run.MarshalCanonical([]AllowedCmd sorted by name)` (escape-off encoder, the one every fsm struct→JSON path uses) → sha256
 hex; independent of declaration order (W4). `hash(path)` returns an error for missing or non-regular files (that is how
-"names an existing regular file" is decided; `workflow.FileSHA256` is the real one). The runner
+"names an existing regular file" is decided; `workflow.FileSHA256` is the real one and follows symlinks, so a symlinked
+script is pinned by its target's contents under the argv path). The runner
 executes `AllowedCmd.Argv` verbatim. `VerifyCmds(allowed /* = snap.AllowedCmds, never re-resolved */, workDir, hash)`:
 each pinned hash → `ERR_CMD_CHANGED{path, reason: mismatch|missing}`; an argv element that now resolves to a regular file
 without a `FileHashes` entry → `ERR_CMD_CHANGED{path, reason: appeared}`. Ledger: absolute paths make the sha per-machine
