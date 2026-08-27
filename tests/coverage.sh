@@ -37,11 +37,21 @@ cleanup() { rm -rf "$COVDIR"; go build -o bin/metareview ./cmd/metareview; }
 trap cleanup EXIT
 
 # 1. Unit tests, instrumented, writing per-package counters into COVDIR.
-go test -cover -covermode=atomic ./... -args -test.gocoverdir="$COVDIR" > /dev/null
+# Output is captured rather than discarded: a failure here used to surface in CI as
+# a bare "exit 1" with nothing to diagnose.
+if ! go test -cover -covermode=atomic ./... -args -test.gocoverdir="$COVDIR" > "$COVDIR/unit.log" 2>&1; then
+  echo "coverage gate: unit tests failed" >&2
+  cat "$COVDIR/unit.log" >&2
+  exit 1
+fi
 
 # 2. Behavioral shell suite. GOFLAGS=-cover instruments every `go run` / `go build` the scripts
 #    perform; GOCOVERDIR makes the resulting binaries emit counters into the same directory.
-GOFLAGS="-cover -covermode=atomic" GOCOVERDIR="$COVDIR" bash tests/run-all.sh > /dev/null
+if ! GOFLAGS="-cover -covermode=atomic" GOCOVERDIR="$COVDIR" bash tests/run-all.sh > "$COVDIR/suite.log" 2>&1; then
+  echo "coverage gate: behavioral suite failed" >&2
+  tail -80 "$COVDIR/suite.log" >&2
+  exit 1
+fi
 
 # 3. Merge into a textfmt profile and compute per-package statement coverage.
 go tool covdata textfmt -i="$COVDIR" -o "$PROFILE"
