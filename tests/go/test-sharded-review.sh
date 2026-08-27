@@ -202,6 +202,15 @@ status=0
 [ "$status" -eq 2 ] || fail "a missing --shard-result exited $status, want 2"
 [ "$(shasum "$repo/.metareview/runs.jsonl" | cut -d' ' -f1)" = "$before" ] || fail "a rejected flag still wrote runs.jsonl"
 
+# A plan has one cross-shard result, so a repeated --cross-shard-result exits 2
+# rather than letting the last file win silently.
+cross="$results_dir/cross-shard.$(plan_field "$(plan_json "$repo" pr-ready)" planHash).result.json"
+status=0
+(cd "$repo" && "$BIN" review pr-ready --base main \
+  --cross-shard-result "$cross" --cross-shard-result "$cross" >/dev/null 2>&1) || status=$?
+[ "$status" -eq 2 ] || fail "a repeated --cross-shard-result exited $status, want 2"
+[ "$(shasum "$repo/.metareview/runs.jsonl" | cut -d' ' -f1)" = "$before" ] || fail "a repeated flag still wrote runs.jsonl"
+
 # Two runs on unchanged content: one plan hash, byte-identical packs.
 pack_dir="$(dirname "$(plan_json "$repo" pr-ready)")"
 before_hashes="$(cd "$pack_dir" && shasum ./* | sort)"

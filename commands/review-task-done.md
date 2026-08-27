@@ -3,7 +3,7 @@
 Run the local task-done review gate:
 
 ```bash
-metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--shard-result <path>]... [--cross-shard-result <path>]...
+metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--shard-result <path>]... [--cross-shard-result <path>]
 ```
 
 Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. `NEEDS_REVISION` means fix blockers and rerun with `--previous-run`; `ESCALATED` means stop same-target retries and ask the human to narrow, split, or redesign.
@@ -22,7 +22,9 @@ hash, and `resultsDir`.
    shard.
 3. Write one result per shard into `resultsDir` as `shard-<id>.<shardHash>.result.json`, and
    `cross-shard.<planHash>.result.json` for a multi-shard plan. Each pack states the exact contract.
-   `--shard-result` and `--cross-shard-result` pass a file in from elsewhere.
+   `--shard-result` (repeatable) and `--cross-shard-result` (once: a plan has one cross-shard
+   result) pass a file in from elsewhere, and take precedence over a file of the same identity
+   in `resultsDir`.
 4. Re-run with `--previous-run <run-id>`. With every shard covered and the aggregate passing, the
    context-risk blocker becomes advisory and the lints run over the whole branch diff.
 5. Commit the results in `docs/metareview/shards/` with the review log. After a fix round only the

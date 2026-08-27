@@ -10,7 +10,7 @@ Run this before pushing a PR branch or asking external reviewers to spend time.
 ## Command
 
 ```bash
-metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]...
+metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
 ```
 
 Use `--base` for the reviewed branch diff, `--previous-run` after fixes, and `--evidence` for validation output. Use `--max-attempts` only on the first run; it sets the chain budget (default 3), with the first blocker run as attempt 1. Use `--github-pr` to include available GitHub PR context. By default, PR-ready reviews the committed branch diff and blocks on non-generated working-tree changes; use `--include-working-tree` only when those changes intentionally belong to the review.
@@ -48,7 +48,9 @@ hash, and `resultsDir`.
    shard.
 3. Write one result per shard into `resultsDir` as `shard-<id>.<shardHash>.result.json`, and
    `cross-shard.<planHash>.result.json` for a multi-shard plan. Each pack states the exact contract.
-   `--shard-result` and `--cross-shard-result` pass a file in from elsewhere.
+   `--shard-result` (repeatable) and `--cross-shard-result` (once: a plan has one cross-shard
+   result) pass a file in from elsewhere, and take precedence over a file of the same identity
+   in `resultsDir`.
 4. Re-run with `--previous-run <run-id>`. With every shard covered and the aggregate passing, the
    context-risk blocker becomes advisory and the lints run over the whole branch diff.
 5. Commit the results in `docs/metareview/shards/` with the review log. After a fix round only the

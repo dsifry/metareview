@@ -41,9 +41,9 @@ Usage:
   metareview evidence run -- <command> [args...]
   metareview evidence import --github-checks <pr-number> [--repo <owner/repo>]
   metareview review artifact <path> [--previous-run <run-id>] [--scaffold-only]
-  metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--shard-result <path>]... [--cross-shard-result <path>]...
+  metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--shard-result <path>]... [--cross-shard-result <path>]
   metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
-  metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]...
+  metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
 
 Commands:
@@ -186,7 +186,7 @@ func main() {
 				options.ShardResultPaths = append(options.ShardResultPaths, mustResultFile(flagValue(args, i, "--shard-result")))
 				i++
 			case "--cross-shard-result":
-				options.CrossShardResultPaths = append(options.CrossShardResultPaths, mustResultFile(flagValue(args, i, "--cross-shard-result")))
+				options.CrossShardResultPaths = appendCrossShardResult(options.CrossShardResultPaths, flagValue(args, i, "--cross-shard-result"))
 				i++
 			default:
 				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
@@ -255,7 +255,7 @@ func main() {
 				options.ShardResultPaths = append(options.ShardResultPaths, mustResultFile(flagValue(args, i, "--shard-result")))
 				i++
 			case "--cross-shard-result":
-				options.CrossShardResultPaths = append(options.CrossShardResultPaths, mustResultFile(flagValue(args, i, "--cross-shard-result")))
+				options.CrossShardResultPaths = appendCrossShardResult(options.CrossShardResultPaths, flagValue(args, i, "--cross-shard-result"))
 				i++
 			case "--include-working-tree":
 				options.IncludeWorkingTree = true
@@ -587,6 +587,17 @@ func defaultActor() string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// appendCrossShardResult keeps --cross-shard-result single valued. A plan has
+// exactly one cross-shard result, and discovery would otherwise let the last
+// matching file win silently, making the outcome depend on flag order.
+func appendCrossShardResult(existing []string, path string) []string {
+	if len(existing) > 0 {
+		fmt.Fprintln(os.Stderr, "Repeated --cross-shard-result: a plan has one cross-shard result")
+		os.Exit(2)
+	}
+	return append(existing, mustResultFile(path))
 }
 
 // mustResultFile validates an explicit shard result before the review package
