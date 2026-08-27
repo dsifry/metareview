@@ -1,0 +1,18 @@
+SYSTEM: You are a precise code review evaluator. Always respond with valid JSON.
+---
+You are evaluating AI code review tools.
+Determine if the candidate issue matches the golden (expected) comment.
+
+Golden Comment (the issue we're looking for):
+off-by-one in {{loop}}
+
+Candidate Issue (from the tool's review):
+loop bound {candidate} wrong }}
+
+Instructions:
+- Determine if the candidate identifies the SAME underlying issue as the golden comment
+- Accept semantic matches - different wording is fine if it's the same problem
+- Focus on whether they point to the same bug, concern, or code issue
+
+Respond with ONLY a JSON object:
+{"reasoning": "brief explanation", "match": true/false, "confidence": 0.0-1.0}

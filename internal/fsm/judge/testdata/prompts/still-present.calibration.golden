@@ -1,0 +1,15 @@
+SYSTEM: You are a strict code review verifier. Always respond with valid JSON.
+---
+You are verifying whether a specific bug still exists in the current code.
+
+Original bug description (from a human reviewer):
+the {{bug}}
+
+Current diff (base..HEAD, after fixes were applied):
+```diff
++fixed {diff}
+```
+
+Does the bug described above STILL EXIST in the current code? (True = bug is still present /
+not fixed. False = the bug has been fixed or no longer applies.)
+Respond with ONLY a JSON object: {"reasoning": "...", "still_present": true/false}
