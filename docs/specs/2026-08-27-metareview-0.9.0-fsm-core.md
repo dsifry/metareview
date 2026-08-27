@@ -28,8 +28,7 @@ internal/fsm/gate       Git interface (exec-backed via an exec seam + Fake); 7 g
 internal/fsm/converge   AllFixed; atoms; any/all/not; Parse; CmdResult/Runner interface
 internal/fsm/machine    Deps; Init/Open/Advance/Record/View; node interfaces (implemented by spec 4's kinds); Sidecar
 ```
-`errs` ← all. `run` ← all. `converge` ← `gate` (`AllFixed`) — no: `converge` ← `run` only; `gate` ← `converge`
-(`all_fixed`/`bugs_remain` gates call `converge.AllFixed`). `machine` ← `workflow`, `gate`, `converge`. `machine`
+`errs` ← all. `run` ← all. `converge` ← `run` only; `gate` ← `converge` (`all_fixed`/`bugs_remain` call `converge.AllFixed`). `machine` ← `workflow`, `gate`, `converge`. `machine`
 imports no kinds/judge/cmdexec package: it consumes §5.1. `workflows` (embed) is used by the CLI (spec 5) to build
 `Deps.Workflows`; `machine` does not import it. Only external dependency: `gopkg.in/yaml.v3` (first external module
 dependency of the repo; `go.sum` ships — spec 5).

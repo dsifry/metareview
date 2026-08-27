@@ -189,9 +189,8 @@ cmds:
 ```
 `Load(dir) (*Scenario, error)` (its own wire structs with yaml tags; `ERR_MOCK_INVALID` on parse/duplicate key);
 `Scenario.Hash()` = sha256 of the canonical scenario (spec 2 §5.3 pins `Mock = dir#hash[:16]`); `Scenario.Judge()
-*judge.MockJudge`; `Scenario.Runner() cmdexec.Runner` — the fake matches a scripted row by `Spec.Argv[0]` basename
-== `name`... no: by the `name` the `Guarded` wrapper passes through `Spec.Env` entry `MRV_CMD_NAME=<name>`; rows are
-consumed in order unless `repeat`; unscripted → error.
+*judge.MockJudge`; `Scenario.Runner() cmdexec.Runner` — the fake matches a scripted row by the `MRV_CMD_NAME=<name>` entry that
+`Guarded` always adds to `Spec.Env`; rows are consumed in order unless `repeat`; unscripted → error.
 
 ## 6. Vars
 `JUDGE` and `JUDGE_EFFORT` are `{required: true}` in both shipped workflows (already at HEAD; confirmed). Unset →
