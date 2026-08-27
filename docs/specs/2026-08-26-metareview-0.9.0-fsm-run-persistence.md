@@ -369,7 +369,7 @@ func (b *Builder) Copy(parent []Event, from, to int64, childID string) []Event  
 | spec 2 r3 (implemented) | `tokens`/`llm_call` with any negative counter are rejected (`FoldError{Reason: tokens_negative}`); `TokenTotals.Negative()`. |
 | spec 2 r3 (implemented) | `FoldState.NextIndex(key) int` and `run.MarshalCanonical` exported. |
 | §5.3 repair-warn Detail | the literal is spec 2's (`"<n> bytes dropped after seq <s> from audit.jsonl"`); this spec defers. |
-| spec 3 r4 (owned there) | `InitData.WorkflowSource string` (`workflow_source`, omitempty, ≤ `MaxShort`, `embedded|path|""`); `RunStore.TornFiles(runID) ([]TornFile, error)` + `TornFile{Name, SHA256 string; Bytes int64}`; `RunStore.MaxEvents() int`; `run.Counted(type) bool` (exports `countedType`); `summarize` marks an incomplete fork (`ParentRunID != "" ∧ (Seq ≤ ForkedAtSeq ∨ (Seq == ForkedAtSeq+1 ∧ StateKind == agent-edit))`) in `RunSummary.Error`. |
+| spec 3 r4/r5 (owned there) | `InitData.WorkflowSource string` + `Snapshot.WorkflowSource` (fold copies from `init`; `Clone` copies it; accepted additive-v1 exception: no tagged release contains `run` yet — thereafter bump `SchemaVersion`) (`workflow_source`, omitempty, ≤ `MaxShort`, `embedded|path|""`); `RunStore.TornFiles(runID) ([]TornFile, error)` + `TornFile{Name, SHA256 string; Bytes int64}`; `RunStore.MaxEvents() int`; `run.Counted(type) bool` (exports `countedType`); `summarize` marks an incomplete fork (`ParentRunID != "" ∧ (Seq ≤ ForkedAtSeq ∨ (Seq == ForkedAtSeq+1 ∧ StateKind == agent-edit))`) in `RunSummary.Error`. |
 
 ## 12. Ownership ledger (partition)
 
