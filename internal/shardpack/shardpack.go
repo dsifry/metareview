@@ -308,7 +308,7 @@ func (w *writer) Discover(root, scope, targetID string, plan contextprofile.Shar
 	for _, path := range explicit {
 		resolved, err := w.deps.EvalSymlinks(path)
 		if err != nil {
-			found.Unreadable = append(found.Unreadable, path)
+			found.Unreadable = append(found.Unreadable, relativeTo(path, resolvedRoot, root))
 			continue
 		}
 		if !underRoot(resolvedRoot, resolved) {
@@ -373,7 +373,10 @@ func (w *writer) GC(root, scope, targetID string, plan contextprofile.ShardPlan)
 	dir := ResultsDir(resolvedRoot, scope, targetID)
 	entries, err := w.deps.ReadDir(dir)
 	if err != nil {
-		return nil // nothing written yet
+		if os.IsNotExist(err) {
+			return nil // nothing written yet
+		}
+		return err
 	}
 	current := map[string]bool{"cross-shard." + plan.PlanHash + ".result.json": true}
 	for _, shard := range plan.Shards {
@@ -384,17 +387,53 @@ func (w *writer) GC(root, scope, targetID string, plan contextprofile.ShardPlan)
 		if entry.IsDir() || !reviewmanifest.IsResultFileName(name) || current[name] {
 			continue
 		}
-		if err := w.deps.RemoveAll(filepath.Join(dir, name)); err != nil {
+		path := filepath.Join(dir, name)
+		// Discover accepts a result on its content, not its file name, so a file
+		// the gate just counted must survive collection whatever it is called.
+		if w.resultIsCurrent(path, plan) {
+			continue
+		}
+		if err := w.deps.RemoveAll(path); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// resultIsCurrent applies Discover's freshness test to a file on disk.
+func (w *writer) resultIsCurrent(path string, plan contextprofile.ShardPlan) bool {
+	data, err := w.deps.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	result, reason, err := reviewmanifest.ParseResult(data)
+	if err != nil || reason != "" {
+		return false
+	}
+	if result.Kind == reviewmanifest.KindCrossShard {
+		return reviewmanifest.MatchesPlan(plan, result)
+	}
+	_, ok := reviewmanifest.MatchShard(plan, result)
+	return ok
+}
+
 // underRoot guards against an explicit result path outside the repository. It is
 // an accident guard, not a defence.
 func underRoot(root, path string) bool {
 	return strings.HasPrefix(path, root+string(filepath.Separator))
+}
+
+// relativeTo trims the repository root so a reported path stays machine
+// independent: unreadable entries are rendered into a committed review log. An
+// unresolvable path is still written as the caller gave it, which may be
+// relative to the root before or after symlink resolution, so both are tried.
+func relativeTo(path string, roots ...string) string {
+	for _, root := range roots {
+		if rel, err := filepath.Rel(root, path); err == nil && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return path
 }
 
 func planJSON(plan contextprofile.ShardPlan, header Header) planFile {

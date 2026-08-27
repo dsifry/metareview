@@ -978,3 +978,142 @@ func TestDiscoverAndGCDepsFailureBranches(t *testing.T) {
 		}
 	})
 }
+
+// TestGCKeepsResultsDiscoverAccepted pins GC to Discover's rule. Discover
+// accepts a shard result on its parsed shardHash, independent of the file name,
+// so a content-current result under an unexpected name must survive collection.
+// Collecting it would drop a shard the gate had just counted, and the next run
+// of the same plan would block on a missing result.
+func TestGCKeepsResultsDiscoverAccepted(t *testing.T) {
+	root, plan, _ := fixture(t)
+	dir := writeResults(t, root, plan)
+	shard := plan.Shards[0]
+
+	// Named for a hash that is not current, but about the current shard.
+	misnamed := filepath.Join(dir, "shard-"+shard.ID+".00112233445566ff.result.json")
+	if err := os.WriteFile(misnamed,
+		resultJSON(t, reviewmanifest.KindShard, "shard-"+shard.ID, shard.Hash, plan.PlanHash), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Same for the cross-shard result.
+	misnamedCross := filepath.Join(dir, "cross-shard.00112233445566ff.result.json")
+	if err := os.WriteFile(misnamedCross,
+		resultJSON(t, reviewmanifest.KindCrossShard, "", "", plan.PlanHash), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := New(OSDeps()).Discover(root, "pr-ready", "feature", plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Ignored) != 0 {
+		t.Fatalf("Discover ignored a content-current result: %v", found.Ignored)
+	}
+
+	if err := New(OSDeps()).GC(root, "pr-ready", "feature", plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{misnamed, misnamedCross} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("GC collected a result Discover accepted: %s", path)
+		}
+	}
+}
+
+// TestGCCollectsUnreadableAndUnparsableResults keeps collection working for the
+// files that carry no usable content.
+func TestGCCollectsUnreadableAndUnparsableResults(t *testing.T) {
+	root, plan, _ := fixture(t)
+	dir := writeResults(t, root, plan)
+	garbage := filepath.Join(dir, "shard-0.00112233445566ff.result.json")
+	if err := os.WriteFile(garbage, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oversize := filepath.Join(dir, "shard-1.00112233445566ff.result.json")
+	if err := os.WriteFile(oversize, make([]byte, reviewmanifest.MaxResultBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := New(OSDeps()).GC(root, "pr-ready", "feature", plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{garbage, oversize} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s should have been collected", path)
+		}
+	}
+
+	// A result file GC cannot read is left alone rather than removed blind.
+	unreadable := filepath.Join(dir, "shard-2.00112233445566ff.result.json")
+	if err := os.WriteFile(unreadable, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deps := OSDeps()
+	deps.ReadFile = func(string) ([]byte, error) { return nil, errors.New("boom") }
+	if err := New(deps).GC(root, "pr-ready", "feature", plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(unreadable); !os.IsNotExist(err) {
+		t.Fatalf("an unreadable result is not current and should be collected")
+	}
+}
+
+// TestGCPropagatesRealReadDirErrors separates "nothing written yet" from a
+// permission or I/O failure, which must not be reported as success.
+func TestGCPropagatesRealReadDirErrors(t *testing.T) {
+	root, plan, _ := fixture(t)
+	writeResults(t, root, plan)
+	boom := errors.New("boom")
+	deps := OSDeps()
+	deps.ReadDir = func(string) ([]os.DirEntry, error) { return nil, boom }
+	if err := New(deps).GC(root, "pr-ready", "feature", plan); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the injected read failure", err)
+	}
+
+	deps.ReadDir = func(string) ([]os.DirEntry, error) { return nil, os.ErrNotExist }
+	if err := New(deps).GC(root, "pr-ready", "feature", plan); err != nil {
+		t.Fatalf("a missing results directory is not an error: %v", err)
+	}
+}
+
+// TestDiscoverReportsUnresolvableExplicitPathsRelatively keeps machine-specific
+// absolute paths out of the durable review log: every other Unreadable entry is
+// repository-relative, and these end up rendered into a committed artifact.
+func TestDiscoverReportsUnresolvableExplicitPathsRelatively(t *testing.T) {
+	root, plan, _ := fixture(t)
+	writeResults(t, root, plan)
+	missing := filepath.Join(root, "docs", "metareview", "shards", "shard-0.0011223344556677.result.json")
+
+	found, err := New(OSDeps()).Discover(root, "pr-ready", "feature", plan, []string{missing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "docs/metareview/shards/shard-0.0011223344556677.result.json"
+	for _, got := range found.Unreadable {
+		if got == want {
+			return
+		}
+		if filepath.IsAbs(got) {
+			t.Fatalf("unreadable entry %q is absolute; it reaches a committed artifact", got)
+		}
+	}
+	t.Fatalf("unreadable = %v, want %q", found.Unreadable, want)
+}
+
+// TestDiscoverKeepsUnresolvableOutsidePathsVerbatim covers the path that cannot
+// be made relative: it is reported as given rather than mangled.
+func TestDiscoverKeepsUnresolvableOutsidePathsVerbatim(t *testing.T) {
+	root, plan, _ := fixture(t)
+	writeResults(t, root, plan)
+	outside := filepath.Join(t.TempDir(), "shard-0.0011223344556677.result.json")
+
+	found, err := New(OSDeps()).Discover(root, "pr-ready", "feature", plan, []string{outside})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, got := range found.Unreadable {
+		if got == outside {
+			return
+		}
+	}
+	t.Fatalf("unreadable = %v, want %q unchanged", found.Unreadable, outside)
+}
