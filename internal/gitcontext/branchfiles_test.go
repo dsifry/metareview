@@ -295,7 +295,6 @@ func TestRunGitErrorBranches(t *testing.T) {
 	r.commit("big change")
 
 	for _, failOn := range []string{"--name-only", "--no-textconv"} {
-		failOn := failOn
 		t.Run(strings.TrimLeft(failOn, "-"), func(t *testing.T) {
 			_, err := CollectWith(r.root, Options{
 				Base: base,

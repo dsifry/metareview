@@ -265,10 +265,18 @@ func TestBitsBoundaryRecutsAll(t *testing.T) {
 	for _, s := range planOf(t, budget, small...).Shards {
 		beforeIDs[s.ID] = true
 	}
-	for _, s := range planOf(t, budget, big...).Shards {
+	after := planOf(t, budget, big...).Shards
+	survived := 0
+	for _, s := range after {
 		if beforeIDs[s.ID] {
-			return // some id survived; nothing stronger is claimed
+			survived++
 		}
+	}
+	if len(after) == 0 {
+		t.Fatal("the larger fixture produced no shards")
+	}
+	if survived == len(after) {
+		t.Fatal("crossing the bits boundary must re-cut the plan, but every shard id survived")
 	}
 }
 

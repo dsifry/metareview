@@ -163,7 +163,7 @@ error; Discover(scope, slug, plan) (Found, error)}`. `prready.Options`/`taskdone
 
 `ReviewResult` gets JSON tags; `SourceManifestHash` is dropped from it.
 
-```
+```json
 {"schemaVersion":1,"id":"<result id>","kind":"shard|cross-shard","shardId":"shard-3a",
  "shardHash":"<16 hex>","planHash":"<16 hex>","verdict":"PASS|PASS_ADVISORY|NEEDS_REVISION|ESCALATED",
  "reviewer":"<agent/model/rubric>","reviewedAt":"<RFC3339>",

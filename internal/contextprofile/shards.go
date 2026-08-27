@@ -14,7 +14,7 @@ import (
 // it through ShardOptions.MaxBytesPerShard.
 const DefaultMaxBytesPerShard = 60000
 
-// maxBucketBits caps the bucket space at 4096 shards (var so tests can lower it).
+// maxBucketBits caps the bucket space at 4096 shards.
 const maxBucketBits = 12
 
 type ShardOptions struct {
@@ -49,14 +49,10 @@ type ShardPlan struct {
 	Shards         []Shard
 }
 
-// hashFields encodes fields as len:bytes\0 so no value can forge a boundary.
-func hashFields(values ...string) string {
-	var b strings.Builder
-	for _, v := range values {
-		fmt.Fprintf(&b, "%d:%s\x00", len(v), v)
-	}
-	return b.String()
-}
+// hashFields is gitcontext's encoding. There is exactly one definition of it:
+// BranchFile.Hash is produced there and consumed by SourceDiffHash here, so a
+// second copy that drifted would silently change plan and shard identity.
+func hashFields(values ...string) string { return gitcontext.HashFields(values...) }
 
 func shortHash(preimage string) string {
 	sum := sha256.Sum256([]byte(preimage))

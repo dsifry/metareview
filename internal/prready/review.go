@@ -1,6 +1,7 @@
 package prready
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -101,7 +102,7 @@ func Create(root string, options Options) (Result, error) {
 	shardPlan, err := contextprofile.PlanShards(profile, analysisGit.BranchFiles, contextprofile.ShardOptions{
 		MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard,
 		Scope:            "pr-ready",
-		TargetID:         firstNonEmpty(analysisGit.Branch, analysisGit.HeadSHA),
+		TargetID:         shardTargetID(analysisGit),
 	})
 	if err != nil {
 		return Result{}, err
@@ -267,15 +268,17 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		restoreSnapshots(snapshots)
 		removeEmptyDirs(root)
+		// The rollback error must not replace the error that caused the rollback.
 		if rollbackErr := packRollback(); rollbackErr != nil {
-			return Result{}, rollbackErr
+			return Result{}, errors.Join(err, rollbackErr)
 		}
 		return Result{}, err
 	}
 	if len(shardPlan.Shards) > 0 {
-		if err := packWriter.Prune(root, "pr-ready", shardTargetID(analysisGit), shardPlan.PlanHash); err != nil {
-			return Result{}, err
-		}
+		// The run is already recorded on disk. Prune only removes obsolete
+		// transient pack directories, so its failure must not discard the run
+		// identifiers the caller needs.
+		_ = packWriter.Prune(root, "pr-ready", shardTargetID(analysisGit), shardPlan.PlanHash)
 	}
 	return result, nil
 }
@@ -814,7 +817,7 @@ func contextMarkdown(runID string, git gitcontext.Context, profile contextprofil
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		contextprofile.Markdown(profile) + "\n\n" +
-		contextprofile.ShardPlanMarkdown(plan, packRelative(packDir)) + "\n\n" +
+		contextprofile.ShardPlanMarkdown(plan, shardpack.Rel(packDir)) + "\n\n" +
 		reviewManifestMarkdown("pr-ready", map[string]string{"type": "branch", "id": firstNonEmpty(git.Branch, git.HeadSHA)}, profile, plan) + "\n\n" +
 		"## Changed Files\n\n" + markdownList(changed, "No changed files.") + "\n\n" +
 		"## Diff\n\n" + markdown.FencedCodeBlock("diff", strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")) + "\n\n" +
@@ -1086,15 +1089,4 @@ func findingIDs(records []findings.Record) []string {
 
 func shardTargetID(git gitcontext.Context) string {
 	return firstNonEmpty(git.Branch, git.HeadSHA)
-}
-
-// packRelative renders a pack directory relative to the repository root.
-func packRelative(dir string) string {
-	if dir == "" {
-		return ""
-	}
-	if idx := strings.Index(dir, ".metareview/shards/"); idx >= 0 {
-		return dir[idx:]
-	}
-	return dir
 }

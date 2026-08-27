@@ -616,3 +616,77 @@ func TestStaleAsideRemovalFailure(t *testing.T) {
 		t.Fatalf("err = %v, want the injected stale-aside failure", err)
 	}
 }
+
+// TestChunkNotBackedByFilesFails pins that a chunk with no backing file, or a
+// byte range past the end of one, fails the write instead of silently
+// persisting an empty diff block that a reviewer would read as "no changes".
+func TestChunkNotBackedByFilesFails(t *testing.T) {
+	root, plan, files := fixture(t)
+	t.Run("missing-file", func(t *testing.T) {
+		if _, err := New(OSDeps()).Write(root, plan, header(), nil); err == nil {
+			t.Fatal("a plan whose chunks have no backing file must fail the write")
+		}
+	})
+	t.Run("short-file", func(t *testing.T) {
+		truncated := make([]gitcontext.BranchFile, 0, len(files))
+		for _, f := range files {
+			f.Diff = ""
+			truncated = append(truncated, f)
+		}
+		if _, err := New(OSDeps()).Write(root, plan, header(), truncated); err == nil {
+			t.Fatal("a chunk range past the end of its file must fail the write")
+		}
+	})
+}
+
+// TestPruneReportsRealReadDirErrors pins that Prune only swallows "no such
+// directory"; any other error must surface rather than reporting success while
+// stale plan directories accumulate.
+func TestPruneReportsRealReadDirErrors(t *testing.T) {
+	boom := errors.New("boom")
+	deps := OSDeps()
+	deps.ReadDir = func(string) ([]os.DirEntry, error) { return nil, boom }
+	if err := New(deps).Prune(t.TempDir(), "pr-ready", "feature", "0123456789abcdef"); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the injected read failure", err)
+	}
+}
+
+// TestPruneRemovesOrphanAside pins that an .aside orphaned by a failed cleanup
+// is collected: isPlanHashName rejects the 22-character name, so without this
+// it would sit under the target forever.
+func TestPruneRemovesOrphanAside(t *testing.T) {
+	root, plan, files := fixture(t)
+	w := New(OSDeps())
+	if _, err := w.Write(root, plan, header(), files); err != nil {
+		t.Fatal(err)
+	}
+	target := Dir(root, "pr-ready", "feature", plan.PlanHash)
+	orphan := filepath.Join(filepath.Dir(target), "0123456789abcdef.aside")
+	if err := os.MkdirAll(orphan, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Prune(root, "pr-ready", "feature", plan.PlanHash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("Prune must collect orphaned .aside directories, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "plan.json")); err != nil {
+		t.Fatalf("Prune must keep the current plan: %v", err)
+	}
+}
+
+// TestRelIsRepoRelative pins the single definition of the pack-directory
+// rendering the review scopes print.
+func TestRelIsRepoRelative(t *testing.T) {
+	if got := Rel(""); got != "" {
+		t.Fatalf("Rel(\"\") = %q, want empty", got)
+	}
+	dir := Dir("/some/root", "pr-ready", "feature", "0123456789abcdef")
+	if got := Rel(dir); !strings.HasPrefix(got, ".metareview/shards/pr-ready/") {
+		t.Fatalf("Rel(%q) = %q", dir, got)
+	}
+	if got := Rel("elsewhere/packs"); got != "elsewhere/packs" {
+		t.Fatalf("Rel of an unrecognised path = %q, want it unchanged", got)
+	}
+}

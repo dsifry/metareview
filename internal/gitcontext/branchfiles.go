@@ -1,11 +1,14 @@
 package gitcontext
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -36,9 +39,16 @@ func realGit(root string, env []string, args ...string) ([]byte, error) {
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
+	// Without stderr the caller sees a bare "exit status 128" and cannot tell
+	// which git invocation failed.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		if message := strings.TrimSpace(stderr.String()); message != "" {
+			return nil, fmt.Errorf("git %s: %s", strings.Join(args, " "), message)
+		}
+		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return out, nil
 }
@@ -105,35 +115,45 @@ func collectBranchFiles(root, base string, excludes []string, run RunGitFunc) ([
 	return files, full.String(), nil
 }
 
+// measureBranchFiles totals the branch diff without retaining any of its text.
+// The raw (unfiltered) scan needs only the byte count, and excludes usually hide
+// the largest content, so materialising it would be the peak allocation.
+func measureBranchFiles(root, base string, excludes []string, run RunGitFunc) (int, error) {
+	paths, err := branchPaths(root, base, excludes, run)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, p := range paths {
+		out, err := run(root, []string{"GIT_LITERAL_PATHSPECS=1"},
+			"diff", "--no-renames", "--text", "--no-textconv", base+"..HEAD", "--", p)
+		if err != nil {
+			return 0, err
+		}
+		total += len(out)
+	}
+	return total, nil
+}
+
 // fileHash is the v4 content key for one path (spec §3). Fields are joined as
 // len:bytes\0 so a path containing a newline cannot forge a boundary.
 func fileHash(path, diff string) string {
-	sum := sha256.Sum256([]byte(hashFields("mrv-file-v4", path, diff)))
+	sum := sha256.Sum256([]byte(HashFields("mrv-file-v4", path, diff)))
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-// HashFields encodes fields as len:bytes\0 for the v4 hash preimages.
-func hashFields(fields ...string) string {
+// HashFields encodes fields as len:bytes\0 for the v4 hash preimages. It is the
+// single definition of that encoding: contextprofile consumes it, and the file,
+// source, chunk, shard and plan hashes must all stay byte-identical forever.
+func HashFields(fields ...string) string {
 	var b strings.Builder
 	for _, f := range fields {
-		b.WriteString(itoa(len(f)))
+		b.WriteString(strconv.Itoa(len(f)))
 		b.WriteString(":")
 		b.WriteString(f)
 		b.WriteString("\x00")
 	}
 	return b.String()
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
 }
 
 // AddedLines returns the added lines of the branch diff (untruncated when it was

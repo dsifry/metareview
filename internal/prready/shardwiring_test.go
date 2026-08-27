@@ -20,14 +20,16 @@ type fakeWriter struct {
 	prunes    int
 	lastPlan  contextprofile.ShardPlan
 	lastHdr   shardpack.Header
+	lastFiles []gitcontext.BranchFile
 	writeErr  error
+	pruneErr  error
 	rollback  func() error
 	rollbacks int
 }
 
 func (f *fakeWriter) Write(root string, plan contextprofile.ShardPlan, header shardpack.Header, files []gitcontext.BranchFile) (func() error, error) {
 	f.writes++
-	f.lastPlan, f.lastHdr = plan, header
+	f.lastPlan, f.lastHdr, f.lastFiles = plan, header, files
 	if f.writeErr != nil {
 		// Write can fail after the new pack set is already in place, so it hands
 		// back a usable rollback alongside the error; callers must run it.
@@ -47,7 +49,7 @@ func (f *fakeWriter) Write(root string, plan contextprofile.ShardPlan, header sh
 
 func (f *fakeWriter) Prune(root, scope, targetID, keepPlanHash string) error {
 	f.prunes++
-	return nil
+	return f.pruneErr
 }
 
 func shardedRepo(t *testing.T) string {
@@ -170,5 +172,84 @@ func TestPackWriteErrorRunsRollback(t *testing.T) {
 	}
 	if writer.rollbacks != 1 {
 		t.Fatalf("rollbacks = %d, want 1: a failed pack write must be rolled back", writer.rollbacks)
+	}
+}
+
+// TestWriteReceivesTheFilesBackingThePlan pins the invariant shardPack depends
+// on: every chunk path in the plan is present in the files handed to Write.
+func TestWriteReceivesTheFilesBackingThePlan(t *testing.T) {
+	root := shardedRepo(t)
+	writer := &fakeWriter{}
+	if _, err := Create(root, Options{Base: "main", ShardWriter: writer}); err != nil {
+		t.Fatal(err)
+	}
+	byPath := map[string]bool{}
+	for _, f := range writer.lastFiles {
+		byPath[f.Path] = true
+	}
+	if len(byPath) == 0 {
+		t.Fatal("no branch files reached the writer")
+	}
+	for _, s := range writer.lastPlan.Shards {
+		for _, c := range s.Chunks {
+			if !byPath[c.Path] {
+				t.Fatalf("chunk path %s is not backed by the files passed to Write", c.Path)
+			}
+		}
+	}
+}
+
+// TestPruneFailureDoesNotDiscardTheRun pins that a failure to remove obsolete
+// transient packs cannot invalidate a run that is already recorded on disk.
+func TestPruneFailureDoesNotDiscardTheRun(t *testing.T) {
+	root := shardedRepo(t)
+	writer := &fakeWriter{pruneErr: errors.New("prune boom")}
+	result, err := Create(root, Options{Base: "main", ShardWriter: writer})
+	if err != nil {
+		t.Fatalf("a prune failure must not fail a recorded run: %v", err)
+	}
+	if result.RunID == "" || result.ReviewRel == "" {
+		t.Fatalf("the caller lost the run identifiers: %+v", result)
+	}
+	if writer.prunes != 1 {
+		t.Fatalf("prunes = %d, want 1", writer.prunes)
+	}
+}
+
+// TestRealWriterProducesNonEmptyPacks runs the review with the real pack writer
+// on a sharded branch: it proves the planned chunks are actually backed by the
+// measured diff end to end, and that no pack is written with an empty body.
+func TestRealWriterProducesNonEmptyPacks(t *testing.T) {
+	root := shardedRepo(t)
+	if _, err := Create(root, Options{Base: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	var packs []string
+	err := filepath.Walk(filepath.Join(root, ".metareview", "shards"), func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasPrefix(filepath.Base(path), "shard-") {
+			packs = append(packs, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packs) == 0 {
+		t.Fatal("the real writer produced no shard packs")
+	}
+	for _, p := range packs {
+		body, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), "src/file") {
+			t.Fatalf("%s carries no measured diff content", filepath.Base(p))
+		}
+		if strings.Contains(string(body), "```diff\n```") {
+			t.Fatalf("%s contains an empty diff block", filepath.Base(p))
+		}
 	}
 }

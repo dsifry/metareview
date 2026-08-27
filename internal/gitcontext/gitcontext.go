@@ -92,14 +92,11 @@ func collectWith(root string, opts Options) (Context, error) {
 	}
 	ctx.BranchRawDiffBytes = ctx.BranchFilteredDiffBytes
 	if len(effectiveExcludes) > 0 {
-		rawFiles, _, err := collectBranchFiles(root, ctx.BaseSHA, nil, opts.runGit())
+		raw, err := measureBranchFiles(root, ctx.BaseSHA, nil, opts.runGit())
 		if err != nil {
 			return Context{}, err
 		}
-		ctx.BranchRawDiffBytes = 0
-		for _, f := range rawFiles {
-			ctx.BranchRawDiffBytes += f.Bytes
-		}
+		ctx.BranchRawDiffBytes = raw
 	}
 	return ctx, nil
 }
