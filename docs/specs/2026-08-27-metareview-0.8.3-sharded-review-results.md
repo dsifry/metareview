@@ -255,8 +255,9 @@ Validation (pure, in `reviewmanifest`; one named test each):
 - Per-pack review: **one subagent per pack against `rubrics/task-done-review-rubric.md`**, and one
   cross-shard subagent over the seams; the human may use a richer lens set. Cost: packs + 1 per plan,
   1 + 1 per fix round. Measured on PR #13 (1,372,619 bytes / 133 files): `need = 23` → `bits = 5` → 32
-  buckets, 9 of which split into 14 sub-shards → **46 packs**, max shard exactly 60,000 bytes, mean 29,840.
-  Roughly 2 × `need` — the price of hash bucketing, paid for plan stability.
+  buckets, some of which split → **43 shard packs plus one cross-shard pack** (measured against the
+  implementation, not estimated): total exactly 1,372,619 bytes, min 1,185, max 59,999, mean 31,921, none
+  over budget. Roughly 2 × `need` — the price of hash bucketing, paid for plan stability.
 - Docs carrying the sharded flow or the durable/transient lists: `AGENTS.md`, `CLAUDE.md`, `README.md`,
   `INSTALL.md`, `docs/quickstart.md`, `docs/README.claude.md`, `docs/README.codex.md`,
   `skills/review-pr-ready/SKILL.md`, `skills/review-task-done/SKILL.md`, `skills/status/SKILL.md`,

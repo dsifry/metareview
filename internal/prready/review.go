@@ -633,8 +633,15 @@ func branchOnlyGitContext(git gitcontext.Context) gitcontext.Context {
 	git.StagedDiffTruncated = false
 	git.WorkingTreeDiffTruncated = false
 	git.UntrackedOmittedCount = 0
-	git.RawDiffBytes = len(git.Diff)
-	git.FilteredDiffBytes = len(git.Diff)
+	git.UntrackedTruncatedCount = 0
+	// Prefer the measured branch bytes; never recompute from the truncated text.
+	if git.BranchFilteredDiffBytes > 0 {
+		git.RawDiffBytes = git.BranchRawDiffBytes
+		git.FilteredDiffBytes = git.BranchFilteredDiffBytes
+	} else {
+		git.RawDiffBytes = len(git.Diff)
+		git.FilteredDiffBytes = len(git.Diff)
+	}
 	return git
 }
 

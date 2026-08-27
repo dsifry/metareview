@@ -71,6 +71,17 @@ func FromGit(git gitcontext.Context, options Options) Profile {
 	if filteredDiffBytes == 0 {
 		filteredDiffBytes = len(git.Diff)
 	}
+	// When the branch diff was measured per file, the truncated branch text is
+	// fiction: use the measured branch bytes plus the local contributions, taken
+	// directly rather than by subtraction (which would double-count).
+	if branch := branchDiffBytes(git); branch > 0 {
+		local := len(git.StagedDiff) + len(git.WorkingTreeDiff) + len(git.UntrackedExcerpts)
+		filteredDiffBytes = branch + local
+		rawDiffBytes = filteredDiffBytes
+		if git.BranchRawDiffBytes > 0 {
+			rawDiffBytes = git.BranchRawDiffBytes + local
+		}
+	}
 
 	reasons := riskReasons(git, filteredDiffBytes, options)
 	level := RiskNone
