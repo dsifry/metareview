@@ -100,11 +100,24 @@ func TestResultSchemaVersionDistinct(t *testing.T) {
 		t.Fatalf("ResultSchemaVersion = %d, want 1", ResultSchemaVersion)
 	}
 	result := passingShardResult("shard-3a", "aaaaaaaaaaaaaaaa")
-	result.SchemaVersion = SchemaVersion + 1
+	result.SchemaVersion = ResultSchemaVersion + 1
 	manifest := manifestWithShard(t, "aaaaaaaaaaaaaaaa")
 	manifest.ShardResults = []ReviewResult{result}
 
 	assertBlocker(t, Aggregate(manifest), "unsupported schema version")
+
+	// Validation must read ResultSchemaVersion, not the manifest's own
+	// SchemaVersion. The two are equal today, so only a result carrying
+	// ResultSchemaVersion proves which constant the check uses.
+	fresh := passingShardResult("shard-3a", "aaaaaaaaaaaaaaaa")
+	fresh.SchemaVersion = ResultSchemaVersion
+	accepted := manifestWithShard(t, "aaaaaaaaaaaaaaaa")
+	accepted.ShardResults = []ReviewResult{fresh}
+	for _, blocker := range Aggregate(accepted).Blockers {
+		if strings.Contains(blocker, "unsupported schema version") {
+			t.Fatalf("a result at ResultSchemaVersion must be accepted: %v", blocker)
+		}
+	}
 }
 
 func TestFreshByShardHash(t *testing.T) {
@@ -273,7 +286,9 @@ func TestEvidenceRuleMatchesValidator(t *testing.T) {
 		{EvidenceRef{Path: "internal/a.go", Line: 1}, true},
 		{EvidenceRef{Path: "internal/a.go"}, false},
 		{EvidenceRef{Note: "short"}, false},
-		{EvidenceRef{Note: "twelve chars ok"}, true},
+		// The exact boundary in both directions.
+		{EvidenceRef{Note: strings.Repeat("n", EvidenceNoteMinLength)}, true},
+		{EvidenceRef{Note: strings.Repeat("n", EvidenceNoteMinLength-1)}, false},
 	}
 	for _, testCase := range cases {
 		if got := evidenceRefValid(testCase.ref); got != testCase.want {
@@ -545,5 +560,66 @@ func assertNoBlocker(t *testing.T, aggregate AggregateResult, unwanted string) {
 		if strings.Contains(blocker, unwanted) {
 			t.Fatalf("unexpected blocker %q in %+v", unwanted, aggregate.Blockers)
 		}
+	}
+}
+
+// TestShardedReviewMarkdownNeutralisesResultDerivedText pins the reason the
+// ingested helper exists. The `## Sharded Review` section is written into the
+// review log, and reviewlog harvests every mrvf- token it finds there as one of
+// the run's finding IDs. Any string that came out of a result file — the
+// reviewer name, an ignore reason, and the file paths themselves — must be
+// neutralised, or a result file can inject finding IDs into the run's record.
+func TestShardedReviewMarkdownNeutralisesResultDerivedText(t *testing.T) {
+	manifest := manifestWithShard(t, "aaaaaaaaaaaaaaaa")
+	result := passingShardResult("shard-3a", "aaaaaaaaaaaaaaaa")
+	result.Reviewer = "mrvf-injected-reviewer"
+	result.Path = "docs/metareview/shards/mrvf-injected-path.result.json"
+	manifest.ShardResults = []ReviewResult{result}
+	manifest.UnreadableResults = []string{"docs/metareview/shards/mrvf-injected-unreadable.json"}
+	aggregate := Aggregate(manifest)
+	aggregate.Ignored = []IgnoredResult{{
+		Path:   "docs/metareview/shards/mrvf-injected-ignored.json",
+		Reason: "mrvf-injected-reason",
+	}}
+
+	rendered := ShardedReviewMarkdown(manifest, aggregate)
+	if strings.Contains(rendered, "mrvf-") {
+		t.Fatalf("the review log carries a harvestable mrvf- token:\n%s", rendered)
+	}
+	// The text still has to be readable, just not harvestable.
+	if !strings.Contains(rendered, "mrvf_injected-reviewer") {
+		t.Fatalf("the reviewer name was dropped rather than neutralised:\n%s", rendered)
+	}
+}
+
+// TestManifestMarkdownNeutralisesResultDerivedText holds the same rule for the
+// context pack, so the two renderers cannot drift apart.
+func TestManifestMarkdownNeutralisesResultDerivedText(t *testing.T) {
+	manifest := manifestWithShard(t, "aaaaaaaaaaaaaaaa")
+	result := passingShardResult("shard-3a", "aaaaaaaaaaaaaaaa")
+	result.Reviewer = "mrvf-injected-reviewer"
+	manifest.ShardResults = []ReviewResult{result}
+	aggregate := Aggregate(manifest)
+	aggregate.Ignored = []IgnoredResult{{Path: "a.json", Reason: "mrvf-injected-reason"}}
+
+	if rendered := Markdown(manifest, aggregate); strings.Contains(rendered, "mrvf-") {
+		t.Fatalf("the context pack carries a harvestable mrvf- token:\n%s", rendered)
+	}
+}
+
+// TestManifestHashOmittedWithoutAPlan keeps the context pack honest for an
+// unsharded review: PlanShards returns an empty plan, so there is no plan hash
+// to report and the field must not render as an empty value.
+func TestManifestHashOmittedWithoutAPlan(t *testing.T) {
+	manifest := Build(Input{Scope: "task-done", Target: map[string]string{"type": "task", "id": "t-1"}})
+	if manifest.SourceManifestHash != "" {
+		t.Fatalf("SourceManifestHash = %q, want empty without a plan", manifest.SourceManifestHash)
+	}
+	rendered := Markdown(manifest, Aggregate(manifest))
+	if strings.Contains(rendered, "Source manifest hash: ``") {
+		t.Fatalf("an empty hash is rendered as a value:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Source manifest hash: not sharded") {
+		t.Fatalf("the unsharded case is not stated:\n%s", rendered)
 	}
 }

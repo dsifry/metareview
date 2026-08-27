@@ -264,7 +264,7 @@ func Markdown(manifest Manifest, aggregate AggregateResult) string {
 		"## Review Manifest",
 		"",
 		"- Manifest verdict: " + markdown.InlineCode(firstNonEmpty(aggregate.Verdict, VerdictPass)),
-		"- Source manifest hash: " + markdown.InlineCode(manifest.SourceManifestHash),
+		"- Source manifest hash: " + manifestHashText(manifest.SourceManifestHash),
 		"- Runtime assessment: " + firstNonEmpty(manifest.RuntimeAssessment, "static-only; runtime not assessed"),
 		"",
 		"### Source Paths",
@@ -298,7 +298,7 @@ func Markdown(manifest Manifest, aggregate AggregateResult) string {
 	if len(aggregate.Ignored) > 0 {
 		lines = append(lines, "", "### Ignored Result Files")
 		for _, ignored := range aggregate.Ignored {
-			lines = append(lines, "- "+markdown.InlineCode(ignored.Path)+": "+markdown.PlainText(ignored.Reason))
+			lines = append(lines, "- "+ingestedCode(ignored.Path)+": "+ingested(ignored.Reason))
 		}
 	}
 	lines = append(lines, "", "### Manifest Blockers")
@@ -306,11 +306,20 @@ func Markdown(manifest Manifest, aggregate AggregateResult) string {
 	return strings.Join(lines, "\n")
 }
 
+// manifestHashText states the unsharded case rather than rendering an empty
+// value: the manifest hash is the plan hash, and an unsharded review has no plan.
+func manifestHashText(hash string) string {
+	if strings.TrimSpace(hash) == "" {
+		return "not sharded"
+	}
+	return markdown.InlineCode(hash)
+}
+
 // resultLine renders one result as a single sanitised bullet body.
 func resultLine(result ReviewResult) string {
 	id := firstNonEmpty(result.ShardID, CrossShardID)
 	return markdown.InlineCode(id) + " " + markdown.InlineCode(result.Verdict) +
-		" by " + markdown.PlainText(result.Reviewer) +
+		" by " + ingested(result.Reviewer) +
 		fmt.Sprintf(" (%d blocking)", result.BlockingCount)
 }
 
@@ -691,6 +700,13 @@ func ingested(value string) string {
 	return strings.ReplaceAll(markdown.PlainText(value), "mrvf-", "mrvf_")
 }
 
+// ingestedCode is ingested for a value rendered as inline code. Result file
+// paths are named by the host, so they carry the same injection risk as the
+// strings inside a result.
+func ingestedCode(value string) string {
+	return strings.ReplaceAll(markdown.InlineCode(value), "mrvf-", "mrvf_")
+}
+
 // ShardedReviewMarkdown renders the review log's `## Sharded Review` section: the
 // results ingested, the files ignored with their reason, anything unreadable, and
 // the files that were reviewed as chunks. It returns "" when nothing was read.
@@ -719,18 +735,18 @@ func ShardedReviewMarkdown(manifest Manifest, aggregate AggregateResult) string 
 			markdown.InlineCode(result.Verdict),
 			ingested(result.Reviewer),
 			result.BlockingCount,
-			markdown.InlineCode(result.Path)))
+			ingestedCode(result.Path)))
 	}
 	if len(aggregate.Ignored) > 0 {
 		lines = append(lines, "", "### Ignored result files", "")
 		for _, ignored := range aggregate.Ignored {
-			lines = append(lines, "- "+markdown.InlineCode(ignored.Path)+": "+ingested(ignored.Reason))
+			lines = append(lines, "- "+ingestedCode(ignored.Path)+": "+ingested(ignored.Reason))
 		}
 	}
 	if len(manifest.UnreadableResults) > 0 {
 		lines = append(lines, "", "### Unreadable result files", "")
 		for _, file := range manifest.UnreadableResults {
-			lines = append(lines, "- "+markdown.InlineCode(file))
+			lines = append(lines, "- "+ingestedCode(file))
 		}
 	}
 	if chunked := chunkedFileLines(manifest.ShardPlan); len(chunked) > 0 {
