@@ -502,7 +502,7 @@ func withinCaps(p any) bool {
 			}
 		}
 		for _, c := range d.AllowedCmds {
-			if !shortOK(c.Name) || !argvOK(c.Argv) || len(c.FileHashes) > MaxFileHashes {
+			if !shortOK(c.Name) || !argvOK(c.Argv) || len(c.FileHashes) > MaxFileHashes || len(c.Env) > MaxEnv || !shortOK(c.Env...) {
 				return false
 			}
 			for k, v := range c.FileHashes {

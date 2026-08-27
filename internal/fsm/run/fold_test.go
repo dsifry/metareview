@@ -804,6 +804,13 @@ func TestFoldCaps(t *testing.T) {
 			b.Init(d)
 			return b.Events()
 		}, MaxFileHashes},
+		{"Env-count", func(n int) []Event {
+			b := NewBuilder(runA)
+			d := baseInit()
+			d.AllowedCmds = []AllowedCmd{{Name: "c", Argv: []string{"/c"}, FileHashes: map[string]string{}, Env: make([]string, n)}}
+			b.Init(d)
+			return b.Events()
+		}, MaxEnv},
 		{"Delta-list-count", func(n int) []Event {
 			b := NewBuilder(runA)
 			b.Init(baseInit())
@@ -875,6 +882,7 @@ func TestFoldCapsPerField(t *testing.T) {
 		"init.cmd.filehash": initWith(func(d *InitData) {
 			d.AllowedCmds = []AllowedCmd{{Name: "c", Argv: []string{"/c"}, FileHashes: map[string]string{big: "h"}}}
 		}),
+		"init.cmd.env":       initWith(func(d *InitData) { d.AllowedCmds = []AllowedCmd{{Name: "c", Argv: []string{"/c"}, Env: []string{big}}} }),
 		"tree.head":          ev(TypeTree, TreeData{Head: big, TreeHash: "t"}),
 		"delta.finding.file": delta(Delta{Findings: []Finding{{IssueText: "i", File: big}}}),
 		"delta.bug.id":       delta(Delta{Confirmed: []Bug{{ID: big, Desc: "d"}}}),

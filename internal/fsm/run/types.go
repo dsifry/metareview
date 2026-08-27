@@ -51,6 +51,7 @@ const (
 	MaxAllowedCmds = 16
 	MaxArgv        = 32
 	MaxFileHashes  = 64
+	MaxEnv         = 16
 	MaxDeltaList   = 256
 	MaxWarnings    = 1024
 
@@ -126,6 +127,8 @@ type AllowedCmd struct {
 	Name       string            `json:"name"`
 	Argv       []string          `json:"argv"`
 	FileHashes map[string]string `json:"file_hashes"`
+	TimeoutMS  int64             `json:"timeout_ms,omitempty"`
+	Env        []string          `json:"env,omitempty"` // extra environment names passed through (consent-covered)
 }
 
 // Delta is what a node's Reduce produced; Fold applies it (§4.3). It carries no tokens.
