@@ -134,6 +134,12 @@ func (w *writer) Write(root string, plan contextprofile.ShardPlan, header Header
 	if err != nil {
 		return noop, err
 	}
+	// Past this point the staging directory exists, so every failure must remove
+	// it; otherwise each failed run leaks a pack-* sibling that nothing prunes.
+	fail := func(err error) (func() error, error) {
+		_ = w.deps.RemoveAll(tmp)
+		return noop, err
+	}
 	byPath := map[string]gitcontext.BranchFile{}
 	for _, f := range files {
 		byPath[f.Path] = f
@@ -141,12 +147,12 @@ func (w *writer) Write(root string, plan contextprofile.ShardPlan, header Header
 	for _, shard := range plan.Shards {
 		body := shardPack(plan, shard, header, byPath)
 		if err := w.deps.WriteFile(filepath.Join(tmp, "shard-"+shard.ID+".md"), []byte(body), 0o644); err != nil {
-			return noop, err
+			return fail(err)
 		}
 	}
 	if len(plan.Shards) > 1 {
 		if err := w.deps.WriteFile(filepath.Join(tmp, "cross-shard.md"), []byte(crossShardPack(plan, header)), 0o644); err != nil {
-			return noop, err
+			return fail(err)
 		}
 	}
 	// planFile is a closed struct of strings, ints and slices, so marshalling it
@@ -154,7 +160,7 @@ func (w *writer) Write(root string, plan contextprofile.ShardPlan, header Header
 	// unreachable branch.
 	data, _ := json.MarshalIndent(planJSON(plan, header), "", "  ")
 	if err := w.deps.WriteFile(filepath.Join(tmp, "plan.json"), append(data, '\n'), 0o644); err != nil {
-		return noop, err
+		return fail(err)
 	}
 
 	// rename-aside → rename-in → remove-aside: an existing pack set is never
@@ -162,15 +168,23 @@ func (w *writer) Write(root string, plan contextprofile.ShardPlan, header Header
 	aside := ""
 	if _, err := w.deps.ReadDir(target); err == nil {
 		aside = target + ".aside"
+		// An interrupted earlier run can leave an aside behind. Renaming onto a
+		// non-empty directory fails, so a stale one would poison this target
+		// forever; clear it first.
+		if _, err := w.deps.ReadDir(aside); err == nil {
+			if err := w.deps.RemoveAll(aside); err != nil {
+				return fail(err)
+			}
+		}
 		if err := w.deps.Rename(target, aside); err != nil {
-			return noop, err
+			return fail(err)
 		}
 	}
 	if err := w.deps.Rename(tmp, target); err != nil {
 		if aside != "" {
 			_ = w.deps.Rename(aside, target)
 		}
-		return noop, err
+		return fail(err)
 	}
 	// asideRestore is cleared once the previous pack set is gone: from then on the
 	// only thing rollback can undo is the set this call created.

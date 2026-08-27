@@ -188,6 +188,12 @@ func Create(root string, options Options) (Result, error) {
 			Budget:   contextprofile.DefaultMaxBytesPerShard,
 		}, analysisGit.BranchFiles)
 		if err != nil {
+			// Write can fail after the new pack set is already in place; the
+			// rollback it returns restores the previous set, so run it rather
+			// than leaving the failed run's packs behind.
+			if packRollback != nil {
+				_ = packRollback()
+			}
 			return Result{}, err
 		}
 	}

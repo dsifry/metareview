@@ -537,3 +537,82 @@ func readAll(t *testing.T, dir string) map[string]string {
 	}
 	return out
 }
+
+// TestFailedWriteLeavesNoTempDir pins that a failure after MkdirTemp cleans up
+// the staging directory instead of leaking a pack-* sibling on every attempt.
+func TestFailedWriteLeavesNoTempDir(t *testing.T) {
+	root, plan, files := fixture(t)
+	boom := errors.New("boom")
+	deps := OSDeps()
+	real := deps.WriteFile
+	deps.WriteFile = func(path string, data []byte, perm os.FileMode) error {
+		if strings.HasSuffix(path, "plan.json") {
+			return boom
+		}
+		return real(path, data, perm)
+	}
+	if _, err := New(deps).Write(root, plan, header(), files); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the injected failure", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".metareview", "shards"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "pack-") {
+			t.Fatalf("failed write leaked the staging directory %q", entry.Name())
+		}
+	}
+}
+
+// TestStaleAsideDoesNotBlockWrite pins that an .aside left by an interrupted
+// earlier run is cleared, rather than permanently poisoning the target so no
+// later run can replace its packs.
+func TestStaleAsideDoesNotBlockWrite(t *testing.T) {
+	root, plan, files := fixture(t)
+	w := New(OSDeps())
+	if _, err := w.Write(root, plan, header(), files); err != nil {
+		t.Fatal(err)
+	}
+	target := Dir(root, "pr-ready", "feature", plan.PlanHash)
+	stale := target + ".aside"
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "stale.md"), []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(root, plan, header(), files); err != nil {
+		t.Fatalf("a stale .aside must not block a later write: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("the stale .aside must be gone, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "plan.json")); err != nil {
+		t.Fatalf("the pack set was not replaced: %v", err)
+	}
+}
+
+// TestStaleAsideRemovalFailure covers the error branch of clearing a stale aside.
+func TestStaleAsideRemovalFailure(t *testing.T) {
+	root, plan, files := fixture(t)
+	deps := OSDeps()
+	if _, err := New(deps).Write(root, plan, header(), files); err != nil {
+		t.Fatal(err)
+	}
+	stale := Dir(root, "pr-ready", "feature", plan.PlanHash) + ".aside"
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	boom := errors.New("boom")
+	failing := OSDeps()
+	failing.RemoveAll = func(path string) error {
+		if strings.HasSuffix(path, ".aside") {
+			return boom
+		}
+		return deps.RemoveAll(path)
+	}
+	if _, err := New(failing).Write(root, plan, header(), files); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the injected stale-aside failure", err)
+	}
+}

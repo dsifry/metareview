@@ -29,7 +29,12 @@ func (f *fakeWriter) Write(root string, plan contextprofile.ShardPlan, header sh
 	f.writes++
 	f.lastPlan, f.lastHdr = plan, header
 	if f.writeErr != nil {
-		return func() error { return nil }, f.writeErr
+		// Write can fail after the new pack set is already in place, so it hands
+		// back a usable rollback alongside the error; callers must run it.
+		return func() error {
+			f.rollbacks++
+			return nil
+		}, f.writeErr
 	}
 	return func() error {
 		f.rollbacks++
@@ -152,5 +157,18 @@ func TestPackRollbackRunsWhenTheReviewFails(t *testing.T) {
 	}
 	if writer.prunes != 0 {
 		t.Fatal("prune must not run when the review failed")
+	}
+}
+
+// TestPackWriteErrorRunsRollback pins that a Write that fails after the packs
+// are in place has its rollback honoured rather than discarded.
+func TestPackWriteErrorRunsRollback(t *testing.T) {
+	root := shardedRepo(t)
+	writer := &fakeWriter{writeErr: errors.New("pack boom")}
+	if _, err := Create(root, Options{Base: "main", ShardWriter: writer}); err == nil {
+		t.Fatal("want the pack failure")
+	}
+	if writer.rollbacks != 1 {
+		t.Fatalf("rollbacks = %d, want 1: a failed pack write must be rolled back", writer.rollbacks)
 	}
 }
