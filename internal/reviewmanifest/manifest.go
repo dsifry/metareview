@@ -683,3 +683,95 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+// ingested sanitises a string that came out of a result file. Newlines and
+// control characters would break a table; an mrvf- token would be harvested by
+// reviewlog as one of the run's finding IDs, so its prefix is neutralised.
+func ingested(value string) string {
+	return strings.ReplaceAll(markdown.PlainText(value), "mrvf-", "mrvf_")
+}
+
+// ShardedReviewMarkdown renders the review log's `## Sharded Review` section: the
+// results ingested, the files ignored with their reason, anything unreadable, and
+// the files that were reviewed as chunks. It returns "" when nothing was read.
+func ShardedReviewMarkdown(manifest Manifest, aggregate AggregateResult) string {
+	if len(manifest.ShardResults) == 0 && manifest.CrossShardResult == nil &&
+		len(aggregate.Ignored) == 0 && len(manifest.UnreadableResults) == 0 {
+		return ""
+	}
+	lines := []string{
+		"## Sharded Review",
+		"",
+		"- Plan hash: " + markdown.InlineCode(manifest.SourceManifestHash),
+		"- Shards covered: " + fmt.Sprintf("%d of %d", aggregate.ShardsCovered, aggregate.ShardCount),
+		"",
+		"| Shard | Shard hash | Verdict | Reviewer | Blocking | File |",
+		"| --- | --- | --- | --- | ---: | --- |",
+	}
+	rows := append([]ReviewResult{}, manifest.ShardResults...)
+	if manifest.CrossShardResult != nil {
+		rows = append(rows, *manifest.CrossShardResult)
+	}
+	for _, result := range rows {
+		lines = append(lines, fmt.Sprintf("| %s | %s | %s | %s | %d | %s |",
+			markdown.InlineCode(firstNonEmpty(result.ShardID, CrossShardID)),
+			markdown.InlineCode(firstNonEmpty(result.ShardHash, result.PlanHash)),
+			markdown.InlineCode(result.Verdict),
+			ingested(result.Reviewer),
+			result.BlockingCount,
+			markdown.InlineCode(result.Path)))
+	}
+	if len(aggregate.Ignored) > 0 {
+		lines = append(lines, "", "### Ignored result files", "")
+		for _, ignored := range aggregate.Ignored {
+			lines = append(lines, "- "+markdown.InlineCode(ignored.Path)+": "+ingested(ignored.Reason))
+		}
+	}
+	if len(manifest.UnreadableResults) > 0 {
+		lines = append(lines, "", "### Unreadable result files", "")
+		for _, file := range manifest.UnreadableResults {
+			lines = append(lines, "- "+markdown.InlineCode(file))
+		}
+	}
+	if chunked := chunkedFileLines(manifest.ShardPlan); len(chunked) > 0 {
+		lines = append(lines, "", "### Files reviewed as chunks", "")
+		lines = append(lines, chunked...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func chunkedFileLines(plan contextprofile.ShardPlan) []string {
+	parts := map[string]int{}
+	shards := map[string][]string{}
+	for _, shard := range plan.Shards {
+		for _, chunk := range shard.Chunks {
+			if chunk.Parts <= 1 {
+				continue
+			}
+			parts[chunk.Path] = chunk.Parts
+			shards[chunk.Path] = appendUnique(shards[chunk.Path], "shard-"+shard.ID)
+		}
+	}
+	paths := make([]string, 0, len(parts))
+	for path := range parts {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	lines := make([]string, 0, len(paths))
+	for _, path := range paths {
+		ids := shards[path]
+		sort.Strings(ids)
+		lines = append(lines, fmt.Sprintf("- %s: %d parts across %s",
+			markdown.InlineCode(path), parts[path], strings.Join(ids, ", ")))
+	}
+	return lines
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}

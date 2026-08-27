@@ -28,6 +28,10 @@ type Options struct {
 	EvidencePath  string
 	MaxAttempts   int
 	Now           time.Time
+	// ShardResultPaths and CrossShardResultPaths are explicit --shard-result and
+	// --cross-shard-result files, added to whatever the results directory holds.
+	ShardResultPaths      []string
+	CrossShardResultPaths []string
 	// ShardWriter is the pack-writing seam; nil uses the real filesystem.
 	ShardWriter shardpack.Writer
 }
@@ -132,14 +136,18 @@ func Create(root, target string, options Options) (Result, error) {
 	if report.Capabilities.Beads || report.Capabilities.Metaswarm {
 		gateEffect = "gate"
 	}
-	rawFindings := reviewers.RunTaskDone(reviewerContext(task, reviewGit, profile, knowledgeContext, evidenceText))
-	targetRecord := map[string]string{"type": taskTargetType(task), "id": task.ID}
-	run := findings.Run{ID: runID, Scope: "task-done", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
-
 	packWriter := options.ShardWriter
 	if packWriter == nil {
 		packWriter = shardpack.New(shardpack.OSDeps())
 	}
+	manifest, aggregate, err := ingestShardResults(root, packWriter, shardPlan, profile, task, options)
+	if err != nil {
+		return Result{}, err
+	}
+	rawFindings := reviewers.RunTaskDone(reviewerContext(task, reviewGit, profile, knowledgeContext, evidenceText, manifestContext(manifest, aggregate)))
+	targetRecord := map[string]string{"type": taskTargetType(task), "id": task.ID}
+	run := findings.Run{ID: runID, Scope: "task-done", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
+
 	packDir := ""
 	packRollback := func() error { return nil }
 	if len(shardPlan.Shards) > 0 {
@@ -170,7 +178,7 @@ func Create(root, target string, options Options) (Result, error) {
 		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, profile, shardPlan, packDir, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
+		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, profile, shardPlan, packDir, manifest, aggregate, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
 			return err
 		}
 		chain, err := runchain.Resolve(root, runchain.Options{
@@ -240,7 +248,7 @@ func Create(root, target string, options Options) (Result, error) {
 			FollowUpFindingCount: counts.FollowUp,
 			WarningFindingCount:  counts.Warnings,
 		}
-		return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, target, contextRel, options.PreviousRunID, gateEffect, verdict, reconciled.OpenFindings, meta)), 0o644)
+		return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, target, contextRel, options.PreviousRunID, gateEffect, verdict, reconciled.OpenFindings, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
 	}()
 	if err != nil {
 		restoreSnapshots(snapshots)
@@ -252,15 +260,58 @@ func Create(root, target string, options Options) (Result, error) {
 		return Result{}, err
 	}
 	if len(shardPlan.Shards) > 0 {
-		// The run is already recorded on disk. Prune only removes obsolete
-		// transient pack directories, so its failure must not discard the run
+		// The run is already recorded on disk. Pruning obsolete packs and collecting
+		// superseded results are housekeeping: their failure must not discard the run
 		// identifiers the caller needs.
 		_ = packWriter.Prune(root, "task-done", task.ID, shardPlan.PlanHash)
+		// Superseded result files are collected only once the gate has passed, so a
+		// failing run never destroys the record it was judged on.
+		if !result.Blocking {
+			_ = packWriter.GC(root, "task-done", task.ID, shardPlan)
+		}
 	}
 	return result, nil
 }
 
-func reviewerContext(task tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, evidenceText string) reviewers.Context {
+// ingestShardResults discovers the result files for this task and aggregates
+// them into the review manifest the gate and the context pack both read.
+func ingestShardResults(root string, writer shardpack.Writer, plan contextprofile.ShardPlan, profile contextprofile.Profile, task tasksource.Source, options Options) (reviewmanifest.Manifest, reviewmanifest.AggregateResult, error) {
+	explicit := append(append([]string{}, options.ShardResultPaths...), options.CrossShardResultPaths...)
+	found := shardpack.Found{}
+	if len(plan.Shards) > 0 || len(explicit) > 0 {
+		discovered, err := writer.Discover(root, "task-done", task.ID, plan, explicit)
+		if err != nil {
+			return reviewmanifest.Manifest{}, reviewmanifest.AggregateResult{}, err
+		}
+		found = discovered
+	}
+	manifest := reviewmanifest.Build(reviewmanifest.Input{
+		Scope:             "task-done",
+		Target:            map[string]string{"type": taskTargetType(task), "id": task.ID},
+		Profile:           profile,
+		ShardPlan:         plan,
+		PathDispositions:  reviewmanifest.GeneratedPathDispositions(profile.GeneratedExcludedFiles),
+		ShardResults:      found.Shards,
+		CrossShardResult:  found.CrossShard,
+		IgnoredResults:    found.Ignored,
+		UnreadableResults: found.Unreadable,
+	})
+	return manifest, reviewmanifest.Aggregate(manifest), nil
+}
+
+func manifestContext(manifest reviewmanifest.Manifest, aggregate reviewmanifest.AggregateResult) reviewers.ManifestContext {
+	return reviewers.ManifestContext{
+		Present:       len(manifest.ShardResults) > 0 || manifest.CrossShardResult != nil,
+		Verdict:       aggregate.Verdict,
+		Blockers:      aggregate.Blockers,
+		ShardCount:    aggregate.ShardCount,
+		ShardsCovered: aggregate.ShardsCovered,
+		CrossShard:    aggregate.CrossShard,
+		PlanHash:      aggregate.PlanHash,
+	}
+}
+
+func reviewerContext(task tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, evidenceText string, manifest reviewers.ManifestContext) reviewers.Context {
 	return reviewers.Context{
 		Task: reviewers.TaskContext{Type: taskTargetType(task), ID: task.ID, Text: task.Body},
 		Git: reviewers.GitContext{
@@ -270,6 +321,7 @@ func reviewerContext(task tasksource.Source, git gitcontext.Context, profile con
 			WorkingTreeFiles:         git.WorkingTreeFiles,
 			UntrackedFiles:           git.UntrackedFiles,
 			Diff:                     git.Diff,
+			BranchDiffFull:           git.BranchDiffFull,
 			StagedDiff:               git.StagedDiff,
 			WorkingTreeDiff:          git.WorkingTreeDiff,
 			UntrackedExcerpts:        git.UntrackedExcerpts,
@@ -283,6 +335,7 @@ func reviewerContext(task tasksource.Source, git gitcontext.Context, profile con
 			RiskLevel:                profile.RiskLevel,
 			RiskReasons:              profile.RiskReasons,
 		},
+		Manifest:     manifest,
 		Knowledge:    reviewerKnowledge(knowledgeContext),
 		EvidenceText: evidenceText,
 	}
@@ -427,7 +480,7 @@ func uniquePaths(root, target string, at time.Time) (string, string, string, err
 	}
 }
 
-func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, plan contextprofile.ShardPlan, packDir string, knowledgeContext knowledge.Context, evidenceText, gateEffect string) string {
+func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, plan contextprofile.ShardPlan, packDir string, manifest reviewmanifest.Manifest, aggregate reviewmanifest.AggregateResult, knowledgeContext knowledge.Context, evidenceText, gateEffect string) string {
 	changed := append([]string{}, git.ChangedFiles...)
 	changed = append(changed, git.StagedFiles...)
 	changed = append(changed, git.WorkingTreeFiles...)
@@ -442,22 +495,11 @@ func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Contex
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		contextprofile.Markdown(profile) + "\n\n" +
 		contextprofile.ShardPlanMarkdown(plan, shardpack.Rel(packDir)) + "\n\n" +
-		reviewManifestMarkdown("task-done", map[string]string{"type": taskTargetType(task), "id": task.ID}, profile, plan) + "\n\n" +
+		reviewmanifest.Markdown(manifest, aggregate) + "\n\n" +
 		"## Changed Files\n\n" + markdownList(changed, "No changed files.") + "\n\n" +
 		"## Diff\n\n" + markdown.FencedCodeBlock("diff", strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")) + "\n\n" +
 		"## Knowledge And Registries\n\n" + knowledgeMarkdown(knowledgeContext) + "\n\n" +
 		"## Evidence\n\n" + firstNonEmpty(evidenceText, "No external validation evidence supplied.") + "\n"
-}
-
-func reviewManifestMarkdown(scope string, target map[string]string, profile contextprofile.Profile, plan contextprofile.ShardPlan) string {
-	manifest := reviewmanifest.Build(reviewmanifest.Input{
-		Scope:            scope,
-		Target:           target,
-		Profile:          profile,
-		ShardPlan:        plan,
-		PathDispositions: reviewmanifest.GeneratedPathDispositions(profile.GeneratedExcludedFiles),
-	})
-	return reviewmanifest.Markdown(manifest, reviewmanifest.Aggregate(manifest))
 }
 
 func knowledgeMarkdown(context knowledge.Context) string {
@@ -502,7 +544,12 @@ func verdictForCounts(counts findings.ClassCounts, gateEffect string, attemptNum
 	return "PASS", "passed", false, ""
 }
 
-func reviewMarkdown(runID, target, contextRel, previousRun, gateEffect, verdict string, records []findings.Record, meta reviewMetadata) string {
+func reviewMarkdown(runID, target, contextRel, previousRun, gateEffect, verdict string, records []findings.Record, shardedReview string, meta reviewMetadata) string {
+	// The sharded section sits after the verdict value line, so reviewlog still
+	// reads the verdict token as the first non-empty line after the heading.
+	if shardedReview != "" {
+		shardedReview += "\n\n"
+	}
 	return "# metareview: task-done review\n\n" +
 		"Run ID: " + markdown.InlineCode(runID) + "\n\n" +
 		"Target: " + markdown.InlineCode(target) + "\n\n" +
@@ -510,7 +557,7 @@ func reviewMarkdown(runID, target, contextRel, previousRun, gateEffect, verdict 
 		"Execution mode: " + markdown.InlineCode("deterministic-local") + "\n\n" +
 		"Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		"Previous run: " + markdown.InlineCode(firstNonEmpty(previousRun, "none")) + "\n\n" +
-		"## Verdict\n\n" + verdict + "\n\n" +
+		"## Verdict\n\n" + verdict + "\n\n" + shardedReview +
 		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n" +
 		reviewerTable(records) + "\n\n" +
 		findingsMarkdown(records) + "\n" +
