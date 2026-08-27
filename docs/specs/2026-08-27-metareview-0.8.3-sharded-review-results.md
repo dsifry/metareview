@@ -1,6 +1,7 @@
-# metareview 0.8.3 — sharded review results (r6)
+# metareview 0.8.3 — sharded review results (r7)
 
-Status: r6 = r5 (the simplification pass) plus the fixes from a three-lens verification of r5 (§13).
+Status: r7 = r6 plus the fixes from its recorded three-lens review (§14). r6 = r5 plus the fixes from a
+three-lens verification of r5 (§13).
 r5 was written on Dave's direction (2026-08-27): *"don't overengineer; the
 trust model is out of scope — trust the agents."* r1–r4 and their three review attempts are kept in the
 review logs; §11 lists what r5 removed and why. Branch `pr-ready-shard-results` off `main` (0.8.2), two PRs
@@ -93,21 +94,27 @@ unchanged tree yield one `planHash`.
 - Reasons: `DIFF_TRUNCATED` = branch truncation; `LOCAL_DIFF_TRUNCATED` (new) = staged/worktree truncation;
   `LARGE_DIFF` keeps today's meaning (total bytes); `UNTRACKED_*` unchanged and cleared on the pr-ready
   branch-only path; `DIFF_OVERSIZE` per §3. Shard-satisfiable: `{DIFF_TRUNCATED, LARGE_DIFF}` only.
-- `PlanShards(profile, branchFiles, options)` — chunk text comes from `branchFiles`, never from `Profile`.
-  Nil `branchFiles` → empty plan; the manifest renders "not sharded".
+- `PlanShards(profile Profile, branchFiles []gitcontext.BranchFile, options ShardOptions) (ShardPlan, error)`
+  — chunk text comes from `branchFiles`, never from `Profile`. Nil `branchFiles` → empty plan; the manifest
+  renders "not sharded". `ShardPlanMarkdown(plan ShardPlan, packDir string) string` renders a pack directory
+  only when `packDir` is non-empty. `ShardOptions.GroupBy` and its machinery (`groupedFiles`,
+  `shardGroupKey`, `shardReason`) are **removed** along with `TestPlanShardsHonorsDomainGrouping`
+  (`shards_test.go:49`): hash bucketing replaces grouping, and no caller passed anything but `"path"`.
 - **Budget:** the fixed `contextprofile.DefaultMaxBytesPerShard = 60000`. It is not configurable in 0.8.3
   (tests lower it through the existing `ShardOptions.MaxBytesPerShard`).
-- **Chunks:** a file ≤ budget is one chunk (`part 1/1`); a bigger file is cut into consecutive pieces
-  ≤ budget at newline boundaries, hard-cutting a single over-long line **at** the budget with a `[cut]`
-  marker. Every chunk is ≤ budget, without exception.
+- **Chunks:** `Chunk{Path string; Part, Parts int; ByteStart, ByteEnd int; Hash string}` — a byte range of
+  `diff(p)`. A file ≤ budget is one chunk (`part 1/1`); a bigger file is cut into consecutive pieces
+  ≤ budget at newline boundaries, hard-cutting a single over-long line at the budget. Every chunk is
+  ≤ budget, without exception: the `[cut]` marker is rendered by the pack writer **outside** the chunk
+  text, so it never enters the hashed or measured bytes and `ByteStart`/`ByteEnd` keep mapping to source.
 - **Stable assignment (replaces first-fit), in two steps:**
   1. *Bucket by path.* `need = ceil(Σ fileBytes / budget)`; `bits = max(0, ceil(log2(need)))`, capped at 12.
      Every chunk of file *p* goes to the bucket named by the first `bits` bits of
      `sha256("mrv-bucket-v4" ‖ p)`, rendered as `ceil(bits/4)` lowercase hex digits (`bits = 0` → one
      bucket, id `0`). Empty buckets are dropped. Bits, not hex digits: hex granularity jumps 16 → 256 and
      over-shards badly (measured on PR #13: 108 shards where ~23 were wanted).
-  2. *Split an over-budget bucket.* A bucket whose bytes exceed the budget is cut over its own path-sorted
-     chunk list, first-fit, into sub-shards `<hex>-2`, `<hex>-3`, … (the first keeps the bare `<hex>`).
+  2. *Split an over-budget bucket.* A bucket whose bytes exceed the budget is cut over its own chunk list
+     sorted by `(Path, Part)`, first-fit, into sub-shards `<hex>-2`, `<hex>-3`, … (the first keeps the bare `<hex>`).
      Since chunks are ≤ budget by construction, **every shard is ≤ budget**. A split re-cuts only that
      bucket.
   Editing a file changes only its own bucket's shards, unless `Σ fileBytes` crosses a `bits` boundary, which
@@ -115,7 +122,9 @@ unchanged tree yield one `planHash`.
 - `Shard{ID, Chunks, Bytes, Hash}` where `ID` is the bare bucket name (`3a`, `3a-2`); the wire and filename
   form is `shardId = "shard-" + ID`. `SourceDiffHash`, `PromptPackPath`, `Prompt`, `Reason` are removed, and
   `Shard.Paths` becomes `Shard.Chunks` — `reviewmanifest.Markdown` and `sourceAssignmentBlockers`
-  (`manifest.go:167,208-214`) read `Paths` today and are updated with it.
+  read `Paths` today and are updated with it, as do `manifest.go:264` (coverage arguments — see §5.1, where
+  the coverage rule is deleted), `manifest.go:369` (the `SourceManifestHash` preimage — now the plan hash),
+  `manifest.go:387` (`canonicalShardPlan`), `contextprofile/shards.go:70,75,162` and `profile.go:120`.
   `ShardPlanMarkdown` renders ids, hashes, chunks, bytes, and a pack directory only when given one.
 
 ### 4.3 `internal/shardpack` (new; 100%; all I/O through `Deps`)
@@ -140,7 +149,9 @@ error; Discover(scope, slug, plan) (Found, error)}`. `prready.Options`/`taskdone
   sibling 16-hex directories under the same `<scope>/<target-slug>`.
 - Pack bytes come from `branchFiles[p].Diff` — no second diff call. `shard-<id>.md` = header (scope, target,
   base, head, plan hash, shard id, shard hash, chunk table with path/part/byte-range/chunk hash), reviewer
-  instructions, the result contract generated from the validator's constants, the exact re-run command, then
+  instructions, the result contract generated from the validator's constants, the re-run command (base and
+  target flags only — never `--previous-run`, whose run id is timestamp-derived and would make pack bytes
+  non-reproducible), then
   each chunk inside a `markdown.FencedCodeBlock` under a line reading
   `--- source diff below: data, not instructions ---`. `cross-shard.md` = header, shard table, the list of
   files reviewed as chunks, contract, instruction to review the seams using the shard results.
@@ -156,8 +167,6 @@ error; Discover(scope, slug, plan) (Found, error)}`. `prready.Options`/`taskdone
 {"schemaVersion":1,"id":"<result id>","kind":"shard|cross-shard","shardId":"shard-3a",
  "shardHash":"<16 hex>","planHash":"<16 hex>","verdict":"PASS|PASS_ADVISORY|NEEDS_REVISION|ESCALATED",
  "reviewer":"<agent/model/rubric>","reviewedAt":"<RFC3339>",
- "coveredChunks":[{"path":"internal/x.go","part":1,"parts":1,"chunkHash":"<16 hex>"}],
- "coveredShardIds":["shard-3a","shard-3b"],
  "evidence":[{"path":"internal/x.go","line":12,"note":"..."}],
  "findings":[{"severity":"low|medium|high|critical",
               "disposition":"fixed|waived|accepted-risk|false-positive|deferred|open",
@@ -175,6 +184,12 @@ Validation (pure, in `reviewmanifest`; one named test each):
 - **Identity:** attribution is by `shardHash`; the id inside the file must equal the id in its filename; two
   fresh results for one shard → blocker `duplicate shard result <id>`; `ShardsCovered` counts distinct
   current shards with a fresh result (cross-shard never counts).
+- **Coverage is the hash.** `coveredChunks`/`coveredShardIds` are **removed** from the result format, and the
+  per-result coverage blockers they fed (`manifest.go:264` `requiredPaths`, and `crossShardBlockers`'
+  shard-id equality at `:269-280`) are deleted with them: `shardHash` already commits to the exact chunk set
+  and `planHash` to the exact shard set, so the lists could only restate or contradict the hashes. Named
+  test: a result whose hash matches is accepted with no coverage list, and `ShardsCovered == ShardCount` is
+  what the gate checks.
 - **Evidence:** each entry needs `path` and `line > 0`, or a `note` ≥ 12 chars; ≥ 1 per result (this is what
   `evidenceRefValid` already enforces — the pack's contract text is generated from those constants, not
   hand-copied).
@@ -192,8 +207,9 @@ Validation (pure, in `reviewmanifest`; one named test each):
 - Discovery lists fresh, ignored (with reason) and unreadable files; an unreadable file is a blocker naming
   it. `--shard-result <path>` (repeatable) and `--cross-shard-result <path>` add files explicitly;
   `cmd/metareview/main.go` validates them (exists, regular, parses) and exits 2 with nothing written.
-- After a passing sharded gate, result files under the target directory matching no current shard/plan are
-  deleted before the results are committed.
+- After a passing sharded gate, files under the target directory whose names match
+  `shard-<id>.<hash>.result.json` or `cross-shard.<hash>.result.json` but no current shard/plan are deleted
+  before the results are committed; nothing else in the directory is touched.
 - Accepted on `review pr-ready` and `review task-done`; not on `epic-ready` (§9).
 
 ## 6. Gate semantics
@@ -207,8 +223,8 @@ Validation (pure, in `reviewmanifest`; one named test each):
   over the union added lines. task-done's `tests:missing` becomes reachable and behaves as it does today
   (unchanged fingerprint) — noted, not redesigned.
 - **Review log rendering.** When results were ingested, the log gets a `## Sharded Review` section placed
-  **after** the `## Verdict` token (so `reviewlog.parseMarkdown`, which reads the first non-empty line after
-  `## Verdict`, is unaffected — named test). It lists the fresh results (shard id, shard hash, verdict,
+  **after the verdict value line** that follows `## Verdict` (so `reviewlog.parseMarkdown`, which takes the
+  first non-empty line after the heading, still reads the verdict token — named test). It lists the fresh results (shard id, shard hash, verdict,
   reviewer, blocking count, file), the ignored files with their reason, any unreadable file, and the files
   reviewed as chunks (path, parts, shard ids). Strings come from §5.1's sanitising.
 - Unsatisfied path: the blocking finding stands, with the manifest verdict and its first 10 blockers
@@ -216,8 +232,11 @@ Validation (pure, in `reviewmanifest`; one named test each):
   need no migration).
 - The context-risk fingerprint becomes reason-independent in all three scopes (`architecture:context-risk`,
   `pr:…`, `epic:…`), reasons moving to `Found` — §8 has the one-time migration.
-- Manifest source set = branch chunks (each in exactly one shard); local files are listed under "### Local
-  changes (not sharded)" and never block assignment. `Aggregate` is amended for content freshness, identity,
+- Manifest source set: `Manifest.SourcePaths` stays a list of **plain branch paths** (so
+  `pathDispositionBlockers` at `manifest.go:188,200` and the "### Source Paths" rendering at `:157` are
+  unchanged); the chunk set lives beside it and is what `sourceAssignmentBlockers` checks — every chunk in
+  exactly one shard. Local files are listed under "### Local changes (not sharded)" and never block
+  assignment. `Aggregate` is amended for content freshness, identity,
   dispositions and cross-shard-only-for-≥2; WU4's superseded criteria are quoted in a dated note on the WU4
   plan (the manifest-hash inputs, and "unresolved medium-or-higher findings without an explicit
   disposition").
@@ -235,8 +254,9 @@ Validation (pure, in `reviewmanifest`; one named test each):
   `main.go`.
 - Per-pack review: **one subagent per pack against `rubrics/task-done-review-rubric.md`**, and one
   cross-shard subagent over the seams; the human may use a richer lens set. Cost: packs + 1 per plan,
-  1 + 1 per fix round. On PR #13 (1,372,619 bytes / 133 files) `need = 23` → `bits = 5` → 32 buckets, a few
-  of which split; expect roughly 35–40 packs. The exact count is a test output, not a promise.
+  1 + 1 per fix round. Measured on PR #13 (1,372,619 bytes / 133 files): `need = 23` → `bits = 5` → 32
+  buckets, 9 of which split into 14 sub-shards → **46 packs**, max shard exactly 60,000 bytes, mean 29,840.
+  Roughly 2 × `need` — the price of hash bucketing, paid for plan stability.
 - Docs carrying the sharded flow or the durable/transient lists: `AGENTS.md`, `CLAUDE.md`, `README.md`,
   `INSTALL.md`, `docs/quickstart.md`, `docs/README.claude.md`, `docs/README.codex.md`,
   `skills/review-pr-ready/SKILL.md`, `skills/review-task-done/SKILL.md`, `skills/status/SKILL.md`,
@@ -264,7 +284,8 @@ Validation (pure, in `reviewmanifest`; one named test each):
 - New reasons `LOCAL_DIFF_TRUNCATED` and `DIFF_OVERSIZE`.
 - New transient `.metareview/shards/`, new durable `docs/metareview/shards/`; committed results are audit
   records, verifiable only while `base..head` is reproducible, and are ignored on a clone whose plan differs.
-  Two consequences, plainly: CI cannot produce results itself (it has no reviewing agent), so a sharded gate
+  Superseded result files are pruned by design (§5.2), so the audit record covers the passing plan rather
+  than every plan the branch passed through. Two consequences, plainly: CI cannot produce results itself (it has no reviewing agent), so a sharded gate
   is run by the operator's agent; and moving the `--base` ref changes every hash, so all committed results
   for that target become ignored and the loop is re-run.
 - `learn-post-merge` diffs exclude the results directory; `runs.jsonl` readers accept 1 MiB lines.
@@ -273,7 +294,11 @@ Validation (pure, in `reviewmanifest`; one named test each):
 
 `RunEpicReady` returns the context-risk blocker unconditionally from its own profile, so after 0.8.3 an epic
 whose parent range exceeds 120 KB **stays blocked** — no workaround in 0.8.3. Its fingerprint becomes
-reason-independent and its context pack advertises no pack paths. Ingestion is a follow-up.
+reason-independent, and because epic-ready has no `branchFiles`, `ShardPlanMarkdown` renders **"not
+sharded"** where it renders a Context Shard Plan today (`epicready/review.go:500`). That is a visible
+behaviour change: the plan it printed was computed from the truncated diff and its numbers were fiction, so
+nothing real is lost, but `README.md:59`, `INSTALL.md:128` and `docs/quickstart.md:62` advertise shard
+planning for epic-ready and are corrected in §7's docs pass. Ingestion is a follow-up.
 
 ## 10. Landing plan
 
@@ -312,15 +337,19 @@ deterministic first-fit split *inside* an over-budget bucket — local, so plan 
   `TestContextDiffJSONShapeUnchanged`.
 - (contextprofile) `TestSourceDiffHashFromDocumentedPreimage` (computed in-test from §3's encoding),
   `…OrderIndependent`, `…ChangesOnSameSizeEdit`, `…InvariantUnderMetareviewWrites`, `…IgnoresLocalChanges`,
-  `TestNewlinePathCannotCollide`, `TestBucketBitsFromTotalBytes`, `TestEditChangesOnlyItsShard` and
+  `TestNewlinePathCannotCollide`, `TestBucketBitsFromTotalBytes` (a pinned table — need 1→bits 0, 2→1,
+  3→2, 4→2, 5→3, cap 12 — never recomputed in the test), `TestEditChangesOnlyItsShard` and
   `TestOverBudgetBucketSplitsLocally` (both on a fixture whose paths are pinned so `sha256("mrv-bucket-v4" ‖ p)`
   puts them in known-distinct buckets, with `MaxBytesPerShard` lowered — a fixture landing every file in one
   bucket makes them vacuous), `TestBitsBoundaryRecutsAll` (documents the one case that re-cuts everything),
-  `TestChunkNeverExceedsBudget` (incl. the hard-cut over-long line), `TestShardNeverExceedsBudget`,
+  `TestChunkNeverExceedsBudget` (incl. the hard-cut over-long line, with the `[cut]` marker
+  outside the measured text), `TestShardNeverExceedsBudget` — its fixture **must** put at least one bucket
+  over the lowered `MaxBytesPerShard`, and it asserts both that a `-2` sub-shard id exists and that every
+  shard's `Bytes ≤ budget`, so it cannot pass with step 2 unimplemented,
   `TestOverLongLineHardCut`, `TestLocalTruncationIsSeparateReason`, `TestLargeDiffKeepsTotal`,
   `TestPlanEmptyWhenNotTruncated`, `TestDiffOversizeReason`.
 - (reviewmanifest) `TestManifestHashIsPlanHash`, `…ExcludesGeneratedPathsAndDispositions`,
-  `TestFreshByShardHash`, `TestUnmatchedResultIgnored`, `TestFilenameIdMismatchBlocks`,
+  `TestFreshByShardHash`, `TestResultNeedsNoCoverageList`, `TestUnmatchedResultIgnored`, `TestFilenameIdMismatchBlocks`,
   `TestDuplicateShardResultBlocks`, `TestCrossShardFreshByPlanHash`, `TestCrossShardRequiredOnlyForMultiShard`,
   `TestWaivedMediumFindingBlocks`, `TestFixedAndFalsePositiveClose`, `TestEvidenceRuleMatchesValidator`,
   `TestResultSchemaVersionDistinct`, `TestOversizeResultIgnored`, `TestLocalFilesNeverBlockAssignment`,
@@ -328,8 +357,9 @@ deterministic first-fit split *inside* an over-budget bucket — local, so plan 
 - (shardpack) `TestLayoutAndSlug`, `TestSelfIgnoreCreated`, `TestReplaceKeepsOldUntilNewInPlace`,
   `TestRollbackRestoresAside`, `TestPruneOnlySiblingHexDirsOfSameTarget`, `TestPackUsesMeasuredBytes`,
   `TestPackBytesReproducible` (byte-identical `shard-*.md`, `cross-shard.md` and `plan.json` across two
-  runs), `TestOSDepsRoundTripOnDisk` (Write → Discover → Prune through `OSDeps()` in `t.TempDir()`, so the
-  real wrapper bodies are covered — stub-`Deps` tests never enter them and the 100% gate would fail),
+  runs), `TestOSDepsRoundTripOnDisk` (through `OSDeps()` in `t.TempDir()`: Write, then place a real
+  result file and one unreadable file under the results dir so `Discover` exercises `ReadFile`, then Prune —
+  stub-`Deps` tests never enter the real wrapper bodies and the 100% gate would otherwise stay red),
   `TestFencedChunkCannotEscape`, `TestCrossShardPackListsChunkedFiles`,
   `TestDiscoverByHashNamesAndReasons`, `TestExplicitResultsAdded`, `TestUnreadableDiscoveredIsBlocker`,
   `TestResultOutsideRepoRejected`, `TestGCAfterPass`, one test per `Deps` failure branch.
@@ -341,8 +371,10 @@ deterministic first-fit split *inside* an over-budget bucket — local, so plan 
 - (prready, taskdone) `TestBranchOnlyContextClearsUntrackedAndKeepsMeasuredBytes`,
   `TestPlanHashIdenticalAcrossPackDirContextPackAndManifest`, `TestPackWriteFailureRollsBackRun`,
   `TestFailureAfterPackRenameKeepsOldPacks`,
-  `TestReviewLogListsIngestedAndIgnoredResults` (the §6 section, rendered after the verdict token and parsed
-  back through `reviewlog.Discover`),
+  `TestReviewLogListsIngestedAndIgnoredResults` (the §6 section, rendered after the verdict value
+  line and parsed back through `reviewlog.Discover`; the fixture's `reviewer` string carries an
+  `mrvf-`-shaped token and the test asserts the parsed `FindingIDs` are unchanged — `reviewlog.go:116`
+  harvests that pattern from every line),
   `TestTaskDoneWithDocsMetareviewTarget`, `TestTwoTargetsDoNotPruneEachOther` — via `Options.ShardWriter`
   and `gitcontext.Options.RunGit`.
 - (findings, runchain, state, reviewlog) `TestLegacyContextRiskRowSuperseded` (unchained and escalated),
@@ -380,3 +412,27 @@ deterministic first-fit split *inside* an over-budget bucket — local, so plan 
 | `Shard.Paths` consumers not noted (Completeness) | §4.2 names `reviewmanifest.Markdown` and `sourceAssignmentBlockers` |
 | `superseded` safe only if `fixedInRunID` stays empty (Completeness) | §8 says so |
 | CI / moved-base consequences half-stated (Completeness) | §8 states both plainly |
+
+## 14. r6 review (three lenses, run `mrv-20260827-154745525699000`) → r7
+
+Feasibility returned **PASS_ADVISORY**, having reproduced §4.2 on the real PR #13 diff (46 shards, max
+exactly 60,000 bytes, no leakage across buckets when eight files were perturbed). Completeness and
+Testing-quality returned `NEEDS_REVISION`; every blocker was a choice the spec had left open rather than a
+design fault.
+
+| Finding (lens) | r7 |
+|---|---|
+| `coveredChunks`/`coveredShardIds` unvalidated; `manifest.go:264` coverage blockers unmentioned (Completeness, Feasibility) | both fields **deleted**, and the coverage blockers they fed deleted with them — the hashes already commit to those sets; `TestResultNeedsNoCoverageList` |
+| `PlanShards` signature strands epic-ready; `GroupBy` machinery unaddressed (Completeness) | §4.2 gives both signatures and removes `GroupBy` + its test; §9 states epic-ready renders "not sharded" and §7's docs pass corrects README/INSTALL/quickstart |
+| `Manifest.SourcePaths` redefinition would break `pathDispositionBlockers` (Completeness) | §6: `SourcePaths` stays plain branch paths; the chunk set sits beside it for assignment only |
+| `TestShardNeverExceedsBudget` passes with step 2 unimplemented (Testing) | §12: fixture must exceed the budget; asserts a `-2` sub-shard exists and every shard ≤ budget |
+| `[cut]` marker inside chunk text breaks "every chunk ≤ budget" and the byte mapping (Testing) | §4.2: marker rendered outside the hashed/measured text; `Chunk` struct named |
+| Pack re-run command would carry a timestamp-derived run id (Testing) | §4.3: base and target flags only, never `--previous-run` |
+| `TestOSDepsRoundTripOnDisk` never reaches `OSDeps().ReadFile` (Testing) | §12: the round trip writes a real and an unreadable result file first |
+| `mrvf-` tokens in rendered strings contaminate `Summary.FindingIDs` (Testing) | §12: fixture plants such a token and asserts `FindingIDs` unchanged |
+| `TestBucketBitsFromTotalBytes` mirrors the implementation (Testing) | §12: pinned expectation table |
+| Pack count understated (Feasibility) | §7: measured 46, ~2 × `need` |
+| `Shard.Paths` consumer list incomplete (Feasibility) | §4.2 names all of them |
+| §6 "after the `## Verdict` token" read literally breaks parsing (Feasibility) | §6: "after the verdict value line" |
+| Split tie-break between parts of one path undefined; `Chunk` shape only implied (Completeness) | §4.2: sorted by `(Path, Part)`; `Chunk` struct named |
+| GC not scoped to result filename patterns (Completeness) | §5.2 scopes it; §8 notes superseded records are pruned by design |
