@@ -97,6 +97,9 @@ type Deps struct {
 	Nonce     func() string
 	MockLoad  func(dir string) (hash string, err error)
 	Terminal  func(ctx context.Context, v View) error
+	// Preflight (optional) runs before Create for every exec: fork node at Init, and on the Advance that would run a
+	// fork node, before any append of that node's work (spec 5 §8: judge pre-flight).
+	Preflight func(node *workflow.Node, calibration bool) error
 }
 
 // InitOptions parameterizes Init.
@@ -116,7 +119,8 @@ type InitOptions struct {
 
 // OpenOptions parameterizes Open.
 type OpenOptions struct {
-	Repair bool
+	Repair   bool
+	ReadOnly bool // no lock; load stops after the fold + sidecar parse (spec 5: fsm state and the read-only commands)
 }
 
 // Statuses of an Advance.
@@ -192,6 +196,25 @@ type View struct {
 	NextAction string
 	Torn       bool
 	FailedGate *run.GateData
+	Outgoing   []Edge // the current state's transitions in declaration order
+}
+
+// Edge is one outgoing transition of the current state.
+type Edge struct {
+	To   run.State
+	Gate string
+}
+
+// JudgeNode is the reserved node name of fsm judge --run's llm_calls.
+const JudgeNode = "judge"
+
+// Stamp is what RecordLLMCall hands its closure (spec 5 §2).
+type Stamp struct {
+	State       run.State
+	Iter        int
+	Index       int
+	Calibration bool
+	Fence       bool
 }
 
 // Decision is a judge verdict's decision as spec 3 §4 compares it: Raw is the kind's decision field, Effective the
@@ -201,6 +224,7 @@ type Decision struct{ Raw, Effective *bool }
 // NodeView describes the current state's node.
 type NodeView struct {
 	Name, Kind, Exec   string
+	Model, Effort      string
 	HasOutput, Applied bool
 }
 

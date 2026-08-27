@@ -66,7 +66,7 @@ func TestM1Init(t *testing.T) {
 	}
 	// warnings → warn events
 	noClean := strings.Replace(strings.Replace(string(raw), "  - {from: discover,   to: done,       gate: nothing_found,      outcome: clean}   # iteration 0 only: refuses once bugs are known\n", "", 1), "  - {from: adjudicate, to: done,       gate: nothing_confirmed,  outcome: clean}\n", "", 1)
-	h.files["/x/noclean.yaml"] = []byte(noClean)
+	h.files["/x/noclean.yaml"] = renamed(noClean)
 	m3 := h.mustInit(InitOptions{Workflow: "/x/noclean.yaml", Vars: sdlcVars})
 	if got := strings.Join(h.types(m3), ","); got != "init,tree,warn" {
 		t.Fatalf("warn sequence %s", got)
@@ -193,7 +193,7 @@ func TestM1InitErrors(t *testing.T) {
 	}
 	// warn append failure on a workflow with warnings
 	noClean := strings.Replace(strings.Replace(string(raw), "  - {from: discover,   to: done,       gate: nothing_found,      outcome: clean}   # iteration 0 only: refuses once bugs are known\n", "", 1), "  - {from: adjudicate, to: done,       gate: nothing_confirmed,  outcome: clean}\n", "", 1)
-	h.files["/x/noclean.yaml"] = []byte(noClean)
+	h.files["/x/noclean.yaml"] = renamed(noClean)
 	h.store.appends, h.store.failAt, h.store.err = 0, 2, errors.New("append2")
 	if _, err := h.init(InitOptions{Workflow: "/x/noclean.yaml", Vars: sdlcVars}); err == nil || err.Error() != "append2" {
 		t.Fatalf("warn append: %v", err)
@@ -205,7 +205,7 @@ func TestM1Consent(t *testing.T) {
 	h := newHarness(t)
 	raw, _ := workflows.Read("sdlc-loop")
 	withCmd := strings.Replace(string(raw), "repo_mode: advisory", "cmds:\n  notify: {argv: [bash, ./notify.sh, --tag, $JUDGE], timeout: 2, env: [SLACK_WEBHOOK]}\non_overflow: notify\nrepo_mode: advisory", 1)
-	h.files["/x/cmd.yaml"] = []byte(withCmd)
+	h.files["/x/cmd.yaml"] = renamed(withCmd)
 	_, err := h.init(InitOptions{Workflow: "/x/cmd.yaml", Vars: sdlcVars})
 	e := wantCode(t, err, CodeCmdsNotAllowed)
 	sha := e.Field("sha")
@@ -220,7 +220,7 @@ func TestM1Consent(t *testing.T) {
 		t.Fatalf("allowed: %+v", snap.AllowedCmds)
 	}
 	// cmd not found
-	h.files["/x/cmd2.yaml"] = []byte(strings.Replace(withCmd, "argv: [bash,", "argv: [nope,", 1))
+	h.files["/x/cmd2.yaml"] = renamed(strings.Replace(withCmd, "argv: [bash,", "argv: [nope,", 1))
 	if _, err := h.init(InitOptions{Workflow: "/x/cmd2.yaml", Vars: sdlcVars}); !errs.Is(err, workflow.CodeCmdNotFound) {
 		t.Fatalf("cmd not found: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestM3GateFailures(t *testing.T) {
 	// Build a custom workflow whose discover has two gates that both fail on empty findings: findings_nonempty, confirmed_nonempty.
 	raw, _ := workflows.Read("review-loop")
 	custom := strings.Replace(string(raw), "  - {from: discover,   to: done,       gate: findings_empty,     outcome: clean}\n", "  - {from: discover,   to: done,       gate: confirmed_nonempty, outcome: clean}\n", 1)
-	h.files["/x/two.yaml"] = []byte(custom)
+	h.files["/x/two.yaml"] = renamed(custom)
 	m := h.mustInit(InitOptions{Workflow: "/x/two.yaml", Vars: sdlcVars})
 	h.advance(m)
 	h.record(m, "discover", `{"findings":[]}`)
@@ -590,7 +590,9 @@ func sdlcWith(t *testing.T, h *harness, name, old, new string) string {
 	if !strings.Contains(string(raw), old) {
 		t.Fatalf("fixture target missing: %s", old)
 	}
-	h.files["/x/"+name] = []byte(strings.Replace(string(raw), old, new, 1))
+	body := strings.Replace(string(raw), old, new, 1)
+	body = strings.Replace(body, "workflow: sdlc-loop", "workflow: sdlc-loop-test", 1)
+	h.files["/x/"+name] = []byte(body)
 	return "/x/" + name
 }
 
@@ -765,7 +767,7 @@ func TestM4Convergence(t *testing.T) {
 	// the real all_fixed atom firing on a confirmed_empty terminal gate → fixed (design §9 example)
 	h = newHarness(t)
 	wf = sdlcWith(t, h, "af.yaml", "  - {from: verify,     to: done,       gate: all_fixed,   outcome: fixed}", "  - {from: verify,     to: done,       gate: confirmed_empty,   outcome: fixed}")
-	h.files["/x/af.yaml"] = []byte(strings.Replace(string(h.files["/x/af.yaml"]), "any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]", "any: [all_fixed, {max_iterations: 5}]", 1))
+	h.files["/x/af.yaml"] = renamed(strings.Replace(string(h.files["/x/af.yaml"]), "any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]", "any: [all_fixed, {max_iterations: 5}]", 1))
 	h.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1}
 	m = h.mustInit(InitOptions{Workflow: wf, Vars: sdlcVars})
 	h.advance(m)
@@ -781,7 +783,7 @@ func TestM4Convergence(t *testing.T) {
 	// user workflow whose terminal gate is confirmed_empty: convergence still bounds the loop
 	h = newHarness(t)
 	wf = sdlcWith(t, h, "ce.yaml", "  - {from: verify,     to: done,       gate: all_fixed,   outcome: fixed}", "  - {from: verify,     to: done,       gate: confirmed_empty,   outcome: fixed}")
-	h.files["/x/ce.yaml"] = []byte(strings.Replace(string(h.files["/x/ce.yaml"]), "{max_iterations: 5}", "{max_iterations: 1}", 1))
+	h.files["/x/ce.yaml"] = renamed(strings.Replace(string(h.files["/x/ce.yaml"]), "{max_iterations: 5}", "{max_iterations: 1}", 1))
 	h.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1}
 	m = h.mustInit(InitOptions{Workflow: wf, Vars: sdlcVars})
 	h.advance(m)
@@ -1195,7 +1197,7 @@ func TestM7Open(t *testing.T) {
 	// stored vars no longer resolve (var removed from the registry-independent workflow is impossible; simulate with a sidecar whose vars differ)
 	// ERR_CMD_CHANGED via the consent list
 	withCmd := strings.Replace(raw2(t, "sdlc-loop"), "repo_mode: advisory", "cmds:\n  notify: {argv: [bash]}\nrepo_mode: advisory", 1)
-	h.files["/x/cmd.yaml"] = []byte(withCmd)
+	h.files["/x/cmd.yaml"] = renamed(withCmd)
 	_, cerr := h.init(InitOptions{Workflow: "/x/cmd.yaml", Vars: sdlcVars})
 	sha := errs.As(cerr).Field("sha")
 	mc := h.mustInit(InitOptions{Workflow: "/x/cmd.yaml", Vars: sdlcVars, AllowCustomCmds: sha})
@@ -1877,4 +1879,19 @@ func TestOpenIncompleteFork(t *testing.T) {
 	if _, err := Open(ctx, h.deps, m.runID, OpenOptions{}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// renamed gives a path fixture derived from an embedded workflow its own name: a path may not reuse an embedded
+// name with different bytes (reserved_name).
+func renamed(body any) []byte {
+	var text string
+	switch b := body.(type) {
+	case string:
+		text = b
+	case []byte:
+		text = string(b)
+	}
+	text = strings.Replace(text, "workflow: sdlc-loop", "workflow: sdlc-loop-test", 1)
+	text = strings.Replace(text, "workflow: review-loop", "workflow: review-loop-test", 1)
+	return []byte(text)
 }

@@ -60,7 +60,9 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 	// 1. load + parse + resolve
 	var raw []byte
 	var err error
+	source := "embedded"
 	if strings.Contains(o.Workflow, "/") || strings.HasSuffix(o.Workflow, ".yaml") {
+		source = "path"
 		raw, err = deps.ReadFile(o.Workflow)
 		if err != nil {
 			return nil, errs.E(CodeWorkflowNotFound, err.Error(), "workflow", o.Workflow)
@@ -78,6 +80,11 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 	if err != nil {
 		return nil, err
 	}
+	if source == "path" {
+		if emb, err := deps.Workflows(parsed.Name); err == nil && !bytes.Equal(emb, raw) {
+			return nil, errs.E(workflow.CodeWorkflowInvalid, "a path workflow may not reuse the embedded name "+parsed.Name+" with different bytes", "reason", "reserved_name", "workflow", o.Workflow)
+		}
+	}
 	switch o.RepoMode {
 	case "":
 	case "enforcing":
@@ -89,6 +96,15 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 	if err != nil {
 		return nil, err
 	}
+	if deps.Preflight != nil {
+		for _, st := range w.States {
+			if n := w.NodeFor(st); n != nil && n.Exec == "fork" {
+				if err := deps.Preflight(n, o.Calibration); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	if !filepath.IsAbs(o.WorkDir) || !filepath.IsAbs(o.RepoRoot) {
 		return nil, errs.E(CodeWorkdirForeign, "work dir and repo root must be absolute", "reason", "relative", "work_dir", o.WorkDir, "repo_root", o.RepoRoot)
 	}
@@ -98,7 +114,7 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 		return nil, err
 	}
 	if len(allowed) > 0 && o.AllowCustomCmds != sha {
-		return nil, errs.E(CodeCmdsNotAllowed, consentList(allowed, o.WorkDir), "sha", sha)
+		return nil, errs.E(CodeCmdsNotAllowed, consentList(allowed, o.WorkDir), "sha", sha, "cmds_json", string(run.MarshalCanonical(allowed)))
 	}
 	// 3. git
 	g := deps.Git(o.WorkDir)
@@ -177,7 +193,7 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 	initData := run.InitData{
 		RunID: runID, CreatedAt: now, Workflow: w.Name, WorkflowHash: w.Hash, Vars: vars, Calibration: o.Calibration,
 		Mock: mock, RepoMode: w.RepoMode, AllowedCmds: allowed, CmdsSHA256: sha, RepoRoot: o.RepoRoot, WorkDir: o.WorkDir,
-		BaseSHA: baseSHA, Head: head, InitialState: w.Initial, InitialKind: initialKind, Goldens: goldens, Lineage: []string{},
+		BaseSHA: baseSHA, Head: head, InitialState: w.Initial, InitialKind: initialKind, Goldens: goldens, Lineage: []string{}, WorkflowSource: source,
 	}
 	m := &Machine{deps: deps, runID: runID}
 	first := run.Event{SchemaVersion: run.SchemaVersion, At: now, Type: run.TypeInit, Data: run.MarshalCanonical(initData)}
@@ -284,7 +300,7 @@ func readGoldens(deps Deps, path string) ([]run.Golden, error) {
 // Open loads an existing run (spec 2 §5.3b).
 func Open(ctx context.Context, deps Deps, runID string, o OpenOptions) (*Machine, error) {
 	m := &Machine{deps: deps, runID: runID}
-	sess, err := m.load(ctx, o.Repair)
+	sess, err := m.loadWith(ctx, o.Repair, o.ReadOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -295,10 +311,18 @@ func Open(ctx context.Context, deps Deps, runID string, o OpenOptions) (*Machine
 
 // load performs §5.3b steps 1–2 and returns a locked session.
 func (m *Machine) load(ctx context.Context, repair bool) (*session, error) {
+	return m.loadWith(ctx, repair, false)
+}
+
+// loadWith is load with the read-only variant: no lock, and it stops after the fold + sidecar parse.
+func (m *Machine) loadWith(ctx context.Context, repair, readOnly bool) (*session, error) {
 	deps := m.deps
-	unlock, err := deps.Store.Lock(m.runID)
-	if err != nil {
-		return nil, err
+	unlock := func() {}
+	if !readOnly {
+		var err error
+		if unlock, err = deps.Store.Lock(m.runID); err != nil {
+			return nil, err
+		}
 	}
 	sess := &session{m: m, ctx: ctx, unlock: unlock}
 	ok := false
@@ -366,6 +390,10 @@ func (m *Machine) load(ctx context.Context, repair bool) (*session, error) {
 		return nil, err
 	}
 	sess.w = w
+	if readOnly {
+		ok = true
+		return sess, nil
+	}
 	if err := workflow.VerifyCmds(snap.AllowedCmds, snap.WorkDir, deps.FileHash); err != nil {
 		return nil, err
 	}
@@ -482,7 +510,10 @@ func pseudoGate(name, code, detail string) *run.GateError {
 // viewOf computes the read model.
 func (s *session) viewOf() View {
 	snap := s.st.Snapshot
-	v := View{RunID: s.m.runID, Workflow: snap.Workflow, Snapshot: snap, NextAction: NextAdvance, Torn: s.m.torn}
+	v := View{RunID: s.m.runID, Workflow: snap.Workflow, Snapshot: snap, NextAction: NextAdvance, Torn: s.m.torn, Outgoing: []Edge{}}
+	for _, tr := range s.w.Outgoing(snap.State) {
+		v.Outgoing = append(v.Outgoing, Edge{To: tr.To, Gate: tr.Gate})
+	}
 	if snap.Outcome != "" {
 		v.NextAction = NextNone
 	}
@@ -493,7 +524,7 @@ func (s *session) viewOf() View {
 	if n := s.w.NodeFor(snap.State); n != nil {
 		k := run.Key(n.Name, snap.Iteration)
 		_, has := snap.NodeOutputs[k]
-		v.Node = &NodeView{Name: n.Name, Kind: n.Kind, Exec: n.Exec, HasOutput: has, Applied: snap.Applied[k]}
+		v.Node = &NodeView{Name: n.Name, Kind: n.Kind, Exec: n.Exec, Model: n.Model, Effort: n.Effort, HasOutput: has, Applied: snap.Applied[k]}
 		if snap.Outcome == "" && n.Exec != "fork" && !has && hasNeedsInput(events, n.Name, snap.Iteration) {
 			v.NextAction = NextRecord
 		}
@@ -592,6 +623,11 @@ func (s *session) advance() (AdvanceResult, error) {
 	}
 	// 5. node
 	if node != nil {
+		if _, has := snap.NodeOutputs[run.Key(node.Name, snap.Iteration)]; node.Exec == "fork" && !has && s.m.deps.Preflight != nil {
+			if err := s.m.deps.Preflight(node, snap.Calibration); err != nil {
+				return AdvanceResult{}, err
+			}
+		}
 		res, done, err := s.runNode(node, head)
 		if done || err != nil {
 			return res, err
@@ -1002,4 +1038,34 @@ func incompleteFork(snap run.Snapshot) bool {
 		return false
 	}
 	return snap.Seq <= snap.ForkedAtSeq || (snap.Seq == snap.ForkedAtSeq+1 && snap.StateKind == run.KindAgentEdit)
+}
+
+// RecordLLMCall appends one llm_call under the run's lock for fsm judge --run (spec 5 §2): the machine stamps
+// State/Iter/Mock, uses the reserved node name "judge" with Index = NextIndex("judge@<iter>"), Fence = !Calibration,
+// and appends whatever the closure returns when its Kind is set (a call error is appended with error set); Kind == ""
+// means nothing to append (ctx cancellation). The closure's error is returned either way.
+func (m *Machine) RecordLLMCall(ctx context.Context, call func(context.Context, Stamp) (run.LLMCallData, error)) (int64, error) {
+	sess, err := m.load(ctx, false)
+	if err != nil {
+		return 0, err
+	}
+	defer sess.unlock()
+	defer func() { m.view = sess.viewOf() }()
+	if m.torn {
+		return 0, errs.E(run.CodeAuditTorn, "audit.jsonl has a torn tail; open with --repair", "run", m.runID)
+	}
+	snap := sess.st.Snapshot
+	if snap.Outcome != "" {
+		return 0, errs.E(CodeRunTerminal, "run is terminal; re-judge through a fork", "outcome", string(snap.Outcome))
+	}
+	stamp := Stamp{State: snap.State, Iter: snap.Iteration, Index: sess.st.NextIndex(run.Key(JudgeNode, snap.Iteration)), Calibration: snap.Calibration, Fence: !snap.Calibration}
+	data, cerr := call(ctx, stamp)
+	if data.Kind == "" {
+		return 0, cerr
+	}
+	data.Index = stamp.Index
+	if err := sess.append(run.TypeLLMCall, data, JudgeNode); err != nil {
+		return 0, err
+	}
+	return sess.st.Seq, cerr
 }
