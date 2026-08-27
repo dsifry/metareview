@@ -299,3 +299,19 @@ func TestC4ValidateAndParseErrors(t *testing.T) {
 		t.Fatal("non-string cmd via Parse")
 	}
 }
+
+func TestDescribe(t *testing.T) {
+	st, err := Describe(node(t, "any: [no_fixation_progress, {cmd: notify}, {max_iterations: 5}, {budget: {tokens: 4000000}}, {all: [no_fixation_progress, {not: {cmd: chk}}]}]"), []string{"notify", "chk"})
+	if err != nil || st.Atoms != 6 || st.Depth != 3 || len(st.Cmds) != 2 || st.Cmds[0] != "notify" || st.Cmds[1] != "chk" {
+		t.Fatalf("describe: %+v %v", st, err)
+	}
+	if st, err := Describe(node(t, "no_fixation_progress"), nil); err != nil || st.Atoms != 1 || st.Depth != 0 || len(st.Cmds) != 0 {
+		t.Fatalf("scalar: %+v %v", st, err)
+	}
+	if _, err := Describe(node(t, "any: [{cmd: ghost}]"), []string{"notify"}); err == nil {
+		t.Fatal("undeclared cmd must fail")
+	}
+	if _, err := Describe(node(t, "bogus: 1"), nil); err == nil {
+		t.Fatal("invalid tree")
+	}
+}

@@ -69,11 +69,17 @@ type Scenario struct {
 	cmds   []cmdRow
 }
 
+// MaxFileBytes caps judge.yaml (spec 5 §8): the peek reads it before the run is verified.
+const MaxFileBytes = 512 << 10
+
 // Load reads <dir>/judge.yaml strictly.
 func Load(dir string) (*Scenario, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, FileName))
 	if err != nil {
 		return nil, errs.E(CodeMockInvalid, err.Error(), "dir", dir)
+	}
+	if len(raw) > MaxFileBytes {
+		return nil, errs.E(CodeMockInvalid, "judge.yaml exceeds 512 KB", "dir", dir, "reason", "too_large")
 	}
 	var f file
 	dec := yaml.NewDecoder(strings.NewReader(string(raw)))

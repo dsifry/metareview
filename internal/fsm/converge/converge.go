@@ -350,3 +350,50 @@ func (n *not) Evaluate(ctx context.Context, s run.Snapshot) (Result, error) {
 	}
 	return out, nil
 }
+
+// Stats describes a validated convergence tree (spec 5 §2: `fsm converge --check`).
+type Stats struct {
+	Atoms int
+	Depth int
+	Cmds  []string
+}
+
+// Describe validates node like Validate and reports its atom count, nesting depth, and the cmd names it references.
+func Describe(node *yaml.Node, cmdNames []string) (Stats, error) {
+	if err := Validate(node, cmdNames); err != nil {
+		return Stats{}, err
+	}
+	st := Stats{Cmds: []string{}}
+	describe(node, 0, &st)
+	return st, nil
+}
+
+// describe walks a tree Validate already accepted: a scalar is an atom, a `cmd` mapping is a cmd atom, the
+// `max_iterations`/`budget` mappings are atoms, `any`/`all`/`not` recurse.
+func describe(node *yaml.Node, depth int, st *Stats) {
+	if node.Kind == yaml.DocumentNode {
+		describe(node.Content[0], depth, st)
+		return
+	}
+	if depth > st.Depth {
+		st.Depth = depth
+	}
+	if node.Kind == yaml.ScalarNode {
+		st.Atoms++
+		return
+	}
+	key, val := node.Content[0].Value, node.Content[1]
+	switch key {
+	case "any", "all":
+		for _, c := range val.Content {
+			describe(c, depth+1, st)
+		}
+	case "not":
+		describe(val, depth+1, st)
+	case "cmd":
+		st.Atoms++
+		st.Cmds = append(st.Cmds, val.Value)
+	default: // max_iterations, budget
+		st.Atoms++
+	}
+}

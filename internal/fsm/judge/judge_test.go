@@ -746,3 +746,36 @@ func TestJ9HashesAndCut(t *testing.T) {
 		}
 	}
 }
+
+func TestPreflight(t *testing.T) {
+	both := Keys{Anthropic: "a", OpenAI: "o"}
+	cases := []struct {
+		name, model, effort string
+		cal                 bool
+		keys                Keys
+		code, reason        string
+	}{
+		{"empty model", "", "low", false, both, CodeJudgeModel, "length"},
+		{"unknown provider", "mistral-large", "low", false, both, CodeJudgeModel, ""},
+		{"bad effort", "gpt-5.2", "turbo", false, both, CodeJudgeEffortUnsupported, ""},
+		{"calibration pins medium", "gpt-5.2", "low", true, both, CodeJudgeEffortUnsupported, "calibration"},
+		{"anthropic key", "claude-opus-5", "low", false, Keys{OpenAI: "o"}, CodeJudgeKey, ""},
+		{"openai key", "gpt-5.2", "low", false, Keys{Anthropic: "a"}, CodeJudgeKey, ""},
+		{"unknown family", "claude-zzz-9", "low", false, both, CodeJudgeModel, "unknown_family"},
+		{"unknown family under calibration is accepted", "claude-zzz-9", "medium", true, both, "", ""},
+		{"ok anthropic", "claude-opus-5", "high", false, both, "", ""},
+		{"ok openai", "kimi-k2", "xhigh", false, both, "", ""},
+	}
+	for _, c := range cases {
+		err := Preflight(c.model, c.effort, c.cal, c.keys)
+		if c.code == "" {
+			if err != nil {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+			continue
+		}
+		if !errs.Is(err, c.code) || (c.reason != "" && errs.As(err).Fields["reason"] != c.reason) {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+	}
+}

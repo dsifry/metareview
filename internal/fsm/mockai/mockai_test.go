@@ -1,6 +1,7 @@
 package mockai
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -109,5 +110,16 @@ func TestS3Runner(t *testing.T) {
 	}
 	if _, err := r.Run(ctx, cmdexec.Spec{Name: "nope", Argv: []string{"/notify"}}); !errs.Is(err, CodeMockUnscripted) {
 		t.Fatal("keyed by Spec.Name, never argv")
+	}
+}
+
+func TestLoadTooLarge(t *testing.T) {
+	dir := t.TempDir()
+	big := append([]byte("judge:\n  - {kind: adjudicate, node: a, iter: 0, index: 0, verdict: {is_real: true}}\n# "), bytes.Repeat([]byte("x"), MaxFileBytes)...)
+	if err := os.WriteFile(filepath.Join(dir, FileName), big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); !errs.Is(err, CodeMockInvalid) || errs.As(err).Fields["reason"] != "too_large" {
+		t.Fatalf("too large: %v", err)
 	}
 }

@@ -219,28 +219,55 @@ func maxTokensFor(kind string, calibration bool) int {
 	return MaxTokensStillPresentProduct
 }
 
+// validate is the network-free half of prepare: model routing, effort vocabulary, the calibration pin, the key for
+// the routed provider, and the Anthropic family table. Preflight exposes it to the CLI (spec 5 §8).
+func validate(model, effort string, calibration bool, keys Keys) (provider, error) {
+	if _, over := run.CapText(model, run.MaxShort); over || model == "" {
+		return provUnknown, errs.E(CodeJudgeModel, "model id is empty or exceeds MaxShort", "model", model, "reason", "length")
+	}
+	prov := route(model)
+	if prov == provUnknown {
+		return provUnknown, errs.E(CodeJudgeModel, "no provider for model "+model, "model", model)
+	}
+	if !efforts[effort] {
+		return provUnknown, errs.E(CodeJudgeEffortUnsupported, "unknown effort "+effort, "effort", effort)
+	}
+	if calibration && effort != CalibrationEff {
+		return provUnknown, errs.E(CodeJudgeEffortUnsupported, "calibration requires effort medium", "effort", effort, "reason", "calibration")
+	}
+	switch prov {
+	case provAnthropic:
+		if keys.Anthropic == "" {
+			return provUnknown, errs.E(CodeJudgeKey, "ANTHROPIC_API_KEY is unset", "provider", "anthropic")
+		}
+		if capable, legacy := anthropicFamily(wireModel(model)); !calibration && !capable && !legacy {
+			return provUnknown, errs.E(CodeJudgeModel, "unknown Anthropic model family "+wireModel(model), "model", model, "reason", "unknown_family")
+		}
+	default:
+		if keys.OpenAI == "" {
+			return provUnknown, errs.E(CodeJudgeKey, "OPENAI_API_KEY is unset", "provider", "openai")
+		}
+	}
+	return prov, nil
+}
+
+// Preflight reports the error a Call with these parameters would raise before any network traffic
+// (ERR_JUDGE_MODEL, ERR_JUDGE_EFFORT_UNSUPPORTED, ERR_JUDGE_KEY), or nil.
+func Preflight(model, effort string, calibration bool, keys Keys) error {
+	_, err := validate(model, effort, calibration, keys)
+	return err
+}
+
 // prepare validates the request and builds the wire body.
 func (j *realJudge) prepare(r Request, system, user string) (request, error) {
-	if _, over := run.CapText(r.Model, run.MaxShort); over || r.Model == "" {
-		return request{}, errs.E(CodeJudgeModel, "model id is empty or exceeds MaxShort", "model", r.Model, "reason", "length")
-	}
-	prov := route(r.Model)
-	if prov == provUnknown {
-		return request{}, errs.E(CodeJudgeModel, "no provider for model "+r.Model, "model", r.Model)
-	}
-	if !efforts[r.Effort] {
-		return request{}, errs.E(CodeJudgeEffortUnsupported, "unknown effort "+r.Effort, "effort", r.Effort)
-	}
-	if r.Calibration && r.Effort != CalibrationEff {
-		return request{}, errs.E(CodeJudgeEffortUnsupported, "calibration requires effort medium", "effort", r.Effort, "reason", "calibration")
+	prov, err := validate(r.Model, r.Effort, r.Calibration, j.keys)
+	if err != nil {
+		return request{}, err
 	}
 	maxTok := maxTokensFor(r.Kind, r.Calibration)
 	model := wireModel(r.Model)
 	switch prov {
 	case provAnthropic:
-		if j.keys.Anthropic == "" {
-			return request{}, errs.E(CodeJudgeKey, "ANTHROPIC_API_KEY is unset", "provider", "anthropic")
-		}
 		body := map[string]any{"model": model, "system": system, "messages": []map[string]string{{"role": "user", "content": user}}, "max_tokens": maxTok}
 		lower := strings.ToLower(model)
 		if strings.Contains(lower, "opus-4-5") || strings.Contains(lower, "sonnet-4-5") {
@@ -266,14 +293,9 @@ func (j *realJudge) prepare(r Request, system, user string) (request, error) {
 			default:
 				body["thinking"] = map[string]any{"type": "disabled"}
 			}
-		default:
-			return request{}, errs.E(CodeJudgeModel, "unknown Anthropic model family "+model, "model", r.Model, "reason", "unknown_family")
 		}
 		return request{prov: prov, url: j.urls.Anthropic + "/v1/messages", headers: map[string]string{"x-api-key": j.keys.Anthropic, "anthropic-version": "2023-06-01", "content-type": "application/json"}, body: run.MarshalCanonical(body), maxTokens: maxTok}, nil
 	default:
-		if j.keys.OpenAI == "" {
-			return request{}, errs.E(CodeJudgeKey, "OPENAI_API_KEY is unset", "provider", "openai")
-		}
 		lower := strings.ToLower(model)
 		effort := r.Effort
 		switch {
