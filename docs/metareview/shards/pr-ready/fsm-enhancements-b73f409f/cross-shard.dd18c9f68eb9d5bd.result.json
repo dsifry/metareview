@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-review",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "dd18c9f68eb9d5bd",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 cross-shard",
+  "reviewedAt": "2026-08-27T12:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 470,
+      "note": "resultContractFor(crossShard bool) now emits crossShardContractBody for the cross-shard pack (cross-shard.<planHash>.result.json, kind \"cross-shard\", shardId \"\") and shardContractBody for shard packs; the generated pack in .metareview/shards/pr-ready/fsm-enhancements-b73f409f/dd18c9f68eb9d5bd/cross-shard.md carries the cross-shard wording, and it matches what reviewmanifest.crossShardBlockers/resultBlockers actually validate (manifest.go:432-505)."
+    },
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 1144,
+      "note": "TestCrossShardPackStatesItsOwnContract is the regression test for the prior contract defect: it asserts the cross-shard pack names cross-shard.<planHash>.result.json and kind \"cross-shard\", asserts it does NOT contain the shard file-name template, and asserts the shard pack keeps the shard contract. tests/go/test-shardpack-coverage.sh reports 100% (178 blocks)."
+    },
+    {
+      "path": "internal/taskdone/shardwiring_test.go",
+      "line": 110,
+      "note": "The previously untested task-done shard-pack wiring now has five named tests (plan write/prune hash parity, pack-write failure fails the run, rollback on review failure, housekeeping failure does not discard the run, Discover ingestion), structurally matching internal/prready/shardwiring_test.go. Both suites pass."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 451,
+      "note": "Cross-shard validation seam confirmed end to end: crossShardBlockers requires MatchesPlan (planHash equality), resultBlockers enforces kind==cross-shard and the file-name id, and a non-empty shardId is a blocker - exactly the shape the pack now instructs. shardpack.Discover (shardpack.go:344) and GC (shardpack.go:381) route cross-shard results by the same rules."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.sha256",
+      "line": 1,
+      "note": "Hash fixtures split across shards were re-derived, not assumed: regenerating oracle.jsonl+oracle.sha256 in a temp dir from oracle.template.jsonl with oracle.sh (three different shards: 00, 0e-2, 0d/16-3) reproduces the committed bytes exactly; internal/fsm/workflow/testdata/cmds-preimage.json (shard-12) and its .sha256 (shard-03) are consumed together by workflow_test.go, which passes."
+    },
+    {
+      "path": "workflows/sdlc-loop.yaml",
+      "line": 9,
+      "note": "Workflow-to-code vocabulary seam: every gate named in the two shipped YAMLs (nothing_found, findings_nonempty, nothing_confirmed, confirmed_nonempty, commit_exists, all_fixed, bugs_remain, findings_empty, confirmed_empty) exists in internal/fsm/gate/gates.go; every node kind exists in internal/fsm/kind/kind.go; every outcome is in run.Outcomes; the convergence atoms (no_fixation_progress bare form, max_iterations, budget.tokens) are all parsed by internal/fsm/converge/converge.go. Neither shipped workflow uses the mapping-form `on` key that workflow.go ignores, so that per-shard low finding stays cosmetic."
+    },
+    {
+      "path": "docs/fsm/driving-a-workflow.md",
+      "line": 40,
+      "note": "Doc-vs-code exit-code contract verified: the doc's table (0 for ADVANCED/DONE(fixed|clean)/FORKED, 3 for NEEDS_INPUT, 2 for usage/refusal-before-mutation, 1 for DONE(reviewed)/STOPPED/GATE_FAILED) matches machine.go:862-870 (OutcomeReviewed -> StatusDone with ExitCode 1; fixed/clean -> ExitCode 0) and cli/run.go usage() returning 2. The envelope keys quoted in docs/fsm/sdlc-loop-example.md (workflow_source, allowed_cmds, cmds_sha256, mock, seq/type/key, forked_at_seq, copied, resume_hint) all exist in cli/envelope.go and cli/run.go."
+    },
+    {
+      "path": "testdata/fsm/agent-prompt.golden",
+      "line": 1,
+      "note": "Three-shard prompt seam: `go run ./cmd/metareview fsm --agent-prompt` output is byte-identical to the golden (shard-10-3) generated from prompt.go (shard-1f), and all anchor lines in tests/go/agent-prompt-anchors.txt (shard-09) are present in it. Every `metareview fsm ...` invocation appearing in README/quickstart/INSTALL/commands/skills/docs/fsm/AGENTS/CLAUDE resolves to a real subcommand and real flags (run.go:37-74, boolFlags at run.go:87, value flags at run.go:113); JUDGE_EFFORT=xhigh documented in the skills matches judge.go:101."
+    },
+    {
+      "path": "tests/coverage.sh",
+      "line": 60,
+      "note": "CI/coverage seam across shards: .github/workflows/test.yml runs `npm test` -> tests/coverage.sh -> unit tests + tests/run-all.sh. Every package listed in tests/coverage-floor.txt (shard-1e) still exists in `go list ./...`, and the only module packages with no floor line are internal/version and internal/shardpack, the latter separately pinned at 100% by tests/go/test-shardpack-coverage.sh, which run-all.sh invokes."
+    },
+    {
+      "path": "internal/fsm/record/record.go",
+      "line": 85,
+      "note": "Shared-file seam between the FSM and the legacy gates: FSM rows are written to the same .metareview/runs.jsonl with Scope \"fsm-<workflow>\" and target type \"fsm\", so runchain.escalatedForTarget (scope task-done/pr-ready/...) can never match them - the CLAUDE.md/CHANGELOG claim that 0.8.x readers ignore FSM rows holds. The 1 MiB scanner buffer added to state.ReadJSONL, reviewlog and runchain.ReadRuns is the same constant in all three readers."
+    },
+    {
+      "path": "internal/taskdone/review.go",
+      "line": 303,
+      "note": "task-done and pr-ready shard wiring stay in parity: ingestShardResults and manifestContext are structurally identical in internal/taskdone/review.go:277-311 and internal/prready/review.go:299-334 (same Discover-with-explicit-paths guard, same Build inputs, same Present/Verdict/Counts mapping), and both prune on every sharded run but GC only when the gate passed."
+    },
+    {
+      "path": "tests/go/test-fsm.sh",
+      "line": 1,
+      "note": "Whole-branch execution check, not just per-shard reading: go build ./..., go vet ./..., go test ./... , tests/go/test-fsm.sh, tests/manifest/test-manifests.sh, tests/manifest/test-skills.sh and tests/go/test-shardpack-coverage.sh all pass on this working tree. Versions agree across the six files that carry one (internal/version/version.go, package.json, both plugin.json files, marketplace.json, CHANGELOG heading): 0.9.0."
+    },
+    {
+      "path": "docs/metareview/shards/pr-ready/fsm-enhancements-b73f409f/shard-03-2.23b7d62c5c661e4d.result.json",
+      "line": 1,
+      "note": "Input completeness checked by hash, not by file listing: all 48 shard hashes named in the pack header now have a matching shard-<id>.<hash>.result.json on disk, each PASS with blockingCount 0 and only low findings. The three that were still outstanding mid-review (shard-03-2, shard-0c, shard-19 - shardpack.go, reviewers/taskdone.go + shardpack_test.go + workflows/embed.go, and cli/envelope.go + record/clock.go + tests/coverage.sh + tests/run-all.sh) landed and were also read directly here; stale results from superseded plans remain on disk and are correctly ignored by Discover on shard-hash mismatch."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Byte-exact hash fixtures are only partly protected by .gitattributes. `internal/fsm/judge/testdata/prompts/*` and `testdata/fsm/**` are marked `-text`, but the equally byte-sensitive chain/preimage fixtures under internal/fsm/run/testdata/ (oracle.jsonl, oracle.sha256, oracle.template.jsonl, oracle.events.jsonl, golden-log.jsonl, golden-snapshots.jsonl) and internal/fsm/workflow/testdata/ (cmds-preimage.json/.sha256) are not. A checkout with core.autocrlf=true would rewrite those line endings and break the sha256 chain assertions with no hint at the cause. No shard could see this: the .gitattributes globs and the fixtures live in seven different shards.",
+      "evidence": [
+        {
+          "path": ".gitattributes",
+          "line": 1,
+          "note": "Only internal/fsm/judge/testdata/prompts/* and testdata/fsm/** are marked -text; the run/ and workflow/ hash fixtures are not covered."
+        },
+        {
+          "path": "internal/fsm/run/testdata/oracle.sha256",
+          "line": 1,
+          "note": "store_test.go:803 compares these hashes to the exact bytes of each oracle.jsonl line, so any line-ending rewrite fails the chain test."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Spec claim contradicted by the implementation it describes. docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md \u00a75.1 states that the pack's contract text \"is generated from those constants, not hand-copied\" (referring to reviewmanifest.EvidenceNoteMinLength and the closed severity/disposition vocabularies). In shardpack.go the contract is two hand-written string literals (shardContractBody, crossShardContractBody) that spell out \"at least 12 characters\" and the disposition list verbatim. They are correct today, but a change to EvidenceNoteMinLength or to the disposition set would silently desynchronise the instructions the reviewer follows from the rules the validator applies - the same failure mode as the contract bug this round fixed. Spec and code are in different shards (1f and 03-2).",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 477,
+          "note": "crossShardContractBody/shardContractBody hard-code \"at least 12 characters\" and the disposition vocabulary as literal text."
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 31,
+          "note": "EvidenceNoteMinLength = 12 and the disposition constants are the real source of truth the validator uses."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

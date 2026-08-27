@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0c-rereview",
+  "kind": "shard",
+  "shardId": "shard-0c",
+  "shardHash": "66ff11cebc8afd94",
+  "planHash": "dd18c9f68eb9d5bd",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 40,
+      "note": "ManifestContext.Satisfies gates the context-risk downgrade on all-shards-covered, cross-shard present for multi-shard plans, and manifest verdict PASS; reviewmanifest.Aggregate only returns PASS with zero blockers (internal/reviewmanifest/manifest.go:246), so the downgrade cannot fire over an unresolved blocker."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 37,
+      "note": "shardSatisfiableReasons admits only DIFF_TRUNCATED and LARGE_DIFF; both match contextprofile.ReasonDiffTruncated/ReasonLargeDiff, and LOCAL_DIFF_TRUNCATED is correctly excluded because packs carry only the branch diff."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 186,
+      "note": "Truncated-diff finding is downgraded to advisory only when the sharded path was taken; advisory maps to non-blocking via findings.classForCount (internal/findings/findings.go:409), and the blocking default is otherwise unchanged."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 220,
+      "note": "addedLines now prefers BranchDiffFull with a fallback to Diff, so lints see the untruncated measured bytes; no behavior change when BranchDiffFull is empty."
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 189,
+      "note": "The context-risk fingerprint change from the reason-suffixed form to the constant architecture:context-risk is already handled by the legacyContextRiskPrefixes supersede path, so prior rows are not orphaned."
+    },
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 1,
+      "note": "New 1175-line test file covering layout, reproducibility, fence widening, atomic replace/rollback, prune, discovery, explicit results and GC, including the cross-shard result-contract test at line 1385; go test ./internal/shardpack/ passes."
+    },
+    {
+      "path": "tests/go/test-override-coverage.sh",
+      "line": 12,
+      "note": "go test failure is checked rather than discarded (only stdout is sent to /dev/null); awk field 3 is the coverprofile hit count, so the zero-hit check is correct. Ran the script: reports 100% (59 blocks). Wired in via tests/run-all.sh:26."
+    },
+    {
+      "path": "workflows/embed.go",
+      "line": 27,
+      "note": "Read rejects any name containing / \\ or . before joining the .yaml suffix, so embedded-name resolution cannot traverse; workflows/embed_test.go exists and the package is on the 100% coverage list in tests/coverage.sh."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 99,
+      "note": "Checked the rubric blockers across the whole shard: no eval or other unsafe execution, no TODO/FIXME markers added, every chunk is part 1/1 with no truncated diff context, no duplicated inventoried path, and source changes are covered by tests (internal/reviewers/sharded_test.go, internal/shardpack/shardpack_test.go, workflows/embed_test.go). go vet and go test pass for all three packages."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}
