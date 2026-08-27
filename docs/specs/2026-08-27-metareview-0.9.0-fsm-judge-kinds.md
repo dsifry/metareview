@@ -1,6 +1,6 @@
 # metareview 0.9.0 — spec 4: guardrails, judge, kinds, and mock AI
 
-> **Status:** DRAFT r3 (2026-08-27). Fourth of the five split artifacts (ownership ledger: run spec §12). Owns plan
+> **Status:** r4 — BUILD BASELINE after ESCALATION (2026-08-27). Attempt 3 (`mrv-20260827-070456908813000-…`) ended NEEDS_REVISION on 4/8 lenses with every blocker mechanical; the chain is ESCALATED and a human must accept this r4 (applied provisionally per the run-spec precedent). r3 note: Fourth of the five split artifacts (ownership ledger: run spec §12). Owns plan
 > r3 §1.8 items 2–5, §2 (judge port), kinds/`Executor`/`Delta` producers, match-then-adjudicate composition +
 > `Bug.Verdict` vocabulary, `index` assignment, the `llm_call`/`cmd_call` producer contract, mock scenarios, and the
 > pinned harnesseval provenance of the prompts. Implements spec 2 r3's `machine.NodeKind`/`Executor`/`Registry`,
@@ -15,6 +15,16 @@
 > `Registry.Mock()`; `judge.Script` (no `judge`↔`mockai` cycle); vendored Python literals for an unconditional
 > provenance test; token clamps; bounded reads; scenario strict decode + file-bytes hash + typed `parsed`; every
 > test row names its discriminating fixture.
+>
+> **r4 changes (attempt 3):** explicit Anthropic effort-capable model list (no globs) and a Go-owned product thinking
+> table (the reference has no `high`); default base URLs; `Bug` field population (`Confidence`, `File`, `Line`); goldens
+> capped at `MaxDesc` at init (run cap) so matched `Desc` always fits; `Rejected` shape; still-present `*bool`; `Input =
+> prompt_tokens − cached_tokens`; every counter clamped ≥ 0 at the provider boundary; 529/`overloaded_error` precedence;
+> body-read/ctx-cancel/URL classification; trailing slash; `.gitattributes -text` for prompt fixtures; `cmdexec`
+> constructors; `Registry.Executor` for host kinds; `Verdict` fields on error; `diff_truncated` = the 30000-byte cut;
+> `lenses` default 8; non-empty `issue_text`; mock cmd rows keyed by durable ordinal; `cmd` kind `Reduce` cliff check;
+> `JUDGE` model id ≤ `MaxShort`; typed `Verdict` constants; duplicate golden comments refused; single Guarded factory;
+> test rows for unknown-fields-ignored, calibration at the `Judge.Call` level, full-stdout decode, literal bodies.
 >
 > **Port spec:** `~/Developer/harnesseval/harnesseval/{judge,adjudicate,sdlc_loop,usage,model_router,effort}.py` @
 > `19ff9a8`. Slot sources: `match` `golden_comment = Golden.Comment`, `candidate = Finding.IssueText`
@@ -41,15 +51,19 @@ type Spec struct { Name string /* declared cmd name; the fake keys on it, the ex
 type Result struct { Stdout, Stderr []byte; ExitCode int; Duration time.Duration }
 type Runner interface { Run(ctx, Spec) (Result, error) }
 type Guarded struct { Runner Runner; Allowed []run.AllowedCmd; Dir string; RunID string; FileHash func(string) (string, error); Audit func(run.Event) error; Environ func() []string; Clock func() time.Time }
-func (g Guarded) Run(ctx, name string, stdin []byte) (converge.CmdResult, error)   // the only entry point (converge.Runner)
-func (g Guarded) Call(ctx, name string, stdin []byte, out any) error               // Run + typed decode
+func NewExecRunner() Runner                                                        // the real one; the fake is mockai's
+func (g Guarded) Run(ctx, name string, stdin []byte) (converge.CmdResult, error)   // converge.Runner
+func (g Guarded) Call(ctx, name string, stdin []byte, out any) error               // shares Run's unaudited core; ONE cmd_call per call (audited after decode)
 ```
+Spec 2's `Deps.Runner` and this package's `kind.Deps.Guarded` are the **same closure** (spec 5 builds one `Guarded` factory).
 `Run`: `name ∈ Allowed` else `ERR_CMD_NOT_ALLOWED{name}` **without audit** (the fold refuses unsanctioned names; the
 check is defense in depth — workflow validation already guarantees names); `Argv[0]` must be absolute else
-`ERR_CMD_NOT_ALLOWED{reason: relative}`; re-verify per spec 2 §2.5 (`ERR_CMD_CHANGED`); execute `Allowed[name].Argv`
+`ERR_CMD_NOT_ALLOWED{reason: relative}` (no audit); re-verify with `workflow.VerifyCmds` (`cmdexec → workflow` edge;
+`ERR_CMD_CHANGED`, no audit — pre-exec refusals are never `cmd_call`s); execute `Allowed[name].Argv`
 verbatim in `Dir` with `Timeout = time.Duration(TimeoutMS) * time.Millisecond` (0 → 60 s); environment = exactly
 {`PATH`, `HOME`, `LANG`, `TMPDIR`} ∩ set-in-`Environ()` + `MRV_RUN_ID=<RunID>` + each `Allowed[name].Env` name that is set;
-stdout/stderr read through `io.LimitReader(MaxPayload+1)` (over → `ERR_CMD_OUTPUT_INVALID{reason: too_large}`);
+stdout/stderr collected by a capping writer that keeps draining (so a chatty child never stalls on a full pipe); more than
+`MaxPayload` bytes → `ERR_CMD_OUTPUT_INVALID{reason: too_large}` after the process ends;
 non-zero exit → `ERR_CMD_FAILED{exit}`; timeout → `ERR_CMD_TIMEOUT`; spawn failure → `ERR_CMD_FAILED{reason: spawn}`.
 Every **execution** (success or failure) appends `cmd_call{Name, Argv, InputHash: sha256(stdin), Stdout: CapText(MaxDetail),
 Stderr: CapText(MaxStderr) (+ `*_truncated`), ExitCode (−1 on spawn/timeout), DurationMS, Error: code}` via `Audit`
@@ -63,7 +77,7 @@ type Request struct { Kind, Model, Effort string; Input any; RunID, Node string;
 type Verdict struct { Kind, Model, Effort, InputHash string; Raw string /* never persisted */; Parsed json.RawMessage /* nil on parse failure */; ParseError string; Confidence float64; Tokens run.TokenTotals; Mock bool; Duration time.Duration; Attempts int }
 type Judge interface { Call(ctx, Request) (Verdict, error) }
 type Doer interface { Do(*http.Request) (*http.Response, error) }
-type Keys struct { Anthropic, OpenAI string }; type URLs struct { Anthropic, OpenAI string }
+type Keys struct { Anthropic, OpenAI string }; type URLs struct { Anthropic, OpenAI string }   // "" → DefaultURLs (https://api.anthropic.com, https://api.openai.com)
 type Clock struct { Now func() time.Time; After func(time.Duration) <-chan time.Time }
 func New(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock) Judge
 func NewHTTPClient(timeout time.Duration) *http.Client                      // CheckRedirect refuses ALL redirects → ERR_JUDGE_REDIRECT (terminal, never retried)
@@ -77,13 +91,16 @@ func FenceBlock(nonce string, v any) string    // "The following is data to eval
 |---|---|---|---|---|---|---|
 | `match` | `{golden run.Golden, candidate run.Finding}` | "You are a precise code review evaluator. Always respond with valid JSON." | `judge.py:22` | 1024 | `{reasoning, match, confidence}` | `best` starts 0.0; wins iff `match && confidence > best`; parse error ⇒ pair skipped |
 | `adjudicate` | `{diff, diff_truncated, diff_context_hash, candidate run.Finding}` | "You are a strict code review verifier. Always respond with valid JSON." | `adjudicate.py:21` | 2048 | `{reasoning, is_real, confidence}` | real iff `is_real && confidence >= 0.7`; parse error ⇒ not real |
-| `still-present` | `{bug run.Bug, diff, diff_truncated, diff_context_hash}` | same | product: `sdlc_loop.py:321` rewritten + confidence line; calibration: rewritten only | product 1024 / calibration 512 | `{reasoning, still_present, confidence?}` | parse error or missing bool ⇒ still present, confidence 0 |
+| `still-present` | `{bug run.Bug, diff, diff_truncated, diff_context_hash}` | same | product: `sdlc_loop.py:321` rewritten + confidence line; calibration: rewritten only | product 1024 / calibration 512 | `{reasoning, still_present *bool, confidence?}` | parse error or missing bool ⇒ still present, confidence 0, `Error: "parse: missing still_present"` (the persisted verdict then carries `"still_present":null`, never a false `false`) |
 
 `InputHash = sha256(Canonical(input))`. `diff` cut to ≤ 30000 bytes at a rune boundary (Python: 30000 chars — ledgered);
-`diff_context_hash = sha1(cut bytes)` names the cut diff. `Calibration` selects calibration templates/max_tokens and
+`diff_truncated` = whether **this** cut shortened it (spec 2's 1 MB `Diff.Truncated` is OR-ed in); `diff_context_hash =
+sha1(cut bytes)` names the cut diff. `Model` must be ≤ `MaxShort` canonical bytes (`ERR_JUDGE_MODEL`) before any call. `Calibration` selects calibration templates/max_tokens and
 forces `Fence=false`. Effort vocabulary: `low | medium | high | xhigh`; anything else → `ERR_JUDGE_EFFORT_UNSUPPORTED{effort}`.
 
 ### 3.2 Templates, rendering, fencing, goldens
+(`testdata/fsm/judge/prompts/*` carry `-text` in `.gitattributes`; a `.python.txt` body = every byte after the first `\n`,
+no trailing newline — the literals end in `}}` — asserted by J1.)
 `RenderPrompt` = single left-to-right pass emulating `str.format`: `{{`→`{`, `}}`→`}`, `{name}`→ value (values are never
 rescanned), any other `{`/`}` or unknown name → `ERR_PROMPT_TEMPLATE`. Fenced (`adjudicate`/`still-present`, product
 mode): the `{diff}` and `{candidate}`/`{golden_comment}` slot values are replaced by `FenceBlock(nonce, value)`; the
@@ -102,22 +119,31 @@ literal must equal `python.txt` (failure = fail, not skip); absent → that laye
 ### 3.3 Parsing
 `stripFences(s)`: if `s` starts with "```" (no trimming first — parity with `model_router._strip_fences`), take
 `strings.SplitN(s, "```", 3)[1]`, strip a leading `json`, `TrimSpace`. `json.Unmarshal` into the typed verdict (strict
-types: `"match": "true"` is a parse error — ledgered vs Python's coercion); unknown fields ignored. `Parsed` = canonical
-re-encoding of the typed struct (absent `confidence` materializes as 0 — stated); `> MaxDetail` → parse error.
-Response bodies are read through `io.LimitReader(4 MB)` (over → `ERR_JUDGE_RESPONSE`).
+types: `"match": "true"` is a parse error — ledgered vs Python's coercion); **unknown fields are ignored** (never
+`DisallowUnknownFields` here — models add keys). `Parsed` = canonical re-encoding of the typed struct (absent
+`confidence` materializes as 0 — stated; still-present's missing bool stays `null`); `> MaxDetail` → parse error.
+Response bodies are read through `io.LimitReader(4 MB)` (over → `ERR_JUDGE_RESPONSE`); a body read error mid-response
+is a transport error (retried); a `ctx` cancellation during a backoff sleep returns `ctx.Err()` immediately (the sleep
+selects on `ctx.Done()`).
 
 ### 3.4 Providers
 Routing: `anthropic` for `claude*`/`anthropic/*`; `openai` for `gpt*`/`openai/*`/`glm*`/`kimi*`; else `ERR_JUDGE_MODEL`.
-Missing key → `ERR_JUDGE_KEY{provider}`. `URLs` come only from `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL` (spec 5 `RealDeps`);
-must be `https`, or `http` with hostname exactly `localhost`/`127.0.0.1`/`::1` (any port), no userinfo, no path/query/
-fragment (`ERR_JUDGE_URL`).
+Missing key → `ERR_JUDGE_KEY{provider}`. `URLs` come only from `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL` (spec 5 `RealDeps`;
+unset → `DefaultURLs`); an override must parse (`ERR_JUDGE_URL`), be `https`, or `http` with hostname exactly
+`localhost`/`127.0.0.1`/`::1` (any port), no userinfo, and a path of `""` or `/` (stripped); query/fragment refused.
+Overrides are agent-satisfiable and unstamped (ledger): spec 5 lists them with the other agent-satisfiable knobs and
+`--agent-prompt` says so.
 - **Anthropic** `POST {base}/v1/messages`: `model`, `system`, `messages:[{user}]`, `max_tokens`; `temperature: 0` for ids
   containing `opus-4-5`/`sonnet-4-5`. Effort: **calibration** → `thinking: {type: "disabled"}` (the reference's `medium`
-  body); **product** → ids matching `claude-opus-4-5*`, `claude-*-4-6*`, `claude-*-5*` (effort-capable) send
-  `output_config: {effort}` (no beta header); other ids: `low`/`medium` → `thinking: disabled`, `high` → `thinking:
-  {type: "enabled", budget_tokens: 8192}`, `xhigh` → `budget_tokens: 32768`, with `max_tokens += budget` and no
-  `temperature` (reference `effort.py:20-32`). A 400 mentioning `output_config`/`effort`/`thinking` →
-  `ERR_JUDGE_EFFORT_UNSUPPORTED{model}`. Headers `x-api-key`, `anthropic-version: 2023-06-01`. Text = concatenation of
+  body; calibration requires `Effort == medium` on every provider, else `ERR_JUDGE_EFFORT_UNSUPPORTED{reason: calibration}`);
+  **product** → an explicit family table (prefix match on the id after an optional `anthropic/`): effort-capable =
+  `claude-opus-4-5`, `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`,
+  `claude-sonnet-5`, `claude-fable-5`, `claude-mythos-5` → `output_config: {effort}` (no beta header, no `thinking`);
+  legacy-thinking = `claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-3-` → `low`/`medium`: `thinking: disabled`;
+  `high`: `thinking: {type: "enabled", budget_tokens: 8192}`; `xhigh`: `budget_tokens: 32768`, with `max_tokens +=
+  budget` and `temperature: 1` (this product table is Go's own — the reference has no `high` and sizes `xhigh` from
+  `max_tokens`; ledgered); any other `claude*` id → `ERR_JUDGE_MODEL{reason: unknown_family}`. A 400 mentioning
+  `output_config`/`effort`/`thinking` → `ERR_JUDGE_EFFORT_UNSUPPORTED{model}`. Headers `x-api-key`, `anthropic-version: 2023-06-01`. Text = concatenation of
   `content[].text` (`type == "text"`; ledger: reference took the first block). Tokens from `usage.{input_tokens,
   cache_read_input_tokens, cache_creation_input_tokens, output_tokens}`.
 - **OpenAI-compatible** `POST {base}/v1/chat/completions`: `model`, `messages`, `max_completion_tokens` (= cap; `glm*`/`kimi*`
@@ -128,10 +154,14 @@ fragment (`ERR_JUDGE_URL`).
   `completion_tokens_details.reasoning_tokens` (`Reasoning`, 0 if absent), `Output = max(0, completion_tokens − Reasoning)`.
 No text / non-JSON body / missing `usage` → `ERR_JUDGE_RESPONSE{detail}` (tokens of earlier attempts kept). **Retry** (≤ 5
 attempts): on 429, 5xx (incl. 529), transport errors other than `ERR_JUDGE_REDIRECT`, or a non-2xx JSON body with
-`error.type == "overloaded_error"`; never on a 2xx body. Sleeps via `clock.After`: 429/`overloaded_error` →
-`min(10·3^a, 120)` s (10, 30, 90, 120); others → `2^a` s (1, 2, 4, 8). Exhausted → `ERR_JUDGE_HTTP{status}` /
+`error.type == "overloaded_error"`; never on a 2xx body. Sleeps via `clock.After` (select with `ctx.Done()`):
+429 or any status whose body is `overloaded_error` (incl. 529) → `min(10·3^a, 120)` s (10, 30, 90, 120); other
+retryable → `2^a` s (1, 2, 4, 8). Exhausted → `ERR_JUDGE_HTTP{status}` /
 `ERR_JUDGE_TRANSPORT`; other statuses → `ERR_JUDGE_HTTP` immediately. 180 s per attempt via `context.WithTimeout`
 (`Clock.Now` based deadline). `Verdict.Tokens` sums every attempt; `Attempts` counts them.
+
+On error `Judge.Call` returns a `Verdict` whose `InputHash`, `Tokens` (earlier attempts), `Duration`, and `Attempts`
+are valid alongside the error; executors use them for the `llm_call`.
 
 ### 3.5 MockJudge
 `NewMock(Script)`: key `(kind, node, iter, index)`; row `Raw` goes through the real parser (so `Parsed` bytes match real
@@ -153,15 +183,21 @@ Executors `Audit` immediately after each `Judge.Call` returns; a non-parse error
 ## 4. `kind`
 ### 4.1 Common
 ```go
-type Deps struct { Judge judge.Judge; Guarded func(allowed []run.AllowedCmd, workDir, runID string, audit func(run.Event) error) cmdexec.Guarded; Clock func() time.Time; Mock bool }
-func New(d Deps) *Registry     // Registry.Mock() == d.Mock; the CLI passes MockJudge + the scenario Runner when --mock-ai / snap.Mock
+type Deps struct { Judge judge.Judge; Guarded func(allowed []run.AllowedCmd, workDir, runID string, audit func(run.Event) error) converge.Runner /* the same closure as machine.Deps.Runner; Call = cmdexec.Call(runner, …) */; Mock bool }
+func New(d Deps) (*Registry, error)   // Registry.Mock() == d.Mock; New refuses Mock:true with a non-*judge.MockJudge and Mock:false with one (ERR_MOCK_MISMATCH)
+// Bug.Verdict constants: run.VerdictMatched = "matched", run.VerdictRealButUngold = "real_but_ungold", run.VerdictHallucination = "hallucination" (typed in run; Decode validates the set for every kind incl. cmd)
+// Registry.Executor(name) for host-only kinds returns (nil, false).
 ```
-`Info()`: `review-lenses {subagent, [inline subagent], ValidateParams: lenses ∈ 1..8}`, `match-then-adjudicate {fork, [fork]}`,
+`Info()`: `review-lenses {subagent, [inline subagent], ValidateParams: lenses absent (→ 8) or an integer 1..8}`, `match-then-adjudicate {fork, [fork]}`,
 `agent-edit {inline, [inline subagent]}`, `still-present {fork, [fork]}`, `cmd {fork, [fork]}`. `Instructions` returns
 `Text` (untrusted values only inside `FenceBlock`s), `Input` (`base_sha`, `head_sha`, `iteration`, `diff_truncated`, +
 untrusted keys), `Untrusted`, documentation `OutputSchema`. `Decode` (used by `Record` and by executors on their own
-output): `DisallowUnknownFields`; lists ≤ `MaxDeltaList`; `IssueText` ≤ `MaxText`, `Desc` ≤ `MaxDesc`, `Summary` ≤
-`MaxShort`; `len(Canonical(output)) ≤ MaxPayload − 128` (envelope margin) → else `ERR_NODE_OUTPUT_INVALID{reason}`.
+output): `DisallowUnknownFields`; lists ≤ `MaxDeltaList`; `IssueText` non-empty and ≤ `MaxText`, `Desc` ≤ `MaxDesc`,
+`Summary` ≤ `MaxShort`, every other string field (`File`, `Severity`, `Category`, `Source`, `ID`, `Verdict`, `Commit`)
+≤ `MaxShort`, `Verdict` ∈ the constant set; `len(Canonical(output)) ≤ MaxPayload − 128` (envelope margin) → else
+`ERR_NODE_OUTPUT_INVALID{reason}`. Goldens are capped at `MaxDesc` at init (spec 2 §5.3 step 4, `ERR_GOLDENS_INVALID`),
+so a matched bug's `Desc = Golden.Comment` always fits; duplicate golden comments are refused there too (IDs are
+`BugID(comment)`).
 Effective bounds (ledger): ~120 full-`Desc` bugs or ~60 full-`IssueText` findings per output.
 
 | kind | Instructions → host | Decode | Reduce |
@@ -170,18 +206,21 @@ Effective bounds (ledger): ~120 full-`Desc` bugs or ~60 full-`IssueText` finding
 | `match-then-adjudicate` | `ERR_EXEC_UNSUPPORTED` | `{Confirmed, Rejected}` (`Rejected` `Desc` ≤ `MaxShort`) | `Confirmed`; fails `ERR_TOO_MANY_BUGS` when `|AllFound ∪ Confirmed| > MaxDeltaList` |
 | `agent-edit` | fix each bug in `input.unfixed_bugs` (= `AllFound` minus fixed statuses, fenced), commit, no push/amend; return `{"commit","summary"}` | `{Commit ^[0-9a-f]{7,40}$, Summary}` | `Commit` |
 | `still-present` | `ERR_EXEC_UNSUPPORTED` | `{Status}` | `Status` |
-| `cmd` | `ERR_EXEC_UNSUPPORTED` | `run.Delta` | as decoded |
+| `cmd` | `ERR_EXEC_UNSUPPORTED` | `run.Delta` (same caps) | as decoded; `ERR_TOO_MANY_BUGS` when `|AllFound ∪ Confirmed| > MaxDeltaList` |
 
 ### 4.2 `match-then-adjudicate` executor
 Input: `snap.Findings`, `snap.Goldens`, `diff`. Candidates are **deduplicated by `IssueText`** (first occurrence kept —
 Python keys by text). Calls are numbered from `StartIndex`.
 1. If goldens: for `g` (outer) × `c` (inner): `match` call — every pair, serially. Per golden: `best = 0.0`; candidate
    `c` becomes the provisional winner iff `match && confidence > best` and is marked *seen* (Python `candidate_matched`);
-   the final winner gets `Verdict: matched`, `GoldenIdx`, `Desc = Golden.Comment`, `ID = BugID(Golden.Comment)`. A
-   candidate may win several goldens (one `Bug` per golden). Superseded provisional winners stay *seen*: neither
+   the final winner gets `Verdict: matched`, `GoldenIdx`, `Desc = Golden.Comment`, `ID = BugID(Golden.Comment)`,
+   `Confidence` = the winning match confidence, `File`/`Line` = the candidate's (location only; its text never
+   propagates). A candidate may win several goldens (one `Bug` per golden). Superseded provisional winners stay *seen*: neither
    confirmed nor adjudicated (reference bookkeeping — ledgered).
 2. Every candidate never *seen*, in order → `adjudicate` call (indexes continue); real → `Verdict: real_but_ungold`,
-   `Desc = CapText(IssueText, MaxDesc)`, `ID = BugID(IssueText)`; not real → `Rejected{Verdict: hallucination}`.
+   `Desc = CapText(IssueText, MaxDesc)` (ledger: the reference passes the full text; `MaxText` candidates are cut at 2 KB),
+   `ID = BugID(IssueText)`, `Confidence` = adjudicate confidence, `File`/`Line` = the candidate's; not real →
+   `Rejected{Verdict: hallucination, Desc: CapText(IssueText, MaxShort), ID: BugID(IssueText), Confidence, File, Line}`.
 3. Output `{Confirmed (golden order then candidate order), Rejected}`; self-`Decode` before returning
    (`ERR_NODE_OUTPUT_INVALID` → executor error). No goldens → step 2 only.
 
@@ -200,10 +239,11 @@ calls:
   - {kind: adjudicate, node: adjudicate, iter: 0, index: 0, raw: '{"reasoning":"...","is_real":true,"confidence":0.9}', tokens: {input: 10, output: 5, cache_read: 0, cache_create: 0, reasoning: 0}, expect_model: gpt-5.2, expect_input_hash: "…"}
   - {kind: match, node: adjudicate, iter: 1, index: 3, error: ERR_JUDGE_HTTP}
 cmds:
-  - {name: notify, stdout: '{"stop": false, "reason": ""}', stderr: "", exit: 0, repeat: true}
+  - {name: notify, call: 0, stdout: '{"stop": false, "reason": ""}', stderr: "", exit: 0}
+  - {name: notify, call: 1, stdout: '{"stop": true, "reason": "plateau"}', exit: 0, repeat: true}
 ```
 `Load(dir) (*Scenario, error)` (own yaml-tagged wire structs, `KnownFields(true)`); `Scenario.Hash()` = sha256 of the
-scenario **file bytes**; `Scenario.Script() judge.Script`; `Scenario.Runner() cmdexec.Runner` (matches `Spec.Name`; rows
+`judge.yaml` **file bytes** (the only file in the directory that is read); `Scenario.Script() judge.Script`; `Scenario.Runner() cmdexec.Runner` (matches `Spec.Name`; rows
 consumed in order unless `repeat`; unscripted → `ERR_MOCK_UNSCRIPTED{name}`; executes nothing).
 
 ## 6. Vars — `JUDGE`/`JUDGE_EFFORT` required (at HEAD); unset → spec 2 `ERR_VAR_UNSET`; spec 5 maps to `ERR_JUDGE_UNSET`.
@@ -219,9 +259,9 @@ consumed in order unless `repeat`; unscripted → `ERR_MOCK_UNSCRIPTED{name}`; e
 ## 8. Tests (100% each; TDD; discriminating fixtures)
 | pkg | rows |
 |---|---|
-| cmdexec | X1 real runner through `Guarded` with a helper binary (`-test.run=TestHelperProcess --` in the pinned argv) printing `os.Args`/`os.Environ()` as JSON: `; rm -rf x`, `$HOME`, `*`, embedded space verbatim; env set equals the derived expected set (injected `Environ` containing `SECRET_TOKEN`, `PATH`, `HOME`, and a declared `TOKEN`; parent `t.Setenv("SECRET_TOKEN")`; `SECRET_TOKEN` absent, `MRV_RUN_ID` present, declared-but-unset name absent); dir; stdin; exit codes; timeout: grandchild `sleep 30`, `elapsed ∈ [Timeout, Timeout+WaitDelay+1s]`, `ERR_CMD_TIMEOUT`, grandchild gone; `TimeoutMS 1500` → fake sees `1500ms` (literal), default → `60s`, positive row (2000 ms, child 200 ms). X2 `Guarded.Run`: not-allowed → error and **no** audit; relative `argv[0]` refused; mismatch/missing/appeared; pinned argv executed (fake sees `Allowed.Argv`); failed, spawn failure, success; `cmd_call` fields incl. `InputHash` literal, truncation flags, `Error` on decode failure (`Call`); audit error propagates; stdout over `MaxPayload` → `too_large` |
-| judge | J1 goldens: `.python.txt` sha literals; rewrite == constant for all four templates (unconditional); sibling layer; `.plain.golden`/`.fenced.golden`; `match` fenced == unfenced; `RenderPrompt` rows: `{{`/`}}`/`{candidate}` inside values, lone `}` and unknown `{slot}` in a template → `ERR_PROMPT_TEMPLATE`. J2 `stripFences`: no fence, ```json, multi-fence, trailing text, lone fence, **leading whitespace before the fence → parse error**, prose before fence → parse error. J3 parsers: booleans present/missing/non-JSON/string-typed; still-present both fail-close triggers (confidence 0); adjudicate 0.7/0.6999/`is_real:false`+0.99; `Parsed` over `MaxDetail`; absent confidence → 0. J4 request shapes via recording `Doer`: table effort `{low, medium, high, xhigh, bogus}` × `{gpt-5.2, glm-4, kimi-k2, claude-opus-4-5, claude-sonnet-4-5, claude-opus-5}` × calibration `{true, false}` asserting literal `reasoning_effort`/`output_config`/`thinking`/`temperature`/`max_tokens`(+budget)/`max_completion_tokens` or `ERR_JUDGE_EFFORT_UNSUPPORTED`; no beta header; still-present `max_tokens` 512/1024 per mode on both providers; token accounting with four distinct nonzero values per provider incl. `cached_tokens`, missing `completion_tokens_details` → `Output = completion_tokens`, `reasoning > completion` → 0; multi-block and empty content; missing `usage`; effort 400; body over 4 MB. J5 retry with injected `After`: `[10,30,90,120]` for 429×4, `[10,30,90,120]` for `overloaded_error`×4, `[1,2,4,8]` for 5xx×4 and 529×4 and transport×4, mixed `429,500,429 → [10,2,90]`, 5xx×5 → `ERR_JUDGE_HTTP` after 4 sleeps, transport×5 → `ERR_JUDGE_TRANSPORT`, 200 body containing "overloaded" **not** retried, 400 immediate, `Attempts`/summed `Tokens`, per-attempt deadline ≈ `Now+180s`. J6 URLs (ports, `LOCALHOST`, path/query rejected, userinfo, other hosts) + `NewHTTPClient` same/cross-host redirect → `ERR_JUDGE_REDIRECT`, `Attempts == 1`, zero sleeps; routing table; missing key per provider. J7 mock: scripted, unscripted, `expect_*` literals, near-miss keys, `Error` rows, `Raw` through the real parser, `Calls()` incl. errored; nonce uniqueness. J8 fixture manifest: no `sk-ant-`, `sk-proj-`, `sk-`, `Bearer `; dummy key literal pinned; `ParseError` is the decoder message only. J9 `InputHash` literal per kind; `diff_context_hash` literals for 29999/30000/30001 + rune straddle |
-| kind | K1 `Decode` accept/reject per kind incl. commit 6/7/40/41/uppercase, `Summary` at cap/+1, lists at 256/257, `IssueText`/`Desc` at cap/+1, canonical at `MaxPayload−128`/+1, `cmd` Delta caps (desc, status, commit), unknown field per kind. K2 `Reduce` incl. `ERR_TOO_MANY_BUGS` at 257 (accept at 256). K3 composition with `MockJudge` at `iter: 2`, `StartIndex: 5`: 2 goldens × 3 findings → indexes `[5..10]` then adjudicate `11,12` for the two never-seen; equal-confidence tie → first; `confidence 0` never matches; one candidate wins both goldens (two `Bug`s, `Desc` = each golden's comment); superseded provisional winner is neither confirmed nor adjudicated (1×2: 0.5 then 0.9 → adjudicate indexes `[]`); duplicate `IssueText` collapsed; parse error on one pair → skipped, `llm_call.Error` set; no goldens; `Rejected`; HTTP error aborts after audit; output over cap → error. K4 still-present order, `Iter` propagated, 256 ok. K5 `Instructions`: raw untrusted value absent outside fences; `lenses` `ValidateParams` 0/1/8/9; `unfixed_bugs` = unfixed subset; schema shows the commit regex. K6 cmd kind via fake Runner: payload literal (vars hashed, no node outputs), delta decoded; `Instructions` → `ERR_EXEC_UNSUPPORTED` ×3. K7 `Info()` table; `New(...).Mock()`; `llm_call` events per §3.6 (success/parse/HTTP) with `Index` from `StartIndex` |
+| cmdexec | X1 real runner through `Guarded` with a helper binary (`-test.run=TestHelperProcess --` in the pinned argv) printing `os.Args`/`os.Environ()` as JSON: `; rm -rf x`, `$HOME`, `*`, embedded space verbatim; env set equals the derived expected set (injected `Environ` containing `SECRET_TOKEN`, `PATH`, `HOME`, and a declared `TOKEN`; parent `t.Setenv("SECRET_TOKEN")`; `SECRET_TOKEN` absent, `MRV_RUN_ID` present, declared-but-unset name absent); dir; stdin; exit codes; timeout: grandchild `sleep 30`, `elapsed ∈ [Timeout, Timeout+WaitDelay+1s]`, `ERR_CMD_TIMEOUT`, grandchild gone; `TimeoutMS 1500` → fake sees `1500ms` (literal), default → `60s`, positive row (2000 ms, child 200 ms). X2 `Guarded.Run`: not-allowed → error and **no** audit; relative `argv[0]` refused (no audit); `ERR_CMD_CHANGED` refused (no audit); literal expected env `{PATH=…, HOME=…, MRV_RUN_ID=<id>, TOKEN=…}` (no `LANG`/`TMPDIR` when unset); stdout at exactly `MaxPayload` accepted, over → `too_large`, stderr over cap → `too_large`; `Call` decodes a valid JSON stdout of `MaxDetail+1` bytes (audited copy truncated, `Error == ""`); timeout/spawn rows assert `exit_code == -1` and the `Error` literal; `Spec.Ordinal` = prior `cmd_call` count; mismatch/missing/appeared; pinned argv executed (fake sees `Allowed.Argv`); failed, spawn failure, success; `cmd_call` fields incl. `InputHash` literal, truncation flags, `Error` on decode failure (`Call`); audit error propagates; stdout over `MaxPayload` → `too_large` |
+| judge | J0 authority: every expected request body in J4 is a hand-written literal JSON fragment per cell (kind × provider × effort × mode), incl. `anthropic-version: 2023-06-01`, message roles, `match` 1024 / `adjudicate` 2048; an unambiguous legacy id (`claude-sonnet-4-5`) pins the `thinking` bodies (`high`: `budget_tokens: 8192`, `max_tokens: 1024+8192`, `temperature: 1`; `xhigh`: 32768); `claude-3-7-sonnet-latest` legacy; `claude-opus-4-7` effort-capable; unknown `claude-zeta` → `ERR_JUDGE_MODEL`; calibration with `Effort != medium` → `ERR_JUDGE_EFFORT_UNSUPPORTED` on both providers. J1 goldens: `.python.txt` sha literals; rewrite == constant for all four templates (unconditional); sibling layer; `.plain.golden`/`.fenced.golden`; `match` fenced == unfenced; `RenderPrompt` rows: `{{`/`}}`/`{candidate}` inside values, lone `}` and unknown `{slot}` in a template → `ERR_PROMPT_TEMPLATE`. J2 `stripFences`: no fence, ```json, multi-fence, trailing text, lone fence, **leading whitespace before the fence → parse error**, prose before fence → parse error. J3 parsers: booleans present/missing/non-JSON/string-typed; still-present both fail-close triggers (confidence 0); adjudicate 0.7/0.6999/`is_real:false`+0.99; `Parsed` over `MaxDetail`; absent confidence → 0. J4 request shapes via recording `Doer`: table effort `{low, medium, high, xhigh, bogus}` × `{gpt-5.2, glm-4, kimi-k2, claude-opus-4-5, claude-sonnet-4-5, claude-opus-5}` × calibration `{true, false}` asserting literal `reasoning_effort`/`output_config`/`thinking`/`temperature`/`max_tokens`(+budget)/`max_completion_tokens` or `ERR_JUDGE_EFFORT_UNSUPPORTED`; no beta header; still-present `max_tokens` 512/1024 per mode on both providers; token accounting with four distinct nonzero values per provider incl. `cached_tokens`, missing `completion_tokens_details` → `Output = completion_tokens`, `reasoning > completion` → 0; multi-block and empty content; missing `usage`; effort 400; body over 4 MB. J5 retry with injected `After`: `[10,30,90,120]` for 429×4, `[10,30,90,120]` for `overloaded_error`×4, `[1,2,4,8]` for 5xx×4 (plain body) and transport×4 and body-read-error×4, `[10,30,90,120]` for 529+`overloaded_error`×4, mixed `429,500,429 → [10,2,90]`, 5xx×5 → `ERR_JUDGE_HTTP` after 4 sleeps, transport×5 → `ERR_JUDGE_TRANSPORT`, 200 body containing "overloaded" **not** retried, 400 immediate, `Attempts`/summed `Tokens`, per-attempt deadline ≈ `Now+180s`. J6 URLs (unset → `DefaultURLs`; ports, `LOCALHOST`, trailing `/` stripped, `/v1` path/query rejected, `http://[::1` unparsable, userinfo, other hosts) + `NewHTTPClient` same/cross-host redirect → `ERR_JUDGE_REDIRECT`, `Attempts == 1`, zero sleeps; routing table; missing key per provider. J7 mock: scripted, unscripted, `expect_*` literals, near-miss keys, `Error` rows, `Raw` through the real parser, `Calls()` incl. errored; nonce uniqueness. J8 fixture manifest: no `sk-ant-`, `sk-proj-`, `sk-`, `Bearer `; dummy key literal pinned; `ParseError` is the decoder message only. J9 `InputHash` literal per kind; `diff_context_hash` literals for 29999/30000/30001 + rune straddle |
+| kind | K1 `Decode` accept/reject per kind incl. commit 6/7/40/41/uppercase, `Summary` at cap/+1, lists at 256/257, `IssueText`/`Desc` at cap/+1, canonical at `MaxPayload−128`/+1, `cmd` Delta caps (desc, status, commit), unknown field per kind. K2 `Reduce` incl. `ERR_TOO_MANY_BUGS` at 257 (accept at 256). K3 composition with `MockJudge` at `iter: 2`, `StartIndex: 5` (script rows carry `expect_input_hash` so index ↔ (g outer, c inner) is pinned; `ID` literals `BugID(Golden.Comment)`/`BugID(IssueText)`; `{match:false, confidence:0.99}` never wins; zero candidates → 0 calls and `{Confirmed:[],Rejected:[]}`): 2 goldens × 3 findings → indexes `[5..10]` then adjudicate `11,12` for the two never-seen; equal-confidence tie → first; `confidence 0` never matches; one candidate wins both goldens (two `Bug`s, `Desc` = each golden's comment); superseded provisional winner is neither confirmed nor adjudicated (1×2: 0.5 then 0.9 → adjudicate indexes `[]`); duplicate `IssueText` collapsed; parse error on one pair → skipped, `llm_call.Error` set; no goldens; `Rejected`; HTTP error aborts after audit; output over cap → error. K4 still-present order, `Iter` propagated, 256 ok. K5 `Instructions`: raw untrusted value absent outside fences; `lenses` `ValidateParams` 0/1/8/9; `unfixed_bugs` = unfixed subset; schema shows the commit regex. K6 cmd kind via fake Runner: payload literal (vars hashed, no node outputs), delta decoded; `Instructions` → `ERR_EXEC_UNSUPPORTED` ×3. K7 `Info()` table; `New(...).Mock()`; `llm_call` events per §3.6 (success/parse/HTTP) with `Index` from `StartIndex` |
 | mockai | S1 load errors: unknown key, duplicate key, bad tokens; `Hash()` = sha256 of file bytes (literal), changes on a comment edit; S2 `Script()` conversion incl. `error` rows; S3 runner: ordered rows, `repeat`, unscripted, matches `Spec.Name` not argv |
 
 ## 9. Ledger
@@ -236,4 +276,12 @@ consumed in order unless `repeat`; unscripted → `ERR_MOCK_UNSCRIPTED{name}`; e
 - Kind output shapes frozen under run `SchemaVersion 1`; additive `omitempty` fields do not bump; incompatible changes bump and need a per-kind migrate hook (run follow-up). No prompt identity in `llm_call` (follow-up: fold the template sha into `InputHash` in a later schema).
 - Serial fan-out; `AllFound` cliff refused at adjudicate `Reduce`.
 - `effort.py` added to the port list; provenance vendored (`python.txt`) so CI checks unconditionally.
-- Agent-satisfiable flags (`--allow-custom-cmds`, `--accept-workflow-change`, `--mock-ai`, `--calibration`) documented as such in spec 5's trust boundary; `fsm judge --no-fence` is redundant with calibration runs (spec 5 drops it).
+- Agent-satisfiable knobs (`--allow-custom-cmds`, `--accept-workflow-change`, `--mock-ai`/`MOCK_AI`, `--calibration`, `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL`, `RepoMode` override) documented as such in spec 5's trust boundary; `fsm judge --no-fence` is redundant with calibration runs (spec 5 drops it); consent depth is argv bytes (PATH-resolved children and HOME dotfiles are the operator's), and `cmd_call` persists capped stdout/stderr (a script echoing a pass-through secret lands it in the audit) — spec 5 docs.
+- Product-mode Anthropic thinking table is Go's own (the reference has no `high` level, sizes `xhigh` from `max_tokens`, and sets `temperature: 1` with thinking); `high` is an addition on every provider; calibration requires `medium`.
+- No goldens → every finding adjudicated (the reference short-circuits to `confirmed: []`); dedup by text changes the call count vs the reference; `Input = prompt_tokens − cached_tokens` (the reference ignores cache on the API path); the reference's glm/kimi one-shot retry on empty/unparseable JSON is not ported (our 5-attempt ladder covers transport; empty content is `ERR_JUDGE_RESPONSE`).
+- `real_but_ungold` `Desc` is cut at `MaxDesc` (2 KB) where the reference passed full text — ledgered parity deviation.
+- Freeze policy: kind output shapes are frozen under run `SchemaVersion 1`; a newer binary must not add fields to persisted shapes without a bump (older binaries decode with `DisallowUnknownFields` and would report `ERR_NODE_OUTPUT_INVALID`/`ERR_COPY_INVALID`); `Parsed` bytes are stable only within a schema version (spec 3 `Diff` compares decision fields + confidence, not `reasoning`).
+- Shipped scenario inventory (plan §4.3: sdlc-loop `{happy, cumulative-convergence, no-findings, no-confirmed, dirty-tree, judge-swap-iter0, judge-swap-frozen, overflow-iterations, overflow-budget, cmd-guardrails, injection}`, review-loop ×5) is authored with the black-box suite (spec 5 §5); a `match-parity` fixture (arrays → exact TP/FP/FN vs `score_from_matches`) is added to K3.
+- Resolved elsewhere (reassignment): SEC-11/SEC-25 → spec 2 §2.5; SEC-14 → spec 3 §2 step 4; SEC-28 → spec 5 `converge --check`; INT-11/FIN-5 → spec 2 §5.3 step 2; INT-22/SEC-26 → spec 5 docs. The `cmd` kind is the realization of design Appendix A's user-defined kind (name fixed, output `run.Delta`; C16 retired JSON-Schema).
+- Overflow handler is audited twice (`cmd_call` by the runner, `overflow_handler` by the machine) — accepted, spec 2 §8.
+- `NEEDS_INPUT` keys are `unfixed_bugs`, `findings_so_far`, `base_sha`, `head_sha`, `iteration`, `diff_truncated`; rubric `rubrics/task-done-review-rubric.md` + the eight lens names from `skills/review-artifact/SKILL.md` step 4 (plan §3.4 wrote `confirmed_bugs`/`findings`/artifact rubric) — spec 5 adopts these.
