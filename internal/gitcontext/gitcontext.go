@@ -43,18 +43,65 @@ type Context struct {
 	GeneratedExcludedFiles   []string `json:"generatedExcludedFiles"`
 	UntrackedOmittedCount    int      `json:"untrackedOmittedCount"`
 	UntrackedTruncatedCount  int      `json:"untrackedTruncatedCount"`
+
+	// Branch measurements (spec 0.8.3 §4.1): untruncated, exclude-filtered, and
+	// never part of the context-diff JSON payload.
+	BranchFiles             []BranchFile `json:"-"`
+	BranchDiffFull          string       `json:"-"`
+	BranchRawDiffBytes      int          `json:"-"`
+	BranchFilteredDiffBytes int          `json:"-"`
 }
 
 func Collect(root, requestedBase string) (Context, error) {
-	return collect(root, requestedBase, nil, nil)
+	return CollectWith(root, Options{Base: requestedBase})
+}
+
+// CollectWith is the seam-carrying entry point; the other Collect* helpers wrap it.
+func CollectWith(root string, opts Options) (Context, error) {
+	return collectWith(root, opts)
 }
 
 func CollectWithExcludes(root, requestedBase string, excludes []string) (Context, error) {
-	return collect(root, requestedBase, excludes, nil)
+	return CollectWith(root, Options{Base: requestedBase, Excludes: excludes})
 }
 
 func CollectWithExcludesExcept(root, requestedBase string, excludes, exceptions []string) (Context, error) {
-	return collect(root, requestedBase, excludes, exceptions)
+	return CollectWith(root, Options{Base: requestedBase, Excludes: excludes, Exceptions: exceptions})
+}
+
+func collectWith(root string, opts Options) (Context, error) {
+	ctx, err := collect(root, opts.Base, opts.Excludes, opts.Exceptions)
+	if err != nil {
+		return Context{}, err
+	}
+	if !ctx.DiffTruncated {
+		return ctx, nil
+	}
+	effectiveExcludes := opts.Excludes
+	if len(opts.Exceptions) > 0 {
+		effectiveExcludes = exactExcludesExcept(root, ctx.BaseSHA, opts.Excludes, opts.Exceptions)
+	}
+	files, full, err := collectBranchFiles(root, ctx.BaseSHA, effectiveExcludes, opts.runGit())
+	if err != nil {
+		return Context{}, err
+	}
+	ctx.BranchFiles = files
+	ctx.BranchDiffFull = full
+	for _, f := range files {
+		ctx.BranchFilteredDiffBytes += f.Bytes
+	}
+	ctx.BranchRawDiffBytes = ctx.BranchFilteredDiffBytes
+	if len(effectiveExcludes) > 0 {
+		rawFiles, _, err := collectBranchFiles(root, ctx.BaseSHA, nil, opts.runGit())
+		if err != nil {
+			return Context{}, err
+		}
+		ctx.BranchRawDiffBytes = 0
+		for _, f := range rawFiles {
+			ctx.BranchRawDiffBytes += f.Bytes
+		}
+	}
+	return ctx, nil
 }
 
 func collect(root, requestedBase string, excludes, exceptions []string) (Context, error) {
