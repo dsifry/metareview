@@ -1,6 +1,6 @@
 # metareview 0.9.0 — spec 4: guardrails, judge, kinds, and mock AI
 
-> **Status:** r4 — BUILD BASELINE after ESCALATION (2026-08-27). Attempt 3 (`mrv-20260827-070456908813000-…`) ended NEEDS_REVISION on 4/8 lenses with every blocker mechanical; the chain is ESCALATED and a human must accept this r4 (applied provisionally per the run-spec precedent). r3 note: Fourth of the five split artifacts (ownership ledger: run spec §12). Owns plan
+> **Status:** r5 (2026-08-27; attempt 4 re-authorized by Dave — six lenses NEEDS_REVISION on one plumbing cluster, all folded here and in code). r4 note: Attempt 3 (`mrv-20260827-070456908813000-…`) ended NEEDS_REVISION on 4/8 lenses with every blocker mechanical; the chain is ESCALATED and a human must accept this r4 (applied provisionally per the run-spec precedent). r3 note: Fourth of the five split artifacts (ownership ledger: run spec §12). Owns plan
 > r3 §1.8 items 2–5, §2 (judge port), kinds/`Executor`/`Delta` producers, match-then-adjudicate composition +
 > `Bug.Verdict` vocabulary, `index` assignment, the `llm_call`/`cmd_call` producer contract, mock scenarios, and the
 > pinned harnesseval provenance of the prompts. Implements spec 2 r3's `machine.NodeKind`/`Executor`/`Registry`,
@@ -25,6 +25,16 @@
 > `lenses` default 8; non-empty `issue_text`; mock cmd rows keyed by durable ordinal; `cmd` kind `Reduce` cliff check;
 > `JUDGE` model id ≤ `MaxShort`; typed `Verdict` constants; duplicate golden comments refused; single Guarded factory;
 > test rows for unknown-fields-ignored, calibration at the `Judge.Call` level, full-stdout decode, literal bodies.
+>
+> **r5 changes (attempt 4):** `converge.Caller` (Run + Call) is what the single factory returns and what executors get as
+> `ExecInput.Runner`; `Spec.Ordinal` + `Guarded.CmdCalls` (from `machine.RunnerDeps`); `kind.Deps` = `{Judge, Mock}`;
+> `judge.New` returns `(Judge, error)` (URL policy checked once); typed judge inputs; freeze policy = any persisted-shape
+> change bumps `SchemaVersion` (no "additive fields" exception); still-present missing bool persists a typed object with
+> `"still_present":null` + `Error`; `Raw` capped at `MaxShort` is kept in `ParseError` on parse failure (never the full
+> text); pre-flight cliff bound before the first judge call; `Rejected []run.Bug`; upper token bound mirrored at the
+> provider boundary; `.gitattributes -text` for prompts and scenarios; OpenAI `temperature` always 1; product-mode fenced
+> diff is a JSON string (ledgered: product ≠ calibration prompt shape); matched bugs carry the candidate's `File`/`Line`
+> (reference recorded none).
 >
 > **Port spec:** `~/Developer/harnesseval/harnesseval/{judge,adjudicate,sdlc_loop,usage,model_router,effort}.py` @
 > `19ff9a8`. Slot sources: `match` `golden_comment = Golden.Comment`, `candidate = Finding.IssueText`
@@ -78,12 +88,16 @@ the `cmd_call` it audits carries that `Error` (decode happens before the audit a
 ## 3. `judge`
 ```go
 type Request struct { Kind, Model, Effort string; Input any; RunID, Node string; Iter, Index int; Fence, Calibration bool }
-type Verdict struct { Kind, Model, Effort, InputHash string; Raw string /* never persisted */; Parsed json.RawMessage /* nil on parse failure */; ParseError string; Confidence float64; Tokens run.TokenTotals; Mock bool; Duration time.Duration; Attempts int }
+type Verdict struct { Kind, Model, Effort, InputHash string; Raw string /* never persisted */; Parsed json.RawMessage /* nil on parse failure, except still-present's missing bool: a typed object with "still_present":null */; ParseError string /* decoder message + "; raw: " + CapText(Raw, MaxShort) */; Confidence float64; Tokens run.TokenTotals; Mock bool; Duration time.Duration; Attempts int }
 type Judge interface { Call(ctx, Request) (Verdict, error) }
 type Doer interface { Do(*http.Request) (*http.Response, error) }
 type Keys struct { Anthropic, OpenAI string }; type URLs struct { Anthropic, OpenAI string }   // "" → DefaultURLs (https://api.anthropic.com, https://api.openai.com)
 type Clock struct { Now func() time.Time; After func(time.Duration) <-chan time.Time }
-func New(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock) Judge
+type MatchInput struct { Golden run.Golden `json:"golden"`; Candidate run.Finding `json:"candidate"` }
+type AdjudicateInput struct { Diff string `json:"diff"`; DiffTruncated bool `json:"diff_truncated"`; DiffContextHash string `json:"diff_context_hash"`; Candidate run.Finding `json:"candidate"` }
+type StillPresentInput struct { Bug run.Bug `json:"bug"`; Diff string `json:"diff"`; DiffTruncated bool `json:"diff_truncated"`; DiffContextHash string `json:"diff_context_hash"` }
+func CutDiff(diff string, alreadyTruncated bool) (cut string, truncated bool, sha1hex string)   // 30000-byte rune-boundary cut
+func New(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock) (Judge, error)   // ERR_JUDGE_URL checked here
 func NewHTTPClient(timeout time.Duration) *http.Client                      // CheckRedirect refuses ALL redirects → ERR_JUDGE_REDIRECT (terminal, never retried)
 type Script struct { Calls map[ScriptKey]ScriptRow }  // ScriptKey{Kind, Node string; Iter, Index int}; ScriptRow{Raw string /* run through the real parser */; Tokens run.TokenTotals; ExpectModel, ExpectInputHash string; Error string /* ERR_* to return instead */}
 func NewMock(s Script) *MockJudge; func (m *MockJudge) Calls() []Request
@@ -103,13 +117,13 @@ sha1(cut bytes)` names the cut diff. `Model` must be ≤ `MaxShort` canonical by
 forces `Fence=false`. Effort vocabulary: `low | medium | high | xhigh`; anything else → `ERR_JUDGE_EFFORT_UNSUPPORTED{effort}`.
 
 ### 3.2 Templates, rendering, fencing, goldens
-(`testdata/fsm/judge/prompts/*` carry `-text` in `.gitattributes`; a `.python.txt` body = every byte after the first `\n`,
+(`internal/fsm/judge/testdata/prompts/*` and `testdata/fsm/scenarios/**` carry `-text` in `.gitattributes`; a `.python.txt` body = every byte after the first `\n`,
 no trailing newline — the literals end in `}}` — asserted by J1.)
 `RenderPrompt` = single left-to-right pass emulating `str.format`: `{{`→`{`, `}}`→`}`, `{name}`→ value (values are never
 rescanned), any other `{`/`}` or unknown name → `ERR_PROMPT_TEMPLATE`. Fenced (`adjudicate`/`still-present`, product
 mode): the `{diff}` and `{candidate}`/`{golden_comment}` slot values are replaced by `FenceBlock(nonce, value)`; the
 template's ```` ```diff ```` lines stay. `match` is never fenced. `nonce` = 16 hex chars from `crypto/rand` (injected).
-Files under `testdata/fsm/judge/prompts/`: `<kind>.python.txt` = the Python literal **vendored verbatim** (bytes between
+Files under `internal/fsm/judge/testdata/prompts/`: `<kind>.python.txt` = the Python literal **vendored verbatim** (bytes between
 `JUDGE_PROMPT = """`/`ADJUDICATE_PROMPT = """`/the `prompt = f"""` at `sdlc_loop.py:321` and the closing `"""`), with a
 one-line header `# source: harnesseval@19ff9a8 <file>:<line> sha256=<sha of the literal bytes>`; `<kind>.plain.txt` =
 the Go constant (`still-present.calibration.plain.txt` and `still-present.product.plain.txt`); `<kind>.plain.golden` /
@@ -178,7 +192,7 @@ ones. `Verdict.Mock = true`, `Duration = 0`, `Attempts = 1`.
 |---|---|
 | `Kind, Model, Effort, Index` | `Request` (`Index` from `StartIndex` upward) |
 | `InputHash` | computed before the call (present on every failure) |
-| `Verdict` | `Parsed`, or the literal `null` on parse failure / error |
+| `Verdict` | `Parsed` when non-nil (incl. still-present's typed null object), else the literal `null` |
 | `Confidence` | parsed or 0 |
 | `Tokens, DurationMS` | `Verdict` (`DurationMS` from the injected clock) |
 | `Error` | `CapText("" | "parse: " + ParseError | ERR_* code (incl. ERR_MOCK_*), MaxShort)` |
@@ -207,7 +221,7 @@ Effective bounds (ledger): ~120 full-`Desc` bugs or ~60 full-`IssueText` finding
 | kind | Instructions → host | Decode | Reduce |
 |---|---|---|---|
 | `review-lenses` | dispatch `lenses` (1..8) of the lens list in `skills/review-artifact/SKILL.md` step 4, in order, as adversarial reviewers of `git diff <base>..HEAD` using `rubrics/task-done-review-rubric.md`; return `{"findings":[{file,line,issue_text,severity?}…]}`; `input.findings_so_far` = `AllFound` (fenced) | `{Findings}` | `Findings` |
-| `match-then-adjudicate` | `ERR_EXEC_UNSUPPORTED` | `{Confirmed, Rejected}` (`Rejected` `Desc` ≤ `MaxShort`) | `Confirmed`; fails `ERR_TOO_MANY_BUGS` when `|AllFound ∪ Confirmed| > MaxDeltaList` |
+| `match-then-adjudicate` | `ERR_EXEC_UNSUPPORTED` | `{Confirmed []run.Bug, Rejected []run.Bug}` (`Rejected` `Desc` ≤ `MaxShort`, `GoldenIdx` nil; no duplicate `ID` within either list) | `Confirmed`; fails `ERR_TOO_MANY_BUGS` when `|AllFound ∪ Confirmed| > MaxDeltaList` |
 | `agent-edit` | fix each bug in `input.unfixed_bugs` (= `AllFound` minus fixed statuses, fenced), commit, no push/amend; return `{"commit","summary"}` | `{Commit ^[0-9a-f]{7,40}$, Summary}` | `Commit` |
 | `still-present` | `ERR_EXEC_UNSUPPORTED` | `{Status}` | `Status` |
 | `cmd` | `ERR_EXEC_UNSUPPORTED` | `run.Delta` (same caps) | as decoded; `ERR_TOO_MANY_BUGS` when `|AllFound ∪ Confirmed| > MaxDeltaList` |
@@ -221,6 +235,9 @@ Python keys by text). Calls are numbered from `StartIndex`.
    `Confidence` = the winning match confidence, `File`/`Line` = the candidate's (location only; its text never
    propagates). A candidate may win several goldens (one `Bug` per golden). Superseded provisional winners stay *seen*: neither
    confirmed nor adjudicated (reference bookkeeping — ledgered).
+0. Pre-flight (before any call): `len(goldens) + len(unique candidates) > MaxDeltaList`, `|AllFound ∪ candidates| > MaxDeltaList`,
+   or the worst-case output size (Σ `min(canon(IssueText), MaxDesc)` + `len(goldens)·MaxDesc` + 160 B per bug) > `MaxPayload − 128`
+   → `ERR_TOO_MANY_BUGS` with no spend.
 2. Every candidate never *seen*, in order → `adjudicate` call (indexes continue); real → `Verdict: real_but_ungold`,
    `Desc = CapText(IssueText, MaxDesc)` (ledger: the reference passes the full text; `MaxText` candidates are cut at 2 KB),
    `ID = BugID(IssueText)`, `Confidence` = adjudicate confidence, `File`/`Line` = the candidate's; not real →
@@ -277,8 +294,12 @@ consumed in order unless `repeat`; unscripted → `ERR_MOCK_UNSCRIPTED{name}`; e
 - Env: exact allow-list + `MRV_RUN_ID` + declared names; `Spec.Name` carries the cmd name; not-allowed unaudited (fold refuses it anyway).
 - Payload = `converge.Payload` (vars hashed, node outputs omitted; `allowed_cmds` argv visible — vars are not secrets).
 - `Rejected` persisted in `node_output` only (redacted on export, spec 3).
-- Kind output shapes frozen under run `SchemaVersion 1`; additive `omitempty` fields do not bump; incompatible changes bump and need a per-kind migrate hook (run follow-up). No prompt identity in `llm_call` (follow-up: fold the template sha into `InputHash` in a later schema).
-- Serial fan-out; `AllFound` cliff refused at adjudicate `Reduce`.
+- Kind output shapes frozen under run `SchemaVersion 1`: **any** change to a persisted shape (fields added or removed, `Rejected` included) bumps `SchemaVersion`, which the fold refuses loudly as `version`; a per-kind migrate hook is a run follow-up. No prompt identity in `llm_call` (follow-up: fold the template sha into `InputHash` in a later schema).
+- Serial fan-out; `AllFound` cliff refused at adjudicate pre-flight (before spend) and `Reduce`.
+- Product-mode prompts differ in shape from calibration: the fenced `{diff}` is one JSON string line inside the template's ```` ```diff ```` block, so product verdicts and the design §17 judge-eval numbers are not the same prompt — the eval picks the model, not the prompt bytes.
+- Matched bugs carry the winning candidate's `File`/`Line` (the reference recorded none) and duplicate texts keep the first occurrence's location (the reference kept the last).
+- Transport/HTTP errors abort the executor (plan §2 wrote "error ⇒ hallucination" for the reference's parse-only error path).
+- The Anthropic family table is closed: a new Anthropic id needs a binary release (follow-up: an override knob). `records/<node>@<iter>.json` host outputs in scenario dirs are spec 5's (`test-fsm.sh`), not hashed into `Mock`.
 - `effort.py` added to the port list; provenance vendored (`python.txt`) so CI checks unconditionally.
 - Agent-satisfiable knobs (`--allow-custom-cmds`, `--accept-workflow-change`, `--mock-ai`/`MOCK_AI`, `--calibration`, `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL`, `RepoMode` override) documented as such in spec 5's trust boundary; `fsm judge --no-fence` is redundant with calibration runs (spec 5 drops it); consent depth is argv bytes (PATH-resolved children and HOME dotfiles are the operator's), and `cmd_call` persists capped stdout/stderr (a script echoing a pass-through secret lands it in the audit) — spec 5 docs.
 - Product-mode Anthropic thinking table is Go's own (the reference has no `high` level, sizes `xhigh` from `max_tokens`, and sets `temperature: 1` with thinking); `high` is an addition on every provider; calibration requires `medium`.
