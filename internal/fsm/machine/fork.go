@@ -1,6 +1,7 @@
 package machine
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -106,6 +107,9 @@ func (m *Machine) Fork(ctx context.Context, o ForkOptions) (*Machine, ForkResult
 		return nil, ForkResult{}, err
 	}
 	source := snap.WorkflowSource
+	if o.WorkflowBytes != nil && bytes.Equal(o.WorkflowBytes, raw) {
+		o.WorkflowBytes = nil // the same bytes are not a change
+	}
 	if o.WorkflowBytes != nil {
 		sum := sha256.Sum256(o.WorkflowBytes)
 		got := hex.EncodeToString(sum[:])

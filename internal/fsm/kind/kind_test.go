@@ -99,8 +99,8 @@ func TestK7Registry(t *testing.T) {
 		t.Fatalf("nil judge without Mock must build a judge-less registry: %v", err)
 	}
 	r := mustNew(t, m, true)
-	if !r.Mock() {
-		t.Fatal("Mock()")
+	if !r.Mock() || r.Judge() != m {
+		t.Fatal("Mock()/Judge()")
 	}
 	info := r.Info()
 	want := map[string][2]string{ReviewLenses: {"subagent", "inline,subagent"}, MatchThenAdjudicate: {"fork", "fork"}, AgentEdit: {"inline", "inline,subagent"}, StillPresent: {"fork", "fork"}, Cmd: {"fork", "fork"}}

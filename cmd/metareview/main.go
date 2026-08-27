@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	fsmcli "github.com/dsifry/metareview/internal/fsm/cli"
 	"os"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ Usage:
   metareview setup --check
   metareview setup --bootstrap-prereqs --dry-run
   metareview status
+  metareview fsm <subcommand> [flags]        (metareview fsm --agent-prompt for the driver contract)
   metareview context build <path>
   metareview context diff [--base <ref>]
   metareview evidence run -- <command> [args...]
@@ -84,6 +86,10 @@ func main() {
 		return
 	}
 
+	if args[0] == "fsm" {
+		os.Exit(fsmcli.Run(context.Background(), args[1:], os.Stdin, os.Stdout, os.Stderr, mustCwd(), fsmcli.RealDeps()))
+	}
+
 	if len(args) == 1 && args[0] == "status" {
 		report := repo.Detect(mustCwd())
 		fmt.Printf("metareview %s\n", version.Version)
@@ -91,6 +97,9 @@ func main() {
 		fmt.Printf("git: %s\n", present(report.Capabilities.Git))
 		fmt.Printf("beads: %s\n", present(report.Capabilities.Beads))
 		fmt.Printf("metaswarm: %s\n", present(report.Capabilities.Metaswarm))
+		for _, line := range fsmcli.StatusLines(context.Background(), fsmcli.RealDeps(), mustCwd()) {
+			fmt.Println(line)
+		}
 		return
 	}
 

@@ -64,7 +64,11 @@ type Registry struct {
 	kinds map[string]machine.NodeKind
 	execs map[string]machine.Executor
 	mock  bool
+	judge judge.Judge
 }
+
+// Judge returns the registry's judge (nil for a judge-less registry); fsm judge --run on a mock run calls it.
+func (r *Registry) Judge() judge.Judge { return r.judge }
 
 // New builds the registry; Mock must agree with the judge's type. A nil judge is allowed (judge-less commands, spec 5
 // r4) with Mock false: executors reached without a judge fail ERR_EXECUTOR_FAILED{reason: no_judge}.
@@ -73,7 +77,7 @@ func New(d Deps) (*Registry, error) {
 	if isMock != d.Mock {
 		return nil, errs.E(CodeMockMismatch, "Mock must be true exactly when the judge is a MockJudge", "mock", fmt.Sprint(d.Mock))
 	}
-	r := &Registry{mock: d.Mock, kinds: map[string]machine.NodeKind{}, execs: map[string]machine.Executor{}}
+	r := &Registry{mock: d.Mock, judge: d.Judge, kinds: map[string]machine.NodeKind{}, execs: map[string]machine.Executor{}}
 	r.kinds[ReviewLenses] = reviewLenses{}
 	r.kinds[MatchThenAdjudicate] = adjudicateKind{}
 	r.kinds[AgentEdit] = agentEdit{}

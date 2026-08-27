@@ -1,0 +1,221 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"encoding/hex"
+	"encoding/json"
+	"path/filepath"
+	"strings"
+
+	"github.com/dsifry/metareview/internal/fsm/cmdexec"
+	"github.com/dsifry/metareview/internal/fsm/converge"
+	"github.com/dsifry/metareview/internal/fsm/errs"
+	"github.com/dsifry/metareview/internal/fsm/export"
+	"github.com/dsifry/metareview/internal/fsm/gate"
+	"github.com/dsifry/metareview/internal/fsm/judge"
+	"github.com/dsifry/metareview/internal/fsm/kind"
+	"github.com/dsifry/metareview/internal/fsm/machine"
+	"github.com/dsifry/metareview/internal/fsm/mockai"
+	"github.com/dsifry/metareview/internal/fsm/run"
+	"github.com/dsifry/metareview/internal/fsm/workflow"
+)
+
+// Env names the CLI reads (spec 5 §6: the closed set).
+const (
+	EnvAnthropicKey = "ANTHROPIC_API_KEY"
+	EnvOpenAIKey    = "OPENAI_API_KEY"
+	EnvAnthropicURL = "ANTHROPIC_BASE_URL"
+	EnvOpenAIURL    = "OPENAI_BASE_URL"
+	EnvMockAI       = "MOCK_AI"
+	EnvRunID        = "MRV_RUN_ID"
+	EnvHome         = "HOME"
+)
+
+// git runs one git command through the Exec seam and returns trimmed stdout.
+func (c *ctxDeps) git(dir string, args ...string) (string, int, error) {
+	out, _, code, err := c.deps.Exec(c.ctx, dir, nil, args...)
+	return strings.TrimSpace(string(out)), code, err
+}
+
+// ctxDeps binds Deps to one invocation.
+type ctxDeps struct {
+	ctx  context.Context
+	deps Deps
+	cwd  string
+}
+
+// rootOf resolves the main worktree of cwd (spec 5 §2): the first `worktree` line of `git worktree list --porcelain`;
+// a bare main or a non-repository is ERR_NOT_A_REPO.
+func (c *ctxDeps) rootOf() (string, error) {
+	out, code, err := c.git(c.cwd, "worktree", "list", "--porcelain")
+	if err != nil || code != 0 {
+		return "", errs.E(CodeNotARepo, "not inside a git repository", "cwd", c.cwd)
+	}
+	block, _, _ := strings.Cut(out, "\n\n") // the first block is the main worktree; its first line is `worktree <path>`
+	lines := strings.Split(block, "\n")
+	for _, line := range lines {
+		if line == "bare" {
+			return "", errs.E(CodeNotARepo, "the main worktree is bare", "reason", "bare")
+		}
+	}
+	return strings.TrimPrefix(lines[0], "worktree "), nil
+}
+
+// toplevel is the current worktree (init's WorkDir default).
+func (c *ctxDeps) toplevel() (string, error) {
+	out, code, err := c.git(c.cwd, "rev-parse", "--show-toplevel")
+	if err != nil || code != 0 || out == "" {
+		return "", errs.E(CodeNotARepo, "not inside a git worktree", "cwd", c.cwd)
+	}
+	return out, nil
+}
+
+// runsIgnored reports whether .metareview/runs.jsonl is ignored in workDir (git check-ignore exits 0).
+func (c *ctxDeps) runsIgnored(workDir string) bool {
+	_, code, err := c.git(workDir, "check-ignore", "-q", ".metareview/runs.jsonl")
+	return err == nil && code == 0
+}
+
+// peek reads the first line of a run's audit.jsonl leniently (spec 5 §8: advisory; Open re-verifies everything).
+func (c *ctxDeps) peek(root, runID string) (run.InitData, bool) {
+	raw, err := c.deps.ReadFile(filepath.Join(root, ".metareview", "runs", runID, "audit.jsonl"))
+	if err != nil {
+		return run.InitData{}, false
+	}
+	if len(raw) > run.MaxLine {
+		raw = raw[:run.MaxLine]
+	}
+	line, _, _ := bytes.Cut(raw, []byte("\n"))
+	var ev run.Event
+	if json.Unmarshal(line, &ev) != nil || ev.Type != run.TypeInit {
+		return run.InitData{}, false
+	}
+	var d run.InitData
+	if json.Unmarshal(ev.Data, &d) != nil {
+		return run.InitData{}, false
+	}
+	return d, true
+}
+
+func relInside(root, dir string) (string, bool) {
+	rootC, dirC := filepath.Clean(root), filepath.Clean(dir)
+	if dirC == rootC {
+		return ".", true
+	}
+	prefix := rootC + string(filepath.Separator)
+	if !strings.HasPrefix(dirC, prefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(dirC, prefix), true
+}
+
+// scenarioFor loads the mock scenario a run's init names (nil for a product run).
+func (c *ctxDeps) scenarioFor(root string, d run.InitData) (*mockai.Scenario, error) {
+	if d.Mock == "" {
+		return nil, nil
+	}
+	if d.RepoRoot != root {
+		return nil, errs.E(CodeRepoRootMismatch, "the run was created in another checkout; mock runs are path-bound", "stored", d.RepoRoot, "root", root)
+	}
+	rel, _, _ := strings.Cut(d.Mock, "#")
+	dir := filepath.Join(root, rel)
+	if _, inside := relInside(root, dir); !inside {
+		return nil, errs.E(machine.CodeMockInvalid, "mock scenario must live inside the repository", "dir", rel, "reason", "outside")
+	}
+	return c.deps.MockLoad(dir)
+}
+
+// judgeMode selects how the registry gets its judge.
+type judgeMode int
+
+const (
+	judgeNone judgeMode = iota // judge-less commands: never read judge env
+	judgeReal
+)
+
+func (c *ctxDeps) keys() judge.Keys {
+	return judge.Keys{Anthropic: c.deps.Getenv(EnvAnthropicKey), OpenAI: c.deps.Getenv(EnvOpenAIKey)}
+}
+
+func (c *ctxDeps) newJudge() (judge.Judge, error) {
+	return judge.New(c.deps.HTTP, c.keys(), judge.URLs{Anthropic: c.deps.Getenv(EnvAnthropicURL), OpenAI: c.deps.Getenv(EnvOpenAIURL)}, c.nonce, judge.Clock{Now: c.deps.Now, After: c.deps.After})
+}
+
+func (c *ctxDeps) nonce() string {
+	var b [8]byte
+	if _, err := c.deps.Rand(b[:]); err != nil {
+		panic(errs.E(CodeInternal, "crypto/rand failed: "+err.Error()))
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// machineDeps builds the per-run machine wiring (spec 5 §8).
+func (c *ctxDeps) machineDeps(root string, scenario *mockai.Scenario, mode judgeMode) (machine.Deps, error) {
+	var j judge.Judge
+	var real cmdexec.Runner = cmdexec.NewExecRunner()
+	switch {
+	case scenario != nil:
+		j = judge.NewMock(scenario.Script())
+		real = scenario.Runner()
+	case mode == judgeReal:
+		var err error
+		if j, err = c.newJudge(); err != nil {
+			return machine.Deps{}, err
+		}
+	}
+	kinds, _ := kind.New(kind.Deps{Judge: j, Mock: scenario != nil}) // consistent by construction: a mock judge iff a scenario
+	d := c.deps
+	md := machine.Deps{
+		Store: d.Store(root), Sidecar: d.Sidecar(root), Kinds: kinds,
+		Git:      func(dir string) gate.Git { return gate.NewExec(dir, d.Exec) },
+		Runner:   func(r machine.RunnerDeps) converge.Caller { return d.Runner(r, d.Environ, d.FileHash, d.Now, real) },
+		Clock:    func() run.Time { return run.Time{Time: d.Now()} },
+		LookPath: d.LookPath, FileHash: d.FileHash, Workflows: d.Workflows, ReadFile: d.ReadFile, Nonce: c.nonce,
+		MockLoad: func(dir string) (string, error) {
+			s, err := d.MockLoad(dir)
+			if err != nil {
+				return "", err
+			}
+			return s.Hash(), nil
+		},
+		Terminal: d.Terminal(root, func() run.Time { return run.Time{Time: d.Now()} }),
+	}
+	if scenario == nil && mode == judgeReal {
+		keys := c.keys()
+		md.Preflight = func(n *workflow.Node, calibration bool) error {
+			return judge.Preflight(n.Model, n.Effort, calibration, keys)
+		}
+	}
+	return md, nil
+}
+
+func (c *ctxDeps) exportDeps(root string, md machine.Deps) export.Deps {
+	return export.Deps{Store: md.Store, Sidecar: md.Sidecar, Kinds: md.Kinds, FS: c.deps.ExportFS, Clock: md.Clock, RepoRoot: root, Home: c.deps.Getenv(EnvHome)}
+}
+
+// resolveRun applies the --run precedence: flag → MRV_RUN_ID → newest run without an Error summary.
+func (c *ctxDeps) resolveRun(store run.RunStore, flag string) (id string, fromEnv bool, err error) {
+	if flag != "" {
+		if err := run.ValidateRunID(flag); err != nil {
+			return "", false, errs.E(run.CodeRunNotFound, err.Error(), "detail", flag)
+		}
+		return flag, false, nil
+	}
+	if env := c.deps.Getenv(EnvRunID); env != "" {
+		if err := run.ValidateRunID(env); err != nil {
+			return "", false, errs.E(run.CodeRunNotFound, err.Error(), "detail", env)
+		}
+		return env, true, nil
+	}
+	list, err := store.List()
+	if err != nil {
+		return "", false, err
+	}
+	for _, s := range list {
+		if s.Error == "" {
+			return s.RunID, false, nil
+		}
+	}
+	return "", false, errs.E(CodeNoRuns, "no FSM runs in this repository; run `metareview fsm init`")
+}
