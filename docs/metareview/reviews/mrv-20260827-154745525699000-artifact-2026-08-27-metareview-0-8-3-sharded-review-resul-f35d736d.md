@@ -79,3 +79,8 @@ Aggregate NEEDS_REVISION (Feasibility PASS_ADVISORY; Completeness and Testing-qu
 ## Warnings
 
 Five of the eight required lenses were not dispatched (see Orchestrator Notes); this review is evidence, not a passing gate.
+
+## Human Decision
+
+2026-08-27 — Dave Sifry accepted **r7** (`db2280d`) as the implementation baseline. r7 closes every blocker from this run (§14 of the spec maps each one); it was not itself re-reviewed, and the recorded aggregate for r6 stays `NEEDS_REVISION` as returned. Rationale recorded at the time: blocker counts fell 35 → 41 → 33 → 6 → 4 across the chain, Feasibility reproduced the plan on the real PR #13 diff and returned PASS_ADVISORY, and the remaining risk is in code rather than in the spec — so the task-done gate on PR-A is the next real filter. Trust model and adversarial hardening were ruled out of scope by the human earlier in the same session.
+
