@@ -511,6 +511,14 @@ func TestF5WorkflowChangeAndCopyValidation(t *testing.T) {
 	if list, _ := h.store.List(); len(list) != 1 {
 		t.Fatalf("refusals must not create runs: %d", len(list))
 	}
+	// Byte-identical workflow bytes are not a change: no flag needed, source stays "embedded".
+	same, sameRes, err := p.Fork(ctx, ForkOptions{From: "adjudicate", WorkflowBytes: append([]byte(nil), raw...)})
+	if err != nil || same.View().Snapshot.State != "adjudicate" {
+		t.Fatalf("identical bytes: %v %+v", err, sameRes)
+	}
+	if src := same.View().Snapshot.WorkflowSource; src != "embedded" {
+		t.Fatalf("identical bytes: source %q", src)
+	}
 	// positive controls: changed gate/model on a not-yet-run state, dropped var → accepted, source path
 	accepted := strings.Replace(string(raw), "effort: $REV_EFFORT", "effort: high", 1)
 	accepted = strings.Replace(accepted, "  REV_EFFORT:   {default: low}\n", "", 1)
@@ -554,8 +562,8 @@ func TestF5WorkflowChangeAndCopyValidation(t *testing.T) {
 		t.Fatalf("max_events: %v", err)
 	}
 	h.store.maxEvents = 0
-	if list, _ := h.store.List(); len(list) != 3 {
-		t.Fatalf("only accepted forks create runs: %d", len(list))
+	if list, _ := h.store.List(); len(list) != 4 {
+		t.Fatalf("only accepted (or identical-bytes) forks create runs: %d", len(list))
 	}
 }
 
