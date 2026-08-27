@@ -93,6 +93,14 @@ func Create(root, target string, options Options) (Result, error) {
 		reviewGit = filterGeneratedGitContext(git)
 	}
 	profile := contextprofile.FromGit(reviewGit, contextprofile.Options{})
+	shardPlan, err := contextprofile.PlanShards(profile, reviewGit.BranchFiles, contextprofile.ShardOptions{
+		MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard,
+		Scope:            "task-done",
+		TargetID:         task.ID,
+	})
+	if err != nil {
+		return Result{}, err
+	}
 	knowledgeContext, err := knowledge.Collect(root)
 	if err != nil {
 		return Result{}, err
@@ -132,7 +140,7 @@ func Create(root, target string, options Options) (Result, error) {
 		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, profile, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
+		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, profile, shardPlan, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
 			return err
 		}
 		chain, err := runchain.Resolve(root, runchain.Options{
@@ -379,7 +387,7 @@ func uniquePaths(root, target string, at time.Time) (string, string, string, err
 	}
 }
 
-func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, evidenceText, gateEffect string) string {
+func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, plan contextprofile.ShardPlan, knowledgeContext knowledge.Context, evidenceText, gateEffect string) string {
 	changed := append([]string{}, git.ChangedFiles...)
 	changed = append(changed, git.StagedFiles...)
 	changed = append(changed, git.WorkingTreeFiles...)
@@ -393,19 +401,15 @@ func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Contex
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		contextprofile.Markdown(profile) + "\n\n" +
-		contextprofile.ShardPlanMarkdown(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"}) + "\n\n" +
-		reviewManifestMarkdown("task-done", map[string]string{"type": taskTargetType(task), "id": task.ID}, profile) + "\n\n" +
+		contextprofile.ShardPlanMarkdown(plan, "") + "\n\n" +
+		reviewManifestMarkdown("task-done", map[string]string{"type": taskTargetType(task), "id": task.ID}, profile, plan) + "\n\n" +
 		"## Changed Files\n\n" + markdownList(changed, "No changed files.") + "\n\n" +
 		"## Diff\n\n" + markdown.FencedCodeBlock("diff", strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")) + "\n\n" +
 		"## Knowledge And Registries\n\n" + knowledgeMarkdown(knowledgeContext) + "\n\n" +
 		"## Evidence\n\n" + firstNonEmpty(evidenceText, "No external validation evidence supplied.") + "\n"
 }
 
-func reviewManifestMarkdown(scope string, target map[string]string, profile contextprofile.Profile) string {
-	plan, err := contextprofile.PlanShards(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"})
-	if err != nil {
-		return "## Review Manifest\n\nUnable to generate review manifest: " + err.Error()
-	}
+func reviewManifestMarkdown(scope string, target map[string]string, profile contextprofile.Profile, plan contextprofile.ShardPlan) string {
 	manifest := reviewmanifest.Build(reviewmanifest.Input{
 		Scope:            scope,
 		Target:           target,

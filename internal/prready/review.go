@@ -95,6 +95,14 @@ func Create(root string, options Options) (Result, error) {
 		analysisGit = branchOnlyGitContext(reviewGit)
 	}
 	profile := contextprofile.FromGit(analysisGit, contextprofile.Options{})
+	shardPlan, err := contextprofile.PlanShards(profile, analysisGit.BranchFiles, contextprofile.ShardOptions{
+		MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard,
+		Scope:            "pr-ready",
+		TargetID:         firstNonEmpty(analysisGit.Branch, analysisGit.HeadSHA),
+	})
+	if err != nil {
+		return Result{}, err
+	}
 	knowledgeContext, err := knowledge.Collect(root)
 	if err != nil {
 		return Result{}, err
@@ -167,7 +175,7 @@ func Create(root string, options Options) (Result, error) {
 		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect)), 0o644); err != nil {
+		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, shardPlan, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect)), 0o644); err != nil {
 			return err
 		}
 		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{
@@ -747,7 +755,7 @@ func uniquePaths(root string, at time.Time) (string, string, string, error) {
 	}
 }
 
-func contextMarkdown(runID string, git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string, ghCtx githubcontext.Context, prEvidence, gateEffect string) string {
+func contextMarkdown(runID string, git gitcontext.Context, profile contextprofile.Profile, plan contextprofile.ShardPlan, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string, ghCtx githubcontext.Context, prEvidence, gateEffect string) string {
 	changed := append([]string{}, git.ChangedFiles...)
 	changed = append(changed, git.StagedFiles...)
 	changed = append(changed, git.WorkingTreeFiles...)
@@ -760,8 +768,8 @@ func contextMarkdown(runID string, git gitcontext.Context, profile contextprofil
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		contextprofile.Markdown(profile) + "\n\n" +
-		contextprofile.ShardPlanMarkdown(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"}) + "\n\n" +
-		reviewManifestMarkdown("pr-ready", map[string]string{"type": "branch", "id": firstNonEmpty(git.Branch, git.HeadSHA)}, profile) + "\n\n" +
+		contextprofile.ShardPlanMarkdown(plan, "") + "\n\n" +
+		reviewManifestMarkdown("pr-ready", map[string]string{"type": "branch", "id": firstNonEmpty(git.Branch, git.HeadSHA)}, profile, plan) + "\n\n" +
 		"## Changed Files\n\n" + markdownList(changed, "No changed files.") + "\n\n" +
 		"## Diff\n\n" + markdown.FencedCodeBlock("diff", strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")) + "\n\n" +
 		"## Review Logs\n\n" + reviewLogsMarkdown(logs) + "\n\n" +
@@ -771,11 +779,7 @@ func contextMarkdown(runID string, git gitcontext.Context, profile contextprofil
 		"## Suggested PR Evidence\n\n" + prEvidence + "\n"
 }
 
-func reviewManifestMarkdown(scope string, target map[string]string, profile contextprofile.Profile) string {
-	plan, err := contextprofile.PlanShards(profile, contextprofile.ShardOptions{MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard, GroupBy: "path"})
-	if err != nil {
-		return "## Review Manifest\n\nUnable to generate review manifest: " + err.Error()
-	}
+func reviewManifestMarkdown(scope string, target map[string]string, profile contextprofile.Profile, plan contextprofile.ShardPlan) string {
 	manifest := reviewmanifest.Build(reviewmanifest.Input{
 		Scope:            scope,
 		Target:           target,

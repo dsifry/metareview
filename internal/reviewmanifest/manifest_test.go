@@ -50,10 +50,9 @@ func TestAggregateBlocksZeroAndDuplicatePrimaryShardAssignments(t *testing.T) {
 		},
 	}
 	plan := contextprofile.ShardPlan{
-		SourceDiffHash: "source-hash",
 		Shards: []contextprofile.Shard{
-			{ID: "shard-01", SourceDiffHash: "source-hash", Paths: []string{"internal/a.go"}, ByteCount: 50},
-			{ID: "shard-02", SourceDiffHash: "source-hash", Paths: []string{"internal/a.go"}, ByteCount: 50},
+			{ID: "shard-01", Paths: []string{"internal/a.go"}, Bytes: 50},
+			{ID: "shard-02", Paths: []string{"internal/a.go"}, Bytes: 50},
 		},
 	}
 
@@ -72,10 +71,9 @@ func TestSourceManifestHashIsStableAndSensitive(t *testing.T) {
 		GeneratedExcludedFiles: []string{"docs/metareview/context/a.md"},
 	}
 	plan := contextprofile.ShardPlan{
-		SourceDiffHash: "source-hash",
 		Shards: []contextprofile.Shard{
-			{ID: "shard-02", SourceDiffHash: "source-hash", Paths: []string{"internal/b.go"}, ByteCount: 20},
-			{ID: "shard-01", SourceDiffHash: "source-hash", Paths: []string{"internal/a.go"}, ByteCount: 10},
+			{ID: "shard-02", Paths: []string{"internal/b.go"}, Bytes: 20},
+			{ID: "shard-01", Paths: []string{"internal/a.go"}, Bytes: 10},
 		},
 	}
 	dispositions := []PathDisposition{{
@@ -193,10 +191,9 @@ func TestAggregateRequiresFreshCrossShardReviewForMultiShardManifest(t *testing.
 		},
 	}
 	plan := contextprofile.ShardPlan{
-		SourceDiffHash: "source-hash",
 		Shards: []contextprofile.Shard{
-			{ID: "shard-01", SourceDiffHash: "source-hash", Paths: []string{"internal/a.go"}, ByteCount: 10},
-			{ID: "shard-02", SourceDiffHash: "source-hash", Paths: []string{"internal/b.go"}, ByteCount: 10},
+			{ID: "shard-01", Paths: []string{"internal/a.go"}, Bytes: 10},
+			{ID: "shard-02", Paths: []string{"internal/b.go"}, Bytes: 10},
 		},
 	}
 	manifest := Build(Input{Profile: profile, ShardPlan: plan})
@@ -275,10 +272,9 @@ func singleShardPlan(sourceHash, path string) contextprofile.ShardPlan {
 	return contextprofile.ShardPlan{
 		SourceDiffHash: sourceHash,
 		Shards: []contextprofile.Shard{{
-			ID:             "shard-01",
-			SourceDiffHash: sourceHash,
-			Paths:          []string{path},
-			ByteCount:      100,
+			ID:    "shard-01",
+			Paths: []string{path},
+			Bytes: 100,
 		}},
 	}
 }
