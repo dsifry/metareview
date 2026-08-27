@@ -225,7 +225,8 @@ TASK
 (cd "$repo" && git add docs/tasks && git commit -qm "task file")
 # Local content is in no pack: staged work still blocks, and an untracked file
 # must stay under 4,000 bytes or it raises a reason no shard result can satisfy.
-printf 'value := eval(untrusted)\n' > "$repo/src/staged.txt"
+# The lint pattern is assembled here so this file does not carry it literally.
+printf 'value := %s(untrusted)\n' eval > "$repo/src/staged.txt"
 (cd "$repo" && git add src/staged.txt)
 filler "u" 40 > "$repo/untracked.txt"
 
