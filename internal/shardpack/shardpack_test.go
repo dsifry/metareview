@@ -1117,3 +1117,23 @@ func TestDiscoverKeepsUnresolvableOutsidePathsVerbatim(t *testing.T) {
 	}
 	t.Fatalf("unreadable = %v, want %q unchanged", found.Unreadable, outside)
 }
+
+// TestRelativeToAcceptsDotDotPrefixedNames keeps a legitimate in-repository
+// file name such as "..result.json" from being reported as an absolute path.
+// Only a real parent traversal should fall back to the path as given.
+func TestRelativeToAcceptsDotDotPrefixedNames(t *testing.T) {
+	root := filepath.Join("/repo", "root")
+	if got := relativeTo(filepath.Join(root, "..result.json"), root); got != "..result.json" {
+		t.Fatalf("relativeTo(..result.json) = %q, want it relative", got)
+	}
+	if got := relativeTo(filepath.Join(root, "docs", "..keep"), root); got != "docs/..keep" {
+		t.Fatalf("relativeTo(docs/..keep) = %q, want it relative", got)
+	}
+	outside := filepath.Join("/repo", "elsewhere", "r.json")
+	if got := relativeTo(outside, root); got != outside {
+		t.Fatalf("a real traversal must stay verbatim, got %q", got)
+	}
+	if got := relativeTo(filepath.Dir(root), root); got != filepath.Dir(root) {
+		t.Fatalf("the parent directory must stay verbatim, got %q", got)
+	}
+}

@@ -623,3 +623,25 @@ func TestManifestHashOmittedWithoutAPlan(t *testing.T) {
 		t.Fatalf("the unsharded case is not stated:\n%s", rendered)
 	}
 }
+
+// TestRenderersNeutraliseShardIDAndVerdict closes the rest of the injection
+// surface. ShardID and Verdict are decoded from the result file, and a result
+// is accepted by its content hash before Aggregate reports invalid metadata, so
+// both fields reach the review log even on a blocking run.
+func TestRenderersNeutraliseShardIDAndVerdict(t *testing.T) {
+	manifest := manifestWithShard(t, "aaaaaaaaaaaaaaaa")
+	result := passingShardResult("shard-3a", "aaaaaaaaaaaaaaaa")
+	result.ShardID = "mrvf-injected-shard"
+	result.Verdict = "mrvf-injected-verdict"
+	manifest.ShardResults = []ReviewResult{result}
+	aggregate := Aggregate(manifest)
+
+	for name, rendered := range map[string]string{
+		"review log":   ShardedReviewMarkdown(manifest, aggregate),
+		"context pack": Markdown(manifest, aggregate),
+	} {
+		if strings.Contains(rendered, "mrvf-") {
+			t.Fatalf("%s carries a harvestable mrvf- token:\n%s", name, rendered)
+		}
+	}
+}

@@ -429,7 +429,10 @@ func underRoot(root, path string) bool {
 // relative to the root before or after symlink resolution, so both are tried.
 func relativeTo(path string, roots ...string) string {
 	for _, root := range roots {
-		if rel, err := filepath.Rel(root, path); err == nil && !strings.HasPrefix(rel, "..") {
+		// Only a real parent traversal disqualifies the result: a file may
+		// legitimately be named "..result.json".
+		if rel, err := filepath.Rel(root, path); err == nil && rel != ".." &&
+			!strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return filepath.ToSlash(rel)
 		}
 	}

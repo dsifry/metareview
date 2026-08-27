@@ -318,7 +318,7 @@ func manifestHashText(hash string) string {
 // resultLine renders one result as a single sanitised bullet body.
 func resultLine(result ReviewResult) string {
 	id := firstNonEmpty(result.ShardID, CrossShardID)
-	return markdown.InlineCode(id) + " " + markdown.InlineCode(result.Verdict) +
+	return ingestedCode(id) + " " + ingestedCode(result.Verdict) +
 		" by " + ingested(result.Reviewer) +
 		fmt.Sprintf(" (%d blocking)", result.BlockingCount)
 }
@@ -405,7 +405,7 @@ func shardResultBlockers(manifest Manifest) ([]string, []IgnoredResult, int) {
 		if !ok {
 			ignored = append(ignored, IgnoredResult{
 				Path:   result.Path,
-				Reason: "no current shard has hash " + firstNonEmpty(result.ShardHash, "(none)"),
+				Reason: "no current shard has hash " + ingested(firstNonEmpty(result.ShardHash, "(none)")),
 			})
 			continue
 		}
@@ -418,7 +418,7 @@ func shardResultBlockers(manifest Manifest) ([]string, []IgnoredResult, int) {
 		blockers = append(blockers, resultBlockers("shard result "+id, result, KindShard)...)
 		if strings.TrimSpace(result.ShardID) != id {
 			blockers = append(blockers, "shard result "+id+" declares shard "+
-				firstNonEmpty(result.ShardID, "(none)"))
+				ingested(firstNonEmpty(result.ShardID, "(none)")))
 		}
 	}
 	for _, shard := range manifest.ShardPlan.Shards {
@@ -465,10 +465,10 @@ func resultBlockers(label string, result ReviewResult, kind string) []string {
 		blockers = append(blockers, label+" missing result ID")
 	}
 	if result.Kind != kind {
-		blockers = append(blockers, label+" unknown kind "+markdown.PlainText(result.Kind))
+		blockers = append(blockers, label+" unknown kind "+ingested(result.Kind))
 	}
 	if !validVerdict(result.Verdict) {
-		blockers = append(blockers, label+" unknown verdict "+markdown.PlainText(result.Verdict))
+		blockers = append(blockers, label+" unknown verdict "+ingested(result.Verdict))
 	}
 	if strings.TrimSpace(result.Reviewer) == "" {
 		blockers = append(blockers, label+" missing reviewer")
@@ -477,7 +477,7 @@ func resultBlockers(label string, result ReviewResult, kind string) []string {
 		blockers = append(blockers, label+" unparsable reviewedAt")
 	}
 	if kind == KindShard && !shardIDPattern.MatchString(result.ShardID) {
-		blockers = append(blockers, label+" invalid shard ID "+markdown.PlainText(result.ShardID))
+		blockers = append(blockers, label+" invalid shard ID "+ingested(result.ShardID))
 	}
 	if result.Path != "" {
 		want := KindCrossShard
@@ -485,7 +485,7 @@ func resultBlockers(label string, result ReviewResult, kind string) []string {
 			want = result.ShardID
 		}
 		if ShardIDFromResultPath(result.Path) != want {
-			blockers = append(blockers, label+" does not match its file name "+markdown.PlainText(result.Path))
+			blockers = append(blockers, label+" does not match its file name "+ingested(result.Path))
 		}
 	}
 	if !hasValidEvidence(result.Evidence) {
@@ -496,10 +496,10 @@ func resultBlockers(label string, result ReviewResult, kind string) []string {
 	}
 	for _, finding := range result.Findings {
 		if !validSeverity(finding.Severity) {
-			blockers = append(blockers, label+" unknown severity "+markdown.PlainText(finding.Severity))
+			blockers = append(blockers, label+" unknown severity "+ingested(finding.Severity))
 		}
 		if !validFindingDisposition(finding.Disposition) {
-			blockers = append(blockers, label+" unknown disposition "+markdown.PlainText(finding.Disposition))
+			blockers = append(blockers, label+" unknown disposition "+ingested(finding.Disposition))
 		} else if severityBlocks(finding.Severity) && !dispositionCloses(finding.Disposition) {
 			blockers = append(blockers, label+" has unresolved "+finding.Disposition+" finding")
 		}
@@ -730,9 +730,9 @@ func ShardedReviewMarkdown(manifest Manifest, aggregate AggregateResult) string 
 	}
 	for _, result := range rows {
 		lines = append(lines, fmt.Sprintf("| %s | %s | %s | %s | %d | %s |",
-			markdown.InlineCode(firstNonEmpty(result.ShardID, CrossShardID)),
-			markdown.InlineCode(firstNonEmpty(result.ShardHash, result.PlanHash)),
-			markdown.InlineCode(result.Verdict),
+			ingestedCode(firstNonEmpty(result.ShardID, CrossShardID)),
+			ingestedCode(firstNonEmpty(result.ShardHash, result.PlanHash)),
+			ingestedCode(result.Verdict),
 			ingested(result.Reviewer),
 			result.BlockingCount,
 			ingestedCode(result.Path)))
