@@ -9,6 +9,7 @@ import (
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/githubcontext"
 	"github.com/dsifry/metareview/internal/knowledge"
+	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/runchain"
 )
 
@@ -18,7 +19,7 @@ func TestReviewMarkdownSeparatesNonBlockingFindings(t *testing.T) {
 		{Reviewer: "validation-reviewer", Classification: "follow-up", Severity: "low", Title: "Track cleanup", Finding: "Cleanup belongs in a later target."},
 		{Reviewer: "security-reviewer", Classification: "warning", Severity: "high", Title: "Unknown class", Finding: "Unknown classification was downgraded to warning."},
 	}
-	md := reviewMarkdown("mrv-pr", "ctx.md", "", "gate", "PASS_ADVISORY", records, "evidence", reviewMetadata{AdvisoryFindingCount: 1, FollowUpFindingCount: 1, WarningFindingCount: 1})
+	md := reviewMarkdown("mrv-pr", "ctx.md", "", "gate", "PASS_ADVISORY", records, "evidence", "", reviewMetadata{AdvisoryFindingCount: 1, FollowUpFindingCount: 1, WarningFindingCount: 1})
 	if strings.Contains(md, "| pr-readiness-reviewer | NEEDS_REVISION | 1 |") || strings.Contains(md, "| validation-reviewer | NEEDS_REVISION | 1 |") {
 		t.Fatalf("non-blocking findings must not render as blocking reviewer failures:\n%s", md)
 	}
@@ -55,12 +56,16 @@ func TestRunChainMarkdownIncludesEscalationDetails(t *testing.T) {
 }
 
 func TestContextMarkdownIncludesReviewManifest(t *testing.T) {
+	profile := contextprofile.Profile{Files: []contextprofile.FileProfile{{Path: "internal/a.go", DiffBytes: 10}}}
+	manifest, aggregate := manifestArgs(profile)
 	body := contextMarkdown(
 		"mrv-pr",
 		gitcontext.Context{BaseSHA: "base", HeadSHA: "head", Branch: "feature", ChangedFiles: []string{"internal/a.go"}},
-		contextprofile.Profile{Files: []contextprofile.FileProfile{{Path: "internal/a.go", DiffBytes: 10}}},
+		profile,
 		contextprofile.ShardPlan{},
 		"",
+		manifest,
+		aggregate,
 		knowledge.Context{},
 		nil,
 		"go test ./... exited 0",
@@ -82,15 +87,19 @@ func TestContextMarkdownIncludesReviewManifest(t *testing.T) {
 }
 
 func TestContextMarkdownDispositionsGeneratedReviewArtifacts(t *testing.T) {
+	profile := contextprofile.Profile{
+		Files:                  []contextprofile.FileProfile{{Path: "internal/a.go", DiffBytes: 10}},
+		GeneratedExcludedFiles: []string{"docs/metareview/reviews/generated-review.md"},
+	}
+	manifest, aggregate := manifestArgs(profile)
 	body := contextMarkdown(
 		"mrv-pr",
 		gitcontext.Context{BaseSHA: "base", HeadSHA: "head", Branch: "feature", ChangedFiles: []string{"internal/a.go"}},
-		contextprofile.Profile{
-			Files:                  []contextprofile.FileProfile{{Path: "internal/a.go", DiffBytes: 10}},
-			GeneratedExcludedFiles: []string{"docs/metareview/reviews/generated-review.md"},
-		},
+		profile,
 		contextprofile.ShardPlan{},
 		"",
+		manifest,
+		aggregate,
 		knowledge.Context{},
 		nil,
 		"go test ./... exited 0",
@@ -110,4 +119,14 @@ func TestContextMarkdownDispositionsGeneratedReviewArtifacts(t *testing.T) {
 	if strings.Contains(body, "missing disposition for docs/metareview/reviews/generated-review.md") {
 		t.Fatalf("pr-ready context should not flag generated review artifact as missing disposition:\n%s", body)
 	}
+}
+
+// manifestArgs builds the manifest the review now passes into contextMarkdown.
+func manifestArgs(profile contextprofile.Profile) (reviewmanifest.Manifest, reviewmanifest.AggregateResult) {
+	manifest := reviewmanifest.Build(reviewmanifest.Input{
+		Scope:            "pr-ready",
+		Profile:          profile,
+		PathDispositions: reviewmanifest.GeneratedPathDispositions(profile.GeneratedExcludedFiles),
+	})
+	return manifest, reviewmanifest.Aggregate(manifest)
 }

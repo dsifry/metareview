@@ -36,11 +36,22 @@ type Chunk struct {
 type Shard struct {
 	ID     string
 	Chunks []Chunk
-	// Paths is derived from Chunks (deduplicated, sorted); PR-B removes it once
-	// reviewmanifest speaks chunks.
-	Paths []string
-	Bytes int
-	Hash  string
+	Bytes  int
+	Hash   string
+}
+
+// ShardPaths lists the distinct paths a shard covers, sorted.
+func ShardPaths(shard Shard) []string {
+	seen := map[string]bool{}
+	paths := make([]string, 0, len(shard.Chunks))
+	for _, c := range shard.Chunks {
+		if !seen[c.Path] {
+			seen[c.Path] = true
+			paths = append(paths, c.Path)
+		}
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 type ShardPlan struct {
@@ -241,19 +252,9 @@ func PlanShards(profile Profile, branchFiles []gitcontext.BranchFile, options Sh
 }
 
 func newShard(id string, chunks []Chunk, bytes int, options ShardOptions) Shard {
-	paths := map[string]bool{}
-	for _, c := range chunks {
-		paths[c.Path] = true
-	}
-	list := make([]string, 0, len(paths))
-	for p := range paths {
-		list = append(list, p)
-	}
-	sort.Strings(list)
 	return Shard{
 		ID:     id,
 		Chunks: append([]Chunk{}, chunks...),
-		Paths:  list,
 		Bytes:  bytes,
 		Hash:   shardHash(options.Scope, options.TargetID, chunks),
 	}
@@ -272,7 +273,7 @@ func ShardPlanMarkdown(plan ShardPlan, packDir string) string {
 	}
 	for _, shard := range plan.Shards {
 		line := "- shard-" + shard.ID + " (`" + shard.Hash + "`, " + fmt.Sprint(shard.Bytes) + " bytes): " +
-			strings.Join(shard.Paths, ", ")
+			strings.Join(ShardPaths(shard), ", ")
 		if packDir != "" {
 			line += " — pack `" + strings.TrimSuffix(packDir, "/") + "/shard-" + shard.ID + ".md`"
 		}

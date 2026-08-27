@@ -59,7 +59,7 @@ Lifecycle gate results use this contract:
 
 Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. `NOT_REVIEWED` artifact scaffolds are also blocking until completed.
 
-Task-done, epic-ready, and PR-ready context packs now include a Context Profile and Context Shard Plan when risk requires sharding. Task-done and PR-ready also include a Review Manifest that accounts for source paths, generated path dispositions, shard assignments, manifest hashes, and manifest blockers.
+Task-done, epic-ready, and PR-ready context packs include a Context Profile. Task-done and PR-ready add a Context Shard Plan and prompt packs when the branch diff exceeds the review context limit, and a Review Manifest that accounts for source paths, generated path dispositions, chunk assignments, the plan hash, the shard results ingested, and manifest blockers; epic-ready renders "not sharded".
 
 ## 4. Metaswarm Fit
 
@@ -74,6 +74,7 @@ Commit:
 - `docs/metareview/reviews/`
 - `docs/metareview/context/`
 - `docs/metareview/learning/`
+- `docs/metareview/shards/` — the shard review results a later gate reads back
 - `.metareview/knowledge/metareview.jsonl` in standalone fallback mode
 - `.metareview/calibration.jsonl`
 - `.metareview/learning-runs.jsonl`
@@ -83,6 +84,7 @@ Keep local:
 
 - `.metareview/findings.jsonl`
 - `.metareview/runs.jsonl`
+- `.metareview/shards/` — the prompt packs, which are regenerated per plan and ignore themselves
 - other transient `.metareview/` state
 
 For ordinary project repositories, use exact file entries for transient state. Do not ignore `docs/metareview/` or the entire `.metareview/` directory, because those patterns hide durable review, learning, calibration, or fallback knowledge artifacts.

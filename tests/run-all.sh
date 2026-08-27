@@ -14,6 +14,7 @@ if [ -f tests/go/test-evidence.sh ]; then bash tests/go/test-evidence.sh; fi
 if [ -f tests/go/test-artifact-review.sh ]; then bash tests/go/test-artifact-review.sh; fi
 if [ -f tests/go/test-git-context.sh ]; then bash tests/go/test-git-context.sh; fi
 if [ -f tests/go/test-shardpack-coverage.sh ]; then bash tests/go/test-shardpack-coverage.sh; fi
+if [ -f tests/go/test-sharded-review.sh ]; then bash tests/go/test-sharded-review.sh; fi
 if [ -f tests/go/test-task-source.sh ]; then bash tests/go/test-task-source.sh; fi
 if [ -f tests/go/test-knowledge-context.sh ]; then bash tests/go/test-knowledge-context.sh; fi
 if [ -f tests/go/test-findings.sh ]; then bash tests/go/test-findings.sh; fi

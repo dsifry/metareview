@@ -61,7 +61,7 @@ func RunEpicReady(context EpicReadyContext) []Finding {
 			Found:          "Risk reasons: " + strings.Join(context.Git.RiskReasons, ", "),
 			Evidence:       []findings.Evidence{{Type: "context", Path: "contextProfile"}},
 			Recommendation: "Resolve the context risk before declaring the epic ready.",
-			Fingerprint:    "epic:context-risk:" + strings.Join(context.Git.RiskReasons, "|"),
+			Fingerprint:    "epic:context-risk",
 		}))
 	}
 	if hasEvalContradiction(context.Children) {

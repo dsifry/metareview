@@ -24,5 +24,5 @@ Report:
 
 Also report whether the current generated artifacts should be committed or kept local:
 
-- commit `docs/metareview/reviews/`, `docs/metareview/context/`, `docs/metareview/learning/`, `.metareview/knowledge/metareview.jsonl`, `.metareview/calibration.jsonl`, and `.metareview/learning-runs.jsonl`
-- keep `.metareview/findings.jsonl`, `.metareview/runs.jsonl`, and other transient `.metareview/` state local
+- commit `docs/metareview/reviews/`, `docs/metareview/context/`, `docs/metareview/learning/`, `docs/metareview/shards/`, `.metareview/knowledge/metareview.jsonl`, `.metareview/calibration.jsonl`, and `.metareview/learning-runs.jsonl`
+- keep `.metareview/findings.jsonl`, `.metareview/runs.jsonl`, `.metareview/shards/` (transient prompt packs), and other transient `.metareview/` state local

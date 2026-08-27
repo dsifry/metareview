@@ -26,7 +26,9 @@ func Collect(root string, options Options) (Context, error) {
 	if err != nil {
 		return Context{}, err
 	}
-	git, err := gitcontext.Collect(root, options.Base)
+	// Committed shard results are audit records of the review, not source under
+	// review: post-merge learning never reads them back.
+	git, err := gitcontext.CollectWithExcludes(root, options.Base, []string{"docs/metareview/shards", "docs/metareview/shards/**"})
 	if err != nil {
 		return Context{}, err
 	}
