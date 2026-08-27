@@ -259,17 +259,21 @@ func (c *countingStore) RepairTail(id string) error {
 // ---- runner ----
 
 type fakeRunner struct {
-	calls  []string
-	stdins [][]byte
-	res    converge.CmdResult
-	err    error
-	audit  func(run.Event) error
-	name   string
+	calls    []string
+	stdins   [][]byte
+	res      converge.CmdResult
+	err      error
+	audit    func(run.Event) error
+	ordinal  func(string) int
+	ordinals []int
 }
 
 func (f *fakeRunner) Run(_ context.Context, name string, stdin []byte) (converge.CmdResult, error) {
 	f.calls = append(f.calls, name)
 	f.stdins = append(f.stdins, stdin)
+	if f.ordinal != nil {
+		f.ordinals = append(f.ordinals, f.ordinal(name))
+	}
 	if f.audit != nil {
 		d := run.CmdCallData{Name: name, Argv: []string{"/bin/true"}, InputHash: "x", ExitCode: f.res.ExitCode}
 		if err := f.audit(run.Event{Type: run.TypeCmdCall, Data: run.MarshalCanonical(d)}); err != nil {
@@ -305,8 +309,9 @@ func newHarness(t *testing.T) *harness {
 	h.deps = Deps{
 		Store: h.store, Sidecar: h.sidecar, Kinds: h.reg,
 		Git: func(dir string) gate.Git { return h.git.get(dir) },
-		Runner: func(_ []run.AllowedCmd, _, _ string, audit func(run.Event) error) converge.Runner {
-			h.runner.audit = audit
+		Runner: func(d RunnerDeps) converge.Runner {
+			h.runner.audit = d.Audit
+			h.runner.ordinal = d.CmdCalls
 			return h.runner
 		},
 		Clock: func() run.Time {

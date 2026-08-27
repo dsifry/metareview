@@ -40,7 +40,8 @@ type session struct {
 	runner   converge.Runner
 	git      gate.Git
 	warns    []string
-	auditErr error // the first store error seen through the audit closure
+	auditErr error          // the first store error seen through the audit closure
+	cmdCalls map[string]int // prior cmd_call count per command name (durable ordinal for mocks)
 	unlock   func()
 }
 
@@ -87,6 +88,9 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 	w, vars, err := parsed.Resolve(o.Vars, o.Calibration)
 	if err != nil {
 		return nil, err
+	}
+	if !filepath.IsAbs(o.WorkDir) || !filepath.IsAbs(o.RepoRoot) {
+		return nil, errs.E(CodeWorkdirForeign, "work dir and repo root must be absolute", "reason", "relative", "work_dir", o.WorkDir, "repo_root", o.RepoRoot)
 	}
 	// 2. commands + consent
 	allowed, sha, err := workflow.ResolveCmds(w, o.WorkDir, deps.LookPath, deps.FileHash)
@@ -148,7 +152,11 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 		if err != nil {
 			return nil, errs.E(CodeMockInvalid, err.Error(), "dir", o.MockDir)
 		}
-		rel := strings.TrimPrefix(strings.TrimPrefix(filepath.Clean(dir), filepath.Clean(o.RepoRoot)), string(filepath.Separator))
+		root := filepath.Clean(o.RepoRoot) + string(filepath.Separator)
+		if !strings.HasPrefix(filepath.Clean(dir)+string(filepath.Separator), root) {
+			return nil, errs.E(CodeMockInvalid, "mock scenario must live inside the repository", "dir", o.MockDir, "reason", "outside")
+		}
+		rel := strings.TrimPrefix(filepath.Clean(dir), root)
 		mock = rel + "#" + h[:16]
 	}
 	if deps.Kinds.Mock() != (mock != "") {
@@ -357,7 +365,16 @@ func (m *Machine) load(ctx context.Context, repair bool) (*session, error) {
 		return nil, errs.E(CodeMockMismatch, "the kind registry's mock mode does not match the run")
 	}
 	sess.git = deps.Git(snap.WorkDir)
-	sess.runner = deps.Runner(snap.AllowedCmds, snap.WorkDir, m.runID, sess.audit)
+	sess.cmdCalls = map[string]int{}
+	for _, ev := range log.Events {
+		if ev.Type == run.TypeCmdCall {
+			var cd run.CmdCallData
+			if json.Unmarshal(ev.Data, &cd) == nil {
+				sess.cmdCalls[cd.Name]++
+			}
+		}
+	}
+	sess.runner = deps.Runner(RunnerDeps{Allowed: snap.AllowedCmds, WorkDir: snap.WorkDir, RunID: m.runID, Audit: sess.audit, CmdCalls: func(name string) int { return sess.cmdCalls[name] }})
 	if w.Convergence != nil {
 		sess.pred = converge.MustParse(w.Convergence, sess.runner) // validated by workflow.Parse
 	}
@@ -415,6 +432,12 @@ func (s *session) audit(ev run.Event) error {
 			s.auditErr = err
 		}
 		return err
+	}
+	if ev.Type == run.TypeCmdCall {
+		var cd run.CmdCallData
+		if json.Unmarshal(ev.Data, &cd) == nil {
+			s.cmdCalls[cd.Name]++
+		}
 	}
 	return nil
 }
@@ -674,7 +697,7 @@ func (s *session) transitions(head string) (AdvanceResult, error) {
 			if err != nil && s.auditErr != nil {
 				return AdvanceResult{}, s.auditErr // the atom's cmd_call could not be stored: abort, not a gate failure
 			}
-			if err != nil || (r.Class == run.OutcomeFixed && r.Atom != "all_fixed") {
+			if err != nil || (r.Stop && r.Class == run.OutcomeFixed && r.Atom != "all_fixed") {
 				detail := "convergence evaluation failed"
 				reason := "error"
 				if err != nil {
@@ -691,12 +714,13 @@ func (s *session) transitions(head string) (AdvanceResult, error) {
 				return s.fail(ge, head)
 			}
 			reason, _ := run.CapText(r.Reason, run.MaxText)
-			if err := s.append(run.TypeConverge, run.ConvergeData{Atom: r.Atom, Class: r.Class, Stop: r.Stop, Reason: reason}, ""); err != nil {
+			atom, _ := run.CapText(r.Atom, run.MaxShort)
+			if err := s.append(run.TypeConverge, run.ConvergeData{Atom: atom, Class: r.Class, Stop: r.Stop, Reason: reason}, ""); err != nil {
 				return AdvanceResult{}, err
 			}
 			if r.Stop {
-				chosen = &workflow.Transition{From: snap.State, To: tt.To, Gate: r.Atom, Outcome: r.Class}
-				return s.finish(s.transitionData(*chosen, head), r.Atom+": "+reason)
+				chosen = &workflow.Transition{From: snap.State, To: tt.To, Gate: atom, Outcome: r.Class}
+				return s.finish(s.transitionData(*chosen, head), atom+": "+reason)
 			}
 		}
 		if chosen == nil {

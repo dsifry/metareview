@@ -72,13 +72,22 @@ type Sidecar interface {
 	List(runID string) ([]string, error)
 }
 
+// RunnerDeps is what the single Guarded factory receives per session.
+type RunnerDeps struct {
+	Allowed  []run.AllowedCmd
+	WorkDir  string
+	RunID    string
+	Audit    func(run.Event) error
+	CmdCalls func(name string) int // prior cmd_call count for a command (mock ordinal)
+}
+
 // Deps wires the machine. Nothing here is optional except Terminal.
 type Deps struct {
 	Store     run.RunStore
 	Sidecar   Sidecar
 	Kinds     Registry
 	Git       func(workDir string) gate.Git
-	Runner    func(allowed []run.AllowedCmd, workDir, runID string, audit func(run.Event) error) converge.Runner
+	Runner    func(RunnerDeps) converge.Runner
 	Clock     Clock
 	LookPath  func(string) (string, error)
 	FileHash  func(string) (string, error)

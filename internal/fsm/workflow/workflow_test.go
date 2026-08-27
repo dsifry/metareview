@@ -175,6 +175,10 @@ func TestW2Reasons(t *testing.T) {
 		src              string
 	}{
 		{"unknown-top-key", "unknown_key", "document", example + "extra: 1\n"},
+		{"bad-yaml-malformed", "bad_yaml", "document", "workflow: [\n"},
+		{"bad-yaml-dup-key", "bad_yaml", "document", example + "workflow: again\n"},
+		{"bad-yaml-scalar-root", "bad_yaml", "document", "just a string\n"},
+		{"bad-version-string", "bad_yaml", "document", edit("version: 1", "version: one")},
 		{"transitions-scalar", "unknown_key", "transitions", scalarTransitions()},
 		{"node-kind-not-string", "unknown_key", "nodes.fix.kind", edit("fix:        { kind: agent-edit }", "fix:        { kind: [agent-edit] }")},
 		{"transition-unknown-field", "unknown_key", "transitions[0]", edit("gate: findings_empty, outcome: clean }", "gate: findings_empty, outcome: clean, extra: 1 }")},

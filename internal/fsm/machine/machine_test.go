@@ -111,6 +111,8 @@ func TestM1InitErrors(t *testing.T) {
 		{"goldens-null-ok", InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, GoldensPath: "/x/gnull.json"}, func() { h.files["/x/gnull.json"] = []byte(`null`) }, ""},
 		{"mock-registry-mismatch", InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, MockDir: "scen/ok"}, func() { h.mockHash["/repo/scen/ok"] = strings.Repeat("a", 64) }, CodeMockMismatch},
 		{"base-unknown", InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, Base: "nope"}, nil, gate.CodeGit},
+		{"workdir-relative", InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, WorkDir: "rel"}, nil, CodeWorkdirForeign},
+		{"mock-outside-root", InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, MockDir: "/other/scen"}, func() { h.mockHash["/other/scen"] = strings.Repeat("b", 64) }, CodeMockInvalid},
 		{"workdir-foreign", InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, WorkDir: "/elsewhere"}, func() {
 			h.git.byDir["/elsewhere"] = &gate.Fake{HeadSHA: shaHead, Common: "/other/.git"}
 		}, CodeWorkdirForeign},
@@ -693,6 +695,9 @@ func TestM4Convergence(t *testing.T) {
 	if !strings.Contains(string(h.runner.stdins[0]), `"vars":{"JUDGE":"sha256:`) {
 		t.Fatal("cmd atom receives the redacted payload")
 	}
+	if len(h.runner.ordinals) != 1 || h.runner.ordinals[0] != 0 {
+		t.Fatalf("first call ordinal 0: %v", h.runner.ordinals)
+	}
 	// converge error
 	h = newHarness(t)
 	wf = sdlcWith(t, h, "custom2.yaml", "  any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]\nrepo_mode: advisory",
@@ -720,11 +725,37 @@ func TestM4Convergence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess.pred = fixedPred{}
+	sess.pred = fixedPred{stop: true}
 	r, err = sess.advance()
 	sess.unlock()
 	if err != nil || r.Gate == nil || r.Gate.Name != GateConverge || !strings.Contains(r.Gate.Error.Detail, "fixed_class") {
 		t.Fatalf("fixed_class: %+v %v", r, err)
+	}
+	// a NON-firing fixed-class result (any: [all_fixed, …] with bugs remaining) is not a failure: the loop is taken
+	h = newHarness(t)
+	m = loopRun(t, h, 1, "sdlc-loop")
+	sess, _ = m.load(context.Background(), false)
+	sess.pred = fixedPred{stop: false}
+	r, err = sess.advance()
+	sess.unlock()
+	if err != nil || r.Status != StatusAdvanced || r.To != "discover" {
+		t.Fatalf("non-firing fixed class: %+v %v", r, err)
+	}
+	// the real all_fixed atom firing on a confirmed_empty terminal gate → fixed (design §9 example)
+	h = newHarness(t)
+	wf = sdlcWith(t, h, "af.yaml", "  - {from: verify,     to: done,       gate: all_fixed,   outcome: fixed}", "  - {from: verify,     to: done,       gate: confirmed_empty,   outcome: fixed}")
+	h.files["/x/af.yaml"] = []byte(strings.Replace(string(h.files["/x/af.yaml"]), "any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]", "any: [all_fixed, {max_iterations: 5}]", 1))
+	h.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1}
+	m = h.mustInit(InitOptions{Workflow: wf, Vars: sdlcVars})
+	h.advance(m)
+	h.record(m, "discover", findings(1))
+	h.advance(m)
+	h.advance(m)
+	h.advance(m)
+	h.record(m, "fix", `{"commit":"`+shaFix+`","summary":"s"}`)
+	h.advance(m)
+	if r := h.advance(m); r.Outcome != run.OutcomeFixed || r.StopReason != "all_fixed: all bugs fixed" {
+		t.Fatalf("all_fixed atom: %+v", r)
 	}
 	// user workflow whose terminal gate is confirmed_empty: convergence still bounds the loop
 	h = newHarness(t)
@@ -741,6 +772,31 @@ func TestM4Convergence(t *testing.T) {
 	h.advance(m)
 	if r := h.advance(m); r.Outcome != run.OutcomeOverflow {
 		t.Fatalf("bounded even when all fixed: %+v", r)
+	}
+	// Atom cap: an `all` of 32 long-named cmd atoms yields a >1 KB name; it is capped, never a store rejection
+	h = newHarness(t)
+	var names, decls []string
+	for i := 0; i < 32; i++ {
+		n := "cmd-" + strings.Repeat("x", 25) + string(rune('a'+i/10)) + string(rune('0'+i%10))
+		names = append(names, "{cmd: "+n+"}")
+		decls = append(decls, "  "+n+": {argv: [bash, -c, echo]}")
+	}
+	wf = sdlcWith(t, h, "wide.yaml", "  any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]\nrepo_mode: advisory",
+		"  all: ["+strings.Join(names, ", ")+"]\ncmds:\n"+strings.Join(decls, "\n")+"\nrepo_mode: advisory")
+	h.runner.res = converge.CmdResult{Stdout: []byte(`{"stop": true, "reason": "x"}`)}
+	_, sha, _ = workflow.ResolveCmds(mustResolve(t, h, wf), "/repo", h.deps.LookPath, h.deps.FileHash)
+	allPresent(h)
+	h.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1}
+	m = h.mustInit(InitOptions{Workflow: wf, Vars: sdlcVars, AllowCustomCmds: sha})
+	h.advance(m)
+	h.record(m, "discover", findings(1))
+	h.advance(m)
+	h.advance(m)
+	h.advance(m)
+	h.record(m, "fix", `{"commit":"`+shaFix+`","summary":"s"}`)
+	h.advance(m)
+	if r := h.advance(m); r.Outcome != run.OutcomeCustom || len(r.StopReason) > run.MaxShort+run.MaxText+8 {
+		t.Fatalf("wide all: %+v", r)
 	}
 	// emitter cap: 5 KB cmd reason capped in converge event and StopReason
 	h = newHarness(t)
@@ -776,12 +832,12 @@ func allPresent(h *harness) {
 	}
 }
 
-type fixedPred struct{}
+type fixedPred struct{ stop bool }
 
 func (fixedPred) Name() string       { return "evil" }
 func (fixedPred) Class() run.Outcome { return run.OutcomeFixed }
-func (fixedPred) Evaluate(context.Context, run.Snapshot) (converge.Result, error) {
-	return converge.Result{Stop: true, Atom: "evil", Class: run.OutcomeFixed, Reason: "ha"}, nil
+func (p fixedPred) Evaluate(context.Context, run.Snapshot) (converge.Result, error) {
+	return converge.Result{Stop: p.stop, Atom: "evil", Class: run.OutcomeFixed, Reason: "ha"}, nil
 }
 
 func mustResolve(t *testing.T, h *harness, path string) *workflow.Workflow {
@@ -890,6 +946,9 @@ func TestM4OverflowHandler(t *testing.T) {
 	r = h3.advance(m3)
 	if r.Status != StatusStopped || r.Outcome != run.OutcomeOverflow || !m3.View().Snapshot.OverflowHandled || countType(h3.events(m3), run.TypeOverflowHandler) != 1 {
 		t.Fatalf("resume handler: %+v", r)
+	}
+	if o := h3.runner.ordinals; len(o) != 2 || o[0] != 0 || o[1] != 0 {
+		t.Fatalf("ordinals: the crashed call stored no cmd_call, so the resume is ordinal 0 again: %v", o)
 	}
 	if _, err := m3.Advance(context.Background()); !errs.Is(err, CodeRunTerminal) {
 		t.Fatal("terminal after resume")
@@ -1641,7 +1700,7 @@ func TestM9Residue(t *testing.T) {
 		hb.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1}
 		allPresent(hb)
 		mb := hb.mustInit(InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars})
-		for _, step := range []func(*harness, *Machine) error{adv, rec("discover", findings(1)), adv, adv, adv, rec("fix", `{"commit":"` + shaFix + `","summary":"s"}`), adv, adv} {
+		for _, step := range []func(*harness, *Machine) error{adv, rec("discover", findings(1)), adv, adv, adv, rec("fix", `{"commit":"`+shaFix+`","summary":"s"}`), adv, adv} {
 			if err := step(hb, mb); err != nil {
 				t.Fatal(err)
 			}

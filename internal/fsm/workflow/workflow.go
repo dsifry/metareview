@@ -166,7 +166,10 @@ func Parse(raw []byte, opts Options) (*Workflow, error) {
 	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&rw); err != nil {
-		return nil, invalid("unknown_key", "document", err.Error())
+		if strings.Contains(err.Error(), "not found in type") {
+			return nil, invalid("unknown_key", "document", err.Error())
+		}
+		return nil, invalid("bad_yaml", "document", err.Error())
 	}
 	sum := sha256.Sum256(raw)
 	w := &Workflow{
