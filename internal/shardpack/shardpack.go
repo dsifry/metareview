@@ -350,7 +350,7 @@ func crossShardPack(plan contextprofile.ShardPlan, header Header) string {
 	b.WriteString("## Shards\n\n")
 	for _, s := range plan.Shards {
 		fmt.Fprintf(&b, "- %s (%s, %d bytes): %s\n", markdown.InlineCode("shard-"+s.ID),
-			markdown.InlineCode(s.Hash), s.Bytes, strings.Join(inlineAll(s.Paths), ", "))
+			markdown.InlineCode(s.Hash), s.Bytes, strings.Join(inlineAll(contextprofile.ShardPaths(s)), ", "))
 	}
 	if chunked := chunkedFiles(plan); len(chunked) > 0 {
 		b.WriteString("\n## Files reviewed as chunks\n\n")
