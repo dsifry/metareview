@@ -1,0 +1,116 @@
+name: GTG
+
+# Merge-readiness check. Runs on PRs and can be dispatched manually.
+# See: https://github.com/dsifry/goodtogo
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to check"
+        required: true
+        type: number
+
+permissions:
+  pull-requests: read
+  contents: read
+  checks: read
+  statuses: read
+
+jobs:
+  gtg-check:
+    name: Merge Ready (gtg)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install gtg
+        run: |
+          pip install gtg || {
+            echo "::error::Failed to install gtg from PyPI"
+            exit 1
+          }
+
+      - name: Determine PR number
+        id: pr
+        run: |
+          if [ -n "${{ github.event.inputs.pr_number }}" ]; then
+            echo "number=${{ github.event.inputs.pr_number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for CI checks
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Waiting for CI checks to complete..."
+          PR=${{ steps.pr.outputs.number }}
+          for i in $(seq 1 30); do
+            # Exclude self and the review bots from the pending count.
+            REAL_PENDING=$(gh pr checks "$PR" --repo ${{ github.repository }} 2>&1 \
+              | grep "pending" | grep -v "Merge Ready" | grep -v "CodeRabbit" | grep -v "Cursor Bugbot" \
+              | wc -l | tr -d ' ')
+            if [ "$REAL_PENDING" = "0" ]; then
+              echo "All CI checks complete."
+              break
+            fi
+            echo "  $REAL_PENDING check(s) still pending, waiting 10s... ($i/30)"
+            sleep 10
+          done
+
+      - name: Check PR readiness
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          echo "Checking PR #${{ steps.pr.outputs.number }} readiness..."
+
+          set +e
+          gtg ${{ steps.pr.outputs.number }} \
+            --repo ${{ github.repository }} \
+            --semantic-codes \
+            --format text \
+            --verbose \
+            --exclude-checks "Merge Ready (gtg)" \
+            --exclude-checks "CodeRabbit" \
+            --exclude-checks "Cursor Bugbot" 2>&1 | tee gtg-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "::group::GTG Check Details"
+          cat gtg-output.txt
+          echo "::endgroup::"
+
+          case $EXIT_CODE in
+            0)
+              echo "::notice::PR #${{ steps.pr.outputs.number }} is ready to merge"
+              ;;
+            1)
+              # Exit 1 = actionable comments. gtg still classifies dismissed bot
+              # review summaries as actionable, so this is a warning, not a failure.
+              echo "::warning::PR may have actionable comments — review the GTG output above"
+              ;;
+            2)
+              echo "::error::PR has unresolved review threads"
+              exit 2
+              ;;
+            3)
+              echo "::error::PR has failing CI checks"
+              exit 3
+              ;;
+            4)
+              echo "::error::Error fetching PR data from GitHub API"
+              exit 4
+              ;;
+            *)
+              echo "::error::GTG check failed with unexpected exit code: $EXIT_CODE"
+              exit $EXIT_CODE
+              ;;
+          esac
