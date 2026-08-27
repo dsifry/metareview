@@ -10,6 +10,7 @@ import (
 
 	"github.com/dsifry/metareview/internal/contextprofile"
 	"github.com/dsifry/metareview/internal/gitcontext"
+	"github.com/dsifry/metareview/internal/reviewmanifest"
 )
 
 func branchFiles(specs map[string]string) []gitcontext.BranchFile {
@@ -497,6 +498,21 @@ func TestOSDepsRoundTripOnDisk(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stale, "old.md"), []byte("stale"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A real result file and an unreadable one, so Discover enters OSDeps.ReadFile.
+	dir := writeResults(t, root, plan)
+	if err := os.WriteFile(filepath.Join(dir, "shard-0.0011223344556677.result.json"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	found, err := w.Discover(root, "pr-ready", "feature", plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Shards) != len(plan.Shards) || len(found.Unreadable) != 1 {
+		t.Fatalf("round trip discovery = %+v", found)
+	}
+	if err := w.GC(root, "pr-ready", "feature", plan); err != nil {
+		t.Fatal(err)
+	}
 	if err := w.Prune(root, "pr-ready", "feature", plan.PlanHash); err != nil {
 		t.Fatal(err)
 	}
@@ -689,4 +705,276 @@ func TestRelIsRepoRelative(t *testing.T) {
 	if got := Rel("elsewhere/packs"); got != "elsewhere/packs" {
 		t.Fatalf("Rel of an unrecognised path = %q, want it unchanged", got)
 	}
+}
+
+// --- discovery, explicit results and GC -------------------------------------
+
+func resultJSON(t *testing.T, kind, shardID, shardHash, planHash string) []byte {
+	t.Helper()
+	result := reviewmanifest.ReviewResult{
+		SchemaVersion: reviewmanifest.ResultSchemaVersion,
+		ID:            "r-" + shardID + planHash,
+		Kind:          kind,
+		ShardID:       shardID,
+		ShardHash:     shardHash,
+		PlanHash:      planHash,
+		Verdict:       reviewmanifest.VerdictPass,
+		Reviewer:      "shard-reviewer",
+		ReviewedAt:    "2026-08-27T10:00:00Z",
+		Evidence:      []reviewmanifest.EvidenceRef{{Path: "a.go", Line: 1}},
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func writeResults(t *testing.T, root string, plan contextprofile.ShardPlan) string {
+	t.Helper()
+	dir := ResultsDir(root, "pr-ready", "feature")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range plan.Shards {
+		name := "shard-" + s.ID + "." + s.Hash + ".result.json"
+		if err := os.WriteFile(filepath.Join(dir, name), resultJSON(t, reviewmanifest.KindShard, "shard-"+s.ID, s.Hash, plan.PlanHash), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	name := "cross-shard." + plan.PlanHash + ".result.json"
+	if err := os.WriteFile(filepath.Join(dir, name), resultJSON(t, reviewmanifest.KindCrossShard, "", "", plan.PlanHash), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestDiscoverByHashNamesAndReasons(t *testing.T) {
+	root, plan, _ := fixture(t)
+	dir := writeResults(t, root, plan)
+	// A result for another plan, a file that is not a result, and a directory
+	// wearing a result name: only the first is reported, and only as ignored.
+	if err := os.WriteFile(filepath.Join(dir, "shard-0.00112233445566ff.result.json"),
+		resultJSON(t, reviewmanifest.KindShard, "shard-0", "00112233445566ff", "8899aabbccddeeff"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("not a result"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "cross-shard.0011223344556677.result.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := New(OSDeps()).Discover(root, "pr-ready", "feature", plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Shards) != len(plan.Shards) {
+		t.Fatalf("fresh shard results = %d, want %d", len(found.Shards), len(plan.Shards))
+	}
+	if found.CrossShard == nil {
+		t.Fatal("cross-shard result not discovered")
+	}
+	if len(found.Ignored) != 1 || found.Ignored[0].Reason == "" {
+		t.Fatalf("ignored = %+v, want exactly the other plan's result with a reason", found.Ignored)
+	}
+	if len(found.Unreadable) != 0 {
+		t.Fatalf("unreadable = %v, want none", found.Unreadable)
+	}
+	if strings.HasPrefix(found.Shards[0].Path, root) {
+		t.Fatalf("result path %q should be repository-relative", found.Shards[0].Path)
+	}
+}
+
+func TestDiscoverIgnoresStaleCrossShardAndOversizeFiles(t *testing.T) {
+	root, plan, _ := fixture(t)
+	dir := ResultsDir(root, "pr-ready", "feature")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cross-shard.0011223344556677.result.json"),
+		resultJSON(t, reviewmanifest.KindCrossShard, "", "", "0011223344556677"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oversize := append([]byte(`{"schemaVersion":1,"id":"`), make([]byte, reviewmanifest.MaxResultBytes)...)
+	if err := os.WriteFile(filepath.Join(dir, "shard-0.00112233445566aa.result.json"), oversize, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	found, err := New(OSDeps()).Discover(root, "pr-ready", "feature", plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Ignored) != 2 {
+		t.Fatalf("ignored = %+v, want the stale cross-shard file and the oversize file", found.Ignored)
+	}
+	if found.CrossShard != nil {
+		t.Fatal("a cross-shard result for another plan must not be adopted")
+	}
+}
+
+func TestDiscoverWithNoResultsDirectory(t *testing.T) {
+	root, plan, _ := fixture(t)
+	found, err := New(OSDeps()).Discover(root, "pr-ready", "feature", plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Shards) != 0 || found.CrossShard != nil || len(found.Ignored) != 0 {
+		t.Fatalf("empty discovery expected, got %+v", found)
+	}
+}
+
+func TestExplicitResultsAdded(t *testing.T) {
+	root, plan, _ := fixture(t)
+	explicitDir := filepath.Join(root, "explicit")
+	if err := os.MkdirAll(explicitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var explicit []string
+	for _, s := range plan.Shards {
+		path := filepath.Join(explicitDir, "shard-"+s.ID+"."+s.Hash+".result.json")
+		if err := os.WriteFile(path, resultJSON(t, reviewmanifest.KindShard, "shard-"+s.ID, s.Hash, plan.PlanHash), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		explicit = append(explicit, path)
+	}
+	crossPath := filepath.Join(explicitDir, "cross-shard."+plan.PlanHash+".result.json")
+	if err := os.WriteFile(crossPath, resultJSON(t, reviewmanifest.KindCrossShard, "", "", plan.PlanHash), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	explicit = append(explicit, crossPath, explicit[0])
+
+	found, err := New(OSDeps()).Discover(root, "pr-ready", "feature", plan, explicit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Shards) != len(plan.Shards) {
+		t.Fatalf("explicit shard results = %d, want %d (the repeat must be deduplicated)", len(found.Shards), len(plan.Shards))
+	}
+	if found.CrossShard == nil {
+		t.Fatal("explicit cross-shard result not added")
+	}
+}
+
+func TestUnreadableDiscoveredIsBlocker(t *testing.T) {
+	root, plan, _ := fixture(t)
+	dir := writeResults(t, root, plan)
+	broken := filepath.Join(dir, "shard-0.0011223344556677.result.json")
+	if err := os.WriteFile(broken, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := New(OSDeps()).Discover(root, "pr-ready", "feature", plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Unreadable) != 1 || !strings.HasSuffix(found.Unreadable[0], "shard-0.0011223344556677.result.json") {
+		t.Fatalf("unreadable = %v, want the malformed file", found.Unreadable)
+	}
+}
+
+func TestResultOutsideRepoRejected(t *testing.T) {
+	root, plan, _ := fixture(t)
+	outside := filepath.Join(t.TempDir(), "shard-0.0011223344556677.result.json")
+	if err := os.WriteFile(outside, resultJSON(t, reviewmanifest.KindShard, "shard-0", plan.Shards[0].Hash, plan.PlanHash), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := New(OSDeps()).Discover(root, "pr-ready", "feature", plan, []string{outside, filepath.Join(root, "missing.result.json")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Shards) != 0 {
+		t.Fatalf("a result outside the repository must not be adopted: %+v", found.Shards)
+	}
+	if len(found.Ignored) != 1 || !strings.Contains(found.Ignored[0].Reason, "outside") {
+		t.Fatalf("ignored = %+v, want an outside-the-repository reason", found.Ignored)
+	}
+	if len(found.Unreadable) != 1 {
+		t.Fatalf("unreadable = %v, want the missing explicit path", found.Unreadable)
+	}
+}
+
+func TestGCAfterPass(t *testing.T) {
+	root, plan, _ := fixture(t)
+	dir := writeResults(t, root, plan)
+	superseded := filepath.Join(dir, "shard-0.00112233445566ff.result.json")
+	staleCross := filepath.Join(dir, "cross-shard.8899aabbccddeeff.result.json")
+	keep := filepath.Join(dir, "README.md")
+	for _, path := range []string{superseded, staleCross, keep} {
+		if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := New(OSDeps()).GC(root, "pr-ready", "feature", plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{superseded, staleCross} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s should have been collected", path)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("GC touched a file outside the result naming patterns: %v", err)
+	}
+	for _, s := range plan.Shards {
+		if _, err := os.Stat(filepath.Join(dir, "shard-"+s.ID+"."+s.Hash+".result.json")); err != nil {
+			t.Fatalf("GC removed a current result: %v", err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cross-shard."+plan.PlanHash+".result.json")); err != nil {
+		t.Fatalf("GC removed the current cross-shard result: %v", err)
+	}
+}
+
+func TestGCWithNoResultsDirectory(t *testing.T) {
+	root, plan, _ := fixture(t)
+	if err := New(OSDeps()).GC(root, "pr-ready", "feature", plan); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDiscoverAndGCDepsFailureBranches(t *testing.T) {
+	root, plan, _ := fixture(t)
+	dir := writeResults(t, root, plan)
+	if err := os.MkdirAll(filepath.Join(dir, "cross-shard.0011223344556677.result.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	boom := errors.New("boom")
+
+	t.Run("discover-evalsymlinks", func(t *testing.T) {
+		deps := OSDeps()
+		deps.EvalSymlinks = func(string) (string, error) { return "", boom }
+		if _, err := New(deps).Discover(root, "pr-ready", "feature", plan, nil); !errors.Is(err, boom) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+	t.Run("discover-readfile", func(t *testing.T) {
+		deps := OSDeps()
+		deps.ReadFile = func(string) ([]byte, error) { return nil, boom }
+		found, err := New(deps).Discover(root, "pr-ready", "feature", plan, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(found.Unreadable) != len(plan.Shards)+1 {
+			t.Fatalf("unreadable = %v, want every discovered file", found.Unreadable)
+		}
+	})
+	t.Run("gc-evalsymlinks", func(t *testing.T) {
+		deps := OSDeps()
+		deps.EvalSymlinks = func(string) (string, error) { return "", boom }
+		if err := New(deps).GC(root, "pr-ready", "feature", plan); !errors.Is(err, boom) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
+	t.Run("gc-removeall", func(t *testing.T) {
+		if err := os.WriteFile(filepath.Join(dir, "shard-0.00112233445566ff.result.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		deps := OSDeps()
+		deps.RemoveAll = func(string) error { return boom }
+		if err := New(deps).GC(root, "pr-ready", "feature", plan); !errors.Is(err, boom) {
+			t.Fatalf("err = %v, want the injected failure", err)
+		}
+	})
 }

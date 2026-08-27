@@ -18,6 +18,7 @@ import (
 	"github.com/dsifry/metareview/internal/contextprofile"
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/markdown"
+	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/state"
 )
 
@@ -29,6 +30,7 @@ type Deps struct {
 	Rename       func(oldPath, newPath string) error
 	RemoveAll    func(path string) error
 	ReadDir      func(path string) ([]os.DirEntry, error)
+	ReadFile     func(path string) ([]byte, error)
 	EvalSymlinks func(path string) (string, error)
 }
 
@@ -41,6 +43,7 @@ func OSDeps() Deps {
 		Rename:       os.Rename,
 		RemoveAll:    os.RemoveAll,
 		ReadDir:      os.ReadDir,
+		ReadFile:     os.ReadFile,
 		EvalSymlinks: filepath.EvalSymlinks,
 	}
 }
@@ -54,10 +57,21 @@ type Header struct {
 	Budget   int
 }
 
-// Writer writes and prunes pack directories.
+// Found is the outcome of one discovery pass over a target's result directory.
+type Found struct {
+	Shards     []reviewmanifest.ReviewResult
+	CrossShard *reviewmanifest.ReviewResult
+	Ignored    []reviewmanifest.IgnoredResult
+	Unreadable []string
+}
+
+// Writer writes and prunes pack directories, and reads back the results a host
+// agent wrote about them.
 type Writer interface {
 	Write(root string, plan contextprofile.ShardPlan, header Header, files []gitcontext.BranchFile) (func() error, error)
 	Prune(root, scope, targetID, keepPlanHash string) error
+	Discover(root, scope, targetID string, plan contextprofile.ShardPlan, explicit []string) (Found, error)
+	GC(root, scope, targetID string, plan contextprofile.ShardPlan) error
 }
 
 type writer struct{ deps Deps }
@@ -90,6 +104,11 @@ func Rel(dir string) string {
 		return filepath.ToSlash(dir)[idx:]
 	}
 	return dir
+}
+
+// ResultsDir is the durable directory holding a target's review results.
+func ResultsDir(root, scope, targetID string) string {
+	return filepath.Join(root, "docs", "metareview", "shards", scope, TargetSlug(scope, targetID))
 }
 
 // planFile is the machine-readable half of a pack set.
@@ -262,6 +281,120 @@ func isPlanHashName(name string) bool {
 		}
 	}
 	return true
+}
+
+// Discover reads the result files for a target: the fresh ones, the ones that
+// are not about the current content (ignored, with a reason) and the ones that
+// could not be read at all. Explicit paths are added to whatever the directory
+// holds, and must resolve inside the repository.
+func (w *writer) Discover(root, scope, targetID string, plan contextprofile.ShardPlan, explicit []string) (Found, error) {
+	var found Found
+	resolvedRoot, err := w.deps.EvalSymlinks(root)
+	if err != nil {
+		return Found{}, err
+	}
+	dir := ResultsDir(resolvedRoot, scope, targetID)
+	var paths []string
+	entries, err := w.deps.ReadDir(dir)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || !reviewmanifest.IsResultFileName(entry.Name()) {
+				continue
+			}
+			paths = append(paths, filepath.Join(dir, entry.Name()))
+		}
+		sort.Strings(paths)
+	}
+	for _, path := range explicit {
+		resolved, err := w.deps.EvalSymlinks(path)
+		if err != nil {
+			found.Unreadable = append(found.Unreadable, path)
+			continue
+		}
+		if !underRoot(resolvedRoot, resolved) {
+			found.Ignored = append(found.Ignored, reviewmanifest.IgnoredResult{
+				Path: path, Reason: "result file is outside the repository",
+			})
+			continue
+		}
+		paths = append(paths, resolved)
+	}
+	seen := map[string]bool{}
+	for _, path := range paths {
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		relative := strings.TrimPrefix(strings.TrimPrefix(path, resolvedRoot), string(filepath.Separator))
+		data, err := w.deps.ReadFile(path)
+		if err != nil {
+			found.Unreadable = append(found.Unreadable, relative)
+			continue
+		}
+		result, reason, err := reviewmanifest.ParseResult(data)
+		if err != nil {
+			found.Unreadable = append(found.Unreadable, relative)
+			continue
+		}
+		if reason != "" {
+			found.Ignored = append(found.Ignored, reviewmanifest.IgnoredResult{Path: relative, Reason: reason})
+			continue
+		}
+		result.Path = relative
+		if result.Kind == reviewmanifest.KindCrossShard {
+			if !reviewmanifest.MatchesPlan(plan, result) {
+				found.Ignored = append(found.Ignored, reviewmanifest.IgnoredResult{
+					Path: relative, Reason: "not the current plan hash",
+				})
+				continue
+			}
+			cross := result
+			found.CrossShard = &cross
+			continue
+		}
+		if _, ok := reviewmanifest.MatchShard(plan, result); !ok {
+			found.Ignored = append(found.Ignored, reviewmanifest.IgnoredResult{
+				Path: relative, Reason: "no current shard has this shard hash",
+			})
+			continue
+		}
+		found.Shards = append(found.Shards, result)
+	}
+	return found, nil
+}
+
+// GC removes result files that match the result naming patterns but no current
+// shard or plan. Nothing else in the directory is touched.
+func (w *writer) GC(root, scope, targetID string, plan contextprofile.ShardPlan) error {
+	resolvedRoot, err := w.deps.EvalSymlinks(root)
+	if err != nil {
+		return err
+	}
+	dir := ResultsDir(resolvedRoot, scope, targetID)
+	entries, err := w.deps.ReadDir(dir)
+	if err != nil {
+		return nil // nothing written yet
+	}
+	current := map[string]bool{"cross-shard." + plan.PlanHash + ".result.json": true}
+	for _, shard := range plan.Shards {
+		current["shard-"+shard.ID+"."+shard.Hash+".result.json"] = true
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !reviewmanifest.IsResultFileName(name) || current[name] {
+			continue
+		}
+		if err := w.deps.RemoveAll(filepath.Join(dir, name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// underRoot guards against an explicit result path outside the repository. It is
+// an accident guard, not a defence.
+func underRoot(root, path string) bool {
+	return strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
 func planJSON(plan contextprofile.ShardPlan, header Header) planFile {

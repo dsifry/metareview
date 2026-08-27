@@ -371,8 +371,8 @@ func TestMarkdownRendersResultsPlainText(t *testing.T) {
 
 func TestShardIDFromResultPath(t *testing.T) {
 	cases := map[string]string{
-		"docs/x/shard-3a.aaaaaaaaaaaaaaaa.result.json":   "shard-3a",
-		"docs/x/shard-3a-2.aaaaaaaaaaaaaaaa.result.json": "shard-3a-2",
+		"docs/x/shard-3a.aaaaaaaaaaaaaaaa.result.json":    "shard-3a",
+		"docs/x/shard-3a-2.aaaaaaaaaaaaaaaa.result.json":  "shard-3a-2",
 		"docs/x/cross-shard.aaaaaaaaaaaaaaaa.result.json": CrossShardID,
 		"docs/x/notes.md": "",
 	}

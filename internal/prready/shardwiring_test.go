@@ -16,15 +16,20 @@ import (
 
 // fakeWriter records what the review asked of the pack writer.
 type fakeWriter struct {
-	writes    int
-	prunes    int
-	lastPlan  contextprofile.ShardPlan
-	lastHdr   shardpack.Header
-	lastFiles []gitcontext.BranchFile
-	writeErr  error
-	pruneErr  error
-	rollback  func() error
-	rollbacks int
+	writes      int
+	prunes      int
+	lastPlan    contextprofile.ShardPlan
+	lastHdr     shardpack.Header
+	lastFiles   []gitcontext.BranchFile
+	writeErr    error
+	pruneErr    error
+	rollback    func() error
+	rollbacks   int
+	discovers   int
+	collections int
+	found       shardpack.Found
+	discoverErr error
+	gcErr       error
 }
 
 func (f *fakeWriter) Write(root string, plan contextprofile.ShardPlan, header shardpack.Header, files []gitcontext.BranchFile) (func() error, error) {
@@ -50,6 +55,16 @@ func (f *fakeWriter) Write(root string, plan contextprofile.ShardPlan, header sh
 func (f *fakeWriter) Prune(root, scope, targetID, keepPlanHash string) error {
 	f.prunes++
 	return f.pruneErr
+}
+
+func (f *fakeWriter) Discover(root, scope, targetID string, plan contextprofile.ShardPlan, explicit []string) (shardpack.Found, error) {
+	f.discovers++
+	return f.found, f.discoverErr
+}
+
+func (f *fakeWriter) GC(root, scope, targetID string, plan contextprofile.ShardPlan) error {
+	f.collections++
+	return f.gcErr
 }
 
 func shardedRepo(t *testing.T) string {
