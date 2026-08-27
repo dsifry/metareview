@@ -40,6 +40,19 @@ if "$TMP/metareview" override list --pending >/dev/null 2>&1; then
   fail "override list --pending must exit nonzero while an override is unacknowledged"
 fi
 
+# A misspelled option must not read as a clean run: a silently ignored
+# --pendng would make a CI check look green with overrides outstanding.
+if "$TMP/metareview" override list --pendng >/dev/null 2>&1; then
+  fail "override list must reject an unknown option"
+fi
+
+# The requester cannot acknowledge its own escalation.
+if "$TMP/metareview" override grant mrvf-1 --by orchestrator \
+  --reason "acknowledging the exception I filed myself" >/dev/null 2>&1; then
+  fail "the requesting actor must not be able to grant its own override"
+fi
+grep -q '"status":"override-pending"' .metareview/findings.jsonl || fail "the refused self-grant changed the record"
+
 # Acknowledgement from outside the workflow clears it, with attribution.
 "$TMP/metareview" override grant mrvf-1 --reason "reviewed the evidence and accept the exception" >/dev/null
 grep -q '"status":"overridden"' .metareview/findings.jsonl || fail "grant did not mark the finding overridden"
@@ -52,6 +65,7 @@ grep -q '"fixedInRunId"' .metareview/findings.jsonl && fail "an override must ne
 grep -q "## Process Overrides" docs/metareview/FINDINGS.md || fail "FINDINGS.md does not surface overrides"
 grep -q "granted by tester@example.com" docs/metareview/FINDINGS.md || fail "FINDINGS.md omits the granting actor"
 grep -q "requested by orchestrator" docs/metareview/FINDINGS.md || fail "FINDINGS.md omits the requesting actor"
+grep -q "escalation: artifact review chain exhausted" docs/metareview/FINDINGS.md || fail "FINDINGS.md omits the escalation context"
 
 # An already-overridden finding cannot be re-overridden.
 if "$TMP/metareview" override request mrvf-1 --by orchestrator --reason "trying to override this a second time" >/dev/null 2>&1; then

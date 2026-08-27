@@ -29,6 +29,10 @@ var (
 
 // OverrideRequest is filed by whoever stepped outside the workflow — typically
 // the orchestrating agent, which may request but never grant.
+//
+// By is audit metadata: it records who claims to have acted, and nothing here
+// authenticates it. The enforceable half of the boundary is that the actor who
+// requested an exception cannot also acknowledge it (see GrantOverride).
 type OverrideRequest struct {
 	By         string
 	Reason     string
@@ -58,6 +62,10 @@ func RequestOverride(root, findingID string, request OverrideRequest) error {
 	if len(strings.TrimSpace(request.Reason)) < minOverrideReason {
 		return fmt.Errorf("override request needs a reason of at least %d characters", minOverrideReason)
 	}
+	now := strings.TrimSpace(request.Now)
+	if now == "" {
+		return fmt.Errorf("override request needs a timestamp")
+	}
 	return mutateFinding(root, findingID, func(record *Record) error {
 		if record.Status != "open" {
 			return fmt.Errorf("finding %s is %s, not open", findingID, record.Status)
@@ -65,15 +73,21 @@ func RequestOverride(root, findingID string, request OverrideRequest) error {
 		record.Status = StatusOverridePending
 		record.OverrideRequestedBy = strings.TrimSpace(request.By)
 		record.OverrideRequestReason = strings.TrimSpace(request.Reason)
-		record.OverrideRequestedAt = request.Now
+		record.OverrideRequestedAt = now
 		record.OverrideEscalation = strings.TrimSpace(request.Escalation)
-		record.UpdatedAt = request.Now
+		record.UpdatedAt = now
 		return nil
 	})
 }
 
 // GrantOverride acknowledges the exception. It accepts an open finding directly
-// (a human overriding without a prior agent escalation) or a pending request.
+// (a human overriding without a prior agent escalation) or a pending request
+// filed by someone else. It refuses a grant from the actor that requested it:
+// requesting and acknowledging are separate roles by design.
+//
+// By is audit metadata, not authentication — a local CLI has no authority to
+// verify an identity — so this enforces the boundary against the accidental
+// case, not against an actor that deliberately misreports itself.
 func GrantOverride(root, findingID string, grant OverrideGrant) error {
 	if strings.TrimSpace(grant.By) == "" {
 		return fmt.Errorf("override grant needs an actor (--by)")
@@ -81,15 +95,23 @@ func GrantOverride(root, findingID string, grant OverrideGrant) error {
 	if len(strings.TrimSpace(grant.Reason)) < minOverrideReason {
 		return fmt.Errorf("override grant needs a reason of at least %d characters", minOverrideReason)
 	}
+	by := strings.TrimSpace(grant.By)
+	now := strings.TrimSpace(grant.Now)
+	if now == "" {
+		return fmt.Errorf("override grant needs a timestamp")
+	}
 	return mutateFinding(root, findingID, func(record *Record) error {
 		if record.Status != "open" && record.Status != StatusOverridePending {
 			return fmt.Errorf("finding %s is %s and cannot be overridden", findingID, record.Status)
 		}
+		if strings.EqualFold(by, record.OverrideRequestedBy) {
+			return fmt.Errorf("%s requested this override and cannot also grant it; acknowledgement comes from outside the workflow", by)
+		}
 		record.Status = StatusOverridden
-		record.OverrideGrantedBy = strings.TrimSpace(grant.By)
+		record.OverrideGrantedBy = by
 		record.OverrideGrantReason = strings.TrimSpace(grant.Reason)
-		record.OverrideGrantedAt = grant.Now
-		record.UpdatedAt = grant.Now
+		record.OverrideGrantedAt = now
+		record.UpdatedAt = now
 		return nil
 	})
 }
@@ -157,16 +179,26 @@ func overrideLines(records []Record) []string {
 	for _, record := range records {
 		switch record.Status {
 		case StatusOverridePending:
-			lines = append(lines, fmt.Sprintf("- %s [pending] %s — requested by %s: %s",
-				record.ID, record.Title, record.OverrideRequestedBy, record.OverrideRequestReason))
+			lines = append(lines, withEscalation(fmt.Sprintf("- %s [pending] %s — requested by %s at %s: %s",
+				record.ID, record.Title, record.OverrideRequestedBy, record.OverrideRequestedAt, record.OverrideRequestReason), record))
 		case StatusOverridden:
-			detail := fmt.Sprintf("- %s [granted] %s — granted by %s: %s",
-				record.ID, record.Title, record.OverrideGrantedBy, record.OverrideGrantReason)
+			detail := fmt.Sprintf("- %s [granted] %s — granted by %s at %s: %s",
+				record.ID, record.Title, record.OverrideGrantedBy, record.OverrideGrantedAt, record.OverrideGrantReason)
 			if record.OverrideRequestedBy != "" {
-				detail += fmt.Sprintf(" (requested by %s: %s)", record.OverrideRequestedBy, record.OverrideRequestReason)
+				detail += fmt.Sprintf(" (requested by %s at %s: %s)",
+					record.OverrideRequestedBy, record.OverrideRequestedAt, record.OverrideRequestReason)
 			}
-			lines = append(lines, detail)
+			lines = append(lines, withEscalation(detail, record))
 		}
 	}
 	return lines
+}
+
+// withEscalation appends the escalation context when the record carries one, so
+// the index shows why the workflow was stepped outside of and not just that it was.
+func withEscalation(detail string, record Record) string {
+	if record.OverrideEscalation == "" {
+		return detail
+	}
+	return detail + fmt.Sprintf(" [escalation: %s]", record.OverrideEscalation)
 }

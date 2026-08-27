@@ -37,7 +37,10 @@ instead of working around it:
   keeps blocking and `metareview override list --pending` exits nonzero, so CI stays red.
 - `metareview override grant <finding-id> --reason "<text>"` — the acknowledgement, and it must come from
   outside the workflow (a human, or an authority explicitly designated as one). A reviewing agent never
-  grants an override on findings it produced.
+  grants an override on findings it produced, and the actor that requested one is refused if it also tries
+  to grant it. `--by` is audit metadata, not authentication: it records who claims to have acted, and a
+  local CLI cannot verify that. Enforce the boundary with whatever authenticates actors in your
+  environment when it matters.
 
 Both halves record actor, timestamp and reason and are rendered under "Process Overrides" in
 `docs/metareview/FINDINGS.md`. An override is never a fix: `fixedInRunId` stays empty, so exceptions can be

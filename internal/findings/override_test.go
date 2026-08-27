@@ -346,3 +346,140 @@ func TestOverrideLoadErrorSurfacesThroughTheSeam(t *testing.T) {
 		t.Fatalf("GrantOverride err = %v, want the injected failure", err)
 	}
 }
+
+// An override without a timestamp is not an audit record. Both halves must
+// refuse one, and must leave the finding untouched when they do.
+func TestOverrideRequiresATimestamp(t *testing.T) {
+	root := t.TempDir()
+	seedRecord(t, root, openBlocker("mrvf-1"))
+	if err := RequestOverride(root, "mrvf-1", OverrideRequest{
+		By: "orchestrator", Reason: "a perfectly good explanation of the exception", Now: "  ",
+	}); err == nil {
+		t.Fatal("a request with no timestamp must be refused")
+	}
+	if err := GrantOverride(root, "mrvf-1", OverrideGrant{
+		By: "human", Reason: "acknowledged the exception here", Now: "",
+	}); err == nil {
+		t.Fatal("a grant with no timestamp must be refused")
+	}
+	if loadOne(t, root).Status != "open" {
+		t.Fatal("a refused override must not change the record")
+	}
+}
+
+// Timestamps are stored normalized so ordering by UpdatedAt stays reliable.
+func TestOverrideTimestampsAreTrimmed(t *testing.T) {
+	root := t.TempDir()
+	seedRecord(t, root, openBlocker("mrvf-1"))
+	if err := RequestOverride(root, "mrvf-1", OverrideRequest{
+		By: "orchestrator", Reason: "an explanation long enough to be meaningful", Now: " 2026-08-27T01:00:00Z ",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadOne(t, root); got.OverrideRequestedAt != "2026-08-27T01:00:00Z" || got.UpdatedAt != "2026-08-27T01:00:00Z" {
+		t.Fatalf("request timestamps were not normalized: %+v", got)
+	}
+	if err := GrantOverride(root, "mrvf-1", OverrideGrant{
+		By: "human", Reason: "acknowledged the exception here", Now: " 2026-08-27T02:00:00Z ",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadOne(t, root); got.OverrideGrantedAt != "2026-08-27T02:00:00Z" || got.UpdatedAt != "2026-08-27T02:00:00Z" {
+		t.Fatalf("grant timestamps were not normalized: %+v", got)
+	}
+}
+
+// The separation of request from grant is the whole point: the actor who
+// escalated cannot also acknowledge it. (`--by` remains audit metadata, not
+// authentication — this closes the accidental case, not an impersonating one.)
+func TestTheRequesterCannotGrantItsOwnOverride(t *testing.T) {
+	root := t.TempDir()
+	seedRecord(t, root, openBlocker("mrvf-1"))
+	if err := RequestOverride(root, "mrvf-1", OverrideRequest{
+		By: "orchestrator", Reason: "chain exhausted; recording the exception", Now: "2026-08-27T01:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := GrantOverride(root, "mrvf-1", OverrideGrant{
+		By: " Orchestrator ", Reason: "acknowledging my own escalation", Now: "2026-08-27T02:00:00Z",
+	}); err == nil {
+		t.Fatal("the requesting actor must not be able to grant its own override")
+	}
+	if loadOne(t, root).Status != StatusOverridePending {
+		t.Fatal("the refused grant must leave the override pending and blocking")
+	}
+	if err := GrantOverride(root, "mrvf-1", OverrideGrant{
+		By: "dsifry@warmstart.ai", Reason: "acknowledged from outside the workflow", Now: "2026-08-27T03:00:00Z",
+	}); err != nil {
+		t.Fatalf("a different actor must still be able to grant: %v", err)
+	}
+}
+
+// FINDINGS.md is the durable audit surface: it must show both timestamps and the
+// escalation context, not just actors and reasons.
+func TestTheIndexRendersFullOverrideProvenance(t *testing.T) {
+	root := t.TempDir()
+	seedRecord(t, root, openBlocker("mrvf-1"))
+	if err := RequestOverride(root, "mrvf-1", OverrideRequest{
+		By:         "orchestrator",
+		Reason:     "the review chain exhausted its attempts overnight",
+		Escalation: "artifact review chain exhausted (attempt 3 of 3)",
+		Now:        "2026-08-27T01:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	render := func() string {
+		t.Helper()
+		records, err := readJSONL(findingsPath(root))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := RenderIndexWithRecords(root, records); err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(filepath.Join(root, "docs", "metareview", "FINDINGS.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(body)
+	}
+	pending := render()
+	for _, want := range []string{"2026-08-27T01:00:00Z", "attempt 3 of 3", "orchestrator"} {
+		if !strings.Contains(pending, want) {
+			t.Fatalf("the pending override is missing %q:\n%s", want, pending)
+		}
+	}
+	if err := GrantOverride(root, "mrvf-1", OverrideGrant{
+		By: "dsifry@warmstart.ai", Reason: "reviewed the evidence and accept it", Now: "2026-08-27T02:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	granted := render()
+	for _, want := range []string{"2026-08-27T02:00:00Z", "2026-08-27T01:00:00Z", "attempt 3 of 3", "dsifry@warmstart.ai", "orchestrator"} {
+		if !strings.Contains(granted, want) {
+			t.Fatalf("the granted override is missing %q:\n%s", want, granted)
+		}
+	}
+}
+
+// A grant with no prior request renders without an empty requester clause.
+func TestTheIndexRendersADirectGrantWithoutARequester(t *testing.T) {
+	root := t.TempDir()
+	seedRecord(t, root, openBlocker("mrvf-1"))
+	if err := GrantOverride(root, "mrvf-1", OverrideGrant{
+		By: "dsifry@warmstart.ai", Reason: "accepted directly; no agent escalation", Now: "2026-08-27T02:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	records, err := readJSONL(findingsPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := overrideLines(records)
+	if len(lines) != 1 {
+		t.Fatalf("want one rendered override, got %v", lines)
+	}
+	if strings.Contains(lines[0], "requested by") || strings.Contains(lines[0], "escalation:") {
+		t.Fatalf("a direct grant must not render an empty requester or escalation: %q", lines[0])
+	}
+}

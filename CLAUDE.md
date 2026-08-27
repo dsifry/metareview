@@ -44,7 +44,13 @@ metareview override list [--pending]
   **not** clear the gate: the finding keeps blocking and `override list --pending` exits nonzero, so CI
   stays red.
 - **Granting** is the acknowledgement, and must come from outside the workflow — a human, or an authority
-  explicitly designated as such. A reviewing agent never grants an override on its own findings.
+  explicitly designated as such. A reviewing agent never grants an override on its own findings. The actor
+  that requested an override is refused if it also tries to grant it.
+- `--by` (or the local git identity it defaults to) is **audit metadata, not authentication**: it records
+  who claims to have acted. A local CLI cannot verify an identity, so the separation of requesting from
+  granting is enforced against the accidental case, not against an actor that misreports itself. Where that
+  matters, gate `override grant` behind whatever authenticates actors in your environment (branch
+  protection, a CI job with restricted credentials, a review approval).
 - Both halves are recorded with actor, timestamp and reason, rendered under "Process Overrides" in
   `docs/metareview/FINDINGS.md`, and an override is never a fix (`fixedInRunId` stays empty), so post-merge
   learning can analyse exceptions separately from resolutions.

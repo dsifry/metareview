@@ -479,9 +479,13 @@ func handleOverride(args []string) {
 	case "list":
 		pendingOnly := false
 		for _, arg := range args[1:] {
-			if arg == "--pending" {
-				pendingOnly = true
+			// A silently ignored option (a misspelled --pending, say) would make a
+			// CI check look green while overrides were still unacknowledged.
+			if arg != "--pending" {
+				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", arg)
+				os.Exit(2)
 			}
+			pendingOnly = true
 		}
 		records, err := findings.ListOverrides(root)
 		exitOnErr(err)
