@@ -14,11 +14,24 @@ const (
 	RiskContextRisk = "context-risk"
 
 	ReasonDiffTruncated      = "DIFF_TRUNCATED"
+	ReasonLocalDiffTruncated = "LOCAL_DIFF_TRUNCATED"
+	ReasonDiffOversize       = "DIFF_OVERSIZE"
 	ReasonLargeDiff          = "LARGE_DIFF"
 	ReasonUntrackedOmitted   = "UNTRACKED_OMITTED"
 	ReasonUntrackedTruncated = "UNTRACKED_TRUNCATED"
 
 	DefaultLargeDiffBytes = 120000
+)
+
+// maxBranchDiffBytes bounds the measured branch diff (var so tests can lower it).
+var maxBranchDiffBytes = 16 << 20
+
+// FileProfile.Source values.
+const (
+	SourceBranch    = "branch"
+	SourceStaged    = "staged"
+	SourceWorktree  = "worktree"
+	SourceUntracked = "untracked"
 )
 
 type Options struct {
@@ -33,6 +46,8 @@ type Risk struct {
 type FileProfile struct {
 	Path      string
 	DiffBytes int
+	Hash      string
+	Source    string
 }
 
 type Profile struct {
@@ -55,6 +70,17 @@ func FromGit(git gitcontext.Context, options Options) Profile {
 	filteredDiffBytes := git.FilteredDiffBytes
 	if filteredDiffBytes == 0 {
 		filteredDiffBytes = len(git.Diff)
+	}
+	// When the branch diff was measured per file, the truncated branch text is
+	// fiction: use the measured branch bytes plus the local contributions, taken
+	// directly rather than by subtraction (which would double-count).
+	if branch := branchDiffBytes(git); branch > 0 {
+		local := len(git.StagedDiff) + len(git.WorkingTreeDiff) + len(git.UntrackedExcerpts)
+		filteredDiffBytes = branch + local
+		rawDiffBytes = filteredDiffBytes
+		if git.BranchRawDiffBytes > 0 {
+			rawDiffBytes = git.BranchRawDiffBytes + local
+		}
 	}
 
 	reasons := riskReasons(git, filteredDiffBytes, options)
@@ -100,32 +126,16 @@ func Markdown(profile Profile) string {
 	return strings.Join(lines, "\n")
 }
 
-func ShardPlanMarkdown(profile Profile, options ShardOptions) string {
-	if profile.RiskLevel != RiskContextRisk {
-		return ""
-	}
-	plan, err := PlanShards(profile, options)
-	if err != nil {
-		return "## Context Shard Plan\n\nUnable to generate shard plan: " + err.Error()
-	}
-	if len(plan.Shards) == 0 {
-		return "## Context Shard Plan\n\nNo shardable source paths were detected."
-	}
-	lines := []string{
-		"## Context Shard Plan",
-		"",
-		"- Source diff hash: `" + plan.SourceDiffHash + "`",
-	}
-	for _, shard := range plan.Shards {
-		lines = append(lines, "- "+shard.ID+": "+strings.Join(shard.Paths, ", ")+" ("+fmt.Sprint(shard.ByteCount)+" bytes, prompt pack `"+shard.PromptPackPath+"`)")
-	}
-	return strings.Join(lines, "\n")
-}
-
 func riskReasons(git gitcontext.Context, filteredDiffBytes int, options Options) []string {
 	var reasons []string
-	if git.DiffTruncated || git.StagedDiffTruncated || git.WorkingTreeDiffTruncated {
+	if git.DiffTruncated {
 		reasons = append(reasons, ReasonDiffTruncated)
+	}
+	if git.StagedDiffTruncated || git.WorkingTreeDiffTruncated {
+		reasons = append(reasons, ReasonLocalDiffTruncated)
+	}
+	if branchBytes := branchDiffBytes(git); branchBytes > maxBranchDiffBytes {
+		reasons = append(reasons, ReasonDiffOversize)
 	}
 	if filteredDiffBytes > largeDiffLimit(options) {
 		reasons = append(reasons, ReasonLargeDiff)
@@ -146,6 +156,14 @@ func largeDiffLimit(options Options) int {
 	return DefaultLargeDiffBytes
 }
 
+func branchDiffBytes(git gitcontext.Context) int {
+	total := 0
+	for _, f := range git.BranchFiles {
+		total += f.Bytes
+	}
+	return total
+}
+
 func filesFromGit(git gitcontext.Context) []FileProfile {
 	byPath := map[string]int{}
 	addDiffProfiles(byPath, git.Diff)
@@ -157,9 +175,19 @@ func filesFromGit(git gitcontext.Context) []FileProfile {
 			byPath[path] += 0
 		}
 	}
+	branch := map[string]gitcontext.BranchFile{}
+	for _, f := range git.BranchFiles {
+		branch[f.Path] = f
+		byPath[f.Path] = f.Bytes
+	}
 	files := make([]FileProfile, 0, len(byPath))
 	for path, diffBytes := range byPath {
-		files = append(files, FileProfile{Path: path, DiffBytes: diffBytes})
+		file := FileProfile{Path: path, DiffBytes: diffBytes, Source: sourceOf(git, path)}
+		if b, ok := branch[path]; ok {
+			file.Hash = b.Hash
+			file.Source = SourceBranch
+		}
+		files = append(files, file)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files
@@ -226,4 +254,23 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func sourceOf(git gitcontext.Context, path string) string {
+	for _, p := range git.ChangedFiles {
+		if p == path {
+			return SourceBranch
+		}
+	}
+	for _, p := range git.StagedFiles {
+		if p == path {
+			return SourceStaged
+		}
+	}
+	for _, p := range git.UntrackedFiles {
+		if p == path {
+			return SourceUntracked
+		}
+	}
+	return SourceWorktree
 }

@@ -10,8 +10,15 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/runchain"
 )
+
+// maxJSONLLineBytes is the JSONL line cap: 1 MiB, not bufio's 64 KiB default.
+// bufio rejects a token equal to the buffer maximum, and ScanLines needs the
+// line terminator to fit alongside the token, so callers size the buffer two
+// bytes larger to admit a line of exactly this length ending in CRLF.
+const maxJSONLLineBytes = 1 << 20
 
 type Summary struct {
 	Path                  string            `json:"path"`
@@ -278,6 +285,8 @@ func readFindings(root string) ([]findingRecord, error) {
 	defer file.Close()
 	var records []findingRecord
 	scanner := bufio.NewScanner(file)
+	// A run row can carry long ingested strings, so the 64 KiB default is not enough.
+	scanner.Buffer(make([]byte, 0, 64*1024), maxJSONLLineBytes+2)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -293,7 +302,8 @@ func readFindings(root string) ([]findingRecord, error) {
 }
 
 func isOpenBlocker(record findingRecord) bool {
-	if record.Status != "open" {
+	// A pending override still blocks; a granted one does not.
+	if !findings.Blocks(record.Status) {
 		return false
 	}
 	if record.Classification == "spec-contract" {

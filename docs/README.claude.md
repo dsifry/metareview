@@ -49,7 +49,7 @@ Lifecycle gate results are actionable: `PASS`/`PASS_ADVISORY` proceed only with 
 
 Prefer structured evidence receipts from `metareview evidence run -- <command>` and, after a PR exists, `metareview evidence import --github-checks <pr-number>`. Task-done and PR-ready parse receipt files as validation evidence; epic-ready reads the supplied evidence text for child-completion signals.
 
-Commit durable review and context Markdown under `docs/metareview/`. Leave transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local.
+Commit durable review and context Markdown under `docs/metareview/`, including the shard review results in `docs/metareview/shards/`. Leave transient `.metareview/findings.jsonl`, `.metareview/runs.jsonl` and `.metareview/shards/` local.
 
 ## Metaswarm Repositories
 
@@ -58,3 +58,26 @@ metareview augments metaswarm. It does not replace metaswarm's Beads task state,
 ## Workflow runs
 
 `metareview fsm` drives `sdlc-loop` and `review-loop` as an audited state machine (the `/fsm` skill). Print the driver contract with `metareview fsm --agent-prompt`; see `docs/fsm/driving-a-workflow.md`.
+
+### Sharded review (diffs over the context limit)
+
+An exclude-filtered diff over 120,000 bytes cannot be held in one review context. metareview measures the real
+branch diff, cuts it into shards, and writes a prompt pack per shard under
+`.metareview/shards/<scope>/<target-slug>/<planHash>/`, with a `plan.json` naming every shard, its
+hash, and the directory the results belong in.
+
+1. Run the gate once. It reports `NEEDS_REVISION` with the context-risk blocker and writes the packs.
+2. Read `plan.json`. Review one subagent per `shard-<id>.md` against `rubrics/task-done-review-rubric.md`,
+   and one more over `cross-shard.md` when there is more than one shard.
+3. Write a result per shard to `docs/metareview/shards/<scope>/<target-slug>/shard-<id>.<shardHash>.result.json`
+   and, for a multi-shard plan, `cross-shard.<planHash>.result.json`. The pack states the exact
+   contract.
+4. Re-run the gate with `--previous-run <run-id>`. With every shard covered and the aggregate
+   passing, the context-risk blocker becomes advisory and the deterministic lints run over the whole
+   branch diff.
+
+Set `--max-attempts` on the **first** run of the chain; mid-chain it is ignored. Commit the results
+with the review log. Editing a file invalidates only its own shard's result: re-review that shard
+and the cross-shard pack, and leave the rest. Local (staged, worktree, untracked) content is in no
+pack, so on task-done commit or remove it first — an untracked file over 4,000 bytes raises
+`UNTRACKED_TRUNCATED`, which shard results can never satisfy.

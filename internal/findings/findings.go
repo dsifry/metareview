@@ -12,6 +12,12 @@ import (
 	"github.com/dsifry/metareview/internal/state"
 )
 
+// maxJSONLLineBytes is the JSONL line cap: 1 MiB, not bufio's 64 KiB default.
+// bufio rejects a token equal to the buffer maximum, and ScanLines needs the
+// line terminator to fit alongside the token, so callers size the buffer two
+// bytes larger to admit a line of exactly this length ending in CRLF.
+const maxJSONLLineBytes = 1 << 20
+
 type Run struct {
 	ID       string `json:"id"`
 	Scope    string `json:"scope"`
@@ -68,10 +74,20 @@ type Record struct {
 	Fingerprint        string     `json:"fingerprint"`
 	Target             any        `json:"target"`
 	FixedInRunID       string     `json:"fixedInRunId,omitempty"`
-	CreatedAt          string     `json:"createdAt"`
-	UpdatedAt          string     `json:"updatedAt"`
-	RepoRoot           string     `json:"repoRoot"`
-	GitHead            string     `json:"gitHead"`
+
+	// Process-exception provenance (see override.go). An override is never a fix:
+	// FixedInRunID stays empty.
+	OverrideRequestedBy   string `json:"overrideRequestedBy,omitempty"`
+	OverrideRequestedAt   string `json:"overrideRequestedAt,omitempty"`
+	OverrideRequestReason string `json:"overrideRequestReason,omitempty"`
+	OverrideEscalation    string `json:"overrideEscalation,omitempty"`
+	OverrideGrantedBy     string `json:"overrideGrantedBy,omitempty"`
+	OverrideGrantedAt     string `json:"overrideGrantedAt,omitempty"`
+	OverrideGrantReason   string `json:"overrideGrantReason,omitempty"`
+	CreatedAt             string `json:"createdAt"`
+	UpdatedAt             string `json:"updatedAt"`
+	RepoRoot              string `json:"repoRoot"`
+	GitHead               string `json:"gitHead"`
 }
 
 type Result struct {
@@ -84,6 +100,10 @@ type Result struct {
 func Reconcile(root string, run Run, current []Input, options Options) (Result, error) {
 	path := findingsPath(root)
 	existing, err := readJSONL(path)
+	if err != nil {
+		return Result{}, err
+	}
+	existing, err = supersedeLegacyContextRisk(path, existing, run, nowISO())
 	if err != nil {
 		return Result{}, err
 	}
@@ -121,7 +141,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 
 	activeExisting := map[string]bool{}
 	for _, record := range updated {
-		if record.Status == "open" && record.Fingerprint != "" && sameRunTarget(record, run) {
+		if record.Status != "fixed" && record.Fingerprint != "" && sameRunTarget(record, run) {
 			activeExisting[record.Fingerprint] = true
 		}
 	}
@@ -156,6 +176,74 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		OpenFindings:      openFindings,
 		OpenBlockingCount: CountByClass(openFindings).Blocking,
 	}, nil
+}
+
+// StatusSuperseded marks a row whose fingerprint an upgrade replaced. It is
+// neither open (so it never blocks) nor fixed (so learning never reads it as a
+// correction), and its fixedInRunId stays empty for the same reason.
+const StatusSuperseded = "superseded"
+
+// legacyContextRiskPrefixes are the reason-bearing context-risk fingerprints
+// 0.8.3 replaced with reason-independent ones.
+var legacyContextRiskPrefixes = []string{
+	"architecture:context-risk:",
+	"pr:architecture:context-risk:",
+	"epic:context-risk:",
+}
+
+// supersedeLegacyContextRisk aliases the pre-0.8.3 context-risk rows for this
+// target onto the new fingerprint. It runs on every reconcile — including one
+// without --previous-run and one on an escalated chain — and is idempotent,
+// since a superseded row is no longer open.
+func supersedeLegacyContextRisk(path string, records []Record, run Run, now string) ([]Record, error) {
+	touched := false
+	for _, record := range records {
+		if legacyContextRiskRow(record, run) {
+			touched = true
+			break
+		}
+	}
+	if !touched {
+		return records, nil
+	}
+	if err := backupOnce(path); err != nil {
+		return nil, err
+	}
+	for i := range records {
+		if legacyContextRiskRow(records[i], run) {
+			records[i].Status = StatusSuperseded
+			records[i].UpdatedAt = now
+		}
+	}
+	return records, nil
+}
+
+func legacyContextRiskRow(record Record, run Run) bool {
+	if record.Status != "open" || !sameRunTarget(record, run) {
+		return false
+	}
+	for _, prefix := range legacyContextRiskPrefixes {
+		if strings.HasPrefix(record.Fingerprint, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// backupOnce copies the findings ledger aside before the first alias pass.
+func backupOnce(path string) error {
+	backup := path + ".pre-0.8.3.bak"
+	if _, err := os.Stat(backup); err == nil {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return os.WriteFile(backup, data, 0o644)
 }
 
 func resetFinding(record Record, run Run, resetRuns map[string]bool) bool {
@@ -215,7 +303,13 @@ func RenderIndexWithRecords(root string, records []Record) error {
 		}
 		body = strings.Join(lines, "\n")
 	}
-	return os.WriteFile(path, []byte("# metareview Findings\n\n"+body+"\n"), 0o644)
+	document := "# metareview Findings\n\n" + body + "\n"
+	if overrides := overrideLines(records); len(overrides) > 0 {
+		document += "\n## Process Overrides\n\n" +
+			"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
+			strings.Join(overrides, "\n") + "\n"
+	}
+	return os.WriteFile(path, []byte(document), 0o644)
 }
 
 func UnresolvedBlocking(root string) ([]Record, error) {
@@ -261,7 +355,7 @@ func normalize(run Run, finding Input, index int, createdAt string) Record {
 func unresolvedBlockingFrom(records []Record) []Record {
 	blockers := make([]Record, 0)
 	for _, record := range records {
-		if record.Status != "open" {
+		if !Blocks(record.Status) {
 			continue
 		}
 		if classForCount(record.Classification, record.Severity) == "blocking" {
@@ -334,7 +428,7 @@ func classForCount(classification, severity string) string {
 func openForRun(records []Record, run Run) []Record {
 	open := make([]Record, 0, len(records))
 	for _, record := range records {
-		if record.Status == "open" && sameRunTarget(record, run) {
+		if Blocks(record.Status) && sameRunTarget(record, run) {
 			open = append(open, record)
 		}
 	}
@@ -379,6 +473,8 @@ func readJSONL(path string) ([]Record, error) {
 	defer file.Close()
 	records := []Record{}
 	scanner := bufio.NewScanner(file)
+	// A run row can carry long ingested strings, so the 64 KiB default is not enough.
+	scanner.Buffer(make([]byte, 0, 64*1024), maxJSONLLineBytes+2)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {

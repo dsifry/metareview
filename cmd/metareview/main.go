@@ -7,6 +7,7 @@ import (
 	"fmt"
 	fsmcli "github.com/dsifry/metareview/internal/fsm/cli"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -15,10 +16,12 @@ import (
 	"github.com/dsifry/metareview/internal/contextpack"
 	"github.com/dsifry/metareview/internal/epicready"
 	"github.com/dsifry/metareview/internal/evidence"
+	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/learning"
 	"github.com/dsifry/metareview/internal/prready"
 	"github.com/dsifry/metareview/internal/repo"
+	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/setup"
 	"github.com/dsifry/metareview/internal/taskdone"
 	"github.com/dsifry/metareview/internal/version"
@@ -32,20 +35,27 @@ Usage:
   metareview setup --bootstrap-prereqs --dry-run
   metareview status
   metareview fsm <subcommand> [flags]        (metareview fsm --agent-prompt for the driver contract)
+
+  metareview override request <finding-id> --reason "<text>" [--by <who>] [--escalation "<text>"]
+  metareview override grant <finding-id> --reason "<text>" [--by <who>]
+  metareview override list [--pending]
   metareview context build <path>
   metareview context diff [--base <ref>]
   metareview evidence run -- <command> [args...]
   metareview evidence import --github-checks <pr-number> [--repo <owner/repo>]
   metareview review artifact <path> [--previous-run <run-id>] [--scaffold-only]
-  metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
+  metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--shard-result <path>]... [--cross-shard-result <path>]
   metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
-  metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>] [--include-working-tree]
+  metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
 
 Commands:
   setup --check              Detect repository mode and prerequisites without writing files
   setup --bootstrap-prereqs  Print or execute prerequisite bootstrap actions
   status                     Print repository review capability status
+  override request           Record an out-of-workflow escalation against a finding (still blocks)
+  override grant             Acknowledge a process exception from outside the workflow (stops blocking)
+  override list              List process exceptions; --pending exits 1 while any are unacknowledged
   context build <path>       Build a Markdown context pack for an artifact
   context diff               Print git diff context as JSON
   evidence run               Run a command and print a structured JSON receipt
@@ -100,6 +110,11 @@ func main() {
 		for _, line := range fsmcli.StatusLines(context.Background(), fsmcli.RealDeps(), mustCwd()) {
 			fmt.Println(line)
 		}
+		return
+	}
+
+	if args[0] == "override" {
+		handleOverride(args[1:])
 		return
 	}
 
@@ -177,6 +192,12 @@ func main() {
 			case "--evidence":
 				options.EvidencePath = flagValue(args, i, "--evidence")
 				i++
+			case "--shard-result":
+				options.ShardResultPaths = append(options.ShardResultPaths, mustResultFile(flagValue(args, i, "--shard-result")))
+				i++
+			case "--cross-shard-result":
+				options.CrossShardResultPaths = appendCrossShardResult(options.CrossShardResultPaths, flagValue(args, i, "--cross-shard-result"))
+				i++
 			default:
 				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
 				os.Exit(2)
@@ -239,6 +260,12 @@ func main() {
 				i++
 			case "--github-pr":
 				options.GitHubPR = flagValue(args, i, "--github-pr")
+				i++
+			case "--shard-result":
+				options.ShardResultPaths = append(options.ShardResultPaths, mustResultFile(flagValue(args, i, "--shard-result")))
+				i++
+			case "--cross-shard-result":
+				options.CrossShardResultPaths = appendCrossShardResult(options.CrossShardResultPaths, flagValue(args, i, "--cross-shard-result"))
 				i++
 			case "--include-working-tree":
 				options.IncludeWorkingTree = true
@@ -459,4 +486,149 @@ func present(value bool) string {
 		return "present"
 	}
 	return "missing"
+}
+
+// handleOverride implements the process-exception commands. An override records
+// that the workflow was deliberately stepped outside of: requesting is available
+// to whoever is driving the run, granting is the acknowledgement from outside it,
+// and CI stays red while any request is unacknowledged.
+func handleOverride(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Usage: metareview override request|grant|list")
+		os.Exit(2)
+	}
+	root := mustCwd()
+	switch args[0] {
+	case "list":
+		pendingOnly := false
+		for _, arg := range args[1:] {
+			// A silently ignored option (a misspelled --pending, say) would make a
+			// CI check look green while overrides were still unacknowledged.
+			if arg != "--pending" {
+				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", arg)
+				os.Exit(2)
+			}
+			pendingOnly = true
+		}
+		records, err := findings.ListOverrides(root)
+		exitOnErr(err)
+		pending := 0
+		for _, record := range records {
+			if record.Status == findings.StatusOverridePending {
+				pending++
+			}
+			if pendingOnly && record.Status != findings.StatusOverridePending {
+				continue
+			}
+			printOverride(record)
+		}
+		if len(records) == 0 {
+			fmt.Println("no process overrides recorded")
+		}
+		if pendingOnly && pending > 0 {
+			fmt.Fprintf(os.Stderr, "%d override(s) awaiting acknowledgement\n", pending)
+			os.Exit(1)
+		}
+	case "request", "grant":
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: metareview override %s <finding-id> --reason \"<text>\"\n", args[0])
+			os.Exit(2)
+		}
+		id := args[1]
+		reason, by, escalation := "", "", ""
+		for i := 2; i < len(args); i++ {
+			switch args[i] {
+			case "--reason":
+				if i+1 < len(args) {
+					reason = args[i+1]
+					i++
+				}
+			case "--by":
+				if i+1 < len(args) {
+					by = args[i+1]
+					i++
+				}
+			case "--escalation":
+				if i+1 < len(args) {
+					escalation = args[i+1]
+					i++
+				}
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
+				os.Exit(2)
+			}
+		}
+		if by == "" {
+			by = defaultActor()
+		}
+		now := time.Now().UTC().Format(time.RFC3339)
+		if args[0] == "request" {
+			exitOnErr(findings.RequestOverride(root, id, findings.OverrideRequest{
+				By: by, Reason: reason, Escalation: escalation, Now: now,
+			}))
+			fmt.Printf("%s: override requested by %s (still blocking until granted)\n", id, by)
+			return
+		}
+		exitOnErr(findings.GrantOverride(root, id, findings.OverrideGrant{By: by, Reason: reason, Now: now}))
+		fmt.Printf("%s: override granted by %s\n", id, by)
+	default:
+		fmt.Fprintln(os.Stderr, "Usage: metareview override request|grant|list")
+		os.Exit(2)
+	}
+}
+
+func printOverride(record findings.Record) {
+	switch record.Status {
+	case findings.StatusOverridePending:
+		fmt.Printf("%s  pending  %s\n    requested by %s at %s: %s\n",
+			record.ID, record.Title, record.OverrideRequestedBy, record.OverrideRequestedAt, record.OverrideRequestReason)
+	default:
+		fmt.Printf("%s  granted  %s\n    granted by %s at %s: %s\n",
+			record.ID, record.Title, record.OverrideGrantedBy, record.OverrideGrantedAt, record.OverrideGrantReason)
+	}
+}
+
+// defaultActor identifies who is acting, from git config.
+func defaultActor() string {
+	cmd := exec.Command("git", "config", "user.email")
+	cmd.Dir = mustCwd()
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// appendCrossShardResult keeps --cross-shard-result single valued. A plan has
+// exactly one cross-shard result, and discovery would otherwise let the last
+// matching file win silently, making the outcome depend on flag order.
+func appendCrossShardResult(existing []string, path string) []string {
+	if len(existing) > 0 {
+		fmt.Fprintln(os.Stderr, "Repeated --cross-shard-result: a plan has one cross-shard result")
+		os.Exit(2)
+	}
+	return append(existing, mustResultFile(path))
+}
+
+// mustResultFile validates an explicit shard result before the review package
+// runs, so a bad path exits 2 with nothing written.
+func mustResultFile(path string) string {
+	reject := func(reason string) {
+		fmt.Fprintf(os.Stderr, "Invalid result file %s: %s\n", path, reason)
+		os.Exit(2)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		reject("does not exist")
+	} else if !info.Mode().IsRegular() {
+		reject("is not a regular file")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		reject("cannot be read")
+	}
+	if _, _, err := reviewmanifest.ParseResult(data); err != nil {
+		reject("is not a metareview review result")
+	}
+	return path
 }

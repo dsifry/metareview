@@ -10,6 +10,7 @@ import (
 
 type PRReadyContext struct {
 	Git                   GitContext
+	Manifest              ManifestContext
 	Knowledge             KnowledgeContext
 	EvidenceText          string
 	PREvidenceMarkdown    string
@@ -129,6 +130,7 @@ func branchDiffFindings(context PRReadyContext) []Finding {
 		Task:         TaskContext{Type: "branch", ID: "pr-ready", Text: "PR-ready branch review"},
 		Git:          context.Git,
 		Knowledge:    context.Knowledge,
+		Manifest:     context.Manifest,
 		EvidenceText: context.EvidenceText,
 	})
 	filtered := make([]Finding, 0, len(raw))

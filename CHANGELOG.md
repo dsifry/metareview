@@ -29,6 +29,69 @@ ignored by 0.8.x readers (their scope/target never match a review gate); a compl
 as a row; only an undecodable fragment moves to `.metareview/runs/.torn/`. `.metareview/runs/` is created 0700 on the
 first `init` with a self-ignoring `.gitignore`; nothing new to ignore. Requires git ≥ 2.31.
 
+## 0.8.3 - 2026-08-27
+
+0.8.3 makes a branch too large for the review context reviewable. metareview measures the real,
+untruncated branch diff, cuts it into content-stable shards, writes a prompt pack per shard, and
+then accepts the result files a reviewing agent writes about those packs. When every shard of the
+current plan has a fresh passing result, the context-risk blocker that nothing could clear becomes
+advisory and the deterministic lints run over the whole branch diff.
+
+Result files are evidence the reviewing agent writes about its own work, exactly like `--evidence`.
+metareview checks that a result is about the current content and that every shard is covered. It
+does not try to prove a review happened, and it does not defend against a hostile branch.
+
+### Added
+
+- **Process overrides.** `metareview override request|grant|list` records that the review workflow was
+  deliberately stepped outside of. Requesting is available to whoever drives the run (an orchestrating
+  agent included) and does not clear the gate — the finding keeps blocking and `override list --pending`
+  exits nonzero, so CI stays red until an authority outside the workflow grants it. Both halves record
+  actor, timestamp and reason; overrides render under "Process Overrides" in `docs/metareview/FINDINGS.md`
+  and never read as fixes (`fixedInRunId` stays empty), so exceptions can be analysed separately from
+  resolutions. The actor that requested an override cannot also grant it; `--by` is audit metadata rather
+  than authentication, so environments that need a hard boundary should gate `override grant` behind
+  whatever authenticates their actors.
+
+- **Measured branch diff.** Per-file sizes come from the untruncated, exclude-filtered diff, so the
+  shard plan reports real bytes instead of the truncated fiction it reported before.
+- **Content-stable shard plan.** Paths are bucketed by hash and an over-budget bucket is split
+  locally, so editing one file re-cuts only that file's shard. New risk reasons
+  `LOCAL_DIFF_TRUNCATED` and `DIFF_OVERSIZE`.
+- **Prompt packs** under the transient `.metareview/shards/<scope>/<target-slug>/<planHash>/`:
+  `shard-<id>.md`, `cross-shard.md` and a `plan.json` carrying everything a host needs to write
+  conforming results.
+- **Review results.** Result files live in the durable
+  `docs/metareview/shards/<scope>/<target-slug>/` as `shard-<id>.<shardHash>.result.json` and
+  `cross-shard.<planHash>.result.json`, and are committed with the review log. `--shard-result`
+  (repeatable) and `--cross-shard-result` add files explicitly on `review pr-ready` and
+  `review task-done`; an invalid path exits 2 with nothing written.
+- **Sharded gate.** With risk reasons limited to `DIFF_TRUNCATED`/`LARGE_DIFF`, every shard covered,
+  a cross-shard result for a multi-shard plan and a passing manifest, "Review context risk" becomes
+  the advisory `architecture:context-risk-covered` and "Diff context was truncated" becomes advisory
+  too. The review log gains a `## Sharded Review` section listing what was ingested, what was
+  ignored and why, and which files were reviewed as chunks.
+
+### Changed
+
+- Freshness is by content hash, and a result that matches nothing is ignored with a reason rather
+  than blocking: there is no "stale" category.
+- The context-risk fingerprint is reason-independent in all three scopes; the reasons moved into
+  the finding's `Found`.
+- The review manifest hash is the plan hash, so generated paths and dispositions no longer churn it.
+- `learn-post-merge` excludes `docs/metareview/shards/**`; the JSONL readers accept 1 MiB lines.
+- `epic-ready` renders "not sharded" where it printed a shard plan computed from the truncated diff.
+
+### Upgrade
+
+- On the first 0.8.3 run for a target, an open finding carrying a legacy reason-bearing context-risk
+  fingerprint is marked `superseded` — neither open nor fixed, with `fixedInRunId` left empty — after
+  `.metareview/findings.jsonl` is backed up once. No other fingerprint changes.
+- CI cannot produce results itself, so a sharded gate is run by the operator's agent. Moving `--base`
+  changes every hash, so all committed results for that target become ignored and the loop is re-run.
+- Superseded result files are collected after a passing gate, so the audit record covers the passing
+  plan rather than every plan the branch passed through.
+
 ## 0.8.2 - 2026-08-26
 
 0.8.2 adds **orchestrator discipline** guidance to the review-artifact skill: the orchestrator

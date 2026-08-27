@@ -29,6 +29,23 @@ Lifecycle gate verdicts have this contract:
 
 Advisory notes can be recorded for later, but blockers are current work.
 
+When a blocker cannot be fixed and the workflow is deliberately stepped outside of, record the exception
+instead of working around it:
+
+- `metareview override request <finding-id> --reason "<text>" [--escalation "<text>"]` — available to
+  whoever drives the run, including an orchestrating agent. It does **not** clear the gate: the finding
+  keeps blocking and `metareview override list --pending` exits nonzero, so CI stays red.
+- `metareview override grant <finding-id> --reason "<text>"` — the acknowledgement, and it must come from
+  outside the workflow (a human, or an authority explicitly designated as one). A reviewing agent never
+  grants an override on findings it produced, and the actor that requested one is refused if it also tries
+  to grant it. `--by` is audit metadata, not authentication: it records who claims to have acted, and a
+  local CLI cannot verify that. Enforce the boundary with whatever authenticates actors in your
+  environment when it matters.
+
+Both halves record actor, timestamp and reason and are rendered under "Process Overrides" in
+`docs/metareview/FINDINGS.md`. An override is never a fix: `fixedInRunId` stays empty, so exceptions can be
+analysed separately from resolutions.
+
 ## Evidence Policy
 
 For task-done and pr-ready reviews, provide evidence:
@@ -52,6 +69,7 @@ Commit durable artifacts:
 - `docs/metareview/reviews/`
 - `docs/metareview/context/`
 - `docs/metareview/learning/`
+- `docs/metareview/shards/` (committed shard review results)
 - `.beads/knowledge/metareview.jsonl` when Beads owns knowledge
 - `.metareview/knowledge/metareview.jsonl` in standalone fallback mode
 - `.metareview/calibration.jsonl`
@@ -63,6 +81,7 @@ Keep transient state local:
 - `.metareview/findings.jsonl`
 - `.metareview/runs.jsonl`
 - `.metareview/runs/` (FSM runs; self-ignoring, incl. `.torn/`)
+- `.metareview/shards/` (transient prompt packs; self-ignoring)
 - generated binaries such as `bin/metareview`
 
 ## Metaswarm Fit
@@ -70,3 +89,26 @@ Keep transient state local:
 When metaswarm is present, it remains the lifecycle owner. Follow metaswarm's decomposition, Superpowers, Beads, and PR shepherding process, and insert metareview as the deeper review harness at artifact, task-done, epic-ready, pr-ready, and post-merge checkpoints.
 
 When metaswarm is absent, use `metareview setup --bootstrap-prereqs --dry-run` before proposing local prerequisites or registries such as `docs/SERVICE_INVENTORY.md`.
+
+### Sharded review (diffs over the context limit)
+
+An exclude-filtered diff over 120,000 bytes cannot be held in one review context. metareview measures the real
+branch diff, cuts it into shards, and writes a prompt pack per shard under
+`.metareview/shards/<scope>/<target-slug>/<planHash>/`, with a `plan.json` naming every shard, its
+hash, and the directory the results belong in.
+
+1. Run the gate once. It reports `NEEDS_REVISION` with the context-risk blocker and writes the packs.
+2. Read `plan.json`. Review one subagent per `shard-<id>.md` against `rubrics/task-done-review-rubric.md`,
+   and one more over `cross-shard.md` when there is more than one shard.
+3. Write a result per shard to `docs/metareview/shards/<scope>/<target-slug>/shard-<id>.<shardHash>.result.json`
+   and, for a multi-shard plan, `cross-shard.<planHash>.result.json`. The pack states the exact
+   contract.
+4. Re-run the gate with `--previous-run <run-id>`. With every shard covered and the aggregate
+   passing, the context-risk blocker becomes advisory and the deterministic lints run over the whole
+   branch diff.
+
+Set `--max-attempts` on the **first** run of the chain; mid-chain it is ignored. Commit the results
+with the review log. Editing a file invalidates only its own shard's result: re-review that shard
+and the cross-shard pack, and leave the rest. Local (staged, worktree, untracked) content is in no
+pack, so on task-done commit or remove it first — an untracked file over 4,000 bytes raises
+`UNTRACKED_TRUNCATED`, which shard results can never satisfy.

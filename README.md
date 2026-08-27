@@ -52,6 +52,14 @@ metareview is built around review patterns that work well when humans and coding
 - **Review artifact accountability:** write durable Markdown context and review logs so future humans and agents can inspect what was reviewed, what blocked, and why it passed.
 - **Post-merge reflection:** after a PR lands, extract accepted learnings, discarded candidates, and reviewer calibration so the next review starts smarter.
 
+## What Changed In 0.8.3
+
+0.8.3 closes the sharded-review loop, so an oversized branch diff can now reach a passing gate:
+
+- **Sharded review results:** on task-done and PR-ready, a branch diff over the context limit is measured in full, cut into content-stable shards, and written as one prompt pack per shard. The agent reviews each pack and writes a result file back.
+- **A clearable context-risk blocker:** when every shard of the current plan has a fresh passing result — and, for a multi-shard plan, a cross-shard result covering the seams — the blocking "Review context risk" finding becomes advisory and the deterministic lints run over the whole branch diff. (`epic-ready` renders "not sharded": ingestion there is a follow-up.)
+- **Freshness by content hash:** a result is matched to a shard by that shard's content hash, so a result about superseded content is ignored with a reason rather than silently counted.
+
 ## What Changed From 0.4.0 To 0.6.0
 
 0.6.0 made metareview more useful for real agent work by adding concrete coverage accounting around the review surface:

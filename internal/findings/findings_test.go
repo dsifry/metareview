@@ -368,3 +368,219 @@ func mustRead(t *testing.T, path string) string {
 	}
 	return string(bytes)
 }
+
+func TestLegacyContextRiskRowSuperseded(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		scope       string
+		fingerprint string
+		options     Options
+	}{
+		{"task-done unchained", "task-done", "architecture:context-risk:DIFF_TRUNCATED|LARGE_DIFF", Options{}},
+		{"pr-ready unchained", "pr-ready", "pr:architecture:context-risk:DIFF_TRUNCATED", Options{}},
+		{"epic-ready escalated", "epic-ready", "epic:context-risk:LARGE_DIFF", Options{ResetRunIDs: []string{"mrv-escalated"}}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, ".metareview", "findings.jsonl")
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			legacy := Record{
+				SchemaVersion:  1,
+				ID:             "mrvf-legacy-1",
+				RunID:          "mrv-escalated",
+				Scope:          testCase.scope,
+				Status:         "open",
+				Classification: "blocking",
+				Severity:       "high",
+				Fingerprint:    testCase.fingerprint,
+				Target:         map[string]string{"type": "task", "id": "t-1"},
+			}
+			data, err := json.Marshal(legacy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			run := Run{ID: "mrv-new", Scope: testCase.scope, Target: map[string]string{"type": "task", "id": "t-1"}, RepoRoot: root}
+			result, err := Reconcile(root, run, nil, testCase.options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.OpenFindings) != 0 {
+				t.Fatalf("a superseded row must not stay open: %+v", result.OpenFindings)
+			}
+			records, err := readJSONL(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(records) != 1 || records[0].Status != StatusSuperseded {
+				t.Fatalf("records = %+v, want one superseded row", records)
+			}
+			if records[0].FixedInRunID != "" {
+				t.Fatalf("fixedInRunId must stay empty, got %q", records[0].FixedInRunID)
+			}
+			if _, err := os.Stat(path + ".pre-0.8.3.bak"); err != nil {
+				t.Fatalf("the ledger must be backed up before the alias pass: %v", err)
+			}
+		})
+	}
+}
+
+func TestSupersedeLeavesUnrelatedRowsAlone(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".metareview", "findings.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keep := Record{SchemaVersion: 1, ID: "mrvf-keep", RunID: "mrv-1", Scope: "task-done", Status: "open",
+		Classification: "blocking", Severity: "high", Fingerprint: "security:eval",
+		Target: map[string]string{"type": "task", "id": "t-1"}}
+	other := Record{SchemaVersion: 1, ID: "mrvf-other", RunID: "mrv-1", Scope: "task-done", Status: "open",
+		Classification: "blocking", Severity: "high", Fingerprint: "architecture:context-risk:LARGE_DIFF",
+		Target: map[string]string{"type": "task", "id": "t-2"}}
+	var lines []byte
+	for _, record := range []Record{keep, other} {
+		data, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines = append(append(lines, data...), '\n')
+	}
+	if err := os.WriteFile(path, lines, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run := Run{ID: "mrv-2", Scope: "task-done", Target: map[string]string{"type": "task", "id": "t-1"}, RepoRoot: root}
+	if _, err := Reconcile(root, run, nil, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	records, err := readJSONL(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		if record.Status != "open" {
+			t.Fatalf("unrelated rows must stay open: %+v", record)
+		}
+	}
+	if _, err := os.Stat(path + ".pre-0.8.3.bak"); !os.IsNotExist(err) {
+		t.Fatal("no backup should be taken when nothing is superseded")
+	}
+}
+
+func TestReadersAcceptOneMiBLines(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".metareview", "findings.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	long := Record{SchemaVersion: 1, ID: "mrvf-long", RunID: "mrv-1", Scope: "task-done", Status: "open",
+		Classification: "blocking", Severity: "high", Fingerprint: "security:eval",
+		Found:  strings.Repeat("x", 300_000),
+		Target: map[string]string{"type": "task", "id": "t-1"}}
+	data, err := json.Marshal(long)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) <= 64*1024 {
+		t.Fatalf("fixture line is only %d bytes; it must exceed bufio's default", len(data))
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	records, err := readJSONL(path)
+	if err != nil {
+		t.Fatalf("a 1 MiB line must be readable: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+}
+
+// TestReadJSONLAcceptsExactlyMaxLine pins the boundary the constant documents:
+// bufio rejects a token equal to the buffer maximum, so a record of exactly
+// maxJSONLLineBytes is only readable when the buffer is one byte larger.
+func TestReadJSONLAcceptsExactlyMaxLine(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".metareview", "findings.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := Record{SchemaVersion: 1, ID: "mrvf-max", RunID: "mrv-1", Scope: "task-done", Status: "open",
+		Classification: "blocking", Severity: "high", Fingerprint: "security:eval",
+		Target: map[string]string{"type": "task", "id": "t-1"}}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Grow Found until the encoded line is exactly maxJSONLLineBytes. The first
+	// pass sizes it roughly; the second corrects for the added field's own bytes.
+	pad := maxJSONLLineBytes - len(data)
+	for i := 0; i < 2; i++ {
+		record.Found = strings.Repeat("x", pad)
+		data, err = json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pad += maxJSONLLineBytes - len(data)
+	}
+	if len(data) != maxJSONLLineBytes {
+		t.Fatalf("fixture line is %d bytes, want exactly %d", len(data), maxJSONLLineBytes)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	records, err := readJSONL(path)
+	if err != nil {
+		t.Fatalf("a line of exactly %d bytes must be readable: %v", maxJSONLLineBytes, err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+}
+
+// TestReadJSONLAcceptsExactlyMaxLineCRLF pins the same boundary for a
+// CRLF-terminated file. bufio.ScanLines drops the trailing \r from the token,
+// but the carriage return still has to fit in the buffer alongside the record,
+// so an exact-limit CRLF line needs two bytes of headroom rather than one.
+// readJSONL already trims the \r, so CRLF input is expected to work.
+func TestReadJSONLAcceptsExactlyMaxLineCRLF(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".metareview", "findings.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := Record{SchemaVersion: 1, ID: "mrvf-max-crlf", RunID: "mrv-1", Scope: "task-done",
+		Status: "open", Classification: "blocking", Severity: "high", Fingerprint: "security:eval",
+		Target: map[string]string{"type": "task", "id": "t-1"}}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pad := maxJSONLLineBytes - len(data)
+	for i := 0; i < 2; i++ {
+		record.Found = strings.Repeat("x", pad)
+		data, err = json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pad += maxJSONLLineBytes - len(data)
+	}
+	if len(data) != maxJSONLLineBytes {
+		t.Fatalf("fixture line is %d bytes, want exactly %d", len(data), maxJSONLLineBytes)
+	}
+	if err := os.WriteFile(path, append(data, '\r', '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	records, err := readJSONL(path)
+	if err != nil {
+		t.Fatalf("an exact-limit CRLF line must be readable: %v", err)
+	}
+	if len(records) != 1 || records[0].ID != "mrvf-max-crlf" {
+		t.Fatalf("records = %+v, want the exact-limit row", records)
+	}
+}

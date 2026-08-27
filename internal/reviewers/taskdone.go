@@ -16,7 +16,38 @@ type Context struct {
 	Task         TaskContext
 	Git          GitContext
 	Knowledge    KnowledgeContext
+	Manifest     ManifestContext
 	EvidenceText string
+}
+
+// ManifestContext is what the review manifest says about the shard results
+// ingested for this run.
+type ManifestContext struct {
+	Present       bool
+	Verdict       string
+	Blockers      []string
+	ShardCount    int
+	ShardsCovered int
+	CrossShard    bool
+	PlanHash      string
+}
+
+// shardSatisfiableReasons are the only context-risk reasons a set of shard
+// reviews can answer: the bytes a shard pack does not carry are never covered.
+var shardSatisfiableReasons = map[string]bool{"DIFF_TRUNCATED": true, "LARGE_DIFF": true}
+
+// Satisfies reports whether the shard results cover the whole context risk.
+func (m ManifestContext) Satisfies(reasons []string) bool {
+	for _, reason := range reasons {
+		if !shardSatisfiableReasons[reason] {
+			return false
+		}
+	}
+	return m.Present &&
+		m.ShardCount > 0 &&
+		m.ShardsCovered == m.ShardCount &&
+		(m.ShardCount == 1 || m.CrossShard) &&
+		m.Verdict == "PASS"
 }
 
 type TaskContext struct {
@@ -32,6 +63,7 @@ type GitContext struct {
 	WorkingTreeFiles         []string
 	UntrackedFiles           []string
 	Diff                     string
+	BranchDiffFull           string
 	StagedDiff               string
 	WorkingTreeDiff          string
 	UntrackedExcerpts        string
@@ -63,17 +95,32 @@ var inventoryPathPattern = regexp.MustCompile(`[A-Za-z0-9_./-]+\.(go|js|ts|tsx|j
 
 func RunTaskDone(context Context) []Finding {
 	var results []Finding
+	sharded := false
 	if context.Git.RiskLevel == "context-risk" {
-		return append(results, finding(Finding{
+		if !context.Manifest.Satisfies(context.Git.RiskReasons) {
+			return append(results, finding(Finding{
+				Reviewer:       "architecture-reviewer",
+				Severity:       "high",
+				Title:          "Review context risk",
+				Finding:        "The reviewer did not receive complete or bounded source context, so task closure cannot be trusted.",
+				Expected:       "Large or incomplete review contexts are split, sharded, or rerun with complete source context before task closure.",
+				Found:          contextRiskFound(context.Git) + manifestFound(context.Manifest),
+				Evidence:       []findings.Evidence{{Type: "context", Path: "contextProfile"}},
+				Recommendation: "Split the task, use the generated shard plan, or rerun the review with complete context.",
+				Fingerprint:    "architecture:context-risk",
+			}))
+		}
+		sharded = true
+		results = append(results, advisory(Finding{
 			Reviewer:       "architecture-reviewer",
-			Severity:       "high",
-			Title:          "Review context risk",
-			Finding:        "The reviewer did not receive complete or bounded source context, so task closure cannot be trusted.",
-			Expected:       "Large or incomplete review contexts are split, sharded, or rerun with complete source context before task closure.",
-			Found:          contextRiskFound(context.Git),
-			Evidence:       []findings.Evidence{{Type: "context", Path: "contextProfile"}},
-			Recommendation: "Split the task, use the generated shard plan, or rerun the review with complete context.",
-			Fingerprint:    "architecture:context-risk:" + strings.Join(context.Git.RiskReasons, "|"),
+			Severity:       "medium",
+			Title:          "Context risk covered by shard reviews",
+			Finding:        "The diff exceeded the review context limit, and every shard of the current plan has a fresh passing review result.",
+			Expected:       "An oversized diff is reviewed shard by shard, with a result for every shard of the current plan.",
+			Found:          contextRiskCoveredFound(context.Manifest),
+			Evidence:       []findings.Evidence{{Type: "context", Path: "reviewManifest"}},
+			Recommendation: "No action: the shard reviews stand in for the context metareview could not hold.",
+			Fingerprint:    "architecture:context-risk-covered",
 		}))
 	}
 	lines := addedLines(context.Git)
@@ -124,7 +171,7 @@ func RunTaskDone(context Context) []Finding {
 	}
 
 	if context.Git.DiffTruncated || context.Git.StagedDiffTruncated || context.Git.WorkingTreeDiffTruncated {
-		results = append(results, finding(Finding{
+		truncated := finding(Finding{
 			Reviewer:       "architecture-reviewer",
 			Severity:       "high",
 			Title:          "Diff context was truncated",
@@ -134,11 +181,48 @@ func RunTaskDone(context Context) []Finding {
 			Evidence:       []findings.Evidence{{Type: "context", Path: "diffTruncated"}},
 			Recommendation: "Split the task or raise the review context limit deliberately.",
 			Fingerprint:    "architecture:truncated-diff",
-		}))
+		})
+		if sharded {
+			truncated.Classification = "advisory"
+		}
+		results = append(results, truncated)
 	}
 
 	results = append(results, duplicatePathFindings(context.Knowledge, changedSource)...)
 	return results
+}
+
+// manifestFound appends what the manifest said, capped at ten blockers.
+func manifestFound(manifest ManifestContext) string {
+	if manifest.ShardCount == 0 {
+		return ""
+	}
+	parts := []string{"Manifest verdict: " + manifest.Verdict,
+		"shards covered: " + intString(manifest.ShardsCovered) + " of " + intString(manifest.ShardCount)}
+	if !manifest.Present {
+		parts = append(parts, "no shard review results were ingested")
+	}
+	blockers := manifest.Blockers
+	if len(blockers) > 10 {
+		blockers = blockers[:10]
+	}
+	if len(blockers) > 0 {
+		parts = append(parts, "manifest blockers: "+strings.Join(blockers, "; "))
+	}
+	return "; " + strings.Join(parts, "; ")
+}
+
+func contextRiskCoveredFound(manifest ManifestContext) string {
+	return "Plan hash: " + manifest.PlanHash + "; shards covered: " +
+		intString(manifest.ShardsCovered) + " of " + intString(manifest.ShardCount) +
+		"; cross-shard review: " + boolString(manifest.CrossShard)
+}
+
+func boolString(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
 }
 
 func contextRiskFound(git GitContext) string {
@@ -168,6 +252,13 @@ func hasSuccessfulValidationEvidence(text string) bool {
 		return false
 	}
 	return bundle.HasSuccessfulValidation(evidence.KindGeneric)
+}
+
+// advisory records a finding that reports rather than gates.
+func advisory(input Finding) Finding {
+	out := finding(input)
+	out.Classification = "advisory"
+	return out
 }
 
 func finding(input Finding) Finding {
@@ -248,7 +339,13 @@ func hasTestChange(git GitContext) bool {
 }
 
 func addedLines(git GitContext) []string {
-	text := strings.Join([]string{git.Diff, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")
+	// The branch part comes from the untruncated measured diff when there is one,
+	// so the lints see the bytes the packs carry rather than the truncated view.
+	branch := git.BranchDiffFull
+	if branch == "" {
+		branch = git.Diff
+	}
+	text := strings.Join([]string{branch, git.StagedDiff, git.WorkingTreeDiff, git.UntrackedExcerpts}, "\n")
 	var lines []string
 	for _, line := range strings.Split(text, "\n") {
 		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
