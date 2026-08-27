@@ -224,6 +224,8 @@ func TestW2Reasons(t *testing.T) {
 		{"outcome-on-nonterminal", "outcome_on_nonterminal", "transitions[1]", edit("{ from: discover, to: adjudicate, gate: findings_nonempty }", "{ from: discover, to: adjudicate, gate: findings_nonempty, outcome: clean }")},
 		{"bad-outcome", "bad_outcome", "transitions[0]", edit("gate: findings_empty, outcome: clean }", "gate: findings_empty, outcome: great }")},
 		{"bad-outcome-failed", "bad_outcome", "transitions[0]", edit("gate: findings_empty, outcome: clean }", "gate: findings_empty, outcome: failed }")},
+		{"initial-terminal", "initial_terminal", "states.discover", strings.Replace(strings.Replace(example, "  - { from: discover, to: done, gate: findings_empty, outcome: clean }\n", "", 1), "  - { from: discover, to: adjudicate, gate: findings_nonempty }\n", "  - { from: fix, to: adjudicate, gate: findings_nonempty }\n", 1)},
+		{"bad-env-shellopts", "bad_env", "cmds.notify", edit("env: [SLACK_WEBHOOK]", "env: [SHELLOPTS]")},
 		{"unreachable-state", "unreachable_state", "states.fix", edit("  - { from: adjudicate, to: fix, gate: confirmed_nonempty }\n", "")},
 		{"loop-count", "loop_count", "transitions", edit("{ from: adjudicate, to: fix, gate: confirmed_nonempty }", "{ from: adjudicate, to: fix, gate: confirmed_nonempty, loop: true }")},
 		{"loop-not-cycle", "loop_not_cycle", "transitions", strings.Replace(edit("{ from: verify, to: discover, gate: bugs_remain, loop: true }", "{ from: verify, to: side, gate: bugs_remain, loop: true }\n  - { from: side, to: done, gate: findings_empty, outcome: clean }"), "verify, done, failed]", "verify, side, done, failed]", 1)},

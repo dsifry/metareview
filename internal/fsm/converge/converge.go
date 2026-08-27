@@ -56,6 +56,12 @@ type Predicate interface {
 	Evaluate(ctx context.Context, s run.Snapshot) (Result, error)
 }
 
+// MaxDepth bounds nesting so composite names stay within run.MaxShort.
+const MaxDepth = 4
+
+// MaxAtoms bounds the number of leaves for the same reason.
+const MaxAtoms = 32
+
 // Error codes produced by this package.
 const (
 	CodeBadConvergence   = "ERR_BAD_CONVERGENCE"
@@ -94,6 +100,9 @@ func parse(node *yaml.Node, runner Runner, cmdNames []string, top bool, depth in
 			return nil, bad("empty convergence")
 		}
 		return parse(node.Content[0], runner, cmdNames, true, 0)
+	}
+	if depth > MaxDepth {
+		return nil, bad(fmt.Sprintf("line %d: convergence tree deeper than %d", node.Line, MaxDepth))
 	}
 	if node.Kind == yaml.ScalarNode {
 		// Bare form: `no_fixation_progress` / `all_fixed` (the shipped YAMLs use it).
@@ -147,8 +156,8 @@ func parse(node *yaml.Node, runner Runner, cmdNames []string, top bool, depth in
 		}
 		return &cmdAtom{name: name, runner: runner}, nil
 	case "any", "all":
-		if val.Kind != yaml.SequenceNode || len(val.Content) == 0 {
-			return nil, bad(fmt.Sprintf("line %d: %s must be a non-empty list", node.Line, key))
+		if val.Kind != yaml.SequenceNode || len(val.Content) == 0 || len(val.Content) > MaxAtoms {
+			return nil, bad(fmt.Sprintf("line %d: %s must be a list of 1..%d predicates", node.Line, key, MaxAtoms))
 		}
 		kids := make([]Predicate, 0, len(val.Content))
 		for _, c := range val.Content {
@@ -311,8 +320,11 @@ func (c *compound) Evaluate(ctx context.Context, s run.Snapshot) (Result, error)
 
 type not struct{ inner Predicate }
 
-func (n *not) Name() string       { return "not(" + n.inner.Name() + ")" }
-func (n *not) Class() run.Outcome { return n.inner.Class() }
+func (n *not) Name() string { return "not(" + n.inner.Name() + ")" }
+
+// Class of a negation is always custom: inverting an atom must never mint a
+// `fixed` or `stalled` classification (plan C3).
+func (n *not) Class() run.Outcome { return run.OutcomeCustom }
 func (n *not) Evaluate(ctx context.Context, s run.Snapshot) (Result, error) {
 	r, err := n.inner.Evaluate(ctx, s)
 	if err != nil {

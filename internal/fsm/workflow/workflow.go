@@ -114,7 +114,7 @@ var (
 	cmdPattern   = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 	varRef       = regexp.MustCompile(`\$(\$|[A-Z_][A-Z0-9_]*)`)
 	execModes    = map[string]bool{"inline": true, "subagent": true, "fork": true}
-	reservedEnv  = map[string]bool{"PATH": true, "HOME": true, "LANG": true, "TMPDIR": true, "BASH_ENV": true, "ENV": true, "PYTHONPATH": true, "NODE_OPTIONS": true, "PERL5OPT": true}
+	reservedEnv  = map[string]bool{"PATH": true, "HOME": true, "LANG": true, "TMPDIR": true, "BASH_ENV": true, "ENV": true, "PYTHONPATH": true, "PYTHONSTARTUP": true, "PYTHONHOME": true, "NODE_OPTIONS": true, "NODE_PATH": true, "PERL5OPT": true, "PERL5LIB": true, "RUBYOPT": true, "RUBYLIB": true, "JAVA_TOOL_OPTIONS": true, "SHELLOPTS": true, "PS4": true, "IFS": true, "CDPATH": true, "GLOBIGNORE": true, "PROMPT_COMMAND": true}
 	reservedPfx  = []string{"MRV_", "LD_", "DYLD_", "GIT_"}
 )
 
@@ -469,6 +469,9 @@ func (w *Workflow) addTransition(rt rawTransition, at string) error {
 func (w *Workflow) validateGraph() error {
 	if !w.hasState(FailedState) || w.Nodes[FailedState] != nil {
 		return invalid("failed_reserved", "states", "failed must be declared and carry no node")
+	}
+	if len(w.Outgoing(w.Initial)) == 0 {
+		return invalid("initial_terminal", "states."+string(w.Initial), "the initial state needs an outgoing transition")
 	}
 	for s, n := range w.Nodes {
 		if w.IsTerminal(s) {

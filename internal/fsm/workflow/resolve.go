@@ -3,7 +3,6 @@ package workflow
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -135,9 +134,7 @@ func ResolveCmds(w *Workflow, workDir string, lookPath func(string) (string, err
 func CmdsSHA256(cmds []run.AllowedCmd) string {
 	sorted := append([]run.AllowedCmd{}, cmds...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
-	raw, _ := json.Marshal(sorted)
-	canon, _ := run.Canonical(raw)
-	sum := sha256.Sum256(canon)
+	sum := sha256.Sum256(run.MarshalCanonical(sorted))
 	return hex.EncodeToString(sum[:])
 }
 

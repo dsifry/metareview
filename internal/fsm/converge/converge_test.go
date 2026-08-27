@@ -40,7 +40,8 @@ func (f *fakeRunner) Run(_ context.Context, name string, stdin []byte) (CmdResul
 func intp(i int) *int { return &i }
 
 func snap(iter int, unfixed int, prev *int, tokens int64, found int) run.Snapshot {
-	s := run.Snapshot{Iteration: iter, Unfixed: unfixed, PrevUnfixed: prev, Tokens: run.TokenTotals{Input: tokens}}
+	// tokens are spread over the non-Input counters so a Total() that only reads Input fails.
+	s := run.Snapshot{Iteration: iter, Unfixed: unfixed, PrevUnfixed: prev, Tokens: run.TokenTotals{Output: tokens / 2, CacheRead: tokens - tokens/2 - tokens/4, Reasoning: tokens / 4}}
 	for i := 0; i < found; i++ {
 		s.AllFound = append(s.AllFound, run.Bug{ID: strings.Repeat("a", 12), Desc: "d"})
 	}
@@ -124,7 +125,7 @@ func TestC2CmdAtom(t *testing.T) {
 	if got.Vars["JUDGE"] != "sha256:"+hex.EncodeToString(sum[:]) || strings.Contains(string(fr.stdins[0]), "secret-model") {
 		t.Fatalf("payload not redacted: %s", fr.stdins[0])
 	}
-	if got.Iteration != 2 || got.Tokens.Input != 7 {
+	if got.Iteration != 2 || got.Tokens.Total() != 7 {
 		t.Fatal("payload carries the snapshot")
 	}
 	if strings.Contains(string(fr.stdins[0]), `"big"`) {
@@ -134,13 +135,17 @@ func TestC2CmdAtom(t *testing.T) {
 		t.Fatal("Payload must not mutate the snapshot")
 	}
 
-	// stop:false path
+	// stop:false path, and a missing reason is legal
 	fr.res = CmdResult{Stdout: []byte(`{"stop": false, "reason": ""}`)}
 	if r, err := p.Evaluate(ctx, s); err != nil || r.Stop || r.Reason != "" {
 		t.Fatalf("stop false: %+v %v", r, err)
 	}
+	fr.res = CmdResult{Stdout: []byte(`{"stop": true}`)}
+	if r, err := p.Evaluate(ctx, s); err != nil || !r.Stop || r.Reason != "" {
+		t.Fatalf("reason optional: %+v %v", r, err)
+	}
 	// invalid outputs
-	for _, out := range []string{`{"stop": "yes"}`, `not json`, `{"stop": true, "extra": 1}`, ``} {
+	for _, out := range []string{`{"stop": "yes"}`, `not json`, `{"stop": true, "extra": 1}`, ``, `{"stop": true, "reason": 5}`} {
 		fr.res = CmdResult{Stdout: []byte(out)}
 		_, err := p.Evaluate(ctx, s)
 		if !errs.Is(err, CodeCmdOutputInvalid) {
@@ -196,11 +201,11 @@ func TestC3Compose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if notP.Name() != "not(budget)" || notP.Class() != run.OutcomeOverflow {
-		t.Fatal("not name/class")
+	if notP.Name() != "not(budget)" || notP.Class() != run.OutcomeCustom {
+		t.Fatal("not name/class: negation is always custom")
 	}
 	r, _ = notP.Evaluate(ctx, quiet)
-	if !r.Stop || r.Atom != "not(budget)" || r.Reason == "" {
+	if !r.Stop || r.Atom != "not(budget)" || r.Class != run.OutcomeCustom || r.Reason == "" {
 		t.Fatalf("not inverts: %+v", r)
 	}
 	r, _ = notP.Evaluate(ctx, snap(0, 1, nil, 10, 1))
@@ -251,6 +256,14 @@ func TestC4ValidateAndParseErrors(t *testing.T) {
 		{"all_fixed-under-all", "all: [{not: all_fixed}, {max_iterations: 5}]"},
 		{"all_fixed-map-under-all", "all: [{all_fixed: true}, {max_iterations: 5}]"},
 		{"all_fixed-nested-any", "any: [{any: [all_fixed]}]"},
+		{"too-deep", "not: {not: {not: {not: {not: {max_iterations: 1}}}}}"},
+		{"too-wide", "any: [" + strings.Repeat("{max_iterations: 1}, ", MaxAtoms) + "{max_iterations: 1}]"},
+	}
+	if err := Validate(node(t, "any: ["+strings.Repeat("{max_iterations: 1}, ", MaxAtoms-1)+"{max_iterations: 1}]"), nil); err != nil {
+		t.Fatalf("at MaxAtoms: %v", err)
+	}
+	if err := Validate(node(t, "not: {not: {not: {not: {max_iterations: 1}}}}"), nil); err != nil {
+		t.Fatalf("at MaxDepth: %v", err)
 	}
 	// all_fixed is legal at the top level and directly under a top-level any
 	for _, ok := range []string{"all_fixed", "{all_fixed: true}", "any: [all_fixed, {max_iterations: 5}]"} {
