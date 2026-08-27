@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.9.0 - unreleased
+
+0.9.0 adds **FSM workflow runs**: `metareview fsm` drives `sdlc-loop` (discover → adjudicate → fix → verify) and
+`review-loop` as an event-sourced, hash-chained state machine. The host agent does the host nodes' work in its own warm
+session; judge calls (Anthropic and OpenAI-compatible) are auditable and swappable; resume is a fork; the results are
+not deterministic — the structure is.
+
+### Added
+
+- `metareview fsm init|state|advance|record|gate|judge|converge|diff|export|workflows|--agent-prompt` with one JSON
+  envelope per call (`schema_version: 1`), an exit table (`0`/`1`/`2`/`3`), `untrusted` marking of every externally
+  derived value, and a driver contract (`--agent-prompt`, pinned by `testdata/fsm/agent-prompt.golden`).
+- Fork/resume at any checkpoint (`advance --from <state> [--at-iter N]`), judge swap (`--var JUDGE=…`), `fsm diff`
+  (raw/effective decisions and confidence, never reasoning), `fsm export` (redacted evidence bundles under
+  `docs/metareview/fsm/`), and `.metareview/runs.jsonl` rows for terminal runs with per-lineage escalation.
+- Consent for workflow commands (`--allow-custom-cmds <sha256>` over exact argv + pinned file hashes), `MaxEvents`,
+  torn-tail repair (`advance --repair`), mock scenarios (`--mock-ai`) for tests, and the `/fsm` skill + `commands/fsm.md`
+  + `docs/fsm/`.
+- `tests/coverage.sh` enforces exactly 100% statement coverage on `internal/fsm/*` and `workflows/` (legacy packages
+  keep a recorded floor; the lift is a follow-up); `tests/go/test-fsm.sh` is the black-box suite; a `smoke`-tagged
+  real-provider judge test is vetted and listed by `tests/run-all.sh`.
+
+### Upgrade
+
+Additive: pre-0.9 `.metareview/` state is untouched — no rewrite of `runs.jsonl`/`findings.jsonl`; new FSM rows are
+ignored by 0.8.x readers (their scope/target never match a review gate); a complete but newline-less final row is kept
+as a row; only an undecodable fragment moves to `.metareview/runs/.torn/`. `.metareview/runs/` is created 0700 on the
+first `init` with a self-ignoring `.gitignore`; nothing new to ignore. Requires git ≥ 2.31.
+
 ## 0.8.2 - 2026-08-26
 
 0.8.2 adds **orchestrator discipline** guidance to the review-artifact skill: the orchestrator

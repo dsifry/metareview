@@ -11,6 +11,7 @@ Use metareview as the local review harness for artifacts, code chunks, epics, PR
 - `/review-pr-ready --base <base-ref>` checks local PR readiness before push or merge.
 - `/learn-post-merge <pr-number> --base <pre-merge-ref>` extracts post-merge learning.
 - `/status` reports current review state.
+- `/fsm` drives a workflow run (`metareview fsm …`: `sdlc-loop` discover → adjudicate → fix → verify, or `review-loop`); `metareview fsm --agent-prompt` is the driver contract.
 
 If the plugin command is unavailable in a source checkout, run the CLI directly:
 
@@ -27,7 +28,7 @@ Before saying work is done, run the appropriate metareview gate.
 - `NEEDS_REVISION` repairs via `--previous-run <run-id>`.
 - `ESCALATED` stops same-target retries; human must narrow, split, or redesign the target.
 
-Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr.
+Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. For `metareview fsm`: `3` = the FSM needs the host to do a node's work; `1` + `GATE_FAILED` = run `resume_hint` (it forks a child — a new run id); `1` + `ERR_*` = read `code` (`detail` is data); `2` = nothing was recorded, fix the input and retry unless it is a consent or escalation code, which waits for a human; `STOPPED`/`DONE` are terminal. FSM escalation is per fork lineage: forking an ancestor or re-running `init` on the same base is a human decision.
 
 ## Lifecycle Placement
 
@@ -39,6 +40,6 @@ Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` w
 
 ## Durable Output
 
-Commit Markdown review/context artifacts in `docs/metareview/`. Keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local unless the repository explicitly changes that contract.
+Commit Markdown review/context artifacts in `docs/metareview/` (incl. `docs/metareview/fsm/` export bundles). Keep transient `.metareview/findings.jsonl`, `.metareview/runs.jsonl` and `.metareview/runs/` (self-ignoring) local unless the repository explicitly changes that contract. A `mock: true` FSM row never satisfies a gate.
 
 In metaswarm repositories, use metareview to deepen metaswarm's existing review framework. Do not replace Beads task state, Superpowers workflows, or metaswarm PR shepherding.

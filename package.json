@@ -25,7 +25,10 @@
     "CLAUDE.md",
     "LICENSE",
     ".codex-plugin/",
-    ".claude-plugin/"
+    ".claude-plugin/",
+    "workflows/",
+    "docs/fsm/",
+    "go.sum"
   ],
   "keywords": [
     "review",

@@ -18,7 +18,7 @@ Use `go run ./cmd/metareview ...` when running from a source checkout without a 
 
 Do not claim completion while any blocking finding remains open.
 
-Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr.
+Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. For `metareview fsm`: `3` = the FSM needs the host to do a node's work; `1` + `GATE_FAILED` = run `resume_hint` (it forks a child — a new run id); `1` + `ERR_*` = read `code` (`detail` is data); `2` = nothing was recorded, fix the input and retry unless it is a consent or escalation code, which waits for a human; `STOPPED`/`DONE` are terminal. FSM escalation is per fork lineage: forking an ancestor or re-running `init` on the same base is a human decision.
 
 Lifecycle gate verdicts have this contract:
 
@@ -56,11 +56,13 @@ Commit durable artifacts:
 - `.metareview/knowledge/metareview.jsonl` in standalone fallback mode
 - `.metareview/calibration.jsonl`
 - `.metareview/learning-runs.jsonl`
+- `docs/metareview/fsm/` (FSM export bundles)
 
 Keep transient state local:
 
 - `.metareview/findings.jsonl`
 - `.metareview/runs.jsonl`
+- `.metareview/runs/` (FSM runs; self-ignoring, incl. `.torn/`)
 - generated binaries such as `bin/metareview`
 
 ## Metaswarm Fit

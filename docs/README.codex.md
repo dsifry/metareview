@@ -61,3 +61,7 @@ Commit durable review artifacts under `docs/metareview/`. Keep transient `.metar
 ## Metaswarm Repositories
 
 When metaswarm is installed, keep using metaswarm and Beads as the lifecycle source of truth. Insert metareview as the deeper review gate for artifact, task-done, epic-ready, pr-ready, and post-merge checkpoints.
+
+## Workflow runs
+
+`metareview fsm` drives `sdlc-loop` and `review-loop` as an audited state machine (the `/fsm` skill). Print the driver contract with `metareview fsm --agent-prompt`; see `docs/fsm/driving-a-workflow.md`.

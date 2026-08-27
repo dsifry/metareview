@@ -54,3 +54,7 @@ Commit durable review and context Markdown under `docs/metareview/`. Leave trans
 ## Metaswarm Repositories
 
 metareview augments metaswarm. It does not replace metaswarm's Beads task state, Superpowers workflows, or PR shepherding. Use it as the deeper review harness at artifact, task-done, epic-ready, pr-ready, and post-merge checkpoints.
+
+## Workflow runs
+
+`metareview fsm` drives `sdlc-loop` and `review-loop` as an audited state machine (the `/fsm` skill). Print the driver contract with `metareview fsm --agent-prompt`; see `docs/fsm/driving-a-workflow.md`.

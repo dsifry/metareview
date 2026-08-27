@@ -57,7 +57,7 @@ Lifecycle gate results use this contract:
 - `NEEDS_REVISION`: fix blockers, then re-run the same gate with `--previous-run <run-id>`.
 - `ESCALATED`: stop same-target retries; human must narrow, split, or redesign the target.
 
-Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. `NOT_REVIEWED` artifact scaffolds are also blocking until completed.
+Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. `NOT_REVIEWED` artifact scaffolds are also blocking until completed. For `metareview fsm` see `docs/fsm/driving-a-workflow.md` (`3` = do the node's work; `1` + `GATE_FAILED` = run `resume_hint`).
 
 Task-done, epic-ready, and PR-ready context packs now include a Context Profile and Context Shard Plan when risk requires sharding. Task-done and PR-ready also include a Review Manifest that accounts for source paths, generated path dispositions, shard assignments, manifest hashes, and manifest blockers.
 
@@ -83,6 +83,7 @@ Keep local:
 
 - `.metareview/findings.jsonl`
 - `.metareview/runs.jsonl`
+- `.metareview/runs/` (FSM runs; the directory ignores itself)
 - other transient `.metareview/` state
 
 For ordinary project repositories, use exact file entries for transient state. Do not ignore `docs/metareview/` or the entire `.metareview/` directory, because those patterns hide durable review, learning, calibration, or fallback knowledge artifacts.

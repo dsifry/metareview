@@ -139,6 +139,9 @@ func (in *invocation) usage(msg string) int {
 }
 
 func (in *invocation) fail(base envelope, err error, ph phase, repairMoved bool) int {
+	if len(in.warns) > 0 {
+		base["warnings"] = warnObj(in.warns)
+	}
 	return errEnvelope(in.out, base, err, ph, repairMoved)
 }
 

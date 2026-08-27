@@ -1,0 +1,5 @@
+# sdlc-loop happy path: one finding, confirmed, fixed, verified gone.
+calls:
+  - {kind: adjudicate, node: adjudicate, iter: 0, index: 0, raw: '{"reasoning":"a real nil dereference","is_real":true,"confidence":0.9}', tokens: {input: 120, output: 40}, expect_model: gpt-5.2}
+  - {kind: still-present, node: verify, iter: 0, index: 0, raw: '{"reasoning":"the guard is in place","still_present":false,"confidence":0.9}', tokens: {input: 80, output: 20}, expect_model: gpt-5.2}
+  - {kind: adjudicate, node: judge, iter: 0, index: 0, raw: '{"reasoning":"standalone judge row","is_real":true,"confidence":0.8}', tokens: {input: 10, output: 5}}

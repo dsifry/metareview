@@ -38,6 +38,8 @@ if (!JSON.stringify(codex).includes("post-merge-learning")) throw new Error("cod
 if (!JSON.stringify(claude).includes("epic-ready")) throw new Error("claude plugin does not advertise epic-ready review");
 if (!JSON.stringify(claude).includes("pr-ready")) throw new Error("claude plugin does not advertise pr-ready review");
 if (!JSON.stringify(claude).includes("post-merge-learning")) throw new Error("claude plugin does not advertise post-merge learning");
+if (!JSON.stringify(codex).includes("workflow")) throw new Error("codex plugin does not advertise workflow runs");
+if (!JSON.stringify(claude).includes("workflow")) throw new Error("claude plugin does not advertise workflow runs");
 if (!JSON.stringify(JSON.parse(fs.readFileSync(".agents/plugins/marketplace.json", "utf8"))).includes("task-done")) {
   throw new Error("marketplace does not advertise task-done review");
 }

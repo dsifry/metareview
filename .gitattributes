@@ -1,1 +1,2 @@
 internal/fsm/judge/testdata/prompts/* -text
+testdata/fsm/** -text

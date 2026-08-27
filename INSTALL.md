@@ -134,7 +134,7 @@ Commit durable Markdown artifacts under `docs/metareview/`. Keep transient `.met
 .metareview/runs.jsonl
 ```
 
-Do not ignore `docs/metareview/` or the whole `.metareview/` directory.
+Do not ignore `docs/metareview/` or the whole `.metareview/` directory. FSM runs (`.metareview/runs/`) ignore themselves; `docs/metareview/fsm/` export bundles are durable. `metareview fsm` needs git ≥ 2.31 (`metareview setup --check` reports it).
 
 ## Update
 

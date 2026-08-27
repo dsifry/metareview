@@ -8,7 +8,8 @@ for file in \
   skills/review-epic-ready/SKILL.md \
   skills/review-pr-ready/SKILL.md \
   skills/learn-post-merge/SKILL.md \
-  skills/status/SKILL.md
+  skills/status/SKILL.md \
+  skills/fsm/SKILL.md
 do
   test -f "$file"
   grep -q '^---$' "$file"
@@ -16,7 +17,7 @@ do
   grep -q '^description:' "$file"
 done
 
-for file in README.md docs/quickstart.md commands/setup.md commands/review-artifact.md commands/review-task-done.md commands/review-epic-ready.md commands/review-pr-ready.md commands/learn-post-merge.md commands/status.md rubrics/task-done-review-rubric.md rubrics/epic-ready-review-rubric.md rubrics/pr-ready-review-rubric.md rubrics/learning-review-rubric.md templates/SERVICE-INVENTORY.md
+for file in README.md docs/quickstart.md commands/setup.md commands/review-artifact.md commands/review-task-done.md commands/review-epic-ready.md commands/review-pr-ready.md commands/learn-post-merge.md commands/status.md commands/fsm.md docs/fsm/driving-a-workflow.md docs/fsm/sdlc-loop-example.md workflows/sdlc-loop.yaml workflows/review-loop.yaml testdata/fsm/agent-prompt.golden tests/go/agent-prompt-anchors.txt rubrics/task-done-review-rubric.md rubrics/epic-ready-review-rubric.md rubrics/pr-ready-review-rubric.md rubrics/learning-review-rubric.md templates/SERVICE-INVENTORY.md
 do
   test -f "$file"
 done
@@ -120,3 +121,10 @@ grep -q 'Critical, high, and spec-contract findings block' rubrics/task-done-rev
 grep -q 'Critical and high findings block epic readiness' rubrics/epic-ready-review-rubric.md
 grep -q 'Critical and high findings block PR readiness' rubrics/pr-ready-review-rubric.md
 grep -q 'changes future reviewer behavior' rubrics/learning-review-rubric.md
+
+grep -q 'metareview fsm --agent-prompt' skills/fsm/SKILL.md
+grep -q 'Fork first, then commit' skills/fsm/SKILL.md
+grep -q 'never satisfies a gate' skills/fsm/SKILL.md
+grep -q 'docs/fsm/driving-a-workflow.md' README.md
+grep -q 'metareview fsm' CLAUDE.md
+grep -q 'metareview fsm' AGENTS.md

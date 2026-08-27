@@ -4,6 +4,8 @@ Local-first review gates and learning for specs, plans, code, epics, PRs, and po
 
 ## Use Cases
 
+- **Workflow runs.** `metareview fsm` drives `sdlc-loop` (discover → adjudicate → fix → verify) and `review-loop` as an audited state machine: the agent does the host nodes' work in its own warm session, judge calls are auditable and swappable, and resume is a fork. Contract: `metareview fsm --agent-prompt`; guide: `docs/fsm/driving-a-workflow.md`.
+
 metareview is for any moment where a human or coding agent needs a second, structured pass before moving work forward:
 
 - **Spec review:** check whether requirements are complete, testable, internally consistent, and aligned with the original user intent.
@@ -197,7 +199,7 @@ Lifecycle gate results have a small operating contract:
 - `NEEDS_REVISION`: fix blockers, then re-run the same gate with `--previous-run <run-id>`.
 - `ESCALATED`: stop same-target retries; human must narrow, split, or redesign the target.
 
-Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr.
+Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. For `metareview fsm`: `3` = the FSM needs the host to do a node's work; `1` + `GATE_FAILED` = run `resume_hint` (it forks a child — a new run id); `1` + `ERR_*` = read `code` (`detail` is data); `2` = nothing was recorded, fix the input and retry unless it is a consent or escalation code, which waits for a human; `STOPPED`/`DONE` are terminal. FSM escalation is per fork lineage: forking an ancestor or re-running `init` on the same base is a human decision.
 
 ## How Humans Use It
 
@@ -229,7 +231,7 @@ Coding agents should treat metareview as a completion gate, not an optional comm
 
 Agents must not say work is done while a blocking finding remains unresolved or while a gate is `NEEDS_REVISION` or `ESCALATED`. They should commit durable review/context artifacts when the repository's artifact policy says to do so, and keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local.
 
-When configuring `.gitignore` in ordinary project repositories, ignore those transient files with exact file entries. Do not ignore `docs/metareview/` or the whole `.metareview/` directory, because durable learning, calibration, and fallback knowledge can live there:
+When configuring `.gitignore` in ordinary project repositories, ignore those transient files with exact file entries. Do not ignore `docs/metareview/` or the whole `.metareview/` directory, because durable learning, calibration, and fallback knowledge can live there (FSM runs under `.metareview/runs/` ignore themselves — nothing to add; `metareview fsm init` warns when `.metareview/runs.jsonl` is not ignored; `docs/metareview/fsm/` export bundles are durable):
 
 ```gitignore
 .metareview/findings.jsonl
