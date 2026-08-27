@@ -233,7 +233,7 @@ returns the first firing child's `Result`; `all` fires only when every child fir
 ```go
 type Instructions struct { Text string; Input map[string]any; Untrusted []string; OutputSchema json.RawMessage }
 type Diff struct { Text string; Truncated bool }                                  // Git.Diff(BaseSHA, head, MaxDiffBytes = 1<<20)
-type ExecInput struct { Snap run.Snapshot; Node *workflow.Node; Diff Diff; StartIndex int /* st.NextIndex(key) */; Audit func(run.Event) error }
+type ExecInput struct { Snap run.Snapshot; Node *workflow.Node; Diff Diff; StartIndex int /* st.NextIndex(key) */; Audit func(run.Event) error; Runner converge.Caller /* the session's guarded runner: same audit closure, same ordinal */ }
 type NodeKind interface {
     Name() string; Info() workflow.KindInfo
     Instructions(snap run.Snapshot, node *workflow.Node, diff Diff, nonce string) (Instructions, error)
@@ -262,7 +262,7 @@ returns unchanged so the next `Advance` resumes from `StartIndex`.
 ```go
 type Deps struct {
     Store run.RunStore; Sidecar Sidecar; Kinds Registry; Git func(workDir string) gate.Git
-    Runner func(RunnerDeps) converge.Runner   // RunnerDeps{Allowed, WorkDir, RunID, Audit, CmdCalls func(name) int /* prior cmd_call count: the mock ordinal */}
+    Runner func(RunnerDeps) converge.Caller   // RunnerDeps{Allowed, WorkDir, RunID, Audit, CmdCalls func(name) int}; the ONE guarded factory. CmdCalls = number of cmd_call events for that name in the log so far (any context: atom, on_overflow, cmd kind; copied Origin events included), incremented on every successful cmd_call append — the durable mock ordinal
     Clock Clock; LookPath func(string) (string, error); FileHash func(string) (string, error)
     Workflows func(name string) ([]byte, error); ReadFile func(string) ([]byte, error); Nonce func() string
     MockLoad func(dir string) (hash string, err error); Terminal func(ctx, View) error   // spec 3's runs.jsonl record; nil → no-op
@@ -316,8 +316,8 @@ type NodeView struct { Name, Kind, Exec string; HasOutput, Applied bool }
    binary surfaces here as `ERR_WORKFLOW_INVALID` — the "older-binary run" signal; `list`/`export` still work);
    `Resolve(snap.Vars, false)`; `VerifyCmds(snap.AllowedCmds, WorkDir, FileHash)`; `Mock`: split on the **last** `#`, resolve
    `rel` against `snap.RepoRoot`, `MockLoad` hash vs stored, `Kinds.Mock() == (snap.Mock != "")`, else `ERR_MOCK_MISMATCH`;
-   build `runner ← Deps.Runner(snap.AllowedCmds, WorkDir, runID, audit)` and, when `w.Convergence != nil`, `pred ←
-   converge.Parse(w.Convergence, runner)`.
+   count `cmd_call` events per name; build `runner ← Deps.Runner(RunnerDeps{…})` and, when `w.Convergence != nil`, `pred ←
+   converge.MustParse(w.Convergence, runner)` (validated at Parse; cannot fail).
 `Advance` and `Record` re-run steps 1–2 under their own lock (no cached state is trusted across calls).
 
 ### 5.4 `Advance`
@@ -352,7 +352,8 @@ type NodeView struct { Name, Kind, Exec string; HasOutput, Applied bool }
        tt ← w.TerminalFor(state); err ← gate(tt.Gate)(snap); append gate; pass → chosen ← tt else failures += err
        if chosen == nil:
            r, err ← pred.Evaluate(snap)                                        (always when tt failed — bounded loops)
-           err → append gate{Name:"converge", Passed:false, Error:{ERR_CONVERGE_FAILED, Detail}} → step 8
+           err with the audit closure having failed → return that store error; err with ctx cancelled → return ctx.Err() (resumable);
+           other err → append gate{Name:"converge", Passed:false, Error:{ERR_CONVERGE_FAILED, Detail}} → step 8
            r.Stop && r.Class == fixed && r.Atom != "all_fixed" → same, ERR_CONVERGE_FAILED{reason: fixed_class}   (defense in depth; the real
            all_fixed atom firing is legitimate — design §9's example — and a non-firing result's class is irrelevant)
            append converge{Atom: CapText(r.Atom, MaxShort), Class: r.Class, Stop: r.Stop, Reason: CapText(MaxText)}
@@ -364,6 +365,7 @@ type NodeView struct { Name, Kind, Exec string; HasOutput, Applied bool }
    first.Gate, Outcome: failed, Head: head}; Deps.Terminal(ctx, View()); return GATE_FAILED with Gate = first, exit 1
 9  append transition{From, To, Gate, Outcome, Loop, ToKind, Head}
 9b if Outcome == overflow && OnOverflow != "" && !OverflowHandled: res, err ← runner.Run(OnOverflow, converge.Payload(snap));
+   audit failure → return it; ctx cancelled → return ctx.Err() (nothing recorded, retried on resume);
    append overflow_handler{Name, Argv: snap.AllowedCmds[name].Argv, InputHash: sha256(payload), Stdout/Stderr: CapText(MaxDetail/MaxStderr)+flags,
    ExitCode (−1 when err), DurationMS, Error: code}; err or exit≠0 → also warn{OVERFLOW_HANDLER_FAILED}   (at-least-once: a crash between the
    runner's cmd_call and this append re-runs the command)
@@ -424,7 +426,9 @@ behind `FSM_MACHINE_UPDATE_GOLDEN=1` with the run package's "drift ≠ regenerat
 - Loop boundary is order-independent: `TerminalFor` gate first, convergence only when `!AllFixed`, then the loop gate and remaining transitions (C3 gate-first, made structural).
 - Converge errors are the `converge` pseudo-gate; enforcing edits, executor and decode failures are `repo_mode`/`executor`/`node_output` pseudo-gates; the failed transition names the first failing gate.
 - `needs_input` once per key; `tree` at `Init`, as a baseline when `TreeHash == ""`, and on change (content-aware `WorkTree`; agent-edit states may emit one per advance while the agent edits — accepted).
-- `commit_exists` = `FixEntryHead..HEAD` + `ERR_GATE_INAPPLICABLE` (SCP3-5); Git failures inside gates are gate errors (recovery by fork) — accepted.
+- `commit_exists` = `FixEntryHead..HEAD` + `ERR_GATE_INAPPLICABLE` (SCP3-5); Git failures inside gates are gate errors (recovery by fork) — accepted. `clean` counts untracked files: a host that leaves stray files after its commit gets `GATE_FAILED` (visible; fork to retry) — spec 5 documents it and makes sure `.metareview/` is ignored in the target repo.
+- Registry defaults (`DefaultExec`) are not persisted: a binary whose registry defaults change reinterprets in-flight runs' inferred `exec` — accepted for 0.9.0 (shipped YAMLs set `model`/`effort`, inferred exec only on `fix`/`verify`); a `Kinds.Info()` digest in `init` is a follow-up.
+- The consent preimage has no version tag: a future `AllowedCmd` field changes every `cmds_sha256` for unchanged YAML — accepted, ledgered.
 - `Open` verifies the run's `workflow.yaml` sidecar (written after `Create`, `O_EXCL`); forks copy the parent's sidecar (spec 3 r2 obligation; also `Export` includes it).
 - `ERR_RECORD_NAME` narrows locked C15 (reserved names refused; plan E13's `record transition` row becomes an `ERR_RECORD_NAME` row in spec 5).
 - `machine` does not import `workflows` (plan §1.1 had the edge); the CLI passes `Deps.Workflows`.

@@ -50,12 +50,16 @@ internal/fsm/mockai    scenario files → judge.Script + cmdexec fake rows; cont
 type Spec struct { Name string /* declared cmd name; the fake keys on it, the exec runner ignores it */; Argv []string; Dir string; Stdin []byte; Timeout time.Duration; Env []string }
 type Result struct { Stdout, Stderr []byte; ExitCode int; Duration time.Duration }
 type Runner interface { Run(ctx, Spec) (Result, error) }
-type Guarded struct { Runner Runner; Allowed []run.AllowedCmd; Dir string; RunID string; FileHash func(string) (string, error); Audit func(run.Event) error; Environ func() []string; Clock func() time.Time }
+type Guarded struct { Runner Runner; Allowed []run.AllowedCmd; Dir string; RunID string; FileHash func(string) (string, error); Audit func(run.Event) error; Environ func() []string; CmdCalls func(name string) int /* from machine.RunnerDeps */ }
 func NewExecRunner() Runner                                                        // the real one; the fake is mockai's
 func (g Guarded) Run(ctx, name string, stdin []byte) (converge.CmdResult, error)   // converge.Runner
 func (g Guarded) Call(ctx, name string, stdin []byte, out any) error               // shares Run's unaudited core; ONE cmd_call per call (audited after decode)
+var _ converge.Caller = Guarded{}                                                  // Caller = Runner + Call, declared in converge
 ```
-Spec 2's `Deps.Runner` and this package's `kind.Deps.Guarded` are the **same closure** (spec 5 builds one `Guarded` factory).
+`machine.Deps.Runner func(RunnerDeps) converge.Caller` is the ONE guarded factory (spec 5 wires `Guarded{Runner: NewExecRunner(), …}`
+or the mock runner); the machine hands the same value to executors as `ExecInput.Runner`. `Spec.Ordinal = CmdCalls(name)`.
+Implemented (`internal/fsm/cmdexec`, 100%): a parent-context cancellation returns `ctx.Err()` (the machine treats it as
+resumable); `DurationMS` comes from the runner's measured `Result.Duration` (no `Clock`).
 `Run`: `name ∈ Allowed` else `ERR_CMD_NOT_ALLOWED{name}` **without audit** (the fold refuses unsanctioned names; the
 check is defense in depth — workflow validation already guarantees names); `Argv[0]` must be absolute else
 `ERR_CMD_NOT_ALLOWED{reason: relative}` (no audit); re-verify with `workflow.VerifyCmds` (`cmdexec → workflow` edge;
@@ -148,8 +152,8 @@ Overrides are agent-satisfiable and unstamped (ledger): spec 5 lists them with t
   cache_read_input_tokens, cache_creation_input_tokens, output_tokens}`.
 - **OpenAI-compatible** `POST {base}/v1/chat/completions`: `model`, `messages`, `max_completion_tokens` (= cap; `glm*`/`kimi*`
   → `max(cap, 16384)`); `reasoning_effort` table — `gpt*`/`openai/*`/`glm*`: `low→low, medium→medium, high→high,
-  xhigh→high`; `kimi*`: `low→low, medium→high, high→high, xhigh→max`; `temperature: 1` when `reasoning_effort` is sent
-  else `temperature: 0` (`model_router.py:151`). `Authorization: Bearer`. Text = `choices[0].message.content` (string).
+  xhigh→high`; `kimi*`: `low→low, medium→high, high→high, xhigh→max`; `temperature: 1` always (every accepted effort maps to a `reasoning_effort`; the reference's `temperature: 0` branch is
+  unreachable here, `model_router.py:151`). `Authorization: Bearer`. Text = `choices[0].message.content` (string).
   Tokens: `prompt_tokens` (`Input`), `prompt_tokens_details.cached_tokens` (`CacheRead`, 0 if absent),
   `completion_tokens_details.reasoning_tokens` (`Reasoning`, 0 if absent), `Output = max(0, completion_tokens − Reasoning)`.
 No text / non-JSON body / missing `usage` → `ERR_JUDGE_RESPONSE{detail}` (tokens of earlier attempts kept). **Retry** (≤ 5
@@ -183,7 +187,7 @@ Executors `Audit` immediately after each `Judge.Call` returns; a non-parse error
 ## 4. `kind`
 ### 4.1 Common
 ```go
-type Deps struct { Judge judge.Judge; Guarded func(allowed []run.AllowedCmd, workDir, runID string, audit func(run.Event) error) converge.Runner /* the same closure as machine.Deps.Runner; Call = cmdexec.Call(runner, …) */; Mock bool }
+type Deps struct { Judge judge.Judge; Mock bool }   // no runner here: the cmd kind uses ExecInput.Runner (converge.Caller — Run + Call), the session's single guarded runner
 func New(d Deps) (*Registry, error)   // Registry.Mock() == d.Mock; New refuses Mock:true with a non-*judge.MockJudge and Mock:false with one (ERR_MOCK_MISMATCH)
 // Bug.Verdict constants: run.VerdictMatched = "matched", run.VerdictRealButUngold = "real_but_ungold", run.VerdictHallucination = "hallucination" (typed in run; Decode validates the set for every kind incl. cmd)
 // Registry.Executor(name) for host-only kinds returns (nil, false).
