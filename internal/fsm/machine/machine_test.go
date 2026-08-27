@@ -777,9 +777,11 @@ func TestM4Convergence(t *testing.T) {
 	h = newHarness(t)
 	var names, decls []string
 	for i := 0; i < 32; i++ {
-		n := "cmd-" + strings.Repeat("x", 25) + string(rune('a'+i/10)) + string(rune('0'+i%10))
+		n := "cmd-" + strings.Repeat("x", 26) + string(rune('a'+i%16)) // 16 declared names, each referenced twice
 		names = append(names, "{cmd: "+n+"}")
-		decls = append(decls, "  "+n+": {argv: [bash, -c, echo]}")
+		if i < 16 {
+			decls = append(decls, "  "+n+": {argv: [bash, -c, echo]}")
+		}
 	}
 	wf = sdlcWith(t, h, "wide.yaml", "  any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]\nrepo_mode: advisory",
 		"  all: ["+strings.Join(names, ", ")+"]\ncmds:\n"+strings.Join(decls, "\n")+"\nrepo_mode: advisory")
