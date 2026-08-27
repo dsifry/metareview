@@ -1,6 +1,7 @@
-# metareview 0.8.3 — sharded review results (r5)
+# metareview 0.8.3 — sharded review results (r6)
 
-Status: r5, a deliberate simplification of r4 on Dave's direction (2026-08-27): *"don't overengineer; the
+Status: r6 = r5 (the simplification pass) plus the fixes from a three-lens verification of r5 (§13).
+r5 was written on Dave's direction (2026-08-27): *"don't overengineer; the
 trust model is out of scope — trust the agents."* r1–r4 and their three review attempts are kept in the
 review logs; §11 lists what r5 removed and why. Branch `pr-ready-shard-results` off `main` (0.8.2), two PRs
 (§10) under version **0.8.3**; `fsm-enhancements` (0.9.0) rebases onto it and PR #13 is re-gated.
@@ -94,26 +95,42 @@ unchanged tree yield one `planHash`.
   branch-only path; `DIFF_OVERSIZE` per §3. Shard-satisfiable: `{DIFF_TRUNCATED, LARGE_DIFF}` only.
 - `PlanShards(profile, branchFiles, options)` — chunk text comes from `branchFiles`, never from `Profile`.
   Nil `branchFiles` → empty plan; the manifest renders "not sharded".
+- **Budget:** the fixed `contextprofile.DefaultMaxBytesPerShard = 60000`. It is not configurable in 0.8.3
+  (tests lower it through the existing `ShardOptions.MaxBytesPerShard`).
 - **Chunks:** a file ≤ budget is one chunk (`part 1/1`); a bigger file is cut into consecutive pieces
-  ≤ budget at newline boundaries, hard-cutting a single over-long line at the budget with a `[cut]` marker.
-- **Stable assignment (replaces first-fit):** `depth = number of hex digits such that 16^depth ≥
-  ceil(Σ fileBytes / budget)`, capped at 3 (4,096 shards); every chunk of file *p* goes to shard
-  `shard-<first `depth` hex digits of sha256("mrv-bucket-v4" ‖ p)>`; empty shards are dropped; a chunk whose
-  file alone exceeds the budget keeps its shard (that shard is simply larger — a pack may exceed the budget
-  only for a single-file shard). Editing a file changes only its own shard's hash unless the total crosses a
-  depth boundary (tests cover both). Ids are a function of the path, not of position.
-- `Shard{ID, Chunks, Bytes, Hash}`; `SourceDiffHash`, `PromptPackPath`, `Prompt`, `Reason` are removed.
+  ≤ budget at newline boundaries, hard-cutting a single over-long line **at** the budget with a `[cut]`
+  marker. Every chunk is ≤ budget, without exception.
+- **Stable assignment (replaces first-fit), in two steps:**
+  1. *Bucket by path.* `need = ceil(Σ fileBytes / budget)`; `bits = max(0, ceil(log2(need)))`, capped at 12.
+     Every chunk of file *p* goes to the bucket named by the first `bits` bits of
+     `sha256("mrv-bucket-v4" ‖ p)`, rendered as `ceil(bits/4)` lowercase hex digits (`bits = 0` → one
+     bucket, id `0`). Empty buckets are dropped. Bits, not hex digits: hex granularity jumps 16 → 256 and
+     over-shards badly (measured on PR #13: 108 shards where ~23 were wanted).
+  2. *Split an over-budget bucket.* A bucket whose bytes exceed the budget is cut over its own path-sorted
+     chunk list, first-fit, into sub-shards `<hex>-2`, `<hex>-3`, … (the first keeps the bare `<hex>`).
+     Since chunks are ≤ budget by construction, **every shard is ≤ budget**. A split re-cuts only that
+     bucket.
+  Editing a file changes only its own bucket's shards, unless `Σ fileBytes` crosses a `bits` boundary, which
+  re-cuts everything (a named test documents that case). Ids are a function of the path, never of position.
+- `Shard{ID, Chunks, Bytes, Hash}` where `ID` is the bare bucket name (`3a`, `3a-2`); the wire and filename
+  form is `shardId = "shard-" + ID`. `SourceDiffHash`, `PromptPackPath`, `Prompt`, `Reason` are removed, and
+  `Shard.Paths` becomes `Shard.Chunks` — `reviewmanifest.Markdown` and `sourceAssignmentBlockers`
+  (`manifest.go:167,208-214`) read `Paths` today and are updated with it.
   `ShardPlanMarkdown` renders ids, hashes, chunks, bytes, and a pack directory only when given one.
 
 ### 4.3 `internal/shardpack` (new; 100%; all I/O through `Deps`)
 
-`Deps{WriteFile, MkdirAll, MkdirTemp, Rename, RemoveAll, ReadDir, ReadFile, EvalSymlinks, Now}` +
+`Deps{WriteFile, MkdirAll, MkdirTemp, Rename, RemoveAll, ReadDir, ReadFile, EvalSymlinks}` (no clock —
+nothing in a pack is time-dependent, which is what keeps packs byte-reproducible) +
 `OSDeps()`; interface `Writer{Write(plan, header) (rollback func() error, error); Prune(scope, slug, keep)
 error; Discover(scope, slug, plan) (Found, error)}`. `prready.Options`/`taskdone.Options` gain
 `ShardWriter Writer` (nil → real) — the seam the rollback tests use.
 
 - Packs are transient: `.metareview/shards/<scope>/<target-slug>/<planHash>/` with `shard-<id>.md`,
-  `cross-shard.md` (≥ 2 shards) and `plan.json` (ids, hashes, chunks, base, head).
+  `cross-shard.md` (≥ 2 shards) and `plan.json`. `plan.json` carries everything a host needs to write
+  conforming results without recomputing anything: `{planHash, scope, target, targetSlug, resultsDir, base,
+  head, budget, shards:[{shardId, shardHash, bytes, chunks:[{path, part, parts, byteStart, byteEnd,
+  chunkHash}]}]}`.
   `<target-slug> = Slugify(targetID) + "-" + sha256(scope ‖ targetID)[:8]`.
   `.metareview/shards/.gitignore` (`*`) is created on first use. Paths are `EvalSymlinks`-resolved and must
   stay under the resolved repo root (an accident guard, not a defence).
@@ -150,7 +167,8 @@ error; Discover(scope, slug, plan) (Found, error)}`. `prready.Options`/`taskdone
 
 Validation (pure, in `reviewmanifest`; one named test each):
 - `schemaVersion == 1`; `id` non-empty; `kind` closed; `verdict` closed; `reviewer` non-empty; `reviewedAt`
-  parses; `shardId` matches `^shard-[0-9a-f]{1,3}$` (empty for cross-shard).
+  parses; `shardId` matches `^shard-[0-9a-f]{1,3}(-[0-9]+)?$` (empty for cross-shard); it is the value §4.2
+  defines, and the one the filename encodes.
 - **Freshness by content:** a shard result is fresh iff its `shardHash` equals a current shard's hash; a
   cross-shard result iff its `planHash` equals the current plan's. Anything else is **ignored** — listed with
   a reason, never a blocker. There is no "stale" category.
@@ -188,6 +206,11 @@ Validation (pure, in `reviewmanifest`; one named test each):
   `Found`); the separately blocking "Diff context was truncated" becomes advisory too; the lints then run
   over the union added lines. task-done's `tests:missing` becomes reachable and behaves as it does today
   (unchanged fingerprint) — noted, not redesigned.
+- **Review log rendering.** When results were ingested, the log gets a `## Sharded Review` section placed
+  **after** the `## Verdict` token (so `reviewlog.parseMarkdown`, which reads the first non-empty line after
+  `## Verdict`, is unaffected — named test). It lists the fresh results (shard id, shard hash, verdict,
+  reviewer, blocking count, file), the ignored files with their reason, any unreadable file, and the files
+  reviewed as chunks (path, parts, shard ids). Strings come from §5.1's sanitising.
 - Unsatisfied path: the blocking finding stands, with the manifest verdict and its first 10 blockers
   appended to `Found`. It still early-returns before the other findings (which is why their fingerprints
   need no migration).
@@ -198,6 +221,11 @@ Validation (pure, in `reviewmanifest`; one named test each):
   dispositions and cross-shard-only-for-≥2; WU4's superseded criteria are quoted in a dated note on the WU4
   plan (the manifest-hash inputs, and "unresolved medium-or-higher findings without an explicit
   disposition").
+- **Local content on task-done.** task-done profiles the full context, so an untracked file over 4,000
+  bytes (`UNTRACKED_TRUNCATED`) or staged/worktree truncation puts a non-satisfiable reason in the set and
+  the sharded gate cannot pass. That is intended — those bytes are in no pack — and the skills tell the
+  operator to commit or remove such files first. pr-ready's branch-only path clears the untracked counters,
+  so it is unaffected.
 - Attempts: a sharded gate costs a plan run, a results run and one run per fix round; the skills tell the
   operator to set `--max-attempts` on the **first** run (mid-chain it is ignored by `runchain.Resolve`).
 
@@ -207,14 +235,16 @@ Validation (pure, in `reviewmanifest`; one named test each):
   `main.go`.
 - Per-pack review: **one subagent per pack against `rubrics/task-done-review-rubric.md`**, and one
   cross-shard subagent over the seams; the human may use a richer lens set. Cost: packs + 1 per plan,
-  1 + 1 per fix round.
+  1 + 1 per fix round. On PR #13 (1,372,619 bytes / 133 files) `need = 23` → `bits = 5` → 32 buckets, a few
+  of which split; expect roughly 35–40 packs. The exact count is a test output, not a promise.
 - Docs carrying the sharded flow or the durable/transient lists: `AGENTS.md`, `CLAUDE.md`, `README.md`,
   `INSTALL.md`, `docs/quickstart.md`, `docs/README.claude.md`, `docs/README.codex.md`,
   `skills/review-pr-ready/SKILL.md`, `skills/review-task-done/SKILL.md`, `skills/status/SKILL.md`,
   `commands/review-pr-ready.md`, `commands/review-task-done.md`, `commands/status.md`. Durable +=
   `docs/metareview/shards/`; transient += `.metareview/shards/`.
 - `learnsource.Collect` excludes `docs/metareview/shards/**`.
-- `runchain.ReadRuns`, `state.ReadJSONL` and `reviewlog.readFindings` get a 1 MiB scanner buffer (they
+- `runchain.ReadRuns`, `state.ReadJSONL`, `reviewlog.readFindings` and `findings.readJSONL` get a 1 MiB
+  scanner buffer (they
   currently cap at 64 KiB, and the 0.9.0 reader already uses 1 MiB).
 - Five version files → 0.8.3; CHANGELOG with §8.
 - `tests/go/test-shardpack-coverage.sh`: `go test -coverprofile` must exit 0, the profile must be non-empty,
@@ -229,11 +259,14 @@ Validation (pure, in `reviewmanifest`; one named test each):
   `findings.Reconcile` treats an open row with a legacy prefix (`architecture:context-risk:`,
   `pr:architecture:context-risk:`, `epic:context-risk:`) as an alias of the new fingerprint and marks it
   `superseded` — a new status, so readers (which key on `open`/`fixed`) neither count it as a blocker nor
-  feed it to learning as a fix. It works without `--previous-run` and on escalated chains. No other
+  feed it to learning as a fix; `fixedInRunID` is left empty, since a non-empty value also reads as a fix. It works without `--previous-run` and on escalated chains. No other
   fingerprint changes.
 - New reasons `LOCAL_DIFF_TRUNCATED` and `DIFF_OVERSIZE`.
 - New transient `.metareview/shards/`, new durable `docs/metareview/shards/`; committed results are audit
   records, verifiable only while `base..head` is reproducible, and are ignored on a clone whose plan differs.
+  Two consequences, plainly: CI cannot produce results itself (it has no reviewing agent), so a sharded gate
+  is run by the operator's agent; and moving the `--base` ref changes every hash, so all committed results
+  for that target become ignored and the loop is re-run.
 - `learn-post-merge` diffs exclude the results directory; `runs.jsonl` readers accept 1 MiB lines.
 
 ## 9. epic-ready
@@ -257,14 +290,21 @@ Per Dave's direction, everything whose only purpose was defending against a host
 agent: the `packRunId`/`KnownPackRuns` provenance chain and the `createdAt`/`planHash` run-row fields it
 needed; the `.metareview` ownership check and `METAREVIEW_DIR_TRACKED`; `SUBMODULE_CHANGE`; `UNSAFE_PATH`
 and the Unicode-format-character sanitiser; the per-run nonce markers; the identifier-pattern blocker; the
-discovered-file count cap; `--shard-budget` and its bounds; the adaptive bucket trie (replaced by one
-fixed-depth hash bucketing); the "attestation" wording (the log simply lists what was ingested). The
-freshness, identity, coverage, stability and rollback rules stay — those are correctness, not defence.
+discovered-file count cap; `--shard-budget` and its bounds; the "attestation" wording (§6 defines a plain
+`## Sharded Review` listing instead). The freshness, identity, coverage, stability and rollback rules stay —
+those are correctness, not defence.
+
+One r5 deletion went too far, and r6 restores it in simplified form: r4's adaptive bucket splitting existed
+to bound **pack size**, not to defend anything, and dropping it let a bucket exceed the 120 KB cap this
+feature exists to escape (measured on PR #13: two shards over 120,000 bytes). §4.2 step 2 puts back a
+deterministic first-fit split *inside* an over-budget bucket — local, so plan stability is preserved.
 
 ## 12. Tests (write first; named; package in parentheses)
 
-- (gitcontext) `TestBranchFilesMeasureUntruncatedFilteredDiff` (300 KB deterministic fixture; `Σ Bytes`
-  equals an independent whole-diff measurement taken with the same flags and excludes, raw bytes),
+- (gitcontext) `TestBranchFilesMeasureUntruncatedFilteredDiff` — 300 KB deterministic fixture; the oracle is
+  one `git diff --no-renames --text --no-textconv base..HEAD -- . ':(exclude)…'` invocation (pathspec-magic
+  form, no env var, raw untrimmed bytes) whose `len(out)` must equal `Σ fileBytes`; the test must not loop
+  per path, or it merely mirrors production,
   `TestBranchFilesRenameDeleteBinaryModeOnly`, `TestBranchFilesExcludeGenerated`,
   `TestBranchFilesLiteralPathspecs` (space, `*`, `[`, leading `-`, leading `:`, non-ASCII — each with
   `Bytes > 0` and its changed line present), `TestBranchFilesDefeatDiffAttributes`,
@@ -272,8 +312,11 @@ freshness, identity, coverage, stability and rollback rules stay — those are c
   `TestContextDiffJSONShapeUnchanged`.
 - (contextprofile) `TestSourceDiffHashFromDocumentedPreimage` (computed in-test from §3's encoding),
   `…OrderIndependent`, `…ChangesOnSameSizeEdit`, `…InvariantUnderMetareviewWrites`, `…IgnoresLocalChanges`,
-  `TestNewlinePathCannotCollide`, `TestBucketDepthFromTotalBytes`, `TestEditChangesOnlyItsShard`,
-  `TestDepthBoundaryRecutsAll` (documents the one case that does), `TestChunkNeverExceedsBudgetExceptSingleFileShard`,
+  `TestNewlinePathCannotCollide`, `TestBucketBitsFromTotalBytes`, `TestEditChangesOnlyItsShard` and
+  `TestOverBudgetBucketSplitsLocally` (both on a fixture whose paths are pinned so `sha256("mrv-bucket-v4" ‖ p)`
+  puts them in known-distinct buckets, with `MaxBytesPerShard` lowered — a fixture landing every file in one
+  bucket makes them vacuous), `TestBitsBoundaryRecutsAll` (documents the one case that re-cuts everything),
+  `TestChunkNeverExceedsBudget` (incl. the hard-cut over-long line), `TestShardNeverExceedsBudget`,
   `TestOverLongLineHardCut`, `TestLocalTruncationIsSeparateReason`, `TestLargeDiffKeepsTotal`,
   `TestPlanEmptyWhenNotTruncated`, `TestDiffOversizeReason`.
 - (reviewmanifest) `TestManifestHashIsPlanHash`, `…ExcludesGeneratedPathsAndDispositions`,
@@ -284,7 +327,10 @@ freshness, identity, coverage, stability and rollback rules stay — those are c
   `TestChunkAssignedToExactlyOneShard`, `TestMarkdownRendersResultsPlainText`.
 - (shardpack) `TestLayoutAndSlug`, `TestSelfIgnoreCreated`, `TestReplaceKeepsOldUntilNewInPlace`,
   `TestRollbackRestoresAside`, `TestPruneOnlySiblingHexDirsOfSameTarget`, `TestPackUsesMeasuredBytes`,
-  `TestPackBytesReproducible`, `TestFencedChunkCannotEscape`, `TestCrossShardPackListsChunkedFiles`,
+  `TestPackBytesReproducible` (byte-identical `shard-*.md`, `cross-shard.md` and `plan.json` across two
+  runs), `TestOSDepsRoundTripOnDisk` (Write → Discover → Prune through `OSDeps()` in `t.TempDir()`, so the
+  real wrapper bodies are covered — stub-`Deps` tests never enter them and the 100% gate would fail),
+  `TestFencedChunkCannotEscape`, `TestCrossShardPackListsChunkedFiles`,
   `TestDiscoverByHashNamesAndReasons`, `TestExplicitResultsAdded`, `TestUnreadableDiscoveredIsBlocker`,
   `TestResultOutsideRepoRejected`, `TestGCAfterPass`, one test per `Deps` failure branch.
 - (reviewers) `TestContextRiskSatisfiedEmitsAdvisoryAndRunsLints` (a `TODO` beyond 120 KB is found),
@@ -294,7 +340,9 @@ freshness, identity, coverage, stability and rollback rules stay — those are c
   `TestStagedEvalStillFoundOnSatisfiedPath`.
 - (prready, taskdone) `TestBranchOnlyContextClearsUntrackedAndKeepsMeasuredBytes`,
   `TestPlanHashIdenticalAcrossPackDirContextPackAndManifest`, `TestPackWriteFailureRollsBackRun`,
-  `TestFailureAfterPackRenameKeepsOldPacks`, `TestAttestationSectionAfterVerdictParses`,
+  `TestFailureAfterPackRenameKeepsOldPacks`,
+  `TestReviewLogListsIngestedAndIgnoredResults` (the §6 section, rendered after the verdict token and parsed
+  back through `reviewlog.Discover`),
   `TestTaskDoneWithDocsMetareviewTarget`, `TestTwoTargetsDoNotPruneEachOther` — via `Options.ShardWriter`
   and `gitcontext.Options.RunGit`.
 - (findings, runchain, state, reviewlog) `TestLegacyContextRiskRowSuperseded` (unchained and escalated),
@@ -304,9 +352,31 @@ freshness, identity, coverage, stability and rollback rules stay — those are c
   budget and one untracked 5 KB file): pr-ready → `NEEDS_REVISION` with packs written and blockers naming
   every shard → read `plan.json`, write passing results for every shard + cross-shard → `--previous-run` →
   `PASS_ADVISORY`, zero blockers, the context-risk row `fixed`, the log listing the chunked file →
-  **fix round**: same-size edit in one file, commit, re-run → exactly that shard and the cross-shard listed
-  as ignored, all others fresh → write those two results → `PASS_ADVISORY` with the untouched shards carried
-  and the superseded files GC'd → a result for another plan → ignored → `--shard-result` to a missing path →
+  **fix round**: a determinate same-size edit (a fixed literal substitution, `AAAA` → `BBBB`, at a known
+  line), commit, re-run → assert exact counts: fresh = N-1, ignored = 2 (that shard and the cross-shard,
+  each with its reason) → write those two results → `PASS_ADVISORY` with the untouched shards carried and
+  the two superseded files GC'd → a result for another plan → ignored → `--shard-result` to a missing path →
   exit 2 with `runs.jsonl` byte-identical → two runs on unchanged content → one plan hash, identical packs.
-  Then the task-done variant with a task file, a staged `eval(` (still blocks) and an untracked file (never
-  sharded).
+  Then the task-done variant with a task file, a staged `eval(` (still blocks) and an untracked file kept
+  **under 4,000 bytes** (above that it raises `UNTRACKED_TRUNCATED`, never satisfiable — §6).
+
+## 13. r5 verification (three lenses) → r6
+
+| Finding (lens) | r6 |
+|---|---|
+| Hex-depth bucketing over-shards ~5× (108 shards where ~23 wanted) (Feasibility, Completeness) | §4.2 step 1 buckets on `bits`, not hex digits |
+| Pure hash bucketing leaves shards over the 120 KB cap (measured: two) (Feasibility, Completeness) | §4.2 step 2: deterministic first-fit split inside an over-budget bucket; `TestShardNeverExceedsBudget` |
+| "budget" undefined after r5 deleted the paragraph (Completeness) | §4.2: fixed `DefaultMaxBytesPerShard = 60000`, not configurable |
+| `shard-` prefix doubled in filenames; `id` vs `shardId` ambiguous (Feasibility) | §4.2 `Shard.ID` is bare; `shardId = "shard-" + ID`; the filename encodes `shardId` |
+| Review-log results section undefined but still tested (Completeness, Testing) | §6 `## Sharded Review`, after the verdict token; test renamed |
+| task-done fixture cannot reach PASS (untracked > 4 KB) (Completeness) | §6 states the consequence; §12 fixture stays under 4,000 bytes |
+| `TestChunkNeverExceedsBudgetExceptSingleFileShard` conflates chunk and shard (Testing) | split into chunk and shard tests |
+| 100% unreachable: `OSDeps()` bodies uncovered (Testing) | §12 `TestOSDepsRoundTripOnDisk` |
+| Whole-diff oracle unimplementable as "same flags" (Testing) | §12 states the exact single invocation and forbids a per-path loop |
+| Same-size-edit oracles vacuous (Testing) | §12 pinned bucket-distinct fixture; exact fresh/ignored counts in the shell round |
+| `Deps.Now` unused but breaks reproducibility if used (Testing) | dropped from `Deps` |
+| `plan.json` too thin for the shell test (Completeness) | §4.3 enumerates its fields incl. `resultsDir` and per-chunk hashes |
+| `findings.readJSONL` missing from the scanner list (Completeness) | §7 adds it |
+| `Shard.Paths` consumers not noted (Completeness) | §4.2 names `reviewmanifest.Markdown` and `sourceAssignmentBlockers` |
+| `superseded` safe only if `fixedInRunID` stays empty (Completeness) | §8 says so |
+| CI / moved-base consequences half-stated (Completeness) | §8 states both plainly |
