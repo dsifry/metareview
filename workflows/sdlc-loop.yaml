@@ -4,7 +4,7 @@ vars:
   REVIEWER:     {default: claude-opus-5}
   JUDGE:        {required: true}
   REV_EFFORT:   {default: low}
-  JUDGE_EFFORT: {default: medium}
+  JUDGE_EFFORT: {required: true}   # Pareto-selected with JUDGE (spec §17); pinned to medium under --calibration
 states: [discover, adjudicate, fix, verify, done, failed]
 transitions:                                  # ordered
   - {from: discover,   to: adjudicate, gate: findings_nonempty}
