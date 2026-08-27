@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0f-review",
+  "kind": "shard",
+  "shardId": "shard-0f",
+  "shardHash": "d9a826d7b02467c0",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T22:22:05Z",
+  "evidence": [
+    {"path": "internal/fsm/export/export.go", "line": 134, "note": "Export path: fold, parse, redact, size cap before any I/O; destination checked (checkDest) and files written O_EXCL|O_NOFOLLOW 0600 into a 0700 dir; no eval, no TODO/FIXME, diff not truncated"},
+    {"path": "internal/fsm/export/export.go", "line": 421, "note": "Redaction switch covers init vars/allowed_cmds/roots, gate detail, cmd stdout/stderr, converge reason, warn detail, unknown-kind node outputs (fail-closed via knownKinds), tree status; unchecked type assertions are backed by non-omitempty schema fields in run.InitData"},
+    {"path": "internal/fsm/machine/fork.go", "line": 637, "note": "Fork steps 0-10 checked: escalation cap, checkpoint selection, workflow-compatibility invariant, var freezing, worktree identity, cmd consent, HEAD==checkpoint precondition, pre-I/O validateChild fold + max-events count"},
+    {"path": "internal/fsm/machine/fork.go", "line": 935, "note": "compatible()/frozenBy() nil-node assumptions hold: workflow.States includes terminal states so a terminal From is rejected at the terminal_state branch before pn.Kind is dereferenced"},
+    {"path": "internal/fsm/export/export_test.go", "line": 1, "note": "Test evidence present for both new source files: internal/fsm/export/export_test.go and internal/fsm/machine/fork_test.go exist; go vet over export, machine, workflows and taskdone is clean"},
+    {"path": "package.json", "line": 57, "note": "npm test switched from tests/run-all.sh to tests/coverage.sh, which itself runs the unit tests plus the behavioral shell suite under merged coverage, so the change is a superset not a regression; workflows/, docs/fsm/ and go.sum all exist for the files array"},
+    {"path": "internal/taskdone/review_markdown_test.go", "line": 141, "note": "Test-only call-site updates for the new contextMarkdown/reviewMarkdown signatures with a manifestArgs helper; no production behavior asserted away"},
+    {"path": "workflows/embed_test.go", "line": 12, "note": "Embed test covers Names() ordering and Read() rejection of traversal/extension/nested names against the two shipped workflow yaml files"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "checkDest only maps symlink and non-empty destinations to ERR_EXPORT_DEST; when Out exists as a regular file, fs.ReadDir returns a raw ENOTDIR error that escapes uncoded, so the CLI reports a bare OS error instead of the export-dest code.",
+      "evidence": [{"path": "internal/fsm/export/export.go", "line": 260, "note": "entries, err := fs.ReadDir(out); err returned unwrapped"}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The npm files array adds the whole workflows/ directory, which ships workflows/embed_test.go (and embed.go) in the published package; only the two yaml files are needed at runtime.",
+      "evidence": [{"path": "package.json", "line": 28, "note": "\"workflows/\" added to files"}]
+    }
+  ],
+  "blockingCount": 0
+}

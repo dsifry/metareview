@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-18-review",
+  "kind": "shard",
+  "shardId": "shard-18",
+  "shardHash": "f001686a416f7b69",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "AGENTS.md",
+      "line": 21,
+      "note": "Checked the fsm exit-code contract, override request/grant boundary text, and the durable/transient artifact lists; consistent with CLAUDE.md and the sharded-review workflow section added below it."
+    },
+    {
+      "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+      "line": 1,
+      "note": "Read the full 382-line spec: wire types, caps table, error/reason mapping, Apply/Fold rules 4.1-4.9, store write path, torn-tail repair, writer contract, test matrix R1-R14, export list, amendment and ownership ledgers."
+    },
+    {
+      "path": "docs/tasks/m0-fsm-run-persistence.md",
+      "line": 1,
+      "note": "Acceptance criteria reference the spec revision, tests/coverage.sh, external shell-generated oracle, and the no-other-fsm-import rule; all match spec sections 8 and 9."
+    },
+    {
+      "path": "docs/tasks/m1-m6-fsm-packages.md",
+      "line": 1,
+      "note": "Acceptance criteria for the core packages reference specs that are outside this shard; nothing internally inconsistent within the shard."
+    },
+    {
+      "path": ".metareview/shards/pr-ready/fsm-enhancements-b73f409f/2ee4294a41b3ad7b/shard-18.md",
+      "line": 1,
+      "note": "Rubric checks run over the shard: no eval or other unsafe execution introduced, no TODO/FIXME/XXX/HACK markers on added lines, all four chunks are part 1/1 with no truncated diff context, and no untracked source files are carried in this shard. All four files are documentation, so the tests-for-source-changes rule does not apply."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Internal contradiction about MaxLine / ERR_EVENT_TOO_LARGE. Section 2.3 states the MaxLine check is 'always satisfiable given MaxPayload + the MaxShort envelope caps, so no separate line check is implemented (ERR_EVENT_TOO_LARGE is reserved)', yet section 5.2 lists 'MaxLine' as a step in both Create and Append, and the R7 store-conformance row requires a test asserting ERR_EVENT_TOO_LARGE. If the error is unreachable by construction, the M0 acceptance criterion of 100% statements cannot cover that branch and the R7 row cannot be written. The implementer should be told which of the three statements governs.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 134,
+          "note": "Caps table MaxLine row declares ERR_EVENT_TOO_LARGE reserved and the check unimplemented."
+        },
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 328,
+          "note": "Test row R7 requires a store-conformance assertion for ERR_EVENT_TOO_LARGE."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Create's signature is stated two different ways. The section 0 resolution map records 'Create(runID, st0, first) has parity with Append', while the RunStore interface and the section 5.2 write path both declare the two-argument Create(runID string, first Event) (FoldState, error). Section 5 is clearly the governing text, but the section 0 row will read as a third parameter to anyone implementing from the resolution map.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 22,
+          "note": "Resolution map row for RA3-4/RC3-5 writes Create with three parameters including st0."
+        },
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 248,
+          "note": "RunStore interface declares Create(runID string, first Event) (FoldState, error) with no state argument."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

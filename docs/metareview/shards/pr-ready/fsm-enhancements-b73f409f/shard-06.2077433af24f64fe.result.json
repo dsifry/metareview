@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-06-review",
+  "kind": "shard",
+  "shardId": "shard-06",
+  "shardHash": "2077433af24f64fe",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T22:19:39Z",
+  "evidence": [
+    {
+      "path": "internal/findings/findings_test.go",
+      "line": 51,
+      "note": "New table test TestLegacyContextRiskRowSuperseded covers the 0.8.3 context-risk alias supersede path across task-done/pr-ready/epic-ready scopes, asserts StatusSuperseded, empty fixedInRunId, and that the .pre-0.8.3.bak ledger backup is written; StatusSuperseded and the backup suffix are confirmed present in internal/findings/findings.go:184,235."
+    },
+    {
+      "path": "internal/findings/findings_test.go",
+      "line": 112,
+      "note": "TestSupersedeLeavesUnrelatedRowsAlone pins the negative case: unrelated fingerprints/targets stay open and no backup file is created. Correct inverse coverage for the supersede pass."
+    },
+    {
+      "path": "internal/findings/findings_test.go",
+      "line": 186,
+      "note": "TestReadJSONLAcceptsExactlyMaxLine and the CRLF variant pin the maxJSONLLineBytes boundary; the two-pass padding loop converges because json.Marshal length grows monotonically with the Found string, and the test asserts the exact byte count before reading. Matches scanner.Buffer(..., maxJSONLLineBytes+2) at internal/findings/findings.go:477."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec_test.go",
+      "line": 305,
+      "note": "TestHelperProcess uses argv-based activation after a '--' sentinel rather than an env flag, which is required here because Guarded scrubs the child environment; it returns early with no '--' so it is inert during a normal test run."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec_test.go",
+      "line": 384,
+      "note": "TestX1RealRunner exercises the real exec runner end to end: literal argv (no shell expansion of '; rm -rf x', '$HOME', '*'), exact scrubbed env with MRV_RUN_ID injected and SECRET_TOKEN excluded despite being set in the parent, stdin, working dir, exit-code mapping, process-group kill on timeout verified via syscall.Kill(pid,0) on the grandchild, output caps at and over MaxOutput for both streams, parent-context cancellation returning context.Canceled, spawn failure, and default/ms timeout units."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec_test.go",
+      "line": 522,
+      "note": "TestX2Guarded covers the guard seams with a recording runner: not-allowed and relative argv[0] refused without audit, ERR_CMD_CHANGED on hash drift, exact spec/env/ordinal, one audit per Call with truncated audited copy, decode failures, failure exit, runner errors with and without a code, audit-write failure propagation, and nil Audit/CmdCalls/Environ tolerance."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec_test.go",
+      "line": 640,
+      "note": "TestX3CappingWriter asserts the writer keeps draining past the cap while retaining MaxOutput+1 bytes, matching the documented contract at internal/fsm/cmdexec/cmdexec.go:210."
+    },
+    {
+      "path": "tests/manifest/test-skills.sh",
+      "line": 670,
+      "note": "Manifest test extends the frontmatter loop with skills/fsm/SKILL.md and the existence loop with commands/fsm.md, the two docs/fsm pages, both workflow YAMLs, the agent-prompt golden and anchors file, then greps the new FSM contract phrases in SKILL.md, README.md, CLAUDE.md and AGENTS.md."
+    },
+    {
+      "path": "tests/manifest/test-skills.sh",
+      "line": 683,
+      "note": "Verified by execution: `go test ./internal/findings/ ./internal/fsm/cmdexec/` and `bash tests/manifest/test-skills.sh` both succeed (exit 0), so every file and grep anchor added by this shard resolves in the tree."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead code in the test helper: sha() assigns run.OutputHash to h and immediately discards it with `_ = h` before delegating to sha256Sum. The two lines have no effect and mislead a reader into thinking the audited input hash is run.OutputHash rather than a plain sha256 of the raw bytes. Non-blocking cleanup: drop the two lines, or use run.OutputHash if that was the intent.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cmdexec/cmdexec_test.go",
+          "line": 515,
+          "note": "func sha(s string) { h := run.OutputHash; _ = h; sum := sha256Sum([]byte(s)); return sum } - the h binding is unused."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestX1RealRunner uses syscall.Kill directly with no build constraint, so the cmdexec test package will not compile on Windows. The production file it tests may already be POSIX-only, and the repo targets darwin/linux, so this is a portability note rather than a defect in the change; if Windows is ever a target the grandchild-liveness probe needs a _unix build tag.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cmdexec/cmdexec_test.go",
+          "line": 459,
+          "note": "syscall.Kill(pid, 0) liveness probe and syscall.SIGKILL cleanup are POSIX-only calls in an unconstrained _test.go file."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

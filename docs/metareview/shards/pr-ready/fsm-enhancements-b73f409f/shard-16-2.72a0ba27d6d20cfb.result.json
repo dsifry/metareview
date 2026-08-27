@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-16-2-review",
+  "kind": "shard",
+  "shardId": "shard-16-2",
+  "shardHash": "72a0ba27d6d20cfb",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 1,
+      "note": "New table/scenario-driven test file for the FSM machine package; read the whole part 1/2 chunk (file lines 1-1258) against the task-done rubric."
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 79,
+      "note": "Checked for TODO/FIXME markers, t.Skip, and eval-style unsafe execution across the shard: none present."
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 431,
+      "note": "Verified error/failure paths are asserted by code (errs.Is on ERR_* codes) rather than string matching, and that gate/converge/overflow event sequences are asserted explicitly."
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 1069,
+      "note": "Confirmed the shard is a test-only addition with no production source change, so the rubric's missing-tests and duplicate-service-path rules do not apply."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Weakened assertion: the warnings check joins two negated predicates with && , so the test only fails when the warning matches neither the WORKFLOW_WARNING prefix nor the loop_without_clean_exit substring. A warning with the right prefix but the wrong atom passes silently; || was almost certainly intended.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 74,
+          "note": "if !strings.HasPrefix(...\"WORKFLOW_WARNING\") && !strings.Contains(...\"loop_without_clean_exit\")"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Test-isolation hazard: the package-level MaxDiffBytes is set to 2 and restored three lines later by plain assignment rather than defer. If the intervening t.Fatalf fires, MaxDiffBytes stays at 2 for every subsequent test in the package, turning one failure into a cascade of confusing truncation failures. Same pattern for sess.unlock() after sess.advance(), which is not deferred.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 245,
+          "note": "MaxDiffBytes = 2 ... t.Fatalf between the mutation and the restore at line 249"
+        },
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 753,
+          "note": "sess.unlock() called inline after sess.advance(); a t.Fatal before it leaks the run lock"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

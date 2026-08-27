@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-16-3-review",
+  "kind": "shard",
+  "shardId": "shard-16-3",
+  "shardHash": "78867e6b9b828967",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T22:22:56Z",
+  "evidence": [
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 1,
+      "note": "package doc plus hash-based freshness contract (shardHash/planHash) reviewed against the new result schema"
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 345,
+      "note": "sourceAssignmentBlockers chunk accounting: every branch path seen, duplicate path+part detected, deterministic sorted keys"
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 510,
+      "note": "resultBlockers shape validation: schema version, kind, verdict, RFC3339 reviewedAt, shard-id/file-name agreement, evidence, finding dispositions"
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 692,
+      "note": "ingested/ingestedCode neutralise control characters and mrvf- tokens before host-supplied result data reaches Markdown tables"
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 1,
+      "note": "M7/M8/M9 test chunk read in full: torn-audit repair, sidecar edge cases, per-append store-failure sweeps, cancellation paths"
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.sha256",
+      "line": 1,
+      "note": "three sha256 oracle digests, data-only fixture with no executable content"
+    },
+    {
+      "path": "internal/reviewmanifest/manifest_test.go",
+      "line": 1,
+      "note": "29 test functions cover the reviewmanifest package, so the source change carries test evidence"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead leftover scaffolding in TestM9Residue: failType/failAt are set and then immediately cleared (failAt = 6 followed by failAt = 0) and the machine returned by loopRun is never exercised afterward, so the block is inert; the trailing comment even says 'use a sweep instead'. Non-blocking, but it should be deleted so the intended gate-append coverage is not assumed to exist.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1720,
+          "note": "h.store.failAt = 6 immediately followed by h.store.failAt = 0; the preceding failType assignment is also cleared before use"
+        },
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1715,
+          "note": "m = loopRun(t, h, 1, \"sdlc-loop\") result is not advanced or asserted on before the sweep block reassigns state"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

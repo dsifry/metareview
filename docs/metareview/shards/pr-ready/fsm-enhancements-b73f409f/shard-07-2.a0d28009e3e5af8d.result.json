@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-07-2-review",
+  "kind": "shard",
+  "shardId": "shard-07-2",
+  "shardHash": "a0d28009e3e5af8d",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T22:19:31Z",
+  "evidence": [
+    {
+      "path": "internal/prready/review_markdown_test.go",
+      "line": 58,
+      "note": "reviewMarkdown call updated for the new signature argument; existing assertions on non-blocking findings are preserved unchanged."
+    },
+    {
+      "path": "internal/prready/review_markdown_test.go",
+      "line": 110,
+      "note": "New manifestArgs helper builds a reviewmanifest.Manifest and AggregateResult from the same profile passed to contextMarkdown; no unsafe execution, no TODO/FIXME, no duplicated manifest-building logic (it delegates to reviewmanifest.Build/Aggregate/GeneratedPathDispositions)."
+    },
+    {
+      "path": "internal/prready/review_markdown_test.go",
+      "line": 88,
+      "note": "GeneratedExcludedFiles case now routes through the shared helper so the generated-artifact disposition assertions still exercise the real manifest path rather than a hand-built stub."
+    },
+    {
+      "path": "skills/review-pr-ready/SKILL.md",
+      "line": 135,
+      "note": "Documented flags --shard-result (repeatable) and --cross-shard-result match the sharded-review workflow described below; docs-only change requiring no tests."
+    },
+    {
+      "path": "skills/review-pr-ready/SKILL.md",
+      "line": 166,
+      "note": "Sharded-review section documents precedence of passed-in results over resultsDir, the --max-attempts first-run constraint, and the local/untracked-content limitation; no contradictions with the flag line above."
+    },
+    {
+      "path": "internal/prready/review_markdown_test.go",
+      "line": 40,
+      "note": "Shard pack reports 7231 of 60000 bytes with both chunks marked part 1/1, so diff context is complete and not truncated."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

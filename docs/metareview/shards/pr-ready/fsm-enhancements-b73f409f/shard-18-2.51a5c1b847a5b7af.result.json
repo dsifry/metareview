@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-18-2-review",
+  "kind": "shard",
+  "shardId": "shard-18-2",
+  "shardHash": "51a5c1b847a5b7af",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/findings/override_test.go",
+      "line": 97,
+      "note": "New table of override tests covers request/grant happy paths, validation refusals (empty actor, trivial reason, missing timestamp), unknown/closed finding ids, reconcile persistence of an overridden record, ordering, and index rendering; no eval, no TODO/FIXME, diff is complete (485 of 485 added lines present)."
+    },
+    {
+      "path": "internal/findings/override_test.go",
+      "line": 367,
+      "note": "Error paths are exercised through the saveRecords/loadRecords seams with t.Cleanup restoring the package vars, so injected write/read failures are asserted rather than left untested."
+    },
+    {
+      "path": "internal/fsm/errs/errs.go",
+      "line": 569,
+      "note": "Checked E/Wrap/Error/Unwrap/Is/Code/As for correctness: odd trailing kv key is handled and documented, Fields are deep-copied on Wrap, Error() sorts keys for deterministic output, Unwrap supports errors.Is/As. No unsafe execution and no duplicated inventoried code path found in the shard."
+    },
+    {
+      "path": "internal/fsm/errs/errs.go",
+      "line": 546,
+      "note": "Validation evidence for this new source file exists outside the shard: internal/fsm/errs/errs_test.go is present in the tree alongside errs.go, so the rubric's tests-for-source requirement is satisfied."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

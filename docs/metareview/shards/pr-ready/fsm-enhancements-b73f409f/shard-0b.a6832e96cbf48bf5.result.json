@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0b-review",
+  "kind": "shard",
+  "shardId": "shard-0b",
+  "shardHash": "a6832e96cbf48bf5",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T22:20:37Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/store_jsonl.go",
+      "line": 1,
+      "note": "Reviewed the JSONL run store: path validation, O_NOFOLLOW opens, flock lifecycle, torn-tail repair, and fsync ordering; no eval, no TODO/FIXME, diff context complete."
+    },
+    {
+      "path": "internal/fsm/mockai/mockai.go",
+      "line": 1,
+      "note": "Reviewed scenario loading: size cap, strict KnownFields decode, duplicate call/cmd key rejection, token validation, and the fake runner ordinal/repeat matching; companion internal/fsm/mockai/mockai_test.go exists in-tree."
+    },
+    {
+      "path": "internal/reviewlog/reviewlog.go",
+      "line": 302,
+      "note": "isOpenBlocker now delegates to findings.Blocks; verified internal/findings/override.go:53 returns true for \"open\" and StatusOverridePending, so pending overrides still block as the comment claims."
+    },
+    {
+      "path": "internal/reviewlog/reviewlog.go",
+      "line": 289,
+      "note": "Scanner buffer raised to maxJSONLLineBytes+2 (1 MiB + CRLF headroom), consistent with the documented bufio token-vs-buffer constraint."
+    },
+    {
+      "path": "internal/contextprofile/plan_test.go",
+      "line": 137,
+      "note": "Shard-plan tests derive hashes from the documented length-prefixed preimage rather than the implementation, and pin the bucketBits table; budget, split, and locality invariants are asserted."
+    },
+    {
+      "path": "internal/fsm/errs/errs_test.go",
+      "line": 446,
+      "note": "Error formatting, Is/Code/As, unwrap chain, and Wrap field-copy isolation are all covered."
+    },
+    {
+      "path": ".gitattributes",
+      "line": 1,
+      "note": "Marks judge prompt and fsm testdata fixtures as binary (-text) so CRLF normalization cannot perturb hashed golden fixtures; go.sum additions are limited to yaml.v3 and its check.v1 test dep, matching the new mockai YAML use."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "readRaw swallows non-EOF read errors: the loop breaks on any rerr without distinguishing io.EOF, so a partial read of audit.jsonl is returned as if it were the whole file. A truncated read would look like a torn tail, and RepairTail could then truncate durable events. Prefer io.ReadAll on the no-follow descriptor, or check errors.Is(rerr, io.EOF) and surface anything else as ERR_STORE_PATH.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store_jsonl.go",
+          "line": 901,
+          "note": "for { n, rerr := f.Read(chunk); buf.Write(chunk[:n]); if rerr != nil { break } } — EOF and real I/O errors are handled identically."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

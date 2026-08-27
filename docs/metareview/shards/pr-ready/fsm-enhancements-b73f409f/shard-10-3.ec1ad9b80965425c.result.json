@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-10-3-review",
+  "kind": "shard",
+  "shardId": "shard-10-3",
+  "shardHash": "ec1ad9b80965425c",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/reviewmanifest/manifest_test.go",
+      "line": 61,
+      "note": "Reviewed the rewritten manifest test suite: plan-hash/shard-hash freshness, ignored vs blocking results, filename/id mismatch, duplicate results, cross-shard shape, evidence rule boundary at EvidenceNoteMinLength, and the mrvf- neutralisation tests for both renderers. Assertions match the constants they claim to pin; no TODO/FIXME, no unsafe execution, helpers are deterministic."
+    },
+    {
+      "path": "tests/go/test-sharded-review.sh",
+      "line": 1,
+      "note": "Read the end-to-end sharded-review script in full: fixture construction, five pr-ready rounds, the re-cut fix round, ignored foreign-plan result, exit-2 flag rejections with runs.jsonl unchanged, byte-reproducibility of packs, and the task-done path. All temp state is under mktemp with an EXIT trap; every mutating git call runs in a subshell or against an absolute path."
+    },
+    {
+      "path": "tests/go/test-sharded-review.sh",
+      "line": 1137,
+      "note": "The 'eval' token here is assembled via printf into a fixture text file so the script does not carry the lint pattern literally; it is test data asserting that a staged eval still blocks (line 1150), not executed code. Rubric eval-blocker does not apply."
+    },
+    {
+      "path": "testdata/fsm/agent-prompt.golden",
+      "line": 1,
+      "note": "New golden for `metareview fsm --agent-prompt`. Exit-code semantics (3 / 1+GATE_FAILED / 1+ERR_* / 2), terminal states, and the untrusted-data and consent-knob warnings agree with the contract documented in CLAUDE.md."
+    },
+    {
+      "path": "tests/manifest/test-manifests.sh",
+      "line": 41,
+      "note": "Two added assertions require both the codex and claude plugin manifests to advertise workflow runs, matching the existing per-review assertion style in the same file."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "init_repo runs a bare `cd \"$repo\"` (not in a subshell), so it permanently changes the script's working directory for everything that follows. It is harmless today because every later command uses an absolute path or its own `(cd ... && ...)` subshell, but the invariant is implicit and a future relative-path addition after `init_repo \"$TMP/task\"` would silently act on the wrong repo.",
+      "evidence": [
+        {
+          "path": "tests/go/test-sharded-review.sh",
+          "line": 929,
+          "note": "bare cd inside init_repo leaks the working directory to the caller"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

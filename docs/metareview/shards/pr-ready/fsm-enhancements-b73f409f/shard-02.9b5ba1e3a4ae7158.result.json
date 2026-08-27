@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-02-review",
+  "kind": "shard",
+  "shardId": "shard-02",
+  "shardHash": "9b5ba1e3a4ae7158",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 263,
+      "note": "checkURL enforces https-or-localhost, rejects userinfo/path/query/fragment; NewHTTPClient refuses redirects and attempt() re-checks ERR_JUDGE_REDIRECT as fatal."
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 609,
+      "note": "Response body is read through io.LimitReader(MaxBody+1) and rejected over 4 MB; token counters are clamped via clampTok, so provider input cannot overflow the run totals."
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 545,
+      "note": "Retry ladder: attempts bounded by MaxAttempts, ctx.Done honored during backoff, classFatal returns immediately, rate backoff capped at 120s. Verdict is returned alongside errors as documented."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/adjudicate.fenced.golden",
+      "line": 722,
+      "note": "Golden asserts injected data containing an END sentinel is JSON-escaped onto one line so it cannot terminate the DATA fence: prompt-injection defense is covered by a test."
+    },
+    {
+      "path": "internal/fsm/workflow/resolve.go",
+      "line": 983,
+      "note": "ResolveCmds indexes argv[0]; verified safe because workflow.go:277 rejects any cmd decl with len(Argv)==0 before Resolve runs."
+    },
+    {
+      "path": "internal/fsm/workflow/resolve.go",
+      "line": 1069,
+      "note": "containsStr is not dead code: it is referenced by internal/fsm/workflow/workflow.go:331 and :387."
+    },
+    {
+      "path": "internal/fsm/run/errors.go",
+      "line": 839,
+      "note": "foldErr and the reason/code table are exercised by internal/fsm/run/fold.go; CodeFor maps every reason and defaults fail-closed to ERR_AUDIT_INVALID."
+    },
+    {
+      "path": "internal/version/version.go",
+      "line": 1093,
+      "note": "Version bump 0.8.2 -> 0.9.0 matches the 0.9.0 FSM feature set on this branch."
+    },
+    {
+      "path": "docs/tasks/pr-a-sharded-measurement.md",
+      "line": 51,
+      "note": "Docs-only task note; no executable content, no TODO/FIXME markers."
+    },
+    {
+      "note": "Checked all shard files for TODO/FIXME markers (none), unsafe execution/eval (none), and test presence: judge_test.go, smoke_test.go, workflow_test.go, fold_test.go/store_test.go all exist for the changed packages. go vet ./internal/fsm/... ./internal/version/... is clean. No diff context in this shard was truncated."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/judge/judge.go: attempt() discards the error from http.NewRequestWithContext (hreq, _ := ...). It is unreachable today because req.url is built from a base validated by checkURL and the method is a constant, but a future URL-construction change would nil-panic on hreq.Header.Set instead of returning ERR_JUDGE_URL. Non-blocking.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 594,
+          "note": "hreq, _ := http.NewRequestWithContext(actx, http.MethodPost, req.url, bytes.NewReader(req.body))"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/judge/judge.go: classify() treats any body whose error.type is overloaded_error as the retryable rate class regardless of HTTP status, so a 4xx client error carrying that type would consume the full retry ladder with 10/30/90/120s sleeps rather than failing fast. Providers only emit overloaded_error on 429/529 in practice. Non-blocking.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 522,
+          "note": "case status == 429 || overloaded: return classRate — status is not constrained for the overloaded branch"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-07-review",
+  "kind": "shard",
+  "shardId": "shard-07",
+  "shardHash": "93b40ceb0b945103",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": ".claude-plugin/plugin.json",
+      "line": 3,
+      "note": "Version bump 0.8.2 to 0.9.0 matches package.json version 0.9.0; description and keywords updated consistently; trailing newline added."
+    },
+    {
+      "path": "commands/status.md",
+      "line": 9,
+      "note": "Doc update matches CLAUDE.md durable-output contract: .metareview/shards/ transient, docs/metareview/shards/ committed."
+    },
+    {
+      "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-enhancements.md",
+      "line": 1,
+      "note": "New design spec, documentation only, no executable content; no TODO/FIXME markers introduced."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 129,
+      "note": "riskReasons split verified: DIFF_TRUNCATED now branch-only, LOCAL_DIFF_TRUNCATED for staged/worktree, DIFF_OVERSIZE gated on branchDiffBytes; reasons asserted in internal/reviewers/sharded_test.go:176."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 71,
+      "note": "FromGit branch accounting checked: branch bytes plus local contributions added directly rather than by subtraction, avoiding double counting; BranchRawDiffBytes used for the raw total when present."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 36,
+      "note": "realGit captures stderr and wraps it into the error so a failing git invocation is identifiable; env is appended to os.Environ rather than replacing it."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 65,
+      "note": "branchPaths uses -z NUL splitting and pathspec magic for excludes; per-file diffs use GIT_LITERAL_PATHSPECS=1 with a bare path after --, so exotic path characters cannot be reinterpreted as pathspec magic. Covered by TestBranchFilesLiteralPathspecs and TestBranchFilesExcludeGenerated."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 148,
+      "note": "HashFields uses length-prefixed len:bytes NUL framing, so a path containing a newline or NUL cannot forge a field boundary in the v4 hash preimage."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles_test.go",
+      "line": 90,
+      "note": "Tests accompany the new source: 9 test functions covering measurement, truncation gating, renames/deletes/binary, literal pathspecs, diff attributes, excludes, git error branches, AddedLines union, and the context-diff JSON shape."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 126,
+      "note": "Removal of ShardPlanMarkdown here is a move, not a deletion: internal/contextprofile/shards.go:264 defines the new two-argument form and internal/taskdone/review.go:497 and internal/prready/review.go:873 call it. go test builds both packages clean."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "filesFromGit overwrites rather than accumulates per-file bytes for branch paths (byPath[f.Path] = f.Bytes), and unconditionally relabels Source as SourceBranch. A path with both committed branch changes and uncommitted staged/worktree changes therefore reports only its branch bytes and loses the local source label. FromGit's aggregate total is unaffected (it adds branch + local separately), so this only under-reports per-file bytes used for shard packing.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 181,
+          "note": "byPath[f.Path] = f.Bytes overwrites the accumulated local diff bytes for that path"
+        },
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 186,
+          "note": "file.Source = SourceBranch overrides the sourceOf result for any branch path"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "AddedLines distinguishes the untracked-excerpt segment by string value (text == ctx.UntrackedExcerpts) rather than by position in the iterated slice. If StagedDiff or WorkingTreeDiff ever equals UntrackedExcerpts verbatim, that segment's context lines would be emitted as added lines. Harmless when UntrackedExcerpts is empty (empty lines are filtered), but an index-based check would be unambiguous.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 171,
+          "note": "segment identified by string equality instead of loop index"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "collectBranchFiles and measureBranchFiles duplicate the same per-path git-diff loop, differing only in whether the diff text is retained; each spawns one git process per changed path, so a branch touching N files costs up to 2N git invocations. The duplication is deliberate (the comment explains that materialising the raw scan would be the peak allocation), but the loop body could be shared with a retain flag or a callback.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 98,
+          "note": "collectBranchFiles per-path diff loop"
+        },
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 121,
+          "note": "measureBranchFiles repeats the identical loop, retaining only len(out)"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "maxBranchDiffBytes is a mutable package-level var used purely as a test seam, unlike the Options-based DefaultLargeDiffBytes threshold immediately above it. Tests that lower it mutate shared global state and cannot run in parallel; an Options field would match the surrounding convention.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 27,
+          "note": "var maxBranchDiffBytes = 16 << 20 declared as a mutable global test seam"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

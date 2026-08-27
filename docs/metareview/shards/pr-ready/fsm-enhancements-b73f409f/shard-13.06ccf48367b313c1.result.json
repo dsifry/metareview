@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-13-review",
+  "kind": "shard",
+  "shardId": "shard-13",
+  "shardHash": "06ccf48367b313c1",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 108,
+      "note": "Guarded.exec: consent lookup, absolute argv[0] check, hash re-verification via workflow.VerifyCmds, and exact env allow-list all precede execution; refusals before exec leave data.Name empty so they are never audited."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 210,
+      "note": "execRunner uses argv only (no shell), Setpgid plus SIGKILL to the process group on cancel, WaitDelay, and a cappingWriter bounded at MaxOutput+1 so overflow is detectable; timeout vs parent cancellation vs spawn failure are distinguished."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 1,
+      "note": "New source file has adjacent tests: internal/fsm/cmdexec/cmdexec_test.go covers the real runner, the guarded wrapper, and the capping writer, satisfying the tests-for-source-changes rule."
+    },
+    {
+      "path": "internal/state/state.go",
+      "line": 17,
+      "note": "1 MiB JSONL line cap with buffer sized maxJSONLLineBytes+2 matches bufio.ScanLines needing room for the terminator; scanner.Err() is still returned so an oversized line surfaces as an error rather than silent truncation."
+    },
+    {
+      "path": "internal/state/state.go",
+      "line": 51,
+      "note": "Behavior is covered by internal/findings/findings_test.go TestReadersAcceptOneMiBLines and the adjacent boundary cases, so this is not an untested source change."
+    },
+    {
+      "path": "internal/reviewers/sharded_test.go",
+      "line": 21,
+      "note": "The TODO and eval( markers in this test are assembled at run time from string fragments as deliberate fixtures; no literal TODO/FIXME marker or executable eval is introduced by this shard."
+    },
+    {
+      "path": "docs/fsm/driving-a-workflow.md",
+      "line": 43,
+      "note": "Documentation only; exit-code and trust-boundary claims match the code (ERR_CMD_NOT_ALLOWED and ERR_CMDS_NOT_ALLOWED both exist as distinct codes)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Unescaped pipe inside a Markdown table cell: `DONE(fixed|clean)` splits the row into three columns in a two-column table, so GFM renderers drop or misalign the rest of the exit-0 cell. Escape it as \\| or write DONE(fixed / clean).",
+      "evidence": [
+        {
+          "path": "docs/fsm/driving-a-workflow.md",
+          "line": 43,
+          "note": "| 0 | `ADVANCED`, `DONE(fixed|clean)`, `FORKED`, `OK`, a passed gate |"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

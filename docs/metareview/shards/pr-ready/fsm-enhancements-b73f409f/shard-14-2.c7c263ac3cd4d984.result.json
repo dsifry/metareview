@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-14-2-review",
+  "kind": "shard",
+  "shardId": "shard-14-2",
+  "shardHash": "c7c263ac3cd4d984",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/testdata/golden-snapshots.jsonl",
+      "line": 1,
+      "note": "New golden snapshot fixture, 24 JSONL rows; verified seq is monotonic 1..24 with no gaps or duplicates, run_id/workflow/workflow_hash constant across all rows, and every line is well-formed single-line JSON."
+    },
+    {
+      "path": "internal/fsm/run/testdata/golden-snapshots.jsonl",
+      "line": 12,
+      "note": "State progression discover -> adjudicate -> fix -> verify -> done is monotonic; node_outputs, applied and nodes_run grow consistently (a node key appears in node_outputs before applied flips true), fix@0 commit c1 is reflected in head and tree_hash advances t0 -> t1, and unfixed transitions 1 -> 0 only after verify status still_present:false is applied."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.events.jsonl",
+      "line": 1,
+      "note": "Oracle event fixture: init/tree/record events carry schemaVersion 1, RFC3339 timestamps in ascending order, and the init run_id matches the golden-snapshots run_id."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.events.jsonl",
+      "line": 2,
+      "note": "Deliberate shell-metacharacter payload in the tree status field ('M a.go <>& x y') is fixture data exercising quoting/escaping; it is inert JSON test data, never executed, and contains no injected instructions."
+    },
+    {
+      "path": "internal/fsm/run/testdata/golden-snapshots.jsonl",
+      "line": 24,
+      "note": "Rubric blocking checks applied and clear: no eval or other unsafe execution, no TODO/FIXME markers, no truncated diff context (both chunks are part 1/1 and fully within budget), no duplication of an inventoried service, and these files are themselves test fixtures rather than untested source."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

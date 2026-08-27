@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1f-review",
+  "kind": "shard",
+  "shardId": "shard-1f",
+  "shardHash": "468edfb921d15794",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {"path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md", "line": 1, "note": "Read the full 439-line spec: hashing preimages (§3), plan/pack design (§4), result format and validation (§5), gate semantics (§6), upgrade/migration (§8), test list (§12) and the r5/r6 review tables (§13-14). Internally consistent apart from the pack-count numbers noted below; no TODO/FIXME markers, no unsafe execution, no truncated diff context."},
+    {"path": "internal/fsm/cli/prompt.go", "line": 5, "note": "New file: a single exported const AgentPrompt built from string concatenation with backtick-quoted inline code. Checked backtick/quote balance, that no format verbs or interpolation are used, and that documented exit codes (3 work, 2 nothing recorded, 1 GATE_FAILED/ERR_*) and subcommand list match CLAUDE.md's FSM exit-handling contract. Validation evidence: the file comment pins it to tests/go/agent-prompt-anchors.txt, which the pinning suite greps."},
+    {"path": "internal/fsm/cmdexec/sha_test.go", "line": 8, "note": "New test-only helper sha256Sum in package cmdexec; verified it is actually consumed by internal/fsm/cmdexec/cmdexec_test.go:239 and :293, so it is not dead code, and it adds no production surface."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Spec contradicts itself on the measured pack count for PR #13: §7 states \"43 shard packs plus one cross-shard pack (measured against the implementation, not estimated)\", while the §14 r6-review table row resolving the \"Pack count understated\" finding says \"§7: measured 46\". Only one number can be the measurement; a reader sizing the review cost gets two answers. Documentation-only, non-blocking.",
+      "evidence": [
+        {"path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md", "line": 258, "note": "§7 says 43 shard packs plus one cross-shard pack"},
+        {"path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md", "line": 435, "note": "§14 row says §7 records measured 46"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

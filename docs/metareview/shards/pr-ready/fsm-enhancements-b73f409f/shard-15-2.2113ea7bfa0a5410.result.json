@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-15-2-review",
+  "kind": "shard",
+  "shardId": "shard-15-2",
+  "shardHash": "2113ea7bfa0a5410",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/converge/converge_test.go",
+      "line": 51,
+      "note": "New table-driven tests cover AllFixed, every atom (all_fixed, no_fixation_progress, max_iterations, budget, cmd), any/all/not composition, error-abort short-circuit, and 25 Validate/Parse rejection cases including MaxAtoms/MaxDepth boundaries; no TODO/FIXME, no eval, no unsafe execution."
+    },
+    {
+      "path": "internal/fsm/converge/converge_test.go",
+      "line": 125,
+      "note": "Redaction contract asserted: cmd stdin payload hashes vars (sha256:), omits node outputs, and does not mutate the source snapshot."
+    },
+    {
+      "path": "internal/fsm/export/export_test.go",
+      "line": 229,
+      "note": "TestF8Redaction checks a full marker leak/keep matrix (secret, home path, cmd streams, diff/porcelain detail), pairwise chain integrity for unredacted lines, manifest and snapshot projections, and include-vars behavior."
+    },
+    {
+      "path": "internal/fsm/export/export_test.go",
+      "line": 375,
+      "note": "TestF8Refusals covers MaxBytes, symlink component, non-empty destination, every injected FS failure (lstat/readdir/mkdir/open/write/close), bad run ids, context cancellation, sidecar failures, and unknown-kind fail-closed."
+    },
+    {
+      "path": "internal/fsm/machine/types.go",
+      "line": 1,
+      "note": "Declaration-only file: interfaces, Deps wiring, status/record constants, error and warn codes. No logic, no unsafe execution, no markers; JSON-free type surface so no serialization risk."
+    },
+    {
+      "path": "internal/fsm/run/event.go",
+      "line": 1,
+      "note": "Event and payload struct declarations with JSON tags only; omitempty usage is consistent with optional fields and there is no behavior to test directly."
+    },
+    {
+      "path": "internal/reviewers/epicready.go",
+      "line": 64,
+      "note": "Fingerprint for the epic context-risk finding is narrowed to a constant 'epic:context-risk' so it stays stable as RiskReasons vary; single-line, behavior-preserving for the finding body which still carries the reasons."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Vacuous assertion: the open flags/perm check is an OR whose second branch (strings.Contains(o, \"-rw-------\")) is true for every recorded open, since memFS.OpenFile is only ever called with 0600. The O_WRONLY|O_CREATE|O_EXCL suffix comparison therefore never fails, and the itoa helper it depends on only encodes the low decimal digit of the flag (string(rune('0'+i%10))), so it could not distinguish flag values anyway. O_EXCL is separately covered against the real filesystem in TestOSFS, so this is a test-strength nit rather than a coverage gap.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 348,
+          "note": "if !strings.HasSuffix(o, \" \"+itoa(...)+\" -rw-------\") && !strings.Contains(o, \"-rw-------\")"
+        },
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 120,
+          "note": "func itoa(i int) string { return string(rune('0' + i%10)) } collapses flags to one digit"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}
