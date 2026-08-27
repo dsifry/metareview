@@ -10,7 +10,7 @@ Run this before pushing a PR branch or asking external reviewers to spend time.
 ## Command
 
 ```bash
-metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
+metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]...
 ```
 
 Use `--base` for the reviewed branch diff, `--previous-run` after fixes, and `--evidence` for validation output. Use `--max-attempts` only on the first run; it sets the chain budget (default 3), with the first blocker run as attempt 1. Use `--github-pr` to include available GitHub PR context. By default, PR-ready reviews the committed branch diff and blocks on non-generated working-tree changes; use `--include-working-tree` only when those changes intentionally belong to the review.
@@ -54,5 +54,7 @@ hash, and `resultsDir`.
 5. Commit the results in `docs/metareview/shards/` with the review log. After a fix round only the
    edited file's shard and the cross-shard result go ignored: re-review those two and leave the rest.
 
-Local content is in no pack. Commit or remove staged, worktree and untracked files first — an
-untracked file over 4,000 bytes raises `UNTRACKED_TRUNCATED`, which shard results can never satisfy.
+Local content is in no pack: packs carry the branch diff only, so `--include-working-tree` puts local
+content in the review context but not in any shard. Commit or remove staged, worktree and untracked
+files first — an untracked file over 4,000 bytes raises `UNTRACKED_TRUNCATED`, and no shard result
+can ever satisfy a local truncation reason.

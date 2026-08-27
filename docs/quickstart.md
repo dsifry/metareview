@@ -74,6 +74,7 @@ Commit:
 - `docs/metareview/reviews/`
 - `docs/metareview/context/`
 - `docs/metareview/learning/`
+- `docs/metareview/shards/` — the shard review results a later gate reads back
 - `.metareview/knowledge/metareview.jsonl` in standalone fallback mode
 - `.metareview/calibration.jsonl`
 - `.metareview/learning-runs.jsonl`
@@ -83,6 +84,7 @@ Keep local:
 
 - `.metareview/findings.jsonl`
 - `.metareview/runs.jsonl`
+- `.metareview/shards/` — the prompt packs, which are regenerated per plan and ignore themselves
 - other transient `.metareview/` state
 
 For ordinary project repositories, use exact file entries for transient state. Do not ignore `docs/metareview/` or the entire `.metareview/` directory, because those patterns hide durable review, learning, calibration, or fallback knowledge artifacts.

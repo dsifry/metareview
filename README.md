@@ -50,13 +50,21 @@ metareview is built around review patterns that work well when humans and coding
 - **Review artifact accountability:** write durable Markdown context and review logs so future humans and agents can inspect what was reviewed, what blocked, and why it passed.
 - **Post-merge reflection:** after a PR lands, extract accepted learnings, discarded candidates, and reviewer calibration so the next review starts smarter.
 
+## What Changed In 0.8.3
+
+0.8.3 closes the sharded-review loop, so an oversized branch diff can now reach a passing gate:
+
+- **Sharded review results:** on task-done and PR-ready, a branch diff over the context limit is measured in full, cut into content-stable shards, and written as one prompt pack per shard. The agent reviews each pack and writes a result file back.
+- **A clearable context-risk blocker:** when every shard of the current plan has a fresh passing result — and, for a multi-shard plan, a cross-shard result covering the seams — the blocking "Review context risk" finding becomes advisory and the deterministic lints run over the whole branch diff. (`epic-ready` renders "not sharded": ingestion there is a follow-up.)
+- **Freshness by content hash:** a result is matched to a shard by that shard's content hash, so a result about superseded content is ignored with a reason rather than silently counted.
+
 ## What Changed From 0.4.0 To 0.6.0
 
 0.6.0 made metareview more useful for real agent work by adding concrete coverage accounting around the review surface:
 
 - **Structured evidence receipts:** `metareview evidence run -- <command>` records validation commands as JSON receipts with exit codes, timestamps, summaries, and output hashes. `metareview evidence import --github-checks <pr-number>` imports GitHub check results into the same receipt format. Task-done and PR-ready parse those receipts as validation evidence; epic-ready accepts the same evidence file as child-completion context.
 - **Context preflight:** task-done, epic-ready, and PR-ready reviews now include a Context Profile that records raw and filtered diff size, generated review-artifact exclusions, omitted or truncated untracked files, and context-risk reasons.
-- **Sharded review:** on task-done and PR-ready, a branch diff over the context limit is measured in full, cut into content-stable shards, and written as one prompt pack per shard. The agent reviews each pack and writes a result file; with every shard covered the context-risk blocker becomes advisory. (`epic-ready` renders "not sharded": ingestion there is a follow-up.)
+- **Shard planning:** large or risky diffs get deterministic Context Shard Plans so agents can split review work by source paths while preserving a shared source diff hash.
 - **Review Manifest aggregation:** task-done and PR-ready context packs now account for source paths, generated path dispositions, shard assignments, manifest hashes, static runtime status, and manifest blockers.
 - **Stateful PR-ready projection:** PR-ready reconciles prior findings by target and run chain, so resolved or unrelated blockers do not keep blocking a later branch review.
 - **0.6.0 metadata alignment:** npm, Codex plugin, Claude Code plugin, and Go source checkout version reporting now agree on `0.6.0`.

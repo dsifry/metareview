@@ -10,7 +10,7 @@ Run this before saying a coding task is done.
 ## Command
 
 ```bash
-metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--shard-result <path>]... [--cross-shard-result <path>]
+metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--shard-result <path>]... [--cross-shard-result <path>]...
 ```
 
 Use `--base` for the reviewed diff, `--previous-run` after fixes, and `--evidence` for validation output. Use `--max-attempts` only on the first run; it sets the chain budget (default 3), with the first blocker run as attempt 1.
