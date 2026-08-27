@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,6 +26,32 @@ func NewJSONLStore(root string, opts Options) RunStore {
 }
 
 func (s *jsonlStore) Root() string { return s.root }
+
+func (s *jsonlStore) MaxEvents() int { return s.opts.maxEvents() }
+
+// TornFiles lists audit.torn-*.bin for a run with their sha256 and size, sorted by name.
+func (s *jsonlStore) TornFiles(runID string) ([]TornFile, error) {
+	if err := s.validate(runID); err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(s.runDir(runID))
+	if err != nil {
+		return nil, storeErrf(CodeRunNotFound, 0, runID)
+	}
+	out := []TornFile{}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "audit.torn-") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(s.runDir(runID), e.Name()))
+		if err != nil {
+			return nil, pathErr(0, err)
+		}
+		out = append(out, TornFile{Name: e.Name(), SHA256: LineHash(raw), Bytes: int64(len(raw))})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
 
 func (s *jsonlStore) runsDir() string { return filepath.Join(s.root, ".metareview", "runs") }
 

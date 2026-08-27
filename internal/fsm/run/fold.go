@@ -289,6 +289,7 @@ func (st *FoldState) applyInit(d *InitData) {
 	st.RunID, st.ParentRunID, st.ForkedAtSeq, st.CreatedAt = d.RunID, d.ParentRunID, d.ForkedAtSeq, d.CreatedAt
 	st.Lineage = nonNilStrings(d.Lineage)
 	st.Workflow, st.WorkflowHash, st.Calibration, st.Mock = d.Workflow, d.WorkflowHash, d.Calibration, d.Mock
+	st.WorkflowSource = d.WorkflowSource
 	st.Vars = cloneStringMap(d.Vars)
 	if st.Vars == nil {
 		st.Vars = map[string]string{}
@@ -500,7 +501,7 @@ func argvOK(argv []string) bool {
 func withinCaps(p any) bool {
 	switch d := p.(type) {
 	case *InitData:
-		if !shortOK(d.RunID, d.Workflow, d.WorkflowHash, d.Mock, d.RepoMode, d.CmdsSHA256, d.RepoRoot, d.WorkDir, d.BaseSHA, d.Head, string(d.InitialState), string(d.InitialKind), d.ParentRunID) || !shortOK(d.Lineage...) {
+		if !shortOK(d.RunID, d.Workflow, d.WorkflowHash, d.Mock, d.RepoMode, d.CmdsSHA256, d.RepoRoot, d.WorkDir, d.BaseSHA, d.Head, string(d.InitialState), string(d.InitialKind), d.ParentRunID, d.WorkflowSource) || !shortOK(d.Lineage...) {
 			return false
 		}
 		if len(d.Vars) > MaxVars || len(d.Goldens) > MaxGoldens || len(d.AllowedCmds) > MaxAllowedCmds {

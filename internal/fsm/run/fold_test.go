@@ -1092,3 +1092,30 @@ func TestFoldTokensNegativeAndNextIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestWorkflowSourceFolds(t *testing.T) {
+	d := baseInit()
+	d.WorkflowSource = "path"
+	b := NewBuilder(runA)
+	b.Init(d)
+	snap, err := Fold(b.Events())
+	if err != nil || snap.WorkflowSource != "path" {
+		t.Fatalf("workflow_source must fold: %v %+v", err, snap.WorkflowSource)
+	}
+	if snap.Clone().WorkflowSource != "path" {
+		t.Fatal("Clone must copy WorkflowSource")
+	}
+	// legacy init without the field decodes and folds as ""
+	b2 := NewBuilder(runA)
+	b2.Init(baseInit())
+	if snap, err := Fold(b2.Events()); err != nil || snap.WorkflowSource != "" {
+		t.Fatalf("legacy: %v %q", err, snap.WorkflowSource)
+	}
+	// cap: over MaxShort is refused at fold
+	d.WorkflowSource = strings.Repeat("x", MaxShort+1)
+	b3 := NewBuilder(runA)
+	b3.Init(d)
+	if _, err := Fold(b3.Events()); err == nil {
+		t.Fatal("over-cap workflow_source must be refused")
+	}
+}

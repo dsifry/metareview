@@ -197,6 +197,7 @@ type Snapshot struct {
 	Seq             int64                      `json:"seq"`
 	Workflow        string                     `json:"workflow"`
 	WorkflowHash    string                     `json:"workflow_hash"`
+	WorkflowSource  string                     `json:"workflow_source,omitempty"`
 	Vars            map[string]string          `json:"vars"`
 	Calibration     bool                       `json:"calibration"`
 	Mock            string                     `json:"mock,omitempty"`

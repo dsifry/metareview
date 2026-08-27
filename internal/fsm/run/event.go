@@ -50,26 +50,27 @@ var EventTypes = []string{TypeInit, TypeTree, TypeNeedsInput, TypeNodeOutput, Ty
 
 // InitData is the seq-1 payload.
 type InitData struct {
-	RunID        string            `json:"run_id"`
-	CreatedAt    Time              `json:"created_at"`
-	Workflow     string            `json:"workflow"`
-	WorkflowHash string            `json:"workflow_hash"`
-	Vars         map[string]string `json:"vars"`
-	Calibration  bool              `json:"calibration"`
-	Mock         string            `json:"mock,omitempty"`
-	RepoMode     string            `json:"repo_mode"`
-	AllowedCmds  []AllowedCmd      `json:"allowed_cmds"`
-	CmdsSHA256   string            `json:"cmds_sha256,omitempty"`
-	RepoRoot     string            `json:"repo_root"`
-	WorkDir      string            `json:"work_dir"`
-	BaseSHA      string            `json:"base_sha"`
-	Head         string            `json:"head"`
-	InitialState State             `json:"initial_state"`
-	InitialKind  Kind              `json:"initial_kind,omitempty"`
-	Goldens      []Golden          `json:"goldens"`
-	ParentRunID  string            `json:"parent_run_id,omitempty"`
-	Lineage      []string          `json:"lineage"`
-	ForkedAtSeq  int64             `json:"forked_at_seq,omitempty"`
+	RunID          string            `json:"run_id"`
+	CreatedAt      Time              `json:"created_at"`
+	Workflow       string            `json:"workflow"`
+	WorkflowHash   string            `json:"workflow_hash"`
+	WorkflowSource string            `json:"workflow_source,omitempty"` // embedded|path|"" (spec 3 r5; "" = legacy)
+	Vars           map[string]string `json:"vars"`
+	Calibration    bool              `json:"calibration"`
+	Mock           string            `json:"mock,omitempty"`
+	RepoMode       string            `json:"repo_mode"`
+	AllowedCmds    []AllowedCmd      `json:"allowed_cmds"`
+	CmdsSHA256     string            `json:"cmds_sha256,omitempty"`
+	RepoRoot       string            `json:"repo_root"`
+	WorkDir        string            `json:"work_dir"`
+	BaseSHA        string            `json:"base_sha"`
+	Head           string            `json:"head"`
+	InitialState   State             `json:"initial_state"`
+	InitialKind    Kind              `json:"initial_kind,omitempty"`
+	Goldens        []Golden          `json:"goldens"`
+	ParentRunID    string            `json:"parent_run_id,omitempty"`
+	Lineage        []string          `json:"lineage"`
+	ForkedAtSeq    int64             `json:"forked_at_seq,omitempty"`
 }
 
 // TreeData is a working-tree snapshot carrier.

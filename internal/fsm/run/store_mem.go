@@ -22,6 +22,17 @@ func NewMemStore(opts Options) RunStore {
 
 func (s *memStore) Root() string { return "" }
 
+func (s *memStore) MaxEvents() int { return s.opts.maxEvents() }
+
+func (s *memStore) TornFiles(runID string) ([]TornFile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.get(runID); err != nil {
+		return nil, err
+	}
+	return []TornFile{}, nil
+}
+
 func (s *memStore) get(runID string) (*memRun, error) {
 	if err := ValidateRunID(runID); err != nil {
 		return nil, storeErrf(CodeStorePath, 0, err.Error())

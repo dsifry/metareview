@@ -35,6 +35,13 @@ type RunSummary struct {
 	Error       string
 }
 
+// TornFile describes one audit.torn-*.bin left by RepairTail (spec 3 r5: listed by exports, never copied).
+type TornFile struct {
+	Name   string
+	SHA256 string
+	Bytes  int64
+}
+
 // Options configures a store.
 type Options struct {
 	MaxEvents int // zero → DefaultMaxEvents
@@ -57,7 +64,12 @@ type RunStore interface {
 	List() ([]RunSummary, error)
 	Lock(runID string) (unlock func(), err error)
 	Root() string
+	TornFiles(runID string) ([]TornFile, error) // sorted by name; empty for the memory store
+	MaxEvents() int                             // the effective cap (Options.MaxEvents or DefaultMaxEvents)
 }
+
+// Counted reports whether an event type counts toward MaxEvents (exported for spec 3's in-memory fork check).
+func Counted(t string) bool { return countedType(t) }
 
 func storeErrf(code string, seq int64, detail string) *StoreError {
 	return &StoreError{Code: code, Seq: seq, Detail: detail}
@@ -191,7 +203,18 @@ func summarize(runID string, log Log, err error, sidecars int) RunSummary {
 	}
 	s.Workflow, s.CreatedAt, s.State, s.Outcome = snap.Workflow, snap.CreatedAt, snap.State, snap.Outcome
 	s.ParentRunID, s.Mock, s.MockTainted = snap.ParentRunID, snap.Mock, snap.MockTainted
+	if incompleteFork(snap) {
+		s.Error = "incomplete fork: run " + runID + " of " + snap.ParentRunID + " has no rebaseline"
+	}
 	return s
+}
+
+// incompleteFork is spec 3 r5 §2 step 8: a forked child whose step-8 write did not finish.
+func incompleteFork(snap Snapshot) bool {
+	if snap.ParentRunID == "" {
+		return false
+	}
+	return snap.Seq <= snap.ForkedAtSeq || (snap.Seq == snap.ForkedAtSeq+1 && snap.StateKind == KindAgentEdit)
 }
 
 func sortSummaries(list []RunSummary) {

@@ -846,3 +846,83 @@ func TestOracle(t *testing.T) {
 		t.Fatalf("edit seq: %+v", se)
 	}
 }
+
+// ---- spec 3 r5 owned amendments -----------------------------------------------------------------
+
+func TestCountedAndMaxEvents(t *testing.T) {
+	for _, typ := range []string{TypeNeedsInput, TypeNodeOutput, TypeDeltaApplied, TypeLLMCall, TypeTokens, TypeRecord, TypeTree} {
+		if !Counted(typ) {
+			t.Fatalf("%s must be counted", typ)
+		}
+	}
+	for _, typ := range []string{TypeInit, TypeTransition, TypeGate, TypeCmdCall, TypeConverge, TypeFork, TypeFixBaseline, TypeWarn, TypeOverflowHandler} {
+		if Counted(typ) {
+			t.Fatalf("%s must not be counted", typ)
+		}
+	}
+	if NewMemStore(Options{MaxEvents: 5}).MaxEvents() != 5 || NewJSONLStore(t.TempDir(), Options{MaxEvents: 7}).MaxEvents() != 7 {
+		t.Fatal("MaxEvents must echo Options")
+	}
+	if NewMemStore(Options{}).MaxEvents() != DefaultMaxEvents || NewJSONLStore(t.TempDir(), Options{}).MaxEvents() != DefaultMaxEvents {
+		t.Fatal("zero → DefaultMaxEvents")
+	}
+}
+
+func TestTornFiles(t *testing.T) {
+	mem := NewMemStore(Options{})
+	seed(t, mem, happyLog().Events())
+	if files, err := mem.TornFiles(runA); err != nil || len(files) != 0 {
+		t.Fatalf("mem store has no torn files: %v %v", files, err)
+	}
+	if _, err := mem.TornFiles("../x"); err == nil {
+		t.Fatal("invalid id must be refused")
+	}
+	if _, err := mem.TornFiles(runB); err == nil {
+		t.Fatal("unknown run must be refused")
+	}
+	s := NewJSONLStore(t.TempDir(), Options{})
+	seed(t, s, happyLog().Events())
+	dir := filepath.Join(s.Root(), ".metareview", "runs", runA)
+	if files, err := s.TornFiles(runA); err != nil || len(files) != 0 {
+		t.Fatalf("no torn files yet: %v %v", files, err)
+	}
+	_ = os.WriteFile(filepath.Join(dir, "audit.torn-9-2.bin"), []byte("zz"), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "audit.torn-9-1.bin"), []byte("{\"torn"), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("x"), 0o600)
+	files, err := s.TornFiles(runA)
+	if err != nil || len(files) != 2 {
+		t.Fatalf("torn files: %+v %v", files, err)
+	}
+	want := TornFile{Name: "audit.torn-9-1.bin", SHA256: LineHash([]byte("{\"torn")), Bytes: 6}
+	if files[0] != want || files[1].Name != "audit.torn-9-2.bin" || files[1].Bytes != 2 {
+		t.Fatalf("literal: %+v", files)
+	}
+	if _, err := s.TornFiles("../x"); err == nil {
+		t.Fatal("invalid id must be refused")
+	}
+	if _, err := s.TornFiles(runB); err == nil {
+		t.Fatal("unknown run must be refused")
+	}
+	_ = os.Chmod(filepath.Join(dir, "audit.torn-9-2.bin"), 0)
+	if _, err := s.TornFiles(runA); err == nil && os.Getuid() != 0 {
+		t.Fatal("unreadable torn file must error")
+	}
+}
+
+func TestSummarizeIncompleteFork(t *testing.T) {
+	parent := happyLog().Events()
+	mk := func(to int64, kind Kind, extra ...string) Log {
+		b := NewBuilder(runB)
+		evs := b.Copy(parent, 2, to, runB, func(d *InitData) { d.ForkedAtSeq = to })
+		_ = kind
+		return Log{Events: evs}
+	}
+	// no rebaseline tree: Seq == ForkedAtSeq → incomplete
+	if s := summarize(runB, mk(3, ""), nil, 0); !strings.Contains(s.Error, "incomplete fork") {
+		t.Fatalf("expected incomplete fork, got %+v", s)
+	}
+	// a root run is never incomplete
+	if s := summarize(runA, Log{Events: parent[:3]}, nil, 0); s.Error != "" {
+		t.Fatalf("root must not be flagged: %+v", s)
+	}
+}
