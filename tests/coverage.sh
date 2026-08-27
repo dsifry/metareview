@@ -41,7 +41,7 @@ go test -cover -covermode=atomic ./... -args -test.gocoverdir="$COVDIR" > /dev/n
 
 # 2. Behavioral shell suite. GOFLAGS=-cover instruments every `go run` / `go build` the scripts
 #    perform; GOCOVERDIR makes the resulting binaries emit counters into the same directory.
-GOFLAGS=-cover GOCOVERDIR="$COVDIR" bash tests/run-all.sh > /dev/null
+GOFLAGS="-cover -covermode=atomic" GOCOVERDIR="$COVDIR" bash tests/run-all.sh > /dev/null
 
 # 3. Merge into a textfmt profile and compute per-package statement coverage.
 go tool covdata textfmt -i="$COVDIR" -o "$PROFILE"
