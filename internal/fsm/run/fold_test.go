@@ -1066,7 +1066,29 @@ func TestFoldTokensNegativeAndNextIndex(t *testing.T) {
 			t.Errorf("llm_call %s: %v", name, err)
 		}
 	}
-	if (TokenTotals{}).Negative() {
-		t.Fatal("zero is not negative")
+	if (TokenTotals{}).Negative() || (TokenTotals{}).TooLarge() {
+		t.Fatal("zero is neither negative nor too large")
+	}
+	for name, tok := range map[string]TokenTotals{"input": {Input: MaxTokenCounter + 1}, "cache_read": {CacheRead: MaxTokenCounter + 1}, "cache_create": {CacheCreate: MaxTokenCounter + 1}, "output": {Output: MaxTokenCounter + 1}, "reasoning": {Reasoning: MaxTokenCounter + 1}} {
+		b2 := NewBuilder(runA)
+		b2.Init(baseInit())
+		b2.Event(TypeTokens, tok)
+		if _, err := Fold(b2.Events()); err == nil || err.(*FoldError).Reason != ReasonTokensTooLarge {
+			t.Errorf("tokens too large %s: %v", name, err)
+		}
+		b3 := NewBuilder(runA)
+		b3.Init(baseInit())
+		b3.Event(TypeNodeOutput, out(`{}`), WithNode("n"))
+		b3.Event(TypeLLMCall, LLMCallData{Kind: "k", Model: "m", Index: 0, Verdict: json.RawMessage(`{}`), Tokens: tok}, WithNode("n"))
+		if _, err := Fold(b3.Events()); err == nil || err.(*FoldError).Reason != ReasonTokensTooLarge {
+			t.Errorf("llm_call too large %s: %v", name, err)
+		}
+	}
+	// at the cap is accepted
+	b4 := NewBuilder(runA)
+	b4.Init(baseInit())
+	b4.Event(TypeTokens, TokenTotals{Input: MaxTokenCounter})
+	if _, err := Fold(b4.Events()); err != nil {
+		t.Fatal(err)
 	}
 }

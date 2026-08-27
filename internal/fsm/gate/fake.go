@@ -3,6 +3,8 @@ package gate
 import (
 	"context"
 	"fmt"
+
+	"github.com/dsifry/metareview/internal/fsm/errs"
 )
 
 // Fake is a scripted Git for tests. Unset answers return zero values; Err
@@ -41,7 +43,7 @@ func (f *Fake) RevParse(_ context.Context, ref string) (string, error) {
 	if sha, ok := f.Refs[ref]; ok {
 		return sha, nil
 	}
-	return "", fmt.Errorf("%s: unknown ref %q", CodeGit, ref)
+	return "", errs.E(CodeGit, "unknown ref", "ref", ref, "op", "rev-parse")
 }
 
 func (f *Fake) IsAncestor(_ context.Context, a, b string) (bool, error) {

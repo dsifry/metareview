@@ -44,6 +44,8 @@ func TestG1Gates(t *testing.T) {
 		{"confirmed_empty", run.Snapshot{}, ""}, {"confirmed_empty", cnf, CodeConfirmedPresent},
 		{"all_fixed", fixed, ""}, {"all_fixed", remain, CodeBugsRemain}, {"all_fixed", run.Snapshot{}, CodeBugsRemain},
 		{"bugs_remain", remain, ""}, {"bugs_remain", run.Snapshot{}, ""}, {"bugs_remain", fixed, CodeAllFixed},
+		{"nothing_found", run.Snapshot{}, ""}, {"nothing_found", fnd, CodeFindingsPresent}, {"nothing_found", run.Snapshot{AllFound: bugs(1)}, CodeBugsKnown},
+		{"nothing_confirmed", run.Snapshot{}, ""}, {"nothing_confirmed", cnf, CodeConfirmedPresent}, {"nothing_confirmed", run.Snapshot{AllFound: bugs(1), Unfixed: 1}, CodeBugsKnown},
 	}
 	for _, c := range cases {
 		g, ok := Builtin(c.gate)
@@ -64,7 +66,7 @@ func TestG1Gates(t *testing.T) {
 	if _, ok := Builtin("nope"); ok {
 		t.Fatal("unknown gate")
 	}
-	want := []string{"all_fixed", "bugs_remain", "commit_exists", "confirmed_empty", "confirmed_nonempty", "findings_empty", "findings_nonempty"}
+	want := []string{"all_fixed", "bugs_remain", "commit_exists", "confirmed_empty", "confirmed_nonempty", "findings_empty", "findings_nonempty", "nothing_confirmed", "nothing_found"}
 	if strings.Join(Names(), ",") != strings.Join(want, ",") {
 		t.Fatalf("Names: %v", Names())
 	}
@@ -418,7 +420,7 @@ func TestG2ExecErrorBranches(t *testing.T) {
 		t.Fatal("RealExec must report an unrunnable process")
 	}
 	// scrubEnv drops GIT_* overrides
-	got := scrubEnv([]string{"GIT_DIR=x", "GIT_CONFIG_COUNT=1", "GIT_WORK_TREE=y", "GIT_INDEX_FILE=z", "GIT_EXTERNAL_DIFF=e", "GIT_OBJECT_DIRECTORY=o", "GIT_ALTERNATE_OBJECT_DIRECTORIES=a", "PATH=p", "HOME=h"})
+	got := scrubEnv([]string{"GIT_DIR=x", "GIT_CONFIG_COUNT=1", "GIT_WORK_TREE=y", "GIT_INDEX_FILE=z", "GIT_EXTERNAL_DIFF=e", "GIT_OBJECT_DIRECTORY=o", "GIT_ALTERNATE_OBJECT_DIRECTORIES=a", "GIT_COMMON_DIR=c", "GIT_TRACE=1", "PATH=p", "HOME=h"})
 	if strings.Join(got, ",") != "PATH=p,HOME=h" {
 		t.Fatalf("scrub: %v", got)
 	}
@@ -436,7 +438,7 @@ func TestG4FakeContract(t *testing.T) {
 	if r, _ := f.RevParse(ctx, "main"); r != shaA {
 		t.Fatal("revparse main")
 	}
-	if _, err := f.RevParse(ctx, "nope"); err == nil {
+	if _, err := f.RevParse(ctx, "nope"); !errs.Is(err, CodeGit) {
 		t.Fatal("unknown ref")
 	}
 	if ok, _ := f.IsAncestor(ctx, shaB, shaA); !ok {

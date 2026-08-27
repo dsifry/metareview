@@ -19,6 +19,7 @@ const (
 	CodeGateInapplicable = "ERR_GATE_INAPPLICABLE"
 	CodeBugsRemain       = "ERR_BUGS_REMAIN"
 	CodeAllFixed         = "ERR_ALL_FIXED"
+	CodeBugsKnown        = "ERR_BUGS_KNOWN"
 )
 
 // Gate evaluates a snapshot; nil means pass.
@@ -53,6 +54,27 @@ var builtin = map[string]Gate{
 			return nil
 		}
 		return fail("confirmed_empty", CodeConfirmedPresent, fmt.Sprintf("%d confirmed bugs present", len(s.Confirmed)))
+	},
+	// nothing_found / nothing_confirmed are the iteration-0 clean exits: they
+	// refuse once any bug is known, so a later discovery miss cannot end a
+	// loop as clean while bugs remain.
+	"nothing_found": func(_ context.Context, s run.Snapshot, _ Git) *run.GateError {
+		if len(s.AllFound) > 0 {
+			return fail("nothing_found", CodeBugsKnown, fmt.Sprintf("%d bugs already known (%d unfixed)", len(s.AllFound), s.Unfixed))
+		}
+		if len(s.Findings) > 0 {
+			return fail("nothing_found", CodeFindingsPresent, fmt.Sprintf("%d findings present", len(s.Findings)))
+		}
+		return nil
+	},
+	"nothing_confirmed": func(_ context.Context, s run.Snapshot, _ Git) *run.GateError {
+		if len(s.AllFound) > 0 {
+			return fail("nothing_confirmed", CodeBugsKnown, fmt.Sprintf("%d bugs already known (%d unfixed)", len(s.AllFound), s.Unfixed))
+		}
+		if len(s.Confirmed) > 0 {
+			return fail("nothing_confirmed", CodeConfirmedPresent, fmt.Sprintf("%d confirmed bugs present", len(s.Confirmed)))
+		}
+		return nil
 	},
 	"commit_exists": commitExists,
 	"all_fixed": func(_ context.Context, s run.Snapshot, _ Git) *run.GateError {

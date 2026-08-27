@@ -148,11 +148,17 @@ func Apply(st FoldState, ev Event) (FoldState, error) {
 		if p.Tokens.Negative() {
 			return FoldState{}, foldErr(ReasonTokensNegative, ev)
 		}
+		if p.Tokens.TooLarge() {
+			return FoldState{}, foldErr(ReasonTokensTooLarge, ev)
+		}
 		next.indexes[k] = p.Index + 1
 		next.Tokens = next.Tokens.Add(p.Tokens)
 	case *TokenTotals:
 		if p.Negative() {
 			return FoldState{}, foldErr(ReasonTokensNegative, ev)
+		}
+		if p.TooLarge() {
+			return FoldState{}, foldErr(ReasonTokensTooLarge, ev)
 		}
 		next.Tokens = next.Tokens.Add(*p)
 	case *CmdCallData:

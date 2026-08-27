@@ -64,15 +64,16 @@ const (
 )
 
 // Validate checks the structure of a convergence tree without binding it.
-// cmdNames lists the declared command names a cmd atom may reference.
+// cmdNames lists the declared command names a cmd atom may reference (nil
+// accepts any name; workflow.Parse always passes the declared list).
 func Validate(node *yaml.Node, cmdNames []string) error {
-	_, err := parse(node, nil, cmdNames)
+	_, err := parse(node, nil, cmdNames, true, 0)
 	return err
 }
 
 // Parse validates and binds a convergence tree; cmd atoms call runner.
 func Parse(node *yaml.Node, runner Runner) (Predicate, error) {
-	return parse(node, runner, nil)
+	return parse(node, runner, nil, true, 0)
 }
 
 func bad(detail string) error {
@@ -81,8 +82,10 @@ func bad(detail string) error {
 
 // parse walks the tree. When cmdNames is nil every cmd name is accepted
 // (Parse trusts workflow.Parse's earlier Validate); otherwise names must be
-// declared.
-func parse(node *yaml.Node, runner Runner, cmdNames []string) (Predicate, error) {
+// declared. top is true at the root and for direct children of a root-level
+// `any` (depth tracks nesting): `all_fixed` is legal only there, so a give-up
+// can never carry the class `fixed` through `all`/`not` (plan C3).
+func parse(node *yaml.Node, runner Runner, cmdNames []string, top bool, depth int) (Predicate, error) {
 	if node == nil || node.Kind == 0 {
 		return nil, bad("empty convergence")
 	}
@@ -90,12 +93,15 @@ func parse(node *yaml.Node, runner Runner, cmdNames []string) (Predicate, error)
 		if len(node.Content) != 1 {
 			return nil, bad("empty convergence")
 		}
-		return parse(node.Content[0], runner, cmdNames)
+		return parse(node.Content[0], runner, cmdNames, true, 0)
 	}
 	if node.Kind == yaml.ScalarNode {
 		// Bare form: `no_fixation_progress` / `all_fixed` (the shipped YAMLs use it).
 		switch node.Value {
 		case "all_fixed":
+			if !top {
+				return nil, bad(fmt.Sprintf("line %d: all_fixed may only appear at the top level or directly under a top-level any", node.Line))
+			}
 			return allFixed{}, nil
 		case "no_fixation_progress":
 			return noProgress{}, nil
@@ -113,6 +119,9 @@ func parse(node *yaml.Node, runner Runner, cmdNames []string) (Predicate, error)
 			return nil, bad(fmt.Sprintf("line %d: %s must be true", node.Line, key))
 		}
 		if key == "all_fixed" {
+			if !top {
+				return nil, bad(fmt.Sprintf("line %d: all_fixed may only appear at the top level or directly under a top-level any", node.Line))
+			}
 			return allFixed{}, nil
 		}
 		return noProgress{}, nil
@@ -143,7 +152,7 @@ func parse(node *yaml.Node, runner Runner, cmdNames []string) (Predicate, error)
 		}
 		kids := make([]Predicate, 0, len(val.Content))
 		for _, c := range val.Content {
-			p, err := parse(c, runner, cmdNames)
+			p, err := parse(c, runner, cmdNames, key == "any" && depth == 0, depth+1)
 			if err != nil {
 				return nil, err
 			}
@@ -151,7 +160,7 @@ func parse(node *yaml.Node, runner Runner, cmdNames []string) (Predicate, error)
 		}
 		return &compound{op: key, kids: kids}, nil
 	case "not":
-		inner, err := parse(val, runner, cmdNames)
+		inner, err := parse(val, runner, cmdNames, false, depth+1)
 		if err != nil {
 			return nil, err
 		}

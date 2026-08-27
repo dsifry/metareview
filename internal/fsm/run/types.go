@@ -103,10 +103,18 @@ type TokenTotals struct {
 }
 
 // Add returns the field-wise sum.
+// MaxTokenCounter bounds every counter in one record so sums can never wrap.
+const MaxTokenCounter = int64(1) << 40
+
 // Negative reports whether any counter is below zero (rejected by Apply so a
 // driver cannot pay down a budget with negative records).
 func (t TokenTotals) Negative() bool {
 	return t.Input < 0 || t.CacheRead < 0 || t.CacheCreate < 0 || t.Output < 0 || t.Reasoning < 0
+}
+
+// TooLarge reports whether any counter exceeds MaxTokenCounter.
+func (t TokenTotals) TooLarge() bool {
+	return t.Input > MaxTokenCounter || t.CacheRead > MaxTokenCounter || t.CacheCreate > MaxTokenCounter || t.Output > MaxTokenCounter || t.Reasoning > MaxTokenCounter
 }
 
 func (t TokenTotals) Add(u TokenTotals) TokenTotals {
@@ -224,7 +232,7 @@ func (s Snapshot) Clone() Snapshot {
 	if s.AllowedCmds != nil {
 		c.AllowedCmds = make([]AllowedCmd, len(s.AllowedCmds))
 		for i, a := range s.AllowedCmds {
-			c.AllowedCmds[i] = AllowedCmd{Name: a.Name, Argv: cloneStrings(a.Argv), FileHashes: cloneStringMap(a.FileHashes)}
+			c.AllowedCmds[i] = AllowedCmd{Name: a.Name, Argv: cloneStrings(a.Argv), FileHashes: cloneStringMap(a.FileHashes), TimeoutMS: a.TimeoutMS, Env: cloneStrings(a.Env)}
 		}
 	}
 	if s.Goldens != nil {

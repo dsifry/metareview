@@ -55,7 +55,7 @@ type Exec func(ctx context.Context, dir string, env []string, args ...string) (s
 // RealExec shells out to git with prompts, external diff drivers, and
 // config injection disabled.
 func RealExec(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.fsmonitor=false", "-c", "diff.external=", "--no-pager"}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.fsmonitor=false", "-c", "diff.external=", "-c", "core.excludesFile=", "-c", "core.attributesFile=", "--no-pager"}, args...)...)
 	cmd.Dir = dir
 	cmd.Env = append(scrubEnv(cmd.Environ()), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_EXTERNAL_DIFF=", "GIT_CONFIG_NOSYSTEM=1")
 	cmd.Env = append(cmd.Env, env...)
@@ -72,14 +72,13 @@ func RealExec(ctx context.Context, dir string, env []string, args ...string) ([]
 	return []byte(out.String()), []byte(errb.String()), code, err
 }
 
-// scrubEnv drops GIT_* overrides that could redirect git to another
-// repository or inject configuration.
+// scrubEnv drops every GIT_* variable so nothing in the caller's environment
+// can redirect git to another repository, inject configuration, or change
+// object/ref resolution. RealExec re-adds the few it needs.
 func scrubEnv(environ []string) []string {
 	out := environ[:0:0]
 	for _, kv := range environ {
-		k, _, _ := strings.Cut(kv, "=")
-		switch {
-		case k == "GIT_DIR", k == "GIT_WORK_TREE", k == "GIT_INDEX_FILE", k == "GIT_EXTERNAL_DIFF", k == "GIT_OBJECT_DIRECTORY", k == "GIT_ALTERNATE_OBJECT_DIRECTORIES", strings.HasPrefix(k, "GIT_CONFIG"):
+		if strings.HasPrefix(kv, "GIT_") {
 			continue
 		}
 		out = append(out, kv)

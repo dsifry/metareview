@@ -215,3 +215,15 @@ func TestMarshalCanonicalExported(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestCloneKeepsAllowedCmdScalars(t *testing.T) {
+	s := Snapshot{AllowedCmds: []AllowedCmd{{Name: "c", Argv: []string{"/c"}, FileHashes: map[string]string{}, TimeoutMS: 1500, Env: []string{"A"}}}}
+	c := s.Clone()
+	if c.AllowedCmds[0].TimeoutMS != 1500 || len(c.AllowedCmds[0].Env) != 1 || c.AllowedCmds[0].Env[0] != "A" {
+		t.Fatalf("clone dropped fields: %+v", c.AllowedCmds[0])
+	}
+	c.AllowedCmds[0].Env[0] = "B"
+	if s.AllowedCmds[0].Env[0] != "A" {
+		t.Fatal("env must be copied")
+	}
+}

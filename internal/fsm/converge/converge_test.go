@@ -247,6 +247,16 @@ func TestC4ValidateAndParseErrors(t *testing.T) {
 		{"any-scalar", "any: x"},
 		{"all-bad-child", "all: [{max_iterations: -1}]"},
 		{"not-bad-child", "not: {budget: 0}"},
+		{"all_fixed-under-not", "not: all_fixed"},
+		{"all_fixed-under-all", "all: [{not: all_fixed}, {max_iterations: 5}]"},
+		{"all_fixed-map-under-all", "all: [{all_fixed: true}, {max_iterations: 5}]"},
+		{"all_fixed-nested-any", "any: [{any: [all_fixed]}]"},
+	}
+	// all_fixed is legal at the top level and directly under a top-level any
+	for _, ok := range []string{"all_fixed", "{all_fixed: true}", "any: [all_fixed, {max_iterations: 5}]"} {
+		if err := Validate(node(t, ok), nil); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
 	}
 	for _, c := range bad {
 		err := Validate(node(t, c.yaml), []string{"notify"})
