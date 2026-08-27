@@ -59,6 +59,11 @@ func (w *Workflow) Resolve(vars map[string]string, calibration bool) (*Workflow,
 	for s, n := range w.Nodes {
 		nn := *n
 		nn.Model, nn.Effort = sub(n.Model), sub(n.Effort)
+		for _, v := range []string{nn.Model, nn.Effort} {
+			if _, over := run.CapText(v, run.MaxShort); over {
+				return nil, nil, invalid("bad_var", "nodes."+n.Name, "resolved model/effort exceeds MaxShort")
+			}
+		}
 		nn.Params = make(map[string]any, len(n.Params))
 		for k, v := range n.Params {
 			switch x := v.(type) {

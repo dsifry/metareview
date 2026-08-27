@@ -69,7 +69,11 @@ func (f FSSidecar) Write(runID, name string, b []byte) error {
 		return sidecarErr("path", err.Error())
 	}
 	_, werr := fh.Write(b)
-	if err := errors.Join(werr, fh.Close()); err != nil {
+	var serr error
+	if syncer, ok := fh.(interface{ Sync() error }); ok {
+		serr = syncer.Sync()
+	}
+	if err := errors.Join(werr, serr, fh.Close()); err != nil {
 		return sidecarErr("path", err.Error())
 	}
 	return nil

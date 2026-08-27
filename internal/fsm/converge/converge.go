@@ -49,6 +49,13 @@ type Result struct {
 	Reason string
 }
 
+// Caller is Runner plus the typed-decode Call the cmd kind needs; the single
+// Guarded factory returns one and the machine hands it to executors.
+type Caller interface {
+	Runner
+	Call(ctx context.Context, name string, stdin []byte, out any) error
+}
+
 // Predicate is one node of the convergence tree.
 type Predicate interface {
 	Name() string

@@ -283,6 +283,14 @@ func (f *fakeRunner) Run(_ context.Context, name string, stdin []byte) (converge
 	return f.res, f.err
 }
 
+func (f *fakeRunner) Call(ctx context.Context, name string, stdin []byte, out any) error {
+	res, err := f.Run(ctx, name, stdin)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(res.Stdout, out)
+}
+
 // ---- harness ----
 
 type harness struct {
@@ -309,7 +317,7 @@ func newHarness(t *testing.T) *harness {
 	h.deps = Deps{
 		Store: h.store, Sidecar: h.sidecar, Kinds: h.reg,
 		Git: func(dir string) gate.Git { return h.git.get(dir) },
-		Runner: func(d RunnerDeps) converge.Runner {
+		Runner: func(d RunnerDeps) converge.Caller {
 			h.runner.audit = d.Audit
 			h.runner.ordinal = d.CmdCalls
 			return h.runner

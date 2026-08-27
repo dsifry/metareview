@@ -339,6 +339,9 @@ func TestW3Resolve(t *testing.T) {
 		t.Fatalf("params: %v", r2.Nodes["discover"].Params)
 	}
 	// errors
+	if _, _, err := w.Resolve(map[string]string{"JUDGE": strings.Repeat("m", run.MaxShort+1), "JUDGE_EFFORT": "b"}, false); !errs.Is(err, CodeWorkflowInvalid) || errs.As(err).Field("reason") != "bad_var" {
+		t.Fatalf("over-long model: %v", err)
+	}
 	if _, _, err := w.Resolve(map[string]string{"JUDGE": "a"}, false); !errs.Is(err, CodeVarUnset) || errs.As(err).Field("name") != "JUDGE_EFFORT" {
 		t.Fatalf("unset: %v", err)
 	}

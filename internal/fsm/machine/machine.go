@@ -37,7 +37,7 @@ type session struct {
 	log      run.Log
 	w        *workflow.Workflow // resolved
 	pred     converge.Predicate
-	runner   converge.Runner
+	runner   converge.Caller
 	git      gate.Git
 	warns    []string
 	auditErr error          // the first store error seen through the audit closure
@@ -148,15 +148,14 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(o.RepoRoot, dir)
 		}
-		h, err := deps.MockLoad(dir)
-		if err != nil {
-			return nil, errs.E(CodeMockInvalid, err.Error(), "dir", o.MockDir)
-		}
-		root := filepath.Clean(o.RepoRoot) + string(filepath.Separator)
-		if !strings.HasPrefix(filepath.Clean(dir)+string(filepath.Separator), root) {
+		rel, inside := relInside(o.RepoRoot, dir)
+		if !inside {
 			return nil, errs.E(CodeMockInvalid, "mock scenario must live inside the repository", "dir", o.MockDir, "reason", "outside")
 		}
-		rel := strings.TrimPrefix(filepath.Clean(dir), root)
+		h, err := deps.MockLoad(dir)
+		if err != nil || len(h) < 16 {
+			return nil, errs.E(CodeMockInvalid, fmt.Sprintf("scenario load failed: %v", err), "dir", o.MockDir)
+		}
 		mock = rel + "#" + h[:16]
 	}
 	if deps.Kinds.Mock() != (mock != "") {
@@ -206,6 +205,20 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 	}
 	m.view = sess.viewOf()
 	return m, nil
+}
+
+// relInside returns dir relative to root ("." for root itself) and whether
+// dir is inside root. Both must be absolute (Init checks).
+func relInside(root, dir string) (string, bool) {
+	rootC, dirC := filepath.Clean(root), filepath.Clean(dir)
+	if dirC == rootC {
+		return ".", true
+	}
+	prefix := rootC + string(filepath.Separator)
+	if !strings.HasPrefix(dirC, prefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(dirC, prefix), true
 }
 
 // consentList renders the human-readable command list for ERR_CMDS_NOT_ALLOWED.
@@ -355,9 +368,12 @@ func (m *Machine) load(ctx context.Context, repair bool) (*session, error) {
 	}
 	if snap.Mock != "" {
 		i := strings.LastIndex(snap.Mock, "#")
+		if i < 0 {
+			return nil, errs.E(CodeMockMismatch, "malformed mock identity", "mock", snap.Mock)
+		}
 		rel, want := snap.Mock[:i], snap.Mock[i+1:]
 		h, err := deps.MockLoad(filepath.Join(snap.RepoRoot, rel))
-		if err != nil || h[:16] != want {
+		if err != nil || len(h) < 16 || h[:16] != want {
 			return nil, errs.E(CodeMockMismatch, "mock scenario changed or missing", "mock", snap.Mock)
 		}
 	}
@@ -552,7 +568,7 @@ func (s *session) advance() (AdvanceResult, error) {
 		if err := s.append(run.TypeTree, tree, ""); err != nil {
 			return AdvanceResult{}, err
 		}
-	case h != snap.TreeHash && (node == nil || node.Kind != "agent-edit"):
+	case h != snap.TreeHash && (node == nil || run.Kind(node.Kind) != run.KindAgentEdit):
 		if snap.RepoMode == "enforcing" {
 			ge := pseudoGate(GateRepoMode, CodeUnsanctionedEdit, "working tree changed outside an agent-edit node:\n"+porcelain)
 			if err := s.gateEvent(GateRepoMode, ge); err != nil {
@@ -596,7 +612,7 @@ func (s *session) runNode(node *workflow.Node, head string) (AdvanceResult, bool
 		diff := Diff{Text: text, Truncated: truncated}
 		if node.Exec == "fork" {
 			ex, _ := s.m.deps.Kinds.Executor(node.Kind)
-			out, err := ex.Execute(s.ctx, ExecInput{Snap: snap, Node: node, Diff: diff, StartIndex: s.st.NextIndex(k), Audit: s.audit})
+			out, err := ex.Execute(s.ctx, ExecInput{Snap: snap, Node: node, Diff: diff, StartIndex: s.st.NextIndex(k), Audit: s.audit, Runner: s.runner})
 			if err != nil {
 				if s.ctx.Err() != nil {
 					return AdvanceResult{}, true, err
@@ -696,6 +712,9 @@ func (s *session) transitions(head string) (AdvanceResult, error) {
 			r, err := s.pred.Evaluate(s.ctx, s.st.Snapshot)
 			if err != nil && s.auditErr != nil {
 				return AdvanceResult{}, s.auditErr // the atom's cmd_call could not be stored: abort, not a gate failure
+			}
+			if err != nil && s.ctx.Err() != nil {
+				return AdvanceResult{}, err // interrupted inside an atom: resumable, never a gate failure
 			}
 			if err != nil || (r.Stop && r.Class == run.OutcomeFixed && r.Atom != "all_fixed") {
 				detail := "convergence evaluation failed"
@@ -827,6 +846,9 @@ func (s *session) overflowHandler() error {
 	res, err := s.runner.Run(s.ctx, name, payload)
 	if s.auditErr != nil {
 		return s.auditErr // the runner's own cmd_call could not be stored: abort, the handler is retried on resume
+	}
+	if s.ctx.Err() != nil {
+		return s.ctx.Err() // interrupted: nothing recorded, the handler is retried on resume
 	}
 	var argv []string
 	for _, c := range snap.AllowedCmds {

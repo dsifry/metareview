@@ -38,6 +38,7 @@ type ExecInput struct {
 	Diff       Diff
 	StartIndex int
 	Audit      func(run.Event) error
+	Runner     converge.Caller // the session's guarded runner (same audit closure and ordinal source)
 }
 
 // NodeKind describes one kind of node work.
@@ -87,7 +88,7 @@ type Deps struct {
 	Sidecar   Sidecar
 	Kinds     Registry
 	Git       func(workDir string) gate.Git
-	Runner    func(RunnerDeps) converge.Runner
+	Runner    func(RunnerDeps) converge.Caller
 	Clock     Clock
 	LookPath  func(string) (string, error)
 	FileHash  func(string) (string, error)

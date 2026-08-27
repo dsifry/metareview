@@ -76,6 +76,14 @@ type Golden struct {
 }
 
 // Bug is a confirmed bug (the fix/verify unit).
+// Bug.Verdict vocabulary (design §6).
+const (
+	VerdictMatched       = "matched"
+	VerdictRealButUngold = "real_but_ungold"
+	VerdictHallucination = "hallucination"
+)
+
+// Bug is a confirmed (or rejected) finding.
 type Bug struct {
 	ID         string  `json:"id"`
 	Desc       string  `json:"desc"`

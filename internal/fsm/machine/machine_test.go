@@ -113,6 +113,7 @@ func TestM1InitErrors(t *testing.T) {
 		{"base-unknown", InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, Base: "nope"}, nil, gate.CodeGit},
 		{"workdir-relative", InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, WorkDir: "rel"}, nil, CodeWorkdirForeign},
 		{"mock-outside-root", InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, MockDir: "/other/scen"}, func() { h.mockHash["/other/scen"] = strings.Repeat("b", 64) }, CodeMockInvalid},
+		{"mock-short-hash", InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, MockDir: "scen/short"}, func() { h.mockHash["/repo/scen/short"] = "abc" }, CodeMockInvalid},
 		{"workdir-foreign", InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, WorkDir: "/elsewhere"}, func() {
 			h.git.byDir["/elsewhere"] = &gate.Fake{HeadSHA: shaHead, Common: "/other/.git"}
 		}, CodeWorkdirForeign},
@@ -143,6 +144,18 @@ func TestM1InitErrors(t *testing.T) {
 	if m.View().Snapshot.Mock != "scen/ok#"+strings.Repeat("a", 16) {
 		t.Fatalf("mock id %q", m.View().Snapshot.Mock)
 	}
+	h.mockHash["/repo"] = strings.Repeat("c", 64)
+	if mr := h.mustInit(InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, MockDir: "."}); mr.View().Snapshot.Mock != ".#"+strings.Repeat("c", 16) {
+		t.Fatalf("mock at repo root: %q", mr.View().Snapshot.Mock)
+	}
+	if _, err := Open(context.Background(), h.deps, m.runID, OpenOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	h.mockHash["/repo/scen/ok"] = "short"
+	if _, err := Open(context.Background(), h.deps, m.runID, OpenOptions{}); !errs.Is(err, CodeMockMismatch) {
+		t.Fatalf("short hash on open: %v", err)
+	}
+	h.mockHash["/repo/scen/ok"] = strings.Repeat("a", 64)
 	if !h.events(m)[1].Mock {
 		t.Fatal("mock runs stamp Mock on every later event")
 	}
@@ -274,7 +287,7 @@ func TestM2ReviewLoop(t *testing.T) {
 		t.Fatalf("reviewed sequence:\n%s\n%s", got, want)
 	}
 	ex := h.reg.execs["match-then-adjudicate"]
-	if len(ex.calls) != 1 || ex.calls[0].StartIndex != 0 || ex.calls[0].Diff.Text != "DIFF" || ex.calls[0].Node.Name != "adjudicate" || ex.calls[0].Node.Model != "gpt-5.2" {
+	if len(ex.calls) != 1 || ex.calls[0].StartIndex != 0 || ex.calls[0].Diff.Text != "DIFF" || ex.calls[0].Node.Name != "adjudicate" || ex.calls[0].Node.Model != "gpt-5.2" || ex.calls[0].Runner == nil {
 		t.Fatalf("exec input: %+v", ex.calls)
 	}
 	evs := h.events(m2)
@@ -1747,6 +1760,68 @@ func TestM9Residue(t *testing.T) {
 	_ = hj.deps.Sidecar.Write("mrv-crafted-invalid-torn", SidecarWorkflow, raw)
 	if _, err := Open(ctx, hj.deps, "mrv-crafted-invalid-torn", OpenOptions{Repair: true}); err == nil || !strings.Contains(err.Error(), "stamp") {
 		t.Fatalf("fold-invalid after repair: %v", err)
+	}
+	// malformed mock identity in a crafted init → ERR_MOCK_MISMATCH, not a panic
+	initJ.RunID = "mrv-crafted-bad-mock"
+	initJ.Mock = "nohash"
+	if _, err := hj.store.Create("mrv-crafted-bad-mock", run.Event{SchemaVersion: run.SchemaVersion, At: initJ.CreatedAt, Type: run.TypeInit, Data: run.MarshalCanonical(initJ)}); err != nil {
+		t.Fatal(err)
+	}
+	_ = hj.deps.Sidecar.Write("mrv-crafted-bad-mock", SidecarWorkflow, raw)
+	hj.reg.mock = true
+	if _, err := Open(ctx, hj.deps, "mrv-crafted-bad-mock", OpenOptions{}); !errs.Is(err, CodeMockMismatch) {
+		t.Fatalf("malformed mock: %v", err)
+	}
+	hj.reg.mock = false
+	// on_overflow interrupted by the parent context: nothing recorded, handler retried on resume
+	ho := newHarness(t)
+	wf := sdlcWith(t, ho, "ov-cancel.yaml", "  any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]\nrepo_mode: advisory",
+		"  any: [{max_iterations: 1}]\ncmds:\n  notify: {argv: [bash, -c, echo]}\non_overflow: notify\nrepo_mode: advisory")
+	_, sha, _ := workflow.ResolveCmds(mustResolve(t, ho, wf), "/repo", ho.deps.LookPath, ho.deps.FileHash)
+	allPresent(ho)
+	ho.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1}
+	ho.runner.err = context.Canceled
+	mo := ho.mustInit(InitOptions{Workflow: wf, Vars: sdlcVars, AllowCustomCmds: sha})
+	ho.advance(mo)
+	ho.record(mo, "discover", findings(1))
+	ho.advance(mo)
+	ho.advance(mo)
+	ho.advance(mo)
+	ho.record(mo, "fix", `{"commit":"`+shaFix+`","summary":"s"}`)
+	ho.advance(mo)
+	cctx, ccancel := context.WithCancel(ctx)
+	ccancel()
+	ho.runner.audit = nil
+	if _, err := mo.Advance(cctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("interrupted handler: %v", err)
+	}
+	if countType(ho.events(mo), run.TypeOverflowHandler) != 0 || mo.View().Snapshot.OverflowHandled {
+		t.Fatal("interrupted handler must not be recorded")
+	}
+	// interrupted inside a cmd atom: returned, never a converge pseudo-gate
+	hc := newHarness(t)
+	wfc := sdlcWith(t, hc, "cv-cancel.yaml", "  any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]\nrepo_mode: advisory",
+		"  any: [{cmd: notify}]\ncmds:\n  notify: {argv: [bash, -c, echo]}\nrepo_mode: advisory")
+	_, shac, _ := workflow.ResolveCmds(mustResolve(t, hc, wfc), "/repo", hc.deps.LookPath, hc.deps.FileHash)
+	allPresent(hc)
+	hc.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1}
+	hc.runner.err = context.Canceled
+	mc := hc.mustInit(InitOptions{Workflow: wfc, Vars: sdlcVars, AllowCustomCmds: shac})
+	hc.advance(mc)
+	hc.record(mc, "discover", findings(1))
+	hc.advance(mc)
+	hc.advance(mc)
+	hc.advance(mc)
+	hc.record(mc, "fix", `{"commit":"`+shaFix+`","summary":"s"}`)
+	hc.advance(mc)
+	cctx2, ccancel2 := context.WithCancel(ctx)
+	ccancel2()
+	hc.runner.audit = nil
+	if _, err := mc.Advance(cctx2); !errors.Is(err, context.Canceled) {
+		t.Fatalf("interrupted atom: %v", err)
+	}
+	if mc.View().Snapshot.Outcome != "" {
+		t.Fatal("interrupted atom must not fail the run")
 	}
 	// FS Read with bad args
 	if _, err := (FSSidecar{Root: root}).Read("bad id", "x"); errs.As(err).Field("reason") != "path" {
