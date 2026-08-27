@@ -125,7 +125,7 @@ After a GitHub PR exists, append CI receipts with `metareview evidence import --
 
 Task-done and PR-ready parse receipt files as validation evidence; epic-ready reads the supplied evidence text for child-completion signals.
 
-Task-done, epic-ready, and PR-ready context packs include context profiles, generated-artifact filtering, and shard plans for risky diffs. Task-done and PR-ready also include Review Manifest coverage accounting.
+Task-done, epic-ready, and PR-ready context packs include context profiles and generated-artifact filtering. Task-done and PR-ready add a Context Shard Plan and prompt packs when the branch diff exceeds the review context limit, plus a Review Manifest accounting for the shard results ingested; epic-ready renders "not sharded".
 
 Commit durable Markdown artifacts under `docs/metareview/`. Keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local unless a future contract says otherwise. In ordinary project repositories, prefer exact `.gitignore` entries:
 

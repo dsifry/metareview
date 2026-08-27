@@ -14,6 +14,9 @@ import (
 	"time"
 )
 
+// maxJSONLLineBytes is the JSONL line cap: 1 MiB, not bufio's 64 KiB default.
+const maxJSONLLineBytes = 1 << 20
+
 func AppendJSONL(path string, record any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -42,6 +45,8 @@ func ReadJSONL[T any](path string) ([]T, error) {
 	defer file.Close()
 	var records []T
 	scanner := bufio.NewScanner(file)
+	// A run row can carry long ingested strings, so the 64 KiB default is not enough.
+	scanner.Buffer(make([]byte, 0, 64*1024), maxJSONLLineBytes)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {

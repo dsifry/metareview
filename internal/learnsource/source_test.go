@@ -153,3 +153,35 @@ func contains(values []string, expected string) bool {
 	}
 	return false
 }
+
+func TestCollectExcludesShardResults(t *testing.T) {
+	root := t.TempDir()
+	run(t, root, "git", "init", "-q")
+	run(t, root, "git", "config", "user.email", "test-user")
+	run(t, root, "git", "config", "user.name", "Test User")
+	mustWrite(t, filepath.Join(root, "lib", "service.go"), "package lib\n")
+	run(t, root, "git", "add", ".")
+	run(t, root, "git", "commit", "-qm", "initial")
+	base := strings.TrimSpace(command(t, root, "git", "rev-parse", "HEAD"))
+	mustWrite(t, filepath.Join(root, "lib", "service.go"), "package lib\nfunc New() {}\n")
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "shards", "pr-ready", "feature-0011aabb",
+		"shard-0.0011223344556677.result.json"), `{"schemaVersion":1,"id":"r-0","kind":"shard"}`+"\n")
+	run(t, root, "git", "add", "-A")
+	run(t, root, "git", "commit", "-qm", "change plus a committed shard result")
+
+	ctx, err := Collect(root, Options{Base: base})
+	if err != nil {
+		t.Fatalf("Collect returned error: %v", err)
+	}
+	if !contains(ctx.Git.ChangedFiles, "lib/service.go") {
+		t.Fatalf("the source change is missing: %+v", ctx.Git.ChangedFiles)
+	}
+	for _, path := range ctx.Git.ChangedFiles {
+		if strings.Contains(path, "docs/metareview/shards/") {
+			t.Fatalf("committed shard results must be excluded: %+v", ctx.Git.ChangedFiles)
+		}
+	}
+	if strings.Contains(ctx.Git.Diff, "shard-0.0011223344556677.result.json") {
+		t.Fatal("the shard result reached the learning diff")
+	}
+}

@@ -242,3 +242,21 @@ func appendLine(path, line string) error {
 	_, err = file.WriteString(line + "\n")
 	return err
 }
+
+func TestReadersAcceptOneMiBLines(t *testing.T) {
+	root := t.TempDir()
+	long := `{"schemaVersion":1,"id":"mrv-long","scope":"pr-ready","target":{"type":"branch","id":"feature"},` +
+		`"status":"passed","verdict":"PASS","escalationReason":"` + strings.Repeat("x", 300_000) + `"}`
+	if len(long) <= 64*1024 {
+		t.Fatalf("fixture line is only %d bytes; it must exceed bufio's default", len(long))
+	}
+	writeRun(t, root, long)
+
+	records, err := ReadRuns(root)
+	if err != nil {
+		t.Fatalf("a 1 MiB run row must be readable: %v", err)
+	}
+	if len(records) != 1 || records[0].ID != "mrv-long" {
+		t.Fatalf("records = %+v, want the long row", records)
+	}
+}

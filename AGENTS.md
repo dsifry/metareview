@@ -69,6 +69,7 @@ Commit durable artifacts:
 - `docs/metareview/reviews/`
 - `docs/metareview/context/`
 - `docs/metareview/learning/`
+- `docs/metareview/shards/` (committed shard review results)
 - `.beads/knowledge/metareview.jsonl` when Beads owns knowledge
 - `.metareview/knowledge/metareview.jsonl` in standalone fallback mode
 - `.metareview/calibration.jsonl`
@@ -78,6 +79,7 @@ Keep transient state local:
 
 - `.metareview/findings.jsonl`
 - `.metareview/runs.jsonl`
+- `.metareview/shards/` (transient prompt packs; self-ignoring)
 - generated binaries such as `bin/metareview`
 
 ## Metaswarm Fit
@@ -85,3 +87,26 @@ Keep transient state local:
 When metaswarm is present, it remains the lifecycle owner. Follow metaswarm's decomposition, Superpowers, Beads, and PR shepherding process, and insert metareview as the deeper review harness at artifact, task-done, epic-ready, pr-ready, and post-merge checkpoints.
 
 When metaswarm is absent, use `metareview setup --bootstrap-prereqs --dry-run` before proposing local prerequisites or registries such as `docs/SERVICE_INVENTORY.md`.
+
+### Sharded review (diffs over the context limit)
+
+A branch diff over 120 KB cannot be held in one review context. metareview measures the real
+branch diff, cuts it into shards, and writes a prompt pack per shard under
+`.metareview/shards/<scope>/<target-slug>/<planHash>/`, with a `plan.json` naming every shard, its
+hash, and the directory the results belong in.
+
+1. Run the gate once. It reports `NEEDS_REVISION` with the context-risk blocker and writes the packs.
+2. Read `plan.json`. Review one subagent per `shard-<id>.md` against `rubrics/task-done-review-rubric.md`,
+   and one more over `cross-shard.md` when there is more than one shard.
+3. Write a result per shard to `docs/metareview/shards/<scope>/<target-slug>/shard-<id>.<shardHash>.result.json`
+   and, for a multi-shard plan, `cross-shard.<planHash>.result.json`. The pack states the exact
+   contract.
+4. Re-run the gate with `--previous-run <run-id>`. With every shard covered and the aggregate
+   passing, the context-risk blocker becomes advisory and the deterministic lints run over the whole
+   branch diff.
+
+Set `--max-attempts` on the **first** run of the chain; mid-chain it is ignored. Commit the results
+with the review log. Editing a file invalidates only its own shard's result: re-review that shard
+and the cross-shard pack, and leave the rest. Local (staged, worktree, untracked) content is in no
+pack, so on task-done commit or remove it first — an untracked file over 4,000 bytes raises
+`UNTRACKED_TRUNCATED`, which shard results can never satisfy.

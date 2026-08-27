@@ -10,6 +10,9 @@ import (
 	"strings"
 )
 
+// maxJSONLLineBytes is the JSONL line cap: 1 MiB, not bufio's 64 KiB default.
+const maxJSONLLineBytes = 1 << 20
+
 const DefaultMaxAttempts = 3
 
 type Options struct {
@@ -103,6 +106,8 @@ func ReadRuns(root string) ([]Record, error) {
 	defer file.Close()
 	var records []Record
 	scanner := bufio.NewScanner(file)
+	// A run row can carry long ingested strings, so the 64 KiB default is not enough.
+	scanner.Buffer(make([]byte, 0, 64*1024), maxJSONLLineBytes)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {

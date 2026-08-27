@@ -194,11 +194,14 @@ func RunTaskDone(context Context) []Finding {
 
 // manifestFound appends what the manifest said, capped at ten blockers.
 func manifestFound(manifest ManifestContext) string {
-	if !manifest.Present {
-		return "; no shard review results were ingested"
+	if manifest.ShardCount == 0 {
+		return ""
 	}
 	parts := []string{"Manifest verdict: " + manifest.Verdict,
 		"shards covered: " + intString(manifest.ShardsCovered) + " of " + intString(manifest.ShardCount)}
+	if !manifest.Present {
+		parts = append(parts, "no shard review results were ingested")
+	}
 	blockers := manifest.Blockers
 	if len(blockers) > 10 {
 		blockers = blockers[:10]
