@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0 - unreleased
+## 0.9.0 - 2026-08-27
 
 0.9.0 adds **FSM workflow runs**: `metareview fsm` drives `sdlc-loop` (discover → adjudicate → fix → verify) and
 `review-loop` as an event-sourced, hash-chained state machine. The host agent does the host nodes' work in its own warm
