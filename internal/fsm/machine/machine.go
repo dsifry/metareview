@@ -689,7 +689,7 @@ func (s *session) transitions(head string) (AdvanceResult, error) {
 	w := s.w
 	var chosen *workflow.Transition
 	var failures []*run.GateError
-	eval := func(t workflow.Transition) (bool, error) {
+	evalGate := func(t workflow.Transition) (bool, error) {
 		g, _ := gate.Builtin(t.Gate)
 		gerr := g(s.ctx, s.st.Snapshot, s.git)
 		if err := s.gateEvent(t.Gate, gerr); err != nil {
@@ -705,7 +705,7 @@ func (s *session) transitions(head string) (AdvanceResult, error) {
 	}
 	tt := w.TerminalFor(snap.State)
 	if tt != nil {
-		if _, err := eval(*tt); err != nil {
+		if _, err := evalGate(*tt); err != nil {
 			return AdvanceResult{}, err
 		}
 		if chosen == nil {
@@ -747,7 +747,7 @@ func (s *session) transitions(head string) (AdvanceResult, error) {
 				if t == *tt {
 					continue
 				}
-				if ok, err := eval(t); err != nil || ok {
+				if ok, err := evalGate(t); err != nil || ok {
 					if err != nil {
 						return AdvanceResult{}, err
 					}
@@ -757,7 +757,7 @@ func (s *session) transitions(head string) (AdvanceResult, error) {
 		}
 	} else {
 		for _, t := range w.Outgoing(snap.State) {
-			if ok, err := eval(t); err != nil || ok {
+			if ok, err := evalGate(t); err != nil || ok {
 				if err != nil {
 					return AdvanceResult{}, err
 				}
