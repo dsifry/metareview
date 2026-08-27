@@ -35,7 +35,7 @@
 > | **A (current, r4)** `AllFixed = len(AllFound) > 0 && Unfixed == 0`; `nothing_found`/`nothing_confirmed` clean exits | convergence runs → `overflow`/`stalled`, exit 1 (shipped loop cannot reach this: verify needs `confirmed_nonempty`) | `clean`, exit 0 (sdlc-loop) / `GATE_FAILED` if the workflow has no clean exit (Parse warns) | `findings_nonempty` fails → `GATE_FAILED`, exit 1 — visible, fork to retry |
 > | **B (design-literal)** `AllFixed = Unfixed == 0` | `fixed`, exit 0 with nothing found | same as A | same as A |
 >
-> A is built. B is a one-line change in `converge.AllFixed` + C1 rows. Accept A or switch to B.
+> **Decided 2026-08-27 by Dave: keep A.** (B remains documented here for the record.)
 >
 > **Scope rule:** what the deterministic core *decides*: how a YAML becomes a `Workflow`, what each gate and atom
 > returns, and exactly which `run` events `Init`/`Advance`/`Record` append. Kinds' prompts/executors are spec 4, forks/

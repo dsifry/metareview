@@ -288,6 +288,9 @@ func TestC4ValidateAndParseErrors(t *testing.T) {
 	if err := Validate(multi, nil); !errs.Is(err, CodeBadConvergence) {
 		t.Fatal("empty document")
 	}
+	if p := MustParse(node(t, "{cmd: anything}"), &fakeRunner{}); p == nil || p.Name() != "cmd:anything" {
+		t.Fatal("MustParse binds validated input")
+	}
 	// Parse (cmdNames nil) accepts any cmd name — workflow.Parse validated it earlier.
 	if _, err := Parse(node(t, "{cmd: anything}"), &fakeRunner{}); err != nil {
 		t.Fatal(err)

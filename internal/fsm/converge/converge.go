@@ -82,6 +82,13 @@ func Parse(node *yaml.Node, runner Runner) (Predicate, error) {
 	return parse(node, runner, nil, true, 0)
 }
 
+// MustParse binds a tree that already passed Validate (workflow.Parse ran
+// it); the error path of parse cannot recur on validated input.
+func MustParse(node *yaml.Node, runner Runner) Predicate {
+	p, _ := parse(node, runner, nil, true, 0)
+	return p
+}
+
 func bad(detail string) error {
 	return errs.E(CodeBadConvergence, detail, "detail", detail)
 }
