@@ -29,6 +29,23 @@ Lifecycle gate verdicts have this contract:
 
 Advisory notes can be recorded for later, but blockers are current work.
 
+When a blocker cannot be fixed and the workflow is deliberately stepped outside of, record the exception
+instead of working around it:
+
+- `metareview override request <finding-id> --reason "<text>" [--escalation "<text>"]` — available to
+  whoever drives the run, including an orchestrating agent. It does **not** clear the gate: the finding
+  keeps blocking and `metareview override list --pending` exits nonzero, so CI stays red.
+- `metareview override grant <finding-id> --reason "<text>"` — the acknowledgement, and it must come from
+  outside the workflow (a human, or an authority explicitly designated as one). A reviewing agent never
+  grants an override on findings it produced, and the actor that requested one is refused if it also tries
+  to grant it. `--by` is audit metadata, not authentication: it records who claims to have acted, and a
+  local CLI cannot verify that. Enforce the boundary with whatever authenticates actors in your
+  environment when it matters.
+
+Both halves record actor, timestamp and reason and are rendered under "Process Overrides" in
+`docs/metareview/FINDINGS.md`. An override is never a fix: `fixedInRunId` stays empty, so exceptions can be
+analysed separately from resolutions.
+
 ## Evidence Policy
 
 For task-done and pr-ready reviews, provide evidence:

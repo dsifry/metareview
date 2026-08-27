@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/runchain"
 )
 
@@ -293,7 +294,8 @@ func readFindings(root string) ([]findingRecord, error) {
 }
 
 func isOpenBlocker(record findingRecord) bool {
-	if record.Status != "open" {
+	// A pending override still blocks; a granted one does not.
+	if !findings.Blocks(record.Status) {
 		return false
 	}
 	if record.Classification == "spec-contract" {

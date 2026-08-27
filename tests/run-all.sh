@@ -17,6 +17,8 @@ if [ -f tests/go/test-shardpack-coverage.sh ]; then bash tests/go/test-shardpack
 if [ -f tests/go/test-task-source.sh ]; then bash tests/go/test-task-source.sh; fi
 if [ -f tests/go/test-knowledge-context.sh ]; then bash tests/go/test-knowledge-context.sh; fi
 if [ -f tests/go/test-findings.sh ]; then bash tests/go/test-findings.sh; fi
+if [ -f tests/go/test-override.sh ]; then bash tests/go/test-override.sh; fi
+if [ -f tests/go/test-override-coverage.sh ]; then bash tests/go/test-override-coverage.sh; fi
 if [ -f tests/go/test-taskdone-reviewers.sh ]; then bash tests/go/test-taskdone-reviewers.sh; fi
 if [ -f tests/go/test-task-done-review.sh ]; then bash tests/go/test-task-done-review.sh; fi
 if [ -f tests/go/test-reviewlog.sh ]; then bash tests/go/test-reviewlog.sh; fi
