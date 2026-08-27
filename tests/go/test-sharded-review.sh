@@ -180,8 +180,8 @@ write_results "$repo" "$plan"
 log4="$(run_review "$repo" review pr-ready --base main --evidence "$EVIDENCE" --previous-run "$run3_id")"
 [ "$(verdict_of "$repo" "$log4")" = "PASS_ADVISORY" ] || fail "run 4 verdict: $(verdict_of "$repo" "$log4")"
 results_dir="$repo/$(plan_field "$plan" resultsDir)"
-[ "$(ls "$results_dir" | wc -l | tr -d ' ')" -eq "$((shards + 1))" ] ||
-  fail "superseded result files were not collected: $(ls "$results_dir")"
+[ "$(find "$results_dir" -type f | wc -l | tr -d ' ')" -eq "$((shards + 1))" ] ||
+  fail "superseded result files were not collected: $(find "$results_dir" -type f)"
 run4_id="$(sed -n 's/^Run ID: `\(.*\)`$/\1/p' "$repo/$log4" | head -1)"
 
 # A result for another plan is ignored, never a blocker.

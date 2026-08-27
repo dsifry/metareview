@@ -1,0 +1,14 @@
+# shellcheck configuration for the behavioral suite.
+#
+# Only one check is disabled, and only because it is a false positive here
+# rather than a rule we would rather not follow:
+#
+#   SC2016 — "expressions don't expand in single quotes". Every hit is a
+#   backtick inside a single-quoted literal: a Markdown code span being
+#   grepped for in a review log (`docs/metareview/`) or a sed script matching
+#   one (`s/^Run ID: `\(.*\)`$/\1/p`). Single quotes are exactly right there,
+#   and taking shellcheck's advice would break the pattern.
+#
+# Everything else stays on, including SC2251, which found fifteen negative
+# assertions in this suite that could never fail.
+disable=SC2016

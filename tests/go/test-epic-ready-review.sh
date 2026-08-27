@@ -219,7 +219,7 @@ generated_epic_context="docs/metareview/context/$(basename "$generated_epic_revi
 grep -q "docs/metareview/reviews/epic.md" "$repo/$generated_epic_review"
 grep -q "docs/metareview/reviews/epic.md" "$repo/$generated_epic_context"
 grep -q "diff --git a/docs/metareview/reviews/epic.md b/docs/metareview/reviews/epic.md" "$repo/$generated_epic_context"
-! grep -q "noise artifact" "$repo/$generated_epic_context"
+grep -q "noise artifact" "$repo/$generated_epic_context" && exit 1
 
 repo="$TMP/failure"
 mkdir -p "$repo/.beads" "$repo/docs"

@@ -143,8 +143,8 @@ printf "bash tests/run-all.sh exited 0\n" > "$TMP/unrelated-artifact-evidence.md
 "$TMP/metareview" review pr-ready --base "$base" --evidence "$TMP/unrelated-artifact-evidence.md" > "$TMP/unrelated-artifact.out"
 unrelated_artifact_review="$(cat "$TMP/unrelated-artifact.out")"
 grep -q "PASS" "$repo/$unrelated_artifact_review"
-! grep -q "Unresolved review blockers" "$repo/$unrelated_artifact_review"
-! grep -q "docs/spec.md" "$repo/$unrelated_artifact_review"
+grep -q "Unresolved review blockers" "$repo/$unrelated_artifact_review" && exit 1
+grep -q "docs/spec.md" "$repo/$unrelated_artifact_review" && exit 1
 
 repo="$TMP/unrelated-artifact-working-tree"
 init_repo "$repo"
@@ -178,8 +178,8 @@ printf "bash tests/run-all.sh exited 0\n" > "$TMP/unrelated-artifact-working-tre
 "$TMP/metareview" review pr-ready --base "$base" --include-working-tree --evidence "$TMP/unrelated-artifact-working-tree-evidence.md" > "$TMP/unrelated-artifact-working-tree.out"
 unrelated_artifact_working_tree_review="$(cat "$TMP/unrelated-artifact-working-tree.out")"
 grep -q "PASS" "$repo/$unrelated_artifact_working_tree_review"
-! grep -q "Unresolved review blockers" "$repo/$unrelated_artifact_working_tree_review"
-! grep -q "docs/spec.md" "$repo/$unrelated_artifact_working_tree_review"
+grep -q "Unresolved review blockers" "$repo/$unrelated_artifact_working_tree_review" && exit 1
+grep -q "docs/spec.md" "$repo/$unrelated_artifact_working_tree_review" && exit 1
 
 repo="$TMP/unrelated-path-finding-no-log"
 init_repo "$repo"
@@ -195,8 +195,8 @@ printf "bash tests/run-all.sh exited 0\n" > "$TMP/unrelated-path-finding-no-log-
 "$TMP/metareview" review pr-ready --base "$base" --evidence "$TMP/unrelated-path-finding-no-log-evidence.md" > "$TMP/unrelated-path-finding-no-log.out"
 unrelated_path_finding_no_log_review="$(cat "$TMP/unrelated-path-finding-no-log.out")"
 grep -q "PASS" "$repo/$unrelated_path_finding_no_log_review"
-! grep -q "Unresolved review blockers" "$repo/$unrelated_path_finding_no_log_review"
-! grep -q "docs/spec.md" "$repo/$unrelated_path_finding_no_log_review"
+grep -q "Unresolved review blockers" "$repo/$unrelated_path_finding_no_log_review" && exit 1
+grep -q "docs/spec.md" "$repo/$unrelated_path_finding_no_log_review" && exit 1
 
 repo="$TMP/wrong-scope-previous"
 init_repo "$repo"
@@ -248,8 +248,8 @@ rm .metareview/runs.jsonl
 "$TMP/metareview" review pr-ready --base "$base" --previous-run "$previous_missing_run" --evidence "$TMP/fixed-validation.md" > "$TMP/fixed-validation.out"
 fixed_review="$(cat "$TMP/fixed-validation.out")"
 grep -q "PASS" "$repo/$fixed_review"
-! grep -q "Unresolved review blockers" "$repo/$fixed_review"
-! grep -q "Missing validation evidence" "$repo/$fixed_review"
+grep -q "Unresolved review blockers" "$repo/$fixed_review" && exit 1
+grep -q "Missing validation evidence" "$repo/$fixed_review" && exit 1
 
 repo="$TMP/cross-branch-current-log"
 init_repo "$repo"
@@ -271,7 +271,7 @@ printf "bash tests/run-all.sh exited 0\n" > "$TMP/current-log-branch-b-evidence.
 "$TMP/metareview" review pr-ready --base "$base" --evidence "$TMP/current-log-branch-b-evidence.md" > "$TMP/current-log-branch-b.out"
 current_log_branch_b_review="$(cat "$TMP/current-log-branch-b.out")"
 grep -q "PASS" "$repo/$current_log_branch_b_review"
-! grep -q "Unresolved review blockers" "$repo/$current_log_branch_b_review"
+grep -q "Unresolved review blockers" "$repo/$current_log_branch_b_review" && exit 1
 
 repo="$TMP/cross-branch-previous"
 init_repo "$repo"
@@ -398,7 +398,7 @@ printf "bash tests/run-all.sh exited 0\n" > "$TMP/dirty-included-evidence.md"
 "$TMP/metareview" review pr-ready --base "$base" --include-working-tree --evidence "$TMP/dirty-included-evidence.md" > "$TMP/dirty-included.out"
 dirty_included_review="$(cat "$TMP/dirty-included.out")"
 grep -q "PASS" "$repo/$dirty_included_review"
-! grep -q "Working tree changes excluded from PR-ready review" "$repo/$dirty_included_review"
+grep -q "Working tree changes excluded from PR-ready review" "$repo/$dirty_included_review" && exit 1
 
 repo="$TMP/github-available"
 init_repo "$repo"
