@@ -3,6 +3,33 @@
 Source: 71 shard results under `docs/metareview/shards/pr-ready/fsm-enhancements-b73f409f/`.
 Regenerate counts with `tests/go/…` or by re-running the gate. `[x]` = fixed AND mutation-pinned.
 
+## Measured: the adjudicate judge under-confirms on a truncated diff
+
+Run `mrv-20260828-214008227025000-fsm-sdlc-loop-sdlc-loop-f6afcc9f` (sdlc-loop,
+codex/gpt-5.6-sol, medium, mock: false) was fed these 100 blockers as `discover@0`.
+It confirmed 39 and rejected 61 as hallucinations.
+
+Two of six spot-checked rejections have REPRODUCED evidence behind them:
+
+- `internal/reviewers/taskdone.go:475` - a reviewer ran `addedLines` over a real diff for
+  `docs/tools/build script.sh` containing `eval(` and got nil; the trailing TAB git appends
+  to a header for a path with a space was confirmed with `od -c`.
+- `internal/fsm/kind/kind.go:480` - measured: 200 candidates x 800-byte file paths produce a
+  339,429-byte output against a 262,016-byte budget.
+
+Cause, verified in code: the discover input was 1,045,221 bytes with `diff_truncated: true`;
+adjudicate passes the same diff cut to the 30 KB window; and `DiffTruncated` is a struct
+field in `internal/fsm/judge/prompts.go` that is READ NOWHERE in non-test judge code. Neither
+`adjudicate.python.txt` nor `still-present.python.txt` contains the word "truncat". The judge
+is handed an incomplete diff and is never told.
+
+Consequence for this list: the 39-item confirmed set is NOT the work list. These 100 carry
+mutation and reproduction evidence; the judge saw neither. Fix from this file.
+
+Consequence for the product: the still-present/DiffTruncated finding (shard-24, filed low)
+is not a design question, it is a measured source of false verdicts. Raise it.
+
+
 | # | sev | shard | location | status |
 |---|---|---|---|---|
 | 1 | high | shard-20 | `docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:164` | [ ] |
