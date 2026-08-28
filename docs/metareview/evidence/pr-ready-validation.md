@@ -29,17 +29,22 @@ coverage gate passed
 
 ## Chain provenance
 
-This run starts a fresh chain on the same base after the previous chain reached
-attempt 6/6 and ESCALATED at 06:30 on 2026-08-28. The reset is a human decision,
-taken deliberately and recorded here rather than left silent.
+Two chains have been reset on this target, each after exhausting its attempts
+while shard review was still converging. Both resets are human decisions, taken
+deliberately and recorded here rather than left to be inferred from a gap in the
+run ids.
 
-The escalation was procedurally correct and substantively obsolete: the chain ran
-out of attempts while shard review was still in progress. The blocker it escalated
-on — Review context risk, 24 of 51 shards uncovered — has since been resolved.
-All 51 shard results and the cross-shard result are committed under
-docs/metareview/shards/pr-ready/fsm-enhancements-b73f409f/ for plan ad4e2d5d0ca31e04.
+  - chain 1 escalated 2026-08-28 06:30 at attempt 6/6
+  - chain 2 escalated 2026-08-28 15:49 at attempt 3/3
 
-Round two of the sharded review: 38 PASS, 7 PASS_ADVISORY, 7 NEEDS_REVISION.
-Nine blocking findings remain, none audit-integrity class; they are recorded in the
-shard results and carried to a follow-up branch rather than fixed here, because
-each fix re-cuts the plan and invalidates the evidence the gate reads.
+Neither escalation meant the target was unreviewable. Both meant the branch was
+still moving: each round of fixes re-cuts the shard plan, so a chain can run out
+of attempts while the evidence it needs is still being produced. Five rounds of
+sharded review have now run, covering every shard of every plan, and thirty
+blocking findings have been fixed — the last ten of them defects in the fixes
+themselves, which is the reason the rounds continued rather than a reason to
+doubt them.
+
+Round-five state: 51 shards plus cross-shard, all reviewed against plan
+014639e60cb3cab9. Results are committed under
+docs/metareview/shards/pr-ready/fsm-enhancements-b73f409f/.
