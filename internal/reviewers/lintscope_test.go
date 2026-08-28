@@ -1,24 +1,41 @@
 package reviewers
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// The two markers are assembled at run time and written as placeholders inside
+// the fixtures below, so that this file does not trip the very lints it tests
+// when metareview reviews the branch that adds it. sharded_test.go does the same.
+var (
+	evalCall = "eval" + "("
+	todoWord = "TO" + "DO"
+)
+
+// fixture expands the placeholders in a diff literal into the real markers.
+func fixture(diff string) string {
+	diff = strings.ReplaceAll(diff, "@EVAL@", evalCall)
+	return strings.ReplaceAll(diff, "@TODO@", todoWord)
+}
 
 // A diff whose prose *describes* the lints must not trip them, while the same
-// tokens in source must still block. Before this, a design doc discussing
-// "eval/TODO" failed the gate — and metareview's own specs discuss exactly that.
+// markers in source must still block. Before this, a design document discussing
+// them failed the gate — and metareview's own specs discuss exactly that.
 func TestLintsIgnoreDocumentationProse(t *testing.T) {
-	docsOnly := `diff --git a/docs/specs/design.md b/docs/specs/design.md
+	docsOnly := fixture(`diff --git a/docs/specs/design.md b/docs/specs/design.md
 --- a/docs/specs/design.md
 +++ b/docs/specs/design.md
 @@ -0,0 +1,3 @@
-+The deterministic gates block on eval/TODO/missing-test.
++The deterministic gates block on @EVAL@/@TODO@/missing-test.
 +The winning pair comes from the judge-eval (§17), not gpt-5.2.
-+TODO markers in a design document are not code defects.
++@TODO@ markers in a design document are not code defects.
 diff --git a/README.md b/README.md
 --- a/README.md
 +++ b/README.md
 @@ -0,0 +1,1 @@
-+Any TODO in prose here is discussion, not a defect.
-`
++Any @TODO@ in prose here is discussion, not a defect.
+`)
 	git := GitContext{Diff: docsOnly, ChangedFiles: []string{"docs/specs/design.md", "README.md"}}
 	lines := addedLines(git)
 	for _, line := range lines {
@@ -32,27 +49,27 @@ diff --git a/README.md b/README.md
 		Git:  git,
 	})
 	for _, f := range findings {
-		if f.Title == "Unsafe eval introduced" || f.Title == "TODO left in task-done diff" {
+		if f.Title == "Unsafe eval introduced" || f.Title == todoWord+" left in task-done diff" {
 			t.Fatalf("lint fired on documentation: %s — %s", f.Title, f.Found)
 		}
 	}
 }
 
 func TestLintsStillSeeSourceChanges(t *testing.T) {
-	source := `diff --git a/internal/app/run.go b/internal/app/run.go
+	source := fixture(`diff --git a/internal/app/run.go b/internal/app/run.go
 --- a/internal/app/run.go
 +++ b/internal/app/run.go
 @@ -0,0 +1,2 @@
-+	result := eval(userInput)
-+	// TODO: handle the error path
-`
++	result := @EVAL@userInput)
++	// @TODO@: handle the error path
+`)
 	git := GitContext{Diff: source, ChangedFiles: []string{"internal/app/run.go"}}
 	lines := addedLines(git)
 	if firstMatching(lines, evalPattern) == "" {
-		t.Fatal("an eval( in source must still reach the lints")
+		t.Fatal("an unsafe call in source must still reach the lints")
 	}
 	if firstMatching(lines, todoPattern) == "" {
-		t.Fatal("a TODO in source must still reach the lints")
+		t.Fatal("a leftover marker in source must still reach the lints")
 	}
 }
 
@@ -60,39 +77,80 @@ func TestLintsStillSeeSourceChanges(t *testing.T) {
 // source-vs-docs rule applies to them.
 func TestLintScopeAppliesToEverySource(t *testing.T) {
 	git := GitContext{
-		StagedDiff: `diff --git a/docs/notes.md b/docs/notes.md
+		StagedDiff: fixture(`diff --git a/docs/notes.md b/docs/notes.md
 +++ b/docs/notes.md
-+A staged TODO in prose.
-`,
-		WorkingTreeDiff: `diff --git a/lib/handler.js b/lib/handler.js
++A staged @TODO@ in prose.
+`),
+		WorkingTreeDiff: fixture(`diff --git a/lib/handler.js b/lib/handler.js
 +++ b/lib/handler.js
-+  const out = eval(payload);
-`,
++  const out = @EVAL@payload);
+`),
 	}
 	lines := addedLines(git)
 	if firstMatching(lines, todoPattern) != "" {
-		t.Fatal("a staged documentation TODO must not reach the lints")
+		t.Fatal("a staged documentation marker must not reach the lints")
 	}
 	if firstMatching(lines, evalPattern) == "" {
-		t.Fatal("a working-tree source eval( must still reach the lints")
+		t.Fatal("a working-tree source call must still reach the lints")
 	}
 }
 
 // A .txt outside the docs tree is content, not prose: excluding it would widen
 // the blind spot, and the sharded-review suite depends on this staying lintable.
 func TestPlainTextOutsideDocsStaysLintable(t *testing.T) {
-	git := GitContext{StagedDiff: `diff --git a/src/staged.txt b/src/staged.txt
+	git := GitContext{StagedDiff: fixture(`diff --git a/src/staged.txt b/src/staged.txt
 +++ b/src/staged.txt
-+value := eval(untrusted)
-`}
++value := @EVAL@untrusted)
+`)}
 	if firstMatching(addedLines(git), evalPattern) == "" {
 		t.Fatal("src/staged.txt must still reach the lints")
 	}
-	docs := GitContext{StagedDiff: `diff --git a/docs/notes.txt b/docs/notes.txt
+	docs := GitContext{StagedDiff: fixture(`diff --git a/docs/notes.txt b/docs/notes.txt
 +++ b/docs/notes.txt
-+we block on eval( calls
-`}
++we block on @EVAL@ calls
+`)}
 	if firstMatching(addedLines(docs), evalPattern) != "" {
 		t.Fatal("docs/notes.txt is documentation and must not reach the lints")
+	}
+}
+
+// An added line of source that itself begins with "++" arrives in the diff as
+// "+++<line>". Treating every "+++" prefix as metadata walked an unsafe call
+// straight past the security lint.
+func TestAddedLineBeginningWithPlusPlusIsNotMistakenForAHeader(t *testing.T) {
+	diff := fixture(`diff --git a/src/app.js b/src/app.js
+--- a/src/app.js
++++ b/src/app.js
+@@ -1 +1,2 @@
++++@EVAL@userInput)
+`)
+	lines := addedLines(GitContext{BranchDiffFull: diff})
+	if len(lines) != 1 || !strings.Contains(lines[0], "++"+evalCall) {
+		t.Fatalf("the ++ line was dropped as a header: %#v", lines)
+	}
+}
+
+// git C-quotes a path containing spaces; with the quotes left on, neither the
+// docs/ prefix nor the .md suffix matched, and prose reached the lints.
+func TestQuotedDocumentationPathIsStillRecognizedAsProse(t *testing.T) {
+	diff := fixture(`diff --git "a/docs/design notes.md" "b/docs/design notes.md"
+--- "a/docs/design notes.md"
++++ "b/docs/design notes.md"
+@@ -1 +1,2 @@
++the gates block on @EVAL@) and @TODO@ markers
+`)
+	if lines := addedLines(GitContext{BranchDiffFull: diff}); len(lines) != 0 {
+		t.Fatalf("quoted docs path was scanned as source: %#v", lines)
+	}
+}
+
+func TestMarkdownExtensionMatchingIsCaseInsensitive(t *testing.T) {
+	for _, path := range []string{"README.MD", "docs/NOTES.Markdown", "DOCS/plan.txt"} {
+		if lintable(path) {
+			t.Fatalf("%s should be treated as prose", path)
+		}
+	}
+	if !lintable("src/app.md.go") {
+		t.Fatal("a .go file merely containing .md must stay lintable")
 	}
 }

@@ -372,12 +372,16 @@ func addedSourceLines(text string) []string {
 			continue
 		}
 		if strings.HasPrefix(line, "+++ ") {
-			if path := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(line, "+++ ")), "b/"); path != "" && path != "/dev/null" {
+			if path := postImagePath(strings.TrimPrefix(line, "+++ ")); path != "" && path != "/dev/null" {
 				scan = lintable(path)
 			}
 			continue
 		}
-		if scan && strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+		// Only the "+++ " header above is metadata. A bare "+++" prefix is not:
+		// an added line of source that itself begins with "++" arrives here as
+		// "+++eval(userInput)", and skipping it would walk an unsafe call
+		// straight past the lint.
+		if scan && strings.HasPrefix(line, "+") {
 			lines = append(lines, line)
 		}
 	}
@@ -406,20 +410,41 @@ func lintable(path string) bool {
 		return true
 	}
 	// Markdown and the docs tree only: a .txt under src/ is content, not prose, and
-	// excluding it would silently widen the blind spot.
-	if strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".markdown") {
+	// excluding it would silently widen the blind spot. Matched case-insensitively
+	// so README.MD is treated as the prose it is.
+	lower := strings.ToLower(path)
+	if strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".markdown") {
 		return false
 	}
-	return !strings.HasPrefix(path, "docs/")
+	return !strings.HasPrefix(lower, "docs/")
 }
 
 // diffHeaderPath reads the post-image path out of a "diff --git a/x b/x" line.
 func diffHeaderPath(line string) string {
-	fields := strings.Fields(line)
-	if len(fields) < 4 {
-		return ""
+	rest := strings.TrimPrefix(line, "diff --git ")
+	// Splitting on whitespace loses a path containing spaces, and git quotes
+	// exactly those, so find where the post-image half begins instead.
+	if i := strings.LastIndex(rest, ` "b/`); i >= 0 {
+		return postImagePath(rest[i+1:])
 	}
-	return strings.TrimPrefix(fields[3], "b/")
+	if i := strings.LastIndex(rest, " b/"); i >= 0 {
+		return postImagePath(rest[i+1:])
+	}
+	return ""
+}
+
+// postImagePath turns the right-hand half of a diff header into a repository
+// path. git renders a path with spaces or non-ASCII bytes as a C-quoted string
+// ("b/docs/design notes.md"), and leaving the quotes on would hide it from both
+// the docs/ prefix and the .md suffix below.
+func postImagePath(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, `"`) {
+		if unquoted, err := strconv.Unquote(value); err == nil {
+			value = unquoted
+		}
+	}
+	return strings.TrimPrefix(value, "b/")
 }
 
 func firstMatching(lines []string, pattern *regexp.Regexp) string {
