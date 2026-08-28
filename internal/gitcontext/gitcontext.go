@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -329,8 +330,28 @@ func validateRef(ref string) error {
 	return nil
 }
 
+// hardenDiff pins a diff invocation to git's own patch output. A developer's gitconfig can
+// install an external diff driver (diff.external is how difftastic is normally wired up) or
+// a textconv filter, and git honours it for every diff this package runs — so the bytes we
+// measure, chunk, hash and lint would be the driver's rendering rather than the patch, and
+// the review would pass over content nobody saw. Both flags are diff-family options, so they
+// go directly after the subcommand. internal/fsm/gate/git.go pins its own diffs the same way.
+func hardenDiff(args []string) []string {
+	if len(args) == 0 || args[0] != "diff" {
+		return args
+	}
+	out := make([]string, 0, len(args)+2)
+	out = append(out, args[0])
+	for _, flag := range []string{"--no-ext-diff", "--no-textconv"} {
+		if !slices.Contains(args, flag) {
+			out = append(out, flag)
+		}
+	}
+	return append(out, args[1:]...)
+}
+
 func git(root string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", hardenDiff(args)...)
 	cmd.Dir = root
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

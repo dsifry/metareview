@@ -224,3 +224,50 @@ func TestRecordLLMCall(t *testing.T) {
 	}
 	h.store.failType = ""
 }
+
+// Pre-flight validates the judge (model, effort, key) before any work is done, so it must
+// run for the nodes that call a judge — not for every exec: fork node. The cmd kind is
+// exec: fork because it forks a subprocess, and it carries no model by design, so gating on
+// exec alone refuses a legal workflow at init with an error naming a knob the operator
+// never set.
+func TestPreflightSkipsNonJudgeForkNodes(t *testing.T) {
+	h := newHarness(t)
+	h.files["/x/cmdnode.yaml"] = []byte(`workflow: cmdnode
+version: 1
+states: [a, b, done, failed]
+transitions:
+  - {from: a, to: b, gate: findings_nonempty}
+  - {from: b, to: done, gate: all_fixed, outcome: fixed}
+nodes:
+  a: {kind: cmd, exec: fork, cmd: chk}
+  b: {kind: still-present, model: gpt-5.2, effort: medium}
+convergence:
+  any: [{max_iterations: 1}]
+cmds:
+  chk: {argv: [bash, -c, echo]}
+repo_mode: advisory
+`)
+	var seen []string
+	h.deps.Preflight = func(n *workflow.Node, _ bool) error {
+		seen = append(seen, n.Name+"/"+n.Kind)
+		if n.Model == "" { // what judge.Preflight does: an empty model id is ERR_JUDGE_MODEL
+			return errs.E("ERR_JUDGE_MODEL", "model id is empty or exceeds MaxShort", "reason", "length")
+		}
+		return nil
+	}
+	parsed, err := workflow.Parse(h.files["/x/cmdnode.yaml"], workflow.Options{Kinds: h.reg.Info()})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	resolved, _, err := parsed.Resolve(map[string]string{}, false)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	_, sha, _ := workflow.ResolveCmds(resolved, "/repo", h.deps.LookPath, h.deps.FileHash)
+	if _, err = h.init(InitOptions{Workflow: "/x/cmdnode.yaml", Base: "main", AllowCustomCmds: sha}); err != nil {
+		t.Fatalf("a cmd node must not be pre-flighted as a judge node: %v", err)
+	}
+	if strings.Join(seen, " ") != "b/still-present" {
+		t.Fatalf("pre-flight ran on the wrong nodes: %v", seen)
+	}
+}

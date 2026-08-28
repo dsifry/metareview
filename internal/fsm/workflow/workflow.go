@@ -82,6 +82,10 @@ type KindInfo struct {
 	DefaultExec    string
 	AllowedExec    []string
 	ValidateParams func(map[string]any) error
+	// NeedsJudge marks the kinds that call an LLM judge. exec: fork does not imply it —
+	// the cmd kind forks a subprocess and carries no model — so callers that validate judge
+	// configuration (machine's Preflight) must key on this rather than on Exec.
+	NeedsJudge bool
 }
 
 // Options parameterizes Parse. Kinds is required.

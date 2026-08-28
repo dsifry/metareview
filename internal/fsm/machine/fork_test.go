@@ -1184,3 +1184,47 @@ func TestDiffRunsKeepsRepeatedCallsWithTheSameInput(t *testing.T) {
 		t.Fatalf("first row must pair the first call of each side: %+v / %+v", rep.Calls[0].A, rep.Calls[0].B)
 	}
 }
+
+// A non-terminal state may legally carry no node: validateGraph forbids a node only on
+// terminal states (workflow.go "terminal_with_node"). Events are stamped with the state
+// they occurred in, so such a state reaches compatible()'s copied-prefix loop. All four
+// nil combinations must be decided, and none may panic.
+func TestForkCompatibleNodelessState(t *testing.T) {
+	const tmpl = `workflow: nodeless
+version: 1
+states: [a, b, done, failed]
+transitions:
+  - {from: a, to: b, gate: findings_nonempty}
+  - {from: b, to: done, gate: all_fixed, outcome: fixed}
+nodes:
+NODES
+convergence:
+  any: [{max_iterations: 5}]
+repo_mode: advisory
+`
+	h := newHarness(t)
+	parse := func(nodes string) *workflow.Workflow {
+		t.Helper()
+		w, err := workflow.Parse([]byte(strings.Replace(tmpl, "NODES", nodes, 1)), workflow.Options{Kinds: h.reg.Info()})
+		if err != nil {
+			t.Fatalf("parse %q: %v", nodes, err)
+		}
+		return w
+	}
+	const (
+		bare  = "  a: {kind: agent-edit}"
+		withB = "  a: {kind: agent-edit}\n  b: {kind: agent-edit}"
+	)
+	// an event stamped with the nodeless state, so "b" enters the copied-prefix set
+	copied := []run.Event{{Type: run.TypeNodeOutput, State: "b"}}
+
+	if err := compatible(parse(bare), parse(bare), copied, "a"); err != nil {
+		t.Fatalf("nodeless in both is an unchanged state, want nil, got %v", err)
+	}
+	if err := compatible(parse(bare), parse(withB), copied, "a"); !errs.Is(err, CodeWorkflowIncompatible) || errs.As(err).Fields["reason"] != "state" {
+		t.Fatalf("a node added on a copied nodeless state must be incompatible, got %v", err)
+	}
+	if err := compatible(parse(withB), parse(bare), copied, "a"); !errs.Is(err, CodeWorkflowIncompatible) || errs.As(err).Fields["reason"] != "state" {
+		t.Fatalf("a node removed from a copied state must be incompatible, got %v", err)
+	}
+}

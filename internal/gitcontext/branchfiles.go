@@ -34,7 +34,7 @@ type Options struct {
 }
 
 func realGit(root string, env []string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", hardenDiff(args)...)
 	cmd.Dir = root
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)

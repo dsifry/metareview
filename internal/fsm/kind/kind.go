@@ -319,7 +319,7 @@ type adjudicateKind struct{}
 
 func (adjudicateKind) Name() string { return MatchThenAdjudicate }
 func (adjudicateKind) Info() workflow.KindInfo {
-	return workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, ValidateParams: noParams}
+	return workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, ValidateParams: noParams, NeedsJudge: true}
 }
 
 func noParams(p map[string]any) error {
@@ -549,7 +549,7 @@ type stillPresentKind struct{}
 
 func (stillPresentKind) Name() string { return StillPresent }
 func (stillPresentKind) Info() workflow.KindInfo {
-	return workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, ValidateParams: noParams}
+	return workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, ValidateParams: noParams, NeedsJudge: true}
 }
 
 type statusOut struct {

@@ -98,7 +98,7 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 	}
 	if deps.Preflight != nil {
 		for _, st := range w.States {
-			if n := w.NodeFor(st); n != nil && n.Exec == "fork" {
+			if n := w.NodeFor(st); n != nil && needsJudge(deps.Kinds, n) {
 				if err := deps.Preflight(n, o.Calibration); err != nil {
 					return nil, err
 				}
@@ -554,6 +554,14 @@ func lastFailedGate(events []run.Event) *run.GateData {
 // ---------------------------------------------------------------- Advance
 
 // Advance runs one step (spec 2 §5.4).
+// needsJudge reports whether a node will call an LLM judge, which is what Preflight validates.
+// exec: fork is not the same question: the cmd kind forks a subprocess and carries no model.
+// Both call sites hold a non-nil node, and deps.Kinds is dereferenced unguarded throughout
+// the package (Parse needs it), so neither is re-checked here.
+func needsJudge(reg Registry, n *workflow.Node) bool {
+	return reg.Info()[n.Kind].NeedsJudge
+}
+
 func (m *Machine) Advance(ctx context.Context) (AdvanceResult, error) {
 	sess, err := m.load(ctx, false)
 	if err != nil {
@@ -623,7 +631,7 @@ func (s *session) advance() (AdvanceResult, error) {
 	}
 	// 5. node
 	if node != nil {
-		if _, has := snap.NodeOutputs[run.Key(node.Name, snap.Iteration)]; node.Exec == "fork" && !has && s.m.deps.Preflight != nil {
+		if _, has := snap.NodeOutputs[run.Key(node.Name, snap.Iteration)]; needsJudge(s.m.deps.Kinds, node) && !has && s.m.deps.Preflight != nil {
 			if err := s.m.deps.Preflight(node, snap.Calibration); err != nil {
 				return AdvanceResult{}, err
 			}

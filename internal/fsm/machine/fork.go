@@ -384,8 +384,11 @@ func compatible(pw, w *workflow.Workflow, copied []run.Event, from run.State) er
 		if !states[s] {
 			continue
 		}
-		pn, n := pw.NodeFor(s), w.NodeFor(s) // pn != nil: copied states and From are non-terminal in pw
-		if !hasState(w, s) || n == nil || pn.Kind != n.Kind || pn.Exec != n.Exec {
+		// A non-terminal state may carry no node (validateGraph forbids one only on terminal
+		// states), so either side may be nil: gaining or losing a node changes the copied
+		// prefix, and nodeless on both sides is unchanged.
+		pn, n := pw.NodeFor(s), w.NodeFor(s)
+		if !hasState(w, s) || (pn == nil) != (n == nil) || (pn != nil && (pn.Kind != n.Kind || pn.Exec != n.Exec)) {
 			return errs.E(CodeWorkflowIncompatible, "a state in the copied prefix changed or disappeared", "reason", "state", "state", string(s))
 		}
 	}

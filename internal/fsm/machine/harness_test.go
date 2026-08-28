@@ -106,9 +106,9 @@ func llmCall(in ExecInput, i int, tokens int64) error {
 func newRegistry() *fakeRegistry {
 	r := &fakeRegistry{kinds: map[string]*fakeKind{}, execs: map[string]*fakeExecutor{}}
 	r.kinds["review-lenses"] = &fakeKind{name: "review-lenses", info: workflow.KindInfo{DefaultExec: "subagent", AllowedExec: []string{"inline", "subagent"}}}
-	r.kinds["match-then-adjudicate"] = &fakeKind{name: "match-then-adjudicate", info: workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}}}
+	r.kinds["match-then-adjudicate"] = &fakeKind{name: "match-then-adjudicate", info: workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, NeedsJudge: true}}
 	r.kinds["agent-edit"] = &fakeKind{name: "agent-edit", info: workflow.KindInfo{DefaultExec: "inline", AllowedExec: []string{"inline", "subagent"}}}
-	r.kinds["still-present"] = &fakeKind{name: "still-present", info: workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}}}
+	r.kinds["still-present"] = &fakeKind{name: "still-present", info: workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, NeedsJudge: true}}
 	r.kinds["cmd"] = &fakeKind{name: "cmd", info: workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}}}
 	// agent-edit output is {commit, summary}; reduce to Commit
 	r.kinds["agent-edit"].decode = func(raw json.RawMessage) (any, error) {
