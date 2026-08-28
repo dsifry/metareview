@@ -645,3 +645,48 @@ func TestRenderersNeutraliseShardIDAndVerdict(t *testing.T) {
 		}
 	}
 }
+
+// A result file is written by an agent, and the `## Sharded Review` table is the
+// durable record of what that agent said. A pipe in any ingested string forges
+// extra cells: a reviewer name of "evil | PASS | 0 | docs/fake.json" shifts the
+// Verdict, Blocking and File columns, so a result can rewrite its own blocking
+// count in the committed log. GFM splits table rows on | before it parses inline
+// code, so wrapping a value in backticks does not contain it.
+func TestShardedReviewMarkdownCannotForgeTableCells(t *testing.T) {
+	manifest := manifestWithShard(t, "aaaaaaaaaaaaaaaa")
+	result := passingShardResult("shard-3a", "aaaaaaaaaaaaaaaa")
+	result.Reviewer = "evil | PASS | 0 | docs/fake.json"
+	result.Verdict = "NEEDS_REVISION | forged"
+	result.Path = "docs/real.json | docs/forged.json"
+	result.BlockingCount = 4
+	manifest.ShardResults = []ReviewResult{result}
+	aggregate := Aggregate(manifest)
+
+	rendered := ShardedReviewMarkdown(manifest, aggregate)
+
+	var row string
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.Contains(line, "shard-3a") && strings.HasPrefix(line, "|") {
+			row = line
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("no row for the shard:\n%s", rendered)
+	}
+	// Six columns means seven pipes. Every additional unescaped pipe is a cell
+	// the result file invented.
+	cells := 0
+	for i, r := range row {
+		if r == '|' && (i == 0 || row[i-1] != '\\') {
+			cells++
+		}
+	}
+	if cells != 7 {
+		t.Fatalf("result-supplied text forged %d extra cell boundaries:\n%s", cells-7, row)
+	}
+	// And the real blocking count must still be the one rendered.
+	if !strings.Contains(row, "| 4 |") {
+		t.Fatalf("the true blocking count is not in the row:\n%s", row)
+	}
+}
