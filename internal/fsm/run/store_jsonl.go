@@ -3,6 +3,7 @@ package run
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -184,16 +185,17 @@ func (s *jsonlStore) readRaw(runID string) ([]byte, error) {
 	}
 	// Read-only: a Close error here tells the caller nothing it can act on.
 	defer func() { _ = f.Close() }()
-	var buf strings.Builder
-	chunk := make([]byte, 64<<10)
-	for {
-		n, rerr := f.Read(chunk)
-		buf.Write(chunk[:n])
-		if rerr != nil {
-			break
-		}
+	// io.ReadAll rather than a hand-rolled loop: the loop broke on any error and
+	// returned what it had with a nil error, so a mid-file I/O failure looked
+	// exactly like a short file. splitLines then read that as a torn tail, and
+	// RepairTail — the documented recovery — truncated a healthy audit log to
+	// the offset. The chain hash cannot catch it, being recomputed over whatever
+	// survives, so a read failure has to surface here or not at all.
+	raw, rerr := io.ReadAll(f)
+	if rerr != nil {
+		return nil, pathErr(0, rerr)
 	}
-	return []byte(buf.String()), nil
+	return raw, nil
 }
 
 func (s *jsonlStore) EventsWithLines(runID string) (Log, [][]byte, error) {

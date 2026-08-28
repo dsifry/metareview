@@ -936,3 +936,36 @@ func TestSummarizeIncompleteFork(t *testing.T) {
 		t.Fatalf("root must not be flagged: %+v", s)
 	}
 }
+
+// A read that fails part-way must be an error, never a short file. readRaw's
+// hand-rolled loop broke on any error and returned the bytes it had with a nil
+// error, so a mid-file I/O failure was indistinguishable from a truncated log:
+// splitLines then reported a false torn tail and the documented recovery,
+// RepairTail, truncated a healthy audit log to that offset. Irreversible, and
+// invisible to the chain hash, which is recomputed over whatever survives.
+func TestReadRawSurfacesAMidFileReadFailure(t *testing.T) {
+	root := t.TempDir()
+	s := NewJSONLStore(root, Options{}).(*jsonlStore)
+	seed(t, s, happyLog().Events()[:1])
+
+	// Replace the audit log with a directory: it opens, and then every Read
+	// fails with EISDIR. A real failure, not an injected one.
+	path := s.auditPath(runA)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := s.readRaw(runA)
+	if err == nil {
+		t.Fatalf("a failed read was reported as success with %d bytes", len(raw))
+	}
+	storeErr(t, err, CodeStorePath)
+
+	// And the failure must reach the caller rather than being read as a torn tail.
+	if _, err := s.Events(runA); err == nil {
+		t.Fatal("Events must not report a healthy log when the read failed")
+	}
+}

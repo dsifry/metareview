@@ -1118,3 +1118,29 @@ func TestWorkflowSourceFolds(t *testing.T) {
 		t.Fatal("over-cap workflow_source must be refused")
 	}
 }
+
+// A node_output whose payload carries no output must be refused. The comment
+// asserting p.Output is always a valid sub-document did not hold: Canonical(nil)
+// fails, the error was discarded, and the fold stored a present key with an
+// invalid document. The matching delta_applied then passed too, because
+// OutputHash(nil) is the sha256 of the empty string — so a malformed event
+// validated all the way through the chain and only surfaced much later, when
+// kind.Decode met a nil document.
+func TestFoldRefusesANodeOutputWithNoOutput(t *testing.T) {
+	// The payload omits "output" entirely, so the decoded RawMessage is nil.
+	// Canonical(nil) fails; the fold used to discard that error, store the empty
+	// result under a present key, and let the matching delta_applied through —
+	// OutputHash(nil) being the sha256 of the empty string.
+	b := NewBuilder(runA)
+	b.Init(baseInit())
+	b.Event(TypeTree, TreeData{Head: "head0000", TreeHash: "t0", Status: ""})
+	b.Event(TypeNeedsInput, EmptyData{}, WithNode("discover"))
+	b.Event(TypeNodeOutput, out(`{"findings":[]}`), WithNode("discover"))
+
+	evs := b.Events()
+	evs[len(evs)-1].Data = json.RawMessage(`{}`) // no "output" key at all
+
+	if _, err := Fold(evs); err == nil {
+		t.Fatal("a node_output whose payload omits output was accepted")
+	}
+}

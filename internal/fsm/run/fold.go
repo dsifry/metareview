@@ -104,7 +104,16 @@ func Apply(st FoldState, ev Event) (FoldState, error) {
 		if st.Applied[k] {
 			return FoldState{}, foldErr(ReasonOutputAfterDelta, ev)
 		}
-		out, _ := Canonical(p.Output) // p.Output is a sub-document of canon, hence valid
+		// The error is not discardable: the "sub-document of canon, hence valid"
+		// assumption fails for a payload with no output at all. Canonical(nil)
+		// errors, and storing the empty result left a present key holding an
+		// invalid document — which the matching delta_applied then accepted,
+		// since OutputHash(nil) is the sha256 of the empty string. The fold has
+		// to refuse it here or the corruption is not caught until kind.Decode.
+		out, cerr := Canonical(p.Output)
+		if cerr != nil {
+			return FoldState{}, foldErr(ReasonBadPayload, ev)
+		}
 		next.NodeOutputs[k] = out
 		if !containsString(next.NodesRun, ev.Node) {
 			next.NodesRun = append(next.NodesRun, ev.Node)
