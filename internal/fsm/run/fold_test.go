@@ -113,9 +113,23 @@ func TestFoldHappyPath(t *testing.T) {
 	if s.StopReason != "all_fixed" || s.LastError != nil || len(s.Warnings) != 0 || s.MockTainted || s.OverflowHandled {
 		t.Fatalf("misc: %+v", s)
 	}
-	// nil-free JSON
-	js := marshalCanonical(s)
-	if strings.Contains(string(js), "null") && !strings.Contains(string(js), `"prev_unfixed":null`) {
+	// nil-free JSON. The snapshot always carries "prev_unfixed":null (no
+	// omitempty), so the old form — Contains("null") && !Contains(prev_unfixed) —
+	// was false unconditionally and could never fire. Every collection field is
+	// checked by name instead, which is what the assertion was for: a regression
+	// serialising any of them as null would have passed silently.
+	js := string(marshalCanonical(s))
+	for _, field := range []string{
+		"findings", "confirmed", "all_found", "status", "nodes_run",
+		"node_outputs", "applied", "allowed_cmds", "lineage", "goldens", "warnings", "vars",
+	} {
+		if strings.Contains(js, `"`+field+`":null`) {
+			t.Fatalf("%s serialised as null rather than an empty collection: %s", field, js)
+		}
+	}
+	// And no null survives anywhere except the one field that is genuinely
+	// nullable, so a new nil collection cannot slip in unnoticed.
+	if strings.Count(js, "null") != strings.Count(js, `"prev_unfixed":null`) {
 		t.Fatalf("unexpected null in snapshot json: %s", js)
 	}
 	for _, key := range []string{`"lineage":[]`, `"goldens":[]`, `"warnings":[]`, `"vars":{}`} {

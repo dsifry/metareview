@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1b.fed4733516ac52fd",
+  "kind": "shard",
+  "shardId": "shard-1b",
+  "shardHash": "fed4733516ac52fd",
+  "planHash": "5946b89296b16369",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/fsm/gate/gates.go",
+      "line": 138,
+      "note": "New gate package builds and vets clean; go test ./internal/fsm/gate/... reports coverage: 100.0% of statements."
+    },
+    {
+      "path": "internal/fsm/judge/prompts.go",
+      "line": 208,
+      "note": "New judge prompt/parse code covered at 100.0% of statements by internal/fsm/judge tests (judge_test.go:159-177 exercises the format and RenderPrompt error paths)."
+    },
+    {
+      "path": "internal/fsm/run/store_mem.go",
+      "line": 147,
+      "note": "MemStore is driven through the same shared store table as the JSONL store (internal/fsm/run/store_test.go:44); package coverage 100.0%."
+    },
+    {
+      "path": "internal/runchain/runchain_test.go",
+      "line": 244,
+      "note": "TestReadersAcceptOneMiBLines sizes its fixture from maxJSONLLineBytes and asserts the line exceeds bufio's 64 KiB default, so the 1 MiB boundary is genuinely exercised."
+    },
+    {
+      "path": "internal/learning/review.go",
+      "line": 278,
+      "note": "markdownList deletion is dead-code removal only: no remaining references in the tree and the strings import is still used at review.go:156,193,228,230; go build ./... succeeds."
+    },
+    {
+      "path": "workflows/review-loop.yaml",
+      "line": 17,
+      "note": "Node kinds review-lenses and match-then-adjudicate exist in internal/fsm/kind/kind.go:27-29; the workflow is loaded and exercised by tests/go/test-fsm.sh:192-198 and internal/fsm/machine/machine_test.go:233."
+    },
+    {
+      "path": ".agents/plugins/marketplace.json",
+      "line": 9,
+      "note": "Go 1.26+ requirement matches go.mod line 3 (go 1.26); the doc string is now consistent with the toolchain."
+    },
+    {
+      "path": "tests/go/test-task-done-review.sh",
+      "line": 99,
+      "note": "The '! grep -q' -> 'grep -q ... && exit 1' rewrite is behaviour-preserving under set -euo pipefail (a failing left operand of && does not trigger set -e) and matches the existing convention in tests/go/test-pr-ready-review.sh:146-147."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/match.calibration.golden",
+      "line": 7,
+      "note": "Golden pins the single-pass str.format emulation: slot values containing {{loop}} / {candidate} / }} are emitted verbatim and never rescanned."
+    },
+    {
+      "path": "internal/fsm/judge/smoke_test.go",
+      "line": 1,
+      "note": "Smoke test is behind //go:build smoke and skips without OPENAI_API_KEY; tests/run-all.sh:10-12 vets and lists it without executing a paid call. No key material is committed."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "match-kind prompts are never fenced: RenderPrompt populates slots for KindMatch (internal/fsm/judge/prompts.go:168-171) without any fenced[] entries, so golden_comment and the candidate finding text are interpolated raw even when Request.Fence is true, while adjudicate and still-present fence the same untrusted values (prompts.go:182,190). This is a prompt-injection surface. It is an explicitly documented, impact-bounded decision, not an oversight: docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md:125 states 'match is never fenced' and line 295 bounds the impact (a crafted candidate can claim a golden and skip adjudication, but its own text never propagates) and names product-mode fencing of match as a follow-up. Recorded so the follow-up is not lost.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/prompts.go",
+          "line": 171,
+          "note": "KindMatch sets slots but no fenced[] entries, so the fence flag is inert for this kind."
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 295,
+          "note": "Spec records match-unfenced as an accepted, bounded risk with product-mode fencing as a follow-up."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "RenderPrompt discards format's error: 'user, _ := format(template, values)' at internal/fsm/judge/prompts.go:208. The spec (docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md:123) requires a malformed template (lone '}', unknown {slot}) to surface ERR_PROMPT_TEMPLATE, and format does return exactly that (prompts.go:220-243), but the caller drops it and would return an empty user prompt instead of an error. Today the four templates are constants and judge_test.go:159-165 covers format's error paths directly, so nothing is reachable; the gap is that a future template typo fails silently as an empty prompt sent to a paid provider rather than as ERR_PROMPT_TEMPLATE. Not blocking: no current caller can reach it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/prompts.go",
+          "line": 208,
+          "note": "format's error is assigned to _ with a comment asserting the templates are constants."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "memStore's unlock closure is not guarded against a stale or repeated call: it sets r.locked = false unconditionally (internal/fsm/run/store_mem.go:142-146), whereas the JSONL store's unlock deletes the run from s.held and is a no-op on a second call (internal/fsm/run/store_jsonl.go:365-372). A double-unlock, or a stale closure invoked after a later Lock, releases a lock the caller does not hold — a divergence from the file's own claim that MemStore 'behaves exactly like the JSONL store'. Only reachable through caller misuse; the shared store table (store_test.go:44) does not exercise it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store_mem.go",
+          "line": 145,
+          "note": "Unlock closure clears r.locked without checking that this closure still owns the lock."
+        },
+        {
+          "path": "internal/fsm/run/store_jsonl.go",
+          "line": 367,
+          "note": "JSONL unlock is guarded by an existence check on s.held, making a repeated call a no-op."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "judge.Parse routes every unrecognised kind into the still-present branch via 'default:' (internal/fsm/judge/prompts.go:336), while its fail() helper computes the fail-closed decision as 'kind == KindStillPresent' (prompts.go:312), so an unknown kind is parsed with still-present semantics but fails open. The live provider path is safe because RenderPrompt rejects unknown kinds before Parse runs (judge.go:519), but the mock path calls Parse directly on a scripted row's kind (judge.go:666) with no such guard. Low: kinds originate from internal node implementations, not from user-supplied YAML.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/prompts.go",
+          "line": 336,
+          "note": "default branch treats any unknown kind as still-present rather than returning an error."
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 666,
+          "note": "Mock path calls Parse(r.Kind, row.Raw) without the RenderPrompt kind validation that guards the live path."
+        }
+      ]
+    }
+  ]
+}

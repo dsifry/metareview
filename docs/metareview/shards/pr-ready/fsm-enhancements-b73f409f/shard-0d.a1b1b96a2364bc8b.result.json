@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0d.a1b1b96a2364bc8b",
+  "kind": "shard",
+  "shardId": "shard-0d",
+  "shardHash": "a1b1b96a2364bc8b",
+  "planHash": "5946b89296b16369",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/export/redaction_test.go",
+      "line": 76,
+      "note": "Verified the classification guard against the real struct: run.Snapshot (internal/fsm/run/types.go:190-234) has 43 JSON fields; transformed (8) + verbatim (35) = 43 exactly, and each of the 8 transformed names is genuinely rewritten in redactor.snapshot (internal/fsm/export/export.go:466-497)."
+    },
+    {
+      "path": "internal/fsm/record/record_test.go",
+      "line": 310,
+      "note": "Read appendRow (internal/fsm/record/record.go:176-235) and confirmed the O_APPEND fix the regression test names is really in place; the test's 40-goroutine mixed appendRow/state.AppendJSONL run does exercise it."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.jsonl",
+      "line": 1,
+      "note": "Independently recomputed all three line hashes with shasum -a 256 outside Go: they match oracle.sha256 and each line's prev field exactly, so the committed fixture is a true external oracle for TestOracle (internal/fsm/run/store_test.go:798)."
+    },
+    {
+      "path": "CLAUDE.md",
+      "line": 88,
+      "note": "Checked every factual claim added to CLAUDE.md against the code: 120000 (internal/gitcontext/gitcontext.go:15, internal/contextprofile/profile.go:23), 4000 + UNTRACKED_TRUNCATED (internal/gitcontext/gitcontext.go:17, internal/contextprofile/profile.go:21,153), 'override list --pending exits nonzero' (cmd/metareview/main.go:503-531), /fsm command (commands/fsm.md), and the self-ignoring .metareview/shards/.gitignore and .metareview/runs/.gitignore. All accurate, and AGENTS.md:114 / docs/README.codex.md:91 carry the same wording, so the doc set is in sync."
+    },
+    {
+      "path": "internal/fsm/kind/kind_test.go",
+      "line": 1,
+      "note": "go vet is clean and go test -cover reports 100.0% of statements for internal/fsm/kind, internal/fsm/record and internal/fsm/export; internal/fsm/record also passes under -shuffle=on."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead test code: kind_test.go builds a 20000-element []run.BugStatus named fatSt and then discards it with `_ = fatSt`, asserting nothing. It reads as an abandoned status-list cap case (the real cap case is already covered a few lines above with run.MaxDeltaList), so it costs allocation and misleads a reader into thinking a 20000-entry payload is exercised.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind_test.go", "line": 232, "note": "`_ = fatSt` discards the 20000-element slice built at lines 228-231; no Decode call ever sees it."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Package-global test seam mutated without restore: TestTornTailWritePath sets `nanos = func() int64 { return 42 }` and never restores it, unlike the sibling `flock` seam in the same file which is saved to `orig` and restored. Every later test in the package then sees a frozen torn-fragment clock, which is order-dependent state; the suite happens to pass today and under -shuffle=on, but the asymmetry is a latent isolation bug (a future test that writes two torn fragments would collide on runs.jsonl-42). t.Cleanup(func(){ nanos = nowNanos }) would close it.",
+      "evidence": [
+        {"path": "internal/fsm/record/record_test.go", "line": 160, "note": "nanos overridden here; no restore anywhere in the file."},
+        {"path": "internal/fsm/record/record_test.go", "line": 284, "note": "flock = orig shows the intended restore pattern that nanos does not follow."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The export fail-closed guard is only one level deep. TestEverySnapshotFieldIsClassifiedForExport enumerates run.Snapshot's own fields, but two of the transforms it certifies are field-selective on nested types with no equivalent guard: redactor.allowedCmds rewrites only `argv` and `file_hashes` on each AllowedCmd (Env and any new field pass through verbatim), and the last_error transform blanks only GateError.Detail. A field added to run.AllowedCmd or run.GateError would therefore reach an evidence bundle unredacted with this suite green -- exactly the failure mode the test's own header comment says it exists to prevent.",
+      "evidence": [
+        {"path": "internal/fsm/export/redaction_test.go", "line": 78, "note": "reflect.VisibleFields(reflect.TypeOf(run.Snapshot{})) enumerates top-level fields only; it does not descend into AllowedCmd or GateError."},
+        {"path": "internal/fsm/export/export.go", "line": 335, "note": "allowedCmds touches only cmd[\"argv\"] and cmd[\"file_hashes\"]; every other key of the marshalled AllowedCmd is emitted as-is."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestRunsJSONLSurvivesInterleavedWriters is titled and commented as proving runs.jsonl survives its two writers, but it only covers the clean-tail path. appendRow's torn-tail branch still does a read-then-f.Truncate(t.offset) under a flock that state.AppendJSONL never takes, so a row appended by the unlocked writer between readRows and the Truncate is discarded. No case in the test plants a torn fragment while concurrent writers are running, so the stated guarantee is broader than what is actually verified. (record.go itself is outside this shard; noting the coverage gap in the test that claims the property.)",
+      "evidence": [
+        {"path": "internal/fsm/record/record_test.go", "line": 310, "note": "The concurrency test starts from an empty runs.jsonl, so t.fragment is always nil and the Truncate branch is never reached concurrently."},
+        {"path": "internal/fsm/record/record.go", "line": 225, "note": "f.Truncate(t.offset) is a read-modify-write against an offset computed before the lock-free writer may have appended."}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

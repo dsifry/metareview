@@ -727,3 +727,30 @@ func contains(list []string, want string) bool {
 	}
 	return false
 }
+
+// The rule the packs publish is "each entry", and the validator was an any().
+// TestEvidenceRuleMatchesValidator could not see the difference because it only
+// ever built one-element slices — the single shape where the two rules agree.
+// These are the multi-entry shapes that tell them apart.
+func TestEvidenceRuleAppliesToEveryEntry(t *testing.T) {
+	good := EvidenceRef{Path: "internal/a.go", Line: 12}
+	bad := EvidenceRef{Path: "internal/a.go"} // no line, no note
+	cases := []struct {
+		name string
+		refs []EvidenceRef
+		want bool
+	}{
+		{"none at all", nil, false},
+		{"one good", []EvidenceRef{good}, true},
+		{"one bad", []EvidenceRef{bad}, false},
+		{"all good", []EvidenceRef{good, good, good}, true},
+		{"good then bad", []EvidenceRef{good, bad}, false},
+		{"bad then good", []EvidenceRef{bad, good}, false},
+		{"one good among many bad", []EvidenceRef{bad, bad, good, bad}, false},
+	}
+	for _, c := range cases {
+		if got := hasValidEvidence(c.refs); got != c.want {
+			t.Fatalf("%s: hasValidEvidence = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

@@ -187,10 +187,16 @@ func TestCodexJudgeBoundsEachAttempt(t *testing.T) {
 func TestCodexJudgeStopsOnCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	f := &fakeCodex{code: 1}
+	// A timer that never fires, so ctx.Done() is the only ready case. codexClock's
+	// After hands back a pre-filled channel, which left both select cases ready
+	// and let Go pick at random — a 6% flake that was an artifact of the fake
+	// clock rather than a real race. A test clock should decide which case is
+	// ready; it should never leave that to chance.
+	never := Clock{Now: codexClock().Now, After: func(time.Duration) <-chan time.Time { return make(chan time.Time) }}
 	j := &codexJudge{exec: func(c context.Context, a []string, s string) ([]byte, int, error) {
 		cancel()
 		return f.exec(c, a, s)
-	}, nonce: func() string { return "n0" }, clock: codexClock()}
+	}, nonce: func() string { return "n0" }, clock: never}
 	if _, err := j.Call(ctx, codexRequest()); err == nil {
 		t.Fatal("a cancelled call must return an error")
 	}
@@ -309,5 +315,55 @@ func TestAnthropicEffortTableMatchesTheAPI(t *testing.T) {
 				t.Fatalf("%s at %s: %v", model, ok, err)
 			}
 		}
+	}
+}
+
+// A caller cancelled before the first attempt must not spawn codex at all. The
+// loop only consulted the context between attempts, so attempt 0 skipped the
+// check entirely and an already-cancelled call still ran the CLI once.
+func TestCodexJudgeDoesNotStartWhenAlreadyCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	f := &fakeCodex{stdout: codexStream(`{"reasoning":"r","is_real":true,"confidence":0.9}`)}
+	j := &codexJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
+
+	v, err := j.Call(ctx, codexRequest())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+	if f.calls != 0 {
+		t.Fatalf("codex was spawned %d times for an already-cancelled caller", f.calls)
+	}
+	if v.Kind == "" {
+		t.Fatal("the envelope must survive the refusal")
+	}
+}
+
+// Cancellation during the backoff wait must interrupt the wait, not sit through
+// it. The top-of-loop check catches a caller cancelled between attempts; this
+// covers the other case — cancelled while the ladder is already sleeping, which
+// on a real clock can be a sixteen-second wait.
+//
+// select evaluates its channel expressions before blocking, so cancelling inside
+// the clock seam puts the context in exactly that window, deterministically.
+func TestCodexJudgeCancellationInterruptsTheBackoffWait(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	f := &fakeCodex{code: 1} // fail, so the ladder reaches its first backoff
+
+	clock := Clock{
+		Now: codexClock().Now,
+		After: func(time.Duration) <-chan time.Time {
+			cancel()                    // cancelled while the select is being set up
+			return make(chan time.Time) // and this timer never fires
+		},
+	}
+	j := &codexJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: clock}
+
+	if _, err := j.Call(ctx, codexRequest()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+	if f.calls != 1 {
+		t.Fatalf("the ladder must stop in the wait after one attempt, got %d", f.calls)
 	}
 }

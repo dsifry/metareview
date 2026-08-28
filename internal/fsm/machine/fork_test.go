@@ -737,7 +737,13 @@ func TestF7DiffRuns(t *testing.T) {
 	}
 	for i := 1; i < len(r.Calls); i++ {
 		x, y := r.Calls[i-1], r.Calls[i]
-		if x.Node > y.Node || (x.Node == y.Node && x.Iter > y.Iter) || (x.Node == y.Node && x.Iter == y.Iter && x.Kind > y.Kind) || (x.Node == y.Node && x.Iter == y.Iter && x.Kind == y.Kind && x.InputHash >= y.InputHash) {
+		// Equal input hashes within one node@iter are legal — several calls of one
+		// kind against the same input — and are ordered by an unexported
+		// occurrence counter, so only a strict decrease is a failure here.
+		if x.Node > y.Node ||
+			(x.Node == y.Node && x.Iter > y.Iter) ||
+			(x.Node == y.Node && x.Iter == y.Iter && x.Kind > y.Kind) ||
+			(x.Node == y.Node && x.Iter == y.Iter && x.Kind == y.Kind && x.InputHash > y.InputHash) {
 			t.Fatalf("sort order at %d", i)
 		}
 	}
@@ -1115,4 +1121,66 @@ func (f *failingSidecar) Read(runID, name string) ([]byte, error) {
 		return nil, f.readErr
 	}
 	return f.Sidecar.Read(runID, name)
+}
+
+// Two calls of one kind in the same node@iter with the same input — the same
+// question put to two models — must both appear in the report. Keying rows on
+// (node, iter, kind, input_hash) alone overwrote row.A and the earlier call
+// vanished, which is the one thing a diff of two runs must never do.
+func TestDiffRunsKeepsRepeatedCallsWithTheSameInput(t *testing.T) {
+	mk := func(id string, calls []run.LLMCallData) run.Log {
+		b := run.NewBuilder(id)
+		b.Init(run.InitData{RunID: id, Workflow: "w", WorkflowHash: "h", Vars: map[string]string{},
+			RepoMode: "advisory", AllowedCmds: []run.AllowedCmd{}, RepoRoot: "/r", WorkDir: "/r",
+			BaseSHA: shaBase, Head: shaHead, InitialState: "s", Lineage: []string{}, Goldens: []run.Golden{}})
+		for _, c := range calls {
+			b.Event(run.TypeLLMCall, c, run.WithNode("n"))
+		}
+		return run.Log{Events: b.Events()}
+	}
+	raw := func(real bool, conf float64) json.RawMessage {
+		return json.RawMessage(run.MarshalCanonical(map[string]any{"is_real": real, "confidence": conf}))
+	}
+	same := "same-input-hash"
+	a := mk("mrv-diff-rep-a-001", []run.LLMCallData{
+		{Kind: "adjudicate", Model: "m1", Index: 0, InputHash: same, Verdict: raw(true, 0.9), Confidence: 0.9},
+		{Kind: "adjudicate", Model: "m2", Index: 1, InputHash: same, Verdict: raw(false, 0.4), Confidence: 0.4},
+	})
+	b := mk("mrv-diff-rep-b-001", []run.LLMCallData{
+		{Kind: "adjudicate", Model: "m3", Index: 0, InputHash: same, Verdict: raw(true, 0.8), Confidence: 0.8},
+		{Kind: "adjudicate", Model: "m4", Index: 1, InputHash: same, Verdict: raw(false, 0.3), Confidence: 0.3},
+	})
+
+	decide := func(kind string, v json.RawMessage) Decision {
+		var d struct {
+			IsReal     *bool   `json:"is_real"`
+			Confidence float64 `json:"confidence"`
+		}
+		_ = json.Unmarshal(v, &d)
+		if d.IsReal == nil {
+			return Decision{}
+		}
+		eff := *d.IsReal && d.Confidence >= 0.7
+		return Decision{Raw: d.IsReal, Effective: &eff}
+	}
+	rep, err := DiffRuns(a, b, decide)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := 0
+	for _, row := range rep.Calls {
+		if row.InputHash == same {
+			rows++
+			if row.A == nil || row.B == nil {
+				t.Fatalf("both sides must be present on every repeated row: %+v", row)
+			}
+		}
+	}
+	if rows != 2 {
+		t.Fatalf("both calls must survive: got %d rows for the repeated input, want 2", rows)
+	}
+	// And the nth call on each side pairs with the nth on the other.
+	if rep.Calls[0].A.Model != "m1" || rep.Calls[0].B.Model != "m3" {
+		t.Fatalf("first row must pair the first call of each side: %+v / %+v", rep.Calls[0].A, rep.Calls[0].B)
+	}
 }

@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-01",
+  "kind": "shard",
+  "shardId": "shard-01",
+  "shardHash": "d228fc04f556ce70",
+  "planHash": "5946b89296b16369",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/contextprofile/shards.go",
+      "line": 188,
+      "note": "PlanShards rewritten to hash-bucket chunk assignment; verified chunk boundaries always advance, bucket ids never contain '-' so split ids stay unique, and Bytes == len(Diff) in gitcontext.BranchFile so budgeting is consistent."
+    },
+    {
+      "path": "internal/fsm/record/record.go",
+      "line": 175,
+      "note": "Reviewed runs.jsonl append path: O_APPEND rationale, flock seam, torn-tail quarantine, idempotent-by-id check, fsync before close. Covered by internal/fsm/record/record_test.go."
+    },
+    {
+      "path": "internal/learnsource/source.go",
+      "line": 35,
+      "note": "Verified gitcontext.CollectWithExcludes exists (internal/gitcontext/gitcontext.go:64) and that the shard exclusion is tested at internal/learnsource/source_test.go:157."
+    },
+    {
+      "path": "internal/epicsource/epicsource.go",
+      "line": 83,
+      "note": "Close error explicitly ignored on a read-only path; behaviour unchanged."
+    },
+    {
+      "path": "commands/review-task-done.md",
+      "line": 97,
+      "note": "Sharded-review docs cross-checked against CLAUDE.md, docs/README.codex.md, skills/fsm/SKILL.md and docs/fsm/driving-a-workflow.md (all present); the 4,000-byte untracked threshold matches gitcontext.maxUntrackedFileBytes."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "PlanShards keeps an (ShardPlan, error) signature but every return path is a nil error, so the error handling at internal/taskdone/review.go:109 and internal/prready/review.go:111 is dead code. The over-limit case (shards.go:193) returns an empty plan with nil error, indistinguishable at the call site from 'not sharded'; it is only explained because contextprofile.riskReasons separately raises ReasonDiffOversize (internal/contextprofile/profile.go:143).",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 188,
+          "note": "signature returns error that is never non-nil"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 109,
+          "note": "unreachable error branch on PlanShards"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Mislabelled structured field: the id-conflict error passes the run id as the value of the \"line\" key, while every other ERR_RUNS_JSONL error uses \"line\" for a line number (record.go:166). A consumer keying on Fields[\"line\"] gets a run id here, which is a type confusion in the CLI error envelope.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 209,
+          "note": "errs.E(..., \"line\", row.ID, \"reason\", \"id_conflict\")"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 166,
+          "note": "same key used for an actual line number"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Torn-tail repair can discard a concurrent row. The comment at record.go:180-187 states the second writer (state.AppendJSONL) takes no lock; readRows snapshots the file with os.ReadFile, and f.Truncate(t.offset) then cuts the file back to that snapshot's offset, so a complete row appended by the unlocked writer between the read and the truncate is lost. The O_APPEND write itself is safe; only the truncate path carries the race, and only when a torn fragment exists.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 225,
+          "note": "f.Truncate(t.offset) based on a pre-read snapshot offset"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 199,
+          "note": "advisory flock excludes only writers that also take it"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The newly added docs/metareview/fsm exclusion has no test. TestCollectExcludesShardResults only creates and asserts a docs/metareview/shards result; nothing asserts an FSM export bundle stays out of the learning diff, so a later regression in that pattern pair would not be caught.",
+      "evidence": [
+        {
+          "path": "internal/learnsource/source.go",
+          "line": 36,
+          "note": "docs/metareview/fsm excludes added"
+        },
+        {
+          "path": "internal/learnsource/source_test.go",
+          "line": 157,
+          "note": "test covers only the shards exclusion"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "PlanSourceHash is exported and its first parameter is discarded (_ Profile); the only caller in the repository is internal/contextprofile/plan_test.go:87. It is an exported surface that exists solely to assert that the profile does not affect the hash, which the delegation to SourceDiffHash already makes structurally true.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 86,
+          "note": "exported wrapper with an ignored Profile parameter"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "record.go's unconditional import of syscall (syscall.Flock, LOCK_EX/LOCK_UN) makes the package unix-only. Checked against the rest of the tree: internal/fsm/cmdexec and internal/fsm/machine/sidecar already depend on syscall.SysProcAttr.Setpgid and syscall.O_NOFOLLOW, so this is the established platform assumption of the FSM packages, not a regression introduced here.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 240,
+          "note": "var flock = syscall.Flock, matching existing unix-only FSM packages"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

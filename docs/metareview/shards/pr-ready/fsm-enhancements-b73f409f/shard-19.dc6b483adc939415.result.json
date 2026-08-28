@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-19.dc6b483adc939415",
+  "kind": "shard",
+  "shardId": "shard-19",
+  "shardHash": "dc6b483adc939415",
+  "planHash": "5946b89296b16369",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {"path": "internal/fsm/cli/envelope.go", "line": 67, "note": "exitFor reviewed against spec 5 exit-code table (docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:166-180)"},
+    {"path": "internal/fsm/machine/harness_test.go", "line": 1, "note": "test harness only; go vet clean and package reports 100.0% of statements"},
+    {"path": "internal/fsm/record/clock.go", "line": 5, "note": "nowNanos is consumed by internal/fsm/record/record.go:243 (var nanos = nowNanos) and covered by record_test.go:298 — not dead code"},
+    {"path": "tests/coverage.sh", "line": 46, "note": "coverage gate script read end to end; awk package derivation verified against the module layout (no root-level .go package exists, so the no-slash edge case is unreachable today)"},
+    {"path": "tests/run-all.sh", "line": 10, "note": "smoke build-tag gate and the new test-fsm/override/shard scripts are appended under the existing set -euo pipefail"},
+    {"path": "skills/fsm/SKILL.md", "line": 34, "note": "skill file is required by tests/manifest/test-skills.sh (frontmatter name/description present)"},
+    {"path": "internal/fsm/judge/testdata/prompts/still-present.fenced.golden", "line": 6, "note": "golden pins the nonce-delimited untrusted-data fence around both the bug text and the diff; no instruction leakage path"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "exitFor short-circuits every code to exit 2 when phase is phaseNone (envelope.go:68), so read-only commands routed through phaseNone (fsm diff / fsm export in internal/fsm/cli/run.go:893-939) return 2 for codes the spec table assigns to 1: ERR_AUDIT_CHAIN / ERR_AUDIT_INVALID from run.Store.Events on a damaged log, and ERR_INTERNAL / ERR_INTERRUPTED (spec line 178 lists ERR_AUDIT_* except NOT_TORN, ERR_INTERRUPTED and ERR_INTERNAL under exit 1). Per the documented driver contract, exit 2 means 'nothing was recorded, fix the input and retry', which invites a retry loop on a corrupt audit log. Defensible against the spec's stated principle for 2 (nothing was appended by a read-only invocation), so flagged rather than blocked; the spec's phase enum does not contain 'none' and should be reconciled either way.",
+      "evidence": [
+        {"path": "internal/fsm/cli/envelope.go", "line": 68, "note": "if ph == phaseNone { return 2 } precedes every code-specific row"},
+        {"path": "internal/fsm/cli/run.go", "line": 901, "note": "fsm diff surfaces store.Events errors (which can carry ERR_AUDIT_CHAIN/ERR_AUDIT_INVALID) at phaseNone"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md", "line": 178, "note": "exit-1 row lists ERR_AUDIT_* except NOT_TORN, ERR_INTERRUPTED and ERR_INTERNAL without qualifying the phase"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "finish() asserts env[\"untrusted\"].([]string) without the comma-ok form, so any caller that seeds untrusted with a differently typed slice panics inside output formatting; errEnvelope does the same read defensively twenty lines later, so the codebase is inconsistent about the same key. All current callers pass []string, so this is latent, not live.",
+      "evidence": [
+        {"path": "internal/fsm/cli/envelope.go", "line": 192, "note": "unchecked assertion appendSorted(env[\"untrusted\"].([]string), \"warnings[].detail\")"},
+        {"path": "internal/fsm/cli/envelope.go", "line": 220, "note": "same key read with the comma-ok form in errEnvelope"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "failure() discards CapText's truncation flag for every error field, so a capped error.fields.* value is emitted indistinguishable from a complete one, while error.detail gets an explicit detail_truncated companion key. A consumer reading a truncated field (for example a cmds name or path) cannot tell it was cut.",
+      "evidence": [
+        {"path": "internal/fsm/cli/envelope.go", "line": 131, "note": "s, _ := run.CapText(v, run.MaxShort) drops the bool"},
+        {"path": "internal/fsm/cli/envelope.go", "line": 143, "note": "detail by contrast carries detail_truncated in the emitted object"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "SKILL.md exit-code table row 0 contains an unescaped pipe inside DONE(fixed|clean). In GFM a pipe inside a code span still splits table cells, so the row renders with four cells against a two-column header and the trailing 'FORKED', 'OK', 'a gate that passed' text is dropped by conforming renderers. Needs \\| escaping. Same defect exists in the spec source it was copied from.",
+      "evidence": [
+        {"path": "skills/fsm/SKILL.md", "line": 34, "note": "| 0 | `ADVANCED`, `DONE(fixed|clean)`, `FORKED`, `OK`, a gate that passed |"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md", "line": 176, "note": "identical unescaped pipe in the spec's exit table"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "tests/coverage.sh's EXIT trap runs `go build -o bin/metareview` on every exit path, including the argument-parse refusal that intends exit 2 before anything is instrumented. Verified empirically that under `set -e` a failing command inside an EXIT trap replaces the pending status (a script exiting 7 exits 1 instead), so a broken build in cleanup silently rewrites the gate's exit code and hides the original reason. Guard the rebuild on having actually set GOFLAGS=-cover, or run it with `|| true` and report separately.",
+      "evidence": [
+        {"path": "tests/coverage.sh", "line": 46, "note": "cleanup() { rm -rf \"$COVDIR\"; go build -o bin/metareview ./cmd/metareview; }; trap cleanup EXIT"},
+        {"path": "tests/coverage.sh", "line": 37, "note": "unknown-option path exits 2 and still triggers the rebuild"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 100%-coverage case pattern in tests/coverage.sh matches `internal/fsm/*` and `workflows` only, so a package sitting at exactly internal/fsm (no subdirectory) would fall through to the floor branch and be reported 'no floor', i.e. unenforced, even though the REQUIRED presence check would still list it. internal/fsm currently holds no .go files so this is latent; `internal/fsm|internal/fsm/*` would close it.",
+      "evidence": [
+        {"path": "tests/coverage.sh", "line": 85, "note": "case \"$rel\" in internal/fsm/*|workflows) requires exact statement coverage"},
+        {"path": "tests/coverage.sh", "line": 109, "note": "REQUIRED comes from go list ./internal/fsm/... ./workflows, which would include a package at internal/fsm itself"}
+      ]
+    }
+  ]
+}

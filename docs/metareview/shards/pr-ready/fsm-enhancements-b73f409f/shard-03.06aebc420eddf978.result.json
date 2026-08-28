@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-03.06aebc420eddf978",
+  "kind": "shard",
+  "shardId": "shard-03",
+  "shardHash": "06aebc420eddf978",
+  "planHash": "5946b89296b16369",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T16:19:51Z",
+  "blockingCount": 1,
+  "evidence": [
+    {
+      "path": ".claude-plugin/marketplace.json",
+      "line": 11,
+      "note": "Version bump 0.8.2 -> 0.9.0 checked for consistency across every manifest: package.json:3, .claude-plugin/plugin.json:3, .codex-plugin/plugin.json:3 and CHANGELOG.md:3 all read 0.9.0. tests/manifest/test-manifests.sh and tests/manifest/test-skills.sh both exit 0."
+    },
+    {
+      "path": "INSTALL.md",
+      "line": 9,
+      "note": "Go 1.22+ -> Go 1.26+ matches go.mod's `go 1.26` directive (toolchain go1.27.0 is deliberately newer and documented in go.mod's comment). cli/metareview.js:28 and :36 carry the same 1.26 wording, so the launcher and the docs agree."
+    },
+    {
+      "path": "INSTALL.md",
+      "line": 137,
+      "note": "Verified the two new operational claims by running the binary: `metareview setup --check` emits prerequisites.git.version/versionOk (internal/setup/setup.go:184 MinGitVersion = \"2.31\"), and the self-ignoring directories exist -- .metareview/runs/.gitignore and .metareview/shards/.gitignore both contain `*`."
+    },
+    {
+      "path": "internal/fsm/workflow/testdata/cmds-preimage.sha256",
+      "line": 1,
+      "note": "New single-line 64-hex fixture, consumed by internal/fsm/workflow/workflow_test.go:478 alongside cmds-preimage.json (a different shard). `go test ./internal/fsm/workflow/` is green, so the fixture and its cross-shard consumer are mutually consistent. Read through strings.TrimSpace, so a CRLF checkout does not break this particular file."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+      "line": 148,
+      "note": "Section 3.4 of the new spec closes the provider routing set at anthropic/openai with `else ERR_JUDGE_MODEL`, which is the basis of finding SPEC-CODEX below."
+    },
+    {
+      "path": "docs/tasks/m8-cli-suite-docs.md",
+      "line": 3,
+      "note": "The referenced sibling spec docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md exists, and the named deliverables resolve: commands/fsm.md, skills/fsm/, docs/fsm/{driving-a-workflow.md,sdlc-loop-example.md}, tests/go/test-fsm.sh, testdata/fsm/scenarios. No dangling references."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+      "line": 3,
+      "note": "Scanned every file in this shard for the rubric's blocking markers: no TODO/FIXME, no eval or other unsafe execution construct, no truncated diff context, no untracked source files, and no duplicated inventoried code path introduced. The spec's 'follow-up' notes are ledger entries, not TODO markers."
+    }
+  ],
+  "findings": [
+    {
+      "id": "SPEC-CODEX",
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The spec added by this shard is stale against code shipped in the same branch: it does not mention the Codex CLI judge provider anywhere, and three of its closed enumerations are contradicted by that provider. (a) Routing -- line 148 states 'anthropic for claude*/anthropic/*; openai for gpt*/openai/*/glm*/kimi*; else ERR_JUDGE_MODEL', but internal/fsm/judge/judge.go:114-127 routes a third provider, provCodex, on the `codex/` prefix, checked first. (b) Effort vocabulary -- line 117 states 'low | medium | high | xhigh; anything else -> ERR_JUDGE_EFFORT_UNSUPPORTED{effort}', but internal/fsm/judge/codex.go:27-29 additionally accepts none, minimal and max, and internal/fsm/judge/judge.go:275-279 delegates the whole effort/key check to validateCodex, so JUDGE_EFFORT=max is valid for a codex/ model. (c) API surface and errors -- the §3 signature block (line 100) lists only judge.New, while the shipped constructor pair is New plus NewWithCodex (internal/fsm/judge/judge.go:201) with a CodexExec seam, and §7's error list omits the codex arm's no-runner ERR_JUDGE_MODEL{provider: codex}. This is not a pre-existing gap: internal/fsm/judge/codex.go was added on this branch (commit eeb8fa4, 'judge through the Codex CLI on OAuth') and the spec was rewritten as recently as r5 on 2026-08-27, so the two moved past each other inside one PR. The consequence is not cosmetic. This spec's §9 Ledger is where the branch records its trust-boundary decisions -- consent depth, the cmd child's {PATH,HOME,LANG,TMPDIR} env allow-list (line 78), the agent-satisfiable knob list that already names --var JUDGE -- and a codex/ model makes that agent-satisfiable knob spawn the `codex` binary resolved from PATH with the parent environment inherited whole (internal/fsm/cli/deps.go:96-105, wired into RealDeps at deps.go:67), entirely outside the cmd allow-list, pinned-argv and hash-reverify machinery the rest of the spec is built around. That is exactly the class of decision the ledger exists to record, and it has no entry. CHANGELOG.md:7 corroborates the drift by describing 0.9.0's judge calls as 'Anthropic and OpenAI-compatible', excluding the provider it ships. The code itself is sound and covered (skills/fsm/SKILL.md:73-74 does document the behaviour for operators); what is missing is the spec paragraphs in §3.1/§3.4/§7 and a ledger entry for the subprocess trust boundary.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 148,
+          "note": "Routing sentence closes the provider set with 'else ERR_JUDGE_MODEL'; no codex/ arm."
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 117,
+          "note": "Effort vocabulary closed at low|medium|high|xhigh; codex accepts none|minimal|max too."
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 119,
+          "note": "case strings.HasPrefix(m, CodexPrefix): return provCodex -- the third route, checked first."
+        },
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 27,
+          "note": "codexEfforts admits none/minimal/max, wider than the spec's closed effort vocabulary."
+        },
+        {
+          "path": "internal/fsm/cli/deps.go",
+          "line": 100,
+          "note": "realCodexExec spawns judge.CodexBin from PATH with the environment inherited whole, outside the cmd allow-list."
+        },
+        {
+          "path": "CHANGELOG.md",
+          "line": 7,
+          "note": "0.9.0 summary says 'Anthropic and OpenAI-compatible', omitting the Codex CLI judge shipped in the same release."
+        }
+      ]
+    },
+    {
+      "id": "CMDEXEC-CLOCK",
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead injected dependency, and the spec states the opposite. Line 72 of the spec asserts that cmdexec's DurationMS 'comes from the runner's measured Result.Duration (no `Clock`)'. The shipped struct does declare cmdexec.Guarded.Clock func() time.Time (internal/fsm/cmdexec/cmdexec.go:77) and internal/fsm/cli/deps.go:90 populates it with `now` on every guarded runner the CLI builds. A repo-wide grep finds no read of that field anywhere -- it is the only occurrence in internal/fsm/cmdexec besides the declaration. Struct fields carry no statements, so the branch's 100%-statement-coverage gate cannot see it. Either the field is removed (and deps.go:90 stops setting it) or the spec sentence is corrected; today a reader of either artifact is misled by the other. Reported against the previous revision of this shard and still present.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cmdexec/cmdexec.go",
+          "line": 77,
+          "note": "Clock func() time.Time declared on Guarded and never read in the package."
+        },
+        {
+          "path": "internal/fsm/cli/deps.go",
+          "line": 90,
+          "note": "guardedRunner sets Clock: now on every Guarded it constructs."
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 72,
+          "note": "Spec says DurationMS comes from Result.Duration with '(no Clock)'."
+        }
+      ]
+    },
+    {
+      "id": "SPEC-LIST-ORDER",
+      "severity": "low",
+      "disposition": "open",
+      "note": "Section 4.2's ordered list is out of sequence: the pre-flight step is written as '0.' but placed in source order after item '1.'. Every Markdown renderer renumbers an ordered list sequentially from its first marker, so the rendered spec shows the pre-flight bound as step 2, immediately after the step it is required to precede ('before any call', 'with no spend'). The one item in this spec whose whole point is ordering is the one the rendering reorders. Moving the block above item 1 and numbering it 1 (renumbering the rest) fixes it. Also carried over from the previous revision of this shard.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 242,
+          "note": "'0. Pre-flight (before any call)' appears after the list item numbered 1."
+        }
+      ]
+    },
+    {
+      "id": "GITATTR-CRLF",
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Considered and rejected for this shard. Byte-pinned fixtures on this branch are unevenly protected -- .gitattributes marks only internal/fsm/judge/testdata/prompts/* and testdata/fsm/** as -text -- which on a core.autocrlf checkout would break sha assertions. It does not reach this shard's file: internal/fsm/workflow/workflow_test.go:478 reads cmds-preimage.sha256 through strings.TrimSpace, which absorbs a CR. Any residual exposure belongs to cmds-preimage.json, which is in another shard, and has already been raised there and cross-shard.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow_test.go",
+          "line": 478,
+          "note": "wantSha := strings.TrimSpace(string(must(os.ReadFile(\"testdata/cmds-preimage.sha256\")))) -- TrimSpace absorbs a CRLF."
+        }
+      ]
+    },
+    {
+      "id": "GO-TOOLCHAIN-CANON",
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Considered and rejected. INSTALL.md:9 and cli/metareview.js now advertise Go 1.26+ as the source-checkout minimum while go.mod pins toolchain go1.27.0, and go.mod's own comment warns that encoding/json writes U+2028/U+2029 and invalid UTF-8 differently between those releases -- which would mean a 1.26 build (GOTOOLCHAIN=local) producing a different hash chain than CI. Checked the encoder: internal/fsm/run/canonical.go:17-31 deliberately does not delegate those escapes to encoding/json, documents that exact reason, and is pinned by TestCanonicalIsToolchainIndependent. The advertised minimum is therefore safe.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/canonical.go",
+          "line": 19,
+          "note": "Comment: the escapes are this package's choice rather than encoding/json's, because the stdlib writes them differently across Go releases."
+        },
+        {
+          "path": "INSTALL.md",
+          "line": 9,
+          "note": "Go 1.26+ advertised as the source-checkout minimum against a go1.27.0 toolchain pin."
+        }
+      ]
+    }
+  ]
+}

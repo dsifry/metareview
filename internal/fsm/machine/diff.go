@@ -21,16 +21,22 @@ type Report struct {
 
 // CallRow aligns one judge call across the two runs by (node, iter, kind, input_hash).
 type CallRow struct {
-	Node           string    `json:"node"`
-	Iter           int       `json:"iter"`
-	Kind           string    `json:"kind"`
-	InputHash      string    `json:"input_hash"`
+	Node      string `json:"node"`
+	Iter      int    `json:"iter"`
+	Kind      string `json:"kind"`
+	InputHash string `json:"input_hash"`
+	// Index distinguishes several calls of one kind in the same node@iter with
+	// the same input — the same question put to two models. Without it the rows
+	// collided and the earlier call vanished from the report.
+	Index          int       `json:"index"`
 	A              *CallSide `json:"a"`
 	B              *CallSide `json:"b"`
 	RawSame        bool      `json:"raw_same"`
 	DecisionSame   bool      `json:"decision_same"`
 	ConfidenceSame bool      `json:"confidence_same"`
 	Same           bool      `json:"same"`
+	// occurrence is the within-side repeat index; it orders rows and never ships.
+	occurrence int
 }
 
 // CallSide is one run's side of a CallRow.
@@ -68,23 +74,35 @@ func DiffRuns(a, b run.Log, decide func(kind string, verdict json.RawMessage) De
 		return Report{}, errs.E(CodeDiffIncompatible, "runs use different workflows", "a", sa.Workflow, "b", sb.Workflow)
 	}
 	r := Report{A: sa.RunID, B: sb.RunID, SameWorkflow: sa.WorkflowHash == sb.WorkflowHash, CommonPrefixSeq: commonPrefix(a.Events, b.Events), Outcomes: [2]string{string(sa.Outcome), string(sb.Outcome)}, Calls: []CallRow{}, Transitions: []TransRow{}}
+	// Rows align across runs by (node, iter, kind, input_hash) — the same question
+	// asked of both runs — which is why the call index is deliberately NOT part of
+	// the identity: the two runs assign indices independently.
+	//
+	// occurrence disambiguates repeats within one side. A node@iter can hold
+	// several calls of one kind with the same input, and keying without it made
+	// the second call overwrite the first, dropping it from the report entirely.
+	// The nth such call on side A pairs with the nth on side B.
 	type key struct {
-		node     string
-		iter     int
-		kind, ih string
+		node       string
+		iter       int
+		kind, ih   string
+		occurrence int
 	}
 	rows := map[key]*CallRow{}
 	collect := func(events []run.Event, side int) {
+		seen := map[key]int{} // per-side repeat counter, reset for each side
 		for _, ev := range events {
 			if ev.Type != run.TypeLLMCall {
 				continue
 			}
 			var d run.LLMCallData
 			_ = json.Unmarshal(ev.Data, &d)
-			k := key{ev.Node, ev.Iter, d.Kind, d.InputHash}
+			k := key{node: ev.Node, iter: ev.Iter, kind: d.Kind, ih: d.InputHash}
+			k.occurrence = seen[k]
+			seen[k]++
 			row, ok := rows[k]
 			if !ok {
-				row = &CallRow{Node: ev.Node, Iter: ev.Iter, Kind: d.Kind, InputHash: d.InputHash}
+				row = &CallRow{Node: ev.Node, Iter: ev.Iter, Kind: d.Kind, InputHash: d.InputHash, occurrence: k.occurrence}
 				rows[k] = row
 			}
 			dec := decide(d.Kind, d.Verdict)
@@ -118,7 +136,10 @@ func DiffRuns(a, b run.Log, decide func(kind string, verdict json.RawMessage) De
 		if x.Kind != y.Kind {
 			return x.Kind < y.Kind
 		}
-		return x.InputHash < y.InputHash
+		if x.InputHash != y.InputHash {
+			return x.InputHash < y.InputHash
+		}
+		return x.occurrence < y.occurrence
 	})
 	ta, tb := transitions(a.Events), transitions(b.Events)
 	for i := 0; i < len(ta) || i < len(tb); i++ {

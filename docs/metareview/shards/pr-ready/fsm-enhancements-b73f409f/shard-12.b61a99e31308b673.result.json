@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-12.b61a99e31308b673",
+  "kind": "shard",
+  "shardId": "shard-12",
+  "shardHash": "b61a99e31308b673",
+  "planHash": "5946b89296b16369",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 1,
+  "evidence": [
+    {"path": "internal/fsm/machine/diff.go", "line": 72, "note": "DiffRuns alignment key is (node, iter, kind, input_hash) only"},
+    {"path": "internal/fsm/machine/diff.go", "line": 38, "note": "CallSide carries Index, so a call is identified by index, yet index is not in the key"},
+    {"path": "internal/fsm/machine/machine.go", "line": 1061, "note": "RecordLLMCall stamps Index = NextIndex(judge@iter): repeated ad-hoc judge calls on the same input in one iteration are allowed by design"},
+    {"path": "internal/fsm/machine/fork_test.go", "line": 740, "note": "sort assertion requires strictly increasing InputHash per node/iter/kind - duplicate-input calls are untested"},
+    {"path": "internal/fsm/judge/codex.go", "line": 70, "note": "codex retry loop has no fatal class; every non-zero exit is retried MaxAttempts times"},
+    {"path": "internal/fsm/judge/judge.go", "line": 543, "note": "HTTP arm returns immediately on classFatal - the parity the codex comment claims is incomplete"},
+    {"path": "internal/fsm/judge/codex.go", "line": 152, "note": "turn.completed usage is assigned, not accumulated across turns"},
+    {"path": "internal/fsm/judge/codex.go", "line": 163, "note": "hand-rolled itoa duplicates strconv.Itoa"},
+    {"path": "README.md", "line": 55, "note": "latest What Changed section is 0.8.3 while package.json ships 0.9.0"},
+    {"note": "go vet and go test pass for internal/contextprofile, internal/fsm/judge, internal/fsm/machine; new tests exist for codex.go (codex_test.go), diff.go (fork_test.go) and the contextprofile LocalBytes regression, and every helper in machine/helpers_test.go has at least one caller"}
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "DiffRuns collapses judge calls that share (node, iter, kind, input_hash) but differ by index/model. collect() keys rows on those four fields only (diff.go:72-97) and assigns row.A/row.B unconditionally, so the last matching call in a run overwrites the earlier one and that earlier call disappears from the report entirely. This is reachable through the swappable-judge path the branch adds: Machine.RecordLLMCall (machine.go:1061) stamps Index = NextIndex(\"judge@<iter>\"), so running `fsm judge --run` twice on the same input in one iteration - e.g. the same kind against two models, which is the point of swappable judges - produces exactly such a pair. CallSide already carries Index (diff.go:38), showing a call is identified by index, yet index and model are excluded from the key. The comparison report is an auditability artifact, so silently dropping a call is worse than reporting it unmatched. No test covers duplicate input hashes: the sort assertion at fork_test.go:740 asserts strictly increasing InputHash within a node/iter/kind, which presumes uniqueness.",
+      "evidence": [
+        {"path": "internal/fsm/machine/diff.go", "line": 72, "note": "key struct{node, iter, kind, ih} - no index, no model"},
+        {"path": "internal/fsm/machine/diff.go", "line": 92, "note": "row.A = cs / row.B = cs overwrite without detecting a collision"},
+        {"path": "internal/fsm/machine/machine.go", "line": 1061, "note": "Index = NextIndex(Key(JudgeNode, iter)) permits repeated same-input calls"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The codex arm has no fatal classification. The HTTP arm returns immediately when classify() yields classFatal (judge.go:543), but codexJudge.Call retries every non-zero exit and every exec failure for the full MaxAttempts=5 ladder (codex.go:70-95). A deterministic failure - codex not on PATH, an unknown model id, an expired OAuth session - therefore burns five attempts plus 1+2+4+8s of backoff before surfacing. The comment at codex.go:63-68 claims parity with the HTTP arm on ceiling, deadline and backoff; the missing fourth element, fatal short-circuiting, is not noted.",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex.go", "line": 70, "note": "loop retries execErr, non-zero exit and missing-message alike"},
+        {"path": "internal/fsm/judge/judge.go", "line": 543, "note": "HTTP arm: if class == classFatal { return v, err }"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "parseCodexEvents assigns the token totals on each turn.completed rather than accumulating them (codex.go:150-158). If one codex exec emits more than one turn.completed, only the last turn's usage is reported and earlier turns' tokens are lost - note the contrast with the caller, which correctly uses v.Tokens.Add across attempts (codex.go:82). Accumulating, or documenting that exec is single-turn by construction, would remove the ambiguity.",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex.go", "line": 152, "note": "tokens = run.TokenTotals{...} replaces any prior turn's totals"},
+        {"path": "internal/fsm/judge/codex.go", "line": 82, "note": "v.Tokens = v.Tokens.Add(tokens) accumulates across attempts"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "itoa (codex.go:163-184) reimplements strconv.Itoa to avoid one stdlib import, in a package that already imports fmt for the same purpose (judge.go uses fmt.Sprintf for status formatting). Beyond the duplication, the negation at codex.go:168 overflows for math.MinInt and would return a bare \"-\"; exit codes make that unreachable today, but the hand-rolled path buys nothing over strconv.Itoa.",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex.go", "line": 163, "note": "// itoa avoids pulling strconv in for two call sites"},
+        {"path": "internal/fsm/judge/codex.go", "line": 168, "note": "n = -n overflows for the minimum int"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Release notes lag the shipped version. This diff adds a \"What Changed In 0.8.3\" section to README.md, but package.json, .claude-plugin/plugin.json and marketplace.json all declare 0.9.0, and README has no 0.9.0 section (only 0.8.3 and 0.4.0-to-0.6.0 headings exist). The FSM workflow engine - the largest change on this branch - appears only as a Use Cases bullet, so a reader looking for what 0.9.0 changed finds nothing.",
+      "evidence": [
+        {"path": "README.md", "line": 55, "note": "## What Changed In 0.8.3 is the newest release-notes heading"},
+        {"path": "package.json", "line": 3, "note": "\"version\": \"0.9.0\""}
+      ]
+    }
+  ]
+}

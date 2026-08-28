@@ -43,7 +43,14 @@ COVDIR="$(mktemp -d)"
 PROFILE="$COVDIR/profile.txt"
 # The shell suite runs `npm run build`, which under GOFLAGS=-cover would leave an instrumented
 # bin/metareview behind; rebuild it plainly on exit.
-cleanup() { rm -rf "$COVDIR"; go build -o bin/metareview ./cmd/metareview; }
+# The rebuild failure is reported rather than swallowed: bash preserves the
+# script's own exit status through an EXIT trap, so this cannot mask a failing
+# gate, but a silent failure here would leave a stale or missing bin/metareview
+# behind a passing run.
+cleanup() {
+  rm -rf "$COVDIR"
+  go build -o bin/metareview ./cmd/metareview || echo "coverage gate: post-run rebuild of bin/metareview FAILED" >&2
+}
 trap cleanup EXIT
 
 # 1. Unit tests, instrumented, writing per-package counters into COVDIR.

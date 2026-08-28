@@ -661,13 +661,22 @@ func dispositionCloses(value string) bool {
 	return value == DispositionFixed || value == DispositionFalsePositive
 }
 
+// hasValidEvidence enforces the rule the packs publish to every reviewer:
+// "each entry needs path AND line > 0, or a note of at least 12 characters; at
+// least one entry". It was an any(), so a result with one good entry and nine
+// empty ones passed while its own instructions said otherwise — and the test
+// named for checking this correspondence only ever built one-element slices,
+// the single shape in which the two rules cannot disagree.
 func hasValidEvidence(values []EvidenceRef) bool {
+	if len(values) == 0 {
+		return false
+	}
 	for _, value := range values {
-		if evidenceRefValid(value) {
-			return true
+		if !evidenceRefValid(value) {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func evidenceRefValid(value EvidenceRef) bool {

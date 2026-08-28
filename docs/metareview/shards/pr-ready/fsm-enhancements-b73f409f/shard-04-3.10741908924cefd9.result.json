@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-04-3",
+  "kind": "shard",
+  "shardId": "shard-04-3",
+  "shardHash": "10741908924cefd9",
+  "planHash": "5946b89296b16369",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 197,
+      "note": "TestCodexJudgeStopsOnCancellation is racy and fails ~10% of runs; reproduced with `go test ./internal/fsm/judge/ -run TestCodexJudgeStopsOnCancellation -count=50` (4-9 failures per 50 across 15 batches) and once in a plain `go test ./internal/fsm/judge/...` run"
+    },
+    {
+      "path": "internal/fsm/judge/codex.go",
+      "line": 72,
+      "note": "the retry ladder selects between ctx.Done() and clock.After(); with an already-ready timer Go picks a ready case at random, so cancellation is not actually guaranteed to stop the ladder"
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 130,
+      "note": "peek reads the whole audit.jsonl through deps.ReadFile (os.ReadFile, unbounded) and only then truncates to run.MaxLine to take the first line"
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 85,
+      "note": "git() discards stderr, so ERR_NOT_A_REPO and friends carry no git diagnostic"
+    },
+    {
+      "path": "internal/fsm/machine/handoffs_test.go",
+      "line": 720,
+      "note": "verified against machine.Open/loadWith: Store.Lock is taken before FileHash re-verification, so the 'full open must take the lock' assertion is sound despite the broken FileHash installed earlier in the test"
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 291,
+      "note": "verified the xhigh table claims in TestAnthropicEffortTableMatchesTheAPI against supportsXHigh/anthropicNoXHigh and the wireModel case-fold trim; the tests match the source"
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 236,
+      "note": "kind.New's only error is the mock/judge mismatch that machineDeps rules out by construction, so the ignored error is safe as written"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "Flaky (and currently failing) test on a frozen branch: TestCodexJudgeStopsOnCancellation asserts f.calls < MaxAttempts, but codexClock()'s After channel is pre-filled, so codex.go's `select { case <-ctx.Done(): ...; case <-j.clock.After(...): }` has two ready cases and Go chooses uniformly at random. When the timer arm wins five times the ladder runs to completion and the test fails. Measured ~10% failure rate (4-9 failures per 50 runs over 15 batches), and it failed during a plain `go test ./internal/fsm/judge/...`, which also dropped package coverage to 99.8% under the repo's 100% rule. This is not only a test defect: the property the test names — a cancelled caller stops the ladder — is not guaranteed by the source, which should check ctx.Err() before selecting on the timer.",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex_test.go", "line": 197, "note": "assertion f.calls >= MaxAttempts fails when the timer arm of the select wins"},
+        {"path": "internal/fsm/judge/codex.go", "line": 72, "note": "select over ctx.Done() and clock.After() with no prior ctx.Err() check"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "peek() loads an entire run's audit.jsonl into memory (deps.ReadFile is os.ReadFile with no cap) purely to read its first line, then truncates. A long-lived run's log is unbounded; a bounded read of the first run.MaxLine bytes would be equivalent and cheap.",
+      "evidence": [{"path": "internal/fsm/cli/wiring.go", "line": 131, "note": "ReadFile of runs/<id>/audit.jsonl before the MaxLine truncation"}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "ctxDeps.git discards git's stderr, so every wrapped failure (rootOf, toplevel) reports a generic 'not inside a git repository' with no underlying git message, making misconfiguration harder to diagnose.",
+      "evidence": [{"path": "internal/fsm/cli/wiring.go", "line": 86, "note": "the second Exec return value is dropped"}]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "nonce() panics on a crypto/rand failure and no production path recovers (the only recover() in the tree is in cli_test.go), so the CLI would crash with a stack trace instead of the structured ERR_INTERNAL envelope. crypto/rand.Read does not fail on supported platforms, and the behaviour is deliberately covered by a test, so this is accepted rather than a defect.",
+      "evidence": [{"path": "internal/fsm/cli/wiring.go", "line": 217, "note": "panic(errs.E(CodeInternal, ...)) with no recover in cmd/ or internal/ outside tests"}]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "rootOf appears able to return an empty root when `git worktree list --porcelain` yields empty stdout with exit 0; git never does this inside a worktree, and a non-repo exits non-zero and is already mapped to ERR_NOT_A_REPO.",
+      "evidence": [{"path": "internal/fsm/cli/wiring.go", "line": 111, "note": "strings.TrimPrefix(lines[0], \"worktree \") on a possibly empty first line"}]
+    }
+  ],
+  "blockingCount": 1
+}

@@ -68,6 +68,14 @@ func (j *codexJudge) Call(ctx context.Context, r Request) (v Verdict, err error)
 	prompt := system + "\n\n" + user
 	var lastErr error
 	for attempt := 0; attempt < MaxAttempts; attempt++ {
+		// Checked before every attempt, including the first. Relying on the
+		// select below made the guarantee incidental: with a real clock the
+		// backoff timer is slow enough that ctx.Done() always wins, but attempt 0
+		// skips the select entirely, so an already-cancelled caller still spawned
+		// one codex exec. Explicit beats accidental.
+		if err := ctx.Err(); err != nil {
+			return v, err
+		}
 		v.Attempts = attempt + 1
 		if attempt > 0 {
 			select {
