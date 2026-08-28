@@ -30,7 +30,7 @@ jobs:
 
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
 
@@ -66,12 +66,22 @@ jobs:
           # Ask the API directly rather than parsing `gh pr checks`, whose error
           # text on "no checks yet" contains no "pending" line and would otherwise
           # read as "everything finished" — letting gtg run before CI reports.
-          SHA="$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)"
+          # The head SHA is resolved inside the loop rather than here: a bare
+          # assignment from a failed `gh api` ends the step under `bash -e`,
+          # before any of the retry budget has been spent.
+          SHA=""
           # 132 * 10s = 22 minutes, which clears the Test job's own 20-minute
           # ceiling. A shorter wait would start gtg while CI was still pending
           # and report a false CI_FAILING.
-          echo "Waiting for checks on $SHA ..."
+          echo "Waiting for the PR head SHA and its checks ..."
           for i in $(seq 1 132); do
+            if [ -z "$SHA" ]; then
+              SHA="$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha || true)"
+              if [ -z "$SHA" ]; then
+                echo "  head SHA unavailable, retrying in 10s... ($i/132)"; sleep 10; continue
+              fi
+              echo "  head SHA $SHA"
+            fi
             RUNS="$(gh api "repos/$REPO/commits/$SHA/check-runs" --paginate \
               --jq '.check_runs[] | select(.name != "Merge Ready (gtg)" and .name != "CodeRabbit" and .name != "Cursor Bugbot") | .status' || echo "api-error")"
             if [ "$RUNS" = "api-error" ]; then
