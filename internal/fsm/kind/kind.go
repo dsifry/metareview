@@ -478,7 +478,7 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 			confirmed = append(confirmed, run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictUnverifiedNoEvidence})
 			continue
 		}
-		diff, truncated, diffHash := judge.ContextFor(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, judge.MaxDiffBytes)
+		diff, truncated, diffHash := judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, cand.IssueText, judge.MaxDiffBytes)
 		v, err := call(ctx, e.judge, in, judge.Request{Kind: judge.KindAdjudicate, Index: index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand}})
 		index++
 		if err != nil {
@@ -616,7 +616,7 @@ func (e *stillPresentExec) Execute(ctx context.Context, in machine.ExecInput) (j
 	st := []run.BugStatus{}
 	for i, b := range in.Snap.AllFound {
 		// per bug, for the same reason adjudicate selects per candidate
-		diff, truncated, diffHash := judge.ContextFor(in.Diff.Text, in.Diff.Truncated, b.File, b.Line, judge.MaxDiffBytes)
+		diff, truncated, diffHash := judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, b.File, b.Line, b.Desc, judge.MaxDiffBytes)
 		v, err := call(ctx, e.judge, in, judge.Request{Kind: judge.KindStillPresent, Index: in.StartIndex + i, Input: judge.StillPresentInput{Bug: b, Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash}})
 		if err != nil {
 			return nil, err

@@ -282,3 +282,62 @@ func TestContextForUnlocalisedFindingFallsBackToTheHead(t *testing.T) {
 		t.Error("an unlocalised finding is not the same as a missing file")
 	}
 }
+
+// Findings are routinely cross-file: 45 of this repo's 100 open blockers name another file
+// in their prose. Selecting only the declared file hands the judge one side of a comparison,
+// and it correctly declines - 9 of 37 rejections in run 3 cited a file they were not shown.
+func TestContextForClaimIncludesReferencedFiles(t *testing.T) {
+	text := "the guide at docs/guide.md says five, but scripts/deploy.py enforces eight"
+	out, _, hash := ContextForClaim(multiLangDiff, false, "internal/app/server.go", 10, text, 8192)
+	if hash == "" {
+		t.Fatal("want a hash")
+	}
+	for _, want := range []string{"go listen(ctx)", "Run the installer.", "subprocess.run"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("claim context is missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "runs-on: ubuntu-latest") {
+		t.Error("a file the text never names must not be pulled in")
+	}
+}
+
+func TestReferencedPathsIgnoresUnknownAndSelf(t *testing.T) {
+	text := "internal/app/server.go and docs/guide.md and internal/ghost/missing.go"
+	got := ReferencedPaths(multiLangDiff, "internal/app/server.go", text)
+	if len(got) != 1 || got[0] != "docs/guide.md" {
+		t.Fatalf("got %v, want only docs/guide.md (self excluded, absent file excluded)", got)
+	}
+}
+
+func TestReferencedPathsIsCapped(t *testing.T) {
+	var b strings.Builder
+	var text strings.Builder
+	for i := 0; i < 12; i++ {
+		p := "internal/p" + strconv.Itoa(i) + "/f.go"
+		b.WriteString("diff --git a/" + p + " b/" + p + "\n@@ -1 +1 @@\n+x\n")
+		text.WriteString(p + " ")
+	}
+	if got := ReferencedPaths(b.String(), "other.go", text.String()); len(got) != maxReferencedFiles {
+		t.Fatalf("got %d refs, want the cap of %d", len(got), maxReferencedFiles)
+	}
+}
+
+// The finding text is untrusted reviewer output, so it may only choose among hunks the diff
+// already carries - never introduce content, and never reach outside the diff.
+func TestReferencedPathsCannotIntroduceContent(t *testing.T) {
+	text := "see /etc/passwd and ../../secrets.go and internal/nope/absent.go"
+	if got := ReferencedPaths(multiLangDiff, "x.go", text); len(got) != 0 {
+		t.Fatalf("untrusted text pulled in %v; only paths present in the diff are selectable", got)
+	}
+}
+
+// Most findings name no other file; those must behave exactly as before.
+func TestContextForClaimWithNoReferencesMatchesContextFor(t *testing.T) {
+	const text = "a nil dereference happens on the second call"
+	got, gotTrunc, gotHash := ContextForClaim(multiLangDiff, false, "docs/guide.md", 41, text, 4096)
+	want, wantTrunc, wantHash := ContextFor(multiLangDiff, false, "docs/guide.md", 41, 4096)
+	if got != want || gotTrunc != wantTrunc || gotHash != wantHash {
+		t.Errorf("no-reference path diverged from ContextFor:\n got %q\nwant %q", got, want)
+	}
+}

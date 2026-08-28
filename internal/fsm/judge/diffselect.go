@@ -3,6 +3,7 @@ package judge
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -279,4 +280,59 @@ func ContextFor(diff string, alreadyTruncated bool, file string, line, budget in
 	out = b.String()
 	sum := sha1.Sum([]byte(out))
 	return out, true, hex.EncodeToString(sum[:])
+}
+
+// maxReferencedFiles caps how many extra files one finding can pull in. The finding text is
+// untrusted reviewer output, so it selects which of OUR OWN hunks to show and nothing more -
+// but an uncapped list would still let one finding crowd out the budget.
+const maxReferencedFiles = 4
+
+// referencedPath matches a path-shaped token inside a finding's prose: two or more slash
+// separated segments ending in an extension. It deliberately does NOT enumerate this repo's
+// top-level directories or a set of extensions - metareview runs against many repositories
+// and languages, and a hardcoded list silently matches nothing in the next one. Precision
+// comes from DiffHasFile instead: a match is only used when the diff actually carries it.
+var referencedPath = regexp.MustCompile(`[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]+`)
+
+// ReferencedPaths returns the paths a finding's text names, excluding its own file and
+// anything the diff does not carry, capped at maxReferencedFiles in first-mentioned order.
+//
+// Findings are routinely cross-file: "reviewlog.go blocks on eight lenses but README says
+// five", "this test pins the wrong constant in kind.go". Selecting only the declared file
+// hands the judge one side of the comparison and it correctly declines - measured here, two
+// of four sampled rejections were exactly that.
+func ReferencedPaths(diff, own, text string) []string {
+	var out []string
+	seen := map[string]bool{own: true}
+	for _, m := range referencedPath.FindAllString(text, -1) {
+		if seen[m] || !DiffHasFile(diff, m) {
+			continue
+		}
+		seen[m] = true
+		if out = append(out, m); len(out) == maxReferencedFiles {
+			break
+		}
+	}
+	return out
+}
+
+// ContextForClaim is ContextFor plus the files the finding's text names. The declared file
+// keeps the larger share of the budget: it is the primary locus, the others are corroboration.
+func ContextForClaim(diff string, alreadyTruncated bool, file string, line int, text string, budget int) (out string, truncated bool, hash string) {
+	refs := ReferencedPaths(diff, file, text)
+	if len(refs) == 0 {
+		return ContextFor(diff, alreadyTruncated, file, line, budget)
+	}
+	share := budget / (len(refs) + 2) // the declared file gets two shares
+	primary, ok, _ := ContextFor(diff, alreadyTruncated, file, line, budget-share*len(refs))
+	var b strings.Builder
+	b.WriteString(primary)
+	for _, r := range refs {
+		if sel, got, _ := SelectDiff(diff, r, 0, share); got {
+			b.WriteString("\n" + sel)
+		}
+	}
+	out = b.String()
+	sum := sha1.Sum([]byte(out))
+	return out, alreadyTruncated || !ok || len(out) < len(diff), hex.EncodeToString(sum[:])
 }
