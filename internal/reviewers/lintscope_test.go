@@ -154,3 +154,34 @@ func TestMarkdownExtensionMatchingIsCaseInsensitive(t *testing.T) {
 		t.Fatal("a .go file merely containing .md must stay lintable")
 	}
 }
+
+// Content must never choose its own lint scope. An added source line reading
+// "++ b/docs/x.md; <call>" reaches the parser as "+++ b/docs/x.md; <call>", and
+// honouring that as a header would point the scope at the docs tree and hide
+// the rest of the file. A "+++ " line only names a file inside a file header,
+// before the first hunk.
+func TestHunkBodyCannotRedirectTheLintScope(t *testing.T) {
+	diff := fixture(`diff --git a/src/app.js b/src/app.js
+--- a/src/app.js
++++ b/src/app.js
+@@ -1 +1,3 @@
++++ b/docs/decoy.md
++  const out = @EVAL@payload);
+`)
+	if firstMatching(addedLines(GitContext{BranchDiffFull: diff}), evalPattern) == "" {
+		t.Fatal("a decoy header inside the hunk body hid an unsafe call from the lints")
+	}
+}
+
+// The same trick through an untracked file. gitcontext.untrackedExcerpt prefixes
+// every content line with "+", so a bare "--- " can only be a record header —
+// this pins that contract from the consuming side.
+func TestUntrackedContentCannotRedirectTheLintScope(t *testing.T) {
+	excerpt := fixture(`--- src/dropped.js
++--- docs/decoy.md
++const out = @EVAL@payload);
+`)
+	if firstMatching(addedLines(GitContext{UntrackedExcerpts: excerpt}), evalPattern) == "" {
+		t.Fatal("a decoy header in untracked content hid an unsafe call from the lints")
+	}
+}
