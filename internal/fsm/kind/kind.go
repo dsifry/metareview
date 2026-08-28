@@ -143,7 +143,7 @@ func within(s string, max int) bool {
 	return !over
 }
 
-var verdicts = map[string]bool{run.VerdictMatched: true, run.VerdictRealButUngold: true, run.VerdictHallucination: true}
+var verdicts = map[string]bool{run.VerdictMatched: true, run.VerdictRealButUngold: true, run.VerdictHallucination: true, run.VerdictUnverifiedNoEvidence: true, run.VerdictCheckedButUnverified: true}
 
 func checkFindings(fs []run.Finding) error {
 	if len(fs) > run.MaxDeltaList {
@@ -469,14 +469,13 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		// No evidence, no question. The verdict schema is one boolean, so a judge that cannot
 		// see the file still has to answer true or false, and "I cannot verify this" comes back
 		// as is_real:false - which downstream is VerdictHallucination and drops the finding.
-		// Keep it instead: an unverifiable finding is for a human to resolve, not for the judge
-		// to deny. (Interim: it lands in Confirmed because run.Verdict has no unadjudicable
-		// value; giving it one is a spec change.)
+		// Keep it instead, marked VerdictUnverifiedNoEvidence: an unverifiable finding is for
+		// a human to resolve, not for the judge to deny.
 		// Only when the diff actually parses into file blocks can absence be asserted: an
 		// empty or unreadable diff says nothing about this candidate, so fall through and ask.
 		if cand.File != "" && len(judge.ChangedPaths(in.Diff.Text)) > 0 && !judge.DiffHasFile(in.Diff.Text, cand.File) {
 			desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
-			confirmed = append(confirmed, run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictRealButUngold})
+			confirmed = append(confirmed, run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictUnverifiedNoEvidence})
 			continue
 		}
 		diff, truncated, diffHash := judge.ContextFor(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, judge.MaxDiffBytes)
@@ -485,7 +484,14 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		if err != nil {
 			return nil, err
 		}
-		real := v.ParseError == "" && v.Decision && v.Confidence >= AdjudicateThreshold
+		// An unparseable reply is not a judgment. Recording it as a hallucination drops the
+		// finding because the transport failed, not because the judge decided anything.
+		if v.ParseError != "" {
+			desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
+			confirmed = append(confirmed, run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified})
+			continue
+		}
+		real := v.Decision && v.Confidence >= AdjudicateThreshold
 		if real {
 			desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
 			confirmed = append(confirmed, run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictRealButUngold, Confidence: v.Confidence})

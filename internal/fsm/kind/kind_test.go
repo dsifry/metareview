@@ -387,7 +387,8 @@ func TestK3Composition(t *testing.T) {
 	if err != nil || len(a.events) != 2 || len(out.Confirmed) != 1 || out.Confirmed[0].Line != 2 || len(out.Rejected) != 0 {
 		t.Fatalf("supersession: %v %d %+v", err, len(a.events), out)
 	}
-	// ties keep the first; duplicate texts collapse (first location kept); rejected hallucination; parse error skipped
+	// ties keep the first; duplicate texts collapse (first location kept); rejected hallucination;
+	// a parse error is NOT a judgment, so that candidate is kept as checked_but_unverified
 	script = judge.Script{Calls: map[judge.ScriptKey]judge.ScriptRow{
 		key(judge.KindMatch, 0):      rowFor(true, 0.6),
 		key(judge.KindMatch, 1):      rowFor(true, 0.6),
@@ -401,8 +402,11 @@ func TestK3Composition(t *testing.T) {
 	dup := []run.Finding{{IssueText: "c0", File: "a.go", Line: 1}, {IssueText: "c1", File: "b.go", Line: 2}, {IssueText: "c0", File: "z.go", Line: 9}, {IssueText: "c2"}}
 	raw, err = ex.Execute(ctx, execInput(run.Snapshot{Iteration: 2, Findings: dup, Goldens: goldens[:1]}, adjNode, 0, a))
 	_ = json.Unmarshal(raw, &out)
-	if err != nil || len(out.Confirmed) != 1 || out.Confirmed[0].File != "a.go" || len(out.Rejected) != 2 || out.Rejected[0].Verdict != run.VerdictHallucination || out.Rejected[0].Confidence != 0.69 || out.Rejected[1].Desc != "c2" {
+	if err != nil || len(out.Confirmed) != 2 || out.Confirmed[0].File != "a.go" || len(out.Rejected) != 1 || out.Rejected[0].Verdict != run.VerdictHallucination || out.Rejected[0].Confidence != 0.69 {
 		t.Fatalf("tie/dedup/reject: %v %+v", err, out)
+	}
+	if out.Confirmed[1].Desc != "c2" || out.Confirmed[1].Verdict != run.VerdictCheckedButUnverified {
+		t.Fatalf("an unparseable reply must be kept as checked_but_unverified, not dropped: %+v", out.Confirmed[1])
 	}
 	if a.events[2].Error == "" || !strings.HasPrefix(a.events[2].Error, "parse: ") || string(a.events[2].Verdict) != "null" || a.events[4].Error == "" {
 		t.Fatalf("parse errors audited: %+v", a.events)
@@ -763,6 +767,13 @@ func TestAdjudicateDoesNotJudgeACandidateWithNoEvidence(t *testing.T) {
 	for _, b := range out.Confirmed {
 		if strings.Contains(b.Desc, "NOT in the diff") {
 			kept = true
+			if b.Verdict != run.VerdictUnverifiedNoEvidence {
+				t.Errorf("verdict = %q, want %q: it must not be mistaken for a judged result",
+					b.Verdict, run.VerdictUnverifiedNoEvidence)
+			}
+			if b.Confidence != 0 {
+				t.Errorf("confidence = %v, want 0: no judge was asked", b.Confidence)
+			}
 		}
 	}
 	if !kept {

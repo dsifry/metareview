@@ -81,6 +81,24 @@ const (
 	VerdictMatched       = "matched"
 	VerdictRealButUngold = "real_but_ungold"
 	VerdictHallucination = "hallucination"
+	// VerdictUnverifiedNoEvidence marks a candidate no judge was asked about, because the
+	// diff carried no hunks for its file. It is deliberately NOT "checked but unverified":
+	// nothing looked at it. The distinction matters to whoever triages the result - "no one
+	// could look" is a different action than "a judge looked and was unsure" - and the
+	// second case, if we ever record it, needs its own value.
+	//
+	// It is a confirmed-side value: a finding that could not be checked is kept for a human,
+	// never denied. Asking anyway is worse than not asking, because the judge's schema is one
+	// boolean, so "I cannot verify this" is returned as is_real:false and read here as
+	// VerdictHallucination - which drops the finding. Measured on this repo: 52 of 100
+	// verdicts said in their reasoning that the file was absent, every one at 0.99 confidence.
+	VerdictUnverifiedNoEvidence = "unverified_no_evidence"
+	// VerdictCheckedButUnverified marks a candidate a judge WAS asked about but returned no
+	// usable answer for - today, a reply that did not parse. Distinct from
+	// VerdictUnverifiedNoEvidence, where nothing looked at it at all: a human triaging the
+	// two takes different actions, and collapsing either into hallucination drops a finding
+	// on the strength of a transport failure rather than a judgment.
+	VerdictCheckedButUnverified = "checked_but_unverified"
 )
 
 // Bug is a confirmed (or rejected) finding.
