@@ -47,8 +47,10 @@ hash, and `resultsDir`.
 3. Write one result per shard into `resultsDir` as `shard-<id>.<shardHash>.result.json`, and
    `cross-shard.<planHash>.result.json` for a multi-shard plan. Each pack states the exact contract.
    `--shard-result` (repeatable) and `--cross-shard-result` (once: a plan has one cross-shard
-   result) pass a file in from elsewhere, and take precedence over a file of the same identity
-   in `resultsDir`.
+   result) pass a file in from elsewhere. `--cross-shard-result` replaces a committed one, since a
+   plan holds a single cross-shard slot; `--shard-result` does **not** — an explicit path is
+   ingested alongside the `resultsDir` listing, so passing a shard whose result is already
+   committed raises a `duplicate shard result` blocker. Replace the committed file instead.
 4. Re-run with `--previous-run <run-id>`. With every shard covered and the aggregate passing, the
    context-risk blocker becomes advisory and the lints run over the whole branch diff.
 5. Commit the results in `docs/metareview/shards/` with the review log. After a fix round only the
