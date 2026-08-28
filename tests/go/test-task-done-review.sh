@@ -96,7 +96,7 @@ generated_target_review="$(cat "$TMP/generated-target.out")"
 grep -q "docs/metareview/reviews/target.md" "$generated_target_review"
 grep -q "docs/metareview/reviews/target.md" "$(dirname "$generated_target_review")/../context/$(basename "$generated_target_review" .md)-context.md"
 grep -q "diff --git a/docs/metareview/reviews/target.md b/docs/metareview/reviews/target.md" "$(dirname "$generated_target_review")/../context/$(basename "$generated_target_review" .md)-context.md"
-! grep -q "noise artifact" "$(dirname "$generated_target_review")/../context/$(basename "$generated_target_review" .md)-context.md"
+grep -q "noise artifact" "$(dirname "$generated_target_review")/../context/$(basename "$generated_target_review" .md)-context.md" && exit 1
 
 mkdir -p "$TMP/failure/lib" "$TMP/failure/.beads"
 cd "$TMP/failure"

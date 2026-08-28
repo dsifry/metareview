@@ -114,7 +114,7 @@ chmod +x "$TMPDIR/bin/metareview"
 packaged_output="$(cd "$TMPDIR" && node cli/metareview.js --version)"
 test "$packaged_output" = "PACKAGED:--version"
 
-rm -rf "$TMPDIR/bin"
+rm -rf "${TMPDIR:?}/bin"
 mkdir -p "$TMPDIR/cli"
 cp "$ROOT/cli/metareview.js" "$TMPDIR/cli/metareview.js"
 output="$(cd "$TMPDIR" && node cli/metareview.js --version 2>&1)" && status=0 || status=$?
