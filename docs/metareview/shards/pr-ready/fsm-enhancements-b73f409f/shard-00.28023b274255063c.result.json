@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-00.28023b274255063c",
+  "kind": "shard",
+  "shardId": "shard-00",
+  "shardHash": "28023b274255063c",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/findings/findings.go",
+      "line": 141,
+      "note": "Verified the fix transition now also closes override-pending; StatusOverridden correctly excluded, and TestReconcileClosesAPendingOverrideThatWasActuallyFixed covers it."
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 152,
+      "note": "activeExisting widened from status==open to status!=fixed; checked against override_test.go TestReconcileKeepsOverrideWhenTheFindingRecurs - suppression of a recurring overridden fingerprint is intended and tested."
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 214,
+      "note": "Migration prefix safety verified against the live fingerprints in internal/reviewers/taskdone.go:110/123 and epicready.go:64: new ids are architecture:context-risk, architecture:context-risk-covered, epic:context-risk (no trailing colon), so supersedeLegacyContextRisk cannot swallow a current open row."
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 487,
+      "note": "1 MiB scanner buffer with the +2 CRLF headroom is correct and scanner.Err() is still returned at line 499, so an over-long line surfaces as an error rather than silent truncation."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.sh",
+      "line": 1,
+      "note": "Ran shellcheck -x on the new script (the CI job at .github/workflows/test.yml:53 lints every *.sh): exit 0, clean under the new .shellcheckrc disable=SC2016."
+    },
+    {
+      "path": "workflows/sdlc-loop.yaml",
+      "line": 6,
+      "note": "The declared-but-unreferenced failed state is required, not dead: internal/fsm/workflow/workflow.go:458/474 rejects a workflow where failed appears in a transition or is undeclared. Embedded file parses in machine_test.go."
+    },
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 96,
+      "note": "fsm dispatch is placed after --help/--version/setup and before status; os.Exit propagates the fsmcli.Run code. go vet, gofmt and go test ./internal/findings/... all clean on the reviewed tree."
+    },
+    {
+      "path": "docs/tasks/pr-b-shard-ingestion.md",
+      "line": 44,
+      "note": "Acceptance section names go test, go vet, tests/run-all.sh and the coverage script; cmd/metareview is covered behaviorally via tests/go/test-override.sh, test-override-coverage.sh and test-sharded-review.sh with a floor of 81.2 in tests/coverage-floor.txt, so the new CLI code is not untested."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Help text is inconsistent for the new top-level command: `metareview fsm` is listed in the Usage block (main.go:37) but is absent from the `Commands:` list (main.go:55-67), where the three new `override` subcommands were added. A user reading the command list sees no fsm entry.",
+      "evidence": [
+        {"path": "cmd/metareview/main.go", "line": 37, "note": "Usage lists metareview fsm <subcommand>"},
+        {"path": "cmd/metareview/main.go", "line": 55, "note": "Commands: block goes status -> override request with no fsm line"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "handleOverride hand-rolls flag parsing instead of using the file's own flagValue helper (main.go:467), so a value-less trailing flag is silently dropped rather than rejected. `metareview override request F1 --reason` leaves reason empty and exits 1 with 'override request needs a reason of at least 12 characters' instead of the CLI-wide exit-2 'Missing value for --reason'. Same for --by and --escalation; a `--reason --by` sequence also silently captures '--by' as the reason, where flagValue rejects a --prefixed value.",
+      "evidence": [
+        {"path": "cmd/metareview/main.go", "line": 541, "note": "case --reason only assigns when i+1 < len(args), no else branch"},
+        {"path": "cmd/metareview/main.go", "line": 467, "note": "flagValue exits 2 on a missing or --prefixed value everywhere else in main.go"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "`override list --pending` prints nothing at all when override records exist but none are pending: the 'no process overrides recorded' line at main.go:526 is gated on len(records)==0, i.e. no overrides of any status. The CI-facing invocation therefore succeeds with empty stdout, which is indistinguishable from a command that did not run.",
+      "evidence": [
+        {"path": "cmd/metareview/main.go", "line": 526, "note": "empty-state message keyed off total records, not the filtered set"},
+        {"path": "cmd/metareview/main.go", "line": 528, "note": "pending>0 path prints to stderr and exits 1; the zero-pending path prints nothing"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "defaultActor() collapses every git failure (git absent, not a repo, user.email unset) into an empty string, so the user is told 'override request needs an actor (--by)' with no indication that identity lookup failed. Given the doc's emphasis that --by is audit metadata, a distinguishable message would help.",
+      "evidence": [
+        {"path": "cmd/metareview/main.go", "line": 592, "note": "err from git config is discarded and \"\" returned"},
+        {"path": "internal/findings/override.go", "line": 58, "note": "RequestOverride rejects an empty actor with a message that only mentions --by"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "mustResultFile os.ReadFile's an explicit --shard-result path with no size cap, while the ingestion path deliberately ignores result files over 256 KiB (see docs/tasks/pr-b-shard-ingestion.md slice 1). A pathological --shard-result is fully read into memory before ParseResult can reject it. Bounded by the fact that the path is operator-supplied, hence low.",
+      "evidence": [
+        {"path": "cmd/metareview/main.go", "line": 626, "note": "unbounded os.ReadFile before reviewmanifest.ParseResult"},
+        {"path": "docs/tasks/pr-b-shard-ingestion.md", "line": 21, "note": "states result files over 256 KiB are ignored on the discovery path"}
+      ]
+    }
+  ]
+}

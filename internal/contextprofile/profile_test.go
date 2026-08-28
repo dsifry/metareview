@@ -123,3 +123,36 @@ func TestBranchFileWithLocalEditsKeepsItsLocalBytes(t *testing.T) {
 		t.Fatalf("the uncommitted bytes were dropped: LocalBytes=%d (they are in no shard pack, so they must be disclosed)", profile.LocalBytes)
 	}
 }
+
+// The fixture that matters: a branch diff IS present. Reading the local
+// contribution out of the shared byPath map picked up those branch bytes, so
+// every clean committed file reported LocalBytes > 0 and was disclosed as
+// locally modified. The first attempt at this fix missed it because its fixture
+// left git.Diff empty — the one input that made the bug visible.
+func TestCleanBranchFileHasNoLocalBytes(t *testing.T) {
+	git := gitcontext.Context{
+		ChangedFiles: []string{"src/clean.go", "src/dirty.go"},
+		BranchFiles: []gitcontext.BranchFile{
+			{Path: "src/clean.go", Bytes: 400, Hash: "h1"},
+			{Path: "src/dirty.go", Bytes: 500, Hash: "h2"},
+		},
+		Diff: "diff --git a/src/clean.go b/src/clean.go\n--- a/src/clean.go\n+++ b/src/clean.go\n" +
+			"@@ -1 +1,2 @@\n+committed line one\n+committed line two\n" +
+			"diff --git a/src/dirty.go b/src/dirty.go\n--- a/src/dirty.go\n+++ b/src/dirty.go\n" +
+			"@@ -1 +1,2 @@\n+committed change\n",
+		WorkingTreeFiles: []string{"src/dirty.go"},
+		WorkingTreeDiff: "diff --git a/src/dirty.go b/src/dirty.go\n--- a/src/dirty.go\n+++ b/src/dirty.go\n" +
+			"@@ -1 +1,2 @@\n+uncommitted line\n",
+	}
+
+	got := map[string]FileProfile{}
+	for _, f := range filesFromGit(git) {
+		got[f.Path] = f
+	}
+	if clean := got["src/clean.go"]; clean.LocalBytes != 0 {
+		t.Fatalf("a committed file with no local edits must report no local bytes, got %d", clean.LocalBytes)
+	}
+	if dirty := got["src/dirty.go"]; dirty.LocalBytes <= 0 {
+		t.Fatalf("a committed file that is also dirty must report its uncommitted bytes, got %d", dirty.LocalBytes)
+	}
+}

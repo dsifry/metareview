@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/machine"
 	"github.com/dsifry/metareview/internal/fsm/run"
 	"github.com/dsifry/metareview/internal/runchain"
+	"github.com/dsifry/metareview/internal/state"
 )
 
 const (
@@ -294,5 +297,50 @@ func TestWriteErrors(t *testing.T) {
 	}
 	if nowNanos() == 0 {
 		t.Fatal("clock")
+	}
+}
+
+// runs.jsonl has two writers: record.appendRow here, and state.AppendJSONL used
+// by the artifact, epic, task-done and pr-ready gates. appendRow held an
+// advisory flock, but an advisory lock only excludes writers that also take it,
+// and state.AppendJSONL takes none — it relies on O_APPEND, which makes the
+// kernel place each write at the end atomically. appendRow opened without
+// O_APPEND and positioned with Seek(0,2), so a write landing between that seek
+// and its own Write overwrote the row instead of following it.
+func TestRunsJSONLSurvivesInterleavedWriters(t *testing.T) {
+	root := t.TempDir()
+	const rows = 40
+
+	var wg sync.WaitGroup
+	for i := 0; i < rows; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if i%2 == 0 {
+				_ = appendRow(root, Row{ID: fmt.Sprintf("mrv-record-%02d", i), HeadSHA: "h", WorkflowHash: "w"})
+				return
+			}
+			_ = state.AppendJSONL(path(root), map[string]string{"id": fmt.Sprintf("mrv-state-%02d", i)})
+		}(i)
+	}
+	wg.Wait()
+
+	data, err := os.ReadFile(path(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row map[string]any
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("interleaved writes produced an unparseable line: %q", line)
+		}
+		seen++
+	}
+	if seen != rows {
+		t.Fatalf("rows lost to interleaved writers: %d of %d survived", seen, rows)
 	}
 }

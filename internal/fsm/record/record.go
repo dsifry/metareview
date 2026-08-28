@@ -179,7 +179,14 @@ func appendRow(root string, row Row) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0o644)
+	// O_APPEND, not a seek: runs.jsonl has a second writer, state.AppendJSONL,
+	// used by the artifact, epic, task-done and pr-ready gates, and it takes no
+	// lock. An advisory flock only excludes writers that also take it, so the
+	// only thing that keeps the two from colliding is the kernel placing each
+	// write at the end atomically. Positioning with Seek(0,2) left a window in
+	// which the other writer's row landed first and this one overwrote it.
+	// O_RDWR is still needed for the torn-tail Truncate below.
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
 	}
@@ -218,7 +225,7 @@ func appendRow(root string, row Row) error {
 			func() error { return f.Truncate(t.offset) })
 	}
 	steps = append(steps,
-		func() error { _, err := f.Seek(0, 2); return err },
+		// No seek: with O_APPEND the kernel positions every write at the end.
 		func() error { _, err := f.Write(append(line, '\n')); return err },
 		f.Sync)
 	for _, step := range steps {

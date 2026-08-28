@@ -75,6 +75,7 @@ Commit:
 - `docs/metareview/context/`
 - `docs/metareview/learning/`
 - `docs/metareview/shards/` — the shard review results a later gate reads back
+- `docs/metareview/fsm/` — FSM run export bundles
 - `.metareview/knowledge/metareview.jsonl` in standalone fallback mode
 - `.metareview/calibration.jsonl`
 - `.metareview/learning-runs.jsonl`

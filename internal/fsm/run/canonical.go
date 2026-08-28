@@ -13,8 +13,13 @@ import (
 )
 
 // Canonical returns the canonical bytes of a JSON value (§2.3): valid JSON, no duplicate keys at any
-// depth, compacted, with HTML characters and U+2028/U+2029 left as literal UTF-8, no trailing newline.
-// Canonical is idempotent and preserves key order.
+// depth, compacted, with HTML characters left as literal UTF-8, U+2028/U+2029 and U+FFFD written as
+// escapes, and no trailing newline. Canonical is idempotent and preserves key order.
+//
+// The escapes are this package's choice rather than encoding/json's: the standard library writes
+// those three differently across Go releases, and these bytes are what the audit chain hashes over.
+// Every pass only ever adds an escape, never removes one, so the transform cannot change what a
+// payload says. See marshalCanonical and TestCanonicalIsToolchainIndependent.
 func Canonical(raw []byte) ([]byte, error) {
 	if !json.Valid(raw) {
 		return nil, errors.New("canonical: invalid JSON")

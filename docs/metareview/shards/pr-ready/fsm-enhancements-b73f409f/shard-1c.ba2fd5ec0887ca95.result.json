@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1c.ba2fd5ec0887ca95",
+  "kind": "shard",
+  "shardId": "shard-1c",
+  "shardHash": "ba2fd5ec0887ca95",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/run.go", "line": 1, "note": "reviewed the whole 987-line new FSM CLI entrypoint against the task-done rubric"},
+    {"note": "go test ./internal/fsm/cli/... ./internal/prready/... ./internal/taskdone/... -cover: all pass; cli 100.0%, prready 79.7%, taskdone 86.0% of statements"},
+    {"note": "no TODO/FIXME markers, no eval/exec-of-string, and no truncated diff context in this shard; every source file in the shard is accompanied by tests"},
+    {"path": "internal/fsm/judge/prompts.go", "line": 197, "note": "verified the two new .calibration.golden files match RenderPrompt's calibration path (fence disabled, single-pass format)"},
+    {"path": "internal/prready/review.go", "line": 289, "note": "verified Prune/GC/Discover wiring the new shardwiring tests assert against"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead no-op normalisation, written twice. judge.KindStillPresent is the literal \"still-present\" (internal/fsm/judge/prompts.go:19), so `if k == \"still-present\" { k = judge.KindStillPresent }` assigns k to itself. The block appears at run.go:713-715 and again, after judgeInput, at run.go:744-746. Neither can ever change k; the second is also unreachable as a state change because the first already ran. Delete both.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 713, "note": "first no-op still-present normalisation"},
+        {"path": "internal/fsm/cli/run.go", "line": 744, "note": "identical no-op repeated after judgeInput"},
+        {"path": "internal/fsm/judge/prompts.go", "line": 19, "note": "KindStillPresent = \"still-present\" makes both assignments identities"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "`fsm gate <name>` returns exit 1 for a failing gate while reporting status \"OK\" and no top-level `code` (run.go:698, run.go:702). The driver contract in AgentPrompt states only two exit-1 shapes: \"exit 1 with GATE_FAILED\" and \"exit 1 with ERR_*\" (internal/fsm/cli/prompt.go:11-12). An agent following that contract literally on a `fsm gate` invocation finds neither, and must know to look inside env[\"gate\"][\"code\"] instead. Either document the diagnostic subcommand's exit-1 shape or emit GATE_FAILED.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 702, "note": "in.ok(env, StatusOK, exit) with exit=1 on gate failure"},
+        {"path": "internal/fsm/cli/prompt.go", "line": 11, "note": "contract enumerates only GATE_FAILED and ERR_* for exit 1"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "`--calibration` is silently ignored by standalone `fsm judge` (no --run). run.go:763 hard-codes calibration=false into judge.Preflight, whereas the --run path reads it from the snapshot (run.go:757). --calibration parses as a valid bool flag for every subcommand (boolFlags, run.go:78) and AgentPrompt lists it as an agent-satisfiable knob, so a caller passing it to an unaudited judge call gets a silently different pre-flight than they asked for. Reject it, or honour it.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 763, "note": "Preflight called with literal false in the no-run branch"},
+        {"path": "internal/fsm/cli/run.go", "line": 78, "note": "--calibration accepted globally by the arg parser"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "parseArgs cannot express a flag value that begins with \"--\": run.go:101-103 treats any next token starting with \"--\" as a missing value and errors. This makes some legitimate inputs unrepresentable, e.g. `--var K=--v` is fine but `--data --x` or a run/model/effort value with a leading dash is not. There is no `--` end-of-flags escape. Low impact today because no current value legitimately starts with two dashes, but it is a latent usability trap with a confusing error message (\"missing value for --data\").",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 102, "note": "returns \"missing value\" whenever the next token has the -- prefix"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Both new rollback tests can pass while proving nothing. They make docs/metareview/reviews mode 0555 and then `t.Skip(\"the review body unexpectedly succeeded; nothing proved\")` if Create succeeds — so the rollback assertion is skipped rather than failed. Two ways it goes vacuous silently: running as root (0555 does not block root writes), and any future change that makes Create tolerate an unwritable review directory. A skip reports green in CI. Prefer injecting the post-pack failure deterministically (a seam that fails the review body) so the rollback assertion cannot be skipped.",
+      "evidence": [
+        {"path": "internal/prready/shardwiring_test.go", "line": 170, "note": "t.Skip on the path the test exists to assert"},
+        {"path": "internal/taskdone/shardwiring_test.go", "line": 201, "note": "same self-skip in the task-done copy"},
+        {"path": "internal/taskdone/shardwiring_test.go", "line": 194, "note": "chmod 0555 is not an effective write barrier for a root test runner"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The two new shardwiring_test.go files duplicate ~120 lines of near-identical scaffolding: the fakeWriter type with the same five methods, and shardedRepo/shardedTaskRepo which differ only by one extra task file. Divergence is already visible (prready's fakeWriter has a `rollback func() error` hook the task-done copy lacks). Test-only duplication across package boundaries is hard to avoid in Go, but an internal testsupport package would hold the git-fixture builder and the fake in one place.",
+      "evidence": [
+        {"path": "internal/prready/shardwiring_test.go", "line": 17, "note": "fakeWriter definition"},
+        {"path": "internal/taskdone/shardwiring_test.go", "line": 19, "note": "near-identical fakeWriter definition in the other package"},
+        {"path": "internal/prready/shardwiring_test.go", "line": 108, "note": "shardedRepo duplicates shardedTaskRepo apart from the task file"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead test hook: prready's fakeWriter.rollback field is never assigned by any test in the package, so the `if f.rollback != nil` branch at shardwiring_test.go:48-50 is unreachable. Either use it or drop the field (the task-done copy already omits it).",
+      "evidence": [
+        {"path": "internal/prready/shardwiring_test.go", "line": 48, "note": "unreachable branch guarded by a field no test sets"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The two new .calibration.golden files pin, by design, that calibration mode drops the nonce fence around untrusted content: RenderPrompt sets `fence = false` when calibration (internal/fsm/judge/prompts.go:197), so the diff and the finding text are interpolated raw. The goldens make this explicit and reassuring on one axis — the injected `{{1}}`, `}}`, `<<<END-0123456789abcdef` and a literal `{diff}` inside the diff payload are all reproduced verbatim, confirming format() is genuinely single-pass and does not rescan slot values — but they also show attacker-controlled diff content sitting unfenced in the prompt, including a forged `<<<END-` sentinel. This is the intended calibration-parity behaviour with the reference harness rather than a defect, and calibration is opt-in, but it deserves a comment in the golden or the template noting that calibration prompts are deliberately unfenced and must not be used to judge untrusted input.",
+      "evidence": [
+        {"path": "internal/fsm/judge/prompts.go", "line": 197, "note": "calibration sets fence = false for every fenced slot"},
+        {"path": "internal/fsm/judge/testdata/prompts/adjudicate.calibration.golden", "line": 9, "note": "a forged <<<END- sentinel from the diff payload lands unfenced in the prompt"},
+        {"path": "internal/fsm/judge/testdata/prompts/still-present.calibration.golden", "line": 6, "note": "bug description interpolated raw in calibration mode"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

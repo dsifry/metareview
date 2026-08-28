@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-10-2.4a12db15ca531fb5",
+  "kind": "shard",
+  "shardId": "shard-10-2",
+  "shardHash": "4a12db15ca531fb5",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/converge/converge.go",
+      "line": 1,
+      "note": "Reviewed the whole convergence predicate tree: parse/Validate/Describe, the five atoms, any/all/not composition and the cmd payload."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 237,
+      "note": "Verified Snapshot.Clone deep-copies Vars (cloneStringMap), so converge.Payload's sha256 rewrite of var values cannot mutate the live snapshot."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 758,
+      "note": "Verified the machine's fixed_class guard and run.CapText(r.Atom, run.MaxShort) bound the composite atom names converge can produce."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 98,
+      "note": "Read the production code the new test file exercises: branchPaths pathspec magic, per-file GIT_LITERAL_PATHSPECS diff, fileHash."
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 536,
+      "note": "Confirmed the new PRReadyContext.Manifest field is populated in production by reviewerContext, not just in tests."
+    },
+    {
+      "path": "internal/fsm/judge/judge_test.go",
+      "line": 37,
+      "note": "TestJ1Provenance pins the vendored match.python.txt body by sha256 and asserts rewrite(body) == TemplateMatch; ran it and it passes."
+    },
+    {
+      "note": "Ran `go test ./internal/fsm/converge/ -cover` = 100.0% of statements; `go test ./internal/gitcontext/ -cover` = 85.1% unit-only, against a branch-generated floor of 86.8 in tests/coverage-floor.txt (combined with the shell suite)."
+    },
+    {
+      "note": "Grepped the four shard files for TODO/FIXME/XXX and for eval-style dynamic execution: none present; no untracked source files in this shard."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/converge/converge.go:69 claims 'MaxAtoms bounds the number of leaves' so composite names stay within run.MaxShort, but MaxAtoms is enforced per compound (converge.go:173), not globally: with MaxDepth 4 a tree may hold up to 32^4 leaves, and compound.Name() joins every one of them recursively. No functional break — machine.go:775 caps the atom with run.CapText before it is recorded — but the stated invariant is not the one the code enforces, and a pathological workflow could build a multi-megabyte name string on every loop boundary.",
+      "evidence": [
+        {"path": "internal/fsm/converge/converge.go", "line": 69},
+        {"path": "internal/fsm/converge/converge.go", "line": 173},
+        {"path": "internal/fsm/converge/converge.go", "line": 298}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/converge/converge.go:239 formats the max_iterations reason with the 0-based s.Iteration while the predicate fires on s.Iteration+1 >= n, so the audited reason reads 'iteration 3 reached max_iterations 4'. The stop decision is correct; only the human-facing reason is off by one.",
+      "evidence": [
+        {"path": "internal/fsm/converge/converge.go", "line": 239}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "A non-firing `any` returns Result{Stop:false, Class: kids[0].Class()} (converge.go:305, 332). At the top level all_fixed is legal as the first child, so the recorded converge event can carry Class 'fixed' with Stop false. Harmless today because machine.go:758 only rejects fixed-class stops, but the audit row's class is then meaningless rather than absent.",
+      "evidence": [
+        {"path": "internal/fsm/converge/converge.go", "line": 305},
+        {"path": "internal/fsm/converge/converge.go", "line": 332}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Options.RunGit is documented at internal/gitcontext/branchfiles.go:28 as 'A nil RunGit uses the real git binary', but the seam only reaches the branch-file collection: collectWith calls collect(...) first, which uses the package-level git() helper and ignores opts.RunGit. A caller injecting a fake git silently gets a hybrid. The doc comment should say the seam covers branch-file measurement only.",
+      "evidence": [
+        {"path": "internal/gitcontext/branchfiles.go", "line": 28},
+        {"path": "internal/gitcontext/gitcontext.go", "line": 73}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Testing gap in the new branchfiles_test.go: TestRunGitErrorBranches passes no Excludes, so measureBranchFiles is never invoked and both of its error returns stay uncovered (confirmed by coverage profile: branchfiles.go 124-125 and 131-132 uncovered, measureBranchFiles at 80.0%). realGit's stderr-decorating error paths (branchfiles.go 48-51) are likewise uncovered. Not gate-breaking — the package floor was generated on this branch — but the error-injection test stops one exclude-flag short of covering the sibling function.",
+      "evidence": [
+        {"path": "internal/gitcontext/branchfiles_test.go", "line": 320},
+        {"path": "internal/gitcontext/branchfiles.go", "line": 121}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "branchfiles_test.go:124 asserts only len(ctx.BranchDiffFull) == sum, never that the concatenation equals the whole-branch diff bytes. A concatenation that reordered or swapped equal-length per-file diffs would still pass; the exotic-name test only spot-checks markers. Comparing BranchDiffFull to the oracle's bytes would make the oracle actually independent.",
+      "evidence": [
+        {"path": "internal/gitcontext/branchfiles_test.go", "line": 124}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

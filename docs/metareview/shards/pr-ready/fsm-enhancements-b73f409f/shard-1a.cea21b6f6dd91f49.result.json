@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1a.cea21b6f6dd91f49",
+  "kind": "shard",
+  "shardId": "shard-1a",
+  "shardHash": "cea21b6f6dd91f49",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 130,
+      "note": "prepareAppend: CAS on (ChainHead, Seq) against the log tail, canonicalization, Seq/Prev stamping, Apply-before-write and the MaxEvents cap all verified against spec 3/persistence spec Sec 5.2; countedType at line 654 matches the spec table (needs_input, node_output, delta_applied, llm_call, tokens, record, tree counted; transition/warn/fork/overflow_handler/cmd_call/fix_baseline exempt)."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 1053,
+      "note": "Snapshot.Clone audited field by field: every reference-bearing field (Lineage, Vars, AllowedCmds incl. Argv/FileHashes/Env, Goldens, Findings, Confirmed, AllFound, Status, PrevUnfixed, NodeOutputs RawMessage copies, Applied, NodesRun, LastError, Warnings) is deep-copied; no aliasing leak found."
+    },
+    {
+      "path": "internal/fsm/gate/gate_test.go",
+      "line": 288,
+      "note": "TreeHash pin independently verified: printf 'abc\\ndef' | shasum -a 256 == d53d6b91af7caf8fe3d8021f116270137c0079d579a1e16965da80c2ed138ffb, matching internal/fsm/gate/git.go:288 sha256(head + \"\\n\" + workTree)."
+    },
+    {
+      "path": "internal/reviewers/lintscope_test.go",
+      "line": 1,
+      "note": "Test file cross-checked against internal/reviewers/taskdone.go:350-475 (addedLines/addedSourceLines/addedUntrackedLines/lintable/diffHeaderPath/postImagePath). Every asserted behaviour - inHeader-gated +++ handling, C-quoted paths, CR stripping, no path trimming, executableExts overriding the docs/ exemption, fail-open on an empty path - matches the implementation. The eval/marker fixtures are assembled at run time, so the file introduces no literal unsafe-call or TODO/FIXME text that the rubric would block on."
+    },
+    {
+      "path": "tests/go/test-shardpack-coverage.sh",
+      "line": 24,
+      "note": "Coverage gate is sound: set -euo pipefail, empty-profile guard before the zero-hit scan, and awk $3 == 0 is the correct count column of a Go coverprofile line."
+    },
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 152,
+      "note": "Comment claim that MaxLine cannot be exceeded is correct: fold.go:43 caps canonical Data at MaxPayload (256KiB) and Type/Node/State at MaxShort, so a line stays far under the 1MiB MaxLine."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/types.go:371 double-quotes the run id in its error: fmt.Errorf(\"invalid run id %q\", strconv.Quote(id)). strconv.Quote already adds quotes and %q quotes again, so a bad id surfaces as invalid run id \"\\\"bad id\\\"\". This string reaches users through store_jsonl.go:98 (ERR_STORE_PATH detail) and machine/sidecar.go, cli/wiring.go, cli/run.go, export/export.go. types_test.go only asserts nil vs non-nil, so no test pins the message. Either %q or strconv.Quote, not both.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 371,
+          "note": "return fmt.Errorf(\"invalid run id %q\", strconv.Quote(id)) - id is quoted twice."
+        },
+        {
+          "path": "internal/fsm/run/store_jsonl.go",
+          "line": 98,
+          "note": "jsonlStore.validate wraps the message into storeErrf(CodeStorePath, 0, err.Error()), so the mis-quoting is user-visible."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Appending is quadratic in the number of events. jsonlStore.Append (store_jsonl.go:225) re-reads the entire audit file on every append, and prepareAppend (store.go:157) then re-runs json.Unmarshal over every existing line through lineType to recount counted events. With DefaultMaxEvents = 100_000 (types.go:874) and lines up to ~256KiB, a full-length run does O(n^2) reads and O(n^2) JSON parses. The CAS design needs the tail, not the whole file, and the counted total is derivable from FoldState. Real runs are small so this is advisory, not a blocker, but the configured cap makes the pathological case reachable.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store.go",
+          "line": 157,
+          "note": "for _, l := range lines { if countedType(lineType(l)) ... } - a full json.Unmarshal per existing line, on every counted append."
+        },
+        {
+          "path": "internal/fsm/run/store_jsonl.go",
+          "line": 225,
+          "note": "raw, err := s.readRaw(runID) at the top of Append reads the whole audit.jsonl before every single write."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/store.go:188 - prepareCreate hardcodes DefaultMaxEvents instead of threading the store's configured Options.maxEvents(). It is harmless today only because TypeInit is not a counted type (countedType, store.go:654), so the cap argument is never consulted on the init line; if init or any exempt type ever became counted, a store constructed with Options{MaxEvents: 5} would silently enforce 100_000 on its first line. The constant should be the store's effective cap, not the package default.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store.go",
+          "line": 188,
+          "note": "return prepareAppend(nil, nil, FoldState{}, first, DefaultMaxEvents) - the store's Options.MaxEvents is not plumbed into Create."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/gate/gate_test.go:390 - the intended TMPDIR restore is a no-op. Line 386 sets TMPDIR to a non-existent directory; line 390 then calls t.Setenv(\"TMPDIR\", os.TempDir()), but os.TempDir() reads TMPDIR, so the argument evaluates to the very missing directory just installed and the variable is re-set to the broken value. Nothing after line 390 depends on TMPDIR and t.Setenv restores the original at test end, so there is no live failure, but any code appended after that line would inherit an unusable temp dir. Capture os.TempDir() before line 386, or drop the restore and rely on t.Setenv's cleanup.",
+      "evidence": [
+        {
+          "path": "internal/fsm/gate/gate_test.go",
+          "line": 390,
+          "note": "t.Setenv(\"TMPDIR\", os.TempDir()) evaluates os.TempDir() after TMPDIR was pointed at a missing directory on line 386."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}
