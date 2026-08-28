@@ -55,7 +55,7 @@ jobs:
         # Blocking, with no baseline: its first run found twelve issues and all
         # twelve are fixed in #20, one of them a dropped Close error on the
         # append behind every finding and run row.
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.13.1
       - name: Unit tests
