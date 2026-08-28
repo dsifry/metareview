@@ -69,9 +69,17 @@ func TestCodexJudgeHappyPath(t *testing.T) {
 	if v.Attempts != 1 || v.Duration != time.Second {
 		t.Fatalf("attempts/duration: %d %v", v.Attempts, v.Duration)
 	}
-	want := run.TokenTotals{Input: 100, CacheRead: 40, CacheCreate: 5, Output: 7, Reasoning: 3}
+	// codex reports input_tokens as the WHOLE prompt with cached_input_tokens a subset of it,
+	// and output_tokens as the whole completion with reasoning a subset (verified against the
+	// live CLI: two byte-identical prompts return identical input_tokens while cached varies).
+	// TokenTotals.Total() sums every field, so the categories must be disjoint or the cached
+	// half is billed twice into the convergence budget.
+	want := run.TokenTotals{Input: 60, CacheRead: 40, CacheCreate: 5, Output: 4, Reasoning: 3}
 	if v.Tokens != want {
 		t.Fatalf("tokens: %+v want %+v", v.Tokens, want)
+	}
+	if got, wantTotal := v.Tokens.Total(), int64(100+5+7); got != wantTotal {
+		t.Fatalf("Total() = %d, want %d (prompt %d + cache_write %d + completion %d)", got, wantTotal, 100, 5, 7)
 	}
 	if v.InputHash == "" || v.Kind != KindAdjudicate || v.Model != "codex/gpt-5.6-sol" {
 		t.Fatalf("envelope: %+v", v)
@@ -365,5 +373,45 @@ func TestCodexJudgeCancellationInterruptsTheBackoffWait(t *testing.T) {
 	}
 	if f.calls != 1 {
 		t.Fatalf("the ladder must stop in the wait after one attempt, got %d", f.calls)
+	}
+}
+
+// A usage block whose cached count exceeds the prompt (a malformed or future CLI) must clamp
+// rather than produce a negative counter: run/fold.go rejects a negative or oversize token
+// field, which would turn a successful judge call into ERR_APPEND_REJECTED.
+func TestParseCodexEventsClampsInconsistentUsage(t *testing.T) {
+	stream := `{"type":"item.completed","item":{"type":"agent_message","text":"{}"}}` + "\n" +
+		`{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":99,"cache_write_input_tokens":0,"output_tokens":3,"reasoning_output_tokens":50}}` + "\n"
+	_, tok, found := parseCodexEvents([]byte(stream))
+	if !found {
+		t.Fatal("agent message not found")
+	}
+	if tok.Input != 0 {
+		t.Errorf("Input = %d, want 0 (10-99 clamped)", tok.Input)
+	}
+	if tok.Output != 0 {
+		t.Errorf("Output = %d, want 0 (3-50 clamped)", tok.Output)
+	}
+	if tok.CacheRead != 99 || tok.Reasoning != 50 {
+		t.Errorf("subset counters not preserved: %+v", tok)
+	}
+	if tok.Total() < 0 {
+		t.Errorf("Total() = %d, must never be negative", tok.Total())
+	}
+}
+
+// Routing strips the codex/ prefix case-insensitively (trimPrefixFold), so the empty-model
+// guard has to match the same way. Comparing against the literal lowercase prefix let
+// "CODEX/" through, and the judge was then spawned with an empty -m value: five attempts and
+// the backoff ladder wasted, or a verdict recorded under a model id that never answered.
+func TestValidateCodexRejectsAnEmptyModelInAnyCase(t *testing.T) {
+	for _, model := range []string{"codex/", "CODEX/", "Codex/", "cOdEx/"} {
+		err := validateCodex(model, "medium", false)
+		if !errs.Is(err, CodeJudgeModel) {
+			t.Errorf("validateCodex(%q) = %v, want ERR_JUDGE_MODEL", model, err)
+		}
+	}
+	if err := validateCodex("codex/gpt-5.6-sol", "medium", false); err != nil {
+		t.Errorf("a real model must still validate: %v", err)
 	}
 }

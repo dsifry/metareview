@@ -81,8 +81,8 @@ is not a design question, it is a measured source of false verdicts. Raise it.
 | 47 | medium | shard-2a | `internal/fsm/export/export_test.go:348` | [ ] |
 | 48 | medium | shard-1b | `internal/fsm/export/redaction_test.go:78` | [ ] |
 | 49 | medium | shard-0a | `internal/fsm/gate/git.go:61` | [ ] |
-| 50 | medium | shard-25 | `internal/fsm/judge/codex.go:111` | [ ] |
-| 51 | medium | shard-25 | `internal/fsm/judge/codex.go:158` | [ ] |
+| 50 | medium | shard-25 | `internal/fsm/judge/codex.go:111` | [x] fixed |
+| 51 | medium | shard-25 | `internal/fsm/judge/codex.go:158` | [x] fixed |
 | 52 | medium | shard-05 | `internal/fsm/judge/judge.go:330` | [ ] |
 | 53 | medium | shard-05 | `internal/fsm/judge/judge.go:332` | [ ] |
 | 54 | medium | shard-23 | `internal/fsm/judge/judge_test.go:139` | [ ] |

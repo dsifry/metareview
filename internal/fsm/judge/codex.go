@@ -108,7 +108,10 @@ func (j *codexJudge) Call(ctx context.Context, r Request) (v Verdict, err error)
 
 // validateCodex is validate's codex arm: no key, and the CLI's wider effort set.
 func validateCodex(model, effort string, calibration bool) error {
-	if _, over := run.CapText(model, run.MaxShort); over || model == CodexPrefix {
+	// route strips the prefix with trimPrefixFold, so an empty model has to be detected the
+	// same way: comparing against the literal lowercase prefix let "Codex/" through and the
+	// CLI was spawned with an empty -m value.
+	if _, over := run.CapText(model, run.MaxShort); over || trimPrefixFold(model, CodexPrefix) == "" {
 		return errs.E(CodeJudgeModel, "model id is empty or exceeds MaxShort", "model", model, "reason", "length")
 	}
 	if !codexEfforts[effort] {
@@ -156,12 +159,17 @@ func parseCodexEvents(stdout []byte) (text string, tokens run.TokenTotals, found
 				text, found = ev.Item.Text, true
 			}
 		case "turn.completed":
+			// input_tokens is the whole prompt with cached_input_tokens a subset of it, and
+			// output_tokens the whole completion with reasoning a subset - the same convention
+			// the HTTP arm subtracts for (judge.go). TokenTotals.Total() sums every field and
+			// feeds the budget convergence atom, so the categories are made disjoint here;
+			// assigning both raw bills the cached half twice and trips budget early.
 			tokens = run.TokenTotals{
-				Input:       ev.Usage.Input,
-				CacheRead:   ev.Usage.Cached,
-				CacheCreate: ev.Usage.CacheWrite,
-				Output:      ev.Usage.Output,
-				Reasoning:   ev.Usage.ReasoningOu,
+				Input:       clampTok(ev.Usage.Input - ev.Usage.Cached),
+				CacheRead:   clampTok(ev.Usage.Cached),
+				CacheCreate: clampTok(ev.Usage.CacheWrite),
+				Output:      clampTok(ev.Usage.Output - ev.Usage.ReasoningOu),
+				Reasoning:   clampTok(ev.Usage.ReasoningOu),
 			}
 		}
 	}
