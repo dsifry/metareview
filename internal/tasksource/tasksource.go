@@ -44,7 +44,8 @@ func resolveBeads(root, id string) (Source, bool, error) {
 	if err != nil {
 		return Source{}, false, err
 	}
-	defer file.Close()
+	// Read-only path: there is nothing a Close error could tell the caller.
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {

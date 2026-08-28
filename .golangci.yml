@@ -1,0 +1,13 @@
+version: "2"
+
+# The default set — errcheck, govet, ineffassign, staticcheck, unused — is what
+# this repo wants: it catches discarded errors, dead code and the mistakes a
+# reviewer should not have to spend attention on. No linter is disabled.
+linters:
+  default: standard
+
+issues:
+  # Report everything. The defaults cap output at three issues per linter,
+  # which hides the tail and makes a clean run look like a fixed run.
+  max-issues-per-linter: 0
+  max-same-issues: 0

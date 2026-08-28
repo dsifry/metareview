@@ -238,7 +238,8 @@ func appendLine(path, line string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	// Read-only path: there is nothing a Close error could tell the caller.
+	defer func() { _ = file.Close() }()
 	_, err = file.WriteString(line + "\n")
 	return err
 }

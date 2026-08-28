@@ -210,7 +210,7 @@ func unresolvedChildBlockers(logs []EpicReviewLog) []string {
 
 func violatesNoEvalIntent(context EpicReadyContext) bool {
 	intent := strings.ToLower(context.Epic.Body + "\n" + context.Epic.Title)
-	if !(strings.Contains(intent, "without executing") || strings.Contains(intent, "no eval") || strings.Contains(intent, "avoid eval")) {
+	if !strings.Contains(intent, "without executing") && !strings.Contains(intent, "no eval") && !strings.Contains(intent, "avoid eval") {
 		return false
 	}
 	evidence := strings.ToLower(context.Git.Diff)
