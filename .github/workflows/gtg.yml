@@ -26,7 +26,7 @@ jobs:
   gtg-check:
     name: Merge Ready (gtg)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Setup Python
@@ -36,7 +36,11 @@ jobs:
 
       - name: Install gtg
         run: |
-          pip install gtg || {
+          # Pinned: this workflow maps gtg's --semantic-codes exit codes to
+          # warnings and failures, so an unpinned release could change what the
+          # gate means without a change in this repository. Verified as
+          # github.com/dsifry/goodtogo rather than the unrelated PyPI names.
+          pip install 'gtg==0.10.0' || {
             echo "::error::Failed to install gtg from PyPI"
             exit 1
           }
@@ -63,12 +67,15 @@ jobs:
           # text on "no checks yet" contains no "pending" line and would otherwise
           # read as "everything finished" — letting gtg run before CI reports.
           SHA="$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)"
+          # 132 * 10s = 22 minutes, which clears the Test job's own 20-minute
+          # ceiling. A shorter wait would start gtg while CI was still pending
+          # and report a false CI_FAILING.
           echo "Waiting for checks on $SHA ..."
-          for i in $(seq 1 60); do
+          for i in $(seq 1 132); do
             RUNS="$(gh api "repos/$REPO/commits/$SHA/check-runs" --paginate \
               --jq '.check_runs[] | select(.name != "Merge Ready (gtg)" and .name != "CodeRabbit" and .name != "Cursor Bugbot") | .status' || echo "api-error")"
             if [ "$RUNS" = "api-error" ]; then
-              echo "  API error, retrying in 10s... ($i/60)"; sleep 10; continue
+              echo "  API error, retrying in 10s... ($i/132)"; sleep 10; continue
             fi
             TOTAL="$(printf '%s\n' "$RUNS" | grep -c . || true)"
             PENDING="$(printf '%s\n' "$RUNS" | grep -vc completed || true)"
@@ -77,7 +84,7 @@ jobs:
               echo "All CI checks complete ($TOTAL)."
               exit 0
             fi
-            echo "  $PENDING of $TOTAL check(s) still running, waiting 10s... ($i/60)"
+            echo "  $PENDING of $TOTAL check(s) still running, waiting 10s... ($i/132)"
             sleep 10
           done
           echo "::warning::Timed out waiting for CI checks; gtg may report them as failing"
