@@ -86,7 +86,7 @@ func Check(root string, options Options) Report {
 		Superpowers: superpowersStatus(root, home),
 		Beads:       beadsStatus(root, lookup, base.Capabilities.Beads),
 		Metaswarm:   metaswarmStatus(root, base.Capabilities.Metaswarm),
-		Go:          commandStatus(lookup, "go", "Install Go 1.22+ and ensure go is on PATH."),
+		Go:          commandStatus(lookup, "go", "Install Go 1.26+ and ensure go is on PATH."),
 		Git:         gitStatus(lookup, nil),
 	}
 	missing := missingFullMetaswarmPrereqs(prereqs)

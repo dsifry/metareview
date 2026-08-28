@@ -78,9 +78,19 @@ func TestEverySnapshotFieldIsClassifiedForExport(t *testing.T) {
 	fields := reflect.VisibleFields(reflect.TypeOf(run.Snapshot{}))
 	seen := map[string]bool{}
 	for _, f := range fields {
+		if !f.IsExported() {
+			continue // unexported fields are not marshalled at all
+		}
 		tag := strings.Split(f.Tag.Get("json"), ",")[0]
-		if tag == "" || tag == "-" {
-			continue
+		if tag == "-" {
+			continue // explicitly excluded from the wire
+		}
+		if tag == "" {
+			// An exported field with no json tag is still marshalled, under its
+			// Go name. Skipping it here was the hole in this guard: precisely the
+			// field nobody had thought about was the one it ignored. Classify it
+			// under the name it will actually be serialised as.
+			tag = f.Name
 		}
 		seen[tag] = true
 		_, isTransformed := transformed[tag]

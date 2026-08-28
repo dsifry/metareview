@@ -95,7 +95,7 @@ codex plugin marketplace add dsifry/metareview-marketplace
 codex
 ```
 
-Then open `/plugins`, select the metareview marketplace, and install `metareview`. Codex invokes metareview skills with `$setup`, `$review-task-done`, `$review-epic-ready`, `$review-pr-ready`, `$review-artifact`, `$learn-post-merge`, and `$status`.
+Then open `/plugins`, select the metareview marketplace, and install `metareview`. Codex invokes metareview skills with `$setup`, `$review-task-done`, `$review-epic-ready`, `$review-pr-ready`, `$review-artifact`, `$learn-post-merge`, `$status`, and `$fsm`.
 
 For local development from a checkout:
 
@@ -111,7 +111,7 @@ claude plugin marketplace add dsifry/metareview-marketplace
 claude plugin install metareview
 ```
 
-Claude Code invokes metareview through `/setup`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/review-artifact`, `/learn-post-merge`, and `/status`.
+Claude Code invokes metareview through `/setup`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/review-artifact`, `/learn-post-merge`, `/status`, and `/fsm`.
 
 ### Source Checkout
 

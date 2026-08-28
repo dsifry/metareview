@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-07-review",
+  "kind": "shard",
+  "shardId": "shard-07",
+  "shardHash": "c9806f0bd36e48e7",
+  "planHash": "014639e60cb3cab9",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": ".claude-plugin/plugin.json",
+      "line": 3,
+      "note": "Version 0.9.0 is consistent across package.json:3, .claude-plugin/marketplace.json:11 and internal/version/version.go:3; the description's Go 1.26+ claim matches go.mod line 3 (go 1.26). Missing trailing newline also fixed."
+    },
+    {
+      "path": "commands/status.md",
+      "line": 9,
+      "note": "Doc-only change; matches the CLAUDE.md durable-output contract (.metareview/shards/ and .metareview/runs/ transient, docs/metareview/shards/ and docs/metareview/fsm/ committed)."
+    },
+    {
+      "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-enhancements.md",
+      "line": 1,
+      "note": "New 747-line design spec; documentation only, no executable content, no TODO/FIXME markers anywhere in this shard's diff (grep over the pack returned no TODO, FIXME or eval hits)."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 139,
+      "note": "riskReasons split verified against the repo: DIFF_TRUNCATED is now branch-only, staged/worktree truncation raises LOCAL_DIFF_TRUNCATED, and Sum(BranchFiles.Bytes) > maxBranchDiffBytes raises DIFF_OVERSIZE. All three are asserted in internal/contextprofile/plan_test.go:285-318 and internal/reviewers/sharded_test.go:176 pins LOCAL_DIFF_TRUNCATED and DIFF_OVERSIZE as never satisfiable by shard results."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 143,
+      "note": "The DIFF_OVERSIZE bound is consistent with the plan gate: internal/contextprofile/shards.go:193 returns an empty ShardPlan for the same condition, and internal/prready/review.go:192 only writes packs when len(shardPlan.Shards) > 0, so an oversize branch keeps a blocker with no packs, exactly as the 0.8.3 spec section 3 requires."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 83,
+      "note": "The FromGit branch-measured path is only entered when BranchFiles is non-empty, which internal/gitcontext/gitcontext.go:77 gates on ctx.DiffTruncated. Truncation (maxDiffBytes = 120000, gitcontext.go:15) and the LARGE_DIFF threshold (DefaultLargeDiffBytes = 120000) are the same number, so there is no window where a branch is large enough to raise LARGE_DIFF but too small to have per-file measurements."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 205,
+      "note": "The localOnly map is genuinely separate from byPath, so a clean committed file reports LocalBytes 0 and a committed-but-dirty file reports its uncommitted bytes; both directions are asserted in internal/contextprofile/profile_test.go:99 and :132, and internal/reviewmanifest/manifest.go:522 is the consumer that turns LocalBytes > 0 into the local-path disclosure."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 135,
+      "note": "ShardPlanMarkdown is moved, not deleted: internal/contextprofile/shards.go:264 defines the two-argument form and internal/prready/review.go:873 and internal/taskdone/review.go:497 call it. No dangling references."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 98,
+      "note": "collectBranchFiles measures each path with GIT_LITERAL_PATHSPECS=1 and a bare path, which is correct because the env var and a :(literal) prefix are mutually exclusive; --text and --no-textconv defeat .gitattributes diff drivers. Covered by internal/gitcontext/branchfiles_test.go TestBranchFilesLiteralPathspecs:197 and TestBranchFilesDefeatDiffAttributes:235."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 149,
+      "note": "HashFields uses a len:bytes NUL encoding, so a path containing a newline, a colon or a NUL cannot forge a field boundary; it is the single definition (internal/contextprofile/shards.go:66 delegates to it), so file, chunk, shard and plan hashes cannot drift apart."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 47,
+      "note": "realGit captures stderr and wraps it into the error, so a failing git invocation is identifiable rather than a bare exit status 128; the error branches are covered by branchfiles_test.go TestRunGitErrorBranches:289."
+    },
+    {
+      "note": "Build and test verification on the frozen branch: go vet ./internal/contextprofile/... ./internal/gitcontext/... is clean, and go test for both packages passes at 81.0% and 85.1% statement coverage. No source file was edited during this review."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 16 MiB DIFF_OVERSIZE bound is evaluated only after the whole branch diff has been materialised. internal/gitcontext/gitcontext.go:84 calls collectBranchFiles, which retains every file's Diff text and also concatenates all of it into BranchDiffFull (internal/gitcontext/branchfiles.go:98-115), so peak allocation is roughly twice the branch diff before contextprofile/profile.go:143 ever gets to compare it against maxBranchDiffBytes. The comment on measureBranchFiles (branchfiles.go:118) shows the memory concern was understood for the raw pass but not applied to the filtered one. Low rather than blocking: reaching it needs a branch diff far beyond 16 MiB, and the failure mode is memory pressure, not a wrong verdict.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 108,
+          "note": "full.WriteString(text) accumulates the entire filtered branch diff in memory with no bound; the DIFF_OVERSIZE check runs later, in contextprofile."
+        },
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 143,
+          "note": "branchDiffBytes(git) > maxBranchDiffBytes is a post-hoc classification of an allocation that has already happened."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Measuring the raw (unfiltered) branch total costs one git subprocess per changed path, on top of the one-per-path already spent on the filtered pass. internal/gitcontext/gitcontext.go:95 calls measureBranchFiles whenever any exclude is configured, which is always for task-done and pr-ready (generatedMetareviewPathExcludes is never empty), so a branch touching N files spawns roughly 2N+2 git processes purely to produce two byte totals. This is the exact path taken on the large branches the feature exists to serve. Not blocking: it is correct, just slower than a single --numstat style pass would be.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 121,
+          "note": "measureBranchFiles re-lists the paths and runs a full git diff per path, discarding the text, only to sum len(out)."
+        },
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 95,
+          "note": "The second per-file pass is triggered by len(effectiveExcludes) > 0, which review scopes always satisfy."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "In filesFromGit, a path that git reports as branch-changed but that has no BranchFiles entry (for example a path filtered out of the branch measurement, or any run where BranchFiles was never collected) falls into the else-if whose guard is file.Source != SourceBranch, so its LocalBytes stays 0 even when it has staged or worktree edits. The manifest's local-path disclosure keys off LocalBytes > 0 (internal/reviewmanifest/manifest.go:522), so in that shape the uncommitted half would go unmentioned - the precise failure the field's own comment was added to prevent. Kept low because it is not reachable today: manifests are only produced on the sharded path, and that path only exists when BranchFiles is populated.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 206,
+          "note": "else if file.Source != SourceBranch suppresses LocalBytes for a sourceOf-branch path that is absent from the BranchFiles map."
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 522,
+          "note": "The local disclosure list depends on file.LocalBytes > 0, so a zeroed LocalBytes silently drops the path from the uncommitted-content disclosure."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new spec is committed with a header reading 'Status: DRAFT for review ... It is a design plan, not an implementation. Build nothing until the schema and interfaces below are reviewed and locked', on the same branch that ships 0.9.0 as released (.claude-plugin/plugin.json:3, internal/version/version.go:3, CHANGELOG.md:3). A reader of the repository at this commit cannot tell whether the spec still gates the work or merely records it. Documentation accuracy only; no code impact.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-enhancements.md",
+          "line": 3,
+          "note": "Status line still says DRAFT and 'Build nothing' while CHANGELOG.md:3 already announces 0.9.0 as a dated release."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

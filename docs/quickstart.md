@@ -100,8 +100,8 @@ The repository `.gitignore` keeps transient state local while allowing fallback 
 
 ## 6. Agent Syntax
 
-Codex users invoke metareview through `$setup`, `$review-artifact`, `$review-task-done`, `$review-epic-ready`, `$review-pr-ready`, `$learn-post-merge`, and `$status`.
+Codex users invoke metareview through `$setup`, `$review-artifact`, `$review-task-done`, `$review-epic-ready`, `$review-pr-ready`, `$learn-post-merge`, `$status`, and `$fsm`.
 
-Claude Code users invoke the same workflows through `/setup`, `/review-artifact`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/learn-post-merge`, and `/status`.
+Claude Code users invoke the same workflows through `/setup`, `/review-artifact`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/learn-post-merge`, `/status`, and `/fsm`.
 
 Direct CLI usage remains the source of truth when plugin skills are unavailable.

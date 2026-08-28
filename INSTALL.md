@@ -52,7 +52,7 @@ codex plugin marketplace add /path/to/metareview
 codex plugin list --marketplace metareview
 ```
 
-Then use the Codex skills with `$setup`, `$review-task-done`, `$review-epic-ready`, `$review-pr-ready`, `$review-artifact`, `$learn-post-merge`, and `$status`.
+Then use the Codex skills with `$setup`, `$review-task-done`, `$review-epic-ready`, `$review-pr-ready`, `$review-artifact`, `$learn-post-merge`, `$status`, and `$fsm`.
 
 ## Claude Code Plugin
 
@@ -70,7 +70,7 @@ claude plugin marketplace add /path/to/metareview
 claude plugin install metareview@metareview
 ```
 
-Then use `/setup`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/review-artifact`, `/learn-post-merge`, and `/status`.
+Then use `/setup`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/review-artifact`, `/learn-post-merge`, `/status`, and `/fsm`.
 
 ## Standalone Setup
 

@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0d.cc052b090ce38225",
+  "kind": "shard",
+  "shardId": "shard-0d",
+  "shardHash": "cc052b090ce38225",
+  "planHash": "014639e60cb3cab9",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/export/redaction_test.go", "line": 82, "note": "fail-closed classification guard skips fields whose json tag is empty"},
+    {"path": "internal/fsm/run/types.go", "line": 331, "note": "MarshalCanonical is encoding/json based, so an untagged exported field marshals under its Go name"},
+    {"path": "internal/fsm/record/record_test.go", "line": 160, "note": "package var nanos overridden without restore, unlike flock which is restored"},
+    {"path": "internal/fsm/record/record.go", "line": 223, "note": "torn-fragment filename uses nanos(), the var the test pins to 42"},
+    {"path": "internal/fsm/kind/kind_test.go", "line": 228, "note": "fatSt is built with 20000 elements and then discarded via _ = fatSt"},
+    {"path": "internal/fsm/record/record.go", "line": 218, "note": "torn-tail repair truncates under an advisory flock the other writer never takes"},
+    {"note": "Verified by execution: go vet clean and go test -race -count=5 -shuffle=on passes for kind, record and export."},
+    {"note": "CLAUDE.md claims cross-checked against source: 120000 diff cap (internal/gitcontext/gitcontext.go:15), UNTRACKED_TRUNCATED at 4000 bytes (gitcontext.go:17, contextprofile/profile.go:21), self-ignoring shard and runs dirs (shardpack.go:158, store_jsonl.go:104). No documentation drift found."},
+    {"note": "internal/fsm/run/testdata/oracle.jsonl is consumed by TestOracle (internal/fsm/run/store_test.go:803) together with the pre-existing oracle.sha256 and oracle.events.jsonl fixtures; not dead fixture data."},
+    {"note": "verbatim classification spot-checked against the producers: Snapshot.Warnings only ever receives p.Code (internal/fsm/run/fold.go:198), so the 'already redacted at the source' justification holds."}
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "redaction_test.go's fail-closed export guard has a hole that defeats its stated purpose. TestEverySnapshotFieldIsClassifiedForExport enumerates run.Snapshot with reflect.VisibleFields and then skips any field whose json tag is empty (redaction_test.go:82). An exported field added without a json tag is still marshalled by run.MarshalCanonical (internal/fsm/run/types.go:331, encoding/json) under its Go field name, so it would reach the evidence bundle unredacted while this test — the only structural enforcement, per its own header comment at redaction_test.go:10-20 — stays green. The empty-tag skip is needed only for unexported fields; the condition should be reflect.StructField.IsExported() rather than an empty tag, keeping the `-` skip. No live leak today (every Snapshot field is tagged), but the guard is future-proofing and this is the exact future it fails to cover.",
+      "evidence": [
+        {"path": "internal/fsm/export/redaction_test.go", "line": 82, "note": "if tag == \"\" || tag == \"-\" { continue } silently exempts untagged exported fields"},
+        {"path": "internal/fsm/export/redaction_test.go", "line": 78, "note": "reflect.VisibleFields returns unexported fields too, which is why the empty-tag skip was written"},
+        {"path": "internal/fsm/run/types.go", "line": 331, "note": "MarshalCanonical delegates to encoding/json, which emits untagged exported fields by Go name"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "record_test.go leaks a package-level seam across tests. TestTornTailWritePath assigns nanos = func() int64 { return 42 } (record_test.go:160) and never restores it, while the neighbouring flock override in TestWriteErrors is carefully saved and restored (record_test.go:279-284). nanos names torn fragments (internal/fsm/record/record.go:223), so any later test in this package that produces two torn fragments in one .torn directory would have the second silently overwrite the first, and the failure would depend on test order. Benign today only because each later case uses a fresh t.TempDir. Fix: defer restoring nanos as flock does.",
+      "evidence": [
+        {"path": "internal/fsm/record/record_test.go", "line": 160, "note": "nanos overridden with no defer to restore it"},
+        {"path": "internal/fsm/record/record.go", "line": 223, "note": "torn fragment file name is runs.jsonl-<nanos()>"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead code in kind_test.go: TestK1Decode builds fatSt, a 20,000-element []run.BugStatus, and then discards it with `_ = fatSt` (kind_test.go:228-232). No assertion consumes it, so this is 20,000 wasted allocations and, more importantly, the residue of a cap assertion that appears to have been dropped mid-edit — a still-present cap on status list size may now be untested. Either assert the intended cap or delete the block.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind_test.go", "line": 228, "note": "var fatSt []run.BugStatus built in a 20000-iteration loop"},
+        {"path": "internal/fsm/kind/kind_test.go", "line": 232, "note": "_ = fatSt discards the value with no assertion"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The interleaved-writers regression test does not cover the branch where the race can still lose a row. TestRunsJSONLSurvivesInterleavedWriters (record_test.go:310) exercises only the plain-append path of appendRow, which is safe because of O_APPEND. The torn-tail repair branch (internal/fsm/record/record.go:218-226) still does readRows then f.Truncate(t.offset) while holding an advisory flock that state.AppendJSONL (internal/state/state.go:28-32) never takes, so an unlocked append landing in that window is truncated away. The test's own header comment asserts the two-writer invariant is now safe; that claim is untested for the repair path. Note the fix would land in record.go, which is outside this shard.",
+      "evidence": [
+        {"path": "internal/fsm/record/record_test.go", "line": 310, "note": "concurrency test starts from an empty runs.jsonl, so t.fragment is always nil"},
+        {"path": "internal/fsm/record/record.go", "line": 218, "note": "f.Truncate(t.offset) in the torn-tail repair steps"},
+        {"path": "internal/state/state.go", "line": 32, "note": "the second writer opens O_APPEND and takes no flock"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestK3Composition reuses one adjudicateOut variable across seven sub-cases and ignores every json.Unmarshal error (kind_test.go:356, 386, 403, 416, 472, 529). When a decode fails the previous case's field values survive into the next assertion, so a sub-case can pass on stale data. Today each sub-case is saved by the accompanying err != nil check or by differing expected shapes, so this is latent rather than active, but declaring `out` inside each block (or checking the unmarshal error) removes the class.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind_test.go", "line": 386, "note": "_ = json.Unmarshal(raw, &out) into a variable carrying the previous case's values"},
+        {"path": "internal/fsm/kind/kind_test.go", "line": 403, "note": "same reuse pattern in the tie/dedup/reject sub-case"}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

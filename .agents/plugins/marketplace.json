@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "metareview",
-      "description": "task-done, epic-ready, pr-ready, artifact review, post-merge learning, and metaswarm-compatible quality gates. Packaged releases use bin/metareview; source checkout mode requires Go 1.22+.",
+      "description": "task-done, epic-ready, pr-ready, artifact review, post-merge learning, and metaswarm-compatible quality gates. Packaged releases use bin/metareview; source checkout mode requires Go 1.26+.",
       "source": {
         "source": "url",
         "url": "https://github.com/dsifry/metareview.git",

@@ -143,15 +143,59 @@ func TestCodexJudgeFailures(t *testing.T) {
 
 func TestCodexJudgeReportsTokensEvenWhenTheCallFails(t *testing.T) {
 	// A non-zero exit after a completed turn still cost tokens; losing them would
-	// under-report the run's spend and weaken the budget convergence check.
+	// under-report the run's spend and weaken the budget convergence check. Each
+	// retry costs again, so the totals accumulate across attempts exactly as the
+	// HTTP arm's do.
 	f := &fakeCodex{code: 1, stdout: `{"type":"turn.completed","usage":{"input_tokens":11,"output_tokens":2}}` + "\n"}
 	j := &codexJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
 	v, err := j.Call(context.Background(), codexRequest())
 	if err == nil {
 		t.Fatal("expected a transport error")
 	}
-	if v.Tokens.Input != 11 || v.Tokens.Output != 2 {
-		t.Fatalf("tokens lost on failure: %+v", v.Tokens)
+	if f.calls != MaxAttempts {
+		t.Fatalf("a transport failure must be retried: %d attempts, want %d", f.calls, MaxAttempts)
+	}
+	if v.Attempts != MaxAttempts {
+		t.Fatalf("Attempts = %d, want %d", v.Attempts, MaxAttempts)
+	}
+	if want := int64(11 * MaxAttempts); v.Tokens.Input != want {
+		t.Fatalf("tokens must accumulate across attempts: Input=%d want %d", v.Tokens.Input, want)
+	}
+}
+
+// A codex exec that never returns must not stall the run. The provider had no
+// deadline of its own and inherited only the caller's context, so a hung CLI
+// hung the FSM.
+func TestCodexJudgeBoundsEachAttempt(t *testing.T) {
+	var gotDeadline bool
+	exec := func(ctx context.Context, _ []string, _ string) ([]byte, int, error) {
+		if _, ok := ctx.Deadline(); ok {
+			gotDeadline = true
+		}
+		return []byte(codexStream(`{"reasoning":"r","is_real":true,"confidence":0.9}`)), 0, nil
+	}
+	j := &codexJudge{exec: exec, nonce: func() string { return "n0" }, clock: codexClock()}
+	if _, err := j.Call(context.Background(), codexRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if !gotDeadline {
+		t.Fatal("each attempt must carry a deadline, or a hung codex exec stalls the run forever")
+	}
+}
+
+// A cancelled caller stops the ladder rather than running it out.
+func TestCodexJudgeStopsOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	f := &fakeCodex{code: 1}
+	j := &codexJudge{exec: func(c context.Context, a []string, s string) ([]byte, int, error) {
+		cancel()
+		return f.exec(c, a, s)
+	}, nonce: func() string { return "n0" }, clock: codexClock()}
+	if _, err := j.Call(ctx, codexRequest()); err == nil {
+		t.Fatal("a cancelled call must return an error")
+	}
+	if f.calls >= MaxAttempts {
+		t.Fatalf("cancellation must stop the ladder early, got %d attempts", f.calls)
 	}
 }
 

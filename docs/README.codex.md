@@ -31,6 +31,7 @@ Codex uses `$skill` syntax:
 | `$review-pr-ready` | Check PR readiness before push or merge. |
 | `$learn-post-merge` | Extract post-merge learning after a PR merges. |
 | `$status` | Show current review state. |
+| `$fsm` | Drive a workflow run (sdlc-loop, review-loop) as an audited state machine. |
 
 ## Direct CLI Fallback
 
@@ -64,7 +65,7 @@ When metaswarm is installed, keep using metaswarm and Beads as the lifecycle sou
 
 ## Workflow runs
 
-`metareview fsm` drives `sdlc-loop` and `review-loop` as an audited state machine (the `/fsm` skill). Print the driver contract with `metareview fsm --agent-prompt`; see `docs/fsm/driving-a-workflow.md`.
+`metareview fsm` drives `sdlc-loop` and `review-loop` as an audited state machine (the `$fsm` skill). Print the driver contract with `metareview fsm --agent-prompt`; see `docs/fsm/driving-a-workflow.md`.
 
 ### Sharded review (diffs over the context limit)
 

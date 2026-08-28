@@ -49,7 +49,6 @@ func (j *codexJudge) Call(ctx context.Context, r Request) (v Verdict, err error)
 	}
 	start := j.clock.Now()
 	defer func() { v.Duration = j.clock.Now().Sub(start) }()
-	v.Attempts = 1
 
 	args := []string{
 		"exec", "--json",
@@ -60,20 +59,43 @@ func (j *codexJudge) Call(ctx context.Context, r Request) (v Verdict, err error)
 		"-c", "model_reasoning_effort=" + r.Effort,
 		"-", // the prompt arrives on stdin, never as an argv the process table would show
 	}
-	stdout, code, execErr := j.exec(ctx, args, system+"\n\n"+user)
-	text, tokens, found := parseCodexEvents(stdout)
-	v.Tokens = tokens
-	switch {
-	case execErr != nil:
-		return v, errs.E(CodeJudgeTransport, "codex could not be run: "+execErr.Error(), "provider", "codex")
-	case code != 0:
-		return v, errs.E(CodeJudgeTransport, "codex exited "+itoa(code), "provider", "codex", "exit", itoa(code))
-	case !found:
-		return v, errs.E(CodeJudgeResponse, "codex produced no agent message", "provider", "codex")
+	// The same attempt ceiling, per-attempt deadline and backoff as the HTTP arm.
+	// This provider had none of the three: a bare caller context with no deadline,
+	// so a codex exec that never returns stalls the run forever, and a single
+	// attempt, so one transient failure was fatal. Whatever retrying the CLI does
+	// internally is its own business; the timeout has to exist here because
+	// nothing else in the process is going to impose one.
+	prompt := system + "\n\n" + user
+	var lastErr error
+	for attempt := 0; attempt < MaxAttempts; attempt++ {
+		v.Attempts = attempt + 1
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return v, ctx.Err()
+			case <-j.clock.After(backoff(classBackoff, attempt-1)):
+			}
+		}
+		actx, cancel := context.WithTimeout(ctx, AttemptTimeout)
+		stdout, code, execErr := j.exec(actx, args, prompt)
+		cancel()
+
+		text, tokens, found := parseCodexEvents(stdout)
+		v.Tokens = v.Tokens.Add(tokens)
+		switch {
+		case execErr != nil:
+			lastErr = errs.E(CodeJudgeTransport, "codex could not be run: "+execErr.Error(), "provider", "codex")
+		case code != 0:
+			lastErr = errs.E(CodeJudgeTransport, "codex exited "+itoa(code), "provider", "codex", "exit", itoa(code))
+		case !found:
+			lastErr = errs.E(CodeJudgeResponse, "codex produced no agent message", "provider", "codex")
+		default:
+			v.Raw = text
+			v.Parsed, v.Decision, v.Confidence, v.ParseError = Parse(r.Kind, text)
+			return v, nil
+		}
 	}
-	v.Raw = text
-	v.Parsed, v.Decision, v.Confidence, v.ParseError = Parse(r.Kind, text)
-	return v, nil
+	return v, lastErr
 }
 
 // validateCodex is validate's codex arm: no key, and the CLI's wider effort set.

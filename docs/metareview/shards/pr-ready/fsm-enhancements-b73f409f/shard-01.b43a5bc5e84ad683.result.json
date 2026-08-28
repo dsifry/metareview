@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-01.b43a5bc5e84ad683",
+  "kind": "shard",
+  "shardId": "shard-01",
+  "shardHash": "b43a5bc5e84ad683",
+  "planHash": "014639e60cb3cab9",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/contextprofile/shards.go",
+      "line": 188,
+      "note": "PlanShards rewritten to hash-bucket chunking; verified chunk boundaries always advance, hard-cut of an over-long line, injective HashFields preimages (internal/gitcontext/branchfiles.go:148), and stable shard/plan hashing."
+    },
+    {
+      "path": "internal/fsm/record/record.go",
+      "line": 177,
+      "note": "appendRow: O_APPEND + flock + fsync, idempotent by id, id_conflict on head/workflow mismatch; defer order verified (unlock runs before Close)."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 37,
+      "note": "Checked that the empty plan returned for a >16 MiB branch diff is intentional: DIFF_OVERSIZE is deliberately not in shardSatisfiableReasons, so shards are never expected to answer it."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 64,
+      "note": "CollectWithExcludes adds no implicit default excludes, so learnsource passing its own two-entry exclude list is not a regression of previously filtered paths."
+    },
+    {
+      "path": "internal/fsm/record/record_test.go",
+      "line": 1,
+      "note": "Validation run locally: go build ./..., go vet and go test for contextprofile, fsm/record, learnsource, epicsource all pass; internal/fsm/record is 100.0% unit-covered, which is what tests/coverage.sh requires of internal/fsm/*."
+    },
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 195,
+      "note": "Doc chunks verified against code: --shard-result / --cross-shard-result exist, and the fsm.md exit-code table matches machine.go:862-870 and cli/envelope.go exitFor (DONE(fixed|clean)=0, DONE(reviewed)/STOPPED/GATE_FAILED=1, NEEDS_INPUT=3)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Documented shard-invalidation rule is narrower than the implementation. CLAUDE.md:91, docs/README.codex.md:87 and commands/review-task-done.md:33 state that editing a file invalidates only its own shard's result, but bucket width comes from bucketBits(needBuckets(total, budget)) over the whole branch diff, so a size change that crosses a power-of-two bucket boundary re-buckets every path and changes every shard id and hash; within one over-budget bucket the shards are packed sequentially over the sorted chunk list, so an edit that changes a file's chunk count also re-hashes the sibling split shards (id-2, id-3). Verified this fails safe: reviewmanifest freshness matches results by shardHash against current shards, so a stale result is ignored rather than counted, and the operator is only asked to re-review more shards than the docs promise, never fewer.",
+      "evidence": [
+        {"path": "internal/contextprofile/shards.go", "line": 199},
+        {"path": "docs/README.codex.md", "line": 87},
+        {"path": "commands/review-task-done.md", "line": 33}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Torn-tail repair can discard a concurrently appended row. appendRow's own comment (record.go:182-188) records that runs.jsonl has a second writer, state.AppendJSONL, which takes no advisory lock; the append path is made safe against it by relying on O_APPEND atomicity, but the repair path is not: readRows re-reads the file, and f.Truncate(t.offset) then cuts the file back to the offset observed at read time, so a complete row appended by the unlocked writer in that window is lost (the torn fragment itself is quarantined first, the newer row is not). Narrow: requires a pre-existing torn tail plus a concurrent gate run, and the loss is one runs.jsonl row (attempt numbering), not audit state.",
+      "evidence": [
+        {"path": "internal/fsm/record/record.go", "line": 225},
+        {"path": "internal/fsm/record/record.go", "line": 182}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new docs/metareview/fsm exclusion in learnsource has no test. internal/learnsource/source_test.go:157 (TestCollectExcludesShardResults) asserts only the docs/metareview/shards half of the same two-part exclude list, so a later edit could drop the fsm entries with the suite still green. Package coverage sits exactly on its floor (70.8), so the gap is not caught there either.",
+      "evidence": [
+        {"path": "internal/learnsource/source.go", "line": 29},
+        {"path": "internal/learnsource/source_test.go", "line": 157}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead API surface left by the shards.go rewrite: PlanShards no longer reads its profile parameter anywhere in the body (both callers, internal/taskdone/review.go:104 and internal/prready/review.go:106, still compute and pass a Profile), PlanSourceHash has no non-test caller and discards its Profile argument outright, and PlanShards no longer has any code path that returns a non-nil error while both callers still branch on one.",
+      "evidence": [
+        {"path": "internal/contextprofile/shards.go", "line": 188},
+        {"path": "internal/contextprofile/shards.go", "line": 86}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Row serializes contextPackPath and reviewLogPath unconditionally (no omitempty) but RowFor never sets them, so every FSM row in runs.jsonl carries empty strings in the two fields the review-gate writers populate with real paths. Consumers that read runs.jsonl generically will see an FSM run with no review log rather than a run that has none by design; either omitempty or a pointer to fsmRunDir would say that explicitly.",
+      "evidence": [
+        {"path": "internal/fsm/record/record.go", "line": 42},
+        {"path": "internal/fsm/record/record.go", "line": 79}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

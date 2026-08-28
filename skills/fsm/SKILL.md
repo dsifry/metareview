@@ -69,11 +69,16 @@ metareview fsm advance --run <id>        # repeat until DONE / STOPPED / GATE_FA
   untracked files fail `commit_exists`.
 - The audit chain (`audit.jsonl`) is integrity-against-accident, not tamper evidence against the host; these are
   process guarantees for a cooperating agent.
-- Calibration runs (`--calibration`) are eval-only; judge models are the closed Anthropic family table plus
-  OpenAI-compatible ids; `high` effort is Go-only.
+- Calibration runs (`--calibration`) are eval-only; judge models are the closed Anthropic family table, plus
+  OpenAI-compatible ids, plus `codex/<model>` ids judged through the Codex CLI; `high` effort is Go-only.
+- A `codex/` model spawns the `codex` binary from `PATH` rather than making an HTTP request. It reads the
+  operator's own OAuth session under `~/.codex`, so metareview never handles that credential and no API key
+  is required for it — but it is a process spawn outside the `allowed_cmds` consent gate, which covers
+  workflow `cmds` only. Each attempt is bounded by `AttemptTimeout` and retried on the same ladder as the
+  HTTP providers.
 - The binary reads exactly these env names: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_BASE_URL`,
-  `OPENAI_BASE_URL`, `MOCK_AI`, `MRV_RUN_ID`, `HOME` (plus `PATH` and, on Linux, `SSL_CERT_*` through the Go runtime).
-  No proxy variables are honoured.
+  `OPENAI_BASE_URL`, `METAREVIEW_JUDGE_MODEL`, `METAREVIEW_JUDGE_EFFORT`, `MOCK_AI`, `MRV_RUN_ID`, `HOME`
+  (plus `PATH` and, on Linux, `SSL_CERT_*` through the Go runtime). No proxy variables are honoured.
 
 ## Files
 

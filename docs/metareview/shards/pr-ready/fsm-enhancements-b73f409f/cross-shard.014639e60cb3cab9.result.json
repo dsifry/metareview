@@ -1,0 +1,248 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-014639e60cb3cab9-claude-opus-5",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "014639e60cb3cab9",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T16:02:05Z",
+  "blockingCount": 3,
+  "evidence": [
+    {
+      "path": "tests/manifest/test-manifests.sh",
+      "line": 74,
+      "note": "new Go-floor guard enumerates five artifacts; the two known-uncorrected copies are not in the list"
+    },
+    {
+      "path": ".agents/plugins/marketplace.json",
+      "line": 9,
+      "note": "shipped marketplace manifest still advertises Go 1.22+"
+    },
+    {
+      "path": "cli/metareview.js",
+      "line": 36,
+      "note": "npm bin diagnostic still tells the user to install Go 1.22+"
+    },
+    {
+      "path": "go.mod",
+      "line": 3,
+      "note": "module requires go 1.26"
+    },
+    {
+      "path": "docs/README.codex.md",
+      "line": 67,
+      "note": "Codex-facing doc names the new command with Claude slash syntax"
+    },
+    {
+      "path": "docs/README.claude.md",
+      "line": 24,
+      "note": "slash-command table ends at /status; /fsm never added"
+    },
+    {
+      "path": "skills/fsm/SKILL.md",
+      "line": 74,
+      "note": "closed env-name list in the trust-boundary section"
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 31,
+      "note": "the code's declared closed set has two names the doc omits"
+    },
+    {
+      "path": "internal/fsm/judge/codex.go",
+      "line": 16,
+      "note": "third judge provider class shipped in this branch"
+    },
+    {
+      "path": "internal/fsm/cli/prompt.go",
+      "line": 41,
+      "note": "--judge-model/--judge-effort documented only in the agent prompt"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "line": 7,
+      "note": "0.9.0 summary states judge calls are Anthropic and OpenAI-compatible"
+    },
+    {
+      "path": "README.md",
+      "line": 55,
+      "note": "release-notes ladder stops at 0.8.3 while every manifest ships 0.9.0"
+    },
+    {
+      "path": "internal/learnsource/source.go",
+      "line": 33,
+      "note": "learning excludes shards and fsm bundles from the branch diff"
+    },
+    {
+      "path": "internal/learning/render.go",
+      "line": 48,
+      "note": "sibling generated-path filter lists three docs/metareview subtrees only"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Fifth occurrence of the partially-corrected-claim class, and this time the guard added to stop it was written around the known-bad copies. The Go floor sentence exists in seven places. go.mod:3 requires go 1.26; commit 19e8f71 on this branch corrected .claude-plugin/plugin.json:4, .codex-plugin/plugin.json:25, package.json:52, INSTALL.md:9 and README.md:85 to 'Go 1.26+'. Two copies were reported as still wrong by the cross-shard result of plan a3a4da37 (committed at docs/metareview/shards/pr-ready/fsm-enhancements-b73f409f/cross-shard.a3a4da37f641f1bc.result.json) and neither was fixed: .agents/plugins/marketplace.json:9 still says 'source checkout mode requires Go 1.22+', and cli/metareview.js:28,36 print 'Go 1.22+' as the error a user sees at the exact moment the Go fallback fails. Both are shipped surfaces (cli/metareview.js is package.json's bin, and cli/ is in files; the .agents manifest is the published agents marketplace entry). The new guard at tests/manifest/test-manifests.sh:74 loops over exactly ['package.json', '.claude-plugin/plugin.json', '.codex-plugin/plugin.json', 'INSTALL.md', 'README.md'] and asserts each states go.mod's floor — the two files that carry the wrong number are absent from that array, even though the same script already parses .agents/plugins/marketplace.json at lines 16 and 43 and shells out to cli/metareview.js at line 117. The guard therefore certifies the repository as consistent while the only two remaining inconsistent copies are the ones it does not look at. Neither file is in the branch diff, so no shard reviewer can see this: it is visible only from the seam between the guard (shard-10-3) and the manifests it omits. Fix both strings and add both paths to the guard's array.",
+      "evidence": [
+        {
+          "path": "tests/manifest/test-manifests.sh",
+          "line": 74,
+          "note": "guard array omits the two uncorrected copies"
+        },
+        {
+          "path": ".agents/plugins/marketplace.json",
+          "line": 9,
+          "note": "Go 1.22+"
+        },
+        {
+          "path": "cli/metareview.js",
+          "line": 36,
+          "note": "Go 1.22+ in the user-facing failure path"
+        },
+        {
+          "path": "go.mod",
+          "line": 3,
+          "note": "go 1.26"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The branch ships a new agent command (commands/fsm.md, skills/fsm/SKILL.md, both in package.json's files list, and tests/manifest/test-skills.sh:20 pins their existence) and adds it to CLAUDE.md:14, but not to a single one of the six user-facing command inventories, every one of which is a closed enumeration: README.md:98 ($setup … $status) and README.md:114 (/setup … /status); INSTALL.md:55 and INSTALL.md:73; docs/quickstart.md:103 and docs/quickstart.md:105; the 'Slash Commands' table in docs/README.claude.md:17-24; and the '$skill' table in docs/README.codex.md:26-32. Four of those files are shipped in the npm package, so an installed user reading docs/README.claude.md or docs/quickstart.md is told the plugin exposes seven commands when it exposes eight. AGENTS.md, CLAUDE.md's codex counterpart, likewise never names the command (only the fsm exit codes at AGENTS.md:21), so the Codex-side agent contract omits the feature its Claude-side twin documents. Compounding it, docs/README.codex.md:67 — inside the doc whose own table is '$skill' syntax — calls it 'the /fsm skill', Claude syntax in the Codex doc. Nothing enforces this: the doc-term loop at tests/manifest/test-manifests.sh:99 checks task-done, epic-ready, pr-ready, post-merge, PASS_ADVISORY and 'blocking finding' across these seven docs, and 'fsm' is not among the terms. The inventories and the command they omit are split across shards 0d, 12, 03, 14, 1b, 01 and 19, so this is invisible per shard.",
+      "evidence": [
+        {
+          "path": "docs/README.claude.md",
+          "line": 24,
+          "note": "table ends at /status; no /fsm row"
+        },
+        {
+          "path": "docs/README.codex.md",
+          "line": 67,
+          "note": "'the /fsm skill' in the $-syntax Codex doc"
+        },
+        {
+          "path": "docs/quickstart.md",
+          "line": 103,
+          "note": "closed $-command list without fsm"
+        },
+        {
+          "path": "README.md",
+          "line": 114,
+          "note": "closed /-command list without fsm"
+        },
+        {
+          "path": "INSTALL.md",
+          "line": 73,
+          "note": "closed /-command list without fsm"
+        },
+        {
+          "path": "commands/fsm.md",
+          "line": 1,
+          "note": "the shipped command none of the inventories names"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Two enumerations in the FSM skill's trust boundary are stated as exhaustive and were made false by code shipped in the same branch. skills/fsm/SKILL.md:74-76: 'The binary reads exactly these env names: ANTHROPIC_API_KEY, OPENAI_API_KEY, ANTHROPIC_BASE_URL, OPENAI_BASE_URL, MOCK_AI, MRV_RUN_ID, HOME'. internal/fsm/cli/wiring.go:25-35 declares the closed set in code and it has nine entries: the same seven plus METAREVIEW_JUDGE_MODEL and METAREVIEW_JUDGE_EFFORT, both read through deps.Getenv at wiring.go:162-163 and folded into the run's vars. Those two names retarget the judge model, which is the same guardrail --var JUDGE covers, and an operator auditing the environment against this doc would not know to clear them (wiring.go:263 has a comment acknowledging that exporting METAREVIEW_JUDGE_MODEL once affects every later run). Same list, second error: 'judge models are the closed Anthropic family table plus OpenAI-compatible ids' omits the third provider class this branch adds — internal/fsm/judge/codex.go:16 routes any model prefixed 'codex/' through the Codex CLI on a ChatGPT OAuth session under ~/.codex, needing no API key, with its own wider effort enum (codex.go:28: none, minimal, low, medium, high, xhigh, max) that judge.go:101's four-value table does not describe. The doc's neighbouring claim that declared commands run only after a human consents to exact argv bytes also does not cover this path: codex.go:53 spawns the 'codex' binary resolved on PATH with no consent gate. SKILL.md is shard-19; wiring.go is shard-04-3; codex.go is shard-12; judge.go is shard-02.",
+      "evidence": [
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 74,
+          "note": "'exactly these env names' — seven of nine"
+        },
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 31,
+          "note": "METAREVIEW_JUDGE_MODEL / METAREVIEW_JUDGE_EFFORT in the code's closed set"
+        },
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 72,
+          "note": "'Anthropic family table plus OpenAI-compatible ids'"
+        },
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 16,
+          "note": "codex/ provider, OAuth session, no API key"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The judge-retargeting flags and the Codex CLI provider are documented in exactly one place — the --agent-prompt text — and are missing from every sibling enumeration of the same subject. internal/fsm/cli/prompt.go:41 (pinned by testdata/fsm/agent-prompt.golden) explains that --judge-model / --judge-effort, or METAREVIEW_JUDGE_MODEL / METAREVIEW_JUDGE_EFFORT, retarget the judge without editing the workflow, and that a codex/ model is judged through the Codex CLI. Yet the 'agent-satisfiable knobs' list appears three times — prompt.go's own list two paragraphs above, skills/fsm/SKILL.md:57-59, docs/fsm/driving-a-workflow.md:89-91 — and all three are byte-identical and name --var JUDGE/JUDGE_EFFORT while omitting the flags and env names that do the same job. commands/fsm.md, docs/fsm/driving-a-workflow.md and skills/fsm/SKILL.md never mention --judge-model, --judge-effort or codex/ at all. CHANGELOG.md:7 describes 0.9.0's judge calls as '(Anthropic and OpenAI-compatible)' and CHANGELOG.md:15 lists judge swap as '--var JUDGE=…', so a whole provider and a whole flag pair ship unannounced.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/prompt.go",
+          "line": 41,
+          "note": "the only prose describing the flags and the codex provider"
+        },
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 57,
+          "note": "knob list without the judge flags"
+        },
+        {
+          "path": "docs/fsm/driving-a-workflow.md",
+          "line": 89,
+          "note": "identical knob list, same omission"
+        },
+        {
+          "path": "CHANGELOG.md",
+          "line": 7,
+          "note": "0.9.0 names two judge providers, not three"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "README.md's release-notes ladder was not advanced with the release. package.json:3, .claude-plugin/plugin.json:3, .codex-plugin/plugin.json:3 and .claude-plugin/marketplace.json:11 all read 0.9.0, internal/version/version.go:3 is 0.9.0, and CHANGELOG.md:3 opens a 0.9.0 section whose headline is the FSM work. README.md's most recent such section is still 'What Changed In 0.8.3' (README.md:55), so the repository's front page describes the sharded-review release as current and never summarises the release it is shipping — the fsm bullet at README.md:7 sits under Use Cases, not under any version. Every prior release has its own section (0.8.3, 0.4.0-to-0.6.0), so the omission is a gap in an established pattern rather than a deliberate choice.",
+      "evidence": [
+        {
+          "path": "README.md",
+          "line": 55,
+          "note": "newest section is 0.8.3"
+        },
+        {
+          "path": "CHANGELOG.md",
+          "line": 3,
+          "note": "0.9.0 section exists"
+        },
+        {
+          "path": "internal/version/version.go",
+          "line": 3,
+          "note": "Version = 0.9.0"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The post-merge-learning generated-path rule is stated twice in two packages and the two statements disagree. internal/learnsource/source.go:33-36 (edited on this branch) excludes docs/metareview/shards and docs/metareview/fsm from the collected git context on the stated grounds that they are audit records rather than source under review. internal/learning/render.go:48-54, which filters the same run's changed-file list, uses a different prefix set: .metareview/, docs/metareview/context/, docs/metareview/learning/, docs/metareview/reviews/ — no shards, no fsm, and no docs/metareview/FINDINGS.md (written by internal/findings/findings.go:304). The mismatch is currently masked because gitcontext.collect applies the excludes to ChangedFiles as well (internal/gitcontext/gitcontext.go:128), so the shards and fsm entries never reach the renderer; but docs/metareview/FINDINGS.md is excluded by neither, and it is listed to the learning reviewer as a non-generated changed file on every run. Meanwhile the three lifecycle reviewers state the rule a third way, as the whole subtree (internal/taskdone/review.go:426-430, internal/prready/review.go:822-826, internal/epicready/review.go:440-444 each treat any docs/metareview/ path as generated). render.go is not in the branch diff, so this is only visible from the seam with the learnsource change in shard-01.",
+      "evidence": [
+        {
+          "path": "internal/learning/render.go",
+          "line": 48,
+          "note": "three subtrees; FINDINGS.md, shards and fsm absent"
+        },
+        {
+          "path": "internal/learnsource/source.go",
+          "line": 33,
+          "note": "excludes shards and fsm as audit records"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 426,
+          "note": "third statement: the whole docs/metareview/ subtree"
+        }
+      ]
+    }
+  ]
+}
