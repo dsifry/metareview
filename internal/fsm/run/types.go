@@ -331,12 +331,29 @@ func SnapshotEqualIgnoringSeq(a, b Snapshot) bool {
 func MarshalCanonical(v any) []byte { return marshalCanonical(v) }
 
 // marshalCanonical encodes v with HTML escaping disabled and no trailing newline.
+//
+// The U+2028/U+2029 pass is what makes "canonical" true across toolchains rather
+// than only within one. encoding/json changed its treatment of those two runes
+// between Go 1.26 and 1.27 — 1.26.7 writes them raw, 1.27 escapes them — and this
+// encoder produces the bytes the audit chain hashes over. Inheriting the
+// standard library's evolving default would mean a run recorded under one Go
+// release failing chain verification under another. Escaping them ourselves,
+// always, pins the output to this repository rather than to the toolchain.
+//
+// Replacing the raw bytes wholesale is safe: in valid JSON these sequences can
+// only ever occur inside a string literal, never as syntax.
 func marshalCanonical(v any) []byte {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(v) // the types in this package never fail to encode
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+	out := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+	out = bytes.ReplaceAll(out, []byte("\u2028"), []byte(`\u2028`))
+	out = bytes.ReplaceAll(out, []byte("\u2029"), []byte(`\u2029`))
+	// Invalid UTF-8 becomes U+FFFD either way, but the two releases disagree on
+	// its written form: 1.26.7 emits the six-byte \ufffd escape, 1.27 the raw
+	// three-byte rune. CapText budgets three, so raw is the form to settle on.
+	return bytes.ReplaceAll(out, []byte(`\ufffd`), []byte("\ufffd"))
 }
 
 var runIDPattern = regexp.MustCompile(`^mrv-[A-Za-z0-9-]{8,200}$`)

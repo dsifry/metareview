@@ -9,8 +9,13 @@ import (
 	"testing"
 )
 
-// R2b (canonical form): Canonical strips whitespace, keeps <>& literal, escapes U+2028/9 (as Go's
-// encoder always does — the fixed point is what matters), keeps existing escapes, preserves key order, rejects invalid JSON and duplicate keys at every depth, and is idempotent.
+// R2b (canonical form): Canonical strips whitespace, keeps <>& literal, escapes U+2028/9, keeps
+// existing escapes, preserves key order, rejects invalid JSON and duplicate keys at every depth, and
+// is idempotent.
+//
+// The U+2028/9 case used to be justified as "what Go's encoder always does". That stopped being
+// true: encoding/json writes them raw on Go 1.26.7 and escapes them on 1.27, so marshalCanonical
+// now escapes them itself. See TestCanonicalIsToolchainIndependent.
 func TestCanonicalNormalForm(t *testing.T) {
 	cases := []struct {
 		name string
@@ -178,5 +183,43 @@ func TestGateErrorError(t *testing.T) {
 	e := &GateError{Code: "ERR_NO_COMMIT", Gate: "commit_exists", Detail: "d"}
 	if e.Error() != "commit_exists: ERR_NO_COMMIT" {
 		t.Fatalf("Error() = %q", e.Error())
+	}
+}
+
+// The canonical encoder is what the audit chain hashes over, so its bytes must not
+// depend on the toolchain: a run recorded under one Go release has to verify under
+// another. encoding/json changed its treatment of U+2028/U+2029 between Go 1.26 and
+// 1.27, which CI caught and no local run could, because the two differ only across
+// versions. marshalCanonical now escapes them itself rather than inheriting the
+// standard library's current default.
+func TestCanonicalIsToolchainIndependent(t *testing.T) {
+	const ls, ps = "\u2028", "\u2029"
+	cases := []struct{ name, in, want string }{
+		{"line separator", "x" + ls + "y", `{"s":"x\u2028y"}`},
+		{"paragraph separator", "x" + ps + "y", `{"s":"x\u2029y"}`},
+		{"repeated and adjacent", ls + "a" + ps + ps + "b" + ls, `{"s":"\u2028a\u2029\u2029b\u2028"}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := string(marshalCanonical(map[string]string{"s": c.in}))
+			if got != c.want {
+				t.Fatalf("got %s, want %s", got, c.want)
+			}
+			if strings.ContainsAny(got, ls+ps) {
+				t.Fatalf("a raw separator survived into the canonical bytes: %q", got)
+			}
+		})
+	}
+	// The other half of the contract: HTML escaping stays off.
+	if got := string(marshalCanonical(map[string]string{"s": "a < b && c > d"})); got != `{"s":"a < b && c > d"}` {
+		t.Fatalf("HTML escaping leaked back in: %s", got)
+	}
+	// And the hash the chain links on is stable for a value carrying one.
+	sum := sha256.Sum256(marshalCanonical(map[string]string{"s": "x" + ls + "y"}))
+	if hex.EncodeToString(sum[:]) != hex.EncodeToString(func() []byte {
+		s := sha256.Sum256([]byte(`{"s":"x\u2028y"}`))
+		return s[:]
+	}()) {
+		t.Fatal("the chain hash does not match the pinned canonical bytes")
 	}
 }
