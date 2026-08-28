@@ -411,7 +411,12 @@ func addedUntrackedLines(text string) []string {
 	// so a file cannot name a path of its own choosing and move the scope.
 	for _, line := range strings.Split(text, "\n") {
 		if strings.HasPrefix(line, "--- ") {
-			scan = lintable(strings.TrimSpace(strings.TrimPrefix(line, "--- ")))
+			// Only the CR of a CRLF line ending is stripped. A leading or
+			// trailing space can be part of a real path, and trimming it turned
+			// " docs/x.js" — a file in a directory literally named " docs" —
+			// into something that looked like it lived under docs/, excluding
+			// it from the lints.
+			scan = lintable(strings.TrimSuffix(strings.TrimPrefix(line, "--- "), "\r"))
 			continue
 		}
 		if scan && strings.HasPrefix(line, "+") {
@@ -423,7 +428,6 @@ func addedUntrackedLines(text string) []string {
 
 // lintable reports whether a path carries code the deterministic lints judge.
 func lintable(path string) bool {
-	path = strings.TrimSpace(path)
 	if path == "" {
 		return true
 	}
@@ -456,7 +460,7 @@ func diffHeaderPath(line string) string {
 // ("b/docs/design notes.md"), and leaving the quotes on would hide it from both
 // the docs/ prefix and the .md suffix below.
 func postImagePath(value string) string {
-	value = strings.TrimSpace(value)
+	value = strings.TrimSuffix(value, "\r")
 	if strings.HasPrefix(value, `"`) {
 		if unquoted, err := strconv.Unquote(value); err == nil {
 			value = unquoted

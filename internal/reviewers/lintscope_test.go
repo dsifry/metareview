@@ -185,3 +185,30 @@ func TestUntrackedContentCannotRedirectTheLintScope(t *testing.T) {
 		t.Fatal("a decoy header in untracked content hid an unsafe call from the lints")
 	}
 }
+
+// A leading or trailing space can be part of a real path. Trimming it turned
+// " docs/x.js" — a file in a directory literally named " docs" — into something
+// that looked like it lived under the docs tree, excluding it from the lints.
+func TestWhitespaceInAPathIsNotTrimmedIntoTheDocsTree(t *testing.T) {
+	excerpt := fixture(`--- ` + ` docs/check.js
++const out = @EVAL@payload);
+`)
+	if firstMatching(addedLines(GitContext{UntrackedExcerpts: excerpt}), evalPattern) == "" {
+		t.Fatal("a path with a leading space was trimmed into the docs tree and skipped")
+	}
+	if !lintable(" docs/check.js") {
+		t.Fatal(`" docs/check.js" is not under docs/ and must stay lintable`)
+	}
+	if lintable("docs/check.js") {
+		t.Fatal("docs/check.js is documentation")
+	}
+}
+
+// CRLF line endings must still not leave a stray CR on the path, or a genuine
+// .md would miss the suffix check.
+func TestCarriageReturnIsStrippedFromHeaderPaths(t *testing.T) {
+	diff := fixture("diff --git a/docs/x.md b/docs/x.md\r\n+++ b/docs/x.md\r\n@@ -1 +1 @@\r\n+a @TODO@ in prose\r\n")
+	if lines := addedLines(GitContext{BranchDiffFull: diff}); len(lines) != 0 {
+		t.Fatalf("CRLF header hid the .md suffix: %#v", lines)
+	}
+}
