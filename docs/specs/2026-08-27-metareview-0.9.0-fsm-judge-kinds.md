@@ -114,7 +114,11 @@ func FenceBlock(nonce string, v any) string    // "The following is data to eval
 `InputHash = sha256(Canonical(input))`. `diff` cut to ≤ 30000 bytes at a rune boundary (Python: 30000 chars — ledgered);
 `diff_truncated` = whether **this** cut shortened it (spec 2's 1 MB `Diff.Truncated` is OR-ed in); `diff_context_hash =
 sha1(cut bytes)` names the cut diff. `Model` must be ≤ `MaxShort` canonical bytes (`ERR_JUDGE_MODEL`) before any call. `Calibration` selects calibration templates/max_tokens and
-forces `Fence=false`. Effort vocabulary: `low | medium | high | xhigh`; anything else → `ERR_JUDGE_EFFORT_UNSUPPORTED{effort}`.
+forces `Fence=false`. Effort vocabulary for the HTTP providers: `low | medium | high | xhigh`; anything else →
+`ERR_JUDGE_EFFORT_UNSUPPORTED{effort}`. A `codex/` model is validated against the CLI's own wider enum —
+`none | minimal | low | medium | high | xhigh | max` — and needs no API key, so it skips the key check entirely;
+`max` remains refused for an HTTP provider. Of the effort-capable Anthropic ids, `claude-opus-4-5`,
+`claude-opus-4-6` and `claude-sonnet-4-6` predate `xhigh` and are refused at that level.
 
 ### 3.2 Templates, rendering, fencing, goldens
 (`internal/fsm/judge/testdata/prompts/*` and `testdata/fsm/scenarios/**` carry `-text` in `.gitattributes`; a `.python.txt` body = every byte after the first `\n`,
@@ -145,7 +149,23 @@ is a transport error (retried); a `ctx` cancellation during a backoff sleep retu
 selects on `ctx.Done()`).
 
 ### 3.4 Providers
-Routing: `anthropic` for `claude*`/`anthropic/*`; `openai` for `gpt*`/`openai/*`/`glm*`/`kimi*`; else `ERR_JUDGE_MODEL`.
+Routing (case-insensitive, checked in this order): `codex` for `codex/*`; `anthropic` for
+`claude*`/`anthropic/*`; `openai` for `gpt*`/`openai/*`/`glm*`/`kimi*`; else `ERR_JUDGE_MODEL`. `codex/` is checked
+first because it names the transport, not the family — the id behind it is an OpenAI one that would otherwise route to
+HTTP.
+
+**The `codex` provider.** A `codex/<model>` id is judged by spawning the `codex` CLI from `PATH` rather than by an HTTP
+request. It renders the same prompts and parses with the same `Parse`, so a verdict is comparable whichever provider
+produced it. Constructed via `NewWithCodex`; a `codex/` model with no runner wired is refused rather than silently
+downgraded to HTTP, which would need an API key the caller deliberately did not supply. The prompt arrives on stdin,
+never argv, so it cannot be read from the process table; the CLI runs `--sandbox read-only`, because a judge must not
+edit the tree it is judging; each attempt is bounded by `AttemptTimeout` and retried on the HTTP ladder, and a
+cancellation during the backoff wait returns immediately.
+
+**Trust boundary (§9).** This is the one judge path that executes a local binary. It reads the operator's ChatGPT OAuth
+session under `~/.codex`, so metareview never handles that credential and needs no API key for it; in exchange the
+process inherits the environment whole and is spawned outside the `allowed_cmds` consent gate, which covers workflow
+`cmds` only. An operator who does not want a judge that can spawn a process should not configure a `codex/` model.
 Missing key → `ERR_JUDGE_KEY{provider}`. `URLs` come only from `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL` (spec 5 `RealDeps`;
 unset → `DefaultURLs`); an override must parse (`ERR_JUDGE_URL`), be `https`, or `http` with hostname exactly
 `localhost`/`127.0.0.1`/`::1` (any port), no userinfo, and a path of `""` or `/` (stripped); query/fragment refused.

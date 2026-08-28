@@ -4,7 +4,7 @@
 
 0.9.0 adds **FSM workflow runs**: `metareview fsm` drives `sdlc-loop` (discover → adjudicate → fix → verify) and
 `review-loop` as an event-sourced, hash-chained state machine. The host agent does the host nodes' work in its own warm
-session; judge calls (Anthropic and OpenAI-compatible) are auditable and swappable; resume is a fork; the results are
+session; judge calls (Anthropic, OpenAI-compatible, and `codex/` models judged through the Codex CLI on its own OAuth session) are auditable and swappable; resume is a fork; the results are
 not deterministic — the structure is.
 
 ### Added

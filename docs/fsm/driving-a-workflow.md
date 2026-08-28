@@ -87,7 +87,9 @@ a deliberate human reset, not something the agent decides.
   (`--allow-custom-cmds <sha256>`); the child env is `{PATH,HOME,LANG,TMPDIR}` ∩ set + `MRV_RUN_ID` + the declared
   names (values never persisted); stdout/stderr are capped and audited.
 - Agent-satisfiable knobs — `--allow-custom-cmds`, `--accept-workflow-change`, `--workflow <path>`, `--var JUDGE` /
-  `JUDGE_EFFORT`, `--mock-ai`/`MOCK_AI`, `--calibration`, `--repo-mode`, `--repair`, `--run-id`, `--include-vars`,
+  `JUDGE_EFFORT`, `--judge-model`/`--judge-effort` and `METAREVIEW_JUDGE_MODEL`/`METAREVIEW_JUDGE_EFFORT` (which
+  retarget the judge exactly as `--var JUDGE` does, and a `codex/` model spawns a local binary),
+  `--mock-ai`/`MOCK_AI`, `--calibration`, `--repo-mode`, `--repair`, `--run-id`, `--include-vars`,
   `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL` — weaken a guardrail; base-URL overrides are not recorded in the audit.
 - The audit chain is integrity-against-accident, not tamper evidence against the host; these are process guarantees
   for a cooperating agent. `repo_mode: enforcing` is materially weaker than it sounds (no `.git/info/exclude`, no clean

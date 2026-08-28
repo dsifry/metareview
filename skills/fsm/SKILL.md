@@ -14,7 +14,7 @@ Print the driver contract once and follow it: `metareview fsm --agent-prompt`.
 ## The loop
 
 ```bash
-metareview fsm init --workflow sdlc-loop --var JUDGE=<model> --var JUDGE_EFFORT=<low|medium|high|xhigh> [--base <ref>]
+metareview fsm init --workflow sdlc-loop --var JUDGE=<model> --var JUDGE_EFFORT=<low|medium|high|xhigh; a codex/ model also takes none|minimal|max> [--base <ref>]
 metareview fsm advance --run <id>        # exit 3 = NEEDS_INPUT: do the node's work, then
 metareview fsm record node-output --run <id> --node <node> --data <file|->
 metareview fsm advance --run <id>        # repeat until DONE / STOPPED / GATE_FAILED
@@ -54,7 +54,9 @@ metareview fsm advance --run <id>        # repeat until DONE / STOPPED / GATE_FA
 ## Trust boundary (read before passing any knob)
 
 - These knobs weaken a guardrail; use them only when the human tells you to: `--allow-custom-cmds`,
-  `--accept-workflow-change`, `--workflow <path>`, `--var JUDGE`/`JUDGE_EFFORT`, `--mock-ai`/`MOCK_AI`, `--calibration`,
+  `--accept-workflow-change`, `--workflow <path>`, `--var JUDGE`/`JUDGE_EFFORT`,
+  `--judge-model`/`--judge-effort` and `METAREVIEW_JUDGE_MODEL`/`METAREVIEW_JUDGE_EFFORT` (they retarget the judge
+  exactly as `--var JUDGE` does, and a `codex/` model spawns a local binary), `--mock-ai`/`MOCK_AI`, `--calibration`,
   `--repo-mode`, `--repair`, `--run-id`, `--include-vars`, `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL` (base-URL overrides
   are not recorded in the audit).
 - Consent: an `ERR_CMDS_NOT_ALLOWED` `cmds` list and its `cmds_sha256` are for a human — relay them unchanged, stop, and

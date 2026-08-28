@@ -61,7 +61,7 @@ metareview fsm record    node-output --node <n> --data <file|-> [--replace] [--r
 metareview fsm record    tokens --data '<json>' [--run <id>]
 metareview fsm record    <event> --data '<json>' [--run <id>]
 metareview fsm gate      <name> [--run <id>] [--input <snapshot.json>]
-metareview fsm judge     --kind <match|adjudicate|still-present> --model <m> --effort <low|medium|high|xhigh> --input <file|-> [--context <diff-file>] [--run <id>]
+metareview fsm judge     --kind <match|adjudicate|still-present> --model <m> --effort <low|medium|high|xhigh; a codex/ model also takes none|minimal|max> --input <file|-> [--context <diff-file>] [--run <id>]
 metareview fsm converge  --check <yaml> [--run <id>]
 metareview fsm diff      --a <run> --b <run>
 metareview fsm export    --run <id> [--out <dir>] [--include-vars] [--max-bytes N]

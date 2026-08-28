@@ -119,7 +119,10 @@ func Canonical(raw []byte) ([]byte, error)   // json.Valid → duplicate-key rej
 func OutputHash(raw []byte) string           // hex sha256 of Canonical(raw)
 func LineHash(line []byte) string            // hex sha256 of a stored line (no '\n')
 ```
-`Canonical` is idempotent; key order preserved; whitespace removed; `<>&` and U+2028/9 left as literal UTF-8.
+`Canonical` is idempotent; key order preserved; whitespace removed; `<>&` left as literal UTF-8; U+2028, U+2029 and U+FFFD written as escapes. The escaping is this repository's
+choice rather than encoding/json's: the standard library writes those three differently across Go releases and these
+bytes are what the audit chain hashes over, so a run recorded under one release has to verify under another. Every
+pass only ever adds an escape, never removes one, so the transform cannot change what a payload says.
 All caps are measured on canonical bytes and enforced in `Apply` (reason `oversize`, naming the field):
 
 | cap | value | applies to |
