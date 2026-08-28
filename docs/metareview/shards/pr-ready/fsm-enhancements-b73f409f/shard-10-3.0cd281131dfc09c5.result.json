@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "id": "r-shard-10-3-0cd281131dfc09c5",
+  "kind": "shard",
+  "shardId": "shard-10-3",
+  "shardHash": "0cd281131dfc09c5",
+  "planHash": "daa5e2b77b4d0503",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "note": "Reviewed all four chunks in the pack in full: internal/reviewmanifest/manifest_test.go, testdata/fsm/agent-prompt.golden, tests/go/test-sharded-review.sh, tests/manifest/test-manifests.sh."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest_test.go",
+      "line": 173,
+      "note": "TestOversizeResultIgnored asserts an oversize file is ignored with a reason rather than erroring; verified against ParseResult (internal/reviewmanifest/manifest.go:150-158), which checks len(data) > MaxResultBytes before json.Unmarshal, so the assertion is not vacuous despite the fixture being invalid JSON."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest_test.go",
+      "line": 281,
+      "note": "TestEvidenceRuleMatchesValidator pins the note-length boundary in both directions and cross-checks evidenceRefValid against the Aggregate blocker, matching manifest.go:672 (>= EvidenceNoteMinLength on the trimmed note)."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest_test.go",
+      "line": 655,
+      "note": "TestShardedReviewMarkdownCannotForgeTableCells counts unescaped pipes in the rendered row and re-asserts the true blocking count; this is a genuine injection guard, not a tautology, and the sibling neutralisation tests cover both renderers so they cannot drift."
+    },
+    {
+      "path": "testdata/fsm/agent-prompt.golden",
+      "line": 1,
+      "note": "Verified the new golden is byte-identical to live output: `go run ./cmd/metareview fsm --agent-prompt` cmp-matches the file (4313 bytes). It is pinned by tests/go/test-fsm.sh:59-66 (cmp plus the anchors sweep) and required by tests/manifest/test-skills.sh:20, so it cannot rot silently."
+    },
+    {
+      "path": "tests/go/test-sharded-review.sh",
+      "line": 1,
+      "note": "Executed the new end-to-end suite locally: `bash tests/go/test-sharded-review.sh` exits 0 (~5s) printing 'sharded review: ok'. It is wired into the suite at tests/run-all.sh:21."
+    },
+    {
+      "path": "tests/manifest/test-manifests.sh",
+      "line": 71,
+      "note": "Executed `bash tests/manifest/test-manifests.sh` -> exit 0. The new Go-floor check reads `go 1.26` from go.mod and every one of the five artifacts states Go 1.26+, so the drift the comment describes is genuinely closed."
+    },
+    {
+      "path": "tests/manifest/test-manifests.sh",
+      "line": 133,
+      "note": "The `rm -rf \"${TMPDIR:?}/bin\"` hardening is correct: with TMPDIR unset or empty the expansion aborts the script instead of expanding to `rm -rf /bin`."
+    },
+    {
+      "note": "Rubric blocking checks over this shard: no eval or other unsafe execution introduced (tests/go/test-sharded-review.sh assembles the lint pattern via printf so the file never carries it literally, and that fixture is a deliberate negative case), no TODO/FIXME markers (grep clean across all four files), no truncated diff context, no duplication of an inventoried code path (all four files are tests/fixtures), and no unsafe untracked source. Package tests pass: `go test ./internal/reviewmanifest/...` ok."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead scaffolding in the new shell test. write_results declares ONLY and SKIP_CROSS parameters whose branches select a subset of shards (line 68) or suppress the cross-shard result (line 76), but all three call sites (lines 147, 179, 246) pass exactly two arguments, so neither branch is ever taken. The partial-coverage and missing-cross-shard-after-a-fix paths the knobs exist to drive are not exercised by this suite; they are covered by the Go unit tests (TestCrossShardRequiredOnlyForMultiShard, TestUnmatchedResultIgnored), which is why this is low rather than a coverage gap, but the unreachable code reads as coverage that is not there.",
+      "evidence": [
+        {"path": "tests/go/test-sharded-review.sh", "line": 59, "note": "ONLY and SKIP_CROSS default to empty and no caller sets them"},
+        {"path": "tests/go/test-sharded-review.sh", "line": 147, "note": "call site passes only REPO and PLAN"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new Go-floor assertion in test-manifests.sh is brittle at both ends. The go.mod matcher `/^go (\\d+\\.\\d+)$/m` does not accept a patch-level directive, so a legitimate bump to `go 1.26.0` makes the check throw 'go.mod does not declare a go directive'; and the artifact matcher `/Go (\\d+\\.\\d+)\\+/g` only sees the 'Go X.Y+' spelling, so a stale floor written as 'Go 1.22' or 'go1.26' in one of the five files satisfies the 'states no Go floor' guard only by accident of another match on the same page. The five-artifact list is also hardcoded, so a sixth doc that states a floor is never checked.",
+      "evidence": [
+        {"path": "tests/manifest/test-manifests.sh", "line": 71, "note": "go.mod matcher rejects a patch-level go directive"},
+        {"path": "tests/manifest/test-manifests.sh", "line": 75, "note": "artifact matcher only recognises the 'Go X.Y+' spelling"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "test-sharded-review.sh hides diagnostics and mutates the caller's working directory. run_review discards stderr entirely (2>/dev/null), so a CLI panic or an unexpected error surfaces only as a wrong verdict string; and init_repo runs a bare `cd \"$repo\"` rather than a subshell, leaving the script's cwd inside the fixture repo for everything that follows. Both are survivable today because every later path is absolute, but they make a future failure harder to diagnose and easy to break.",
+      "evidence": [
+        {"path": "tests/go/test-sharded-review.sh", "line": 112, "note": "run_review swallows stderr from the reviewed binary"},
+        {"path": "tests/go/test-sharded-review.sh", "line": 30, "note": "init_repo changes the script cwd without a subshell"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

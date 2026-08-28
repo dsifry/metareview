@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "id": "xshard-pr-ready-fsm-enhancements-daa5e2b77b4d0503",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "daa5e2b77b4d0503",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T08:45:24Z",
+  "evidence": [
+    {
+      "note": "Seams verified against the working tree at HEAD 2826521, not inferred from the shard results: version strings (internal/version/version.go, .claude-plugin/plugin.json, .codex-plugin/plugin.json, .claude-plugin/marketplace.json, package.json, CHANGELOG.md) all agree on 0.9.0."
+    },
+    {
+      "path": "internal/fsm/cli/envelope.go",
+      "line": 67,
+      "note": "exitFor is the single authority on exit codes; the 0/3/2/1 tables in skills/fsm/SKILL.md:32-37, docs/fsm/driving-a-workflow.md:41-46, commands/fsm.md:13-15, CLAUDE.md:31, AGENTS.md:21, README.md:210 and testdata/fsm/agent-prompt.golden:5-8 were compared against it and agree, including ERR_AUDIT_TORN and ERR_RUN_LOCKED landing on 1 and the consent/escalation codes on 2."
+    },
+    {
+      "path": "testdata/fsm/agent-prompt.golden",
+      "line": 1,
+      "note": "Regenerated `go run ./cmd/metareview fsm --agent-prompt` and diffed against the golden: byte-identical. Every anchor in tests/go/agent-prompt-anchors.txt is present in the golden."
+    },
+    {
+      "path": "internal/fsm/workflow/testdata/cmds-preimage.sha256",
+      "line": 1,
+      "note": "Recomputed the pinned consent hash independently (canonical preimage with WORK->/w): sha256 76d37fa8f97d1468432efdc97ba42dc770cbbe032bcf72ca31811af60f2b0f53 matches, so testdata/fsm/workflows/sdlc-loop-cmds.yaml, cmds-preimage.json and the .sha256 pin are consistent across three shards."
+    },
+    {
+      "path": "workflows/sdlc-loop.yaml",
+      "line": 10,
+      "note": "Every gate name used by workflows/sdlc-loop.yaml, workflows/review-loop.yaml and testdata/fsm/workflows/sdlc-loop-cmds.yaml resolves in internal/fsm/gate/gates.go:34-90; nothing_found/nothing_confirmed vs findings_empty/confirmed_empty is a deliberate iteration-0 distinction, not drift. All node kinds resolve in internal/fsm/kind/kind.go:27-31 and `lenses: 8` matches len(kind.Lenses)."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 40,
+      "note": "ManifestContext.Satisfies requires m.Verdict == PASS; reviewmanifest.Aggregate (internal/reviewmanifest/manifest.go:246-249) only ever emits PASS or NEEDS_REVISION, and PASS_ADVISORY shard results are not treated as blockers by resultBlockers, so the two packages agree. The 120000/4000 byte constants in internal/contextprofile/profile.go:23 and internal/gitcontext/gitcontext.go:15-17 match the numbers documented in CLAUDE.md and AGENTS.md."
+    },
+    {
+      "path": "tests/coverage.sh",
+      "line": 12,
+      "note": "The CHANGELOG's coverage claim was checked against the gate: tests/coverage.sh requires every statement in ./internal/fsm/... and ./workflows, floors everything else from tests/coverage-floor.txt, and .github/workflows/test.yml runs it via `npm test`. The smoke-tagged judge test is vetted and listed by tests/run-all.sh:11-12 as the CHANGELOG says."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Two implementations of the lint input disagree, and the new one is dead. This branch adds exported gitcontext.AddedLines (internal/gitcontext/branchfiles.go:161) while the same branch rewrites internal/reviewers/taskdone.go:350 addedLines into a path-scoped walker (addedSourceLines at :368 tracks `diff --git`/`+++` headers and drops non-lintable paths via lintable(), and addedUntrackedLines handles the `--- <path>` headed untracked excerpts separately). AddedLines has no production caller anywhere in the module (only internal/gitcontext/branchfiles_test.go:338), and it reimplements the union without any of that scoping: it concatenates BranchDiffFull/StagedDiff/WorkingTreeDiff/UntrackedExcerpts and keeps every `+` line regardless of which file the hunk belongs to. No single shard could see both halves - branchfiles.go is in shard-07 and reviewers/taskdone.go in shard-0c. As shipped it is dead weight; adopted by a future caller it would silently reintroduce the generated-path and docs-path false positives the reviewer-side rewrite exists to prevent. Corroborates and extends shard-07's finding with the other side of the seam.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 161,
+          "note": "exported AddedLines, no production caller"
+        },
+        {
+          "path": "internal/reviewers/taskdone.go",
+          "line": 350,
+          "note": "the real, path-scoped implementation the lints use"
+        },
+        {
+          "path": "internal/reviewers/taskdone.go",
+          "line": 368,
+          "note": "addedSourceLines: header tracking and lintable() scoping that AddedLines has no equivalent of"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The same 'what to commit / keep local' enumeration appears in nine files; this branch adds docs/metareview/fsm/ as a durable output in four of them and leaves five stale, including the surface whose entire job is answering that question. Updated: CLAUDE.md:69 (docs/metareview/fsm/ export bundles, .metareview/runs/), AGENTS.md:77 and :83, README.md:242, INSTALL.md:137. Not updated, though each had exactly this sentence edited on this branch: skills/status/SKILL.md:27-28 (enumerates docs/metareview/reviews|context|learning|shards and omits fsm/; omits .metareview/runs/ from the keep-local list), commands/status.md:9, docs/README.claude.md:52, docs/README.codex.md:59, and docs/quickstart.md:72-80 (its keep-local list gained `.metareview/runs/` at :87 but its Commit list never gained docs/metareview/fsm/ - a half-update inside one section). An agent following /status after `fsm export` is told to commit reviews, context, learning and shards, and will leave the export bundle uncommitted. Only a cross-file pass can see this: the files are spread over shard-00, shard-01, shard-07, shard-14 and shard-1b.",
+      "evidence": [
+        {
+          "path": "skills/status/SKILL.md",
+          "line": 27,
+          "note": "commit list omits docs/metareview/fsm/"
+        },
+        {
+          "path": "docs/quickstart.md",
+          "line": 72,
+          "note": "Commit list omits docs/metareview/fsm/ while the keep-local list below it did gain .metareview/runs/"
+        },
+        {
+          "path": "CLAUDE.md",
+          "line": 69,
+          "note": "the corrected version of the same claim"
+        },
+        {
+          "path": "AGENTS.md",
+          "line": 77,
+          "note": "docs/metareview/fsm/ (FSM export bundles) listed as durable"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Cross-shard correction of three shard results that independently overstate the same gap. shard-15-3, shard-1c and shard-1d report that the new `if !result.Blocking { packWriter.GC(...) }` housekeeping (internal/taskdone/review.go:269-271, internal/prready/review.go:292-294) is never invoked and has no positive coverage. It does: the black-box suite drives a sharded pr-ready run to PASS_ADVISORY and then asserts that superseded result files were collected (tests/go/test-sharded-review.sh:180-184), and the task-done half of the same script reaches PASS_ADVISORY at :257-258, which executes the task-done call site too. That evidence lives in shard-10-3, so no per-shard reviewer of the taskdone/prready shards could see it. What survives is narrower and already recorded by shard-1c/shard-15-3: the specific 'gc' subtest at internal/taskdone/shardwiring_test.go:190 injects a gcErr the fixture can never reach, and no Go-level test in either package asserts collections > 0. Recording this so the aggregate is not read as 'GC is untested'.",
+      "evidence": [
+        {
+          "path": "tests/go/test-sharded-review.sh",
+          "line": 183,
+          "note": "asserts the superseded result files were collected after the gate passed"
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 293,
+          "note": "the pr-ready GC call site the shell suite exercises"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 270,
+          "note": "the task-done GC call site, reached by the same script's PASS_ADVISORY run"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The .gitattributes protection added on this branch covers two of the four byte-pinned fixture trees. `internal/fsm/judge/testdata/prompts/* -text` and `testdata/fsm/** -text` are declared, but internal/fsm/run/testdata/ is not, and that directory holds fixtures compared byte-for-byte or by hash: oracle.jsonl is hashed line by line against oracle.sha256 (internal/fsm/run/store_test.go:803-820, which also re-checks each line is canonical), and golden-log.jsonl / golden-snapshots.jsonl are bytes.Equal-compared (internal/fsm/run/golden_test.go:30-38). internal/fsm/workflow/testdata/cmds-preimage.json is likewise sha-pinned. On a checkout with core.autocrlf=true these fail with an opaque hash mismatch. CI is ubuntu-only so nothing is red today; the point is that the guard was applied inconsistently across shards (.gitattributes is in shard-0b, the unprotected fixtures in shard-0d, shard-14-2 and shard-16-3).",
+      "evidence": [
+        {
+          "path": ".gitattributes",
+          "line": 1,
+          "note": "covers judge prompts and testdata/fsm only"
+        },
+        {
+          "path": "internal/fsm/run/store_test.go",
+          "line": 813,
+          "note": "hashes each line of oracle.jsonl against the pinned oracle.sha256"
+        },
+        {
+          "path": "internal/fsm/run/golden_test.go",
+          "line": 37,
+          "note": "bytes.Equal over golden-log.jsonl"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The FSM exit-code carve-out was added to four copies of the exit-handling sentence and not to the two agent-facing READMEs, which this branch edited. README.md:210, CLAUDE.md:31 and AGENTS.md:21 carry the full fsm table, and docs/quickstart.md:60 at least points at docs/fsm/driving-a-workflow.md and names exit 3. docs/README.claude.md:48 and docs/README.codex.md:55 still end at 'nonzero without a path means read stderr' while both files gained a 'Workflow runs' section directing the agent to run `metareview fsm` a few lines below (README.claude.md:60, README.codex.md:67). An agent reading only its own README is told fsm's exit 3 - the normal 'do the node's work' signal - is a failure to diagnose from stderr.",
+      "evidence": [
+        {
+          "path": "docs/README.codex.md",
+          "line": 55,
+          "note": "exit-handling sentence with no fsm carve-out"
+        },
+        {
+          "path": "docs/README.codex.md",
+          "line": 67,
+          "note": "the fsm section added on this branch, just below it"
+        },
+        {
+          "path": "docs/README.claude.md",
+          "line": 48,
+          "note": "same stale sentence"
+        },
+        {
+          "path": "docs/quickstart.md",
+          "line": 60,
+          "note": "the corrected version of the same sentence"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The shard wiring added on this branch is copy-pasted between two packages rather than shared. ingestShardResults is 24 lines in each of internal/taskdone/review.go:278 and internal/prready/review.go:301, differing only in the scope literal and how the target id is derived, and the Prune/GC housekeeping block (taskdone :262-271, prready :285-294) is identical down to its three-line comment. Neither existed on main, so this is new duplication, not inherited. It does follow the pre-existing parallel structure of these two files (~350 lines were already byte-identical before the branch), which is why this is low rather than a blocker - but it means every future fix to shard ingestion has to be made twice, and the two files sit in different shards (shard-15-3 and shard-0e-2) so no per-shard reviewer sees the pair. Verified there is no behavioural divergence today: prready passes analysisGit to the shadowed `git` parameter, and neither filterGeneratedGitContext nor branchOnlyGitContext touches Branch or HeadSHA, so shardTargetID and the manifest target id agree.",
+      "evidence": [
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 278,
+          "note": "ingestShardResults"
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 301,
+          "note": "the near-identical twin"
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 289,
+          "note": "Prune/GC housekeeping block duplicated verbatim from taskdone/review.go:262-271"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 2
+}

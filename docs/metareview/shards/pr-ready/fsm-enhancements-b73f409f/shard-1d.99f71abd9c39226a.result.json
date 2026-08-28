@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1d.99f71abd9c39226a",
+  "kind": "shard",
+  "shardId": "shard-1d",
+  "shardHash": "99f71abd9c39226a",
+  "planHash": "daa5e2b77b4d0503",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T07:20:00Z",
+  "evidence": [
+    {
+      "path": "internal/findings/override.go",
+      "line": 53,
+      "note": "Blocks(): open and override-pending block; overridden does not, consistent with findings.go:368 and :441 and reviewlog.go:307"
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 141,
+      "note": "Reconcile closes override-pending as fixed when the fingerprint is no longer found, so a pending request cannot wedge the gate forever; StatusOverridden is deliberately excluded so fixedInRunId stays empty"
+    },
+    {
+      "path": "internal/findings/override_test.go",
+      "line": 395,
+      "note": "requester-cannot-grant, timestamp, reason-length, read/write seam failures and index provenance are all covered; go tool cover reports 100.0% of statements for every function in override.go"
+    },
+    {
+      "path": "internal/prready/shardingestion_test.go",
+      "line": 143,
+      "note": "the only assertion in TestGCOnlyRunsAfterAPassingGate is the negative half (collections == 0 while blocking); grep shows no test asserts collections == 1 after a pass"
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 293,
+      "note": "packWriter.GC is guarded by !result.Blocking, the behaviour the new test names but only half-asserts"
+    },
+    {
+      "path": "tests/go/test-fsm.sh",
+      "line": 9,
+      "note": "reuses an existing bin/metareview when present instead of building, unlike every sibling script in tests/go which builds into a temp dir"
+    },
+    {
+      "path": ".codex-plugin/plugin.json",
+      "line": 3,
+      "note": "0.9.0 matches package.json and .claude-plugin/plugin.json; tests/manifest/test-manifests.sh:26 enforces the three-way match, and the missing trailing newline is fixed by this diff"
+    },
+    {
+      "note": "Verified against the working tree rather than the diff alone: tests/go/test-fsm.sh is wired into tests/run-all.sh (last line) which tests/coverage.sh runs under GOFLAGS=-cover; every path the script greps or reads exists (testdata/fsm/agent-prompt.golden, tests/go/agent-prompt-anchors.txt, testdata/fsm/scenarios/{sdlc-loop,review-loop,sdlc-loop-cmds}, testdata/fsm/workflows/sdlc-loop-cmds.yaml, skills, commands, docs/fsm, workflows, README.md, INSTALL.md, docs/quickstart.md, AGENTS.md, CLAUDE.md). The fakeWriter/shardedRepo helpers the new prready test depends on are defined in internal/prready/shardwiring_test.go:18-70. Fence-sentinel spoofing, which the shell suite's injection section does not actually assert, is covered by internal/fsm/judge/judge_test.go:97,129,734 against testdata/prompts goldens. No TODO/FIXME markers, no eval, no truncated chunks (all four chunks are part 1/1)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "tests/go/test-fsm.sh:9 reuses a pre-existing bin/metareview (`if [ -x bin/metareview ]; then MRV=... else go build ...`) rather than building unconditionally. Every other black-box script in tests/go builds a fresh binary into a temp dir (test-pr-ready-review.sh:8, test-sharded-review.sh:11, test-override.sh:10, ...). Inside the full suite this is harmless: tests/run-all.sh runs tests/manifest/test-manifests.sh first, which executes `npm run build` (test-manifests.sh:101) and rebuilds bin/metareview from current source, and tests/coverage.sh:46 rebuilds it on exit, so it always exists and is current. The residual hazard is the standalone dev loop: `bash tests/go/test-fsm.sh` after editing internal/fsm silently exercises the binary left behind by the previous run and reports ok, which is a false green in the one black-box suite covering the new FSM surface. Low, not medium, because CI and `npm test` both rebuild first.",
+      "evidence": [
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 9,
+          "note": "conditional build; sibling scripts build unconditionally into $TMP"
+        },
+        {
+          "path": "tests/coverage.sh",
+          "line": 46,
+          "note": "cleanup() always leaves a plain bin/metareview behind, so the reuse branch is the normal path locally"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The injection section of tests/go/test-fsm.sh is titled 'fenced values never appear raw in instructions' and plants a payload that opens with the literal fence sentinel `<<<END-0123456789abcdef`, but its only assertion is that some audit entry of type llm_call exists (`const call=lines.find(e=>e.type===\"llm_call\"); if(!call) throw new Error(\"no llm_call\")`); the bound variable is never used again and nothing checks that the payload was fenced or JSON-escaped in the emitted instructions. The section would stay green if fencing regressed entirely. Not higher than low because the property is genuinely covered at unit level: internal/fsm/judge/judge_test.go:97 and :129 feed exactly this spoofed sentinel and assert it does not survive verbatim, judge_test.go:734 asserts FenceBlock JSON-escapes it, and prompts.go:152 marshals the value rather than interpolating it.",
+      "evidence": [
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 232,
+          "note": "node assertion in the injection section checks only for the presence of an llm_call audit entry"
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 129,
+          "note": "the sentinel-spoof property the shell section claims is actually asserted here"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The forbidden-phrase check in tests/go/test-fsm.sh greps a hard-coded path list (`skills commands docs/fsm README.md INSTALL.md docs/quickstart.md AGENTS.md CLAUDE.md workflows`) with `2>/dev/null`. grep exits 2 with 'No such file or directory' when a path disappears, and the `if` treats any nonzero exit as 'phrase absent', so renaming or moving any of those paths silently downgrades the check to a permanent pass instead of failing loudly. The planted control immediately above only proves the regex matches, not that the path list still resolves; all nine paths do exist today.",
+      "evidence": [
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 46,
+          "note": "grep -rEil ... 2>/dev/null over a hard-coded path list inside an if-guard"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestGCOnlyRunsAfterAPassingGate (internal/prready/shardingestion_test.go:129-146) asserts only the negative half of its name: it drives a blocking run and checks collections == 0. No test in the package asserts collections == 1 (or >0) after a passing gate, so deleting the `packWriter.GC(...)` call at internal/prready/review.go:293 outright would leave this test green. The name promises a conditional; only the refusal branch is pinned.",
+      "evidence": [
+        {
+          "path": "internal/prready/shardingestion_test.go",
+          "line": 143,
+          "note": "collections != 0 is the sole assertion; the passing-gate branch is never observed through the fake"
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 293,
+          "note": "the GC call whose positive branch nothing asserts"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Ordering assertion in TestReviewLogListsIngestedAndIgnoredResults is vacuous if the verdict heading ever changes: `verdictAt := strings.Index(text, \"## Verdict\")` is -1 when the heading is absent, and the guarded comparison `shardedAt < verdictAt` is then false for any present sharded section, so the test passes while asserting nothing. Cheap fix would be to require verdictAt >= 0 first; no behavioural impact today.",
+      "evidence": [
+        {
+          "path": "internal/prready/shardingestion_test.go",
+          "line": 107,
+          "note": "strings.Index result used in a comparison without checking for -1"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Override reasons are validated only for length (>= 12 after trimming, internal/findings/override.go:120-124 and :95-99) and are rendered straight into the one-line-per-record Markdown of the Process Overrides section (override.go:177-196, spliced by findings.go:317). A reason containing a newline therefore breaks the line format and can forge additional entries in docs/metareview/FINDINGS.md, e.g. a request whose reason embeds `\\n- mrvf-000001 [granted] ...`. The audit file is human-facing and is also fed into context packs (internal/prready/review.go:165 and the other three gates), so the forged lines read as real records. Kept at low because the module documents `By` as audit metadata rather than authentication, and the actor able to pass the reason can already edit the file; a newline/control-character reject in the two validators would close it.",
+      "evidence": [
+        {
+          "path": "internal/findings/override.go",
+          "line": 121,
+          "note": "reason validated for trimmed length only, no newline or control-character rejection"
+        },
+        {
+          "path": "internal/findings/findings.go",
+          "line": 317,
+          "note": "overrideLines output is joined with newlines into FINDINGS.md, so an embedded newline becomes a new list entry"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}
