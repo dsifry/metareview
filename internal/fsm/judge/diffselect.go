@@ -242,3 +242,41 @@ func windowLines(h hunk, target, budget int) []string {
 	out := []string{h.lines[0]}
 	return append(out, h.lines[lo:hi+1]...)
 }
+
+// maxPathList caps the changed-path listing so it cannot itself consume the budget.
+const maxPathList = 4000
+
+// ContextFor builds the diff value for one candidate: the hunks of its own file when the
+// diff carries them, and otherwise an explicit statement that no diff is available plus the
+// paths that did change. The second form matters more than it looks. Sending the first N
+// bytes of an unrelated file lets the judge answer confidently from evidence that cannot
+// contain the answer - measured on this branch, 0.94-0.99 confidence on 100 candidates whose
+// files were all absent from the window. Saying so lets it abstain instead of confabulating.
+//
+// truncated is true whenever the judge is not seeing the whole story, so a caller can
+// distinguish a complete answer from a partial one.
+func ContextFor(diff string, alreadyTruncated bool, file string, line, budget int) (out string, truncated bool, hash string) {
+	if file == "" {
+		// A finding with no file attribution is unlocalised: there is nothing to select on,
+		// so the head of the diff is the best available evidence. CutDiff reports whether it
+		// had to cut, so the judge is still told when it is seeing part of the story.
+		return CutDiff(diff, alreadyTruncated)
+	}
+	if sel, ok, h := SelectDiff(diff, file, line, budget); ok {
+		elided := len(sel) < len(diff)
+		return sel, alreadyTruncated || elided, h
+	}
+	var b strings.Builder
+	b.WriteString("[metareview: no diff is available for " + file +
+		"; it is not among the changed files. The branch changed these paths:]\n")
+	for _, p := range ChangedPaths(diff) {
+		if b.Len()+len(p)+1 > maxPathList {
+			b.WriteString("...\n")
+			break
+		}
+		b.WriteString(p + "\n")
+	}
+	out = b.String()
+	sum := sha1.Sum([]byte(out))
+	return out, true, hex.EncodeToString(sum[:])
+}

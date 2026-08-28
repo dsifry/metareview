@@ -670,3 +670,56 @@ func TestStillPresentDecodeCapsOversizedStatusList(t *testing.T) {
 		t.Fatalf("Decode accepted a %d-byte payload the fold will reject", len(raw))
 	}
 }
+
+// recordingJudge captures what evidence each call actually received.
+type recordingJudge struct{ diffs []string }
+
+func (r *recordingJudge) Call(_ context.Context, req judge.Request) (judge.Verdict, error) {
+	if in, ok := req.Input.(judge.AdjudicateInput); ok {
+		r.diffs = append(r.diffs, in.Diff)
+	}
+	return judge.Verdict{Decision: true, Confidence: 0.9}, nil
+}
+
+// Each candidate must be judged against its OWN file's hunks. A single cut shared by the
+// node is the first MaxDiffBytes of the whole branch diff, so a candidate in a file that
+// sorts late gets evidence that cannot contain the answer - and the judge answers anyway,
+// confidently. Here late.go's hunk sits past the budget, so a shared cut cannot carry it.
+func TestAdjudicateSelectsEachCandidatesOwnFile(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("diff --git a/early.go b/early.go\n--- a/early.go\n+++ b/early.go\n@@ -1,2 +1,3 @@\n+\tearlyMarker()\n")
+	b.WriteString("diff --git a/filler.go b/filler.go\n--- a/filler.go\n+++ b/filler.go\n@@ -1,900 +1,900 @@\n")
+	for b.Len() < judge.MaxDiffBytes+5000 {
+		b.WriteString("+// " + strings.Repeat("f", 70) + "\n")
+	}
+	b.WriteString("diff --git a/late.go b/late.go\n--- a/late.go\n+++ b/late.go\n@@ -1,2 +1,3 @@\n+\tlateMarker()\n")
+	full := b.String()
+	if strings.Index(full, "lateMarker") < judge.MaxDiffBytes {
+		t.Fatalf("fixture invalid: late.go must sit past the %d budget", judge.MaxDiffBytes)
+	}
+
+	rec := &recordingJudge{}
+	r := mustNew(t, rec, false)
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	snap := run.Snapshot{RunID: "mrv-sel", Iteration: 1, Findings: []run.Finding{
+		{IssueText: "bug in early", File: "early.go", Line: 1},
+		{IssueText: "bug in late", File: "late.go", Line: 1},
+	}}
+	a := &audits{}
+	in := machine.ExecInput{Snap: snap, Node: adjNode, Diff: machine.Diff{Text: full}, StartIndex: 0, Audit: a.fn}
+	if _, err := ex.Execute(context.Background(), in); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(rec.diffs) != 2 {
+		t.Fatalf("got %d adjudicate calls, want 2", len(rec.diffs))
+	}
+	if !strings.Contains(rec.diffs[0], "earlyMarker") {
+		t.Errorf("candidate 0 did not receive early.go:\n%.300s", rec.diffs[0])
+	}
+	if !strings.Contains(rec.diffs[1], "lateMarker") {
+		t.Errorf("candidate 1 did not receive late.go (a shared cut cannot reach it):\n%.300s", rec.diffs[1])
+	}
+	if strings.Contains(rec.diffs[1], "earlyMarker") {
+		t.Errorf("candidate 1 received another file's content:\n%.300s", rec.diffs[1])
+	}
+}

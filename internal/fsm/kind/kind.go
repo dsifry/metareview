@@ -435,7 +435,10 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 	if len(allIDs) > run.MaxDeltaList {
 		return nil, errs.E(CodeTooManyBugs, fmt.Sprintf("%d bugs would be known (max %d)", len(allIDs), run.MaxDeltaList), "reason", "preflight")
 	}
-	diff, truncated, diffHash := judge.CutDiff(in.Diff.Text, in.Diff.Truncated)
+	// The diff is selected per candidate, not once per node: each judge call gets the hunks
+	// of the candidate's own file. One shared window is the first MaxDiffBytes of the whole
+	// branch diff, which on a large branch is the alphabetically first few files and nothing
+	// the candidate refers to.
 	index := in.StartIndex
 	seen := make([]bool, len(cands)) // ever a provisional winner (the reference's candidate_matched)
 	var confirmed []run.Bug
@@ -463,6 +466,7 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		if seen[c] {
 			continue
 		}
+		diff, truncated, diffHash := judge.ContextFor(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, judge.MaxDiffBytes)
 		v, err := call(ctx, e.judge, in, judge.Request{Kind: judge.KindAdjudicate, Index: index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand}})
 		index++
 		if err != nil {
@@ -590,9 +594,10 @@ func (e *stillPresentExec) Execute(ctx context.Context, in machine.ExecInput) (j
 	if len(in.Snap.AllFound) > run.MaxDeltaList {
 		return nil, errs.E(CodeTooManyBugs, fmt.Sprintf("%d bugs known (max %d)", len(in.Snap.AllFound), run.MaxDeltaList))
 	}
-	diff, truncated, diffHash := judge.CutDiff(in.Diff.Text, in.Diff.Truncated)
 	st := []run.BugStatus{}
 	for i, b := range in.Snap.AllFound {
+		// per bug, for the same reason adjudicate selects per candidate
+		diff, truncated, diffHash := judge.ContextFor(in.Diff.Text, in.Diff.Truncated, b.File, b.Line, judge.MaxDiffBytes)
 		v, err := call(ctx, e.judge, in, judge.Request{Kind: judge.KindStillPresent, Index: in.StartIndex + i, Input: judge.StillPresentInput{Bug: b, Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash}})
 		if err != nil {
 			return nil, err

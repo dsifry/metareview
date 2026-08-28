@@ -1,6 +1,7 @@
 package judge
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -227,4 +228,57 @@ func TestSelectDiffHandlesLinesOutsideEveryHunk(t *testing.T) {
 			t.Error("the hunk header must survive")
 		}
 	})
+}
+
+func TestContextForAbsentFileSaysSoAndListsPaths(t *testing.T) {
+	out, truncated, hash := ContextFor(multiLangDiff, false, "internal/nope/missing.go", 4, 4096)
+	if !truncated || hash == "" {
+		t.Fatalf("absent file must report truncated with a hash: %v %q", truncated, hash)
+	}
+	if !strings.Contains(out, "no diff is available for internal/nope/missing.go") {
+		t.Errorf("the judge must be told the evidence is missing:\n%s", out)
+	}
+	if !strings.Contains(out, "scripts/deploy.py") {
+		t.Errorf("the changed paths must be listed:\n%s", out)
+	}
+	if strings.Contains(out, "subprocess.run") {
+		t.Errorf("only paths, not content:\n%s", out)
+	}
+}
+
+func TestContextForPresentFileReturnsItsHunks(t *testing.T) {
+	out, truncated, hash := ContextFor(multiLangDiff, false, "scripts/deploy.py", 5, 4096)
+	if hash == "" || !strings.Contains(out, "subprocess.run") {
+		t.Fatalf("present file must yield its hunks: %q", out)
+	}
+	if !truncated {
+		t.Error("selecting one file out of five elides the rest, so truncated must be true")
+	}
+}
+
+func TestContextForCapsThePathList(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 2000; i++ {
+		p := "pkg/dir" + strconv.Itoa(i) + "/file.go"
+		b.WriteString("diff --git a/" + p + " b/" + p + "\n@@ -1 +1 @@\n+x\n")
+	}
+	out, _, _ := ContextFor(b.String(), false, "not/here.go", 1, 30000)
+	if len(out) > maxPathList+200 {
+		t.Errorf("path list is %d bytes, must be capped near %d", len(out), maxPathList)
+	}
+	if !strings.Contains(out, "...") {
+		t.Error("a capped list must say it was cut")
+	}
+}
+
+// A finding may carry no file (an unlocalised reviewer note). There is nothing to select on,
+// so it falls back to the head of the diff rather than reporting the evidence as missing.
+func TestContextForUnlocalisedFindingFallsBackToTheHead(t *testing.T) {
+	out, _, hash := ContextFor(multiLangDiff, false, "", 0, 4096)
+	if hash == "" || !strings.Contains(out, "diff --git") {
+		t.Fatalf("empty file must fall back to the diff head: %q", out)
+	}
+	if strings.Contains(out, "no diff is available") {
+		t.Error("an unlocalised finding is not the same as a missing file")
+	}
 }
