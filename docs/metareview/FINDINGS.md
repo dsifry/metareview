@@ -1,7 +1,6 @@
 # metareview Findings
 
 - mrvf-20260827-215325129085000-pr-ready-branch-10d735e5-002 [high] Review context risk (architecture-reviewer)
-- mrvf-20260828-024448675616000-pr-ready-branch-10d735e5-001 [high] Missing validation evidence (validation-reviewer)
 
 ## Process Overrides
 

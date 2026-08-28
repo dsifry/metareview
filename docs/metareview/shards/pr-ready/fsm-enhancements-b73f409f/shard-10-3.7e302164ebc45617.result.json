@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "id": "r-shard-10-3",
+  "kind": "shard",
+  "shardId": "shard-10-3",
+  "shardHash": "7e302164ebc45617",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T12:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/reviewmanifest/manifest_test.go",
+      "line": 64,
+      "note": "Rewritten suite matches the new hash-freshness model: every identifier it exercises (ResultSchemaVersion, MaxResultBytes, EvidenceNoteMinLength, ParseResult, ShardIDFromResultPath, evidenceRefValid, ShardedReviewMarkdown, Kind/KindShard/KindCrossShard) exists in internal/reviewmanifest/manifest.go and the asserted blocker strings match resultBlockers verbatim."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 458,
+      "note": "resultBlockers emits exactly the messages the tests assert (unsupported schema version, missing result ID, unknown kind, unknown verdict, missing reviewer, unparsable reviewedAt, invalid shard ID, does not match its file name, missing evidence, has blockers, unknown severity, unknown disposition, has unresolved <disposition> finding, finding missing evidence)."
+    },
+    {
+      "path": "testdata/fsm/agent-prompt.golden",
+      "line": 1,
+      "note": "Ran `go run ./cmd/metareview fsm --agent-prompt` and diffed it against the golden: byte-identical, 44 lines, so tests/go/test-fsm.sh:60 cmp will pass."
+    },
+    {
+      "path": "tests/go/test-sharded-review.sh",
+      "line": 263,
+      "note": "Executed the script end to end: exits 0 in ~6s with 'sharded review: ok', covering the pr-ready plan/results/fix-round/negative-case/reproducibility path and the task-done staged-eval path."
+    },
+    {
+      "path": "tests/manifest/test-manifests.sh",
+      "line": 66,
+      "note": "Executed the script: exit 0. The Go 1.22 to Go 1.26 assertion agrees with go.mod line 3 (go 1.26) and package.json line 52 (Go 1.26+)."
+    },
+    {
+      "path": "tests/coverage-floor.txt",
+      "line": 21,
+      "note": "Ran tests/coverage.sh in full: gate passed, internal/reviewmanifest merged coverage lands at exactly its 97.0 floor despite the test rewrite, and every internal/fsm and workflows package holds 100.0."
+    },
+    {
+      "note": "Rubric blocking checks: no eval introduced (tests/go/test-sharded-review.sh:141 deliberately assembles the lint pattern via printf so the file does not carry it literally), no TODO/FIXME markers, no truncated diff context in the four chunks, no duplication of an inventoried code path (all four files are test/golden fixtures), and no unsafe untracked source."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestResultSchemaVersionDistinct's second half cannot prove what its comment claims. The comment (manifest_test.go:109-111) says 'only a result carrying ResultSchemaVersion proves which constant the check uses', but SchemaVersion and ResultSchemaVersion are both 1 (manifest.go:23 and manifest.go:27), so a result at either constant is byte-identical and the loop asserting no 'unsupported schema version' blocker would pass whichever constant resultBlockers reads. The assertion is tautological until the two constants diverge; only the first half (ResultSchemaVersion+1 blocks) is load-bearing today.",
+      "evidence": [
+        {
+          "path": "internal/reviewmanifest/manifest_test.go",
+          "line": 109
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 27
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The severity boundary is pinned from one side only. TestWaivedMediumFindingBlocks (manifest_test.go:247) asserts medium blocks under waived/accepted-risk/deferred/open, and TestFixedAndFalsePositiveClose uses critical, but nothing asserts that a low-severity finding with a non-closing disposition does NOT block. severityBlocks (manifest.go:641-643) could be widened to include SeverityLow without any test in this file failing, which would silently turn advisory shard findings into gate blockers.",
+      "evidence": [
+        {
+          "path": "internal/reviewmanifest/manifest_test.go",
+          "line": 247
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 641
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead scaffolding in the new shell test: write_results declares ONLY and SKIP_CROSS parameters (tests/go/test-sharded-review.sh:57-59) whose branches at lines 64 and 76 select a subset of shards or suppress the cross-shard result, but all three call sites (lines 147, 179, 246) pass only two arguments. The partial-results and missing-cross-shard-result-after-a-fix paths those knobs exist to exercise are therefore never driven by this suite.",
+      "evidence": [
+        {
+          "path": "tests/go/test-sharded-review.sh",
+          "line": 59
+        },
+        {
+          "path": "tests/go/test-sharded-review.sh",
+          "line": 147
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Weak new manifest assertions: tests/manifest/test-manifests.sh:41-42 check only that the stringified plugin manifest contains the substring 'workflow'. That matches any incidental occurrence (a description, a path segment, the word 'workflows' in unrelated prose) and would not fail if the fsm/workflow command entry itself were removed, unlike the sibling assertions above it which name concrete command ids such as 'epic-ready' and 'pr-ready'.",
+      "evidence": [
+        {
+          "path": "tests/manifest/test-manifests.sh",
+          "line": 41
+        }
+      ]
+    }
+  ]
+}

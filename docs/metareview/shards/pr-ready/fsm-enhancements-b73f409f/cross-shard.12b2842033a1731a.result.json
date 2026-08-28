@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-cross-shard-12b2842033a1731a-claude-opus-5",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 306,
+      "note": "Discover appends explicit result paths after the resultsDir entries; shard results accumulate rather than override."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 413,
+      "note": "A second result for the same shard hash is a hard blocker (duplicate shard result), not a precedence win."
+    },
+    {
+      "path": "internal/fsm/gate/gates.go",
+      "line": 34,
+      "note": "Checked every gate name used by workflows/sdlc-loop.yaml and workflows/review-loop.yaml against the gate registry: all nine resolve."
+    },
+    {
+      "path": "internal/fsm/cli/envelope.go",
+      "line": 53,
+      "note": "Cross-checked every ERR_* code named in CLAUDE.md, AGENTS.md, docs/fsm/driving-a-workflow.md, skills/fsm/SKILL.md and commands/fsm.md against the codes emitted in internal/**.go: no documented code is missing from the implementation, and the exit table (0/1/2/3) reads the same in all five documents."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 445,
+      "note": "judge.Request kinds are the typed judge constants, so judge.Parse never falls into its still-present default branch for a node kind."
+    },
+    {
+      "path": ".claude-plugin/plugin.json",
+      "line": 4,
+      "note": "Plugin manifest still advertises Go 1.22+ while go.mod requires go 1.26 and INSTALL.md/README.md/package.json say Go 1.26+."
+    },
+    {
+      "path": ".gitattributes",
+      "line": 2,
+      "note": "-text is applied to testdata/fsm/** and the judge prompt goldens but not to the byte-pinned sha fixtures under internal/fsm/run/testdata and internal/fsm/workflow/testdata."
+    },
+    {
+      "note": "Version identity is consistent across package.json, .claude-plugin/plugin.json, .codex-plugin/plugin.json, .claude-plugin/marketplace.json and internal/version/version.go (all 0.9.0), and tests/manifest/test-manifests.sh enforces that quartet; tests/manifest/test-skills.sh covers the new /fsm skill, commands/fsm.md, docs/fsm/*, both workflow YAMLs and the agent-prompt golden."
+    },
+    {
+      "note": "Sharding constants agree end to end: contextprofile.DefaultLargeDiffBytes = 120000 and gitcontext.maxUntrackedFileBytes = 4000 match the 120,000 / 4,000 figures quoted in CLAUDE.md, both SKILL.md files and both command docs; shardpack.ResultsDir matches the docs/metareview/shards/<scope>/<target-slug>/ path every doc states."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The same false precedence sentence is duplicated in four operator-facing documents, so the per-shard reviews each saw only part of the problem and a fix that touches one copy leaves three. commands/review-pr-ready.md:26, commands/review-task-done.md:26, skills/review-pr-ready/SKILL.md:52 and skills/review-task-done/SKILL.md:50 all tell the operator that --shard-result and --cross-shard-result 'take precedence over a file of the same identity in resultsDir'. Only the cross-shard slot behaves that way (shardpack.go sets found.CrossShard = &cross, last write wins). For shard results, Discover appends the explicit path after the directory entries into found.Shards, and reviewmanifest.shardResultBlockers then raises 'duplicate shard result shard-<id>' the moment two results match the same shard hash. So following the documented workflow to override a stale in-tree result does not override it: it turns the gate red with a blocker whose text explains nothing about the flag the operator just used.",
+      "evidence": [
+        {"path": "internal/shardpack/shardpack.go", "line": 310, "note": "explicit paths appended after the resultsDir listing"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 414, "note": "duplicate shard result <id> blocker"},
+        {"path": "commands/review-pr-ready.md", "line": 26, "note": "first copy of the precedence claim"},
+        {"path": "skills/review-task-done/SKILL.md", "line": 50, "note": "fourth copy of the same claim"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The lint-scope narrowing lands in two gates but is recorded in neither rubric. reviewers.lintable() now drops every *.md and everything under docs/ from the eval and TODO/FIXME lints, and reviewers.branchDiffFindings reuses RunTaskDone verbatim, so pr-ready inherits the same blind spot. rubrics/task-done-review-rubric.md:11-14 still says the gate blocks when 'the diff introduces unsafe execution such as eval' or 'adds TODO or FIXME markers' with no scope caveat, and rubrics/pr-ready-review-rubric.md carries the same unqualified promise for the branch diff. Neither rubric file is in this branch's diff, so no shard could see the divergence on both sides.",
+      "evidence": [
+        {"path": "internal/reviewers/taskdone.go", "line": 430, "note": "lintable() excludes .md and docs/"},
+        {"path": "internal/reviewers/prready.go", "line": 129, "note": "pr-ready reuses RunTaskDone, inheriting the scope"},
+        {"path": "rubrics/pr-ready-review-rubric.md", "line": 10, "note": "unqualified branch-diff blocking promise"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Both plugin manifests were edited in this PR (version bumped to 0.9.0, FSM sentence appended) but their Go floor was left at the pre-existing, now-wrong value, so the repository states two different minimum Go versions to users. go.mod requires go 1.26 (with toolchain go1.27.0), and INSTALL.md:9, README.md:85 and package.json:52 say Go 1.26+; .claude-plugin/plugin.json:4, .codex-plugin/plugin.json:25, .agents/plugins/marketplace.json:9 and the runtime error messages in cli/metareview.js:28,36 still say Go 1.22+. A user who trusts the plugin description installs a toolchain that cannot build the fallback go run path.",
+      "evidence": [
+        {"path": "go.mod", "line": 3, "note": "go 1.26 is the consumer floor"},
+        {"path": ".codex-plugin/plugin.json", "line": 25, "note": "still advertises Go 1.22+"},
+        {"path": "cli/metareview.js", "line": 36, "note": "runtime message repeats Go 1.22+"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Line-ending protection for byte-pinned fixtures is applied inconsistently across the new test data. .gitattributes marks internal/fsm/judge/testdata/prompts/* and testdata/fsm/** as -text, but internal/fsm/run/testdata/oracle.jsonl (whose per-line sha256 chain is pinned by oracle.sha256 and asserted in store_test.go:813) and internal/fsm/workflow/testdata/cmds-preimage.json (pinned by cmds-preimage.sha256 in workflow_test.go:474-478) get no such protection. On any checkout that normalises line endings these hash assertions fail, while the fixtures that were given -text survive — the same class of fixture, two different treatments.",
+      "evidence": [
+        {"path": ".gitattributes", "line": 1, "note": "only two fixture trees are marked -text"},
+        {"path": "internal/fsm/run/store_test.go", "line": 813, "note": "byte-exact sha chain assertion over oracle.jsonl"},
+        {"path": "internal/fsm/workflow/workflow_test.go", "line": 474, "note": "byte-exact preimage sha assertion"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Coverage of the plan is incomplete at the time of this cross-shard pass: thirteen shards in plan 12b2842033a1731a have no result file at their current shard hash (shard-10-3, shard-11-2, shard-15-3, shard-16-3, shard-17-2, shard-19, shard-1a, shard-1a-2, shard-1b, shard-1c, shard-1d, shard-1e, shard-1f). The seams those shards own were reviewed here against the repository directly (gate registry, workflow embed, CLI run/prompt, errs, coverage floor), but the gate will still raise its own missing-shard blockers until those results land.",
+      "evidence": [
+        {"note": "plan.json lists 51 shards; docs/metareview/shards/pr-ready/fsm-enhancements-b73f409f holds results at the current hash for 38 of them."}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Checked whether the judge prompt/decoder seam disagrees across packages: TemplateStillPresentCalibration omits confidence from the requested JSON while TemplateStillPresentProduct asks for it, and judge.Parse routes still-present through its default branch. Both are safe. confOf() supplies 0 for an absent confidence, the still-present path never gates on a threshold (only match/adjudicate do, at kind.go:450 and kind.go:471), and every judge.Request built in kind.go uses a typed judge.Kind* constant, so no node kind can reach the default branch by accident.",
+      "evidence": [
+        {"path": "internal/fsm/judge/prompts.go", "line": 336, "note": "default branch handles still-present"},
+        {"path": "internal/fsm/kind/kind.go", "line": 590, "note": "typed KindStillPresent request"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Checked the driver contract for drift between the five places it is written down and the code that produces it. GATE_FAILED, resume_hint, NEEDS_INPUT/exit 3, DONE/STOPPED and the consent/escalation exit-2 carve-out are described identically in CLAUDE.md:31, AGENTS.md:21, docs/fsm/driving-a-workflow.md:45-48, skills/fsm/SKILL.md:37-43 and commands/fsm.md:14-15, and each matches internal/fsm/cli/run.go (resume_hint emitted from both state() and advance()), exitFor() in envelope.go and machine.StatusGateFailed. The counts keys in docs/fsm/sdlc-loop-example.md match counts() at run.go:446 and the record subcommand names match run.go:621-632.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 502, "note": "resume_hint on the GATE_FAILED path"},
+        {"path": "docs/fsm/sdlc-loop-example.md", "line": 39, "note": "documented counts keys match counts()"}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

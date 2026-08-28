@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-07-2.e8493be9d019c9b2",
+  "kind": "shard",
+  "shardId": "shard-07-2",
+  "shardHash": "e8493be9d019c9b2",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {"path": "skills/review-pr-ready/SKILL.md", "line": 52, "note": "documented --shard-result precedence checked against shardpack.Discover and reviewmanifest.shardResultBlockers"},
+    {"path": "internal/shardpack/shardpack.go", "line": 306, "note": "explicit result paths are appended to the resultsDir listing and deduped by resolved path only"},
+    {"path": "internal/reviewmanifest/manifest.go", "line": 413, "note": "second result matching the same shard id emits a duplicate shard result blocker"},
+    {"path": "internal/prready/review_markdown_test.go", "line": 124, "note": "manifestArgs helper keeps the tests compiling against the widened contextMarkdown signature"},
+    {"path": "internal/prready/review.go", "line": 860, "note": "contextMarkdown signature matches the arguments the updated tests now pass"},
+    {"path": "tests/go/test-pr-ready-review.sh", "line": 146, "note": "negation rewritten as grep ... && exit 1; equivalent under set -euo pipefail"},
+    {"path": "tests/go/test-learn-post-merge.sh", "line": 55, "note": "git check-ignore negations rewritten in the same style, no remaining ! prefixed assertions in tests/"}
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "skills/review-pr-ready/SKILL.md:52 tells the operator that --shard-result and --cross-shard-result 'take precedence over a file of the same identity in resultsDir'. That is false for shard results. internal/shardpack/shardpack.go:306-320 appends explicit paths after the resultsDir listing and dedupes only by resolved path, so a file passed in from elsewhere for a shard that already has a result in resultsDir is ingested as a second result; internal/reviewmanifest/manifest.go:413-416 then raises 'duplicate shard result shard-XX' as a blocker. Following the skill therefore produces a NEEDS_REVISION rather than an override. The precedence claim only happens to hold for the cross-shard result, where Found.CrossShard is a single last-wins pointer (shardpack.go:349-352). Note the source comment at shardpack.go:287 says the opposite of the skill: 'Explicit paths are added to whatever the directory holds.' The identical sentence exists in skills/review-task-done/SKILL.md:50 and needs the same correction.",
+      "evidence": [
+        {"path": "skills/review-pr-ready/SKILL.md", "line": 52, "note": "the precedence claim as shipped in this diff"},
+        {"path": "internal/shardpack/shardpack.go", "line": 306, "note": "explicit paths appended, not substituted; dedupe is by resolved path"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 414, "note": "duplicate shard result blocker is the actual outcome"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "skills/review-pr-ready/SKILL.md:57 promises that after a fix round 'only the edited file's shard and the cross-shard result go ignored: re-review those two and leave the rest.' Shard membership is bucketed by path hash and the bucket is then split by byte budget (internal/contextprofile/shards.go:200-243), so an edit that changes a file's diff size can re-split its bucket and change the hashes of sibling shard-NN-<n> parts, and a change in total diff size changes needBuckets and can reshuffle every shard. The guidance is right in the common case but should not be stated as a guarantee.",
+      "evidence": [
+        {"path": "skills/review-pr-ready/SKILL.md", "line": 57, "note": "invalidation guarantee stated without the re-split caveat"},
+        {"path": "internal/contextprofile/shards.go", "line": 200, "note": "bucket count derives from total diff bytes; sub-shard index derives from per-chunk sizes"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The negation rewrite in tests/go/test-pr-ready-review.sh (lines 146-147, 181-182, 198-199, 251-252, 274, 401) and tests/go/test-learn-post-merge.sh (55-57) is behaviour-preserving under set -euo pipefail, but like the '! cmd' form it replaced it still treats tool errors as assertion successes: grep exiting 2 on a missing review file, or git check-ignore exiting 128, satisfies the assertion silently. Pre-existing rather than introduced, but the rewrite touched exactly these lines and could have added a 'test -f' guard on the review path.",
+      "evidence": [
+        {"path": "tests/go/test-pr-ready-review.sh", "line": 146, "note": "grep failure and grep error are indistinguishable to this assertion"},
+        {"path": "tests/go/test-learn-post-merge.sh", "line": 55, "note": "git check-ignore exit 128 would pass this assertion"}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

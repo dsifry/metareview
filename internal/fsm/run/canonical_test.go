@@ -223,3 +223,40 @@ func TestCanonicalIsToolchainIndependent(t *testing.T) {
 		t.Fatal("the chain hash does not match the pinned canonical bytes")
 	}
 }
+
+// The normalisation must only ever ADD escapes. Removing one is unsafe: an
+// unescape rewrites text the payload itself contained, and a payload holding
+// the six literal characters of a \ufffd escape — which this repository's own
+// types.go does — then encodes to a lone backslash before a raw rune, which is
+// not a valid JSON escape. Three reviewers reproduced that independently; the
+// consequences ranged from an unparseable run-log line to ERR_AUDIT_CHAIN
+// rejecting a whole run with no recovery, since RepairTail only mends a tail.
+func TestCanonicalNeverUnescapesThePayloadsOwnText(t *testing.T) {
+	literal := "\\ufffd" // backslash u f f f d, six characters
+	if len(literal) != 6 {
+		t.Fatalf("fixture wrong: %q is %d bytes", literal, len(literal))
+	}
+	for _, payload := range []string{
+		literal,
+		"the escape " + literal + " appears mid-sentence",
+		literal + literal,
+		"raw \ufffd and literal " + literal + " together",
+	} {
+		out := marshalCanonical(map[string]string{"s": payload})
+		if !json.Valid(out) {
+			t.Fatalf("canonical output is not valid JSON for %q: %s", payload, out)
+		}
+		var back map[string]string
+		if err := json.Unmarshal(out, &back); err != nil {
+			t.Fatalf("decode %q: %v (%s)", payload, err, out)
+		}
+		if back["s"] != payload {
+			t.Fatalf("round trip changed the value: %q -> %q", payload, back["s"])
+		}
+		// Idempotent, as Canonical's contract promises.
+		again, err := Canonical(out)
+		if err != nil || string(again) != string(out) {
+			t.Fatalf("not idempotent for %q: %s -> %s (%v)", payload, out, again, err)
+		}
+	}
+}

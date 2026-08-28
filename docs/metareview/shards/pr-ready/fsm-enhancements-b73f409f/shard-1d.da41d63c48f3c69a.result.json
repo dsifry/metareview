@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1d-da41d63c48f3c69a",
+  "kind": "shard",
+  "shardId": "shard-1d",
+  "shardHash": "da41d63c48f3c69a",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": ".codex-plugin/plugin.json",
+      "line": 3,
+      "note": "Version 0.9.0 agrees with package.json, .claude-plugin/plugin.json and internal/version/version.go:3; file parses as JSON and now ends with a newline. tests/manifest/test-manifests.sh:26,32,41 enforces the version parity, the skills path and the new 'workflow' keyword, and skills/fsm plus commands/fsm.md exist, so the advertised fsm capability is actually shipped."
+    },
+    {
+      "path": "internal/findings/override.go",
+      "line": 53,
+      "note": "Blocks() is the single blocking predicate and is consumed at internal/findings/findings.go:358 (unresolvedBlockingFrom), findings.go:431 (openForRun) and internal/reviewlog/reviewlog.go:307 — no surviving `status == \"open\"` blocking check bypasses it, so override-pending really does keep gates closed and overridden really does stop blocking."
+    },
+    {
+      "path": "internal/findings/override.go",
+      "line": 104,
+      "note": "Request/grant separation verified: GrantOverride refuses a self-grant case-insensitively (EqualFold) and refuses statuses outside open/override-pending; RequestOverride refuses a non-open finding. go tool cover -func reports 100.0% statement coverage for every function in override.go under `go test ./internal/findings/`."
+    },
+    {
+      "path": "internal/prready/shardingestion_test.go",
+      "line": 130,
+      "note": "Both new tests compile and pass (`go vet` + `go test ./internal/findings/... ./internal/prready/...` clean); fakeWriter, shardedRepo and the collections counter they rely on exist in internal/prready/shardwiring_test.go:18-70."
+    },
+    {
+      "path": "tests/go/test-fsm.sh",
+      "line": 1,
+      "note": "shellcheck -x passes on the suite; it is wired into tests/run-all.sh:46 and the node dependency it relies on is provisioned in CI (.github/workflows/test.yml:31-33). Checked the bash env-prefix-on-a-function concern empirically: assignments such as `MOCK_AI=... fsm state` do NOT leak into the shell after the call, so the later mock-rule and --run precedence rows are not cross-contaminated."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "An override-pending finding has no exit other than a grant. RequestOverride sets status override-pending (internal/findings/override.go:70-79) and Blocks() keeps it blocking (override.go:53-55), but Reconcile's fix transition requires status == \"open\" (internal/findings/findings.go:129-131), and cmd/metareview/main.go:495-575 exposes only request|grant|list — there is no withdraw/reopen. So the realistic sequence 'agent requests an exception, human says no and fixes the issue instead' leaves the row pending forever: `override list --pending` exits 1 (main.go:528-531) on every later run even though the finding's fingerprint is gone from the current diff. tests/go/test-override.sh covers request -> blocked -> grant but never request -> actually fixed. Fail-closed rather than fail-open, and the local ledger .metareview/findings.jsonl is transient, so this is a follow-up rather than a blocker; a `metareview override withdraw` (or letting Reconcile fix an override-pending row whose fingerprint disappeared) would close it.",
+      "evidence": [
+        {"path": "internal/findings/override.go", "line": 54},
+        {"path": "internal/findings/findings.go", "line": 129},
+        {"path": "cmd/metareview/main.go", "line": 529}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "A granted override suppresses the same fingerprint on that target permanently, including at later commits. Reconcile treats every non-\"fixed\" status as active (internal/findings/findings.go:142-145), so once a record is 'overridden' no new open record is ever created for that fingerprint/target again, and Blocks() returns false for it — the only surviving trace at review time is the 'Process Overrides' section of FINDINGS.md (findings.go:307-312). That is defensible as waiver semantics, but it is not stated anywhere in CLAUDE.md's override contract, which describes the grant as acknowledging one exception rather than an indefinite per-target waiver. Worth either documenting or scoping the suppression to the git head it was granted against.",
+      "evidence": [
+        {"path": "internal/findings/findings.go", "line": 143},
+        {"note": "CLAUDE.md's 'Process Overrides' section documents actor/timestamp/reason recording and 'an override is never a fix', but says nothing about a grant silencing the same fingerprint on all future runs of that target."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestGCOnlyRunsAfterAPassingGate only asserts the negative half of its own name. It checks collections == 0 while the gate blocks (internal/prready/shardingestion_test.go:142-145) and nothing anywhere in the Go tests asserts the GC actually runs after a pass — verified against the coverage profile: internal/prready/review.go:293 (the packWriter.GC call) has an execution count of 0 in `go test -coverprofile ./internal/prready/`. Deleting that call outright would leave every Go test green. The positive branch is only covered by the shell suite (tests/go/test-sharded-review.sh:180-184 asserts superseded result files were collected), so combined coverage holds; a one-line positive assertion in this test would make the name true on its own.",
+      "evidence": [
+        {"path": "internal/prready/shardingestion_test.go", "line": 143},
+        {"path": "internal/prready/review.go", "line": 293}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "test-fsm.sh is the only suite that may run against a stale binary. Line 9 reuses $ROOT/bin/metareview whenever it is executable, whereas every other suite builds fresh into a temp dir (tests/go/test-sharded-review.sh:11, test-task-done-review.sh:8, test-override.sh:10, and eight more). In a full `tests/run-all.sh` this is safe — tests/manifest/test-manifests.sh:87 runs `npm run build` before any Go suite — but a developer running `bash tests/go/test-fsm.sh` alone after editing Go source gets a green FSM suite from the previously built binary, and the fallback branch writes the binary into the repo tree rather than a temp dir. Building into $WORK would remove the hazard at the cost of one build.",
+      "evidence": [
+        {"path": "tests/go/test-fsm.sh", "line": 9},
+        {"path": "tests/go/test-sharded-review.sh", "line": 11}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestReviewLogListsIngestedAndIgnoredResults asserts the negative and ordering cases but never asserts that the fresh shard results were actually ingested. planFor runs a whole first review to learn the plan, results are written for that plan, then a second Create is asserted only to contain the '## Sharded Review' and 'Ignored result files' strings — which the stale shard-0/8899aabb result alone satisfies. If the second run's plan hash ever diverged from the first, every fresh result would be silently ignored and the test would still pass. Also note the ordering guard at line 101-103: when '## Verdict' is absent strings.Index returns -1 and the shardedAt < verdictAt check can never fire.",
+      "evidence": [
+        {"path": "internal/prready/shardingestion_test.go", "line": 100},
+        {"path": "internal/prready/shardingestion_test.go", "line": 101}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Blocks() fails open on any unrecognised status string (internal/findings/override.go:53-55 returns false for anything that is not \"open\" or \"override-pending\"). A typo'd or future status written into .metareview/findings.jsonl silently stops blocking rather than being rejected. Low impact today because every writer is in-package, but a defensive default — unknown statuses block, or an explicit known-status set — would be cheaper than discovering it from a gate that went green for the wrong reason.",
+      "evidence": [
+        {"path": "internal/findings/override.go", "line": 55}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

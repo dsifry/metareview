@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-14.950648769c461a4c",
+  "kind": "shard",
+  "shardId": "shard-14",
+  "shardHash": "950648769c461a4c",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/fsm/run/fold_test.go",
+      "line": 1,
+      "note": "go test ./internal/fsm/run -count=1 -cover passes at 100.0% of statements; gofmt -l and go vet are clean for the package"
+    },
+    {
+      "path": "internal/fsm/run/fold_test.go",
+      "line": 118,
+      "note": "the nil-free-JSON guard is vacuous: verified by probe that the happy-path snapshot contains exactly one null, prev_unfixed"
+    },
+    {
+      "path": "internal/fsm/run/builder.go",
+      "line": 130,
+      "note": "Builder.Events returns a defensive copy, so the aliasing in TestFoldNoOps (fold_test.go:513) cannot corrupt the parent log - checked, not a defect"
+    },
+    {
+      "path": "docs/quickstart.md",
+      "line": 87,
+      "note": "the self-ignoring .metareview/runs and .metareview/shards directories exist with a '*' .gitignore, matching store_jsonl.go:103 and shardpack.go:158 - doc claim verified"
+    },
+    {
+      "path": "docs/quickstart.md",
+      "line": 62,
+      "note": "the 'not sharded' string is rendered by contextprofile/shards.go:266 for unsharded task-done/pr-ready, not by epic-ready, which renders its own sentence at epicready/review.go:500"
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 78,
+      "note": "envelope validation checks ev.At.IsZero only; no ordering constraint on at, and no spec text requires one"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "docs/quickstart.md:62 - two claims do not match the code. (a) 'epic-ready renders \"not sharded\"': epic-ready renders 'Sharding is not applied to epic-ready reviews; see the child task-done and pr-ready packs.' (internal/epicready/review.go:500). The literal 'not sharded' comes from internal/contextprofile/shards.go:266 (the unsharded Context Shard Plan body, for task-done and pr-ready) and internal/reviewmanifest/manifest.go:313 (the unsharded manifest-hash text) - both task-done/pr-ready surfaces, so the sentence attaches the string to the wrong scope. (b) 'Task-done and PR-ready add a Context Shard Plan and prompt packs when the branch diff exceeds the review context limit' - the Context Shard Plan section is rendered unconditionally for those scopes and reads 'Not sharded.' below the limit; only the plan rows and the prompt packs are conditional. A reader searching the pack for 'not sharded' will look under the wrong gate.",
+      "evidence": [
+        {
+          "path": "docs/quickstart.md",
+          "line": 62,
+          "note": "epic-ready renders \"not sharded\" - and the conditional phrasing of the Context Shard Plan section"
+        },
+        {
+          "path": "internal/epicready/review.go",
+          "line": 500,
+          "note": "epic-ready's actual Context Shard Plan body does not contain the string 'not sharded'"
+        },
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 266,
+          "note": "return \"## Context Shard Plan\\n\\nNot sharded.\" - the section exists even when the diff is under the limit"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/fold_test.go:118 - the 'nil-free JSON' assertion can never fire. It is `if strings.Contains(js, \"null\") && !strings.Contains(js, `\"prev_unfixed\":null`)`, and the same test already asserts s.PrevUnfixed == nil at line 106, so the snapshot always serialises prev_unfixed as null and the second conjunct is always false. Any future null elsewhere in the snapshot JSON (a container regressing to nil, a new pointer field) passes silently. Confirmed by probe: the happy-path snapshot currently contains exactly one null. Strip the known key before scanning, e.g. `strings.Contains(strings.Replace(js, `\"prev_unfixed\":null`, \"\", 1), \"null\")`. The four explicit container checks at line 121 partially cover the intent, which is why this is not blocking.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 118,
+          "note": "guard conjunct is always false, so the t.Fatalf on line 119 is unreachable"
+        },
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 106,
+          "note": "s.PrevUnfixed != nil already fails the test earlier, pinning prev_unfixed to null"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/fold_test.go:365-413 - TestFoldFixBaseline declares the `mk` closure (a non-copied agent-edit transition builder) and then discards it with `_ = mk` at line 413 purely to silence the unused-variable error. It is dead scaffolding: the non-copied FixEntryHead case it was written for is covered in TestFoldTransitionLoopAndBaseline (fold_test.go, the `c` builder asserting FixEntryHead == \"hh\"), and as written mk attaches an Origin to a run with no ParentRunID, which would fail provenance rather than the baseline rule. Delete the closure and the `_ = mk` line.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 413,
+          "note": "_ = mk exists only to keep the compiler quiet about a helper no case calls"
+        },
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 365,
+          "note": "mk := func() *Builder { ... } is never invoked anywhere in the test"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/fold.go:59,78 - Fold validates that ev.At is non-zero but never that it is non-decreasing across the chain, and fold_test.go has no row for it (TestFoldSequenceInvariants:537 covers version, first-not-init, second-init, seq gap, unknown type, bad payload and the state/iter/at-zero stamps only). TestFoldNoOps demonstrates the gap incidentally: it transplants a ~20-event log into a fresh Builder at fold_test.go:513-515, so the appended events carry timestamps seconds *earlier* than the events they follow, and Fold accepts the log. For an append-only audit chain whose whole purpose is tamper evidence, a rewound clock should either be rejected or explicitly documented as out of scope. No spec text currently requires monotonicity, so this is a gap to decide rather than a contract violation.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 78,
+          "note": "ev.At.IsZero() is the only temporal check in the envelope validator"
+        },
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 515,
+          "note": "b2.state, b2.iter = \"verify\", 0 on a fresh builder clock, so later events are stamped with earlier timestamps and still fold"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1a-2.af5caa2d1f29da66",
+  "kind": "shard",
+  "shardId": "shard-1a-2",
+  "shardHash": "af5caa2d1f29da66",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/reviewers/lintscope_test.go",
+      "line": 8,
+      "note": "Reviewed the new lint-scope test file against internal/reviewers/taskdone.go addedLines/addedSourceLines/addedUntrackedLines/lintable/diffHeaderPath/postImagePath; each test maps to a real branch of the production code."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 93,
+      "note": "todoPattern is (?i)\\b(TODO|FIXME)\\b and evalPattern is \\beval\\s*\\( ; verified both against the literal fixture strings in the new test file."
+    },
+    {
+      "path": "tests/go/test-shardpack-coverage.sh",
+      "line": 18,
+      "note": "Go coverprofile line format is 'block numStmts count', so $3 == 0 correctly selects uncovered blocks; the empty-profile guard on the mode: header is also correct. Ran the script: 'shardpack coverage: 100% (178 blocks)', exit 0. It is wired into tests/run-all.sh:20."
+    },
+    {
+      "path": "testdata/fsm/scenarios/sdlc-loop/injection/judge.yaml",
+      "line": 3,
+      "note": "Consumed by tests/go/test-fsm.sh:225 (fsm init --mock-ai scenarios/sdlc-loop/injection); the single adjudicate call with is_real:false matches the flow the test drives (NEEDS_INPUT -> record -> ADVANCED -> DONE)."
+    },
+    {
+      "path": "internal/reviewers/lintscope_test.go",
+      "line": 19,
+      "note": "Executed RunTaskDone over the real base..head diff of this file with a temporary probe test: it produced 'critical Unsafe eval introduced' and 'high TODO left in task-done diff'. Probe file was removed; working tree left clean."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "The @TODO@ placeholder does not evade the lint it is meant to evade. lintscope_test.go:8-12 claims the markers are 'assembled at run time and written as placeholders ... so that this file does not trip the very lints it tests', but todoPattern (internal/reviewers/taskdone.go:93) is (?i)\\b(TODO|FIXME)\\b and '@' is a non-word character, so '@TODO@' matches. lintscope_test.go is a .go file and therefore lintable() == true, so all eight added lines carrying '@TODO@' (lines 19, 30, 32, 37, 64, 82, 140, 213) reach the lints. I confirmed end to end by running RunTaskDone over the real base..head diff of this file: it emits the high finding 'TODO left in task-done diff' with Found = 'return strings.ReplaceAll(diff, \"@TODO@\", todoWord)'. Per the task-done rubric ('The diff adds TODO or FIXME markers') this blocks. Fix: assemble the placeholder too (e.g. \"@\"+\"TO\"+\"DO\"+\"@\") or rename it to a token that contains neither word, e.g. @MARKER@.",
+      "evidence": [
+        {"path": "internal/reviewers/lintscope_test.go", "line": 19, "note": "fixture() substitutes the literal string \"@TODO@\", which itself matches todoPattern"},
+        {"path": "internal/reviewers/lintscope_test.go", "line": 8, "note": "the comment asserts the file will not trip the lints it tests, which is false for the TODO lint"},
+        {"path": "internal/reviewers/taskdone.go", "line": 159, "note": "firstMatching(lines, todoPattern) raises the high 'TODO left in task-done diff' finding with no test-file exemption"}
+      ]
+    },
+    {
+      "severity": "critical",
+      "disposition": "open",
+      "note": "The same self-tripping problem, worse, for the eval lint. lintscope_test.go:31 contains the fixture prose line '+The winning pair comes from the judge-eval (§17), not gpt-5.2.' Inside the test that line is docs prose and is correctly excluded, but the line as it appears in this branch's own diff of lintscope_test.go (a .go file) matches evalPattern \\beval\\s*\\( -- the hyphen before 'eval' is a word boundary and ' (' satisfies \\s*\\(. Running RunTaskDone over the real base..head diff of this file emits 'critical Unsafe eval introduced' with Found = 'The winning pair comes from the judge-eval (§17), not gpt-5.2.' So the branch that adds the docs-exclusion fix cannot pass its own eval gate on account of this file. Fix: reword to remove the space before the paren (e.g. 'judge-eval(§17)' would still match; use 'judge eval, §17') or route it through the @EVAL@-style placeholder, which does not match.",
+      "evidence": [
+        {"path": "internal/reviewers/lintscope_test.go", "line": 31, "note": "'judge-eval (§17)' matches \\beval\\s*\\( when this .go file is itself linted"},
+        {"path": "internal/reviewers/taskdone.go", "line": 129, "note": "firstMatching(lines, evalPattern) raises the critical 'Unsafe eval introduced' finding"},
+        {"path": "internal/reviewers/taskdone.go", "line": 92, "note": "evalPattern = \\beval\\s*\\( treats the hyphen as a word boundary, so a hyphenated compound still matches"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new injection scenario's stated purpose is not actually asserted by its only consumer. testdata/fsm/scenarios/sdlc-loop/injection/judge.yaml:1 says the host records a finding 'whose text carries fence markers and instructions', and tests/go/test-fsm.sh:222 titles the block 'fenced values never appear raw in instructions'. The assertion at tests/go/test-fsm.sh:232-235 only reads audit.jsonl and throws when no llm_call entry exists; it never inspects the prompt for the raw payload or for a broken fence. The scenario file itself is correct and wired in, but the guarantee it exists to protect is untested. Non-blocking; the consuming test is outside this shard.",
+      "evidence": [
+        {"path": "testdata/fsm/scenarios/sdlc-loop/injection/judge.yaml", "line": 1, "note": "comment states the scenario exercises fence markers and injected instructions in finding text"},
+        {"path": "tests/go/test-fsm.sh", "line": 233, "note": "the only check is find(e => e.type === 'llm_call'); the fenced payload is never compared against the prompt"}
+      ]
+    }
+  ],
+  "blockingCount": 2
+}

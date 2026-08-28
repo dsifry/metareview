@@ -117,7 +117,9 @@ func CapText(s string, max int) (string, bool) {
 		_, size := utf8.DecodeRuneInString(s[i:])
 		n := encodedRuneLen(r)
 		if r == utf8.RuneError {
-			n = 3 // an invalid byte is replaced by a literal U+FFFD; a genuine U+FFFD is written verbatim
+			// marshalCanonical writes both an invalid byte and a genuine U+FFFD
+			// as the six-character escape, so both cost six here.
+			n = 6
 		}
 		if total+n > max {
 			return s[:cut], true

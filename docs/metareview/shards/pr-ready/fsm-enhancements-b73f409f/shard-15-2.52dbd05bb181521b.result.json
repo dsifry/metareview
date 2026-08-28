@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-15-2.52dbd05bb181521b",
+  "kind": "shard",
+  "shardId": "shard-15-2",
+  "shardHash": "52dbd05bb181521b",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T09:20:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {"path": "internal/fsm/converge/converge_test.go", "line": 283, "note": "TestC4ValidateAndParseErrors covers both boundary cases (MaxAtoms=32, MaxDepth=4) and the off-by-one rejections; verified against converge.go:67,70,118,173"},
+    {"path": "internal/fsm/export/export_test.go", "line": 608, "note": "TestF8Redaction asserts both leaked markers and kept markers, plus pairwise prev-hash chaining of unredacted lines"},
+    {"path": "internal/fsm/machine/types.go", "line": 85, "note": "Deps doc comment reviewed against machine.go nil-checks for the optional fields"},
+    {"path": "internal/fsm/run/event.go", "line": 1, "note": "Pure type/constant declarations; EventTypes list matches the sixteen Type* constants declared above it, no behavioral code"},
+    {"path": "internal/reviewers/epicready.go", "line": 64, "note": "Fingerprint stabilization is covered by internal/reviewers/sharded_test.go:207-209, which asserts epic:context-risk is identical across two differing risk-reason sets"},
+    {"path": "internal/reviewers/epicready.go", "line": 213, "note": "!(A||B||C) rewritten as !A&&!B&&!C is a De Morgan-equivalent transformation; no behavior change"},
+    {"note": "Verification run locally: go build ./... clean, go vet on all five touched packages clean, go test ./internal/fsm/converge ./internal/fsm/export ./internal/reviewers -cover => converge 100.0%, export 100.0%, reviewers 97.0%, all passing"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead assertion: the open-flag/permission check is short-circuited. The loop fails only when BOTH clauses are false, and the second clause (strings.Contains(o, \"-rw-------\")) is true for every recorded open because writeFile always passes perm 0o600, so the flag half of the assertion can never fire. Compounding it, the expected flag word is built with the local itoa() at export_test.go:120, which is string(rune('0'+i%10)) - a single digit, so distinct flag words collide; and the literal 0x100 stands in for syscall.O_NOFOLLOW, which is 0x100 only on darwin (0x20000 on linux). Net effect: the security-relevant O_EXCL|O_NOFOLLOW flags on export.go:222 are never asserted by this test. TestOSFS (export_test.go:553) does cover O_EXCL against the real filesystem, so the production behavior is verified elsewhere; only O_NOFOLLOW is unasserted. Fix: compare m.opens entries against a real strconv.Itoa of the flag word and drop the || fallback.",
+      "evidence": [
+        {"path": "internal/fsm/export/export_test.go", "line": 348, "note": "the || !strings.Contains(o, \"-rw-------\") clause makes the preceding HasSuffix check unreachable as a failure"},
+        {"path": "internal/fsm/export/export_test.go", "line": 120, "note": "func itoa(i int) string { return string(rune('0' + i%10)) } - single-digit, lossy for real flag words"},
+        {"path": "internal/fsm/export/export.go", "line": 222, "note": "OpenFile with O_WRONLY|O_CREATE|O_EXCL|syscall.O_NOFOLLOW and 0o600 is the behavior the assertion intends to pin"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stale doc comment on Deps: \"Nothing here is optional except Terminal\" is contradicted twelve lines later by the Preflight field, which is documented as optional and is nil-checked at machine.go:99 and machine.go:626. A reader wiring Deps from this comment would believe Preflight is mandatory. Fix: amend the comment to name both optional fields.",
+      "evidence": [
+        {"path": "internal/fsm/machine/types.go", "line": 85, "note": "// Deps wires the machine. Nothing here is optional except Terminal."},
+        {"path": "internal/fsm/machine/types.go", "line": 100, "note": "// Preflight (optional) runs before Create for every exec"},
+        {"path": "internal/fsm/machine/machine.go", "line": 99, "note": "if deps.Preflight != nil - the nil guard proving the field is optional"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "MaxDiffBytes is a mutable package-level global declared purely so tests can force truncation, and its only mutator restores it by plain assignment rather than defer/t.Cleanup. If the assertion between the two assignments fails with t.Fatalf, the goroutine exits with MaxDiffBytes still set to 2 and every later test in the package silently sees a 2-byte diff budget, turning one failure into a cascade of misleading ones. The package has no t.Parallel today, so there is no data race, but a future parallel test would introduce one. Fix: guard the mutation with defer func(v int){ MaxDiffBytes = v }(MaxDiffBytes) or t.Cleanup.",
+      "evidence": [
+        {"path": "internal/fsm/machine/types.go", "line": 32, "note": "var MaxDiffBytes = 1 << 20 - package-level mutable state exported for test control"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 245, "note": "MaxDiffBytes = 2 set, asserted with t.Fatalf on the next line, restored only at line 249 if the assertion passed"}
+      ]
+    }
+  ]
+}

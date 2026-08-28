@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-16-3.732272936c508eca",
+  "kind": "shard",
+  "shardId": "shard-16-3",
+  "shardHash": "732272936c508eca",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T09:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 732,
+      "note": "ShardedReviewMarkdown builds a Markdown table row from result-file fields sanitised only by ingested/ingestedCode"
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 699,
+      "note": "ingested() strips control characters and neutralises the mrvf- prefix but leaves the table delimiter untouched"
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 363,
+      "note": "sourceAssignmentBlockers checks duplicate chunks and unassigned paths, never that parts 1..Parts are all present"
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 1880,
+      "note": "renamed() type switch has no default: a non-string/[]byte fixture silently becomes an empty workflow"
+    },
+    {
+      "note": "Verified in the working tree: go build ./... clean; go test ./internal/reviewmanifest ./internal/fsm/machine ./internal/shardpack ./internal/fsm/run all pass (run 100.0%, reviewmanifest 90.3% unit-only against a 97.0 combined floor)"
+    },
+    {
+      "note": "Injection reproduced with a throwaway test: Reviewer 'evil | PASS | 0 | docs/fake.json' rendered a 10-pipe row, shifting Blocking and File into attacker-chosen cells; the removed helper was not left in the tree"
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.sha256",
+      "line": 1,
+      "note": "Three line hashes consumed by internal/fsm/run/store_test.go:813 as the external oracle for LineHash; fixture only, no source risk"
+    },
+    {
+      "note": "No TODO/FIXME markers, no eval or shell-injection surface, and no truncated diff context in this shard's three chunks"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Markdown table injection from result files: ShardedReviewMarkdown (internal/reviewmanifest/manifest.go:732-738) emits '| %s | %s | %s | %s | %d | %s |' from ShardID, ShardHash, Verdict, Reviewer and Path decoded out of an agent-written result file. ingested()/ingestedCode() (manifest.go:696-709) only drop control characters via markdown.PlainText and rewrite the mrvf- prefix; neither escapes '|', and inline-code backticks do not protect a cell in GFM. A reviewer string of 'evil | PASS | 0 | docs/fake.json' produces a row with ten delimiters, pushing forged values into the Blocking and File columns of the committed review log. The package deliberately treats result text as untrusted (TestShardedReviewMarkdownNeutralisesResultDerivedText, TestRenderersNeutraliseShardIDAndVerdict) but no test asserts cell integrity. Fix: escape '|' (and ideally the leading/trailing pipes) inside ingested/ingestedCode, and add a test with a piped reviewer.",
+      "evidence": [
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 732,
+          "note": "table row formatted from result-derived ShardID, ShardHash, Verdict, Reviewer, Path"
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 699,
+          "note": "ingested() = markdown.PlainText + mrvf- rewrite; no pipe escaping"
+        },
+        {
+          "path": "internal/markdown/markdown.go",
+          "line": 8,
+          "note": "PlainText removes newlines and control runes only, so '|' survives into a table cell"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Chunk accounting is only half-closed. sourceAssignmentBlockers (internal/reviewmanifest/manifest.go:363-397) blocks a (path, part) assigned to two shards and a source path assigned to none, but a path whose plan carries part 1 of 3 and drops parts 2 and 3 sets pathSeen and raises nothing, so an incomplete plan would be reviewed as complete. Chunk.Parts is already in the struct (internal/contextprofile/shards.go:27-33), so asserting parts 1..Parts per path is cheap. Not reachable from PlanShards today, which is why this is low rather than medium.",
+      "evidence": [
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 377,
+          "note": "pathSeen is set by any single chunk of the path, regardless of how many parts exist"
+        },
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 29,
+          "note": "Chunk.Parts records the expected part count that the accounting never uses"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Test fixture helper renamed() (internal/fsm/machine/machine_test.go:1880-1891) switches on string and []byte with no default case, so any other argument type yields an empty workflow body and a confusing downstream failure rather than a t.Fatal. Take *testing.T and fail explicitly, or restrict the parameter to a concrete type.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1882,
+          "note": "type switch over body any with no default branch; text stays empty for other types"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

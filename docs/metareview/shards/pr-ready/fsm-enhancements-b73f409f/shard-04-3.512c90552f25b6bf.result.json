@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-04-3.512c90552f25b6bf",
+  "kind": "shard",
+  "shardId": "shard-04-3",
+  "shardHash": "512c90552f25b6bf",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 1,
+      "note": "Only non-test file in the shard; every exported/unexported helper has a caller in internal/fsm/cli/run.go (rootOf:194, resolveRun:199, peek:210, machineDeps:215, applyJudgeOverride:307, runsIgnored:330, exportDeps:937) and direct tests in cli_test.go / judgeoverride_test.go."
+    },
+    {
+      "path": "internal/fsm/cli/judgeoverride_test.go",
+      "line": 15,
+      "note": "New judge-override behaviour is covered by TestJudgeOverridePrecedence and TestApplyJudgeOverrideCopiesAndOverlays, including the flag-beats-env precedence and the caller's-map-not-mutated contract."
+    },
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 61,
+      "note": "Codex provider tests cover happy path, argv safety (prompt on stdin, read-only sandbox, no prompt leak into argv), transport/response/effort/model/kind failures, token accounting on failure, routing, and NewWithCodex wiring."
+    },
+    {
+      "path": "internal/fsm/machine/handoffs_test.go",
+      "line": 15,
+      "note": "Read-only Open, the Preflight seam, workflow source/reserved-name refusal and RecordLLMCall are exercised including negative paths (lock held, torn audit, terminal run, store append failures); all helpers (newHarness, sdlcDone, sdlcWith, renamed, findings) exist in the package."
+    },
+    {
+      "note": "Validation run locally: `go vet ./internal/fsm/...` clean; `go test -cover ./internal/fsm/cli/... ./internal/fsm/judge/... ./internal/fsm/machine/...` all ok at 100.0% statement coverage per package. No TODO/FIXME markers, no eval-style dynamic execution, no truncated diff hunks in this shard."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 400,
+      "note": "Verified the suspicion that wiring.go scenarioFor discards the recorded scenario hash: machine.Open re-verifies rel#hash before any work, so the lenient pre-load is advisory only. Not a defect."
+    },
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 220,
+      "note": "Verified resolveRun's assumption that RunStore.List() is newest-first: sortSummaries orders by CreatedAt descending. Not a defect."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "scenarioFor splits the recorded mock identity on the FIRST '#' (strings.Cut) while machine.Open splits it on the LAST '#' (strings.LastIndex, machine.go:401). For a scenario directory whose repo-relative path itself contains '#', the two disagree: the CLI pre-load would resolve a truncated directory and fail the command with a load error even though Open would have resolved it correctly. Use strings.LastIndex here too, or reject '#' in the recorded rel path at init.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 123,
+          "note": "rel, _, _ := strings.Cut(d.Mock, \"#\") vs machine.go:401 strings.LastIndex(snap.Mock, \"#\")"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "applyJudgeOverride's doc comment states unconditionally that 'The map is copied: the caller's parsed vars are not a place to leave side effects', but the early-return path at line 256-258 returns the caller's map itself. The behaviour is intentional and asserted by the test ('no copy, no change'), so this is a comment that overstates the contract and could mislead a future caller into believing the result is always safe to mutate.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 256,
+          "note": "if o.Model == \"\" && o.Effort == \"\" { return vars } returns the caller's map uncopied"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "validateCodex checks only the length of the model id, so a workflow-supplied $JUDGE such as 'codex/--something' reaches the codex argv as the value of -m. Because exec passes argv without a shell this cannot inject a second flag and is not exploitable, but a workflow author is otherwise held to explicit consent (--allow-custom-cmds) before influencing an external process, so rejecting a wireModel that begins with '-' would be cheap defence-in-depth. TestCodexJudgeBuildsASafeInvocation does not cover a hyphen-leading model id.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 81,
+          "note": "validateCodex only length-checks the model; codex.go:62 places wireModel(r.Model) after -m"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Hand-rolled itoa duplicates strconv.Itoa (strconv is not otherwise imported anywhere in the judge package, so the stated rationale of 'avoids pulling strconv in' saves nothing) and mishandles math.MinInt: negation overflows, the loop never runs, and itoa(math.MinInt) returns \"-\". Unreachable in practice because both call sites pass a process exit status, and TestItoa (codex_test.go:212) does not exercise the boundary.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 141,
+          "note": "itoa avoids pulling strconv in for two call sites; MinInt negation overflow at the neg branch"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two error returns are discarded on paths where a failure would surface later as a nil-pointer or a panic rather than as the real cause: kind.New's error at wiring.go:189 (a non-nil error leaves Kinds nil in machine.Deps) and h.store.Lock's error in TestReadOnlyOpen (a nil unlock would panic at the deferred call site rather than fail the assertion). Both are argued unreachable by construction and the packages hold 100% statement coverage, so this is hygiene, not a live defect.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 189,
+          "note": "kinds, _ := kind.New(...) discards an error that would leave machine.Deps.Kinds nil"
+        },
+        {
+          "path": "internal/fsm/machine/handoffs_test.go",
+          "line": 42,
+          "note": "unlock2, _ := h.store.Lock(m.runID) ignores the error before calling unlock2()"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

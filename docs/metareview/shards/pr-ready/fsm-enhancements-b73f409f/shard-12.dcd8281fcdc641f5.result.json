@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-12.dcd8281fcdc641f5",
+  "kind": "shard",
+  "shardId": "shard-12",
+  "shardHash": "dcd8281fcdc641f5",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/fsm/judge/codex.go",
+      "line": 183,
+      "note": "codexJudge.Call verified against the HTTP realJudge.Call arm in internal/fsm/judge/judge.go:475-492; named returns make the deferred Duration assignment effective, and the codex arm is only reachable via route() returning provCodex."
+    },
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 406,
+      "note": "DiffRuns checked field-by-field against spec 3 section 4 in docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:159-180: alignment key (node, iter, kind, input_hash), RawSame/DecisionSame/ConfidenceSame/Same semantics, transitions-by-ordinal, and the CommonPrefixSeq definition all match."
+    },
+    {
+      "path": "internal/fsm/machine/helpers_test.go",
+      "line": 38,
+      "note": "Every helper declared here is used outside the file (fileMode at internal/fsm/machine/machine_test.go:1393; appendBytes, writeBytes, symlink, chmod, mkdir, joinLines, badFile, timeDuration in machine_test.go/fork_test.go), so the unused linter has nothing to report."
+    },
+    {
+      "path": ".golangci.yml",
+      "line": 1,
+      "note": "golangci-lint v2.13.1 (the version pinned in .github/workflows/test.yml:59) run locally over ./internal/fsm/judge/... and ./internal/fsm/machine/... reports 0 issues under this config."
+    },
+    {
+      "path": "README.md",
+      "line": 7,
+      "note": "go test -cover for internal/fsm/{judge,machine,workflow} passes at 100.0% of statements; go.mod declares go 1.26, matching the README's revised Go-version claim at README.md:85."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/still-present.plain.golden",
+      "line": 1,
+      "note": "Golden is the unfenced (calibration) rendering; the untrusted-looking tokens in it are deliberate test inputs and the fenced variant is what non-calibration calls use (Fence: !snap.Calibration, internal/fsm/machine/machine.go:1061)."
+    },
+    {
+      "path": "internal/fsm/workflow/testdata/cmds-preimage.json",
+      "line": 1,
+      "note": "Pure test fixture for the allowed-cmds hash preimage; no executable path is taken from it at runtime."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "README.md:7 inserts the new 'Workflow runs' bullet ABOVE the sentence that introduces the list ('metareview is for any moment where a human or coding agent needs a second, structured pass...', README.md:9). The bullet is orphaned between the '## Use Cases' heading and the lead-in, so the section now reads as one stray bullet followed by an introduction to a second list.",
+      "evidence": [
+        {
+          "path": "README.md",
+          "line": 7,
+          "note": "New bullet precedes the lead-in paragraph at README.md:9 that it should follow."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "README's newest release section is 'What Changed In 0.8.3' (README.md:55) while package.json declares version 0.9.0 and this branch ships the entire FSM feature set. The FSM appears only as a use-case bullet and an exit-code sentence; there is no 0.9.0 changelog section, so a reader of the README cannot tell what the released version added.",
+      "evidence": [
+        {
+          "path": "README.md",
+          "line": 55
+        },
+        {
+          "path": "package.json",
+          "line": 3,
+          "note": "\"version\": \"0.9.0\" against a README whose latest section is 0.8.3."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Model-id case handling is inconsistent between routing and wire rendering. route() lowercases before matching the 'codex/' prefix (internal/fsm/judge/judge.go:116-121), but wireModel strips the prefix with a case-sensitive strings.TrimPrefix, and validateCodex's empty-wire-model guard compares model == CodexPrefix exactly. A JUDGE var of 'Codex/gpt-5.6' therefore routes to the CLI arm, passes validation, and is handed to the CLI as '-m Codex/gpt-5.6' with the transport prefix still attached; the failure surfaces as an opaque 'codex exited N' (codex.go:212). The same asymmetry pre-exists for 'Anthropic/' and 'OpenAI/', so this is a consistency issue rather than a regression.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 202,
+          "note": "'-m', wireModel(r.Model) — wireModel trims case-sensitively while route() matched case-insensitively."
+        },
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 223,
+          "note": "validateCodex guards only the exact literal 'codex/', so a differently-cased prefix bypasses the empty-wire-model check."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The codex arm has no retry ladder: v.Attempts is hard-set to 1 and any non-zero exit or exec failure is returned immediately, while the HTTP arm retries up to MaxAttempts=5 with backoff. A transient CLI failure (a dropped OAuth refresh, a momentary spawn failure) that the HTTP providers would ride out fails the node outright. Call's doc comment promises comparable verdicts across providers but does not state this reliability asymmetry.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 194,
+          "note": "v.Attempts = 1 with no loop, versus the MaxAttempts ladder in internal/fsm/judge/judge.go:493-500."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "itoa (codex.go:284) mishandles math.MinInt: negation overflows, the digit loop never runs, and the result is a bare '-'. Dismissed as unreachable — both call sites pass a process exit status, which is 0-255 on every supported platform, and the helper is covered by internal/fsm/judge/codex_test.go:214.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 288,
+          "note": "neg := n < 0; n = -n overflows only for math.MinInt, which no exit status can be."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Report.Outcomes is declared [2]string with explicit string() conversions, while spec 3 section 4 declares [2]run.Outcome. The JSON is byte-identical because run.Outcome is a string type, but the Go API loses the type that would keep a caller from putting an arbitrary string in an outcome slot.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/diff.go",
+          "line": 365,
+          "note": "Outcomes [2]string here versus 'Outcomes [2]run.Outcome' at docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:164."
+        }
+      ]
+    }
+  ]
+}

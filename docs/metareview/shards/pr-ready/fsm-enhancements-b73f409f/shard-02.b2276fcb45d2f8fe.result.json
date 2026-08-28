@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-02.b2276fcb45d2f8fe",
+  "kind": "shard",
+  "shardId": "shard-02",
+  "shardHash": "b2276fcb45d2f8fe",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 637,
+      "note": "New HTTP/mock judge reviewed in full against the task-done rubric: no eval, no TODO/FIXME, no truncated context, no duplicated inventoried path."
+    },
+    {
+      "path": "internal/fsm/workflow/resolve.go",
+      "line": 203,
+      "note": "Var substitution, command pinning and consent digest reviewed; verified against internal/fsm/workflow/workflow.go and internal/fsm/machine/machine.go rather than from the diff alone."
+    },
+    {
+      "path": "internal/fsm/run/errors.go",
+      "line": 104,
+      "note": "Typed FoldError/StoreError codes and CodeFor mapping; Unwrap exposes the cause for ERR_APPEND_REJECTED."
+    },
+    {
+      "path": "internal/version/version.go",
+      "line": 3,
+      "note": "Version 0.8.2 to 0.9.0; cross-checked package.json, .claude-plugin/plugin.json, .claude-plugin/marketplace.json, .codex-plugin/plugin.json and CHANGELOG.md - all read 0.9.0, consistent."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/adjudicate.fenced.golden",
+      "line": 8,
+      "note": "Golden proves the nonce fence is sound: FenceBlock JSON-marshals the payload, so untrusted text carrying <<<END-<nonce> stays inside one quoted line and cannot close the fence, and {{1}}/{diff} in the value are not rescanned by format()."
+    },
+    {
+      "note": "Validation evidence: go vet ./internal/fsm/... ./internal/version/ is clean, and go test -cover reports 100.0% of statements for internal/fsm/judge, internal/fsm/workflow and internal/fsm/run, so every source file in this shard has relevant tests."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 115,
+      "note": "Checked the caller-var-into-argv risk from Resolve/ResolveCmds: init refuses unless AllowCustomCmds equals the resolved cmds_sha256, and fork.go:192 repeats the check, so a var that rewrites argv[0] still needs fresh human consent. Not a finding."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 277,
+      "note": "Checked the empty-argv panic suspicion at resolve.go argv[0]: parse rejects argv outside 1..MaxArgv, and collectRefs (workflow.go:603) rejects any undeclared $VAR in model/effort/params/argv, so Resolve cannot silently substitute an unknown var. Not a finding."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "checkURL never rejects a hostless base URL: url.Parse(\"https://\") yields scheme https with an empty Host and passes every guard, so a typo in ANTHROPIC_BASE_URL/OPENAI_BASE_URL produces \"https:///v1/messages\", which Do rejects as a transport error and the ladder retries all 5 attempts (1+2+4+8s of sleep) before surfacing what is really a fatal configuration error. A u.Host == \"\" check beside the userinfo check would fail it fast at New/Preflight time.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 197,
+          "note": "checkURL validates userinfo, path, query, fragment and scheme, but not that a host is present."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "attempt() discards the http.NewRequestWithContext error (hreq, _ := ...) and immediately dereferences hreq for Header.Set, so any request-construction failure is a nil-pointer panic rather than a typed ERR_JUDGE_* error. Currently unreachable because checkURL already url.Parse-es the base and the method is a constant, which is presumably why the branch is elided to keep 100% statement coverage - but the failure mode is a panic, not an error, if that ever stops holding.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 532,
+          "note": "hreq, _ := http.NewRequestWithContext(...) followed by hreq.Header.Set on the next line."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Verdict.Attempts is incremented at the top of the loop, before the backoff wait, so a context cancellation during the sleep returns a Verdict claiming one more attempt than was actually sent. The count is audited (LLMCallData is built from the Verdict in internal/fsm/cli/run.go), so the audit trail overstates attempts by one on every cancelled call. Setting v.Attempts after the backoff select would fix it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 497,
+          "note": "v.Attempts = attempt + 1 precedes the select on ctx.Done()/clock.After at lines 499-503."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Resolve substitutes $VAR only in string and []any params; a nested map[string]any param falls into the default branch and is copied verbatim, and paramRefs (workflow.go:638) has the same blind spot, so such a $VAR is neither validated as declared nor substituted and would reach the kind as the literal text \"$JUDGE\". Latent only: every kind registered today allows either no params or the single int param \"lenses\" (kind.go:260 validateLenses, kind.go:325 noParams), so no current workflow can hit it. Worth either recursing into maps or rejecting non-scalar params at parse time before a future kind accepts one.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/resolve.go",
+          "line": 82,
+          "note": "default branch assigns nn.Params[k] = v without substitution."
+        },
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 371,
+          "note": "node.Params[k] = v accepts any YAML value, including a nested mapping."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The calibration pin is only as strong as the workflow's use of $JUDGE: Resolve pins JUDGE/JUDGE_EFFORT among declared vars, and judge.validate independently enforces effort == medium under calibration, but nothing pins the model, so a node with a hardcoded model (say model: claude-opus-5) runs a calibration run against a non-reference judge while still being stamped Calibration in the audit. Note that validate also skips the Anthropic unknown-family check when calibration is set, so the hardcoded path is not even family-checked. Either refuse a calibration init whose resolved node models differ from CalibrationJudge, or state in the doc comment that hardcoded models are out of the pin's scope.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/resolve.go",
+          "line": 30,
+          "note": "pins map applies only to declared vars named JUDGE/JUDGE_EFFORT."
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 260,
+          "note": "validate enforces the calibration effort pin and skips the family check under calibration, but never checks the model against the reference judge."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead statement in the Anthropic legacy thinking branch: delete(body, \"temperature\") is immediately followed by body[\"temperature\"] = 1, so the delete has no observable effect on the marshalled body. Harmless, but it reads as if the intent was to drop temperature entirely and the following line contradicts it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 309,
+          "note": "delete(body, \"temperature\") then body[\"temperature\"] = 1 on the next line."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

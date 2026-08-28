@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-15-3.ba4668df4c4dabde",
+  "kind": "shard",
+  "shardId": "shard-15-3",
+  "shardHash": "ba4668df4c4dabde",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/taskdone/review.go",
+      "line": 262,
+      "note": "Reviewed the shard-pack wiring added to Create: plan, ingest, write, rollback, prune and GC ordering."
+    },
+    {
+      "path": "internal/taskdone/shardwiring_test.go",
+      "line": 186,
+      "note": "Read the new table test that claims to cover prune and gc housekeeping failures."
+    },
+    {
+      "path": "tests/coverage-floor.txt",
+      "line": 28,
+      "note": "internal/taskdone floor raised to 89.4 by this branch; go test ./internal/taskdone reports 81.9% package coverage locally, and go tool cover puts Create at 83.0% and ingestShardResults at 88.9%."
+    },
+    {
+      "note": "Verified against the working tree: go vet ./internal/taskdone is clean and go test ./internal/taskdone passes; an aggregated coverage profile over ./... was used to identify which new statements are never executed."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The 'gc' case of TestTaskDoneHousekeepingFailuresDoNotDiscardTheRun cannot fail. GC is only called when !result.Blocking (internal/taskdone/review.go:269-271), but every sharded task-done run in these tests emits a context-risk blocker, so packWriter.GC is never invoked: an aggregated coverage profile over ./... shows review.go:270 with count 0 across the whole test suite, and fakeWriter.gcErr therefore never reaches the code under test. The subtest is byte-for-byte equivalent to the 'prune' subtest and would still pass if a GC error were propagated as a run failure. The one place GC's absence is asserted is the negative check at shardwiring_test.go:177. Either drive a passing sharded run (supply shard results via found/ShardResultPaths so result.Blocking is false) or assert writer.collections == 1 in the gc case.",
+      "evidence": [
+        {"path": "internal/taskdone/review.go", "line": 269},
+        {"path": "internal/taskdone/shardwiring_test.go", "line": 190}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "fakeWriter.discoverErr and fakeWriter.found are dead test seams: no test ever sets them (grep over internal/taskdone/shardwiring_test.go finds only the declarations at lines 30-31 and the returns at line 56). As a result the Discover error propagation added by this diff (review.go:283-285 into Create at review.go:144-145) is never exercised, and neither is the manifest path where shard results are actually present, so manifestContext's Present/Verdict/ShardsCovered plumbing is only ever observed in its empty state from this package.",
+      "evidence": [
+        {"path": "internal/taskdone/review.go", "line": 283},
+        {"path": "internal/taskdone/shardwiring_test.go", "line": 31}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Rollback error handling is inconsistent between the two failure paths added here. The review-body failure path joins the rollback error onto the original (review.go:257-259), but the pack-write failure path discards it with '_ = packRollback()' (review.go:163-168). If the rollback of a failed pack write itself fails, the pack directory is left in a half-restored state with no signal in the returned error. The errors.Join branch at review.go:258 is also uncovered by any test.",
+      "evidence": [
+        {"path": "internal/taskdone/review.go", "line": 165},
+        {"path": "internal/taskdone/review.go", "line": 257}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

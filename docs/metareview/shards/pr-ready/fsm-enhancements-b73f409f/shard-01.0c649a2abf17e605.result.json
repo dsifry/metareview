@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-01.0c649a2abf17e605",
+  "kind": "shard",
+  "shardId": "shard-01",
+  "shardHash": "0c649a2abf17e605",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/contextprofile/shards.go",
+      "line": 188,
+      "note": "PlanShards rewritten to hash-bucket chunking; verified callers in internal/prready/review.go:106 and internal/taskdone/review.go:104 pass analysisGit.BranchFiles, matching the profile used for the oversize risk reason."
+    },
+    {
+      "path": "internal/fsm/record/record.go",
+      "line": 177,
+      "note": "appendRow read in full against internal/state/state.go:28 AppendJSONL, the other writer of the same .metareview/runs.jsonl file."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 112,
+      "note": "BranchFile.Bytes == len(Diff), so totalBytes/needBuckets and chunksOf agree on the same byte measure; no unit mismatch in the shard budget arithmetic."
+    },
+    {
+      "path": "internal/learnsource/source.go",
+      "line": 31,
+      "note": "CollectWithExcludes exists (internal/gitcontext/gitcontext.go:64) and pathspecArgs renders :(exclude) forms, so the shard-results exclusion is effective."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 137,
+      "note": "PlanShards returning an empty plan above maxBranchDiffBytes is not silent: riskReasons already raises ReasonDiffOversize for the same branch-file set."
+    },
+    {
+      "note": "go vet and go test pass for internal/contextprofile, internal/fsm/record, internal/learnsource, internal/epicsource; record.go is at 100% statement coverage, contextprofile at 78.1% with ShardPaths/ShardPlanMarkdown covered indirectly (internal/shardpack/shardpack.go:550, internal/reviewmanifest/manifest.go:286). Documented constants verified against code: 120000 (profile.go:23) and the 4000-byte untracked limit (gitcontext.go:17). fsm.md exit codes verified against machine.go:867-869 (DONE/STOPPED exit 1) and machine.go:685 (NEEDS_INPUT exit 3). No TODO/FIXME, no eval, no unsafe execution in this shard."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "runs.jsonl append is not atomic against the file's other writers. appendRow opens .metareview/runs.jsonl with O_RDWR (no O_APPEND) and writes at the offset returned by an earlier Seek(0,2), protected only by an advisory flock that no other writer takes: internal/state/state.go:32 AppendJSONL (used by artifactreview, epicready, taskdone, prready for the same file) opens O_APPEND with no lock. If a review gate appends between record's Seek and Write, record's row lands at a stale offset and overwrites the concurrent row, producing exactly the malformed line that readRows then rejects with ERR_RUNS_JSONL. The torn-tail repair path is worse: f.Truncate(t.offset) at record.go:218 uses an offset computed from a read taken earlier and will discard any row a non-locking writer appended in between. The comment at record.go:176 claims the flock makes this safe; it only serialises record against itself. Fix: write with O_APPEND (separate handle for the truncate), or make state.AppendJSONL take the same lock.",
+      "evidence": [
+        {"path": "internal/fsm/record/record.go", "line": 182, "note": "os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0o644) - no O_APPEND"},
+        {"path": "internal/fsm/record/record.go", "line": 221, "note": "Seek(0,2) then Write at that offset, outside any writer-wide lock"},
+        {"path": "internal/fsm/record/record.go", "line": 218, "note": "f.Truncate(t.offset) can drop a row appended after readRows"},
+        {"path": "internal/state/state.go", "line": 32, "note": "the other runs.jsonl writer: O_APPEND, no flock participation"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The incremental-re-review invariant documented in this same diff does not always hold. commands/review-task-done.md and docs/README.codex.md state that editing a file invalidates only that file's shard result, but the bucket width is derived from the total branch-diff size: bits = bucketBits(needBuckets(total, budget)) at shards.go:198. When a fix round pushes the shard count across a power of two (needBuckets 32 -> 33 gives bits 5 -> 6), every path is re-bucketed, every shard's chunk set changes, and every shard hash changes, invalidating all previously written results. The failure direction is safe (unmatched results are ignored, never wrongly credited), but the documented promise and the reviewer's cost model are wrong at those boundaries; the docs should state the caveat or the bit width should be pinned in the plan.",
+      "evidence": [
+        {"path": "internal/contextprofile/shards.go", "line": 198, "note": "bits derived from total bytes, so it moves as the branch grows"},
+        {"path": "internal/contextprofile/shards.go", "line": 109, "note": "bucketBits: smallest b with 2^b >= need"},
+        {"path": "commands/review-task-done.md", "line": 30, "note": "documents that only the edited file's shard is invalidated"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead API and unreachable guards in the rewritten shard planner. PlanSourceHash has no non-test caller (only internal/contextprofile/plan_test.go:87), and both its Profile parameter and PlanShards' own profile parameter are unused - PlanShards derives everything from branchFiles. needBuckets' budget <= 0 fallback is unreachable from its only caller, which normalises the budget first (shards.go:200-203), and it is the uncovered branch in the 60% coverage of that function. Either delete PlanSourceHash and the unused parameters or give them a caller.",
+      "evidence": [
+        {"path": "internal/contextprofile/shards.go", "line": 86, "note": "PlanSourceHash(_ Profile, files) - test-only, ignores its first parameter"},
+        {"path": "internal/contextprofile/shards.go", "line": 99, "note": "budget <= 0 fallback unreachable from PlanShards"},
+        {"path": "internal/contextprofile/shards.go", "line": 188, "note": "PlanShards' profile parameter is never read in the body"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The ERR_RUNS_JSONL detail keys are inconsistent, which matters because these fields are the machine-readable half of the error contract. The malformed-line case sets \"line\" to a line number (record.go:165) while the id-conflict case sets the same key to a run id (record.go:202). A consumer keying on \"line\" gets two incompatible value shapes; the conflict case should use a distinct key such as \"run\" or \"id\".",
+      "evidence": [
+        {"path": "internal/fsm/record/record.go", "line": 202, "note": "errs.E(..., \"line\", row.ID, \"reason\", \"id_conflict\")"},
+        {"path": "internal/fsm/record/record.go", "line": 165, "note": "errs.E(..., \"line\", fmt.Sprint(line), \"reason\", \"malformed\")"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "syscall.Flock and syscall.LOCK_EX do not exist on Windows or plan9, so this package cannot compile there. That matters because the npm wrapper falls back to compiling the Go source on the user's machine (cli/metareview.js:20 runs `go run ./cmd/metareview` when no packaged binary is present), and neither README.md nor INSTALL.md states a platform restriction. Pre-existing pattern (internal/fsm/run/store_jsonl.go:349 does the same), CI is ubuntu-only, so this is recorded rather than treated as new breakage - but a build-tagged no-op lock or a documented platform list would close it.",
+      "evidence": [
+        {"path": "internal/fsm/record/record.go", "line": 233, "note": "var flock = syscall.Flock - unavailable on windows/plan9"},
+        {"path": "cli/metareview.js", "line": 20, "note": "npm wrapper compiles the Go source when no packaged binary is present"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The transient-paths list added to docs/README.codex.md is now incomplete for this branch: it names .metareview/findings.jsonl, .metareview/runs.jsonl and .metareview/shards/, but not the .metareview/runs/ FSM run directories that the same branch introduces and that CLAUDE.md does list (including the .torn fragments record.go:212 writes under them). A reader following only the Codex README has no statement about that directory.",
+      "evidence": [
+        {"path": "docs/README.codex.md", "line": 59, "note": "transient list omits .metareview/runs/ while CLAUDE.md includes it"},
+        {"path": "internal/fsm/record/record.go", "line": 212, "note": "writes .metareview/runs/.torn fragments"}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

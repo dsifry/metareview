@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0b.33e5d765f12cc2a8",
+  "kind": "shard",
+  "shardId": "shard-0b",
+  "shardHash": "33e5d765f12cc2a8",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "blockingCount": 1,
+  "evidence": [
+    {
+      "path": "internal/fsm/run/store_jsonl.go",
+      "line": 190,
+      "note": "readRaw's hand-rolled read loop breaks on any error and returns partial bytes with a nil error"
+    },
+    {
+      "path": "internal/fsm/run/store_jsonl.go",
+      "line": 350,
+      "note": "Lock: flock failure other than EWOULDBLOCK returns without closing the opened lock descriptor"
+    },
+    {
+      "path": "internal/fsm/mockai/mockai.go",
+      "line": 86,
+      "note": "MaxFileBytes is enforced after os.ReadFile has already loaded the whole file into memory"
+    },
+    {
+      "path": "internal/reviewlog/reviewlog.go",
+      "line": 306,
+      "note": "isOpenBlocker now defers to findings.Blocks; verified against internal/findings/override.go:53, pending overrides block and granted ones do not - correct"
+    },
+    {
+      "path": "internal/state/state_test.go",
+      "line": 1,
+      "note": "closeFile seam and both tests verified against internal/state/state.go; go build, go vet and go test pass for every package in this shard"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "internal/fsm/run/store_jsonl.go:186-193 - readRaw loops on f.Read and breaks on ANY non-nil error, discarding it and returning the partial buffer with err == nil. A mid-file I/O error (EIO, a network filesystem hiccup, the exact class of failure the rest of this store defends against with fsync, O_NOFOLLOW and torn sidecars) therefore looks identical to a short file. splitLines (internal/fsm/run/store.go:112) then reports the truncated final line as a TornTail, prepareAppend rejects the append with ERR_AUDIT_TORN, and the documented recovery, RepairTail (store_jsonl.go:243-259), calls truncateTo(auditPath, torn.Offset) - permanently destroying the healthy tail of a durable audit log. The chain hash cannot detect this because the partial prefix verifies cleanly. Use io.ReadAll (or return rerr unless errors.Is(rerr, io.EOF)) so a read error surfaces as ERR_STORE_PATH. Note the inconsistency: this same PR adds internal/state/state_test.go specifically to prove Close errors are not swallowed, and internal/state/state.go:24 shows the project already uses a test seam when an error branch is otherwise hard to cover.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store_jsonl.go",
+          "line": 190,
+          "note": "n, rerr := f.Read(chunk); buf.Write(chunk[:n]); if rerr != nil { break } - rerr is never inspected or returned"
+        },
+        {
+          "path": "internal/fsm/run/store_jsonl.go",
+          "line": 252,
+          "note": "RepairTail truncates the audit file to torn.Offset, so a misdiagnosed short read becomes irreversible data loss"
+        },
+        {
+          "path": "internal/fsm/run/store.go",
+          "line": 112,
+          "note": "splitLines treats any unterminated trailing bytes as a TornTail with no way to distinguish a short read"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/store_jsonl.go:346-355 - the lock descriptor leaks when syscall.Flock fails with anything other than EWOULDBLOCK (ENOLCK, EINTR, EBADF). The EWOULDBLOCK branch closes f, but the generic `if err != nil { return nil, pathErr(0, err) }` branch does not, so a long-lived process that retries Lock accumulates open descriptors. Close f before returning in that branch.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store_jsonl.go",
+          "line": 353,
+          "note": "return nil, pathErr(0, err) with f still open when flock failed for a non-EWOULDBLOCK reason"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/mockai/mockai.go:82-89 - MaxFileBytes is documented as a cap because 'the peek reads it before the run is verified', but os.ReadFile completes first and the length check runs on the already-resident buffer. The cap therefore bounds what is parsed, not what is allocated: a multi-gigabyte judge.yaml is read into memory in full before being rejected. Stat the file, or read through an io.LimitReader of MaxFileBytes+1, to make the cap do what its comment claims.",
+      "evidence": [
+        {
+          "path": "internal/fsm/mockai/mockai.go",
+          "line": 86,
+          "note": "if len(raw) > MaxFileBytes runs after os.ReadFile has fully allocated the buffer"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/mockai/mockai.go:91 - yaml.NewDecoder(strings.NewReader(string(raw))) makes a full second copy of the file bytes for no reason; bytes.NewReader(raw) is equivalent and allocation-free. Related: the decoder consumes only the first YAML document, so a second '---' document in judge.yaml is silently ignored despite KnownFields(true) otherwise enforcing strictness.",
+      "evidence": [
+        {
+          "path": "internal/fsm/mockai/mockai.go",
+          "line": 91,
+          "note": "strings.NewReader(string(raw)) copies the whole buffer; only the first YAML document is decoded"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/contextprofile/plan_test.go:339-368 - TestBitsBoundaryRecutsAll calls t.Skip when its fixture does not cross a bits boundary, so a future change to bucketBits or the budget constants can silently disable the only test covering re-cut behaviour at the boundary; the fixture should assert the boundary is crossed instead. Minor, same file: TestOverBudgetBucketSplitsLocally:322 iterates a one-element slice literal to compute `target`, which reads as leftover scaffolding.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/plan_test.go",
+          "line": 347,
+          "note": "t.Skip on an unmet fixture precondition turns a regression into a silently skipped test"
+        },
+        {
+          "path": "internal/contextprofile/plan_test.go",
+          "line": 322,
+          "note": "for _, f := range []gitcontext.BranchFile{grown[3]} is a single-iteration loop over a literal"
+        }
+      ]
+    }
+  ]
+}

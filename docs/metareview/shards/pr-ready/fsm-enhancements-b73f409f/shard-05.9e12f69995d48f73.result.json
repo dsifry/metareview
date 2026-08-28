@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-05.9e12f69995d48f73",
+  "kind": "shard",
+  "shardId": "shard-05",
+  "shardHash": "9e12f69995d48f73",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": ".metareview/shards/pr-ready/fsm-enhancements-b73f409f/12b2842033a1731a/shard-05.md",
+      "line": 1,
+      "note": "Reviewed all 7 chunks in the pack (53129 of 60000 bytes, not truncated): test.yml, epicready/review.go, fsm/gate/git.go, two judge prompt goldens, fsm/run/golden_test.go, fsm/workflow/workflow_test.go."
+    },
+    {
+      "path": "internal/fsm/gate/git.go",
+      "line": 1,
+      "note": "Read the file in the repo; verified against internal/fsm/gate/gate_test.go, which covers RealExec spawn failure, scrubEnv, Cut boundaries, TreeHash pin, WorkTree/CommonDir error branches."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 356,
+      "note": "Verified by executing a scratch test in package run: marshalCanonical on the string \\ufffd (literal backslash-u-f-f-f-d) emits {\"k\":\"\\<U+FFFD>\"}, which json.Unmarshal rejects with 'invalid escape sequence'."
+    },
+    {
+      "path": "internal/epicready/review.go",
+      "line": 500,
+      "note": "Confirmed the removed ShardPlanMarkdown call was informational only: epic-ready never wrote shard packs (no pack-writing call site exists), and ShardPlanMarkdown's signature changed, so the call site had to change."
+    },
+    {
+      "note": "Ran gofmt -l, go vet and go test over internal/fsm/{gate,workflow,run} and internal/epicready: all clean and passing. No TODO/FIXME, no eval, no unsafe untracked source in the shard diff."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The canonical encoder this shard's new golden fixture pins can emit invalid JSON. internal/fsm/run/types.go:356 does bytes.ReplaceAll(out, []byte(`\\ufffd`), []byte(\"\\ufffd\")) over the already-encoded document, so a payload whose text contains the six literal characters \\ufffd (encoded by encoding/json as \\\\ufffd) has its trailing six bytes replaced, yielding \\<U+FFFD> — an invalid escape that json.Unmarshal refuses. Verified by running a scratch test in the package: output {\"k\":\"\\<U+FFFD>\"}, round trip fails with 'invalid escape sequence \\\\\\xef'. This is not hypothetical input: types.go itself contains that literal, so recording a diff of this repo as a run payload writes an unparseable line into the run log and breaks chain verification. The fix is to escape only when the six bytes are a real JSON escape (operate on the encoder output as JSON, not as raw text). internal/fsm/run/golden_test.go, added in this shard, is billed as the R4 regression fixture for canonical form but its happyLog corpus contains no such payload, so the case is unpinned.",
+      "evidence": [
+        {"path": "internal/fsm/run/types.go", "line": 356, "note": "bytes.ReplaceAll over encoded JSON corrupts an escaped literal backslash"},
+        {"path": "internal/fsm/run/golden_test.go", "line": 12, "note": "golden regression fixture for canonical form does not cover a payload containing the literal \\ufffd"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "golden_test.go fails badly rather than clearly on a drifted golden pair. The snapshot loop indexes stored[:i+1] while iterating the snapshots file, so a snapshots file with more lines than the log file panics with index out of range before the i != len(stored) guard is reached. Neither sc.Err() nor ws.Err() is checked, so a golden line over MaxLine (or a read error) silently shortens stored instead of failing the test — the same condition that then triggers the panic.",
+      "evidence": [
+        {"path": "internal/fsm/run/golden_test.go", "line": 55, "note": "stored[:i+1] is unbounded by len(stored)"},
+        {"path": "internal/fsm/run/golden_test.go", "line": 44, "note": "bufio.Scanner errors are never checked for either file"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The gate package doc claims RealExec runs git with 'config injection disabled', which overstates what it does. GIT_CONFIG_NOSYSTEM=1 suppresses only /etc/gitconfig; the user's global ~/.gitconfig is still read (GIT_CONFIG_GLOBAL is scrubbed but never pointed at /dev/null), and only diff.external, core.excludesFile, core.attributesFile and core.fsmonitor are neutralised with -c. WorkTree's `git add -A` path can therefore still run filter.<driver>.clean commands configured globally or via a repo .gitattributes. Separately, WorkTree writes blob objects for every tracked and untracked file into the repository object store on each call — the scratch index is temporary but the objects it creates are not.",
+      "evidence": [
+        {"path": "internal/fsm/gate/git.go", "line": 3, "note": "package doc says nothing here calls an LLM and config injection is disabled"},
+        {"path": "internal/fsm/gate/git.go", "line": 62, "note": "RealExec -c list and env do not disable the global config file"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Cancellation is reported as a git failure rather than as cancellation. RealExec converts any *exec.ExitError into (code, nil), so a context-cancelled git returns code -1 with err nil; runEnv then sees code not in {0,1} and produces ERR_GIT 'git <op> exited -1' instead of surfacing ctx.Err(). asExit also uses a bare type assertion where errors.As would be the robust form.",
+      "evidence": [
+        {"path": "internal/fsm/gate/git.go", "line": 71, "note": "ExitError is flattened to a code with err set to nil, losing the context error"},
+        {"path": "internal/fsm/gate/git.go", "line": 100, "note": "asExit type-asserts instead of using errors.As"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The epic-ready context section and the epic-ready reviewer message now disagree, and neither is asserted by a test. review.go:500 hardcodes 'Sharding is not applied to epic-ready reviews', while RunEpicReady still blocks with Expected: 'Epic closure is reviewed with complete branch context or an explicit shard plan' — a path epic-ready can no longer offer. internal/epicready has one test file (review_markdown_test.go) and none of its three tests touches contextMarkdown, so the new static text is executed by the behavioural suite but asserted nowhere.",
+      "evidence": [
+        {"path": "internal/epicready/review.go", "line": 500, "note": "new static Context Shard Plan section replacing the generated plan"},
+        {"path": "internal/reviewers/epicready.go", "line": 59, "note": "Expected still offers an explicit shard plan as the way out"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "CI runs the Go unit tests twice: the 'Unit tests' step runs `go test ./...`, and 'Behavioral suite and coverage gate' runs `npm test` -> tests/coverage.sh, whose first step is `go test -cover ./...`. Also, cancel-in-progress applies to pushes to main as well as pull requests, so a rapid second push to main cancels the run for the previous main commit, leaving that commit without a green result.",
+      "evidence": [
+        {"path": ".github/workflows/test.yml", "line": 14, "note": "cancel-in-progress: true covers the push-to-main trigger too"},
+        {"path": ".github/workflows/test.yml", "line": 60, "note": "go test ./... duplicated by the coverage gate step that follows"}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

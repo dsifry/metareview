@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0e-2-review",
+  "kind": "shard",
+  "shardId": "shard-0e-2",
+  "shardHash": "7f01aebf1bcfae70",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 1,
+      "note": "Whole new file reviewed (Init, Open/loadWith, advance, runNode, transitions, fail/finish, overflowHandler, Record, RecordLLMCall): no eval-like execution, no TODO/FIXME markers, diff complete and not truncated."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 338,
+      "note": "Suspected nil deref on log.Torn.Bytes in the --repair path is a false positive: deps.Store.RepairTail returns ERR_AUDIT_NOT_TORN first for both stores (store_jsonl.go:253, store_mem.go:112), so the dereference is unreachable when Torn is nil."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 807,
+      "note": "s.pred.Evaluate cannot be called on a nil predicate: TerminalFor is non-nil only for the loop-carrying state (workflow.go:729) and workflow.go:219 rejects a loop without a convergence block, so loadWith always set sess.pred."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 857,
+      "note": "failures[0] on the chosen==nil path cannot index an empty slice: validateGraph requires an outcome on every transition into a terminal state (workflow.go:487) and a non-empty Outgoing for the initial state, so a state with no outgoing edges already carries an Outcome and advance() returns at the terminal check before transitions()."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 850,
+      "note": "snap.OverflowHandled (machine.go:575) and s.st.OverflowHandled (machine.go:850) read the same field: run.FoldState embeds run.Snapshot (fold.go:11), so the promoted field is consistent, not two sources of truth."
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 103,
+      "note": "Shard plan/pack wiring: packs are written before the context markdown names them, packRollback runs on the Write error path and on the closure error path with errors.Join so the rollback error never masks the cause, and Prune/GC failures are deliberately non-fatal."
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 269,
+      "note": "The GC gate reads a settled value: result.Blocking is assigned inside the write closure (review.go:229) which runs to completion before the len(shardPlan.Shards) > 0 housekeeping block."
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 698,
+      "note": "branchOnlyGitContext now prefers the measured Branch*DiffBytes over len(git.Diff) so a truncated diff text no longer understates the size that drives sharding; the fallback still applies when the measurement is absent."
+    },
+    {
+      "path": "internal/prready/shardwiring_test.go",
+      "line": 1,
+      "note": "New prready shard wiring and ingestion paths are covered by shardwiring_test.go and shardingestion_test.go; go build ./..., go vet and go test on internal/prready and internal/fsm/machine are all clean."
+    },
+    {
+      "path": "tests/go/test-epic-ready-review.sh",
+      "line": 222,
+      "note": "grep -q ... && exit 1 is semantically equivalent to the previous ! grep -q under set -euo pipefail: the left operand of an && list is exempt from set -e, and the line is not the script's last command (a failure region follows at line 224), so the assertion still fails loudly only when the noise artifact leaks into the context pack."
+    },
+    {
+      "path": "testdata/fsm/scenarios/sdlc-loop-cmds/overflow-handler/judge.yaml",
+      "line": 1,
+      "note": "Mock scenario fixture is wired, not dead: tests/go/test-fsm.sh:207 and :210 init against scenarios/sdlc-loop-cmds/overflow-handler for the consent and overflow-handler paths. Declarative canned calls only, no live execution."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.template.jsonl",
+      "line": 1,
+      "note": "Test fixture only: three canonical audit events with @PREV@ placeholders consumed by testdata/oracle.sh to regenerate oracle.jsonl; no executable content."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "oracle.template.jsonl is a byte-sensitive hash-chain source but is not covered by .gitattributes, which only marks internal/fsm/judge/testdata/prompts/* and testdata/fsm/** as -text. On a checkout with core.autocrlf=true, testdata/oracle.sh would regenerate the chain over CRLF lines and the sha256 assertions in store_test.go:803 would fail with no hint at the cause. Non-blocking: the fixture is correct as committed, and the .gitattributes file itself is outside this shard.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/testdata/oracle.template.jsonl",
+          "line": 1,
+          "note": "Line-ending-sensitive fixture, no -text attribute covering internal/fsm/run/testdata/."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Init has no cleanup between Store.Create and the first successful append: if Sidecar.Write (machine.go:204) or Store.Lock (machine.go:207) fails, the run directory already exists with only the init event and no workflow sidecar, and every later Open fails at the sidecar read with ERR_WORKFLOW_CHANGED or a read error, leaving a run that can only be removed by hand. Non-blocking: run ids are time-derived so a retry does not collide, and the failure needs a store-level I/O error.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 204,
+          "note": "Sidecar.Write error path returns without removing the run created at machine.go:200."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two json.Decoder uses accept trailing content after the decoded value: RecordTokens (machine.go:992) and readGoldens (machine.go:273) call Decode once without a following dec.More()/io.EOF check, so '{\"input\":1} garbage' is recorded as valid tokens. The sibling RecordEvent path routes through run.Canonical instead, so the strictness is inconsistent between record kinds. Non-blocking: the accepted value is still a well-formed prefix and the trailing bytes are discarded rather than stored.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 992,
+          "note": "dec.Decode(&tok) with DisallowUnknownFields but no trailing-data check."
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 273,
+          "note": "dec.Decode(&goldens) has the same single-value decode without a trailing-data check."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

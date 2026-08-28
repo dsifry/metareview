@@ -351,9 +351,16 @@ func marshalCanonical(v any) []byte {
 	out = bytes.ReplaceAll(out, []byte("\u2028"), []byte(`\u2028`))
 	out = bytes.ReplaceAll(out, []byte("\u2029"), []byte(`\u2029`))
 	// Invalid UTF-8 becomes U+FFFD either way, but the two releases disagree on
-	// its written form: 1.26.7 emits the six-byte \ufffd escape, 1.27 the raw
-	// three-byte rune. CapText budgets three, so raw is the form to settle on.
-	return bytes.ReplaceAll(out, []byte(`\ufffd`), []byte("\ufffd"))
+	// its written form: 1.26.7 emits the six-byte escape, 1.27 the raw rune.
+	//
+	// Settled on the escaped form, like the two above, because the direction
+	// matters more than the choice. Every pass here only ever ADDS an escape,
+	// which cannot change what the payload says. Going the other way — turning
+	// an escape into a raw rune — rewrites text the payload itself contained:
+	// a value holding the six literal characters of the escape came out as a
+	// lone backslash before a raw rune, which is not valid JSON, and left the
+	// run unrecordable. CapText budgets six to match.
+	return bytes.ReplaceAll(out, []byte("\ufffd"), []byte(`\ufffd`))
 }
 
 var runIDPattern = regexp.MustCompile(`^mrv-[A-Za-z0-9-]{8,200}$`)

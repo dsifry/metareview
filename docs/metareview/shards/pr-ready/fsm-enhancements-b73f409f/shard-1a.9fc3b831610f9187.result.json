@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1a.9fc3b831610f9187",
+  "kind": "shard",
+  "shardId": "shard-1a",
+  "shardHash": "9fc3b831610f9187",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 356,
+      "note": "marshalCanonical unconditionally rewrites the six bytes \\ufffd to a raw U+FFFD; reproduced with a scratch test that Canonical() then emits invalid JSON."
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 26,
+      "note": "Canonical() routes every event payload through marshalCanonical, so the rewrite reaches every audit line."
+    },
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 105,
+      "note": "parseLines fails the whole run with ERR_AUDIT_CHAIN 'undecodable' when any stored line will not decode."
+    },
+    {
+      "path": "internal/fsm/run/canonical_test.go",
+      "line": 134,
+      "note": "Escape coverage exercises raw U+FFFD and \\xff but never a literal backslash followed by ufffd, which is why the defect ships green."
+    },
+    {
+      "path": "internal/fsm/gate/gate_test.go",
+      "line": 390,
+      "note": "TMPDIR restore reads os.TempDir() after TMPDIR was already clobbered, so it restores the bogus value."
+    },
+    {
+      "path": "docs/index.html",
+      "line": 742,
+      "note": "Paragraph added after the closing footer tag, outside main and outside every .wrap container."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 364,
+      "note": "go build and go test ./internal/fsm/... pass on the branch; findings below are behavioural, not build breaks."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "internal/fsm/run/types.go:356 corrupts the audit chain. marshalCanonical ends with bytes.ReplaceAll(out, []byte(`\\ufffd`), []byte(\"\\ufffd\")), rewriting the literal six-byte sequence backslash-u-f-f-f-d anywhere in the encoded output. That sequence also occurs as the tail of a legitimately escaped backslash: a payload string containing the text `\\ufffd` encodes as `\\\\ufffd`, and the replacement matches at offset 1, yielding a lone backslash followed by a raw U+FFFD rune. That is not a valid JSON escape. Reproduced: Canonical(`{\"issue_text\":\"the JSON escape \\\\ufffd is emitted\"}`) returns bytes for which json.Valid is false, so Canonical violates its own documented contract (canonical.go:15-17: 'valid JSON ... Canonical is idempotent'). Because Canonical output is what Append writes and LineHash hashes, one such payload — trivially reachable, since findings/node_output/stderr carry arbitrary reviewer and diff text, and this very branch's docs discuss \\ufffd — writes an undecodable line into the run log. parseLines (store.go:105) then rejects the entire run with ERR_AUDIT_CHAIN 'undecodable' on every subsequent read, and RepairTail only handles an unterminated tail, not a bad interior line, so the run is unrecoverable. Compounding it: the replacement is dead for its stated purpose on the toolchain in use — go1.27's encoder already writes invalid UTF-8 as a raw three-byte U+FFFD (verified), so the branch only ever fires on false positives.",
+      "evidence": [
+        {"path": "internal/fsm/run/types.go", "line": 356, "note": "the ReplaceAll that produces the invalid escape"},
+        {"path": "internal/fsm/run/canonical.go", "line": 26, "note": "Canonical returns marshalCanonical output for every payload"},
+        {"path": "internal/fsm/run/store.go", "line": 105, "note": "undecodable line fails the whole chain"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The U+FFFD arm of marshalCanonical is untested. canonical_test.go's toolchain-independence table covers U+2028/U+2029 only, and the escape round-trip list at canonical_test.go:134 uses a raw replacement char and a raw \\xff byte — neither of which reaches the replacement. No test feeds a literal backslash-ufffd, so the corruption above is invisible to the suite. Any fix should land with that case pinned.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical_test.go", "line": 134, "note": "escape cases that miss the replacement branch"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/types.go:364 double-quotes the run id: fmt.Errorf(\"invalid run id %q\", strconv.Quote(id)) applies %q to an already-quoted string, so a bad id renders as invalid run id \"\\\"foo\\\"\". Either drop strconv.Quote or use %s.",
+      "evidence": [
+        {"path": "internal/fsm/run/types.go", "line": 364, "note": "%q applied to strconv.Quote output"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/store.go:188 hardcodes DefaultMaxEvents in prepareCreate instead of the store's configured Options.MaxEvents, unlike Append (store_mem.go:74, store_jsonl.go:231, which pass s.opts.maxEvents()). Benign today because TypeInit is not a counted type, so the cap can never fire at seq 1 — but it is a silent divergence from the MaxEvents() contract documented at store.go:68 and will bite if the init envelope ever becomes counted.",
+      "evidence": [
+        {"path": "internal/fsm/run/store.go", "line": 188, "note": "prepareCreate ignores the configured cap"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/store.go:155-161 recomputes the counted-event total by json.Unmarshal-probing every previously stored line on each counted append. Combined with the jsonl store re-reading the whole audit file per append, appending N events is O(N^2) in both bytes and JSON parses; at the DefaultMaxEvents ceiling of 100,000 that is on the order of 5e9 line probes for one run. A counted-event tally carried in FoldState would make it O(1).",
+      "evidence": [
+        {"path": "internal/fsm/run/store.go", "line": 158, "note": "per-append full rescan with lineType JSON probe"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/gate/gate_test.go:390 does not restore TMPDIR as intended. Line 386 sets TMPDIR to a non-existent directory; line 390's t.Setenv(\"TMPDIR\", os.TempDir()) reads os.TempDir(), which on unix returns $TMPDIR — the bogus path just set — so it re-sets the broken value rather than restoring the original. Harmless only because t.Setenv unwinds at test end; capture os.TempDir() before line 386 (or drop line 390 and rely on t.Setenv's own restore) so the intent matches the behaviour.",
+      "evidence": [
+        {"path": "internal/fsm/gate/gate_test.go", "line": 390, "note": "restore reads the already-clobbered variable"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "docs/index.html:742 inserts the new metareview fsm paragraph after </footer>, directly under <body> — outside <main>, outside the footer, and outside every .wrap container the page's CSS styles. It will render as unstyled full-bleed text below the footer. Move it into a section inside <main> or into the footer's .wrap div.",
+      "evidence": [
+        {"path": "docs/index.html", "line": 742, "note": "orphan paragraph after the closing footer"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "docs/0.8.0-candidates.md cites its entire evidence base through an absolute path on one developer's machine (/Users/dsifry/Developer/harnesseval, line 3) and repeatedly instructs readers not to run the verification yet ('DO NOT TEST until the harnesseval batch ... finishes'). As a committed repository document, none of the numbers can be re-derived by anyone else and the operational embargo has no expiry marker. Prefer a relative/URL reference to the lab and a dated status line.",
+      "evidence": [
+        {"path": "docs/0.8.0-candidates.md", "line": 3, "note": "absolute machine-local path as the sole evidence source"},
+        {"path": "docs/0.8.0-candidates.md", "line": 22, "note": "committed do-not-test embargo without an expiry"}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

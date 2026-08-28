@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1f.d79135b79fb4dbe5",
+  "kind": "shard",
+  "shardId": "shard-1f",
+  "shardHash": "d79135b79fb4dbe5",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cli/prompt.go",
+      "line": 5,
+      "note": "New file: one exported const AgentPrompt assembled by string concatenation, no exec, no format verbs. Verified live, not by inspection: built ./cmd/metareview and ran `metareview fsm --agent-prompt`; output is byte-identical to testdata/fsm/agent-prompt.golden (cmp clean), which is what tests/go/test-fsm.sh:59-60 asserts."
+    },
+    {
+      "path": "tests/go/agent-prompt-anchors.txt",
+      "line": 1,
+      "note": "All 29 anchor lines (18 prose + 11 subcommand names) are present verbatim in the emitted prompt; test-fsm.sh:66 requires >= 20. The forbidden-phrase grep at test-fsm.sh:69 does not match the prompt's 'the results are not deterministic' sentence."
+    },
+    {
+      "path": "internal/fsm/cli/run.go",
+      "line": 113,
+      "note": "Drift check of the prompt against the real CLI: every subcommand the prompt documents (init|state|advance|record|gate|judge|converge|diff|export|workflows) exists in the dispatch switch at run.go:49-71, and every flag it names is in the parse list at run.go:87 and run.go:113. Env names METAREVIEW_JUDGE_MODEL/EFFORT and ANTHROPIC_BASE_URL/OPENAI_BASE_URL match wiring.go:28-32, and the codex/ prefix matches judge/codex.go:16. No documentation drift found."
+    },
+    {
+      "path": "internal/fsm/cmdexec/sha_test.go",
+      "line": 8,
+      "note": "New test-only helper file containing sha256Sum and no Test function. Legitimate: it is consumed by cmdexec_test.go:239 and :293, the package compiles, `go vet ./internal/fsm/...` is clean, and `go test ./internal/fsm/cmdexec/` passes at 100.0% statement coverage. Test-only files do not enter the coverage profile."
+    },
+    {
+      "path": "internal/sessionhistory/sessionhistory.go",
+      "line": 224,
+      "note": "Behaviour-preserving change: `defer file.Close()` becomes `defer func() { _ = file.Close() }()` on a read-only path, which is correct (a Close error on a read handle carries no caller-actionable information) and satisfies errcheck. Package tests pass."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md",
+      "line": 30,
+      "note": "Documentation-only 439-line design spec for already-shipped work; no executable content. Spot-verified its concrete claims against the tree rather than trusting the prose: the v4 hash domain separators of section 3 exist verbatim (gitcontext/branchfiles.go:141, contextprofile/shards.go:77,126,167,178,246), internal/shardpack exists, and section 7's learnsource exclusion is implemented at learnsource/source.go:31."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Missed sibling in the branch's own scanner-buffer hardening. Spec section 7 of this very diff raises four JSONL readers from the default 64 KiB bufio.Scanner cap to 1 MiB, and the tree confirms exactly those four were changed (state.go:66, runchain.go:114, findings.go:478, reviewlog.go:290). readJSONLSignal, the function this diff touches, still uses a bare bufio.NewScanner (sessionhistory.go:226) even though it is the one reader that parses foreign Claude Code / Codex transcripts, where >64 KiB lines are routine: 17 such lines exist in this session's own transcript. On a hit, scanner.Err() returns ErrTooLong, which propagates through collectSignals -> Collect -> learning/review.go:69 and hard-fails `learn-post-merge` instead of degrading to 'no signal'. Kept low, not medium, because the loop returns on the first parseable line, so the long line must precede any content-bearing line: an empirical probe of readJSONLSignal over all 1003 real ~/.claude/projects/*/*.jsonl transcripts on this machine produced 0 errors. Latent, not currently firing.",
+      "evidence": [
+        {"path": "internal/sessionhistory/sessionhistory.go", "line": 226},
+        {"path": "internal/learning/review.go", "line": 69},
+        {"path": "internal/state/state.go", "line": 66}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "The rubric blocks on TODO/FIXME markers added by the diff. The one hit in this shard is the string `TODO` inside a prose test-name description in the spec ('a `TODO` beyond 120 KB is found'), describing a lint fixture. It is not a code marker and no source file in this shard contains TODO or FIXME.",
+      "evidence": [
+        {"path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md", "line": 367}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}
