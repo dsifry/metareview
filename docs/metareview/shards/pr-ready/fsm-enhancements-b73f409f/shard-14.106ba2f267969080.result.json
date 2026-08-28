@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-14-106ba2f267969080-claude-opus-5",
+  "kind": "shard",
+  "shardId": "shard-14",
+  "shardHash": "106ba2f267969080",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T06:35:47Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 113,
+      "note": "The production fix the final test in this shard pins is present: the node_output branch now propagates the Canonical(p.Output) error as ReasonBadPayload instead of discarding it, so a payload with no output key is refused at fold rather than surfacing later at kind.Decode."
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 30,
+      "note": "rejectDuplicateKeys backs the duplicate-key init row at fold_test.go:577 ('\"vars\":{},\"vars\":{}' expecting ReasonBadPayload); encoding/json alone would accept that document, so the assertion is real and not accidental."
+    },
+    {
+      "path": "internal/fsm/run/builder.go",
+      "line": 130,
+      "note": "Builder.Events() returns a defensive copy, so the slice surgery in TestFoldNoOps (fold_test.go:511) and the append-based mutation helpers (fresh/rechain) cannot alias and corrupt the source log — checked because several tests append to a slice returned by Events()."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 42,
+      "note": "MaxText is 4<<10, so the (MaxText-2)/2 escaped-newline cap row in TestFoldCaps divides exactly; the at-cap/one-over pair is not silently degenerate for that row."
+    },
+    {
+      "path": "docs/quickstart.md",
+      "line": 60,
+      "note": "The doc chunk's new pointers resolve: docs/fsm/driving-a-workflow.md exists, and the exit-code summary (3 = do the node's work, 1 + GATE_FAILED = run resume_hint) matches CLAUDE.md; the durable/local split it adds for docs/metareview/shards/ vs .metareview/shards/ and .metareview/runs/ matches the contract stated in CLAUDE.md."
+    },
+    {
+      "note": "go test ./internal/fsm/run/ -cover reports ok at 100.0% of statements; gofmt -l and go vet on the package are both clean. No TODO/FIXME markers, no eval or other unsafe execution, and no untracked source files are introduced by either chunk in this shard."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 'nil-free JSON' guard in TestFoldHappyPath is structurally dead and can never fail. It reads `if strings.Contains(js, \"null\") && !strings.Contains(js, \"\\\"prev_unfixed\\\":null\")`. Snapshot.PrevUnfixed is `*int` with tag `json:\"prev_unfixed\"` and no omitempty (types.go:225), and the same test asserts three lines earlier that s.PrevUnfixed is nil on the happy path — so the snapshot JSON always contains `\"prev_unfixed\":null`, the second operand is always false, and the conjunction is unconditionally false. Any other null that appeared in the snapshot encoding would pass unnoticed. The four explicit key checks that follow (`\"lineage\":[]`, `\"goldens\":[]`, `\"warnings\":[]`, `\"vars\":{}`) are what actually pin the invariant, and they cover only four of the containers; the guard reads as broader coverage than exists. Low, not blocking: the invariant is partially pinned elsewhere and no production behaviour depends on it.",
+      "evidence": [
+        {"path": "internal/fsm/run/fold_test.go", "line": 117, "note": "the conjunction whose second operand is always false"},
+        {"path": "internal/fsm/run/fold_test.go", "line": 106, "note": "the same test requires s.PrevUnfixed to be nil, which is what makes the guard dead"},
+        {"path": "internal/fsm/run/types.go", "line": 225, "note": "prev_unfixed has no omitempty, so nil always encodes as null"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestFoldFixBaseline declares a `mk` closure that builds a run whose fix transition carries an Origin, never calls it, and silences the compiler with `_ = mk` at the end of the function. It is leftover scaffolding: every case in the body constructs its builder inline (bp, b2, b3, b4), and the `_ = mk` line is the only thing keeping the file compiling. Dead code in a test that otherwise reads as an exhaustive rule table, and the `_ =` idiom hides it from vet and from the 100%-coverage gate (a closure that is never invoked has no statements to cover).",
+      "evidence": [
+        {"path": "internal/fsm/run/fold_test.go", "line": 365, "note": "mk closure declared and never invoked"},
+        {"path": "internal/fsm/run/fold_test.go", "line": 413, "note": "_ = mk silences the unused-variable error"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestFoldRefusesANodeOutputWithNoOutput — the regression test for the fold.go:113 fix — asserts only that Fold returns a non-nil error, while every other negative case in this file goes through expectReason and pins reason, code, seq and type. The path under test is narrow (Data replaced with `{}` on the last event, no rechain), so several unrelated rejections would satisfy it: a future stricter envelope or chain check, an oversize path, or a decode-level refusal would all keep the test green while the specific ReasonBadPayload behaviour the comment describes regressed. Using expectReason(t, evs, ReasonBadPayload, int64(len(evs)), TypeNodeOutput) would make the test say what its own doc comment claims.",
+      "evidence": [
+        {"path": "internal/fsm/run/fold_test.go", "line": 1143, "note": "err == nil is the whole assertion"},
+        {"path": "internal/fsm/run/fold_test.go", "line": 158, "note": "expectReason, the helper used by every other negative case in the file"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Checked whether the caps table in TestFoldCaps is self-consistent about canonical byte accounting, since a wrong constant there would make both the at-cap and one-over rows vacuous. The `esc` helper repeats '<' and comments that canonical keeps it literal; Canonical's contract (canonical.go:15-17) does leave HTML characters as literal UTF-8, so '<' costs one byte and MaxText-2 / MaxDesc-2 / MaxShort-2 correctly reserve the two quote bytes. The escaped row uses '\\n' at two bytes, matching encodedRuneLen (canonical.go:129). The Payload row's `MaxPayload - len(\"{\\\"name\\\":\\\"r\\\",\\\"data\\\":\\\"\\\"}\")` equals MaxPayload-22, which is exactly the canonical envelope of the record payload. Every row's at-cap side is accepted and its one-over side rejected in a real run, so no row is degenerate.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 16, "note": "canonical form keeps HTML characters literal"},
+        {"path": "internal/fsm/run/canonical.go", "line": 129, "note": "encodedRuneLen charges two bytes for \\n"},
+        {"path": "internal/fsm/run/fold_test.go", "line": 700, "note": "the esc/nl helpers and the per-row caps they feed"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Checked the mutation helpers for aliasing that would make TestFoldProvenance and TestFoldPrefixesAndMutations silently test the wrong bytes. `fresh` deep-copies each Event's Origin pointer, so the five provenance mutations (evs[2].Origin.RunID etc.) cannot leak back into the shared parent log; `rechain` renumbers Seq and recomputes Prev over canonical lines and touches nothing else; and every `append(fresh(x), ...)` site starts from a slice whose len equals its cap, so the append always allocates rather than writing into a neighbouring event. The 'Apply must not mutate its input' check is also meaningful rather than tautological: Apply's copy-on-write state is compared against an independent re-fold of the same prefix, so a shared map would be caught.",
+      "evidence": [
+        {"path": "internal/fsm/run/fold_test.go", "line": 660, "note": "fresh deep-copies Origin"},
+        {"path": "internal/fsm/run/fold_test.go", "line": 673, "note": "rechain renumbers Seq and Prev only"},
+        {"path": "internal/fsm/run/fold.go", "line": 57, "note": "Apply's cow() state, which the prefix test's non-mutation check exercises"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-08.3502422b052c3811",
+  "kind": "shard",
+  "shardId": "shard-08",
+  "shardHash": "3502422b052c3811",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 18,
+      "note": "Canonical() traced by hand over object/array/nested/empty-container token streams; rejectDuplicateKeys is balanced for every valid-JSON shape and the tok.(string) assertion is unreachable for non-strings because the '}' case is handled first."
+    },
+    {
+      "path": "internal/fsm/run/canonical_test.go",
+      "line": 20,
+      "note": "Dedicated unit tests exist for the new file (TestCanonicalNormalForm, TestCanonicalRejects, idempotency, toolchain independence); `go test ./internal/fsm/run/ -cover` reports 100.0% of statements, satisfying the repo's coverage gate."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 345,
+      "note": "marshalCanonical cross-checked: SetEscapeHTML(false) leaves <>& literal, and it explicitly ReplaceAll-escapes U+2028, U+2029 and U+FFFD after compaction."
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 199,
+      "note": "CapText budget verified against marshalCanonical for every class: 2 bytes for \" \\\\ \\n \\r \\t, 6 for C0 controls and U+2028/9, 6 forced for utf8.RuneError (both a raw invalid byte and a genuine U+FFFD encode to the six-byte escape), 1 for DEL and HTML characters since escaping is off. cut advances by DecodeRuneInString size, so the cut is always on a UTF-8 boundary."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 129,
+      "note": "OutputHash's documented empty-string-hash fallback checked against its only comparison site: Apply rejects a non-canonicalizable NodeOutputData at fold.go:113 and machine.go:980/1008 rejects it at record time, so the invalid/nil hash collision is never reachable in a comparison. NodeOutputData.Output is json.RawMessage, so stored bytes round-trip verbatim and the hash is stable."
+    },
+    {
+      "path": "testdata/fsm/scenarios/review-loop/reviewed/judge.yaml",
+      "line": 3,
+      "note": "Fixture is exercised by tests/go/test-fsm.sh:198-201, which asserts DONE exit 1, outcome=reviewed and counts.confirmed=1, matching the fixture's header comment; expect_model gpt-5.2 matches VARS (--var JUDGE=gpt-5.2) resolving workflows/review-loop.yaml's adjudicate model."
+    },
+    {
+      "path": "docs/tasks/pr-b-slice-3.md",
+      "line": 1,
+      "note": "Docs-only task file; no TODO/FIXME markers, no unsafe execution, no duplicated service, and no untracked source introduced anywhere in this shard."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stale doc contract on an exported function: internal/fsm/run/canonical.go:16 states the canonical form leaves \"HTML characters and U+2028/U+2029 left as literal UTF-8\", but only the HTML half is true. marshalCanonical (internal/fsm/run/types.go:351-352) escapes U+2028/U+2029 to \\u2028/\\u2029, and canonical_test.go:27 pins that escaped form as expected. Since Canonical's bytes feed OutputHash and are stored on the event log, a reader trusting the comment would mispredict hash-affecting output. No behavioral impact - the implementation and tests agree with each other, only the comment is wrong.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 16},
+        {"path": "internal/fsm/run/types.go", "line": 351},
+        {"path": "internal/fsm/run/canonical_test.go", "line": 27}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "CapText reports truncation that did not occur for the empty string: internal/fsm/run/canonical.go:200-202 returns (\"\", true) whenever max < 2, without first checking s == \"\", even though \"\" encodes to exactly two bytes and nothing was cut. Currently unreachable - every caller passes MaxShort (1024) or larger, and kind.go:141 within() only forwards those constants - so this is latent rather than live, but the boolean is the truncated flag several call sites branch on (cmdexec.go:142, machine.go:284).",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 200},
+        {"path": "internal/fsm/kind/kind.go", "line": 141}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-16.9a6754e268731d9e",
+  "kind": "shard",
+  "shardId": "shard-16",
+  "shardHash": "9a6754e268731d9e",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cli/deps.go",
+      "line": 102,
+      "note": "realCodexExec exit-path handling reviewed against judge.CodexExec contract in internal/fsm/judge/codex.go:21-24"
+    },
+    {
+      "path": "internal/fsm/kind/decision.go",
+      "line": 48,
+      "note": "adjudicate effective rule checked against kind.AdjudicateThreshold (internal/fsm/kind/kind.go:46) and the live path at kind.go:471"
+    },
+    {
+      "path": "commands/review-pr-ready.md",
+      "line": 6,
+      "note": "documented flags verified against cmd/metareview/main.go:195-199 and internal/prready/review.go:36-39; duplicate shard result blocker exists at internal/reviewmanifest/manifest.go:414"
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 106,
+      "note": "doc claim that --include-working-tree adds local content to context but not to shards verified: PlanShards runs over analysisGit.BranchFiles only"
+    },
+    {
+      "note": "go test ./internal/fsm/cli/... ./internal/fsm/kind/... -cover reports 100.0% of statements in both packages; deps.go seams and the three realCodexExec exit paths are exercised via internal/fsm/cli/judgeoverride_test.go:70-95"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "realCodexExec never sets cmd.Stderr, so the Codex CLI's stderr is discarded to /dev/null. On a nonzero exit the only diagnosis surfaced is judge/codex.go:69 'codex exited N' with no message from the process, making CLI-provider failures (bad model id, auth expiry, sandbox refusal) opaque. Capturing stderr into a capped buffer and folding it into the transport error would cost nothing in the success path.",
+      "evidence": [
+        {"path": "internal/fsm/cli/deps.go", "line": 102, "note": "cmd.Stdout is set, cmd.Stderr is left nil"},
+        {"path": "internal/fsm/judge/codex.go", "line": 69, "note": "error text is exit code only, no process output"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "A codex process killed by a signal (context deadline/cancel via exec.CommandContext, or an OOM kill) returns an *exec.ExitError whose ExitCode() is -1, so realCodexExec reports (code=-1, err=nil) and codexJudge renders CodeJudgeTransport 'codex exited -1' rather than a cancellation/timeout error. Not a hang risk (the retry ladder selects on ctx.Done at judge.go:534), but the failure is misclassified for the operator and for any exit-code-based triage.",
+      "evidence": [
+        {"path": "internal/fsm/cli/deps.go", "line": 107, "note": "errors.As(*exec.ExitError) branch returns ee.ExitCode() with a nil error, which is -1 for signal death"},
+        {"path": "internal/fsm/judge/judge.go", "line": 534, "note": "ctx.Done is honoured by the retry ladder, bounding the impact"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "newHTTPClient does an unchecked type assertion http.DefaultTransport.(*http.Transport), which panics if any imported package replaces http.DefaultTransport (instrumentation/record-replay libraries do). This contradicts the RealDeps doc comment 'binds every seam to its real implementation and nothing else; it cannot fail'. The clone-and-nil-Proxy idiom is the one prior artifact review asked for, so this is a robustness/doc-accuracy note, not a design objection; a comma-ok assertion with a fresh &http.Transport{} fallback closes it.",
+      "evidence": [
+        {"path": "internal/fsm/cli/deps.go", "line": 88, "note": "unchecked assertion inside newHTTPClient"},
+        {"path": "internal/fsm/cli/deps.go", "line": 55, "note": "RealDeps doc comment claims it cannot fail"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The adjudicate 'real bug' rule is now encoded twice in package kind: kind.Decision computes is_real AND confidence >= AdjudicateThreshold for the diff/report path, while the live adjudicate executor recomputes v.ParseError == \"\" && v.Decision && v.Confidence >= AdjudicateThreshold. The two are consistent today (both treat an absent confidence as 0), but the executor also requires an empty ParseError, which Decision cannot see; a future change to either arm can drift silently and make a diff report disagree with the run it describes. Extracting one predicate would remove the duplication.",
+      "evidence": [
+        {"path": "internal/fsm/kind/decision.go", "line": 48, "note": "eff = r && conf >= AdjudicateThreshold"},
+        {"path": "internal/fsm/kind/kind.go", "line": 471, "note": "real := v.ParseError == \"\" && v.Decision && v.Confidence >= AdjudicateThreshold"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

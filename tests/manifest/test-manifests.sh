@@ -63,7 +63,21 @@ for (const required of ["docs/quickstart.md", "docs/README.codex.md", "docs/READ
 }
 if (!fs.readFileSync("LICENSE", "utf8").startsWith("MIT License")) throw new Error("LICENSE must contain MIT text");
 if (!JSON.stringify(pkg).includes("post-merge-learning")) throw new Error("package metadata does not advertise post-merge learning");
-if (!JSON.stringify(pkg).includes("Go 1.26")) throw new Error("package metadata does not describe Go runtime expectation");
+// The Go floor is stated in five places and go.mod is the one that enforces it.
+// Reading it from there and asserting every artifact carries the same number is
+// what stops the drift this check used to permit: it pinned package.json alone,
+// so both plugin manifests advertised Go 1.22+ — a floor `go 1.26` cannot build —
+// while three sibling files had already moved.
+const goFloor = (fs.readFileSync("go.mod", "utf8").match(/^go (\d+\.\d+)$/m) || [])[1];
+if (!goFloor) throw new Error("go.mod does not declare a go directive");
+for (const artifact of ["package.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "INSTALL.md", "README.md"]) {
+  const text = fs.readFileSync(artifact, "utf8");
+  const stated = [...text.matchAll(/Go (\d+\.\d+)\+/g)].map((m) => m[1]);
+  if (stated.length === 0) throw new Error(`${artifact} states no Go floor`);
+  for (const found of stated) {
+    if (found !== goFloor) throw new Error(`${artifact} advertises Go ${found}+ but go.mod requires ${goFloor}`);
+  }
+}
 if (pkg.scripts.build !== "go build -o bin/metareview ./cmd/metareview") throw new Error("package build script must create bin/metareview");
 if (pkg.scripts.prepack !== "npm run build") throw new Error("package prepack must build the packaged binary");
 '

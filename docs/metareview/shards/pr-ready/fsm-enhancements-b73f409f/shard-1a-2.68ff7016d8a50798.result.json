@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1a-2.68ff7016d8a50798",
+  "kind": "shard",
+  "shardId": "shard-1a-2",
+  "shardHash": "68ff7016d8a50798",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/reviewers/lintscope_test.go",
+      "line": 8,
+      "note": "New test file pins the lint-scope rules in internal/reviewers/taskdone.go (addedLines, addedSourceLines, addedUntrackedLines, lintable, diffHeaderPath, postImagePath). Every helper and every finding title the tests reference was verified to exist in taskdone.go (evalPattern:92, todoPattern:93, addedLines:350, lintable:434, diffHeaderPath:458, firstMatching:485, titles at 133 and 163), so no assertion is vacuous through a stale symbol."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 408,
+      "note": "The untracked-record contract the test pins from the consuming side was verified at the producer: internal/gitcontext/gitcontext.go:454 untrackedExcerpt() prefixes every content line with '+' and emits a single '--- <rel>' header, and untracked paths come from `git ls-files --others` (gitcontext.go:132) without -z, so git C-quotes any path containing a newline. Content cannot forge a '--- ' record header and redirect the lint scope."
+    },
+    {
+      "path": "internal/reviewers/lintscope_test.go",
+      "line": 10,
+      "note": "The eval/TODO markers are assembled at run time ('eval' + '(' and 'TO' + 'DO') and the fixtures use marker-free placeholders, so this file does not itself trip evalPattern (\\beval\\s*\\() or todoPattern. Checked every added line for an accidental literal match; there is none, and no FIXME appears."
+    },
+    {
+      "path": "tests/go/test-shardpack-coverage.sh",
+      "line": 22,
+      "note": "Coverprofile field indexing is correct: profile rows are '<file>:<range> <numStmts> <count>', so `NR > 1 && $3 == 0` selects zero-hit blocks and NR>1 skips the 'mode:' header. The empty-profile guard at line 16 catches a package that produced no blocks. Executed the script: 'shardpack coverage: 100% (178 blocks)'."
+    },
+    {
+      "path": "testdata/fsm/scenarios/sdlc-loop/injection/judge.yaml",
+      "line": 3,
+      "note": "Scenario file matches the schema used by testdata/fsm/scenarios/sdlc-loop/happy/judge.yaml (kind/node/iter/index/raw/tokens; expect_model optional) and is consumed by tests/go/test-fsm.sh:225. The single adjudicate row with is_real:false drives the injection run to DONE as the harness expects."
+    },
+    {
+      "path": "tests/go/test-shardpack-coverage.sh",
+      "line": 1,
+      "note": "Both new scripts are wired into the runner: tests/run-all.sh:20 invokes test-shardpack-coverage.sh and tests/run-all.sh:46 invokes test-fsm.sh, so neither is dead. `go test ./internal/reviewers/` passes with the new file."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "tests/go/test-shardpack-coverage.sh:11 discards go test stdout to /dev/null, so when the build or a test fails the script prints only 'shardpack coverage: go test failed' and the actual compiler/test output is lost. Diagnosing a CI failure then requires re-running the command by hand. Redirecting to a temp file and cat-ing it on the failure branch would keep the signal at no cost to the quiet success path.",
+      "evidence": [
+        {"path": "tests/go/test-shardpack-coverage.sh", "line": 11, "note": "go test output discarded on the failure path"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/reviewers/lintscope_test.go:61 asserts through RunTaskDone only negatively (no eval/TODO finding on documentation). A negative-only assertion still passes if RunTaskDone stopped invoking the lints altogether, and every other case in this file asserts against the unexported helpers (addedLines/firstMatching) rather than the reviewer entrypoint. The risk is mitigated — internal/reviewers/taskdone_test.go:20 and internal/reviewers/prready_test.go:31 do assert the 'Unsafe eval introduced' finding positively end to end — so this is a robustness note, not a coverage hole.",
+      "evidence": [
+        {"path": "internal/reviewers/lintscope_test.go", "line": 61, "note": "negative-only RunTaskDone assertion; positive path covered in taskdone_test.go:20"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The injection scenario this judge.yaml feeds is titled 'fenced values never appear raw in instructions' (tests/go/test-fsm.sh:224), but the only assertion made over the audit log is that some llm_call row exists (tests/go/test-fsm.sh:235). The injected payload is never searched for in the recorded prompt, so the scenario would pass even if the untrusted finding text were interpolated raw into the judge instructions. judge.yaml itself is correct and schema-conformant; the missing assertion lives in test-fsm.sh, which belongs to a different shard, so this is recorded here only as the data-side observation.",
+      "evidence": [
+        {"path": "testdata/fsm/scenarios/sdlc-loop/injection/judge.yaml", "line": 3, "note": "scenario data whose consuming assertion in test-fsm.sh:235 checks only that an llm_call row exists"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

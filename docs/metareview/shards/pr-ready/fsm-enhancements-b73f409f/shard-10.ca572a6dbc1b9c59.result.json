@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-10.ca572a6dbc1b9c59",
+  "kind": "shard",
+  "shardId": "shard-10",
+  "shardHash": "ca572a6dbc1b9c59",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+      "line": 1,
+      "note": "Spec 3 r5 reviewed section by section (fork algorithm, VerifyOrigin, Diff, Export redaction table, runs.jsonl record, errors, test matrix, ledger); normative body is internally consistent and matches the shipped implementation on every claim checked."
+    },
+    {
+      "path": "internal/fsm/machine/fork.go",
+      "line": 41,
+      "note": "Escalation rule verified against spec §2 step 0 / §6: Escalated(snap) = Attempt >= MaxAttempts(3) AND Outcome != \"\" AND !PassOutcome, computed from the run's own chained snapshot as the spec states."
+    },
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 162,
+      "note": "commonPrefix compares (Type, Node, At, Data) and ignores Origin/Seq/Prev, matching spec §4 (line 174) and test row F7 (line 315)."
+    },
+    {
+      "path": "internal/fsm/record/record.go",
+      "line": 212,
+      "note": "Torn-fragment destination is <root>/.metareview/runs/.torn/runs.jsonl-<nanos>, matching spec §6 (line 251) and F9 (line 317)."
+    },
+    {
+      "path": "internal/fsm/run/event.go",
+      "line": 49,
+      "note": "All 16 entries of run.EventTypes are accounted for by the §5 redaction table (init, tree, needs_input, node_output, delta_applied, llm_call, cmd_call, gate, converge, transition, fix_baseline, tokens, record, warn, overflow_handler, fork); the table's 'every event type' claim holds."
+    },
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 58,
+      "note": "The owned run amendments named in spec §1 are actually present: RunStore.TornFiles/MaxEvents (store.go:67-68), run.Counted (store.go:72), Snapshot.WorkflowSource (types.go:200)."
+    },
+    {
+      "path": "internal/fsm/cli/judgeoverride_test.go",
+      "line": 451,
+      "note": "Test file verified against the real implementation: judgeOverride precedence flag->env with TrimSpace (wiring.go:154-166), applyJudgeOverrideFor calibration rule (wiring.go:266-289), realCodexExec's three exit paths incl. codexBin seam (deps.go:93-114). Assertions match behaviour; no t.Parallel anywhere in package cli, so the codexBin global mutation is race-free."
+    },
+    {
+      "path": "docs/tasks/m7-fork-record-export.md",
+      "line": 1,
+      "note": "Task card scopes M7 to spec 3 r5 with a 100%-coverage + go vet done-condition; no TODO/FIXME markers anywhere in this shard, no unsafe execution constructs, and the diff is not truncated."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The r5 changelog header contradicts the spec's own normative body and the shipped code on CommonPrefixSeq. Line 30 says the tuple 'includes Origin presence', but §4 (line 174) says Origin/Seq/Prev are ignored, F7 (line 315) asserts CommonPrefixSeq == ForkedAtSeq with 'Origin/Prev ignored', and machine/diff.go:162-172 compares only (Type, Node, At, Data). Implementing the header literally would make every parent/child pair report CommonPrefixSeq == 1, since copied child events carry Origin and the parent's do not. Line 22 (r4 header) adds a third variant, '(Type, Node, Data)', dropping the At component that the §4 rationale relies on to stop the child's fresh tree event from extending the prefix.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 30,
+          "note": "r5 header: 'CommonPrefixSeq tuple includes Origin presence'"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 174,
+          "note": "normative body: Origin, Seq and Prev are ignored"
+        },
+        {
+          "path": "internal/fsm/machine/diff.go",
+          "line": 166,
+          "note": "shipped comparison: Type, Node, At, Data only"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Same header/body split for the torn-tail filename: line 24 says the torn tail is preserved to 'runs.jsonl.torn-<ts>' (a sibling of runs.jsonl), while §6 line 251 and F9 line 317 say '.metareview/runs/.torn/runs.jsonl-<unixnano>', which is what record.go:212-216 actually writes. The header path is also the one location that would NOT be self-ignored by the .torn/ directory convention the body relies on.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 24,
+          "note": "header: runs.jsonl.torn-<ts>"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 212,
+          "note": "code: filepath.Join(root, \".metareview\", \"runs\", \".torn\")"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Manifest.Bytes is documented as 'sum of all written files' (spec line 189), but export.go:79 defines it as 'every written file except manifest.json itself'. A reader verifying a bundle by summing the on-disk file sizes will get a mismatch equal to the manifest's own size. Either the spec comment or the field's meaning should be corrected; the manifest is explicitly evidence-for-a-reader, so the definition is load-bearing.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 189,
+          "note": "Bytes int64 /* sum of all written files */"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 79,
+          "note": "Bytes int64 `json:\"bytes\"` // every written file except manifest.json itself"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two Go signatures in §4/§5 drifted from the shipped types: the spec declares 'type ExportOptions struct' and 'Export(ctx, deps, runID, opts ExportOptions)' (lines 187-188) whereas export.go:56-64 names it 'Options'; and 'Report.Outcomes [2]run.Outcome' (line 163) is '[2]string' in diff.go:17. Both are cosmetic for behaviour but make the spec's code blocks non-compiling as written, which matters because the spec is the durable reference for M7.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 187,
+          "note": "spec: type ExportOptions struct"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 56,
+          "note": "code: type Options struct"
+        },
+        {
+          "path": "internal/fsm/machine/diff.go",
+          "line": 17,
+          "note": "code: Outcomes [2]string, spec says [2]run.Outcome"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The §5 snapshot.json paragraph enumerates only a subset of run.Snapshot's 44 fields (Vars, AllowedCmds, RepoRoot/WorkDir, TreeStatus, LastError.Detail, StopReason, NodeOutputs, Goldens/Confirmed/AllFound/Findings, SchemaVersion), while the r4 header (line 20) claims the mirror 'lists every field'. Fields such as Status, Warnings, Applied, NodesRun, Tokens, MockTainted, FixEntryHead are unlisted. The stated reflection test does fail closed on new fields, so this is a documentation gap rather than a behavioural one. Related: tree.status / Snapshot.TreeStatus is a string in run.types.go:218 but exported as a []string path list, so the redacted snapshot is not a run.Snapshot; the spec says this for audit lines but not for snapshot.json.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 20,
+          "note": "r4 header: 'snapshot.json mirror lists every field'"
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 218,
+          "note": "TreeStatus string `json:\"tree_status,omitempty\"` — exported as a []string path list"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

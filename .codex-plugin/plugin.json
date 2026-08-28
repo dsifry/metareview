@@ -22,7 +22,7 @@
   "interface": {
     "displayName": "metareview",
     "shortDescription": "Internal review harness, adversarial gates, and post-merge learning for Codex",
-    "longDescription": "Use metareview to run metaswarm-compatible internal reviews over specs, plans, decompositions, artifacts, task-done code changes, acceptance evidence, PR readiness, and post-merge learning with durable Markdown artifacts and JSONL state. Packaged releases use a built Go binary; source checkout mode requires Go 1.22+. metareview fsm drives sdlc-loop and review-loop workflow runs with auditable, swappable judge calls.",
+    "longDescription": "Use metareview to run metaswarm-compatible internal reviews over specs, plans, decompositions, artifacts, task-done code changes, acceptance evidence, PR readiness, and post-merge learning with durable Markdown artifacts and JSONL state. Packaged releases use a built Go binary; source checkout mode requires Go 1.26+. metareview fsm drives sdlc-loop and review-loop workflow runs with auditable, swappable judge calls.",
     "developerName": "David Sifry",
     "category": "Coding",
     "capabilities": [

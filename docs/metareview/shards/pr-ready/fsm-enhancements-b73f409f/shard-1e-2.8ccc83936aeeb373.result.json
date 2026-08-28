@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1e-2.8ccc83936aeeb373",
+  "kind": "shard",
+  "shardId": "shard-1e-2",
+  "shardHash": "8ccc83936aeeb373",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "tests/coverage-floor.txt",
+      "line": 1,
+      "note": "New per-package floor file; header documents the regeneration command `bash tests/coverage.sh --update-floor`, which matches the actual --update-floor branch in tests/coverage.sh."
+    },
+    {
+      "path": "tests/coverage.sh",
+      "line": 96,
+      "note": "Verified consumer of the floor file: internal/fsm/* and workflows require every statement covered; all other packages are compared against their floor line, and packages with no floor line are reported as 'no floor' but not enforced. The 28 floor lines cover every non-fsm package except internal/version, which is const-only (no statements) and therefore never appears in the merged profile."
+    },
+    {
+      "path": "tests/go/test-git-context.sh",
+      "line": 58,
+      "note": "Assertion lowered to 'invalid git base'. Verified against internal/gitcontext/gitcontext.go:305,319,327 which now emit lowercase 'invalid git base: ...'; the pre-branch base commit 61ffdf72 emitted 'Invalid git base'. grep is case-sensitive, so the test update is required, not cosmetic, and it still fails if the message regresses."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 305,
+      "note": "Confirmed all three error sites were lowercased consistently (ST1005 style), so no other shell assertion in tests/ is left matching the old capitalization."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The floor lines are pinned to the exact measured percentages (e.g. internal/learnsource 70.8, internal/contextpack 76.1) with no slack, so any sub-0.1% coverage drift fails the gate. tests/coverage.sh mitigates this by exporting the go.mod-pinned GOTOOLCHAIN, and --update-floor refuses to lower a line without --allow-floor-decrease, so this is an accepted tightness rather than a defect.",
+      "evidence": [
+        {
+          "path": "tests/coverage-floor.txt",
+          "line": 16,
+          "note": "internal/learnsource 70.8 - zero-slack floor line"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-ad4e2d5d0ca31e04-20260828T064054Z",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T06:40:54Z",
+  "evidence": [
+    {
+      "note": "Reviewed the 51-shard seam surface for cross-cutting drift only: repeated claims corrected in some files and not others, exported doc comments vs their implementation, duplicated logic across sibling packages, and contract statements restated in several documents. Verified every suspicion against the working tree rather than against shard prose."
+    },
+    {
+      "note": "Cross-checked the release/runtime metadata set (go.mod, package.json, INSTALL.md, README.md, both plugin manifests, tests/manifest/test-manifests.sh) and the artifact-policy set (CLAUDE.md, AGENTS.md, docs/README.claude.md, docs/README.codex.md, docs/quickstart.md, INSTALL.md, README.md, skills/status/SKILL.md, commands/status.md) file by file."
+    },
+    {
+      "note": "Cross-checked the FSM driver contract as stated in commands/fsm.md, skills/fsm/SKILL.md, docs/fsm/driving-a-workflow.md, CLAUDE.md, AGENTS.md, README.md, docs/quickstart.md, tests/go/agent-prompt-anchors.txt and testdata/fsm/agent-prompt.golden: the exit table, GATE_FAILED/resume_hint wording, the subcommand list and the 120,000-byte sharding threshold all agree with internal/fsm/cli/run.go and internal/contextprofile."
+    },
+    {
+      "path": "go.mod",
+      "line": 3
+    },
+    {
+      "path": ".claude-plugin/plugin.json",
+      "line": 4
+    },
+    {
+      "path": ".codex-plugin/plugin.json",
+      "line": 25
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 16
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 351
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 204
+    },
+    {
+      "path": "internal/taskdone/review.go",
+      "line": 167
+    },
+    {
+      "path": "CHANGELOG.md",
+      "line": 7
+    },
+    {
+      "path": "internal/fsm/cli/prompt.go",
+      "line": 43
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The supported Go floor was raised to 1.26 in three files and left at 1.22 in the two shipped plugin manifests. go.mod:3 declares `go 1.26` with a comment stating it is 'the oldest Go someone can install with'; INSTALL.md:9, README.md:85 and package.json:52 were all edited on this branch to say 'Go 1.26+'. But .claude-plugin/plugin.json:4 and .codex-plugin/plugin.json:25 — both edited on this branch, to add the FSM wording to the very same sentence — still say 'source checkout mode requires Go 1.22+'. These are the descriptions users read when installing the plugin, so a user on Go 1.22-1.25 is told the checkout will work and gets a toolchain error instead. Nothing catches it: tests/manifest/test-manifests.sh:66 asserts only that package.json contains the string 'Go 1.26', and no manifest test looks at either plugin.json. Per-shard review cannot see this — the corrected copies are in shard-03/shard-12/shard-0f and the stale copies in shard-07/shard-1d, and each reads as internally consistent. (.agents/plugins/marketplace.json:9 carries the same stale 1.22 claim but is outside this diff.)",
+      "evidence": [
+        {
+          "path": ".claude-plugin/plugin.json",
+          "line": 4
+        },
+        {
+          "path": ".codex-plugin/plugin.json",
+          "line": 25
+        },
+        {
+          "path": "go.mod",
+          "line": 3
+        },
+        {
+          "path": "INSTALL.md",
+          "line": 9
+        },
+        {
+          "path": "package.json",
+          "line": 52
+        },
+        {
+          "path": "tests/manifest/test-manifests.sh",
+          "line": 66
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The exported doc comment on run.Canonical and spec 2 both state the opposite of what the encoder now does with U+2028/U+2029. internal/fsm/run/canonical.go:16 documents Canonical as producing bytes 'with HTML characters and U+2028/U+2029 left as literal UTF-8', and docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:122 repeats it ('`<>&` and U+2028/9 left as literal UTF-8'), but Canonical routes through marshalCanonical, which since the cross-toolchain fix escapes both runes unconditionally (internal/fsm/run/types.go:351-352), and the fixtures agree (internal/fsm/run/testdata/oracle.jsonl:2 stores `x\\u2028y` escaped; canonical_test.go:198-200 asserts the escaped form). The implementation is the correct half — the escaping is what makes the audit chain stable across Go 1.26/1.27 — but the exported contract for a function whose output is hashed now misdescribes its own bytes, and the spec's R2b acceptance row is written against the old rule. Only the definition is stale, in two shards away from the implementation (canonical.go in shard-08 and the spec in shard-18; types.go in shard-1a), so no per-shard reviewer sees both sides.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/canonical.go",
+          "line": 16
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 351
+        },
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 122
+        },
+        {
+          "path": "internal/fsm/run/testdata/oracle.jsonl",
+          "line": 2
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The Codex-CLI judge is a third provider that exists only in the driver prompt. internal/fsm/judge/codex.go adds a `codex/` model family judged through the Codex CLI on the local OAuth session, needing no API key, with its own effort vocabulary (codex.go:29 accepts none/minimal/low/medium/high/xhigh/max, against judge.go:101's low/medium/high/xhigh for the HTTP providers). It is described in internal/fsm/cli/prompt.go:43-44 and therefore in testdata/fsm/agent-prompt.golden:39-40, and nowhere else: CHANGELOG.md:7 still tells the reader that 0.9.0's judge calls are '(Anthropic and OpenAI-compatible)', and skills/fsm/SKILL.md, commands/fsm.md and docs/fsm/driving-a-workflow.md only ever show `--var JUDGE=gpt-5.2` / `claude-opus-5`. The one no-API-key path — the easiest judge for a new user to reach — is invisible to everyone who does not read `fsm --agent-prompt`, and the release note for the release that adds it is now an incomplete provider list. Every file involved sits in a different shard (codex.go in shard-12, prompt.go in shard-1f, the golden in shard-10-3, CHANGELOG.md in shard-1e, the skill in shard-19, the command in shard-01, the guide in shard-13).",
+      "evidence": [
+        {
+          "path": "CHANGELOG.md",
+          "line": 7
+        },
+        {
+          "path": "internal/fsm/cli/prompt.go",
+          "line": 43
+        },
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 29
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 101
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The commit/keep artifact policy is restated in nine places and the 0.9.0 additions reached only four of them. CLAUDE.md:69, AGENTS.md:77-83, INSTALL.md:131 and README.md:242 all now name `docs/metareview/fsm/` as durable and `.metareview/runs/` as transient-and-self-ignoring. The other five copies, all edited on this branch and all describing the same policy, still list the pre-0.9 set: docs/quickstart.md:71-79 (commit list, no fsm bundles) and :84-89, skills/status/SKILL.md:27-28, commands/status.md, docs/README.claude.md:52 and docs/README.codex.md:59. The `/status` surfaces are the ones that matter most, because their whole job is to tell the user which of the current generated artifacts to commit, and an `fsm export` bundle is exactly a current generated artifact they will not mention. shard-00 caught the skills/status/SKILL.md instance in isolation; the pattern — a majority-corrected claim with a stale minority — is only visible across shards.",
+      "evidence": [
+        {
+          "path": "docs/quickstart.md",
+          "line": 71
+        },
+        {
+          "path": "skills/status/SKILL.md",
+          "line": 27
+        },
+        {
+          "path": "AGENTS.md",
+          "line": 77
+        },
+        {
+          "path": "CLAUDE.md",
+          "line": 69
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/taskdone and internal/prready carry the shard wiring as two hand-maintained copies rather than one shared path, and the copies have already begun to diverge in their defects. The pack-write block (taskdone/review.go:151-171 vs prready/review.go:197-217), the rollback-on-failure block (:257-261 vs :279-283), the Prune/GC housekeeping block (:262-272 vs :285-295) and ingestShardResults (:278-301 vs :300-323) are line-for-line equivalents down to identical comment text, differing only in the scope string and the target id. The consequence is concrete: all three findings shard-15-3 raised against internal/taskdone/review.go apply verbatim to internal/prready/review.go — the same `_ = packRollback()` that discards the rollback error on the pack-write path (prready:204) beside the same errors.Join on the review-body path (prready:280), and the same GC call that only runs when !result.Blocking. shard-0e-2, which held prready/review.go, raised none of them. A fix applied to one twin will silently leave the other, and no test asserts the two stay in step.",
+      "evidence": [
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 167
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 204
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 257
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 280
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

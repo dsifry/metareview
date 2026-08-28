@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0b.36c1f1f1728cc20e",
+  "kind": "shard",
+  "shardId": "shard-0b",
+  "shardHash": "36c1f1f1728cc20e",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/store_jsonl.go",
+      "line": 1,
+      "note": "New on-disk JSONL run store reviewed in full: id validation, symlink-refusing path checks, O_NOFOLLOW opens, create/append/repair/list/lock. Covered by internal/fsm/run/store_test.go (16 tests incl. TestJSONLTornTail, TestJSONLLockContentionAndPathErrors, TestTornFiles, TestReadRawSurfacesAMidFileReadFailure)."
+    },
+    {
+      "path": "internal/fsm/mockai/mockai.go",
+      "line": 77,
+      "note": "Scenario loader reviewed: strict YAML (KnownFields), duplicate call-key and cmd-key rejection, token bounds via run.TokenTotals.Negative/TooLarge, sha256 identity. Tests present at internal/fsm/mockai/mockai_test.go (TestS1Load, TestS3Runner, TestLoadTooLarge)."
+    },
+    {
+      "path": "internal/reviewlog/reviewlog.go",
+      "line": 305,
+      "note": "isOpenBlocker now delegates to findings.Blocks; verified against internal/findings/override.go:53-55, which returns true for \"open\" and StatusOverridePending, matching the comment that a pending override still blocks and a granted one does not. readFindings still returns scanner.Err() (reviewlog.go:301), so the enlarged buffer cannot silently truncate the findings log."
+    },
+    {
+      "path": "go.mod",
+      "line": 15,
+      "note": "go.sum additions match the single new dependency gopkg.in/yaml.v3 v3.0.1 declared in go.mod; check.v1 is that module's test-only requirement. No unexplained modules."
+    },
+    {
+      "path": "internal/contextprofile/plan_test.go",
+      "line": 1,
+      "note": "Shard-planning tests derive hashes from the documented length-prefixed preimage rather than from the implementation, and assert budget, split, and incremental-stability properties. No source change in this shard lacks tests: internal/state/state.go, internal/contextprofile/shards.go, internal/fsm/run/store_jsonl.go, internal/fsm/mockai/mockai.go and internal/fsm/errs all have companion _test.go files."
+    },
+    {
+      "path": ".gitattributes",
+      "line": 1,
+      "note": "The -text attributes pin the byte-exact prompt and FSM fixture directories; both internal/fsm/judge/testdata/prompts and testdata/fsm exist in the tree, so neither pattern is dead. No TODO/FIXME markers and no eval-style dynamic execution anywhere in this shard's diff."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "File-descriptor leak in Lock: if syscall.Flock fails with anything other than EWOULDBLOCK (ENOLCK, EINTR, EBADF), the function returns at store_jsonl.go:357-359 without closing the lock file opened at line 349. Only the EWOULDBLOCK branch (line 353-356) closes it. Rare, and the process usually exits soon after, but a long-lived driver retrying Lock would accumulate descriptors.",
+      "evidence": [
+        {"path": "internal/fsm/run/store_jsonl.go", "line": 357, "note": "err != nil path returns without f.Close()"},
+        {"path": "internal/fsm/run/store_jsonl.go", "line": 353, "note": "only the EWOULDBLOCK branch closes the descriptor"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "fsyncDir discards every error, including the Sync failure itself. Create calls it for both the run directory and the runs directory and then reports success, so on a filesystem where the directory entry never reaches stable storage the store still tells the caller the run was durably created. The file writes themselves are checked (writeLine fsyncs and returns the error), so only the directory-entry half of the durability claim is unverified.",
+      "evidence": [
+        {"path": "internal/fsm/run/store_jsonl.go", "line": 124, "note": "fsyncDir has no error return and swallows Open/Sync failures"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "MaxFileBytes is enforced after the whole file is already in memory: os.ReadFile at mockai.go:77 loads judge.yaml unbounded and only line 81 rejects it for being over 512 KB. The cap is documented as protecting a peek that happens before the run is verified, so it should be applied while reading (io.LimitReader over an opened file, or a Stat size check) rather than after. Exploitability is nil in practice — the scenario directory is as trusted as the checkout — so this is robustness, not a vulnerability.",
+      "evidence": [
+        {"path": "internal/fsm/mockai/mockai.go", "line": 77, "note": "os.ReadFile precedes the size cap"},
+        {"path": "internal/fsm/mockai/mockai.go", "line": 81, "note": "cap checked only after the full read"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TornFiles maps every os.ReadDir failure to ERR_RUN_NOT_FOUND (store_jsonl.go:39-41), so a permission error or an I/O error on an existing run directory is reported to the operator as a missing run. The sibling read at line 48 correctly uses pathErr; this one should distinguish os.IsNotExist from other failures the same way readRaw does at line 181-184.",
+      "evidence": [
+        {"path": "internal/fsm/run/store_jsonl.go", "line": 40, "note": "all ReadDir errors become CodeRunNotFound"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The JSONL line-cap idiom is copy-pasted verbatim — the same five-line comment, the same const maxJSONLLineBytes = 1 << 20, and the same scanner.Buffer(make([]byte, 0, 64*1024), maxJSONLLineBytes+2) — into internal/reviewlog, internal/state, internal/runchain and internal/findings, while three other JSONL readers (internal/epicsource/epicsource.go:86, internal/sessionhistory/sessionhistory.go:226, internal/knowledge/knowledge.go:73) keep bufio's 64 KiB default. The reasoning is subtle enough (why +2, why bufio rejects a token equal to the maximum) that it belongs in one shared helper; four independent copies will drift, and the readers left out are an inconsistency rather than a deliberate exclusion. Not a correctness defect here: all four copies return scanner.Err(), so an over-long line surfaces as an error rather than as silently dropped rows.",
+      "evidence": [
+        {"path": "internal/reviewlog/reviewlog.go", "line": 21, "note": "one of four verbatim copies of the constant and its comment"},
+        {"path": "internal/reviewlog/reviewlog.go", "line": 290, "note": "duplicated scanner.Buffer sizing"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestBitsBoundaryRecutsAll can turn itself into a no-op: if the hand-built fixture stops crossing a bucket-bits boundary (a change to bucketBits, needBuckets, or the budget constants would do it), the test calls t.Skip at plan_test.go:260 and reports success while asserting nothing. A skip on a fixture the test itself constructs hides exactly the regression the test exists to catch; the fixture should be sized so the boundary crossing is guaranteed, and the precondition asserted with t.Fatal instead.",
+      "evidence": [
+        {"path": "internal/contextprofile/plan_test.go", "line": 260, "note": "t.Skip on a self-constructed fixture"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead construct in TestOverBudgetBucketSplitsLocally: `for _, f := range []gitcontext.BranchFile{grown[3]}` is a one-element loop whose only effect is to assign `target`, and it re-derives the bucket id inline instead of naming it. It reads as the residue of an earlier multi-file version and should be a straight assignment.",
+      "evidence": [
+        {"path": "internal/contextprofile/plan_test.go", "line": 235, "note": "single-iteration range loop assigning target"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Portability: store_jsonl.go uses syscall.O_NOFOLLOW and syscall.Flock with no //go:build constraint and no non-POSIX counterpart, so the package (and therefore cmd/metareview) does not compile on Windows. The npm package declares no `os` restriction and INSTALL.md documents a `go run ./cmd/metareview` fallback, so a Windows user would hit a compile error rather than a clear unsupported-platform message. CI is ubuntu-only (.github/workflows/test.yml:19), so nothing catches it. This is branch-wide, not shard-local — internal/fsm/cmdexec, internal/fsm/record, internal/fsm/machine/sidecar and internal/fsm/export all newly import syscall too — so it belongs to the cross-shard review; recorded here for the one file in this shard. Marked low because no platform support is claimed anywhere in the repo.",
+      "evidence": [
+        {"path": "internal/fsm/run/store_jsonl.go", "line": 351, "note": "syscall.Flock is unavailable on Windows; no build tag guards the file"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-02-review",
+  "kind": "shard",
+  "shardId": "shard-02",
+  "shardHash": "94d72adb9068c5fc",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 219,
+      "note": "checkURL enforces the base-URL policy from spec 4 §3.4 exactly: parse failure, userinfo, path/query/fragment rejected, https required, http only to localhost/127.0.0.1/::1, trailing slash stripped. No SSRF surface beyond the two validated bases."
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 138,
+      "note": "anthropicNoXHigh (opus-4-5, opus-4-6, sonnet-4-6) matches the spec's xhigh refusal list; supportsXHigh is applied through wireModel so a differently-cased anthropic/ prefix cannot bypass it."
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 320,
+      "note": "prepare's Anthropic body (temperature 0 for opus-4-5/sonnet-4-5, calibration thinking:disabled, output_config.effort for effort-capable ids, legacy budget 8192/32768 with max_tokens += budget) matches docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md §3.4 line by line."
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 495,
+      "note": "Retry ladder matches spec: rate class 10*3^a capped at 120s, backoff class 2^a, MaxAttempts 5, redirect and 4xx fatal, ctx.Done() selected during every sleep so cancellation returns ctx.Err() immediately."
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 585,
+      "note": "Body is read through io.LimitReader(MaxBody+1) and the >4MB case is fatal, so an oversized provider response cannot exhaust memory; the redirect error is recognised via errs.Is and never retried."
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 649,
+      "note": "MockJudge sets Mock:true on every verdict and records errored calls too, so a mock row is distinguishable in the audit (CLAUDE.md: a mock:true FSM row never satisfies a gate)."
+    },
+    {
+      "path": "internal/fsm/workflow/resolve.go",
+      "line": 30,
+      "note": "Calibration pinning refuses a caller-supplied JUDGE/JUDGE_EFFORT with ERR_CALIBRATION_PINNED before substitution, matching spec 3 §; the pinned values come from workflow.go constants (gpt-5.2 / medium)."
+    },
+    {
+      "path": "internal/fsm/workflow/resolve.go",
+      "line": 63,
+      "note": "Resolved model/effort are re-checked against run.MaxShort after substitution, so an unbounded --var value cannot widen the wire model id past the judge's own cap."
+    },
+    {
+      "path": "internal/fsm/workflow/resolve.go",
+      "line": 116,
+      "note": "ResolveCmds pins argv[0] to an absolute path and hashes every argv element that names a regular file; VerifyCmds re-hashes and additionally refuses an unpinned argv element that has since become a file, closing the swap-in path."
+    },
+    {
+      "path": "internal/fsm/run/errors.go",
+      "line": 44,
+      "note": "CodeFor maps every fold reason to exactly one code with ERR_AUDIT_INVALID as the fail-closed default, so an unlisted reason cannot degrade into a non-error."
+    },
+    {
+      "path": "internal/fsm/judge/judge_test.go",
+      "line": 449,
+      "note": "Validation evidence: go test -cover reports 100.0% of statements for internal/fsm/judge, internal/fsm/run and internal/fsm/workflow (and every other internal/fsm package), and go vet ./internal/fsm/... is clean. Token-accounting, retry-ladder, URL-policy and mock paths are all table-driven."
+    },
+    {
+      "path": "internal/version/version.go",
+      "line": 3,
+      "note": "Version 0.9.0 is consistent with package.json, .claude-plugin/plugin.json, .claude-plugin/marketplace.json, .codex-plugin/plugin.json and the CHANGELOG 0.9.0 entry dated 2026-08-27."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Undocumented spec deviation in OpenAI token accounting: spec 4 §3.4 says Input = prompt_tokens and CacheRead = prompt_tokens_details.cached_tokens, but decodeOpenAI computes Input = prompt_tokens - cached_tokens. The sibling Output = max(0, completion - reasoning) subtraction IS spelled out in the spec, so the omission reads as unintentional. The implementation is arguably the better normalisation (it matches Anthropic, whose input_tokens already excludes cache reads) and judge_test.go pins it (prompt 10 / cached 20 -> Input 0, CacheRead 20), so this is a spec-text fix, not a code fix. Non-blocking.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 460,
+          "note": "Input: clampTok(r.Usage.Prompt - cached) vs the spec's 'prompt_tokens (Input)'."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead statement in the Anthropic legacy-thinking branch: delete(body, \"temperature\") is immediately followed by body[\"temperature\"] = 1, so the delete can never change the marshalled body. Harmless (MarshalCanonical sorts keys) but it reads as if an ordering or absence guarantee were intended and invites a future edit that removes the wrong half.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 343,
+          "note": "delete(body, \"temperature\") then body[\"temperature\"] = 1 on the next line."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "attempt() discards the error from http.NewRequestWithContext and dereferences hreq on the next line, so a construction failure would panic rather than surface a typed ERR_JUDGE_* code. Unreachable today because req.url is built from a base validated by checkURL plus a constant path and the method is a constant, which is also why 100% coverage is achievable with the error ignored. Worth an explicit non-nil guard or a comment recording why the error cannot occur.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 566,
+          "note": "hreq, _ := http.NewRequestWithContext(...) followed by hreq.Header.Set on line 567."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Latent asymmetry in node-param handling: Resolve substitutes $VAR only inside string params and []any elements, and workflow.go's paramRefs collects refs from exactly the same two shapes. A $VAR nested inside a map-valued param would therefore be neither rejected as an unknown var at load nor substituted at resolve time; it would reach the node as a literal '$VAR'. Not reachable on this branch (every registered kind uses noParams or validateLenses, which admit no map-valued params), so this is a hardening note rather than a live defect.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/resolve.go",
+          "line": 69,
+          "note": "switch x := v.(type) handles string and []any only; the default arm copies the value through untouched."
+        },
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 641,
+          "note": "paramRefs mirrors the same two cases, so nested values are not ref-validated either."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Documentation staleness surfaced by the version bump in this shard: version.go, the four manifests and the CHANGELOG all read 0.9.0, but README.md's release section is still headed 'What Changed In 0.8.3' and describes the sharded-review loop. No test asserts README currency, so nothing fails; a reader landing on the README will not see the FSM feature this release is named for.",
+      "evidence": [
+        {
+          "path": "README.md",
+          "line": 55,
+          "note": "'## What Changed In 0.8.3' while internal/version/version.go line 3 is now 0.9.0."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

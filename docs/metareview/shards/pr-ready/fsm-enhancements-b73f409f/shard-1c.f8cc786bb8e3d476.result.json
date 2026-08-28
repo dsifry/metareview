@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1c.f8cc786bb8e3d476",
+  "kind": "shard",
+  "shardId": "shard-1c",
+  "shardHash": "f8cc786bb8e3d476",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "blockingCount": 1,
+  "evidence": [
+    {"path": "internal/fsm/cli/run.go", "line": 1, "note": "read the whole 987-line new CLI entrypoint against the rubric"},
+    {"path": "internal/taskdone/shardwiring_test.go", "line": 184, "note": "housekeeping subtests instrumented and re-run in a scratchpad copy"},
+    {"path": "internal/prready/shardwiring_test.go", "line": 28, "note": "fake writer fields cross-checked against the assertions in the file"},
+    {"path": "internal/tasksource/coverage_test.go", "line": 179, "note": "subtest isolation checked by running the subtest alone"},
+    {"path": "internal/taskdone/review.go", "line": 270, "note": "go test -coverprofile shows this GC call at count 0 for package unit tests"},
+    {"path": "internal/prready/review.go", "line": 293, "note": "go test -coverprofile shows this GC call at count 0 for package unit tests"},
+    {"path": "internal/fsm/judge/prompts.go", "line": 197, "note": "calibration disables fencing, which is what the two new goldens pin"},
+    {"note": "no TODO/FIXME markers, no eval-style execution, and no truncated diff context anywhere in this shard"}
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestTaskDoneHousekeepingFailuresDoNotDiscardTheRun's \"gc\" subtest is vacuous: it injects gcErr but GC is never invoked, so nothing about a GC failure is proved. Create only calls packWriter.GC when !result.Blocking (internal/taskdone/review.go:269), and the fixture's sharded run is always blocking because fakeWriter.Discover returns a zero shardpack.Found, so no shard results exist. Instrumenting the subtest in a scratchpad copy of the tree printed `PROBE name=gc prunes=1 collections=0 blocking=true`, and `go test ./internal/taskdone/ -coverprofile` reports internal/taskdone/review.go:270 (the GC call) at count 0. The test name and its comment (\"Prune and GC are housekeeping ... their failure must not discard the run\") assert coverage the test does not deliver; the same gap exists unasserted in internal/prready/review.go:293. Either drive the fixture to a passing gate (seed fakeWriter.found with results that satisfy the plan) or assert collections == 1 so the case fails loudly when GC is skipped.",
+      "evidence": [
+        {"path": "internal/taskdone/shardwiring_test.go", "line": 190, "note": "the gc case injects gcErr but never asserts collections"},
+        {"path": "internal/taskdone/review.go", "line": 269, "note": "GC runs only when !result.Blocking, which this fixture never reaches"},
+        {"path": "internal/taskdone/review.go", "line": 270, "note": "coverage profile count 0 for the GC call under package unit tests"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/prready/shardwiring_test.go carries fake-writer scaffolding that no assertion in the file ever reads: discovers, collections, found, discoverErr and gcErr are recorded but never checked. taskdone has TestTaskDoneDiscoversShardResults pinning discovers == 1; pr-ready has no analogue, so a regression that stops discovering shard results on the pr-ready path would not fail this package's tests.",
+      "evidence": [
+        {"path": "internal/prready/shardwiring_test.go", "line": 28, "note": "discovers/collections/found/discoverErr/gcErr are written but never asserted"},
+        {"path": "internal/prready/review.go", "line": 305, "note": "the Discover call on the pr-ready path has no unit-level assertion"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead no-op code in the judge subcommand. judge.KindStillPresent is the literal string \"still-present\" (internal/fsm/judge/prompts.go:19), so `if k == \"still-present\" { k = judge.KindStillPresent }` assigns k to itself. It appears twice — once before the kind validation and again after judgeInput — and the second occurrence is doubly dead because the first already ran. It reads as a normalisation step that does nothing, which will mislead the next reader into believing the CLI accepts an alias it does not.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 713, "note": "first self-assignment guarded on the same literal"},
+        {"path": "internal/fsm/cli/run.go", "line": 744, "note": "second, unreachable-in-effect repetition of the same no-op"},
+        {"path": "internal/fsm/judge/prompts.go", "line": 19, "note": "KindStillPresent = \"still-present\" makes both branches identity"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Misleading usage message in the gate subcommand. The condition is `err != nil || snap.FixEntryHead != \"\" && !gate.ValidSHA(snap.FixEntryHead)`, so a snapshot that decodes cleanly but carries a malformed fix-entry SHA takes the same branch with err == nil, and the operator is told `--input is not a snapshot: <nil>`. The real cause (an invalid FixEntryHead) is never named, and commit_exists is exactly the gate that consumes that field (internal/fsm/gate/gates.go:98).",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 677, "note": "the two failure causes are collapsed into one message"},
+        {"path": "internal/fsm/cli/run.go", "line": 678, "note": "fmt.Sprint(err) renders <nil> on the SHA-validation path"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "`fsm gate <name> --input <snap> --run <id>` evaluates a git-backed gate against the work tree named by the *input's* work_dir, not the run's. snap is decoded from --input (run.Snapshot.WorkDir is the json field \"work_dir\", internal/fsm/run/types.go:209), and git is then built as o.md.Git(snap.WorkDir). The guard that forces --run says the gate \"needs the run's git/snapshot\", but the run only supplies the deps factory; the resulting envelope carries the run's run_id and view keys alongside a commit_exists verdict computed in an unrelated directory. Either take WorkDir from the opened run's snapshot, or reword the guard so the envelope does not imply the run was the subject.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 690, "note": "git is constructed from the input-supplied work_dir"},
+        {"path": "internal/fsm/cli/run.go", "line": 691, "note": "viewKeys then stamps the run's identity onto that result"},
+        {"path": "internal/fsm/gate/gates.go", "line": 98, "note": "commit_exists is the only builtin that actually uses Git"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "In the judge subcommand's recorded path, an audit-append failure is discarded whenever the judge call also failed. RecordLLMCall appends the llm_call row and returns (seq, cerr); if sess.append fails it returns (0, appendErr) (internal/fsm/machine/machine.go:1067). run.go only surfaces that error under `if err != nil && callErr == nil`, so with both failing the operator sees only the call error and never learns the run log was not written. The mirror case is cosmetic but related: when the call fails and the append succeeds, `if err == nil` is false, so seq/index are omitted from the envelope even though the row exists on disk.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 793, "note": "the store error is only reported when callErr is nil"},
+        {"path": "internal/fsm/machine/machine.go", "line": 1067, "note": "append failure is returned as the error, shadowed here by cerr"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Order-dependent subtest in the new tasksource coverage test. \"relative path fails for an existing target\" relies on file.md being created by the earlier sibling subtest \"a candidate under a regular file\"; run in isolation (`-run '.../relative_path_fails_for_an_existing_target'`) it still passes, but only because relPath is stubbed to fail on both branches — it then exercises the not-yet-created branch at internal/tasksource/tasksource.go:142 instead of the existing-target one, silently duplicating the next subtest. The file's stated purpose is pinning every remaining branch, so the coverage it claims is contingent on execution order.",
+      "evidence": [
+        {"path": "internal/tasksource/coverage_test.go", "line": 179, "note": "the existing-target case depends on a sibling subtest's side effect"},
+        {"path": "internal/tasksource/tasksource.go", "line": 142, "note": "the not-exist branch both subtests collapse onto when file.md is absent"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "readCapped enforces its byte cap only after the whole file is in memory: the stdin path uses io.LimitReader(max+1), but the file path calls deps.ReadFile and checks len(raw) afterwards. --context is capped at machine.MaxDiffBytes and --goldens at 512 KiB, yet pointing either at a multi-gigabyte file allocates it in full before ERR_INPUT_TOO_LARGE is returned. Cheap to fix by reading through the same LimitReader used for stdin.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 169, "note": "stdin is limited but the file branch reads unbounded"},
+        {"path": "internal/fsm/cli/run.go", "line": 176, "note": "the size check runs only after the full read"}
+      ]
+    }
+  ]
+}
