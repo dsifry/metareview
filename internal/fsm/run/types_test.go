@@ -109,7 +109,7 @@ func TestCloneIsDeep(t *testing.T) {
 	for i := 0; i < rt.NumField(); i++ {
 		f := rt.Field(i)
 		switch f.Type.Kind() {
-		case reflect.Slice, reflect.Map, reflect.Ptr:
+		case reflect.Slice, reflect.Map, reflect.Pointer:
 			if !exercised[f.Name] {
 				t.Fatalf("Clone test does not exercise reference field %s", f.Name)
 			}
@@ -150,7 +150,7 @@ func TestSnapshotEqualIgnoringSeq(t *testing.T) {
 			m := reflect.MakeMap(f.Type)
 			m.SetMapIndex(reflect.ValueOf("k"), reflect.Zero(f.Type.Elem()))
 			v.Set(m)
-		case reflect.Ptr:
+		case reflect.Pointer:
 			v.Set(reflect.New(f.Type.Elem()))
 		case reflect.Struct:
 			if f.Type == reflect.TypeOf(Time{}) {

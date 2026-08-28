@@ -518,7 +518,7 @@ func (j *realJudge) attempt(ctx context.Context, req request) (string, run.Token
 		}
 		return "", run.TokenTotals{}, classBackoff, errs.Wrap(errs.E(CodeJudgeTransport, err.Error()), err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxBody+1))
 	if err != nil {
 		return "", run.TokenTotals{}, classBackoff, errs.Wrap(errs.E(CodeJudgeTransport, "body read: "+err.Error()), err)

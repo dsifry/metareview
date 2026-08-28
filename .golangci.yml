@@ -2,7 +2,8 @@ version: "2"
 
 # The default set — errcheck, govet, ineffassign, staticcheck, unused — is what
 # this repo wants: it catches discarded errors, dead code and the mistakes a
-# reviewer should not have to spend attention on. No linter is disabled.
+# reviewer should not have to spend attention on. No linter is disabled, and
+# nothing is excluded: the noisy cases were fixed at the source instead.
 linters:
   default: standard
 

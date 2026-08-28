@@ -49,19 +49,19 @@ func TestHelperProcess(t *testing.T) {
 	case "sleep-grandchild":
 		c := exec.Command("sleep", "30")
 		_ = c.Start()
-		fmt.Fprintln(os.Stdout, c.Process.Pid)
+		_, _ = fmt.Fprintln(os.Stdout, c.Process.Pid)
 		_ = c.Wait()
 	case "big":
 		n, _ := strconv.Atoi(rest[1])
-		os.Stdout.WriteString(strings.Repeat("x", n))
+		_, _ = os.Stdout.WriteString(strings.Repeat("x", n))
 	case "bigerr":
 		n, _ := strconv.Atoi(rest[1])
-		os.Stderr.WriteString(strings.Repeat("e", n))
+		_, _ = os.Stderr.WriteString(strings.Repeat("e", n))
 	case "json":
-		os.Stdout.WriteString(rest[1])
+		_, _ = os.Stdout.WriteString(rest[1])
 	case "slow-ok":
 		time.Sleep(200 * time.Millisecond)
-		os.Stdout.WriteString("done")
+		_, _ = os.Stdout.WriteString("done")
 	}
 	os.Exit(0)
 }

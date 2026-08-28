@@ -13,7 +13,17 @@ import (
 
 // ---- helpers ------------------------------------------------------------------------------------
 
-func storeErr(t *testing.T, err error, code string) *StoreError {
+// storeErr asserts that err is a StoreError carrying code. Most call sites want
+// only the assertion, so this returns nothing: a helper that hands back an error
+// nobody reads is indistinguishable, to errcheck and to a reader, from a
+// discarded failure.
+func storeErr(t *testing.T, err error, code string) {
+	t.Helper()
+	_ = storeErrE(t, err, code)
+}
+
+// storeErrE is storeErr for the call sites that go on to inspect the error.
+func storeErrE(t *testing.T, err error, code string) *StoreError {
 	t.Helper()
 	var se *StoreError
 	if !errors.As(err, &se) || se.Code != code {
@@ -96,7 +106,7 @@ func TestStoreCreateAndEvents(t *testing.T) {
 			}
 			if _, err := s.Create(runB, evs[1]); err == nil {
 				t.Fatalf("non-init create must fail")
-			} else if se := storeErr(t, err, CodeAppendRejected); se.Cause == nil {
+			} else if se := storeErrE(t, err, CodeAppendRejected); se.Cause == nil {
 				t.Fatalf("rejected create must carry the fold error")
 			}
 			if _, err := s.Create(runB, evs[0]); err == nil {
@@ -177,7 +187,7 @@ func TestStoreAppendContract(t *testing.T) {
 			badEv.Iter = 9
 			if _, err := s.Append(runA, st, badEv); err == nil {
 				t.Fatalf("invalid event must be rejected")
-			} else if se := storeErr(t, err, CodeAppendRejected); se.Cause.(*FoldError).Reason != ReasonStamp {
+			} else if se := storeErrE(t, err, CodeAppendRejected); se.Cause.(*FoldError).Reason != ReasonStamp {
 				t.Fatalf("cause: %v", se.Cause)
 			}
 			after, _ := s.Events(runA)
@@ -260,8 +270,8 @@ func TestStoreFoldEquivalence(t *testing.T) {
 	evs := happyLog().Events()
 	var snaps [][]byte
 	for _, sc := range stores() {
-		s := sc.mk(t)
 		// raise MaxEvents for the full log
+		var s RunStore
 		if sc.disk {
 			s = NewJSONLStore(t.TempDir(), Options{})
 		} else {
@@ -378,7 +388,7 @@ func TestJSONLChainVerification(t *testing.T) {
 	_ = os.WriteFile(path, []byte(strings.Join(lines2, "\n")+"\n"), 0o600)
 	if _, err := s.Events(runA); err == nil {
 		t.Fatalf("corrupted line must break the chain")
-	} else if se := storeErr(t, err, CodeAuditChain); se.Seq != 3 {
+	} else if se := storeErrE(t, err, CodeAuditChain); se.Seq != 3 {
 		t.Fatalf("chain break seq = %d", se.Seq)
 	}
 	// undecodable complete line
@@ -387,7 +397,7 @@ func TestJSONLChainVerification(t *testing.T) {
 	_ = os.WriteFile(path, []byte(strings.Join(lines3, "\n")+"\n"), 0o600)
 	if _, err := s.Events(runA); err == nil {
 		t.Fatalf("undecodable line must fail")
-	} else if se := storeErr(t, err, CodeAuditChain); se.Seq != 3 || se.Detail != "undecodable" {
+	} else if se := storeErrE(t, err, CodeAuditChain); se.Seq != 3 || se.Detail != "undecodable" {
 		t.Fatalf("undecodable: %+v", se)
 	}
 	// seq gap in stored lines
@@ -641,7 +651,7 @@ func TestJSONLLockContentionAndPathErrors(t *testing.T) {
 	}
 	if _, err := s2.Lock(runA); err == nil {
 		t.Fatalf("flock contention must fail")
-	} else if se := storeErr(t, err, CodeRunLocked); !strings.Contains(se.Detail, "another") {
+	} else if se := storeErrE(t, err, CodeRunLocked); !strings.Contains(se.Detail, "another") {
 		t.Fatalf("detail: %s", se.Detail)
 	}
 	unlock()
@@ -842,7 +852,7 @@ func TestOracle(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "audit.jsonl"), []byte(edited), 0o600)
 	if _, err := s.Events(runA); err == nil {
 		t.Fatalf("edited oracle must fail")
-	} else if se := storeErr(t, err, CodeAuditChain); se.Seq != 3 {
+	} else if se := storeErrE(t, err, CodeAuditChain); se.Seq != 3 {
 		t.Fatalf("edit seq: %+v", se)
 	}
 }

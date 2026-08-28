@@ -179,8 +179,8 @@ fsm advance --run "$LIVE"; expect_err ERR_AUDIT_TORN 1
 fsm state --run "$LIVE"; expect OK 0; assert_eq "$(field torn)" true "torn"
 fsm advance --run "$LIVE" --repair; expect ADVANCED 0; assert_eq "$(field warnings.0.code)" AUDIT_TORN_LINE_DROPPED "repair warning"
 printf '%s' "$(field warnings.0.detail)" | grep -Eq '^[0-9]+ bytes dropped after seq [0-9]+ from audit.jsonl$'
-ls .metareview/runs/$LIVE/audit.torn-*.bin >/dev/null
-[ "$(cat .metareview/runs/$LIVE/audit.torn-*.bin)" = '{"torn' ]
+ls .metareview/runs/"$LIVE"/audit.torn-*.bin >/dev/null
+[ "$(cat .metareview/runs/"$LIVE"/audit.torn-*.bin)" = '{"torn' ]
 fsm advance --run "$LIVE" --repair; expect_err ERR_AUDIT_NOT_TORN 2
 # workflow change: refused without the flag, accepted with it (source path); impersonation refused at init
 sed 's/effort: \$REV_EFFORT/effort: high/' "$ROOT/workflows/sdlc-loop.yaml" > fixtures/changed.yaml

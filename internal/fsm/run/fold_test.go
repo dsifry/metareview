@@ -504,10 +504,9 @@ func TestFoldTerminalAndMisc(t *testing.T) {
 // R1b: no-op rows compare snapshots ignoring Seq.
 func TestFoldNoOps(t *testing.T) {
 	b := happyLog()
-	before := mustFold(t, b.Events())
 	// remove the terminal transition so more events are legal
 	evs := b.Events()[:len(b.Events())-1]
-	before = mustFold(t, evs)
+	before := mustFold(t, evs)
 	b2 := NewBuilder(runA)
 	b2.events, b2.lines = evs, nil
 	for _, e := range evs {

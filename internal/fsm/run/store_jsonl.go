@@ -182,7 +182,8 @@ func (s *jsonlStore) readRaw(runID string) ([]byte, error) {
 	if err != nil {
 		return nil, pathErr(0, err)
 	}
-	defer f.Close()
+	// Read-only: a Close error here tells the caller nothing it can act on.
+	defer func() { _ = f.Close() }()
 	var buf strings.Builder
 	chunk := make([]byte, 64<<10)
 	for {

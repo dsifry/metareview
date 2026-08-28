@@ -438,7 +438,15 @@ func (h *harness) advance(m *Machine) AdvanceResult {
 	return r
 }
 
-func wantCode(t *testing.T, err error, code string) *errs.Error {
+// wantCode asserts that err carries code. Callers that go on to inspect the
+// error use wantCodeE; the bare assertion returns nothing so that an ignored
+// return cannot look like a discarded failure.
+func wantCode(t *testing.T, err error, code string) {
+	t.Helper()
+	_ = wantCodeE(t, err, code)
+}
+
+func wantCodeE(t *testing.T, err error, code string) *errs.Error {
 	t.Helper()
 	if !errs.Is(err, code) {
 		t.Fatalf("want %s, got %v", code, err)

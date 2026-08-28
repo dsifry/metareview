@@ -153,7 +153,7 @@ func (c *ctxDeps) nonce() string {
 // machineDeps builds the per-run machine wiring (spec 5 §8).
 func (c *ctxDeps) machineDeps(root string, scenario *mockai.Scenario, mode judgeMode) (machine.Deps, error) {
 	var j judge.Judge
-	var real cmdexec.Runner = cmdexec.NewExecRunner()
+	real := cmdexec.NewExecRunner()
 	switch {
 	case scenario != nil:
 		j = judge.NewMock(scenario.Script())

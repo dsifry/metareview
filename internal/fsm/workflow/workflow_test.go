@@ -408,7 +408,7 @@ func TestW3Resolve(t *testing.T) {
 		t.Fatal("re-resolve stored vars")
 	}
 	// calibration on a workflow without JUDGE is a no-op
-	noJudge := mustParse(t, strings.Replace(strings.Replace(strings.Replace(example, "JUDGE: {required: true}, JUDGE_EFFORT: {required: true}, ", "", 1), "model: $JUDGE, effort: $JUDGE_EFFORT", "model: x", -1), "--model, $JUDGE", "--model, x", 1))
+	noJudge := mustParse(t, strings.Replace(strings.ReplaceAll(strings.Replace(example, "JUDGE: {required: true}, JUDGE_EFFORT: {required: true}, ", "", 1), "model: $JUDGE, effort: $JUDGE_EFFORT", "model: x"), "--model, $JUDGE", "--model, x", 1))
 	if _, eff4, err := noJudge.Resolve(nil, true); err != nil || len(eff4) != 1 {
 		t.Fatalf("no-judge calibration: %v %v", eff4, err)
 	}

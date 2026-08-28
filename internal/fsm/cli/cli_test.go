@@ -183,7 +183,6 @@ func TestUsageAndPrompt(t *testing.T) {
 
 func TestHappySdlcLoop(t *testing.T) {
 	h := newHarness(t)
-	base := git(t, h.root, "rev-parse", "HEAD")
 	env := h.must(StatusOK, 0, mockInit...)
 	if env["mock"] != true || env["workflow_source"] != "embedded" || env["state"] != "discover" || env["iteration"] != float64(0) || env["outcome"] != nil || env["schema_version"] != float64(1) {
 		t.Fatalf("init: %v", env)
@@ -195,7 +194,7 @@ func TestHappySdlcLoop(t *testing.T) {
 	h.file("../.gitignore", "mock/\nfixtures/\nexp/\nsmall/\ndocs/\n.metareview/runs.jsonl\n")
 	git(t, h.root, "add", ".gitignore")
 	git(t, h.root, "commit", "-q", "-m", "ignore runs.jsonl")
-	base = git(t, h.root, "rev-parse", "HEAD")
+	base := git(t, h.root, "rev-parse", "HEAD")
 	env = h.must(StatusOK, 0, mockInit...)
 	if len(env["warnings"].([]any)) != 0 {
 		t.Fatalf("warnings must be empty with an ignore rule: %v", env["warnings"])
@@ -213,7 +212,7 @@ func TestHappySdlcLoop(t *testing.T) {
 		t.Fatalf("input shas: %v", in)
 	}
 	// idempotent at NEEDS_INPUT
-	env = h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
+	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
 	// record from stdin
 	h.stdin = findingsData
 	env = h.must(StatusOK, 0, "record", "node-output", "--node", "discover", "--data", "-", "--run", id)
@@ -524,7 +523,7 @@ func TestProductRunAndJudge(t *testing.T) {
 	h.mustErr("ERR_JUDGE_URL", 2, "judge", "--kind", "match", "--model", "gpt-5.2", "--effort", "low", "--input", h.file("m.json", `{"golden":{"comment":"g"},"candidate":{"issue_text":"x"}}`))
 	delete(h.env, EnvOpenAIURL)
 	h.doer.body = ""
-	env = h.mustErr("ERR_JUDGE_TRANSPORT", 2, "judge", "--kind", "match", "--model", "gpt-5.2", "--effort", "low", "--input", h.file("m.json", `{"golden":{"comment":"g"},"candidate":{"issue_text":"x"}}`))
+	h.mustErr("ERR_JUDGE_TRANSPORT", 2, "judge", "--kind", "match", "--model", "gpt-5.2", "--effort", "low", "--input", h.file("m.json", `{"golden":{"comment":"g"},"candidate":{"issue_text":"x"}}`))
 	// judge --run on a mock run: recorded under the run, index continues; terminal run refused
 	h.env = map[string]string{}
 	env = h.must(StatusOK, 0, mockInit...)

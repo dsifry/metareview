@@ -91,7 +91,8 @@ func (f FSSidecar) Read(runID, name string) ([]byte, error) {
 		}
 		return nil, sidecarErr("path", err.Error())
 	}
-	defer fh.Close()
+	// Read-only: a Close error here tells the caller nothing it can act on.
+	defer func() { _ = fh.Close() }()
 	b, err := io.ReadAll(io.LimitReader(fh, run.MaxPayload+1))
 	if err != nil {
 		return nil, sidecarErr("path", err.Error())

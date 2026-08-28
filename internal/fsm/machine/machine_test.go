@@ -207,7 +207,7 @@ func TestM1Consent(t *testing.T) {
 	withCmd := strings.Replace(string(raw), "repo_mode: advisory", "cmds:\n  notify: {argv: [bash, ./notify.sh, --tag, $JUDGE], timeout: 2, env: [SLACK_WEBHOOK]}\non_overflow: notify\nrepo_mode: advisory", 1)
 	h.files["/x/cmd.yaml"] = renamed(withCmd)
 	_, err := h.init(InitOptions{Workflow: "/x/cmd.yaml", Vars: sdlcVars})
-	e := wantCode(t, err, CodeCmdsNotAllowed)
+	e := wantCodeE(t, err, CodeCmdsNotAllowed)
 	sha := e.Field("sha")
 	if len(sha) != 64 || !strings.Contains(e.Detail, `notify: argv=["/bin/bash" "./notify.sh" "--tag" "gpt-5.2"] timeout=2000ms env=[SLACK_WEBHOOK]`) || !strings.Contains(e.Detail, "pinned: /bin/bash=hb") || !strings.Contains(e.Detail, "unpinned: ./notify.sh, --tag, gpt-5.2") {
 		t.Fatalf("consent detail:\n%s", e.Detail)
@@ -1079,7 +1079,7 @@ func TestM6Record(t *testing.T) {
 	if err := rec(RecordOptions{Kind: RecordNodeOutput, Node: "discover", Data: json.RawMessage(`{"findings":[{"issue_text":"a"}]}`)}); err != nil {
 		t.Fatal(err)
 	}
-	e := wantCode(t, rec(RecordOptions{Kind: RecordNodeOutput, Node: "discover", Data: json.RawMessage(`{"findings":[]}`)}), CodeNodeOutputExists)
+	e := wantCodeE(t, rec(RecordOptions{Kind: RecordNodeOutput, Node: "discover", Data: json.RawMessage(`{"findings":[]}`)}), CodeNodeOutputExists)
 	if e.Field("key") != "discover@0" {
 		t.Fatal("key")
 	}
@@ -1102,7 +1102,7 @@ func TestM6Record(t *testing.T) {
 	}
 	// record name sub-rules
 	for name, reason := range map[string]string{"Bad": "syntax", "transition": "event_type", "mrv_x": "reserved"} {
-		e := wantCode(t, rec(RecordOptions{Kind: RecordEvent, Name: name, Data: json.RawMessage(`{}`)}), CodeRecordName)
+		e := wantCodeE(t, rec(RecordOptions{Kind: RecordEvent, Name: name, Data: json.RawMessage(`{}`)}), CodeRecordName)
 		if e.Field("reason") != reason {
 			t.Errorf("%s: %s", name, e.Field("reason"))
 		}
@@ -1183,7 +1183,7 @@ func TestM7Open(t *testing.T) {
 	}
 	h.deps.Workflows = workflows.Read
 	h.sidecar.Delete(m.runID, SidecarWorkflow)
-	if e := wantCode(t, mustErr(Open(ctx, h.deps, m.runID, OpenOptions{})), CodeSidecar); e.Field("reason") != "missing" {
+	if e := wantCodeE(t, mustErr(Open(ctx, h.deps, m.runID, OpenOptions{})), CodeSidecar); e.Field("reason") != "missing" {
 		t.Fatal("missing sidecar")
 	}
 	h.sidecar.Put(m.runID, SidecarWorkflow, raw)
@@ -1457,7 +1457,7 @@ func TestM8Stamps(t *testing.T) {
 	h.advance(m)
 	evs := h.events(m)
 	for i, ev := range evs {
-		if !ev.At.Time.Equal(evs[0].At.Time.Add(timeSeconds(i))) {
+		if !ev.At.Equal(evs[0].At.Add(timeSeconds(i))) {
 			t.Fatalf("At sequence at %d: %v", i, ev.At)
 		}
 		if ev.Mock {
@@ -1710,15 +1710,9 @@ func TestM9Residue(t *testing.T) {
 	if _, err := m.Advance(ctx); err == nil || err.Error() != "treefail" {
 		t.Fatalf("agent-edit tree append: %v", err)
 	}
-	// loop gate append failure at the boundary (convergence does not stop): fail the gate append after the converge event
-	h = newHarness(t)
-	m = loopRun(t, h, 1, "sdlc-loop")
-	h.store.failType, h.store.err = run.TypeGate, errors.New("gatefail")
-	// the first gate at verify is all_fixed; make only the second gate append fail by counting
-	h.store.failType = ""
-	h.store.appends = 0
-	h.store.failAt = 6 // node_output, delta_applied, gate(all_fixed), converge, gate(bugs_remain)=5 … use a sweep instead
-	h.store.failAt = 0
+	// loop gate append failure at the boundary (convergence does not stop). Counting
+	// the appends by hand proved too brittle to place the failure, so the sweep below
+	// walks every append position instead.
 	total := 0
 	{
 		hb := newHarness(t)

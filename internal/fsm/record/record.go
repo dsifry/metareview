@@ -183,7 +183,9 @@ func appendRow(root string, row Row) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	// The append below ends in f.Sync, so the row is durable before this runs
+	// and a Close error cannot mean a lost write.
+	defer func() { _ = f.Close() }()
 	if err := flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		return err
 	}

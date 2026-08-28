@@ -756,7 +756,7 @@ func (s *session) transitions(head string) (AdvanceResult, error) {
 				return AdvanceResult{}, err // interrupted inside an atom: resumable, never a gate failure
 			}
 			if err != nil || (r.Stop && r.Class == run.OutcomeFixed && r.Atom != "all_fixed") {
-				detail := "convergence evaluation failed"
+				var detail string
 				reason := "error"
 				if err != nil {
 					detail = err.Error()
@@ -847,7 +847,7 @@ func (s *session) finish(td run.TransitionData, stopReason ...string) (AdvanceRe
 			return AdvanceResult{}, err
 		}
 	}
-	if td.Outcome == run.OutcomeOverflow && s.w.OnOverflow != "" && !s.st.Snapshot.OverflowHandled {
+	if td.Outcome == run.OutcomeOverflow && s.w.OnOverflow != "" && !s.st.OverflowHandled {
 		if err := s.overflowHandler(); err != nil {
 			return AdvanceResult{}, err
 		}

@@ -215,3 +215,26 @@ func TestCarriageReturnIsStrippedFromHeaderPaths(t *testing.T) {
 		t.Fatalf("CRLF header hid the .md suffix: %#v", lines)
 	}
 }
+
+// The two remaining branches of the path decoders: an empty path (a header the
+// parser could not read) stays lintable, because failing open here would hide
+// real code, and a diff --git line with no recognisable post-image half yields
+// nothing rather than a partial path.
+func TestPathDecodersFailOpen(t *testing.T) {
+	if !lintable("") {
+		t.Fatal("an unreadable path must stay lintable rather than be skipped")
+	}
+	for _, header := range []string{
+		"diff --git a/only-one-half",
+		"diff --git",
+		"diff --git a/x.md c/x.md",
+	} {
+		if got := diffHeaderPath(header); got != "" {
+			t.Fatalf("%q yielded %q, want no path", header, got)
+		}
+	}
+	// The unquoted " b/" form, which the quoted branch does not cover.
+	if got := diffHeaderPath("diff --git a/src/app.go b/src/app.go"); got != "src/app.go" {
+		t.Fatalf("plain header path: %q", got)
+	}
+}

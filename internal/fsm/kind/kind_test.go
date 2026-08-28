@@ -497,8 +497,6 @@ func TestK3Composition(t *testing.T) {
 		t.Fatalf("preflight size: %v", err)
 	}
 	// calibration run: requests unfenced, calibration flag set
-	r = mustNew(t, judge.NewMock(judge.Script{Calls: map[judge.ScriptKey]judge.ScriptRow{key(judge.KindAdjudicate, 0): adjRow(true, 0.9)}}), true)
-	ex, _ = r.Executor(MatchThenAdjudicate)
 	mj := judge.NewMock(judge.Script{Calls: map[judge.ScriptKey]judge.ScriptRow{key(judge.KindAdjudicate, 0): adjRow(true, 0.9)}})
 	r = mustNew(t, mj, true)
 	ex, _ = r.Executor(MatchThenAdjudicate)

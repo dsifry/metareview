@@ -250,7 +250,9 @@ func (g *execGit) WorkTree(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", errs.Wrap(errs.E(CodeGit, "scratch index: "+err.Error(), "op", "write-tree"), err)
 	}
-	defer os.RemoveAll(dir)
+	// Best-effort cleanup of a temp dir; a failure here must not mask the
+	// gate result the caller came for.
+	defer func() { _ = os.RemoveAll(dir) }()
 	env := []string{"GIT_INDEX_FILE=" + filepath.Join(dir, "index")}
 	if _, code, err := g.runEnv(ctx, env, "add", "-A", "--"); err != nil {
 		return "", err
