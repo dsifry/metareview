@@ -304,7 +304,7 @@ func (in *invocation) init() int {
 	// The judge override is folded into the run's vars rather than applied at
 	// call time, so the model that judged a run is visible in its snapshot and
 	// its export. An override the audit cannot see would be worse than none.
-	vars := c.applyJudgeOverride(p.vars, p.flags["judge-model"], p.flags["judge-effort"])
+	vars := c.applyJudgeOverrideFor(p.vars, p.flags["judge-model"], p.flags["judge-effort"], p.bools["calibration"])
 	opts := machine.InitOptions{Workflow: wf, RunID: p.flags["run-id"], Vars: vars, Base: p.flags["base"], RepoMode: p.flags["repo-mode"], AllowCustomCmds: p.flags["allow-custom-cmds"], Calibration: p.bools["calibration"], MockDir: mockDir, GoldensPath: goldens, WorkDir: workDir, RepoRoot: root}
 	m, err := machine.Init(c.ctx, md, opts)
 	if err != nil {

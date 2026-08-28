@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/dsifry/metareview/internal/repo"
 )
@@ -41,6 +43,11 @@ type ToolStatus struct {
 	Present bool   `json:"present"`
 	Path    string `json:"path,omitempty"`
 	Action  string `json:"action,omitempty"`
+	// Version and VersionOK are reported for tools with a minimum this project
+	// actually depends on. INSTALL.md tells the operator that setup --check
+	// reports git >= MinGitVersion, so it has to.
+	Version   string `json:"version,omitempty"`
+	VersionOK bool   `json:"versionOk,omitempty"`
 }
 
 type InstallStatus struct {
@@ -80,7 +87,7 @@ func Check(root string, options Options) Report {
 		Beads:       beadsStatus(root, lookup, base.Capabilities.Beads),
 		Metaswarm:   metaswarmStatus(root, base.Capabilities.Metaswarm),
 		Go:          commandStatus(lookup, "go", "Install Go 1.22+ and ensure go is on PATH."),
-		Git:         commandStatus(lookup, "git", "Install git and ensure git is on PATH."),
+		Git:         gitStatus(lookup, nil),
 	}
 	missing := missingFullMetaswarmPrereqs(prereqs)
 
@@ -171,6 +178,77 @@ func commandStatus(lookup LookupPathFunc, name, action string) ToolStatus {
 		return ToolStatus{Action: action}
 	}
 	return ToolStatus{Present: true, Path: path}
+}
+
+// MinGitVersion is the git `metareview fsm` needs, as INSTALL.md states.
+const MinGitVersion = "2.31"
+
+// gitVersionOutput returns `git version` output; a seam so the check is testable
+// without depending on whatever git the machine happens to carry.
+type gitVersionOutput func() (string, error)
+
+// gitStatus is commandStatus for git, plus the version check INSTALL.md promises.
+// Presence and version are reported separately: a git that is installed but too
+// old is Present with VersionOK false, which is a different problem from absent.
+func gitStatus(lookup LookupPathFunc, version gitVersionOutput) ToolStatus {
+	status := commandStatus(lookup, "git", "Install git and ensure git is on PATH.")
+	if !status.Present {
+		return status
+	}
+	if version == nil {
+		version = func() (string, error) {
+			out, err := exec.Command(status.Path, "version").Output()
+			return string(out), err
+		}
+	}
+	out, err := version()
+	if err != nil {
+		status.Action = "Could not read the git version; metareview fsm needs git >= " + MinGitVersion + "."
+		return status
+	}
+	v := parseGitVersion(out)
+	if v == "" {
+		status.Action = "Could not parse the git version; metareview fsm needs git >= " + MinGitVersion + "."
+		return status
+	}
+	status.Version = v
+	if !atLeastVersion(v, MinGitVersion) {
+		status.Action = "Upgrade git: metareview fsm needs git >= " + MinGitVersion + ", found " + v + "."
+		return status
+	}
+	status.VersionOK = true
+	return status
+}
+
+// parseGitVersion pulls the number out of "git version 2.39.5 (Apple Git-154)".
+func parseGitVersion(out string) string {
+	fields := strings.Fields(strings.TrimSpace(out))
+	for i, f := range fields {
+		if f == "version" && i+1 < len(fields) {
+			return fields[i+1]
+		}
+	}
+	return ""
+}
+
+// atLeastVersion compares dotted numeric versions field by field; a non-numeric
+// field ends the comparison rather than guessing at it.
+func atLeastVersion(have, min string) bool {
+	hp, mp := strings.Split(have, "."), strings.Split(min, ".")
+	for i := range mp {
+		if i >= len(hp) {
+			return false
+		}
+		h, err1 := strconv.Atoi(hp[i])
+		m, err2 := strconv.Atoi(mp[i])
+		if err1 != nil || err2 != nil {
+			return false
+		}
+		if h != m {
+			return h > m
+		}
+	}
+	return true
 }
 
 func missingFullMetaswarmPrereqs(prereqs Prerequisites) []string {

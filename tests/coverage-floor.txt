@@ -22,7 +22,7 @@ internal/reviewmanifest 97.0
 internal/reviewstate 92.1
 internal/runchain 92.5
 internal/sessionhistory 86.3
-internal/setup 88.5
+internal/setup 89.8
 internal/shardpack 100.0
 internal/state 86.2
 internal/taskdone 89.4

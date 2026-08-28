@@ -230,3 +230,40 @@ func TestItoa(t *testing.T) {
 		}
 	}
 }
+
+// The effort-capable table must match what the API accepts, or Preflight — whose
+// whole job is to reject a bad model/effort pair before any network traffic —
+// passes a request the provider then rejects with a 400.
+//
+// Per Anthropic's effort documentation, xhigh is available on Fable 5, Mythos 5,
+// Opus 5, Opus 4.8, Opus 4.7 and Sonnet 5. It is NOT available on Opus 4.5,
+// Opus 4.6 or Sonnet 4.6, which support max but predate xhigh: "xhigh is a newer
+// level; some models that support max don't support xhigh."
+func TestAnthropicEffortTableMatchesTheAPI(t *testing.T) {
+	keys := Keys{Anthropic: "k"}
+
+	for _, model := range []string{
+		"claude-opus-5", "claude-opus-4-8", "claude-opus-4-7",
+		"claude-sonnet-5", "claude-fable-5", "claude-mythos-5",
+	} {
+		if err := Preflight(model, "xhigh", false, keys); err != nil {
+			t.Fatalf("%s supports xhigh: %v", model, err)
+		}
+	}
+
+	for _, model := range []string{"claude-opus-4-5", "claude-opus-4-6", "claude-sonnet-4-6"} {
+		err := Preflight(model, "xhigh", false, keys)
+		if err == nil {
+			t.Fatalf("%s does not support xhigh; Preflight must refuse it rather than let the API 400", model)
+		}
+		if !errs.Is(err, CodeJudgeEffortUnsupported) {
+			t.Fatalf("%s: got %v, want %s", model, err, CodeJudgeEffortUnsupported)
+		}
+		// The levels they do support must keep working.
+		for _, ok := range []string{"low", "medium", "high"} {
+			if err := Preflight(model, ok, false, keys); err != nil {
+				t.Fatalf("%s at %s: %v", model, ok, err)
+			}
+		}
+	}
+}

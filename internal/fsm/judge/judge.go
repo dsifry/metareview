@@ -129,6 +129,25 @@ func route(model string) provider {
 // Anthropic families: effort-capable ids take output_config.effort; legacy
 // ids take the thinking table; anything else is unknown_family.
 var anthropicEffortCapable = []string{"claude-opus-4-5", "claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-mythos-5"}
+
+// anthropicNoXHigh take the effort parameter but predate the xhigh level: they
+// support max and not xhigh ("xhigh is a newer level; some models that support
+// max don't support xhigh" — Anthropic's effort documentation). Sending xhigh to
+// one of these is a 400, so Preflight refuses it rather than letting a request
+// that cannot succeed reach the provider.
+var anthropicNoXHigh = []string{"claude-opus-4-5", "claude-opus-4-6", "claude-sonnet-4-6"}
+
+// supportsXHigh reports whether an Anthropic id accepts the xhigh effort level.
+func supportsXHigh(model string) bool {
+	id := wireModel(model)
+	for _, p := range anthropicNoXHigh {
+		if strings.HasPrefix(id, p) {
+			return false
+		}
+	}
+	return true
+}
+
 var anthropicLegacy = []string{"claude-sonnet-4-5", "claude-haiku-4-5", "claude-3-"}
 
 func anthropicFamily(model string) (capable bool, legacy bool) {
@@ -268,6 +287,10 @@ func validate(model, effort string, calibration bool, keys Keys) (provider, erro
 	case provAnthropic:
 		if keys.Anthropic == "" {
 			return provUnknown, errs.E(CodeJudgeKey, "ANTHROPIC_API_KEY is unset", "provider", "anthropic")
+		}
+		if effort == "xhigh" && !supportsXHigh(model) {
+			return provUnknown, errs.E(CodeJudgeEffortUnsupported,
+				wireModel(model)+" does not support the xhigh effort level", "effort", effort, "model", model, "reason", "level_predates_model")
 		}
 		if capable, legacy := anthropicFamily(wireModel(model)); !calibration && !capable && !legacy {
 			return provUnknown, errs.E(CodeJudgeModel, "unknown Anthropic model family "+wireModel(model), "model", model, "reason", "unknown_family")

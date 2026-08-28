@@ -156,7 +156,11 @@ Overrides are agent-satisfiable and unstamped (ledger): spec 5 lists them with t
   body; calibration requires `Effort == medium` on every provider, else `ERR_JUDGE_EFFORT_UNSUPPORTED{reason: calibration}`);
   **product** → an explicit family table (prefix match on the id after an optional `anthropic/`): effort-capable =
   `claude-opus-4-5`, `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-opus-4-7`, `claude-opus-4-8`, `claude-opus-5`,
-  `claude-sonnet-5`, `claude-fable-5`, `claude-mythos-5` → `output_config: {effort}` (no beta header, no `thinking`);
+  `claude-sonnet-5`, `claude-fable-5`, `claude-mythos-5` → `output_config: {effort}` (no beta header, no `thinking`).
+  Of those, `claude-opus-4-5`, `claude-opus-4-6` and `claude-sonnet-4-6` do **not** accept `xhigh`: they take the effort
+  parameter and support `max`, but predate the `xhigh` level ("xhigh is a newer level; some models that support max
+  don't support xhigh" — Anthropic's effort documentation), so `Preflight` refuses that pair rather than letting a
+  request that cannot succeed reach the provider;
   legacy-thinking = `claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-3-` → `low`/`medium`: `thinking: disabled`;
   `high`: `thinking: {type: "enabled", budget_tokens: 8192}`; `xhigh`: `budget_tokens: 32768`, with `max_tokens +=
   budget` and `temperature: 1` (this product table is Go's own — the reference has no `high` and sizes `xhigh` from

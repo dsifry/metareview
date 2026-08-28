@@ -483,3 +483,56 @@ func TestTheIndexRendersADirectGrantWithoutARequester(t *testing.T) {
 		t.Fatalf("a direct grant must not render an empty requester or escalation: %q", lines[0])
 	}
 }
+
+// A finding whose override was requested and which is then genuinely fixed must
+// leave override-pending. Reconcile's fix transition only matched status "open",
+// so once RequestOverride moved a finding to override-pending nothing could move
+// it again: it never became "fixed", Blocks stayed true, and `override list
+// --pending` exited 1 forever with no command able to clear it. The CLI offers
+// request|grant|list and no withdraw, so CI stayed red permanently.
+func TestReconcileClosesAPendingOverrideThatWasActuallyFixed(t *testing.T) {
+	root := t.TempDir()
+	run := Run{ID: "mrv-run-1", Scope: "pr-ready", Target: map[string]string{"branch": "b"}, GitHead: "head1"}
+	input := Input{Fingerprint: "pr:security:eval", Title: "Unsafe eval introduced", Severity: "critical", Classification: "blocking"}
+
+	if _, err := Reconcile(root, run, []Input{input}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := readJSONL(findingsPath(root))
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("seed: %v %d", err, len(recs))
+	}
+	id := recs[0].ID
+
+	if err := RequestOverride(root, id, OverrideRequest{By: "tester", Reason: "escalated out of the workflow deliberately", Now: "2026-08-28T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := PendingOverrides(root); err != nil || len(pending) != 1 {
+		t.Fatalf("expected one pending override: %v %d", err, len(pending))
+	}
+
+	// The next run genuinely fixes it: the fingerprint is no longer found.
+	next := Run{ID: "mrv-run-2", Scope: "pr-ready", Target: run.Target, GitHead: "head2"}
+	if _, err := Reconcile(root, next, nil, Options{PreviousRunID: run.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err = readJSONL(findingsPath(root))
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("load: %v %d", err, len(recs))
+	}
+	got := recs[0]
+	if Blocks(got.Status) {
+		t.Fatalf("a fixed finding still blocks: status %q", got.Status)
+	}
+	if got.Status != "fixed" {
+		t.Fatalf("status %q, want fixed", got.Status)
+	}
+	if got.FixedInRunID != next.ID {
+		t.Fatalf("FixedInRunID %q, want %q", got.FixedInRunID, next.ID)
+	}
+	pending, err := PendingOverrides(root)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("override list --pending must be empty once the finding is fixed: %v %+v", err, pending)
+	}
+}

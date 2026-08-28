@@ -126,9 +126,19 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			record.GitHead = firstNonEmpty(run.GitHead, record.GitHead)
 			record.UpdatedAt = now
 		}
+		// override-pending closes here too, not just open. A requested override
+		// that is then genuinely fixed had no way out: the fix transition matched
+		// only "open", so the record stayed pending, Blocks kept returning true,
+		// and `override list --pending` exited 1 forever with no command able to
+		// clear it — the CLI offers request|grant|list and no withdraw. A finding
+		// that is no longer found is fixed, and the pending request is moot.
+		//
+		// StatusOverridden is deliberately not included: a granted override is an
+		// acknowledged exception, never a fix, and its fixedInRunId stays empty so
+		// post-merge learning can tell the two apart.
 		if (previousRuns[record.RunID] || resetFinding(record, run, resetRuns)) &&
 			sameRunTarget(record, run) &&
-			record.Status == "open" &&
+			(record.Status == "open" || record.Status == StatusOverridePending) &&
 			record.Fingerprint != "" &&
 			!currentFingerprints[record.Fingerprint] {
 			record.Status = "fixed"

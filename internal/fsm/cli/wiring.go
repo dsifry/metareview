@@ -252,7 +252,27 @@ const (
 // operator's choice, taking a flag first and the environment second. The map is
 // copied: the caller's parsed vars are not a place to leave side effects.
 func (c *ctxDeps) applyJudgeOverride(vars map[string]string, modelFlag, effortFlag string) map[string]string {
+	return c.applyJudgeOverrideFor(vars, modelFlag, effortFlag, false)
+}
+
+// applyJudgeOverrideFor is applyJudgeOverride with the calibration rule.
+//
+// --calibration pins JUDGE and JUDGE_EFFORT so calibration runs stay comparable,
+// and workflow.Resolve refuses a run that also supplies them. A flag is a real
+// conflict and must still reach Resolve to be reported. The environment is not:
+// exporting METAREVIEW_JUDGE_MODEL once would otherwise make every later
+// calibration run fail with ERR_CALIBRATION_PINNED naming a flag the operator
+// never passed.
+func (c *ctxDeps) applyJudgeOverrideFor(vars map[string]string, modelFlag, effortFlag string, calibration bool) map[string]string {
 	o := c.judgeOverride(modelFlag, effortFlag)
+	if calibration {
+		if strings.TrimSpace(modelFlag) == "" {
+			o.Model = ""
+		}
+		if strings.TrimSpace(effortFlag) == "" {
+			o.Effort = ""
+		}
+	}
 	if o.Model == "" && o.Effort == "" {
 		return vars
 	}

@@ -100,3 +100,40 @@ func TestRealCodexExec(t *testing.T) {
 		}
 	})
 }
+
+// --calibration pins JUDGE and JUDGE_EFFORT so calibration runs stay comparable,
+// and resolve refuses a run that also supplies them. An explicit flag is a real
+// conflict and must still be refused; an ambient environment variable is not —
+// exporting METAREVIEW_JUDGE_MODEL once made every later calibration run fail
+// with an error naming a flag the operator never passed.
+func TestCalibrationIgnoresTheEnvironmentButNotAFlag(t *testing.T) {
+	env := map[string]string{EnvJudgeModel: "codex/gpt-5.6-sol", EnvJudgeEffort: "max"}
+	vars := map[string]string{"REVIEWER": "claude-opus-5"}
+
+	t.Run("environment does not reach a calibration run", func(t *testing.T) {
+		got := overrideDeps(env).applyJudgeOverrideFor(vars, "", "", true)
+		if _, pinned := got[JudgeVar]; pinned {
+			t.Fatalf("the environment overrode a pinned var: %+v", got)
+		}
+		if _, pinned := got[JudgeEffortVar]; pinned {
+			t.Fatalf("the environment overrode a pinned effort: %+v", got)
+		}
+		if got["REVIEWER"] != "claude-opus-5" {
+			t.Fatalf("unrelated vars must survive: %+v", got)
+		}
+	})
+
+	t.Run("an explicit flag still reaches it, so resolve can refuse", func(t *testing.T) {
+		got := overrideDeps(nil).applyJudgeOverrideFor(vars, "codex/gpt-5.6-sol", "", true)
+		if got[JudgeVar] != "codex/gpt-5.6-sol" {
+			t.Fatalf("an explicit --judge-model must still be passed through so the pin conflict is reported: %+v", got)
+		}
+	})
+
+	t.Run("outside calibration the environment applies as before", func(t *testing.T) {
+		got := overrideDeps(env).applyJudgeOverrideFor(vars, "", "", false)
+		if got[JudgeVar] != "codex/gpt-5.6-sol" || got[JudgeEffortVar] != "max" {
+			t.Fatalf("normal runs still honour the environment: %+v", got)
+		}
+	})
+}
