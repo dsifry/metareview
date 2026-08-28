@@ -207,7 +207,10 @@ func TestWhitespaceInAPathIsNotTrimmedIntoTheDocsTree(t *testing.T) {
 // CRLF line endings must still not leave a stray CR on the path, or a genuine
 // .md would miss the suffix check.
 func TestCarriageReturnIsStrippedFromHeaderPaths(t *testing.T) {
-	diff := fixture("diff --git a/docs/x.md b/docs/x.md\r\n+++ b/docs/x.md\r\n@@ -1 +1 @@\r\n+a @TODO@ in prose\r\n")
+	// README.md, deliberately not under docs/: the prefix check would catch a
+	// docs/ path whether or not the CR was stripped, so only a path recognised
+	// by its .md suffix actually exercises this.
+	diff := fixture("diff --git a/README.md b/README.md\r\n+++ b/README.md\r\n@@ -1 +1 @@\r\n+a @TODO@ in prose\r\n")
 	if lines := addedLines(GitContext{BranchDiffFull: diff}); len(lines) != 0 {
 		t.Fatalf("CRLF header hid the .md suffix: %#v", lines)
 	}
