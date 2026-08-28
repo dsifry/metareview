@@ -645,3 +645,28 @@ func TestK6Cmd(t *testing.T) {
 		t.Fatal("runner error")
 	}
 }
+
+// stillPresentKind.Decode was the only Decode without a payload cap, justified by a comment
+// claiming MaxDeltaList statuses of MaxShort ids always fit. They do not: 256 x 1024-byte ids
+// canonicalize past MaxPayload. Without the cap the executor emits a payload the fold then
+// refuses, and because Execute returned success the machine appends nothing, changes no state,
+// and the next Advance re-runs the node - re-spending every judge call, indefinitely.
+func TestStillPresentDecodeCapsOversizedStatusList(t *testing.T) {
+	// MaxShort is measured on canonical bytes, so the longest id shortOK accepts is
+	// MaxShort-2 (the two quotes). Ids must also be distinct or checkStatus's dedup fires first.
+	st := make([]run.BugStatus, run.MaxDeltaList)
+	for i := range st {
+		id := fmt.Sprintf("%04d%s", i, strings.Repeat("a", run.MaxShort-2-4))
+		if !shortOK(id) {
+			t.Fatalf("fixture id is not accepted by shortOK: %d chars", len(id))
+		}
+		st[i] = run.BugStatus{ID: id, StillPresent: true, Confidence: 1}
+	}
+	raw := json.RawMessage(run.MarshalCanonical(statusOut{Status: st}))
+	if len(raw) <= run.MaxPayload-envelopeMargin {
+		t.Fatalf("fixture is not oversized: %d bytes vs budget %d", len(raw), run.MaxPayload-envelopeMargin)
+	}
+	if _, err := (stillPresentKind{}).Decode(raw); err == nil {
+		t.Fatalf("Decode accepted a %d-byte payload the fold will reject", len(raw))
+	}
+}

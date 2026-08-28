@@ -568,7 +568,13 @@ func (stillPresentKind) Decode(raw json.RawMessage) (any, error) {
 	if err := checkStatus(o.Status); err != nil {
 		return nil, err
 	}
-	return o, nil // ≤ MaxDeltaList statuses of ≤ MaxShort ids always fit the payload
+	// MaxDeltaList statuses of MaxShort-sized ids do NOT always fit: 256 ids just under the
+	// cap canonicalize past MaxPayload, and the fold would then refuse the append after the
+	// executor had already reported success. Cap it here like every sibling Decode.
+	if err := checkPayload(o); err != nil {
+		return nil, err
+	}
+	return o, nil
 }
 
 func (stillPresentKind) Reduce(_ run.Snapshot, out any) (run.Delta, error) {
