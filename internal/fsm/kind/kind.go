@@ -466,6 +466,19 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		if seen[c] {
 			continue
 		}
+		// No evidence, no question. The verdict schema is one boolean, so a judge that cannot
+		// see the file still has to answer true or false, and "I cannot verify this" comes back
+		// as is_real:false - which downstream is VerdictHallucination and drops the finding.
+		// Keep it instead: an unverifiable finding is for a human to resolve, not for the judge
+		// to deny. (Interim: it lands in Confirmed because run.Verdict has no unadjudicable
+		// value; giving it one is a spec change.)
+		// Only when the diff actually parses into file blocks can absence be asserted: an
+		// empty or unreadable diff says nothing about this candidate, so fall through and ask.
+		if cand.File != "" && len(judge.ChangedPaths(in.Diff.Text)) > 0 && !judge.DiffHasFile(in.Diff.Text, cand.File) {
+			desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
+			confirmed = append(confirmed, run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictRealButUngold})
+			continue
+		}
 		diff, truncated, diffHash := judge.ContextFor(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, judge.MaxDiffBytes)
 		v, err := call(ctx, e.judge, in, judge.Request{Kind: judge.KindAdjudicate, Index: index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand}})
 		index++

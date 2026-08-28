@@ -723,3 +723,49 @@ func TestAdjudicateSelectsEachCandidatesOwnFile(t *testing.T) {
 		t.Errorf("candidate 1 received another file's content:\n%.300s", rec.diffs[1])
 	}
 }
+
+// A candidate whose file is absent from the diff cannot be adjudicated. The judge's schema
+// is a single boolean, so asking anyway turns an honest "I cannot verify this" into
+// is_real:false, which downstream is VerdictHallucination and drops the finding. Measured on
+// this repo: 52 of 100 verdicts said in their reasoning that the file was not in the diff,
+// and every one was recorded as a rejection at 0.99 confidence. So the caller must not ask.
+func TestAdjudicateDoesNotJudgeACandidateWithNoEvidence(t *testing.T) {
+	diff := "diff --git a/present.go b/present.go\n--- a/present.go\n+++ b/present.go\n@@ -1,2 +1,3 @@\n+\tpresentMarker()\n"
+	rec := &recordingJudge{}
+	r := mustNew(t, rec, false)
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	snap := run.Snapshot{RunID: "mrv-noev", Iteration: 1, Findings: []run.Finding{
+		{IssueText: "bug in a file that is in the diff", File: "present.go", Line: 1},
+		{IssueText: "bug in a file that is NOT in the diff", File: "absent.go", Line: 9},
+	}}
+	a := &audits{}
+	raw, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: snap, Node: adjNode, Diff: machine.Diff{Text: diff}, StartIndex: 0, Audit: a.fn})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(rec.diffs) != 1 {
+		t.Fatalf("judge was called %d times, want 1: a candidate with no evidence must not be asked", len(rec.diffs))
+	}
+	if !strings.Contains(rec.diffs[0], "presentMarker") {
+		t.Errorf("the one call must be for the file that is present:\n%s", rec.diffs[0])
+	}
+	var out adjudicateOut
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, b := range out.Rejected {
+		if strings.Contains(b.Desc, "NOT in the diff") {
+			t.Error("an unverifiable finding must not be recorded as a hallucination")
+		}
+	}
+	var kept bool
+	for _, b := range out.Confirmed {
+		if strings.Contains(b.Desc, "NOT in the diff") {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Error("an unverifiable finding must be kept for a human, not silently dropped")
+	}
+}

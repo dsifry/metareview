@@ -29,7 +29,13 @@ type Diff struct {
 }
 
 // MaxDiffBytes bounds the diff handed to kinds (a variable so tests can force truncation).
-var MaxDiffBytes = 1 << 20
+//
+// This is a memory safety valve, not a relevance filter. It used to be 1 MiB, which head-cut
+// this repo's own 11.8 MB branch diff down to 56 of 540 files - so 94 of 100 candidates were
+// adjudicated against evidence that could not contain the answer. The kinds now select the
+// hunks for each candidate's own file (judge.ContextFor), so what any single judge call
+// receives is bounded there; this only has to stop an unbounded read into memory.
+var MaxDiffBytes = 1 << 26
 
 // ExecInput is everything a fork executor gets.
 type ExecInput struct {
