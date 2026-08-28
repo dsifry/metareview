@@ -15,6 +15,7 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/errs"
 	"github.com/dsifry/metareview/internal/fsm/machine"
 	"github.com/dsifry/metareview/internal/fsm/run"
+	"github.com/dsifry/metareview/internal/jsonl"
 	"github.com/dsifry/metareview/internal/runchain"
 	"github.com/dsifry/metareview/internal/state"
 )
@@ -342,5 +343,46 @@ func TestRunsJSONLSurvivesInterleavedWriters(t *testing.T) {
 	}
 	if seen != rows {
 		t.Fatalf("rows lost to interleaved writers: %d of %d survived", seen, rows)
+	}
+}
+
+// runs.jsonl is written by internal/runchain and read by both runchain and this package.
+// runchain sizes its scanner MaxLineBytes+2 because bufio counts the terminator; readRows
+// passed the bare cap, so a row runchain writes and reads back fine made Exists fail with
+// "token too long" - and it fails for the WHOLE file, so one long row hid every other run.
+func TestExistsReadsAnExactlyMaxLengthRow(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".metareview"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	row := Row{SchemaVersion: 1, ID: "mrv-long-row", Scope: "fsm", Status: "passed", Target: map[string]string{"pad": ""}}
+	encode := func(r Row) []byte {
+		b, err := json.Marshal(r)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return b
+	}
+	if pad := jsonl.MaxLineBytes - len(encode(row)); pad > 0 {
+		row.Target["pad"] = strings.Repeat("x", pad)
+	}
+	line := encode(row)
+	if len(line) != jsonl.MaxLineBytes {
+		t.Fatalf("fixture is %d bytes, want exactly %d", len(line), jsonl.MaxLineBytes)
+	}
+	// a second row after it: a cap failure takes down the whole file, not just the long line
+	second := append(encode(Row{SchemaVersion: 1, ID: "mrv-short-row", Scope: "fsm", Status: "passed"}), '\n')
+	body := append(append(line, '\n'), second...)
+	if err := os.WriteFile(filepath.Join(root, ".metareview", "runs.jsonl"), body, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, id := range []string{"mrv-long-row", "mrv-short-row"} {
+		found, err := Exists(root, id)
+		if err != nil {
+			t.Fatalf("Exists(%s): %v", id, err)
+		}
+		if !found {
+			t.Errorf("Exists(%s) = false, want true", id)
+		}
 	}
 }

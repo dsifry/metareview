@@ -3,12 +3,12 @@
 package record
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/dsifry/metareview/internal/jsonl"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,8 +152,7 @@ func readRows(root string) ([]Row, tail, error) {
 			complete = raw[:i]
 		}
 	}
-	sc := bufio.NewScanner(bytes.NewReader(complete))
-	sc.Buffer(make([]byte, 0, 1<<20), 1<<20)
+	sc := jsonl.NewScanner(bytes.NewReader(complete))
 	line := 0
 	for sc.Scan() {
 		line++

@@ -1,9 +1,9 @@
 package reviewlog
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/dsifry/metareview/internal/jsonl"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,11 +14,11 @@ import (
 	"github.com/dsifry/metareview/internal/runchain"
 )
 
-// maxJSONLLineBytes is the JSONL line cap: 1 MiB, not bufio's 64 KiB default.
+// maxJSONLLineBytes is this package's name for the shared JSONL line cap.
 // bufio rejects a token equal to the buffer maximum, and ScanLines needs the
 // line terminator to fit alongside the token, so callers size the buffer two
 // bytes larger to admit a line of exactly this length ending in CRLF.
-const maxJSONLLineBytes = 1 << 20
+const maxJSONLLineBytes = jsonl.MaxLineBytes
 
 type Summary struct {
 	Path                  string            `json:"path"`
@@ -285,9 +285,7 @@ func readFindings(root string) ([]findingRecord, error) {
 	// Read-only path: there is nothing a Close error could tell the caller.
 	defer func() { _ = file.Close() }()
 	var records []findingRecord
-	scanner := bufio.NewScanner(file)
-	// A run row can carry long ingested strings, so the 64 KiB default is not enough.
-	scanner.Buffer(make([]byte, 0, 64*1024), maxJSONLLineBytes+2)
+	scanner := jsonl.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {

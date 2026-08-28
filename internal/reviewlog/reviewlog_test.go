@@ -1,6 +1,8 @@
 package reviewlog
 
 import (
+	"encoding/json"
+	"github.com/dsifry/metareview/internal/jsonl"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,5 +245,41 @@ func mustWrite(t *testing.T, path, text string) {
 	}
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// readFindings shares jsonl.NewScanner with every other .jsonl reader; this pins that it
+// uses it. findings.jsonl carries reviewer-supplied Found/Evidence strings, so a max-length
+// line is realistic, and a bare-cap scanner fails the WHOLE file — every finding, not one.
+func TestReadFindingsAcceptsAnExactlyMaxLengthLine(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".metareview"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	rec := findingRecord{ID: "mrvf-1", RunID: "r1", Status: "open", Target: map[string]any{"pad": ""}}
+	encode := func(v findingRecord) []byte {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return b
+	}
+	if pad := jsonl.MaxLineBytes - len(encode(rec)); pad > 0 {
+		rec.Target["pad"] = strings.Repeat("x", pad)
+	}
+	line := encode(rec)
+	if len(line) != jsonl.MaxLineBytes {
+		t.Fatalf("fixture is %d bytes, want %d", len(line), jsonl.MaxLineBytes)
+	}
+	body := append(append(line, '\n'), append(encode(findingRecord{ID: "mrvf-2", RunID: "r1", Status: "open"}), '\n')...)
+	if err := os.WriteFile(filepath.Join(root, ".metareview", "findings.jsonl"), body, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := readFindings(root)
+	if err != nil {
+		t.Fatalf("readFindings: %v", err)
+	}
+	if len(got) != 2 || got[0].ID != "mrvf-1" || got[1].ID != "mrvf-2" {
+		t.Fatalf("got %d records %+v, want both", len(got), got)
 	}
 }

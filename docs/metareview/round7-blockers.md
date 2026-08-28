@@ -71,7 +71,7 @@ Regenerate counts with `tests/go/…` or by re-running the gate. `[x]` = fixed A
 | 64 | medium | shard-2d-2 | `internal/fsm/machine/machine_test.go:402` | [ ] |
 | 65 | medium | shard-2d-2 | `internal/fsm/machine/machine_test.go:74` | [ ] |
 | 66 | medium | shard-17 | `internal/fsm/mockai/mockai.go:153` | [ ] |
-| 67 | medium | cross-shard | `internal/fsm/record/record.go:156` | [ ] |
+| 67 | medium | cross-shard | `internal/fsm/record/record.go:156` | [x] fixed |
 | 68 | medium | shard-02 | `internal/fsm/record/record.go:225` | [ ] |
 | 69 | medium | shard-1a | `internal/fsm/record/record_test.go:225` | [ ] |
 | 70 | medium | shard-1a | `internal/fsm/record/record_test.go:298` | [ ] |
@@ -88,7 +88,7 @@ Regenerate counts with `tests/go/…` or by re-running the gate. `[x]` = fixed A
 | 81 | medium | shard-39 | `internal/prready/shardwiring_test.go:55` | [ ] |
 | 82 | medium | cross-shard | `internal/reviewers/taskdone.go:456` | [ ] |
 | 83 | medium | shard-19 | `internal/reviewers/taskdone.go:471` | [ ] |
-| 84 | medium | shard-16 | `internal/reviewlog/reviewlog.go:290` | [ ] |
+| 84 | medium | shard-16 | `internal/reviewlog/reviewlog.go:290` | [x] fixed |
 | 85 | medium | shard-16 | `internal/reviewlog/reviewlog.go:306` | [ ] |
 | 86 | medium | shard-2c | `internal/reviewmanifest/manifest.go:361` | [ ] |
 | 87 | medium | cross-shard | `internal/reviewmanifest/manifest.go:506` | [ ] |
