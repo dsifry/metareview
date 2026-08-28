@@ -1,0 +1,64 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push supersedes in-flight runs for the same ref, so stale runs cannot
+# report after newer ones.
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # The behavioral suite runs dozens of shell scripts; without this a hung
+    # script would hold a runner for the six-hour default.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The review gates diff against a base ref, so they need real history.
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: gofmt
+        # gofmt disagreements are never a judgement call, so this is a hard
+        # gate rather than an advisory lint. -l lists offenders; any output at
+        # all is a failure, and the list tells the author which files.
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: shellcheck
+        # The behavioral suite is 35 shell scripts and is the evidence that the
+        # review gates work, so it gets linted like source. Its first run found
+        # fifteen negative assertions that could never fail (see #19).
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          find . -name '*.sh' -not -path './node_modules/*' -print0 | xargs -0 shellcheck -x
+      - name: golangci-lint
+        # Blocking, with no baseline: its first run found twelve issues and all
+        # twelve are fixed in #20, one of them a dropped Close error on the
+        # append behind every finding and run row.
+        uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa # v7
+        with:
+          version: v2.13.1
+      - name: Unit tests
+        run: go test ./...
+      - name: Behavioral suite
+        run: npm test
