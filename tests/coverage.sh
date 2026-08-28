@@ -18,6 +18,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Measure with the toolchain go.mod pins, not whatever the developer happens to
+# have. Coverage percentages differ by a few tenths between Go releases, so an
+# unpinned run produces floors that pass locally and fail on the runner — which
+# is exactly what happened once. The `toolchain` directive alone will not do
+# this: it only ever forces an upgrade, never a downgrade to an older release.
+PINNED_TOOLCHAIN="$(awk '$1 == "toolchain" {print $2}' "$ROOT/go.mod")"
+if [ -n "$PINNED_TOOLCHAIN" ]; then
+  export GOTOOLCHAIN="$PINNED_TOOLCHAIN"
+fi
+
 UPDATE_FLOOR=false
 ALLOW_DECREASE=false
 for arg in "$@"; do
