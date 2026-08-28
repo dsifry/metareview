@@ -26,3 +26,20 @@ internal/taskdone                                   89.4%  ok
 internal/tasksource                                100.0%  ok
 workflows                                          100.0%  ok
 coverage gate passed
+
+## Chain provenance
+
+This run starts a fresh chain on the same base after the previous chain reached
+attempt 6/6 and ESCALATED at 06:30 on 2026-08-28. The reset is a human decision,
+taken deliberately and recorded here rather than left silent.
+
+The escalation was procedurally correct and substantively obsolete: the chain ran
+out of attempts while shard review was still in progress. The blocker it escalated
+on — Review context risk, 24 of 51 shards uncovered — has since been resolved.
+All 51 shard results and the cross-shard result are committed under
+docs/metareview/shards/pr-ready/fsm-enhancements-b73f409f/ for plan ad4e2d5d0ca31e04.
+
+Round two of the sharded review: 38 PASS, 7 PASS_ADVISORY, 7 NEEDS_REVISION.
+Nine blocking findings remain, none audit-integrity class; they are recorded in the
+shard results and carried to a follow-up branch rather than fixed here, because
+each fix re-cuts the plan and invalidates the evidence the gate reads.
