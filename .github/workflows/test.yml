@@ -51,6 +51,13 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           find . -name '*.sh' -not -path './node_modules/*' -print0 | xargs -0 shellcheck -x
+      - name: golangci-lint
+        # Blocking, with no baseline: its first run found twelve issues and all
+        # twelve are fixed in #20, one of them a dropped Close error on the
+        # append behind every finding and run row.
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.13.1
       - name: Unit tests
         run: go test ./...
       - name: Behavioral suite
