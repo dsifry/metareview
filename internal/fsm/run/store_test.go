@@ -921,15 +921,39 @@ func TestTornFiles(t *testing.T) {
 
 func TestSummarizeIncompleteFork(t *testing.T) {
 	parent := happyLog().Events()
-	mk := func(to int64, kind Kind, extra ...string) Log {
+	// forkedAt sets ForkedAtSeq independently of where the copy stops, so both
+	// disjuncts of incompleteFork can be reached. The helper used to take a kind
+	// and discard it (`_ = kind`), which left the second disjunct —
+	// Seq == ForkedAtSeq+1 && StateKind == KindAgentEdit — unexercised anywhere
+	// in the package. Statement coverage cannot see that: both disjuncts share
+	// one return.
+	mk := func(to, forkedAt int64) Log {
 		b := NewBuilder(runB)
-		evs := b.Copy(parent, 2, to, runB, func(d *InitData) { d.ForkedAtSeq = to })
-		_ = kind
+		evs := b.Copy(parent, 2, to, runB, func(d *InitData) { d.ForkedAtSeq = forkedAt })
 		return Log{Events: evs}
 	}
-	// no rebaseline tree: Seq == ForkedAtSeq → incomplete
-	if s := summarize(runB, mk(3, ""), nil, 0); !strings.Contains(s.Error, "incomplete fork") {
-		t.Fatalf("expected incomplete fork, got %+v", s)
+	// First disjunct: no rebaseline tree, Seq <= ForkedAtSeq.
+	if s := summarize(runB, mk(3, 3), nil, 0); !strings.Contains(s.Error, "incomplete fork") {
+		t.Fatalf("expected incomplete fork on Seq <= ForkedAtSeq, got %+v", s)
+	}
+	// Second disjunct: exactly one event past the fork point, and that event is
+	// the agent-edit node. Asserted on incompleteFork directly because the two
+	// disjuncts share a single return, so statement coverage cannot distinguish
+	// them and a summarize-level assertion cannot show which one fired.
+	for _, tc := range []struct {
+		name string
+		snap Snapshot
+		want bool
+	}{
+		{"no parent is never incomplete", Snapshot{Seq: 1, ForkedAtSeq: 9}, false},
+		{"first disjunct: at or before the fork", Snapshot{ParentRunID: runA, Seq: 3, ForkedAtSeq: 3}, true},
+		{"second disjunct: one past, agent-edit", Snapshot{ParentRunID: runA, Seq: 4, ForkedAtSeq: 3, StateKind: KindAgentEdit}, true},
+		{"one past but not agent-edit is complete", Snapshot{ParentRunID: runA, Seq: 4, ForkedAtSeq: 3, StateKind: Kind("review-lenses")}, false},
+		{"two past is complete", Snapshot{ParentRunID: runA, Seq: 5, ForkedAtSeq: 3, StateKind: KindAgentEdit}, false},
+	} {
+		if got := incompleteFork(tc.snap); got != tc.want {
+			t.Fatalf("%s: incompleteFork = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 	// a root run is never incomplete
 	if s := summarize(runA, Log{Events: parent[:3]}, nil, 0); s.Error != "" {

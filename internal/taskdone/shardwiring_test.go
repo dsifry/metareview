@@ -11,6 +11,7 @@ import (
 
 	"github.com/dsifry/metareview/internal/contextprofile"
 	"github.com/dsifry/metareview/internal/gitcontext"
+	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/shardpack"
 )
 
@@ -29,6 +30,31 @@ type fakeWriter struct {
 	gcErr       error
 	found       shardpack.Found
 	discoverErr error
+	// satisfy makes Discover synthesise a passing result for every shard in the
+	// plan, so the review does not block and the after-gate housekeeping runs.
+	satisfy bool
+}
+
+// satisfyingFound builds one PASS result per shard plus the cross-shard result.
+func satisfyingFound(plan contextprofile.ShardPlan) shardpack.Found {
+	found := shardpack.Found{}
+	for _, shard := range plan.Shards {
+		found.Shards = append(found.Shards, reviewmanifest.ReviewResult{
+			SchemaVersion: 1, ID: "shard-" + shard.ID + "." + shard.Hash, Kind: "shard",
+			ShardID: "shard-" + shard.ID, ShardHash: shard.Hash,
+			PlanHash: plan.PlanHash, Verdict: "PASS", Reviewer: "fake",
+			ReviewedAt: "2026-08-28T00:00:00Z",
+			Evidence:   []reviewmanifest.EvidenceRef{{Note: "synthesised for the wiring test"}},
+		})
+	}
+	if len(plan.Shards) > 1 {
+		found.CrossShard = &reviewmanifest.ReviewResult{
+			SchemaVersion: 1, ID: "cross-shard." + plan.PlanHash, Kind: "cross-shard", PlanHash: plan.PlanHash,
+			Verdict: "PASS", Reviewer: "fake", ReviewedAt: "2026-08-28T00:00:00Z",
+			Evidence: []reviewmanifest.EvidenceRef{{Note: "synthesised for the wiring test"}},
+		}
+	}
+	return found
 }
 
 func (f *fakeWriter) Write(root string, plan contextprofile.ShardPlan, header shardpack.Header, files []gitcontext.BranchFile) (func() error, error) {
@@ -53,6 +79,9 @@ func (f *fakeWriter) Prune(root, scope, targetID, keepPlanHash string) error {
 
 func (f *fakeWriter) Discover(root, scope, targetID string, plan contextprofile.ShardPlan, explicit []string) (shardpack.Found, error) {
 	f.discovers++
+	if f.satisfy {
+		return satisfyingFound(plan), f.discoverErr
+	}
 	return f.found, f.discoverErr
 }
 
@@ -187,14 +216,33 @@ func TestTaskDoneHousekeepingFailuresDoNotDiscardTheRun(t *testing.T) {
 		writer *fakeWriter
 	}{
 		{"prune", &fakeWriter{pruneErr: errors.New("prune boom")}},
-		{"gc", &fakeWriter{gcErr: errors.New("gc boom")}},
+		// GC runs only once the gate has passed (review.go: `if !result.Blocking`),
+		// so a satisfying Found is required to reach it at all. With the zero Found
+		// this case used to carry, the run always blocked and gcErr was never read:
+		// the subtest asserted nothing about GC.
+		{"gc", &fakeWriter{gcErr: errors.New("gc boom"), satisfy: true}},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			root := shardedTaskRepo(t)
-			result, err := Create(root, "docs/tasks/big-task.md", Options{Base: "main", ShardWriter: tc.writer})
+			opts := Options{Base: "main", ShardWriter: tc.writer}
+			if tc.name == "gc" {
+				// GC runs only after the gate passes, so this case has to clear
+				// every blocker — including the validation-evidence one — or it
+				// silently goes back to asserting nothing.
+				opts.EvidencePath = writeEvidence(t, root)
+			}
+			result, err := Create(root, "docs/tasks/big-task.md", opts)
 			if err != nil {
 				t.Fatalf("a %s failure must not fail the run: %v", tc.name, err)
+			}
+			if tc.name == "gc" {
+				if result.Blocking {
+					t.Fatal("the gc case must produce a non-blocking run, or GC is never reached")
+				}
+				if tc.writer.collections == 0 {
+					t.Fatal("GC was never called, so its failure was never exercised")
+				}
 			}
 			if result.RunID == "" {
 				t.Fatal("the run identifiers must survive a housekeeping failure")
@@ -212,4 +260,15 @@ func TestTaskDoneDiscoversShardResults(t *testing.T) {
 	if writer.discovers != 1 {
 		t.Fatalf("discovers = %d, want 1 — results must be looked for on every sharded run", writer.discovers)
 	}
+}
+
+// writeEvidence drops a passing validation record in the repo and returns its path.
+func writeEvidence(t *testing.T, root string) string {
+	t.Helper()
+	path := filepath.Join(root, "evidence.md")
+	body := "# Validation\n\n```\n$ go test ./...\nok  \tall packages\n```\n\nAll tests pass.\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

@@ -690,3 +690,40 @@ func TestShardedReviewMarkdownCannotForgeTableCells(t *testing.T) {
 		t.Fatalf("the true blocking count is not in the row:\n%s", row)
 	}
 }
+
+// A file both committed on the branch and dirty locally must be disclosed as
+// local: its committed bytes are in a shard pack, its uncommitted ones are in no
+// pack at all. Classifying it purely as a branch file hid that second fact, so
+// unreviewed bytes never appeared in the manifest's local disclosure.
+func TestLocalPathsIncludeABranchFileWithUncommittedBytes(t *testing.T) {
+	profile := contextprofile.Profile{Files: []contextprofile.FileProfile{
+		{Path: "src/branch-only.go", Source: contextprofile.SourceBranch, DiffBytes: 100},
+		{Path: "src/both.go", Source: contextprofile.SourceBranch, DiffBytes: 400, LocalBytes: 40},
+		{Path: "src/worktree-only.go", Source: contextprofile.SourceWorktree, DiffBytes: 20},
+	}}
+
+	local := profilePaths(profile, false)
+	if !contains(local, "src/both.go") {
+		t.Fatalf("a branch file with uncommitted bytes must be disclosed as local: %v", local)
+	}
+	if !contains(local, "src/worktree-only.go") {
+		t.Fatalf("a purely local file must still be disclosed: %v", local)
+	}
+	if contains(local, "src/branch-only.go") {
+		t.Fatalf("a clean branch file is not local: %v", local)
+	}
+
+	branch := profilePaths(profile, true)
+	if !contains(branch, "src/both.go") || !contains(branch, "src/branch-only.go") {
+		t.Fatalf("branch files must still be listed as branch files: %v", branch)
+	}
+}
+
+func contains(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}

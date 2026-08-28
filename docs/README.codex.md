@@ -56,7 +56,7 @@ Lifecycle gate results are actionable: `PASS`/`PASS_ADVISORY` proceed only with 
 
 Prefer structured evidence receipts from `metareview evidence run -- <command>` and, after a PR exists, `metareview evidence import --github-checks <pr-number>`. Task-done and PR-ready parse receipt files as validation evidence; epic-ready reads the supplied evidence text for child-completion signals.
 
-Commit durable review artifacts under `docs/metareview/`, including the shard review results in `docs/metareview/shards/`. Keep transient `.metareview/findings.jsonl`, `.metareview/runs.jsonl` and `.metareview/shards/` local.
+Commit durable review artifacts under `docs/metareview/`, including the shard review results in `docs/metareview/shards/` and the FSM export bundles in `docs/metareview/fsm/`. Keep transient `.metareview/findings.jsonl`, `.metareview/runs.jsonl`, `.metareview/runs/` (FSM runs, self-ignoring) and `.metareview/shards/` local.
 
 ## Metaswarm Repositories
 

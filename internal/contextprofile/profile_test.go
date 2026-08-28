@@ -89,3 +89,37 @@ func contains(values []string, want string) bool {
 	}
 	return false
 }
+
+// A file can be both committed on the branch and dirty in the working tree. The
+// committed bytes are in a shard pack; the uncommitted ones are in no pack at
+// all, so the manifest has to disclose them. Assigning Source=SourceBranch and
+// overwriting the byte count with the branch total dropped that second fact:
+// the file never appeared in LocalPaths and the per-file table stopped summing
+// to FilteredDiffBytes, so unreviewed bytes were silently undisclosed.
+func TestBranchFileWithLocalEditsKeepsItsLocalBytes(t *testing.T) {
+	git := gitcontext.Context{
+		ChangedFiles:     []string{"src/both.go"},
+		WorkingTreeFiles: []string{"src/both.go"},
+		BranchFiles:      []gitcontext.BranchFile{{Path: "src/both.go", Bytes: 400, Hash: "h1"}},
+		WorkingTreeDiff: "diff --git a/src/both.go b/src/both.go\n" +
+			"--- a/src/both.go\n+++ b/src/both.go\n@@ -1 +1,2 @@\n" +
+			"+uncommitted line one\n+uncommitted line two\n",
+	}
+
+	files := filesFromGit(git)
+	var profile *FileProfile
+	for i := range files {
+		if files[i].Path == "src/both.go" {
+			profile = &files[i]
+		}
+	}
+	if profile == nil {
+		t.Fatal("the file is missing from the profile entirely")
+	}
+	if profile.Source != SourceBranch {
+		t.Fatalf("a branch-committed file is still a branch file: %q", profile.Source)
+	}
+	if profile.LocalBytes <= 0 {
+		t.Fatalf("the uncommitted bytes were dropped: LocalBytes=%d (they are in no shard pack, so they must be disclosed)", profile.LocalBytes)
+	}
+}

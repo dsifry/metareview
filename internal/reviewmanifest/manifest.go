@@ -514,7 +514,12 @@ func profilePaths(profile contextprofile.Profile, branch bool) []string {
 	paths := make([]string, 0, len(profile.Files))
 	for _, file := range profile.Files {
 		isBranch := file.Source == "" || file.Source == contextprofile.SourceBranch
-		if isBranch == branch {
+		// A file can be both: committed on the branch and dirty in the working
+		// tree. Its committed bytes are in a shard pack and its uncommitted ones
+		// are in no pack at all, so it belongs in both lists. These are
+		// disclosures, not a partition, and treating them as a partition let the
+		// uncommitted half go unmentioned.
+		if isBranch == branch || (!branch && file.LocalBytes > 0) {
 			paths = append(paths, file.Path)
 		}
 	}
