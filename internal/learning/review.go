@@ -278,22 +278,3 @@ func removeEmptyLearningDirs(root string) {
 		_ = os.Remove(filepath.Join(root, rel))
 	}
 }
-
-func markdownList(values []string, empty string) string {
-	if len(values) == 0 {
-		return empty
-	}
-	lines := make([]string, 0, len(values))
-	seen := map[string]bool{}
-	for _, value := range values {
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		lines = append(lines, "- "+value)
-	}
-	if len(lines) == 0 {
-		return empty
-	}
-	return strings.Join(lines, "\n")
-}

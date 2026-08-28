@@ -470,7 +470,8 @@ func readJSONL(path string) ([]Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	// Read-only path: there is nothing a Close error could tell the caller.
+	defer func() { _ = file.Close() }()
 	records := []Record{}
 	scanner := bufio.NewScanner(file)
 	// A run row can carry long ingested strings, so the 64 KiB default is not enough.

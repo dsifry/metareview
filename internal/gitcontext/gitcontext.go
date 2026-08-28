@@ -302,7 +302,7 @@ func resolveBase(root, requestedBase string) (string, error) {
 		}
 		base, err := git(root, "rev-parse", "--verify", requestedBase+"^{commit}")
 		if err != nil {
-			return "", fmt.Errorf("Invalid git base: %s", requestedBase)
+			return "", fmt.Errorf("invalid git base: %s", requestedBase)
 		}
 		return base, nil
 	}
@@ -316,7 +316,7 @@ func resolveBase(root, requestedBase string) (string, error) {
 			return base, nil
 		}
 	}
-	return "", fmt.Errorf("Invalid git base: unable to resolve default base")
+	return "", fmt.Errorf("invalid git base: unable to resolve default base")
 }
 
 func validateRef(ref string) error {
@@ -324,7 +324,7 @@ func validateRef(ref string) error {
 		strings.HasPrefix(ref, "-") ||
 		strings.Contains(ref, "..") ||
 		!refPattern.MatchString(ref) {
-		return fmt.Errorf("Invalid git base: %s", ref)
+		return fmt.Errorf("invalid git base: %s", ref)
 	}
 	return nil
 }
@@ -351,11 +351,6 @@ func tryGit(root string, args ...string) string {
 		return ""
 	}
 	return out
-}
-
-func limitedGit(root string, args ...string) (string, bool, error) {
-	out, truncated, _, err := limitedGitMeasured(root, args...)
-	return out, truncated, err
 }
 
 func limitedGitMeasured(root string, args ...string) (string, bool, int, error) {

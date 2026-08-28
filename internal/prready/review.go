@@ -1044,11 +1044,11 @@ func runChainMarkdown(runID, verdict string, meta reviewMetadata) string {
 	var builder strings.Builder
 	builder.WriteString("\n## Run Chain\n\n")
 	for _, link := range meta.RunChain {
-		builder.WriteString(fmt.Sprintf("- %s: %s attempt %d/%d\n", link.ID, link.Verdict, link.AttemptNumber, link.MaxAttempts))
+		fmt.Fprintf(&builder, "- %s: %s attempt %d/%d\n", link.ID, link.Verdict, link.AttemptNumber, link.MaxAttempts)
 	}
-	builder.WriteString(fmt.Sprintf("- %s: %s attempt %d/%d\n", runID, verdict, meta.AttemptNumber, meta.MaxAttempts))
+	fmt.Fprintf(&builder, "- %s: %s attempt %d/%d\n", runID, verdict, meta.AttemptNumber, meta.MaxAttempts)
 	builder.WriteString("\n## Unresolved Blocker Summary\n\n")
-	builder.WriteString(fmt.Sprintf("- Blocking: %d\n- Advisory: %d\n- Follow-up: %d\n- Warnings: %d\n", meta.BlockingFindingCount, meta.AdvisoryFindingCount, meta.FollowUpFindingCount, meta.WarningFindingCount))
+	fmt.Fprintf(&builder, "- Blocking: %d\n- Advisory: %d\n- Follow-up: %d\n- Warnings: %d\n", meta.BlockingFindingCount, meta.AdvisoryFindingCount, meta.FollowUpFindingCount, meta.WarningFindingCount)
 	return builder.String()
 }
 

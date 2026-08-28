@@ -55,4 +55,4 @@ set +e
 code=$?
 set -e
 test "$code" -eq 1
-grep -q 'Invalid git base' "$TMP/bad.err"
+grep -q 'invalid git base' "$TMP/bad.err"
