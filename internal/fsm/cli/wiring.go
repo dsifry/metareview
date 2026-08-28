@@ -28,6 +28,8 @@ const (
 	EnvAnthropicURL = "ANTHROPIC_BASE_URL"
 	EnvOpenAIURL    = "OPENAI_BASE_URL"
 	EnvMockAI       = "MOCK_AI"
+	EnvJudgeModel   = "METAREVIEW_JUDGE_MODEL"
+	EnvJudgeEffort  = "METAREVIEW_JUDGE_EFFORT"
 	EnvRunID        = "MRV_RUN_ID"
 	EnvHome         = "HOME"
 )
@@ -139,7 +141,27 @@ func (c *ctxDeps) keys() judge.Keys {
 }
 
 func (c *ctxDeps) newJudge() (judge.Judge, error) {
-	return judge.New(c.deps.HTTP, c.keys(), judge.URLs{Anthropic: c.deps.Getenv(EnvAnthropicURL), OpenAI: c.deps.Getenv(EnvOpenAIURL)}, c.nonce, judge.Clock{Now: c.deps.Now, After: c.deps.After})
+	return judge.NewWithCodex(c.deps.HTTP, c.keys(),
+		judge.URLs{Anthropic: c.deps.Getenv(EnvAnthropicURL), OpenAI: c.deps.Getenv(EnvOpenAIURL)},
+		c.nonce, judge.Clock{Now: c.deps.Now, After: c.deps.After}, c.deps.CodexExec)
+}
+
+// judgeOverride is the model/effort the operator chose, by flag or environment.
+// Precedence is flag → env → the workflow's own var, so a workflow keeps working
+// unchanged while an operator can retarget the judge without editing it.
+type judgeOverride struct{ Model, Effort string }
+
+func (c *ctxDeps) judgeOverride(modelFlag, effortFlag string) judgeOverride {
+	pick := func(flag, env string) string {
+		if strings.TrimSpace(flag) != "" {
+			return strings.TrimSpace(flag)
+		}
+		return strings.TrimSpace(c.deps.Getenv(env))
+	}
+	return judgeOverride{
+		Model:  pick(modelFlag, EnvJudgeModel),
+		Effort: pick(effortFlag, EnvJudgeEffort),
+	}
 }
 
 func (c *ctxDeps) nonce() string {
@@ -218,4 +240,31 @@ func (c *ctxDeps) resolveRun(store run.RunStore, flag string) (id string, fromEn
 		}
 	}
 	return "", false, errs.E(CodeNoRuns, "no FSM runs in this repository; run `metareview fsm init`")
+}
+
+// JudgeVar and JudgeEffortVar are the workflow variables an operator retargets.
+const (
+	JudgeVar       = "JUDGE"
+	JudgeEffortVar = "JUDGE_EFFORT"
+)
+
+// applyJudgeOverride returns vars with JUDGE and JUDGE_EFFORT replaced by the
+// operator's choice, taking a flag first and the environment second. The map is
+// copied: the caller's parsed vars are not a place to leave side effects.
+func (c *ctxDeps) applyJudgeOverride(vars map[string]string, modelFlag, effortFlag string) map[string]string {
+	o := c.judgeOverride(modelFlag, effortFlag)
+	if o.Model == "" && o.Effort == "" {
+		return vars
+	}
+	out := make(map[string]string, len(vars)+2)
+	for k, v := range vars {
+		out[k] = v
+	}
+	if o.Model != "" {
+		out[JudgeVar] = o.Model
+	}
+	if o.Effort != "" {
+		out[JudgeEffortVar] = o.Effort
+	}
+	return out
 }

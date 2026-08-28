@@ -1,0 +1,218 @@
+package judge
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/dsifry/metareview/internal/fsm/errs"
+	"github.com/dsifry/metareview/internal/fsm/run"
+)
+
+// fakeCodex records the invocation and replays a canned event stream.
+type fakeCodex struct {
+	args   []string
+	stdin  string
+	stdout string
+	code   int
+	err    error
+	calls  int
+}
+
+func (f *fakeCodex) exec(_ context.Context, args []string, stdin string) ([]byte, int, error) {
+	f.calls++
+	f.args, f.stdin = args, stdin
+	return []byte(f.stdout), f.code, f.err
+}
+
+func codexStream(text string) string {
+	return `{"type":"thread.started","thread_id":"t"}` + "\n" +
+		`{"type":"item.completed","item":{"id":"i0","type":"reasoning","text":"ignored"}}` + "\n" +
+		`{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":` + quote(text) + `}}` + "\n" +
+		"not json at all\n" + // a future CLI line this build does not know
+		`{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":5,"output_tokens":7,"reasoning_output_tokens":3}}` + "\n"
+}
+
+func quote(s string) string {
+	return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
+}
+
+// codexClock is a tick-per-call clock; the package's own testClock takes a
+// sleep recorder this provider never uses.
+func codexClock() Clock {
+	n := time.Unix(0, 0)
+	return Clock{Now: func() time.Time { n = n.Add(time.Second); return n }, After: func(time.Duration) <-chan time.Time {
+		ch := make(chan time.Time, 1)
+		ch <- time.Unix(0, 0)
+		return ch
+	}}
+}
+
+func codexRequest() Request {
+	return Request{Kind: KindAdjudicate, Model: "codex/gpt-5.6-sol", Effort: "medium",
+		Input: AdjudicateInput{Diff: "diff --git a/a.go b/a.go", Candidate: run.Finding{IssueText: "nil deref"}}}
+}
+
+func TestCodexJudgeHappyPath(t *testing.T) {
+	f := &fakeCodex{stdout: codexStream(`{"reasoning":"grounded","is_real":true,"confidence":0.91}`)}
+	j := &codexJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
+
+	v, err := j.Call(context.Background(), codexRequest())
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if !v.Decision || v.Confidence != 0.91 || v.ParseError != "" {
+		t.Fatalf("verdict: %+v", v)
+	}
+	if v.Attempts != 1 || v.Duration != time.Second {
+		t.Fatalf("attempts/duration: %d %v", v.Attempts, v.Duration)
+	}
+	want := run.TokenTotals{Input: 100, CacheRead: 40, CacheCreate: 5, Output: 7, Reasoning: 3}
+	if v.Tokens != want {
+		t.Fatalf("tokens: %+v want %+v", v.Tokens, want)
+	}
+	if v.InputHash == "" || v.Kind != KindAdjudicate || v.Model != "codex/gpt-5.6-sol" {
+		t.Fatalf("envelope: %+v", v)
+	}
+}
+
+func TestCodexJudgeBuildsASafeInvocation(t *testing.T) {
+	f := &fakeCodex{stdout: codexStream(`{"reasoning":"r","is_real":false,"confidence":0.2}`)}
+	j := &codexJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
+	if _, err := j.Call(context.Background(), codexRequest()); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(f.args, " ")
+	for _, want := range []string{
+		"exec --json",
+		"--sandbox read-only",   // a judge must not edit the tree it judges
+		"--skip-git-repo-check", // judging is not tied to a repository
+		"--color never",
+		"-m gpt-5.6-sol", // the codex/ prefix is stripped for the wire
+		"-c model_reasoning_effort=medium",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args %q missing %q", joined, want)
+		}
+	}
+	if f.args[len(f.args)-1] != "-" {
+		t.Fatalf("the prompt must arrive on stdin, not argv: %v", f.args)
+	}
+	if !strings.Contains(f.stdin, "code review") || !strings.Contains(f.stdin, "nil deref") {
+		t.Fatalf("stdin did not carry the rendered prompt: %q", f.stdin)
+	}
+	if strings.Contains(joined, "nil deref") {
+		t.Fatal("the prompt leaked into argv, where the process table would show it")
+	}
+}
+
+func TestCodexJudgeFailures(t *testing.T) {
+	cases := []struct {
+		name string
+		f    *fakeCodex
+		req  func(Request) Request
+		code string
+	}{
+		{"cannot run", &fakeCodex{err: errors.New("no such file")}, nil, CodeJudgeTransport},
+		{"non-zero exit", &fakeCodex{stdout: "", code: 3}, nil, CodeJudgeTransport},
+		{"no agent message", &fakeCodex{stdout: `{"type":"turn.completed","usage":{}}` + "\n"}, nil, CodeJudgeResponse},
+		{"unknown effort", &fakeCodex{}, func(r Request) Request { r.Effort = "light"; return r }, CodeJudgeEffortUnsupported},
+		{"calibration needs medium", &fakeCodex{}, func(r Request) Request { r.Calibration = true; r.Effort = "high"; return r }, CodeJudgeEffortUnsupported},
+		{"empty model", &fakeCodex{}, func(r Request) Request { r.Model = CodexPrefix; return r }, CodeJudgeModel},
+		{"unknown kind", &fakeCodex{stdout: codexStream("{}")}, func(r Request) Request { r.Kind = "nope"; return r }, CodePromptTemplate},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			j := &codexJudge{exec: c.f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
+			r := codexRequest()
+			if c.req != nil {
+				r = c.req(r)
+			}
+			v, err := j.Call(context.Background(), r)
+			if !errs.Is(err, c.code) {
+				t.Fatalf("got %v, want %s", err, c.code)
+			}
+			if v.Kind == "" {
+				t.Fatal("the envelope must survive an error")
+			}
+		})
+	}
+}
+
+func TestCodexJudgeReportsTokensEvenWhenTheCallFails(t *testing.T) {
+	// A non-zero exit after a completed turn still cost tokens; losing them would
+	// under-report the run's spend and weaken the budget convergence check.
+	f := &fakeCodex{code: 1, stdout: `{"type":"turn.completed","usage":{"input_tokens":11,"output_tokens":2}}` + "\n"}
+	j := &codexJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
+	v, err := j.Call(context.Background(), codexRequest())
+	if err == nil {
+		t.Fatal("expected a transport error")
+	}
+	if v.Tokens.Input != 11 || v.Tokens.Output != 2 {
+		t.Fatalf("tokens lost on failure: %+v", v.Tokens)
+	}
+}
+
+func TestCodexRoutingAndValidation(t *testing.T) {
+	if route("codex/gpt-5.6-sol") != provCodex {
+		t.Fatal("codex/ must route to the CLI provider")
+	}
+	if route("gpt-5.6-sol") != provOpenAI {
+		t.Fatal("a bare OpenAI id still routes over HTTP")
+	}
+	if got := wireModel("codex/gpt-5.6-sol"); got != "gpt-5.6-sol" {
+		t.Fatalf("wireModel: %q", got)
+	}
+	// No key of any kind: the CLI holds the OAuth session.
+	if _, err := validate("codex/gpt-5.6-sol", "medium", false, Keys{}); err != nil {
+		t.Fatalf("codex must not require an API key: %v", err)
+	}
+	if err := Preflight("codex/gpt-5.6-sol", "max", false, Keys{}); err != nil {
+		t.Fatalf("max is in the CLI effort set: %v", err)
+	}
+	if err := Preflight("codex/gpt-5.6-sol", "light", false, Keys{}); !errs.Is(err, CodeJudgeEffortUnsupported) {
+		t.Fatalf("light is not an effort the API accepts: %v", err)
+	}
+	// The wider set stays codex-only; HTTP providers keep their vocabulary.
+	if err := Preflight("gpt-5.6-sol", "max", false, Keys{OpenAI: "k"}); !errs.Is(err, CodeJudgeEffortUnsupported) {
+		t.Fatalf("max must not leak into the HTTP providers: %v", err)
+	}
+}
+
+func TestCodexModelWithoutARunnerIsRefused(t *testing.T) {
+	// Falling back to HTTP would need an API key the caller deliberately did not
+	// supply, so this must fail loudly rather than quietly change provider.
+	j, err := New(nil, Keys{}, URLs{}, func() string { return "n" }, codexClock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := j.Call(context.Background(), codexRequest())
+	if !errs.Is(err, CodeJudgeModel) {
+		t.Fatalf("got %v", err)
+	}
+	if v.Model != "codex/gpt-5.6-sol" {
+		t.Fatalf("envelope: %+v", v)
+	}
+}
+
+func TestNewWithCodexRoutesToTheCLI(t *testing.T) {
+	f := &fakeCodex{stdout: codexStream(`{"reasoning":"r","is_real":true,"confidence":0.8}`)}
+	j, err := NewWithCodex(nil, Keys{}, URLs{}, func() string { return "n" }, codexClock(), f.exec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := j.Call(context.Background(), codexRequest())
+	if err != nil || !v.Decision || f.calls != 1 {
+		t.Fatalf("v=%+v err=%v calls=%d", v, err, f.calls)
+	}
+}
+
+func TestItoa(t *testing.T) {
+	for in, want := range map[int]string{0: "0", 7: "7", 42: "42", -3: "-3", 1234567: "1234567"} {
+		if got := itoa(in); got != want {
+			t.Fatalf("itoa(%d)=%q want %q", in, got, want)
+		}
+	}
+}

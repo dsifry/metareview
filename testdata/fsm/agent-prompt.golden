@@ -15,7 +15,7 @@ What `exec` means:
 `fork`: the CLI does it — never re-spawn a cold `claude -p`.
 
 Subcommands:
-  metareview fsm init --workflow <name|path> [--var K=V]... [--base <ref>] [--goldens <file>] [--repo-mode enforcing] [--allow-custom-cmds <sha256>] [--calibration] [--mock-ai <dir>] [--work-dir <dir>] [--run-id <id>]
+  metareview fsm init --workflow <name|path> [--var K=V]... [--judge-model <m>] [--judge-effort <e>] [--base <ref>] [--goldens <file>] [--repo-mode enforcing] [--allow-custom-cmds <sha256>] [--calibration] [--mock-ai <dir>] [--work-dir <dir>] [--run-id <id>]
   metareview fsm state [--run <id>]                      — where the run is: next_action, outgoing, counts, resume_hint
   metareview fsm advance [--run <id>] [--repair]          — take the next step
   metareview fsm advance --run <id> --from <state> [--at-iter N] [--var K=V]... [--work-dir <dir>] [--accept-workflow-change [--workflow <name|path>]] [--allow-custom-cmds <sha256>] — fork a child at a checkpoint
@@ -34,6 +34,10 @@ An `ERR_CMDS_NOT_ALLOWED` `cmds` list and its `cmds_sha256` are for a human: rel
 `ERR_RUN_ESCALATED`: stop. Forking an ancestor or running `init` again on the same target is a human decision — relay and wait.
 
 Agent-satisfiable knobs (they weaken a guardrail; use them only when told to): --allow-custom-cmds, --accept-workflow-change, --workflow <path>, --var JUDGE / JUDGE_EFFORT, --mock-ai / MOCK_AI, --calibration, --repo-mode, --repair, --run-id, --include-vars, ANTHROPIC_BASE_URL / OPENAI_BASE_URL — base-URL overrides are not recorded in the audit.
+--judge-model / --judge-effort (or METAREVIEW_JUDGE_MODEL / METAREVIEW_JUDGE_EFFORT) retarget the
+judge without editing the workflow; they are folded into the run's vars, so the model that judged a
+run stays visible in its snapshot and export. A codex/ model (e.g. codex/gpt-5.6-sol) is judged
+through the Codex CLI on the OAuth session under ~/.codex, so it needs no API key.
 Never pass a secret via --var; use a declared env name.
 fsm judge without --run is unaudited. A mock: true run never satisfies a gate. Fork first, then commit. After FORKED, pass --run <child> explicitly.
 The audit chain is integrity-against-accident, not tamper evidence against the host; these are process guarantees for a cooperating agent.

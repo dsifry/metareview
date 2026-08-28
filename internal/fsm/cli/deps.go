@@ -3,11 +3,14 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"errors"
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/dsifry/metareview/internal/fsm/cmdexec"
@@ -34,6 +37,7 @@ type Deps struct {
 	FileHash  func(string) (string, error)
 	ReadFile  func(string) ([]byte, error)
 	Exec      gate.Exec
+	CodexExec judge.CodexExec
 	HTTP      judge.Doer
 	Store     func(root string) run.RunStore
 	Sidecar   func(root string) machine.Sidecar
@@ -60,6 +64,7 @@ func RealDeps() Deps {
 		FileHash:  workflow.FileSHA256,
 		ReadFile:  os.ReadFile,
 		Exec:      gate.RealExec,
+		CodexExec: realCodexExec,
 		HTTP:      newHTTPClient(),
 		Store:     func(root string) run.RunStore { return run.NewJSONLStore(root, run.Options{}) },
 		Sidecar:   func(root string) machine.Sidecar { return machine.FSSidecar{Root: root} },
@@ -83,4 +88,28 @@ func newHTTPClient() *http.Client {
 
 func guardedRunner(r machine.RunnerDeps, env func() []string, fileHash func(string) (string, error), now func() time.Time, real cmdexec.Runner) converge.Caller {
 	return cmdexec.Guarded{Runner: real, Allowed: r.Allowed, Dir: r.WorkDir, RunID: r.RunID, FileHash: fileHash, Audit: r.Audit, Environ: env, Clock: now, CmdCalls: r.CmdCalls}
+}
+
+// codexBin is the executable realCodexExec runs; a seam so the three exit paths
+// can be tested without the Codex CLI installed.
+var codexBin = judge.CodexBin
+
+// realCodexExec runs the Codex CLI. The prompt goes in on stdin rather than as
+// an argument so it never appears in the process table, and the environment is
+// inherited: the OAuth session the CLI reads lives under the user's home, and
+// metareview never handles the token itself.
+func realCodexExec(ctx context.Context, args []string, stdin string) ([]byte, int, error) {
+	cmd := exec.CommandContext(ctx, codexBin, args...)
+	cmd.Stdin = strings.NewReader(stdin)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return out.Bytes(), ee.ExitCode(), nil // ran and failed: the exit code is the answer
+	}
+	if err != nil {
+		return out.Bytes(), 0, err // could not be run at all
+	}
+	return out.Bytes(), 0, nil
 }

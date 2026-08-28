@@ -1,8 +1,7 @@
 # metareview Findings
 
 - mrvf-20260827-215325129085000-pr-ready-branch-10d735e5-002 [high] Review context risk (architecture-reviewer)
-- mrvf-20260827-231005610059000-pr-ready-branch-10d735e5-002 [critical] Unsafe eval introduced (security-reviewer)
-- mrvf-20260827-231005610059000-pr-ready-branch-10d735e5-003 [high] TODO left in task-done diff (code-quality-reviewer)
+- mrvf-20260828-024448675616000-pr-ready-branch-10d735e5-001 [high] Missing validation evidence (validation-reviewer)
 
 ## Process Overrides
 

@@ -108,11 +108,16 @@ const (
 	provUnknown provider = iota
 	provAnthropic
 	provOpenAI
+	provCodex
 )
 
 func route(model string) provider {
 	m := strings.ToLower(model)
 	switch {
+	// Checked first: "codex/" names the transport, not the family, and the id
+	// behind it is an OpenAI one that would otherwise route to HTTP.
+	case strings.HasPrefix(m, CodexPrefix):
+		return provCodex
 	case strings.HasPrefix(m, "claude"), strings.HasPrefix(m, "anthropic/"):
 		return provAnthropic
 	case strings.HasPrefix(m, "gpt"), strings.HasPrefix(m, "openai/"), strings.HasPrefix(m, "glm"), strings.HasPrefix(m, "kimi"):
@@ -142,11 +147,12 @@ func anthropicFamily(model string) (capable bool, legacy bool) {
 }
 
 func wireModel(model string) string {
-	return strings.TrimPrefix(strings.TrimPrefix(model, "anthropic/"), "openai/")
+	return strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(model, CodexPrefix), "anthropic/"), "openai/")
 }
 
-// realJudge is the HTTP implementation.
+// realJudge is the HTTP implementation, and the router for codex/ models.
 type realJudge struct {
+	codex CodexExec
 	doer  Doer
 	keys  Keys
 	urls  URLs
@@ -156,6 +162,13 @@ type realJudge struct {
 
 // New builds the real judge; base URLs are validated once.
 func New(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock) (Judge, error) {
+	return NewWithCodex(doer, keys, urls, nonce, clock, nil)
+}
+
+// NewWithCodex is New plus the Codex CLI seam. When codex is nil a codex/ model
+// is refused rather than silently falling back to HTTP, which would need an API
+// key the caller deliberately did not supply.
+func NewWithCodex(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock, codex CodexExec) (Judge, error) {
 	if urls.Anthropic == "" {
 		urls.Anthropic = DefaultURLs.Anthropic
 	}
@@ -169,7 +182,7 @@ func New(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock) (Jud
 		}
 		*u = clean
 	}
-	return &realJudge{doer: doer, keys: keys, urls: urls, nonce: nonce, clock: clock}, nil
+	return &realJudge{doer: doer, keys: keys, urls: urls, nonce: nonce, clock: clock, codex: codex}, nil
 }
 
 // checkURL enforces the base-URL policy and strips a trailing slash.
@@ -228,6 +241,11 @@ func validate(model, effort string, calibration bool, keys Keys) (provider, erro
 	prov := route(model)
 	if prov == provUnknown {
 		return provUnknown, errs.E(CodeJudgeModel, "no provider for model "+model, "model", model)
+	}
+	if prov == provCodex {
+		// Delegated whole: the CLI holds the credential and accepts a wider
+		// effort set, so neither the key check nor the effort table below applies.
+		return prov, validateCodex(model, effort, calibration)
 	}
 	if !efforts[effort] {
 		return provUnknown, errs.E(CodeJudgeEffortUnsupported, "unknown effort "+effort, "effort", effort)
@@ -456,6 +474,13 @@ func backoff(class retryClass, attempt int) time.Duration {
 
 // Call renders, sends with the retry ladder, and parses.
 func (j *realJudge) Call(ctx context.Context, r Request) (v Verdict, err error) {
+	if route(r.Model) == provCodex {
+		if j.codex == nil {
+			return Verdict{Kind: r.Kind, Model: r.Model, Effort: r.Effort, InputHash: InputHash(r.Input)},
+				errs.E(CodeJudgeModel, "no codex runner is wired for "+r.Model, "model", r.Model, "provider", "codex")
+		}
+		return (&codexJudge{exec: j.codex, nonce: j.nonce, clock: j.clock}).Call(ctx, r)
+	}
 	v = Verdict{Kind: r.Kind, Model: r.Model, Effort: r.Effort, InputHash: InputHash(r.Input)}
 	system, user, err := RenderPrompt(r.Kind, r.Input, r.Fence, r.Calibration, j.nonce())
 	if err != nil {
