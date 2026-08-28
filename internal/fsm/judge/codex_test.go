@@ -155,6 +155,20 @@ func TestCodexJudgeReportsTokensEvenWhenTheCallFails(t *testing.T) {
 	}
 }
 
+// route lowercases the model but wireModel stripped the prefix case-sensitively,
+// so "Codex/gpt-5.6-sol" routed to the CLI and then passed the unstripped prefix
+// through as -m, which codex rejects.
+func TestCodexPrefixStrippingMatchesRouting(t *testing.T) {
+	for _, model := range []string{"codex/gpt-5.6-sol", "Codex/gpt-5.6-sol", "CODEX/gpt-5.6-sol"} {
+		if route(model) != provCodex {
+			t.Fatalf("%s must route to the CLI provider", model)
+		}
+		if got := wireModel(model); got != "gpt-5.6-sol" {
+			t.Fatalf("wireModel(%q) = %q, want the bare id", model, got)
+		}
+	}
+}
+
 func TestCodexRoutingAndValidation(t *testing.T) {
 	if route("codex/gpt-5.6-sol") != provCodex {
 		t.Fatal("codex/ must route to the CLI provider")

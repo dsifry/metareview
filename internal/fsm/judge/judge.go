@@ -147,7 +147,18 @@ func anthropicFamily(model string) (capable bool, legacy bool) {
 }
 
 func wireModel(model string) string {
-	return strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(model, CodexPrefix), "anthropic/"), "openai/")
+	// Case-insensitive, to match route: it lowercases before comparing, so a
+	// differently-cased prefix routed to a provider and then travelled to the
+	// wire unstripped.
+	return trimPrefixFold(trimPrefixFold(trimPrefixFold(model, CodexPrefix), "anthropic/"), "openai/")
+}
+
+// trimPrefixFold is strings.TrimPrefix with an ASCII case-insensitive match.
+func trimPrefixFold(value, prefix string) string {
+	if len(value) >= len(prefix) && strings.EqualFold(value[:len(prefix)], prefix) {
+		return value[len(prefix):]
+	}
+	return value
 }
 
 // realJudge is the HTTP implementation, and the router for codex/ models.

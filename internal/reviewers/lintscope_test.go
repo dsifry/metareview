@@ -13,10 +13,19 @@ var (
 	todoWord = "TO" + "DO"
 )
 
+// The placeholders carry no marker text of their own. An "@"-delimited pair did:
+// "@" is a non-word character, so the word-boundary anchors in todoPattern match
+// straight through the delimiters, and this file tripped the very lint it exists
+// to test. The pattern is named rather than spelled out here for that reason.
+const (
+	evalSlot = "XxEVALSLOTxX"
+	todoSlot = "XxMARKERSLOTxX"
+)
+
 // fixture expands the placeholders in a diff literal into the real markers.
 func fixture(diff string) string {
-	diff = strings.ReplaceAll(diff, "@EVAL@", evalCall)
-	return strings.ReplaceAll(diff, "@TODO@", todoWord)
+	diff = strings.ReplaceAll(diff, evalSlot, evalCall)
+	return strings.ReplaceAll(diff, todoSlot, todoWord)
 }
 
 // A diff whose prose *describes* the lints must not trip them, while the same
@@ -27,14 +36,14 @@ func TestLintsIgnoreDocumentationProse(t *testing.T) {
 --- a/docs/specs/design.md
 +++ b/docs/specs/design.md
 @@ -0,0 +1,3 @@
-+The deterministic gates block on @EVAL@/@TODO@/missing-test.
-+The winning pair comes from the judge-eval (§17), not gpt-5.2.
-+@TODO@ markers in a design document are not code defects.
++The deterministic gates block on XxEVALSLOTxX/XxMARKERSLOTxX/missing-test.
++The winning pair comes from the judge scoring pass, not gpt-5.2.
++XxMARKERSLOTxX markers in a design document are not code defects.
 diff --git a/README.md b/README.md
 --- a/README.md
 +++ b/README.md
 @@ -0,0 +1,1 @@
-+Any @TODO@ in prose here is discussion, not a defect.
++Any XxMARKERSLOTxX in prose here is discussion, not a defect.
 `)
 	git := GitContext{Diff: docsOnly, ChangedFiles: []string{"docs/specs/design.md", "README.md"}}
 	lines := addedLines(git)
@@ -60,8 +69,8 @@ func TestLintsStillSeeSourceChanges(t *testing.T) {
 --- a/internal/app/run.go
 +++ b/internal/app/run.go
 @@ -0,0 +1,2 @@
-+	result := @EVAL@userInput)
-+	// @TODO@: handle the error path
++	result := XxEVALSLOTxXuserInput)
++	// XxMARKERSLOTxX: handle the error path
 `)
 	git := GitContext{Diff: source, ChangedFiles: []string{"internal/app/run.go"}}
 	lines := addedLines(git)
@@ -79,11 +88,11 @@ func TestLintScopeAppliesToEverySource(t *testing.T) {
 	git := GitContext{
 		StagedDiff: fixture(`diff --git a/docs/notes.md b/docs/notes.md
 +++ b/docs/notes.md
-+A staged @TODO@ in prose.
++A staged XxMARKERSLOTxX in prose.
 `),
 		WorkingTreeDiff: fixture(`diff --git a/lib/handler.js b/lib/handler.js
 +++ b/lib/handler.js
-+  const out = @EVAL@payload);
++  const out = XxEVALSLOTxXpayload);
 `),
 	}
 	lines := addedLines(git)
@@ -100,14 +109,14 @@ func TestLintScopeAppliesToEverySource(t *testing.T) {
 func TestPlainTextOutsideDocsStaysLintable(t *testing.T) {
 	git := GitContext{StagedDiff: fixture(`diff --git a/src/staged.txt b/src/staged.txt
 +++ b/src/staged.txt
-+value := @EVAL@untrusted)
++value := XxEVALSLOTxXuntrusted)
 `)}
 	if firstMatching(addedLines(git), evalPattern) == "" {
 		t.Fatal("src/staged.txt must still reach the lints")
 	}
 	docs := GitContext{StagedDiff: fixture(`diff --git a/docs/notes.txt b/docs/notes.txt
 +++ b/docs/notes.txt
-+we block on @EVAL@ calls
++we block on XxEVALSLOTxX calls
 `)}
 	if firstMatching(addedLines(docs), evalPattern) != "" {
 		t.Fatal("docs/notes.txt is documentation and must not reach the lints")
@@ -122,7 +131,7 @@ func TestAddedLineBeginningWithPlusPlusIsNotMistakenForAHeader(t *testing.T) {
 --- a/src/app.js
 +++ b/src/app.js
 @@ -1 +1,2 @@
-+++@EVAL@userInput)
++++XxEVALSLOTxXuserInput)
 `)
 	lines := addedLines(GitContext{BranchDiffFull: diff})
 	if len(lines) != 1 || !strings.Contains(lines[0], "++"+evalCall) {
@@ -137,7 +146,7 @@ func TestQuotedDocumentationPathIsStillRecognizedAsProse(t *testing.T) {
 --- "a/docs/design notes.md"
 +++ "b/docs/design notes.md"
 @@ -1 +1,2 @@
-+the gates block on @EVAL@) and @TODO@ markers
++the gates block on XxEVALSLOTxX) and XxMARKERSLOTxX markers
 `)
 	if lines := addedLines(GitContext{BranchDiffFull: diff}); len(lines) != 0 {
 		t.Fatalf("quoted docs path was scanned as source: %#v", lines)
@@ -166,7 +175,7 @@ func TestHunkBodyCannotRedirectTheLintScope(t *testing.T) {
 +++ b/src/app.js
 @@ -1 +1,3 @@
 +++ b/docs/decoy.md
-+  const out = @EVAL@payload);
++  const out = XxEVALSLOTxXpayload);
 `)
 	if firstMatching(addedLines(GitContext{BranchDiffFull: diff}), evalPattern) == "" {
 		t.Fatal("a decoy header inside the hunk body hid an unsafe call from the lints")
@@ -179,7 +188,7 @@ func TestHunkBodyCannotRedirectTheLintScope(t *testing.T) {
 func TestUntrackedContentCannotRedirectTheLintScope(t *testing.T) {
 	excerpt := fixture(`--- src/dropped.js
 +--- docs/decoy.md
-+const out = @EVAL@payload);
++const out = XxEVALSLOTxXpayload);
 `)
 	if firstMatching(addedLines(GitContext{UntrackedExcerpts: excerpt}), evalPattern) == "" {
 		t.Fatal("a decoy header in untracked content hid an unsafe call from the lints")
@@ -190,17 +199,19 @@ func TestUntrackedContentCannotRedirectTheLintScope(t *testing.T) {
 // " docs/x.js" — a file in a directory literally named " docs" — into something
 // that looked like it lived under the docs tree, excluding it from the lints.
 func TestWhitespaceInAPathIsNotTrimmedIntoTheDocsTree(t *testing.T) {
-	excerpt := fixture(`--- ` + ` docs/check.js
-+const out = @EVAL@payload);
+	excerpt := fixture(`--- ` + ` docs/check.txt
++const out = XxEVALSLOTxXpayload);
 `)
 	if firstMatching(addedLines(GitContext{UntrackedExcerpts: excerpt}), evalPattern) == "" {
 		t.Fatal("a path with a leading space was trimmed into the docs tree and skipped")
 	}
-	if !lintable(" docs/check.js") {
-		t.Fatal(`" docs/check.js" is not under docs/ and must stay lintable`)
+	// .txt, so neither the Markdown suffix nor the executable list decides and
+	// the docs/ prefix is genuinely what is being tested.
+	if !lintable(" docs/check.txt") {
+		t.Fatal(`" docs/check.txt" is not under docs/ and must stay lintable`)
 	}
-	if lintable("docs/check.js") {
-		t.Fatal("docs/check.js is documentation")
+	if lintable("docs/check.txt") {
+		t.Fatal("docs/check.txt is under the docs tree")
 	}
 }
 
@@ -210,7 +221,7 @@ func TestCarriageReturnIsStrippedFromHeaderPaths(t *testing.T) {
 	// README.md, deliberately not under docs/: the prefix check would catch a
 	// docs/ path whether or not the CR was stripped, so only a path recognised
 	// by its .md suffix actually exercises this.
-	diff := fixture("diff --git a/README.md b/README.md\r\n+++ b/README.md\r\n@@ -1 +1 @@\r\n+a @TODO@ in prose\r\n")
+	diff := fixture("diff --git a/README.md b/README.md\r\n+++ b/README.md\r\n@@ -1 +1 @@\r\n+a XxMARKERSLOTxX in prose\r\n")
 	if lines := addedLines(GitContext{BranchDiffFull: diff}); len(lines) != 0 {
 		t.Fatalf("CRLF header hid the .md suffix: %#v", lines)
 	}
@@ -236,5 +247,34 @@ func TestPathDecodersFailOpen(t *testing.T) {
 	// The unquoted " b/" form, which the quoted branch does not cover.
 	if got := diffHeaderPath("diff --git a/src/app.go b/src/app.go"); got != "src/app.go" {
 		t.Fatalf("plain header path: %q", got)
+	}
+}
+
+// The docs/ exemption is for prose, not for anything executable that happens to
+// live there. pages.yml deploys the whole docs tree, and
+// docs/presentations/metareview-intro.html carries real script, so exempting the
+// directory wholesale traded one blind spot for another: live deployed code with
+// no security lint over it.
+func TestExecutableContentUnderDocsStaysLintable(t *testing.T) {
+	for _, path := range []string{
+		"docs/presentations/metareview-intro.html",
+		"docs/assets/app.js",
+		"docs/tools/build.sh",
+		"docs/scripts/gen.py",
+	} {
+		if !lintable(path) {
+			t.Fatalf("%s is executable content and must stay lintable", path)
+		}
+	}
+	// Prose stays exempt, wherever it lives.
+	for _, path := range []string{
+		"docs/specs/design.md",
+		"docs/notes.txt",
+		"README.md",
+		"docs/plan.markdown",
+	} {
+		if lintable(path) {
+			t.Fatalf("%s is prose and must stay exempt", path)
+		}
 	}
 }
