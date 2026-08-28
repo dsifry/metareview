@@ -80,7 +80,8 @@ func readIssues(path string) ([]map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	// Read-only path: there is nothing a Close error could tell the caller.
+	defer func() { _ = file.Close() }()
 	var issues []map[string]any
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {

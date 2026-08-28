@@ -52,9 +52,9 @@ test -f .metareview/knowledge/metareview.jsonl
 test -f .metareview/calibration.jsonl
 grep -q "mrvf-accept" .metareview/knowledge/metareview.jsonl
 grep -q "false-positive" .metareview/calibration.jsonl
-! git check-ignore -q .metareview/knowledge/metareview.jsonl
-! git check-ignore -q .metareview/calibration.jsonl
-! git check-ignore -q .metareview/learning-runs.jsonl
+git check-ignore -q .metareview/knowledge/metareview.jsonl && exit 1
+git check-ignore -q .metareview/calibration.jsonl && exit 1
+git check-ignore -q .metareview/learning-runs.jsonl && exit 1
 git check-ignore -q .metareview/findings.jsonl
 git check-ignore -q .metareview/runs.jsonl
 

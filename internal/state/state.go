@@ -20,7 +20,12 @@ import (
 // bytes larger to admit a line of exactly this length ending in CRLF.
 const maxJSONLLineBytes = 1 << 20
 
-func AppendJSONL(path string, record any) error {
+// closeFile is a seam so the Close-failure branch below can be tested. A
+// permission- or descriptor-based test would be the alternative, and those
+// stop failing when the suite runs as root, which is the normal case in CI.
+var closeFile = func(f *os.File) error { return f.Close() }
+
+func AppendJSONL(path string, record any) (err error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -28,7 +33,15 @@ func AppendJSONL(path string, record any) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		// A write can fail at Close rather than at Write — a delayed ENOSPC, a
+		// write-back error on a network filesystem. This is the append that
+		// records every finding and every run, so swallowing that error would
+		// let metareview report a row as recorded when it never landed.
+		if cerr := closeFile(file); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	bytes, err := json.Marshal(record)
 	if err != nil {
 		return err
@@ -45,7 +58,8 @@ func ReadJSONL[T any](path string) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	// Read-only path: there is nothing a Close error could tell the caller.
+	defer func() { _ = file.Close() }()
 	var records []T
 	scanner := bufio.NewScanner(file)
 	// A run row can carry long ingested strings, so the 64 KiB default is not enough.
