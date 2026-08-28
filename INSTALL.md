@@ -6,7 +6,7 @@ metareview installs as a local review harness for coding agents. It can run stan
 
 - Git repository checkout.
 - Node.js 18+ for the package launcher and manifest tests.
-- Go 1.22+ when running from a source checkout.
+- Go 1.26+ when running from a source checkout.
 - Optional: metaswarm, Superpowers, Beads (`bd`), and GitHub CLI (`gh`) for full lifecycle integration.
 
 ## npm Package

@@ -82,7 +82,7 @@ npm install -g metareview
 metareview setup --check
 ```
 
-Packaged releases include a built `bin/metareview` binary. Source checkout mode requires Go 1.22+ and falls back to:
+Packaged releases include a built `bin/metareview` binary. Source checkout mode requires Go 1.26+ and falls back to:
 
 ```bash
 go run ./cmd/metareview

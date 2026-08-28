@@ -49,7 +49,7 @@
     "node": ">=18"
   },
   "metareview": {
-    "runtime": "Packaged releases should provide bin/metareview. Source checkout mode requires Go 1.22+ and falls back to go run ./cmd/metareview."
+    "runtime": "Packaged releases should provide bin/metareview. Source checkout mode requires Go 1.26+ and falls back to go run ./cmd/metareview."
   },
   "scripts": {
     "build": "go build -o bin/metareview ./cmd/metareview",
