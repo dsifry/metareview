@@ -148,7 +148,21 @@ type AdjudicateInput struct {
 	DiffTruncated   bool        `json:"diff_truncated"`
 	DiffContextHash string      `json:"diff_context_hash"`
 	Candidate       run.Finding `json:"candidate"`
+	// SandboxRoot is set only on an escalated call, where the changed files have been
+	// materialized at both revisions on disk. It adds SandboxAddendum to the system message; the
+	// vendored template itself is untouched, so provenance still holds.
+	SandboxRoot string `json:"sandbox_root,omitempty"`
 }
+
+// SandboxAddendum tells an escalated judge that the excerpt is not all it has. The first arm has
+// already answered on the excerpt alone; re-asking the same question the same way is not a second
+// opinion, and the evidence=sandbox label in the audit would describe a capability nothing used.
+const SandboxAddendum = "\n\nYou are running in a directory containing the changed files at both revisions: " +
+	"`head/<path>` is the file after the change and `base/<path>` is the same file before it. " +
+	"The diff excerpt below may be truncated or may omit a file the finding depends on. Read the " +
+	"files directly before deciding, especially when the finding refers to a file other than the " +
+	"one it is filed against. Base your verdict on what those files actually contain; if the tree " +
+	"does not contain a file the finding needs, say so rather than assuming."
 
 // StillPresentInput is the still-present kind's input.
 type StillPresentInput struct {
@@ -205,6 +219,9 @@ func RenderPrompt(kind string, in any, fence, calibration bool, nonce string) (s
 			return "", "", errs.E(CodePromptTemplate, "adjudicate expects AdjudicateInput", "kind", kind)
 		}
 		system, template = SystemAdjudicate, TemplateAdjudicate
+		if ai.SandboxRoot != "" {
+			system += SandboxAddendum
+		}
 		slots["diff"], slots["candidate"] = ai.Diff, ai.Candidate.IssueText
 		fenced["diff"], fenced["candidate"] = true, true
 	case KindStillPresent:

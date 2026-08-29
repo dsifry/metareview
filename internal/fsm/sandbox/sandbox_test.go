@@ -141,3 +141,36 @@ func TestMaterializeSurfacesFilesystemErrors(t *testing.T) {
 		}
 	})
 }
+
+// Two input paths can name one destination: escalation dedups by raw string, but changedPaths
+// yields "internal/x.go" while judge prose yields "./internal/x.go" - two keys, one file after
+// Clean. Writing the second one hit the tree's own 0444 mode and returned EACCES, and because
+// adjudicateExec caches the builder error under a sync.Once, one such candidate turned EVERY
+// cross-file rejection in the run into checked_but_unverified. A duplicate is not an error; it
+// is the same evidence named twice.
+func TestMaterializeToleratesDuplicateDestinations(t *testing.T) {
+	root := t.TempDir()
+	body := []byte("package x\n")
+	show := func(rev, path string) ([]byte, bool, error) { return body, true, nil }
+	tree, err := Materialize(root, "B", "H", []string{"internal/x.go", "./internal/x.go", "internal/x.go"}, show)
+	if err != nil {
+		t.Fatalf("a path named twice must not fail the batch: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, Head, "internal", "x.go"))
+	if err != nil || string(got) != string(body) {
+		t.Fatalf("materialized file: %q %v", got, err)
+	}
+	// The hash must count the evidence once, or the same tree addresses differently depending on
+	// how many times a finding happened to mention the file.
+	plain := t.TempDir()
+	once, err := Materialize(plain, "B", "H", []string{"internal/x.go"}, show)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree.TreeHash != once.TreeHash {
+		t.Errorf("naming a path twice changed the tree hash:\n dup %s\nonce %s", tree.TreeHash, once.TreeHash)
+	}
+	if tree.Files != once.Files {
+		t.Errorf("Files = %d with a duplicate, %d without", tree.Files, once.Files)
+	}
+}

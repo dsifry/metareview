@@ -83,6 +83,10 @@ type Escalation struct {
 	Model    string
 	Effort   string
 	Evidence string // run.EvidenceSandbox when the judge reads a materialized tree
+	// Root is the materialized tree on disk. It is passed into the prompt so the escalated judge
+	// is told the evidence exists: without it the second opinion is the same question, on the
+	// same excerpt, to the same model, differing only in the subprocess working directory.
+	Root     string
 	TreeHash string
 	BaseSHA  string
 	HeadSHA  string
@@ -586,7 +590,7 @@ func (e *adjudicateExec) secondOpinion(ctx context.Context, in machine.ExecInput
 		return run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified}, true
 	}
 	diff, truncated, diffHash := judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, cand.IssueText, judge.MaxDiffBytes)
-	v, err := callAs(ctx, esc.Judge, in, judge.Request{Kind: judge.KindAdjudicate, Index: *index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand}}, esc)
+	v, err := callAs(ctx, esc.Judge, in, judge.Request{Kind: judge.KindAdjudicate, Index: *index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand, SandboxRoot: esc.Root}}, esc)
 	*index++
 	if err != nil {
 		// The second opinion never arrived, so nothing decided this finding. Keeping the

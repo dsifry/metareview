@@ -198,10 +198,14 @@ func New(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock) (Jud
 	return NewWithCodex(doer, keys, urls, nonce, clock, nil)
 }
 
-// WithCodexWorkDir returns j with its codex judge confined to dir. It is the containment
-// half of sandbox evidence: the CLI can read and execute inside whatever directory it is
-// given, so handing it a materialized tree is what makes "the evidence" an enumerable set.
-// A non-codex judge is returned unchanged.
+// WithCodexWorkDir returns j with its codex judge rooted at dir: the CLI runs there, so that is
+// what its relative paths resolve against and what the prompt can point it at.
+//
+// This is presentation, not containment. Nothing here stops the process reading outside dir, and
+// codex's --sandbox read-only bounds writes and network rather than reads. The recorded TreeHash
+// therefore addresses what the judge was offered, not the limit of what it could reach - a real
+// read boundary would need OS-level sandboxing this does not attempt. A non-codex judge is
+// returned unchanged.
 func WithCodexWorkDir(j Judge, dir string) Judge {
 	rj, ok := j.(*realJudge)
 	if !ok {

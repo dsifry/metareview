@@ -54,6 +54,7 @@ func (c *ctxDeps) escalationFor(root string) kind.EscalateFunc {
 			Model:    node.Model,
 			Effort:   node.Effort,
 			Evidence: run.EvidenceSandbox,
+			Root:     tree.Root,
 			TreeHash: tree.TreeHash,
 			BaseSHA:  tree.BaseSHA,
 			HeadSHA:  tree.HeadSHA,

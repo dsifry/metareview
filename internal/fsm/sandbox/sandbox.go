@@ -50,11 +50,22 @@ func Materialize(root, baseSHA, headSHA string, paths []string, show ShowFunc) (
 	// hash.Hash.Write never returns an error (documented), so the result is discarded explicitly.
 	_, _ = fmt.Fprintf(h, "base %s\nhead %s\n", baseSHA, headSHA)
 	t := &Tree{Root: root, BaseSHA: baseSHA, HeadSHA: headSHA}
+	// Dedup on the resolved destination, not the raw string. The caller's list mixes sources -
+	// changed paths from git, referenced paths from judge prose - so "internal/x.go" and
+	// "./internal/x.go" arrive as two entries naming one file. Writing the second hit this
+	// function's own 0444 mode and returned EACCES, and the caller caches that failure for the
+	// whole run, so one duplicated mention disabled escalation everywhere. Counting it twice
+	// would also make the tree hash depend on how often a finding happened to mention a file.
+	written := map[string]bool{}
 	for _, rel := range sorted {
 		clean := filepath.Clean(rel)
 		if clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
 			return nil, fmt.Errorf("sandbox: path escapes the tree: %q", rel)
 		}
+		if written[clean] {
+			continue
+		}
+		written[clean] = true
 		for _, side := range [...]struct{ dir, rev string }{{Head, headSHA}, {Base, baseSHA}} {
 			body, ok, err := show(side.rev, rel)
 			if err != nil {
