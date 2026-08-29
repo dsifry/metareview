@@ -813,9 +813,11 @@ const escalationDiff = "diff --git a/server.go b/server.go\n--- a/server.go\n+++
 
 func runEscalation(t *testing.T, primary, esc judge.Judge) adjudicateOut {
 	t.Helper()
-	var e *Escalation
+	var e EscalateFunc
 	if esc != nil {
-		e = &Escalation{Judge: esc, Model: "codex/x", Effort: "medium", Evidence: run.EvidenceSandbox}
+		e = func(context.Context, run.Snapshot) (*Escalation, error) {
+			return &Escalation{Judge: esc, Model: "codex/x", Effort: "medium", Evidence: run.EvidenceSandbox}, nil
+		}
 	}
 	r, err := New(Deps{Judge: primary, Escalate: e})
 	if err != nil {

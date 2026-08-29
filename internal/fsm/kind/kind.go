@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/dsifry/metareview/internal/fsm/converge"
 	"github.com/dsifry/metareview/internal/fsm/errs"
@@ -64,8 +65,14 @@ type Deps struct {
 	// Only rejections are escalated, and only for candidates whose text names another file
 	// the diff carries. A false reject silently drops a real bug while a false confirm only
 	// costs a human a look, and measurement showed excerpts are weakest on cross-file claims.
-	Escalate *Escalation
+	Escalate EscalateFunc
 }
+
+// EscalateFunc resolves the second opinion for a run. It is called lazily - at most once per
+// executor invocation, on the first cross-file rejection - because materializing an evidence
+// tree costs real time and a run that confirms everything must not pay it. Returning a nil
+// Escalation, or an error, leaves the finding unresolved rather than rejected.
+type EscalateFunc func(ctx context.Context, snap run.Snapshot) (*Escalation, error)
 
 // Escalation is the second opinion and everything the audit needs to describe it. The judge
 // carries its own model and effort because it is a different judge, not the node's; and the
@@ -387,8 +394,11 @@ func (adjudicateKind) Reduce(s run.Snapshot, out any) (run.Delta, error) {
 
 // adjudicateExec is the fork executor (spec 4 §4.2).
 type adjudicateExec struct {
-	judge    judge.Judge
-	escalate *Escalation
+	judge      judge.Judge
+	escalate   EscalateFunc
+	once       sync.Once
+	resolved   *Escalation
+	resolveErr error
 }
 
 // call performs one judge call and audits it; parse failures are never errors.
@@ -546,16 +556,32 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 	return json.RawMessage(run.MarshalCanonical(out)), nil
 }
 
+// resolve builds the escalation at most once per executor invocation and remembers the
+// outcome, error included: a sandbox that could not be materialized will not be retried for
+// every remaining candidate.
+func (e *adjudicateExec) resolve(ctx context.Context, snap run.Snapshot) (*Escalation, error) {
+	e.once.Do(func() { e.resolved, e.resolveErr = e.escalate(ctx, snap) })
+	return e.resolved, e.resolveErr
+}
+
 // secondOpinion re-judges one rejected candidate against wider evidence, and reports whether
 // the finding should be kept. It is only consulted for rejections, so it can never turn a
 // confirmation into a rejection - the error escalation exists to prevent.
 func (e *adjudicateExec) secondOpinion(ctx context.Context, in machine.ExecInput, cand run.Finding, index *int) (run.Bug, bool) {
-	if e.escalate == nil || e.escalate.Judge == nil || len(judge.ReferencedPaths(in.Diff.Text, cand.File, cand.IssueText)) == 0 {
+	if e.escalate == nil || len(judge.ReferencedPaths(in.Diff.Text, cand.File, cand.IssueText)) == 0 {
 		return run.Bug{}, false
 	}
 	desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
+	esc, err := e.resolve(ctx, in.Snap)
+	if err != nil || esc == nil || esc.Judge == nil {
+		if err == nil {
+			return run.Bug{}, false // escalation deliberately unavailable: the rejection stands
+		}
+		// The second opinion could not be built, so nothing decided this finding.
+		return run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified}, true
+	}
 	diff, truncated, diffHash := judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, cand.IssueText, judge.MaxDiffBytes)
-	v, err := callAs(ctx, e.escalate.Judge, in, judge.Request{Kind: judge.KindAdjudicate, Index: *index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand}}, e.escalate)
+	v, err := callAs(ctx, esc.Judge, in, judge.Request{Kind: judge.KindAdjudicate, Index: *index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand}}, esc)
 	*index++
 	if err != nil {
 		// The second opinion never arrived, so nothing decided this finding. Keeping the

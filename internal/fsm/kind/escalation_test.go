@@ -3,6 +3,7 @@ package kind
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -47,10 +48,12 @@ func TestEscalationEndToEndWithMocks(t *testing.T) {
 	// 3. the registry, with escalation injected
 	reg, err := New(Deps{
 		Judge: &scriptedJudge{real: false}, // the cheap arm rejects
-		Escalate: &Escalation{
-			Judge: confined, Model: "codex/gpt-5.6-sol", Effort: "medium",
-			Evidence: run.EvidenceSandbox, TreeHash: tree.TreeHash,
-			BaseSHA: tree.BaseSHA, HeadSHA: tree.HeadSHA,
+		Escalate: func(context.Context, run.Snapshot) (*Escalation, error) {
+			return &Escalation{
+				Judge: confined, Model: "codex/gpt-5.6-sol", Effort: "medium",
+				Evidence: run.EvidenceSandbox, TreeHash: tree.TreeHash,
+				BaseSHA: tree.BaseSHA, HeadSHA: tree.HeadSHA,
+			}, nil
 		},
 	})
 	if err != nil {
@@ -100,5 +103,109 @@ func TestEscalationEndToEndWithMocks(t *testing.T) {
 	}
 	if esc.TreeHash != tree.TreeHash || esc.BaseSHA != "base-sha" || esc.HeadSHA != "head-sha" {
 		t.Errorf("escalation row does not content-address its evidence: %+v", esc)
+	}
+}
+
+// Materializing a sandbox costs real time (540 files on this repo). A run whose candidates
+// are all confirmed, or all local, must never pay it - so the escalation is resolved lazily,
+// at most once, and only when a cross-file rejection actually needs a second opinion.
+func TestEscalationIsResolvedLazilyAndOnce(t *testing.T) {
+	build := func(real bool) (*int, Deps) {
+		calls := new(int)
+		return calls, Deps{
+			Judge: &scriptedJudge{real: real},
+			Escalate: func(context.Context, run.Snapshot) (*Escalation, error) {
+				*calls++
+				return &Escalation{Judge: &scriptedJudge{real: true}, Model: "codex/x", Effort: "medium", Evidence: run.EvidenceSandbox}, nil
+			},
+		}
+	}
+	// TWO cross-file candidates: with one, resolving once and resolving per candidate are
+	// indistinguishable, and the memoization assertion would pass either way.
+	twoCrossFile := run.Snapshot{RunID: "mrv-lazy", Iteration: 1, Findings: []run.Finding{
+		{IssueText: "server.go disagrees with scripts/deploy.py", File: "server.go", Line: 1},
+		{IssueText: "server.go also contradicts scripts/deploy.py elsewhere", File: "server.go", Line: 2},
+	}}
+	exec := func(d Deps) {
+		t.Helper()
+		reg, err := New(d)
+		if err != nil {
+			t.Fatalf("registry: %v", err)
+		}
+		ex, _ := reg.Executor(MatchThenAdjudicate)
+		if _, err := ex.Execute(context.Background(), machine.ExecInput{
+			Snap: twoCrossFile, Node: adjNode, Diff: machine.Diff{Text: escalationDiff}, StartIndex: 0, Audit: (&audits{}).fn}); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+	}
+
+	confirmed, d := build(true) // nothing is rejected: never resolved
+	exec(d)
+	if *confirmed != 0 {
+		t.Errorf("escalation resolved %d times on a run with no rejections, want 0", *confirmed)
+	}
+
+	rejected, d2 := build(false) // two cross-file rejections: a per-candidate resolve would be 2
+	exec(d2)
+	if *rejected != 1 {
+		t.Errorf("escalation resolved %d times, want exactly 1 (memoized across candidates)", *rejected)
+	}
+}
+
+// A provider that fails must not take the run down: the finding is kept for a human, which is
+// what happens for any escalation that cannot produce an answer.
+func TestEscalationProviderErrorKeepsTheFinding(t *testing.T) {
+	reg, err := New(Deps{
+		Judge:    &scriptedJudge{real: false},
+		Escalate: func(context.Context, run.Snapshot) (*Escalation, error) { return nil, errSandboxUnavailable },
+	})
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	ex, _ := reg.Executor(MatchThenAdjudicate)
+	raw, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: escalationSnap(), Node: adjNode, Diff: machine.Diff{Text: escalationDiff}, StartIndex: 0, Audit: (&audits{}).fn})
+	if err != nil {
+		t.Fatalf("a failed escalation provider must not fail the run: %v", err)
+	}
+	var out adjudicateOut
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	var kept bool
+	for _, b := range out.Confirmed {
+		if strings.Contains(b.Desc, "deploy.py") && b.Verdict == run.VerdictCheckedButUnverified {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Errorf("want the finding kept as checked_but_unverified: %+v", out)
+	}
+}
+
+var errSandboxUnavailable = errors.New("sandbox unavailable")
+
+// A provider may decide there is nothing to escalate to - no agentic judge configured, or the
+// operator turned it off for this run. That is not a failure: the first arm's rejection stands.
+func TestEscalationProviderReturningNilLeavesTheRejection(t *testing.T) {
+	reg, err := New(Deps{
+		Judge:    &scriptedJudge{real: false},
+		Escalate: func(context.Context, run.Snapshot) (*Escalation, error) { return nil, nil },
+	})
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	ex, _ := reg.Executor(MatchThenAdjudicate)
+	raw, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: escalationSnap(), Node: adjNode, Diff: machine.Diff{Text: escalationDiff}, StartIndex: 0, Audit: (&audits{}).fn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out adjudicateOut
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Rejected) != 2 || len(out.Confirmed) != 0 {
+		t.Errorf("no escalation available: both rejections stand, got confirmed=%d rejected=%d", len(out.Confirmed), len(out.Rejected))
 	}
 }
