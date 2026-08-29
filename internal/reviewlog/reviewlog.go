@@ -9,15 +9,11 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/runchain"
 )
-
-// maxJSONLLineBytes is this package's name for the shared JSONL line cap.
-// bufio rejects a token equal to the buffer maximum, and ScanLines needs the
-// line terminator to fit alongside the token, so callers size the buffer two
-// bytes larger to admit a line of exactly this length ending in CRLF.
 
 type Summary struct {
 	Path                  string            `json:"path"`
@@ -103,6 +99,7 @@ func ForTarget(root, target string) ([]Summary, error) {
 
 func parseMarkdown(rel, text string) Summary {
 	summary := Summary{Path: rel}
+	var declaredLenses []string
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		switch {
@@ -116,6 +113,8 @@ func parseMarkdown(rel, text string) Summary {
 			summary.PreviousRunID = previousRunID(firstInlineCode(line))
 		case strings.HasPrefix(line, "Context pack:"):
 			summary.ContextRel = firstInlineCode(line)
+		case strings.HasPrefix(line, "Required lenses:"):
+			declaredLenses = splitLenses(firstInlineCode(line))
 		case strings.TrimSpace(line) == "## Verdict":
 			summary.Verdict = nextNonEmpty(lines, i+1)
 		}
@@ -126,7 +125,7 @@ func parseMarkdown(rel, text string) Summary {
 	if verdictIsUnresolved(summary.Verdict) {
 		summary.HasUnresolvedBlockers = true
 	}
-	if summary.Kind == "artifact" && !artifactReviewComplete(lines) {
+	if summary.Kind == "artifact" && !artifactReviewComplete(lines, declaredLenses, summary.RunID) {
 		summary.HasUnresolvedBlockers = true
 	}
 	return summary
@@ -165,16 +164,143 @@ func verdictIsUnresolved(verdict string) bool {
 	}
 }
 
-func artifactReviewComplete(lines []string) bool {
-	required := map[string]bool{
-		"feasibility":        false,
-		"completeness":       false,
-		"scopeandalignment":  false,
-		"architecture":       false,
-		"intentpreservation": false,
-		"security":           false,
-		"testingquality":     false,
-		"datamigration":      false,
+// currentLenses is the set an artifact review must cover today. legacyLenses is the set that was
+// required before security (0.7.0) and testing-quality / data-migration (0.8.0) were added.
+var currentLenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation", "security", "testingquality", "datamigration"}
+var legacyLenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation"}
+
+// lensEra records a rubric and the date it took effect. Adding a lens means appending an era, not
+// editing currentLenses: a log has to stay judged against the rubric of its own date, or every
+// completed review becomes incomplete the day the next lens ships - which is the failure the
+// Required lenses marker exists to prevent, returning exactly when it is needed.
+//
+// Eras are ordered oldest first and compared as YYYYMMDD strings. Security (0.7.0) and
+// testing-quality / data-migration (0.8.0) both shipped on 2026-08-24.
+type lensEra struct {
+	from   string
+	lenses []string
+}
+
+var lensEras = []lensEra{
+	{from: "", lenses: legacyLenses},
+	{from: "20260824", lenses: currentLenses},
+}
+
+// eraLenses is the rubric in force when this run happened. A run ID with no parseable date is
+// judged against the newest rubric, not the oldest: the grandfather is an allowance for provenance
+// we can verify, and treating unknown provenance as old would let any log claim it.
+func eraLenses(runID string) []string {
+	date := runDate(runID)
+	if date == "" {
+		return lensEras[len(lensEras)-1].lenses
+	}
+	lenses := lensEras[0].lenses
+	for _, era := range lensEras {
+		if era.from <= date {
+			lenses = era.lenses
+		}
+	}
+	return lenses
+}
+
+// requiredLenses answers which lenses this particular log had to cover.
+//
+// A completed review is evidence about the artifact as the rubric stood when it ran. Judging an
+// old log against lenses invented afterwards marks work incomplete that was complete, and since
+// an artifact log only reaches a gate once someone edits the file it reviewed, the result is a
+// blocker that can never be resolved by fixing anything - only by a standing override. So the log
+// declares its own set, and one written before the marker existed falls back to the set of its era.
+// requiredLenses answers which lenses this particular log had to cover: the rubric in force on its
+// date, plus anything its own declaration adds.
+//
+// The date is the authority and the declaration may only strengthen. A declaration that could
+// reduce the requirement would be an opt-out written by the thing being judged - a current review
+// could declare the legacy five and drop security, testing-quality and data-migration, which is
+// precisely the escape the unmarked path already refuses. An unrecognised declaration adds
+// nothing; the era floor still applies.
+func requiredLenses(declared []string, runID string) []string {
+	required := map[string]bool{}
+	for _, name := range eraLenses(runID) {
+		required[name] = true
+	}
+	if known := knownRubric(declared); known != nil {
+		for _, name := range known {
+			required[name] = true
+		}
+	}
+	out := make([]string, 0, len(required))
+	for name := range required {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// runDate extracts the YYYYMMDD segment of a run ID (mrv-20260705-...), or "" when there is none.
+// A log whose age cannot be established is judged against the current set, not the legacy one:
+// the grandfather is an allowance for provenance we can verify, and treating unknown provenance as
+// old would let any log claim it by carrying a malformed ID.
+func runDate(runID string) string {
+	parts := strings.Split(runID, "-")
+	if len(parts) < 2 || len(parts[1]) < 8 {
+		return ""
+	}
+	date := parts[1][:8]
+	// Parse it as a real calendar date, not just eight digits: "20260230" is all digits and sorts
+	// before the cutoff, so a digit check alone would hand the legacy rubric to a log whose id is
+	// merely plausible. time.Parse rejects an out-of-range month or day.
+	if _, err := time.Parse("20060102", date); err != nil {
+		return ""
+	}
+	return date
+}
+
+// knownRubric returns the shipped lens set the declaration names, or nil when it names none.
+func knownRubric(declared []string) []string {
+	for _, rubric := range [][]string{currentLenses, legacyLenses} {
+		if sameLensSet(declared, rubric) {
+			return rubric
+		}
+	}
+	return nil
+}
+
+func sameLensSet(a, b []string) bool {
+	// Length first: comparing only the count of UNIQUE names let a declaration that repeats a lens
+	// match a shipped rubric, so "the five legacy lenses, one of them twice" was honoured as the
+	// legacy set. A declaration is provenance; a malformed one is not evidence of anything.
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, name := range a {
+		seen[name] = true
+	}
+	if len(seen) != len(b) {
+		return false
+	}
+	for _, name := range b {
+		if !seen[name] {
+			return false
+		}
+	}
+	return true
+}
+
+func splitLenses(value string) []string {
+	var out []string
+	for _, part := range strings.Split(value, ",") {
+		if name := normalizedReviewer(part); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func artifactReviewComplete(lines []string, declared []string, runID string) bool {
+	required := map[string]bool{}
+	for _, name := range requiredLenses(declared, runID) {
+		required[name] = false
 	}
 	for _, line := range lines {
 		columns := markdownTableColumns(line)
@@ -214,7 +340,19 @@ func normalizedReviewer(value string) string {
 	value = strings.ToLower(value)
 	value = strings.ReplaceAll(value, "&", "and")
 	replacer := strings.NewReplacer("-", "", "_", "", "/", "", " ", "")
-	return replacer.Replace(value)
+	return canonicalLens(replacer.Replace(value))
+}
+
+// canonicalLens folds spellings of the same lens onto one key. The scope lens is written both ways
+// in this repository - the artifact scaffold declares "scope-alignment" while the reviewer row it
+// asks for is "Scope and alignment" - and both already appear in committed review logs, so folding
+// here is what lets a declared set and a reviewer table refer to the same lens. Dropping it makes
+// every newly completed artifact review permanently incomplete.
+func canonicalLens(name string) string {
+	if name == "scopealignment" {
+		return "scopeandalignment"
+	}
+	return name
 }
 
 func reviewerVerdictComplete(value string) bool {

@@ -1,9 +1,9 @@
 package epicsource
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/dsifry/metareview/internal/jsonl"
 	"os"
 	"path/filepath"
 	"sort"
@@ -83,7 +83,7 @@ func readIssues(path string) ([]map[string]any, error) {
 	// Read-only path: there is nothing a Close error could tell the caller.
 	defer func() { _ = file.Close() }()
 	var issues []map[string]any
-	scanner := bufio.NewScanner(file)
+	scanner := jsonl.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {

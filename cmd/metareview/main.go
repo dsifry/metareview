@@ -34,7 +34,7 @@ func printHelp() {
 Usage:
   metareview setup --check
   metareview setup --bootstrap-prereqs --dry-run
-  metareview status
+  metareview status [--json]
   metareview fsm <subcommand> [flags]        (metareview fsm --agent-prompt for the driver contract)
 
   metareview override request <finding-id> --reason "<text>" [--by <who>] [--escalation "<text>"]
@@ -53,7 +53,9 @@ Usage:
 Commands:
   setup --check              Detect repository mode and prerequisites without writing files
   setup --bootstrap-prereqs  Print or execute prerequisite bootstrap actions
-  status                     Print repository review capability status
+  status [--json]            Print repository review capability status; --json emits the
+                             machine-readable contract a host hook branches on (exit 1 when
+                             something must be cleared)
   override request           Record an out-of-workflow escalation against a finding (still blocks)
   override grant             Acknowledge a process exception from outside the workflow (stops blocking)
   override list              List process exceptions; --pending exits 1 while any are unacknowledged

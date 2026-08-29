@@ -1,11 +1,12 @@
 package run
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/dsifry/metareview/internal/jsonl"
 )
 
 // R4 goldens are regression fixtures only: the authority for fold semantics is R1/R2b/R13. They are
@@ -40,7 +41,7 @@ func TestGoldenPrefixes(t *testing.T) {
 	}
 	// fold the committed log line by line and compare each prefix snapshot
 	var stored []Event
-	sc := bufio.NewScanner(bytes.NewReader(wantLog))
+	sc := jsonl.NewScanner(bytes.NewReader(wantLog))
 	sc.Buffer(make([]byte, MaxLine), MaxLine)
 	for sc.Scan() {
 		var ev Event
@@ -49,7 +50,7 @@ func TestGoldenPrefixes(t *testing.T) {
 		}
 		stored = append(stored, ev)
 	}
-	ws := bufio.NewScanner(bytes.NewReader(wantSnaps))
+	ws := jsonl.NewScanner(bytes.NewReader(wantSnaps))
 	ws.Buffer(make([]byte, MaxLine), MaxLine)
 	i := 0
 	for ws.Scan() {

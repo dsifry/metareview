@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1301,6 +1302,14 @@ func TestCallRowCarriesNoDeadIndexField(t *testing.T) {
 	}
 	if _, present := m["index"]; present {
 		t.Errorf("CallRow still ships a row-level index: %s", b)
+	}
+	// Marshalling one instance cannot see the defect's actual shape: re-adding
+	// `Index int `+"`"+`json:"index,omitempty"`+"`"+` to CallRow left the full suite green, because the row above
+	// has a zero Index and omitempty drops it. The type is what the property is about.
+	for i := 0; i < reflect.TypeOf(CallRow{}).NumField(); i++ {
+		if f := reflect.TypeOf(CallRow{}).Field(i); f.Name == "Index" {
+			t.Errorf("CallRow declares a row-level Index field (json tag %q); the index belongs to each side", f.Tag.Get("json"))
+		}
 	}
 	side := m["a"].(map[string]any)
 	if side["index"] != float64(3) {

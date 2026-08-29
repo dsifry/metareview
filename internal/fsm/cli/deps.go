@@ -36,8 +36,12 @@ type Deps struct {
 	LookPath func(string) (string, error)
 	FileHash func(string) (string, error)
 	ReadFile func(string) ([]byte, error)
-	// TempDir makes the evidence sandbox root. It is outside the repository on purpose: a
-	// judge confined to it cannot read .git or anything else the working tree holds.
+	// TempDir makes the evidence sandbox root, outside the repository so the tree is a clean,
+	// enumerable set rather than a view of the working tree. It is NOT a read boundary: the
+	// working directory a judge is given is a default, not a confinement, and codex's
+	// --sandbox read-only bounds writes and network, not reads. Verified: from a cwd outside
+	// the repository, `codex sandbox -- /bin/ls <repo>/.git` succeeds. Treat the tree as what
+	// the judge was OFFERED, not as the limit of what it could reach.
 	TempDir   func(pattern string) (string, error)
 	Exec      gate.Exec
 	CodexExec judge.CodexExec
@@ -104,8 +108,9 @@ var codexBin = judge.CodexBin
 // metareview never handles the token itself.
 func realCodexExec(ctx context.Context, dir string, args []string, stdin string) ([]byte, int, error) {
 	cmd := exec.CommandContext(ctx, codexBin, args...)
-	// Empty means inherit, which is metareview's own repository. A caller that has
-	// materialized an evidence tree passes it here so the CLI cannot read past it.
+	// Empty means inherit, which is metareview's own repository. A caller that has materialized
+	// an evidence tree passes it here so that tree is what relative paths resolve against. This
+	// does not stop the CLI reading elsewhere - cmd.Dir is a starting point, not a jail.
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(stdin)
 	var out bytes.Buffer

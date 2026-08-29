@@ -112,9 +112,15 @@ file. The changed files are materialized at base and head under a temporary dire
 repository, and a `codex/` judge is re-asked with its working directory set to that tree, so it can
 read both sides of a cross-file claim instead of the excerpts the prompt carries.
 
-It is on by default; `--no-escalate` turns it off. The asymmetry is the reason: a false reject drops
-a real finding and nothing reports it, while a false confirm only costs a human a look. Only
+It is off by default; `--escalate` opts in. The asymmetry is the reason it exists: a false reject
+drops a real finding and nothing reports it, while a false confirm only costs a human a look. Only
 rejections are escalated, so a second opinion can never delete a confirmation.
+
+It ships opt-in rather than on because a nine-reviewer pass over the feature found it both inert
+and harmful: the escalated judge is handed the identical prompt, so nothing tells it the tree
+exists; the materialized files are whitespace-trimmed, so line numbers shift; and a `git` failure
+is reported as "escalation unavailable", which records the finding as a hallucination. Until those
+are fixed, enabling it can lose findings that the first pass would have kept.
 
 The escalated call is audited as its own `llm_call` with `evidence: sandbox` and the
 `tree_hash`/`base_sha`/`head_sha` of what it could read, so the verdict stays replayable even though

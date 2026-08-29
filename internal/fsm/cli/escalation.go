@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/dsifry/metareview/internal/fsm/judge"
@@ -14,9 +16,10 @@ import (
 // escalationFor builds the second opinion a rejected cross-file candidate gets: the same judge
 // the run declared, confined to a materialized tree of the changed files at base and head.
 //
-// It is on by default. Unattended, a false reject is the dangerous direction - it drops a real
-// finding and nothing says so - while a false confirm only costs a human a look. --no-escalate
-// turns it off.
+// It is off unless --escalate. Unattended, a false reject is the dangerous direction - it drops
+// a real finding and nothing says so - while a false confirm only costs a human a look, which is
+// why it exists. It is opt-in rather than default because the implementation has known defects
+// that make it drop findings; see escalation in wiring.go.
 //
 // It returns (nil, nil), meaning "escalation unavailable, the rejection stands", when the run's
 // judge is not agentic. An HTTP judge cannot read a tree, so escalating to it would re-ask the
@@ -26,7 +29,7 @@ func (c *ctxDeps) escalationFor(root string) kind.EscalateFunc {
 		if node == nil || !strings.HasPrefix(strings.ToLower(node.Model), judge.CodexPrefix) {
 			return nil, nil
 		}
-		paths, err := c.changedPaths(root, snap.BaseSHA, snap.Head)
+		paths, err := c.changedPaths(ctx, root, snap.BaseSHA, snap.Head)
 		if err != nil || len(paths) == 0 {
 			return nil, err
 		}
@@ -38,9 +41,18 @@ func (c *ctxDeps) escalationFor(root string) kind.EscalateFunc {
 		if err != nil {
 			return nil, err
 		}
-		tree, err := sandbox.Materialize(dir, snap.BaseSHA, snap.Head, paths, c.showFile(root))
+		c.sandboxRoots = append(c.sandboxRoots, dir)
+		tree, err := sandbox.Materialize(dir, snap.BaseSHA, snap.Head, paths, c.showFile(ctx, root))
 		if err != nil {
 			return nil, err
+		}
+		// An empty tree is not evidence. Every path being absent at both revisions means the
+		// changed set and the finding's references produced nothing readable, and escalating into
+		// an empty directory would record evidence=sandbox with a well-formed TreeHash over
+		// nothing - a verdict attributed to evidence that was never materialized. Tree.Files is
+		// the count that makes this checkable; before this it was written and never read.
+		if tree.Files == 0 {
+			return nil, fmt.Errorf("sandbox: no files materialized for %s..%s (%d paths offered)", snap.BaseSHA, snap.Head, len(paths))
 		}
 		j, err := c.newJudge()
 		if err != nil {
@@ -51,6 +63,7 @@ func (c *ctxDeps) escalationFor(root string) kind.EscalateFunc {
 			Model:    node.Model,
 			Effort:   node.Effort,
 			Evidence: run.EvidenceSandbox,
+			Root:     tree.Root,
 			TreeHash: tree.TreeHash,
 			BaseSHA:  tree.BaseSHA,
 			HeadSHA:  tree.HeadSHA,
@@ -72,22 +85,59 @@ func (c *ctxDeps) referencedByFindings(snap run.Snapshot, changed []string) []st
 				continue
 			}
 			have[p] = true
+			// These paths come from model prose, not from git. sandbox.Materialize refuses a path
+			// that escapes the tree - correctly, since a diff-derived path doing that is a bug -
+			// but that refusal is fatal to the whole batch, and escalationFor's error is cached
+			// under a sync.Once, so one malformed string in one finding would disable escalation
+			// for the entire run. diffselect's own comment sets the intended cost of a spurious
+			// path: "at worst costs one escalation". So the untrusted half is filtered here,
+			// where the provenance is known, and the guard downstream stays fail-closed.
+			if escapesTree(p) {
+				continue
+			}
 			extra = append(extra, p)
 		}
 	}
 	return extra
 }
 
+// escapesTree reports whether a path cannot be written inside the evidence tree. It checks for a
+// ".." COMPONENT rather than a ".." prefix: a directory may legitimately be named "..dir", and
+// rejecting it would drop a real file from the evidence for looking like traversal.
+func escapesTree(p string) bool {
+	clean := filepath.Clean(p)
+	if clean == "." || filepath.IsAbs(clean) {
+		return true
+	}
+	for _, part := range strings.Split(filepath.ToSlash(clean), "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // changedPaths lists what the branch touched, NUL-delimited so a path containing a space or a
 // newline survives (git quotes those in its line-oriented output, and the quoting is lossy to
 // parse; -z avoids the question).
-func (c *ctxDeps) changedPaths(root, base, head string) ([]string, error) {
-	out, code, err := c.git(root, "diff", "--no-ext-diff", "--name-only", "-z", "--no-renames", base+".."+head)
-	if err != nil || code != 0 {
+func (c *ctxDeps) changedPaths(ctx context.Context, root, base, head string) ([]string, error) {
+	// Raw, not trimmed: the output is NUL-delimited and a path may legitimately begin or end with
+	// whitespace, which TrimSpace would silently rewrite into a different path - dropping that
+	// file from the evidence.
+	raw, code, err := c.gitRawCtx(ctx, root, "diff", "--no-ext-diff", "--name-only", "-z", "--no-renames", base+".."+head)
+	if err != nil {
 		return nil, err
 	}
+	// gate.RealExec reports a failed git as (code, nil): a nonzero exit arrives with err == nil.
+	// Returning (nil, nil) here would read to the caller as "escalation deliberately unavailable,
+	// the rejection stands", and the finding would be recorded as a hallucination - a real finding
+	// deleted by an outage, which is the failure escalation exists to prevent. A resumed run whose
+	// recorded BaseSHA no longer resolves after a rebase or gc exits 128 on exactly this call.
+	if code != 0 {
+		return nil, fmt.Errorf("git diff %s..%s failed with exit code %d", base, head, code)
+	}
 	var paths []string
-	for _, p := range strings.Split(out, "\x00") {
+	for _, p := range strings.Split(string(raw), "\x00") {
 		if p != "" {
 			paths = append(paths, p)
 		}
@@ -97,15 +147,35 @@ func (c *ctxDeps) changedPaths(root, base, head string) ([]string, error) {
 
 // showFile reads one path at one revision. A path absent at a revision is not an error: a file
 // added on the branch has no base side, and the judge is told so by its absence from base/.
-func (c *ctxDeps) showFile(root string) sandbox.ShowFunc {
+func (c *ctxDeps) showFile(ctx context.Context, root string) sandbox.ShowFunc {
 	return func(rev, path string) ([]byte, bool, error) {
-		out, code, err := c.git(root, "show", "--no-ext-diff", rev+":"+path)
+		// Absence and failure must be distinguishable. Mapping every nonzero exit to "absent"
+		// means an unreadable object produces a partial or empty tree that still carries a
+		// well-formed TreeHash, and the judge is asked to settle a claim inside a directory that
+		// was never materialized while the audit records evidence=sandbox.
+		//
+		// `cat-file -e` cannot answer this: it exits 128 both for a path missing from the tree and
+		// for a revision that does not resolve. `ls-tree` separates them - it exits 0 whether or
+		// not the path is there and says which by printing it, so a nonzero exit is a real failure.
+		listed, code, err := c.gitCtx(ctx, root, "ls-tree", "--name-only", "-z", rev, "--", path)
 		if err != nil {
 			return nil, false, err
 		}
 		if code != 0 {
+			return nil, false, fmt.Errorf("git ls-tree %s -- %s failed with exit code %d", rev, path, code)
+		}
+		if strings.Trim(listed, "\x00") == "" {
 			return nil, false, nil
 		}
-		return []byte(out), true, nil
+		// Read the blob raw. c.git trims, and a file body must reach the tree byte for byte or
+		// its line numbers no longer match the finding that points into it.
+		out, code, err := c.gitRawCtx(ctx, root, "cat-file", "blob", rev+":"+path)
+		if err != nil {
+			return nil, false, err
+		}
+		if code != 0 {
+			return nil, false, fmt.Errorf("git cat-file blob %s:%s failed with exit code %d", rev, path, code)
+		}
+		return out, true, nil
 	}
 }

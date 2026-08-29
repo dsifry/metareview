@@ -1158,3 +1158,33 @@ func TestFoldRefusesANodeOutputWithNoOutput(t *testing.T) {
 		t.Fatal("a node_output whose payload omits output was accepted")
 	}
 }
+
+// The four sandbox-evidence fields were added to LLMCallData's admission check, and removing
+// them from withinCaps left `go test ./...` green - no shell test could tell either, since a
+// 64-hex tree hash and 40-hex SHAs are far under MaxShort. withinCaps is what stops an oversized
+// field entering the audit store at all, so each field it is supposed to guard has to be able to
+// fail it, or the check silently covers less than it claims.
+func TestWithinCapsGuardsEverySandboxEvidenceField(t *testing.T) {
+	long := strings.Repeat("x", MaxShort+1)
+	base := &LLMCallData{Kind: "adjudicate", Model: "m", Effort: "medium", InputHash: "h"}
+	if !withinCaps(base) {
+		t.Fatal("the baseline record must be admissible")
+	}
+	for _, tc := range []struct {
+		field string
+		set   func(*LLMCallData)
+	}{
+		{"Evidence", func(d *LLMCallData) { d.Evidence = long }},
+		{"TreeHash", func(d *LLMCallData) { d.TreeHash = long }},
+		{"BaseSHA", func(d *LLMCallData) { d.BaseSHA = long }},
+		{"HeadSHA", func(d *LLMCallData) { d.HeadSHA = long }},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			d := *base
+			tc.set(&d)
+			if withinCaps(&d) {
+				t.Errorf("an oversized %s was admitted to the audit store", tc.field)
+			}
+		})
+	}
+}

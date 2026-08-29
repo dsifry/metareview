@@ -3,6 +3,7 @@ package judge
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -101,12 +102,27 @@ func parseHunkRange(line string) (start, count int) {
 // precondition for adjudicating a finding: a judge cannot evaluate a candidate whose file
 // is absent from the evidence, and that is knowable without spending the call.
 func DiffHasFile(diff, path string) bool {
+	want := NormalizePath(path)
 	for _, b := range parseUnifiedDiff(diff) {
-		if b.path == path {
+		if NormalizePath(b.path) == want {
 			return true
 		}
 	}
 	return false
+}
+
+// NormalizePath is the one definition of "the same file" shared by every path predicate here and
+// in kind. Exact string equality was the previous rule, so a discover node that emitted
+// "./internal/x.go" or "a/internal/x.go" - both ordinary ways to write a path, and both produced
+// by real tools - was judged to have no evidence for a file the diff plainly carried, and its
+// finding was kept as unverified_no_evidence for a human who would have found it right there.
+func NormalizePath(p string) string {
+	p = strings.TrimSpace(p)
+	p = strings.TrimPrefix(p, "./")
+	for _, prefix := range []string{"a/", "b/"} {
+		p = strings.TrimPrefix(p, prefix)
+	}
+	return path.Clean(p)
 }
 
 // SelectDiff returns the slice of a unified diff that bears on one candidate: the hunks of
@@ -118,10 +134,11 @@ func DiffHasFile(diff, path string) bool {
 // budget bytes of the whole branch diff - on a 538-file branch that is the alphabetically
 // first dozen files and nothing the candidate refers to.
 func SelectDiff(diff, path string, line, budget int) (out string, ok bool, hash string) {
+	want := NormalizePath(path) // the same definition of "same file" DiffHasFile uses
 	var block *fileBlock
 	all := parseUnifiedDiff(diff)
 	for i := range all {
-		if all[i].path == path {
+		if NormalizePath(all[i].path) == want {
 			block = &all[i]
 			break
 		}
@@ -216,6 +233,12 @@ func windowLines(h hunk, target, budget int) []string {
 	if len(h.lines) == 0 || budget <= 0 {
 		return h.lines
 	}
+	// h.lines[0] is the @@ header and the window is prepended with it, so a hunk that is nothing
+	// but a header has no body to window: returning here avoids emitting the header twice, which
+	// produced a hunk with two @@ lines and no content.
+	if len(h.lines) == 1 {
+		return h.lines
+	}
 	centre := 1
 	if target > h.start {
 		centre = target - h.start + 1
@@ -283,8 +306,14 @@ func ContextFor(diff string, alreadyTruncated bool, file string, line, budget in
 }
 
 // maxReferencedFiles caps how many extra files one finding can pull in. The finding text is
-// untrusted reviewer output, so it selects which of OUR OWN hunks to show and nothing more -
-// but an uncapped list would still let one finding crowd out the budget.
+// untrusted reviewer output, and for prompt construction it selects which of OUR OWN hunks to
+// show and nothing more - an uncapped list would still let one finding crowd out the budget.
+//
+// It does NOT stay inside the diff everywhere: cli.referencedByFindings feeds these same paths to
+// the evidence sandbox, which materializes repository files at both revisions. That path filters
+// anything escaping the tree before it gets there, and this cap bounds how many files one finding
+// can cause to be copied - but the claim "our own hunks and nothing more" is true of the prompt,
+// not of the sandbox.
 const maxReferencedFiles = 4
 
 // referencedPath matches a path-shaped token inside a finding's prose: two or more slash
@@ -331,12 +360,17 @@ func namedPaths(text string) []string {
 // of four sampled rejections were exactly that.
 func ReferencedPaths(diff, own, text string) []string {
 	var out []string
-	seen := map[string]bool{own: true}
+	// Keyed on the normalized path, like DiffHasFile: prose that quotes the candidate's own file
+	// from a diff header ("b/internal/x.go") names the same file, not an extra one. Keying on the
+	// raw string spent a maxReferencedFiles slot and a share of the budget on an alias of the
+	// primary - showing it twice and dropping a genuine second file to make room.
+	seen := map[string]bool{NormalizePath(own): true}
 	for _, m := range namedPaths(text) {
-		if seen[m] || !DiffHasFile(diff, m) {
+		key := NormalizePath(m)
+		if seen[key] || !DiffHasFile(diff, m) {
 			continue
 		}
-		seen[m] = true
+		seen[key] = true
 		if out = append(out, m); len(out) == maxReferencedFiles {
 			break
 		}
@@ -363,12 +397,13 @@ func MentionsOtherFiles(own, text string) bool {
 // claim depends on, which a tree of only the changed files cannot.
 func AllReferencedPaths(own, text string) []string {
 	var out []string
-	seen := map[string]bool{own: true}
+	seen := map[string]bool{NormalizePath(own): true}
 	for _, m := range namedPaths(text) {
-		if seen[m] {
+		key := NormalizePath(m)
+		if seen[key] {
 			continue
 		}
-		seen[m] = true
+		seen[key] = true
 		if out = append(out, m); len(out) == maxReferencedFiles {
 			break
 		}
@@ -384,7 +419,20 @@ func ContextForClaim(diff string, alreadyTruncated bool, file string, line int, 
 		return ContextFor(diff, alreadyTruncated, file, line, budget)
 	}
 	share := budget / (len(refs) + 2) // the declared file gets two shares
-	primary, ok, _ := ContextFor(diff, alreadyTruncated, file, line, budget-share*len(refs))
+	// The second return of ContextFor is named `truncated`, not `ok`. It was bound here to a
+	// variable called `ok` and OR'd in as `!ok`, so the term claimed truncation exactly when the
+	// primary was NOT truncated - an inversion that never changed an answer, because on this path
+	// ContextFor's flag is true by construction (it carries one file out of several) and the
+	// length test below decided every reachable case. Dropped rather than corrected.
+	//
+	// The length test is an approximation and known to be imperfect in both directions: each
+	// selection re-emits its own file header, so a claim carried in FULL can produce more bytes
+	// than the diff it came from (measured: 40193 from 40074) and read as complete. Measuring it
+	// properly needs SelectDiff to report whether it cut, which it does not - and its budget is
+	// not a hard cap, since a smaller budget can return MORE bytes (measured: 40102 at budget 133
+	// against 39983 unbounded). That contract is worth settling before this signal is rebuilt on
+	// top of it; see docs/0.10.0-candidates.md.
+	primary, _, _ := ContextFor(diff, alreadyTruncated, file, line, budget-share*len(refs))
 	var b strings.Builder
 	b.WriteString(primary)
 	for _, r := range refs {
@@ -394,5 +442,5 @@ func ContextForClaim(diff string, alreadyTruncated bool, file string, line int, 
 	}
 	out = b.String()
 	sum := sha1.Sum([]byte(out))
-	return out, alreadyTruncated || !ok || len(out) < len(diff), hex.EncodeToString(sum[:])
+	return out, alreadyTruncated || len(out) < len(diff), hex.EncodeToString(sum[:])
 }

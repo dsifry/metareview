@@ -2,11 +2,12 @@ package reviewlog
 
 import (
 	"encoding/json"
-	"github.com/dsifry/metareview/internal/jsonl"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dsifry/metareview/internal/jsonl"
 )
 
 func TestDiscoverReviewLogsDeterministically(t *testing.T) {
@@ -373,5 +374,148 @@ func TestReadFindingsAcceptsAnExactlyMaxLengthLine(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].ID != "mrvf-1" || got[1].ID != "mrvf-2" {
 		t.Fatalf("got %d records %+v, want both", len(got), got)
+	}
+}
+
+// Grandfathering: a completed artifact review must be judged against the lens set that was
+// required when it ran, not the set required today. Three lenses were added after the earliest
+// reviews in this repository (security in 0.7.0, testing-quality and data-migration in 0.8.0);
+// without this, every historical artifact review turns into a permanent blocker the moment
+// somebody edits the file it reviewed, clearable only by a standing override.
+//
+// The grandfather is bounded, which is the point of the cutoff: a log written today cannot get
+// the easier legacy rubric by simply omitting the marker, because "no marker" only means "legacy"
+// for run IDs that predate the marker itself.
+func TestArtifactLensSetIsGrandfathered(t *testing.T) {
+	rows := func(names ...string) string {
+		out := "## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n"
+		for _, n := range names {
+			out += "| " + n + " | PASS | 0 | ok |\n"
+		}
+		return out
+	}
+	five := []string{"Feasibility", "Completeness", "Scope and alignment", "Architecture", "Intent preservation"}
+	eight := append(append([]string{}, five...), "Security", "Testing-quality", "Data-migration")
+	log := func(runID, declared, table string) string {
+		s := "# metareview: artifact review\n\nRun ID: `" + runID + "`\n\nTarget: `A.md`\n\n"
+		if declared != "" {
+			s += "Required lenses: `" + declared + "`\n\n"
+		}
+		return s + "## Verdict\n\nPASS\n\n" + table
+	}
+	all := "feasibility, completeness, scope-and-alignment, architecture, intent-preservation, security, testing-quality, data-migration"
+
+	for _, tc := range []struct {
+		name     string
+		text     string
+		blocking bool
+	}{
+		{"legacy log, five lenses, no marker", log("mrv-20260705-1-artifact-a-1", "", rows(five...)), false},
+		{"legacy log missing an original lens still blocks", log("mrv-20260705-1-artifact-a-1", "", rows(five[:4]...)), true},
+		{"post-cutoff log with only five lenses blocks", log("mrv-20260829-1-artifact-a-1", "", rows(five...)), true},
+		{"post-cutoff log with eight lenses passes", log("mrv-20260829-1-artifact-a-1", all, rows(eight...)), false},
+		{"declared set is what counts, not the cutoff", log("mrv-20260705-1-artifact-a-1", all, rows(five...)), true},
+		// An all-digit run of eight characters is not a date. Accepting one as legacy would hand the
+		// five-lens rubric to any log carrying a plausible-looking id, which is the opposite of a
+		// grandfather bounded by verifiable provenance.
+		// A declaration may strengthen what a log is held to; it may never weaken it. Declaring the
+		// legacy five on a post-cutoff log is an opt-out of security, testing-quality and
+		// data-migration - the exact escape the unmarked path already refuses after the cutoff.
+		{"post-cutoff log cannot declare the legacy rubric", log("mrv-20260829-1-artifact-a-1", "feasibility, completeness, scope-and-alignment, architecture, intent-preservation", rows(five...)), true},
+		// A declaration is provenance, not permission. Accepting an arbitrary one lets a log name a
+		// one-lens rubric, satisfy it with a single row, and be reported complete - so a current
+		// review could skip security, testing-quality and data-migration by declaring them away.
+		{"partial declared set does not certify itself", log("mrv-20260829-1-artifact-a-1", "feasibility", rows(five[:1]...)), true},
+		{"unknown lens in the declaration falls back to current", log("mrv-20260829-1-artifact-a-1", "feasibility, completeness, vibes", rows(five...)), true},
+		{"pre-cutoff log cannot declare its way out either", log("mrv-20260705-1-artifact-a-1", "feasibility", rows(five[:1]...)), true},
+		{"impossible calendar date is not legacy", log("mrv-20260230-1-artifact-a-1", "", rows(five...)), true},
+		{"month 13 is not legacy", log("mrv-20261305-1-artifact-a-1", "", rows(five...)), true},
+		{"day 00 is not legacy", log("mrv-20260700-1-artifact-a-1", "", rows(five...)), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseMarkdown("docs/metareview/reviews/x.md", tc.text).HasUnresolvedBlockers
+			if got != tc.blocking {
+				t.Errorf("HasUnresolvedBlockers = %v, want %v", got, tc.blocking)
+			}
+		})
+	}
+}
+
+// The era table is what keeps the marker meaningful across the NEXT lens addition. Judging a log
+// against a live "current" set means every existing declaration stops matching the day a lens is
+// added, and every completed review becomes incomplete again - the standing-override failure the
+// marker exists to prevent, returning at exactly the moment it is needed. Eras are keyed by the
+// date a rubric took effect, so adding a lens means appending an era and leaves older logs alone.
+func TestLensErasAreKeyedByDate(t *testing.T) {
+	for _, tc := range []struct {
+		runID string
+		want  []string
+	}{
+		{"mrv-20260705-1-artifact-a-1", legacyLenses},
+		{"mrv-20260823-1-artifact-a-1", legacyLenses},
+		{"mrv-20260824-1-artifact-a-1", currentLenses},
+		{"mrv-20260829-1-artifact-a-1", currentLenses},
+		{"mrv-notadate-1-artifact-a-1", currentLenses},
+	} {
+		got := eraLenses(tc.runID)
+		if !sameLensSet(got, tc.want) {
+			t.Errorf("eraLenses(%s) = %v, want %v", tc.runID, got, tc.want)
+		}
+	}
+	// Appending a future era must not reach back. This is the property that breaks if the rule is
+	// "whatever the current set happens to be".
+	saved := lensEras
+	defer func() { lensEras = saved }()
+	ninth := append(append([]string{}, currentLenses...), "supplychain")
+	lensEras = append(append([]lensEra{}, lensEras...), lensEra{from: "20270101", lenses: ninth})
+	if !sameLensSet(eraLenses("mrv-20260829-1-artifact-a-1"), currentLenses) {
+		t.Error("adding a later era must not change what an earlier log is judged against")
+	}
+	if !sameLensSet(eraLenses("mrv-20270102-1-artifact-a-1"), ninth) {
+		t.Error("a log written in the new era must be judged against it")
+	}
+}
+
+// The severity policy is "critical and high block; medium and low do not", and only three of its
+// four cases were pinned - medium had none, so widening the set from (critical|high) to
+// != "low" left the suite green and silently promoted every medium finding to a blocker. The
+// enumeration is now complete, which is the point of an enumeration.
+func TestOnlyCriticalAndHighSeveritiesBlock(t *testing.T) {
+	for _, tc := range []struct {
+		severity string
+		blocks   bool
+	}{
+		{"critical", true},
+		{"high", true},
+		{"medium", false},
+		{"low", false},
+		{"", false},
+	} {
+		t.Run(tc.severity, func(t *testing.T) {
+			got := isOpenBlocker(findingRecord{Status: "open", Classification: "blocking", Severity: tc.severity})
+			if got != tc.blocks {
+				t.Errorf("severity %q: isOpenBlocker = %v, want %v", tc.severity, got, tc.blocks)
+			}
+		})
+	}
+	// spec-contract blocks whatever its severity, which is the one exception to the rule above.
+	if !isOpenBlocker(findingRecord{Status: "open", Classification: "spec-contract", Severity: "low"}) {
+		t.Error("a spec-contract finding must block regardless of severity")
+	}
+}
+
+// A declaration that repeats a lens is malformed, and malformed is not "the legacy rubric".
+// Comparing only the count of UNIQUE names let "the five legacy lenses, one of them twice" match
+// legacyLenses, so a pre-cutoff log could satisfy the gate with five rows on an invalid marker.
+func TestDuplicateLensDeclarationIsNotAShippedRubric(t *testing.T) {
+	dup := append(append([]string{}, legacyLenses...), legacyLenses[0])
+	if known := knownRubric(dup); known != nil {
+		t.Errorf("a declaration repeating a lens matched %v; it names no shipped rubric", known)
+	}
+	if known := knownRubric(legacyLenses); known == nil {
+		t.Error("the legacy rubric itself must still be recognised")
+	}
+	if known := knownRubric(currentLenses); known == nil {
+		t.Error("the current rubric must still be recognised")
 	}
 }

@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2.6f0beb2ce9e58532",
+  "kind": "shard",
+  "shardId": "shard-2",
+  "shardHash": "6f0beb2ce9e58532",
+  "planHash": "232e5c0c067629e5",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "note": "Method: mutation testing in an isolated rsync copy of the tree under the scratchpad (never the live tree). Baseline `go test ./...` green. Sixteen mutations applied one at a time and reverted; each surviving mutation re-verified against the FULL `go test ./...`, not just its own package, because internal/fsm/* sits at 100% statement coverage and coverage proves nothing here."
+    },
+    {
+      "path": "internal/fsm/sandbox/sandbox.go",
+      "line": 56,
+      "note": "Killed: neutering the containment guard (`if false && ...`, keeping the strings import so the failure is a test failure and not an unused-import build error) fails TestMaterializeRefusesEscapingPaths on all four inputs. Guard is genuinely pinned."
+    },
+    {
+      "path": "internal/fsm/sandbox/sandbox.go",
+      "line": 70,
+      "note": "Killed: 0o444 -> 0o644 fails TestMaterializedFilesAreReadOnly. Killed: deleting sort.Strings(sorted) fails TestTreeHashIgnoresInputOrder. Killed: dropping baseSHA/headSHA from the hash preamble (line 51) fails TestTreeHashIsContentAddressed."
+    },
+    {
+      "path": "internal/reviewlog/reviewlog.go",
+      "line": 287,
+      "note": "Killed: reverting jsonl.NewScanner to a local bufio scanner sized at the bare cap fails TestReadFindingsAcceptsAnExactlyMaxLengthLine. Same mutation in internal/runchain/runchain.go:112 fails TestReadersAcceptOneMiBLines, and in internal/state/state.go:63 fails the new TestReadJSONLAcceptsAnExactlyMaxLengthLine. The off-by-two migration is well pinned in all three."
+    },
+    {
+      "path": "internal/status/status.go",
+      "line": 76,
+      "note": "Killed: Blocked always false, `continue` guard removed (every review a blocker), Discover error swallowed, Emit always exit 0, and Emit ignoring the Fprintln error each fail at least one status test. The status contract's decision surface is well pinned."
+    },
+    {
+      "path": "internal/fsm/judge/diffselect.go",
+      "line": 296,
+      "note": "Probe (temporary test, removed): AllReferencedPaths(\"own.go\", \"see ../shared/util.go for the other copy\") returns [\"../shared/util.go\"]; \"compare with ./internal/x.go\" returns [\"./internal/x.go\"]; \"the guard in a/../../up.go\" returns [\"a/../../up.go\"]. The sandbox path list therefore carries judge-authored tokens, not only diff paths."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 563,
+      "note": "adjudicateExec.resolve caches the escalation error under sync.Once, and secondOpinion (kind.go:580-586) turns a non-nil error into VerdictCheckedButUnverified for the candidate. So one Materialize failure disables escalation for the whole run rather than for one finding."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 561,
+      "note": "SURVIVED: reverting withinCaps to shortOK(d.Kind, d.Model, d.Effort, d.InputHash, d.Error) leaves `go test ./...` fully green. The only production change in this chunk is untested."
+    },
+    {
+      "note": "Toolchain: gofmt -l clean, go vet clean, golangci-lint 2.13.1 reports 0 issues over internal/reviewlog, internal/runchain, internal/status and internal/fsm/sandbox. No TODO/FIXME markers, no eval or other unsafe execution, and every chunk in this shard is part 1/1 (no truncated context)."
+    },
+    {
+      "path": "tests/go/agent-prompt-anchors.txt",
+      "line": 13,
+      "note": "The changed anchor line is present byte-for-byte in internal/fsm/cli/prompt.go:40, --no-escalate is a real bool flag (internal/fsm/cli/run.go:88) wired at run.go:49 and honoured at wiring.go:180, and the anchors file is enforced by tests/go/test-fsm.sh:62-67 which CI runs via `npm test`. The anchor change is accurate and gated."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "sandbox.Materialize fails the entire batch when two input paths resolve to the same destination, and its own 0o444 mode is what makes it fail. os.WriteFile on a path already written in this call returns EACCES, so Materialize returns (nil, \"open .../head/internal/x.go: permission denied\"). Verified empirically: Materialize(root, \"B\", \"H\", []string{\"internal/x.go\", \"./internal/x.go\"}, show) and the exact-duplicate case both fail this way. This is reachable in production. escalation.go:63-77 dedups by RAW string, but AllReferencedPaths yields \"./internal/x.go\" for ordinary judge prose (\"compare with ./internal/x.go\") while changedPaths yields \"internal/x.go\" - two distinct keys, one destination after filepath.Clean. The consequence is not local: escalationFor returns the error, adjudicateExec.resolve caches it under sync.Once (kind.go:563), and secondOpinion then marks EVERY cross-file rejection in the run VerdictCheckedButUnverified. Escalation is on by default precisely because \"a false reject is the dangerous direction - it drops a real finding and nothing says so\" (escalation.go:17); a reviewer writing a leading-./ path silently turns that protection off for the whole run. Two contributing defects: (a) Materialize does not dedupe the cleaned destination, and is therefore also not idempotent - a second call on the same root fails identically; (b) the WriteFile and MkdirAll errors are returned bare at sandbox.go:69 and 71, with no \"sandbox:\" prefix and no path, unlike the show error at line 66 which does wrap and name the path - so the operator sees only a permission-denied on a temp directory metareview created itself. No test covers a duplicate path, a ./-prefixed path, or a re-used root.",
+      "evidence": [
+        {"path": "internal/fsm/sandbox/sandbox.go", "line": 70, "note": "os.WriteFile(dest, body, 0o444) - the second write to the same dest hits its own read-only mode"},
+        {"path": "internal/fsm/sandbox/sandbox.go", "line": 71, "note": "return nil, err - bare, unlike the wrapped show error at line 66"},
+        {"path": "internal/fsm/cli/escalation.go", "line": 65, "note": "have[p] dedups on the raw string, never on filepath.Clean(p)"},
+        {"path": "internal/fsm/judge/diffselect.go", "line": 296, "note": "referencedPath's class includes '.', so ./a/b.go and ../a/b.go are matched and returned verbatim"},
+        {"path": "internal/fsm/kind/kind.go", "line": 563, "note": "sync.Once caches resolveErr, so one failure applies to every remaining candidate"},
+        {"path": "internal/fsm/sandbox/sandbox_test.go", "line": 20, "note": "TestMaterializeWritesBothSides is the only happy-path test; no duplicate, ./-prefixed or repeated-root case exists"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Materialize's containment refusal is batch-fatal on input that is not a diff, and a comment elsewhere states the opposite cost. sandbox.go:44-45 justifies the refusal with \"the path list ultimately derives from a diff and a diff is data\" - but escalation.go:35 appends judge-authored paths from AllReferencedPaths, and diffselect.go:299-301 tells the reader that anything spurious \"is filtered by existence when the evidence tree is built, and at worst costs one escalation.\" Neither half holds for an escaping path: it is refused before any existence check, and by the resolve/sync.Once caching it costs every escalation in the run, not one. Verified: AllReferencedPaths returns \"../shared/util.go\" for the prose \"see ../shared/util.go for the other copy\" - a path a reviewer writes without thinking - and Materialize refuses it. This is the defect class the comment is supposed to prevent: a comment that talks the reader out of a check the code needs. Skipping a non-contained path (recorded, so the omission is auditable) contains the blast radius to that one file; refusing the batch does not. The four inputs in TestMaterializeRefusesEscapingPaths all assert the refusal is correct, and none asserts anything about what the refusal costs.",
+      "evidence": [
+        {"path": "internal/fsm/sandbox/sandbox.go", "line": 45, "note": "\"the path list ultimately derives from a diff\" - it also derives from judge output"},
+        {"path": "internal/fsm/sandbox/sandbox.go", "line": 56, "note": "the refusal aborts the whole Materialize call, not the offending path"},
+        {"path": "internal/fsm/judge/diffselect.go", "line": 301, "note": "\"at worst costs one escalation\" - it costs all of them for the run"},
+        {"path": "internal/fsm/cli/escalation.go", "line": 35, "note": "paths = append(paths, c.referencedByFindings(snap, paths)...) mixes untrusted prose paths into the diff-derived list"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TreeHash does not have to be an address for the suite to pass. Mutation: replace the per-file hash line with the digest alone, dropping side.dir and clean - `go test ./...` stays fully green. Under that mutation the hash collides in two ways I confirmed with a probe: a file present only at head collides with the same file present only at base (an addition and a deletion get one address), and a.go collides with z.go at identical content (a rename is invisible). The shipped code is correct - the same probe against the unmutated code reports no collision - but nothing pins it. That matters more here than for an ordinary guard: the package doc calls this the thing that \"makes the audit honest ... content-addressing the tree restores it\" (sandbox.go:9-11) and the field comment says \"content address of everything written, so a verdict is replayable\" (sandbox.go:38). Three tests exercise TreeHash and each pins a different dimension (content, revision, input order); the two that separate an address from a plain content digest - which path, and which side - are the two nobody pins. Add a case where head-only and base-only content hash differently, and one where two paths carrying identical bytes hash differently.",
+      "evidence": [
+        {"path": "internal/fsm/sandbox/sandbox.go", "line": 74, "note": "side.dir and clean are hashed here; removing them leaves the whole suite green"},
+        {"path": "internal/fsm/sandbox/sandbox.go", "line": 38, "note": "\"content address of everything written, so a verdict is replayable\" - the claim the mutation falsifies"},
+        {"path": "internal/fsm/sandbox/sandbox_test.go", "line": 60, "note": "TestTreeHashIsContentAddressed covers content and base revision, not path or side"},
+        {"path": "internal/fsm/sandbox/sandbox_test.go", "line": 84, "note": "TestTreeHashIgnoresInputOrder covers order only"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The only production change in this shard's fold.go chunk is untested. Reverting internal/fsm/run/fold.go:561 to the pre-0.9.0 shortOK(d.Kind, d.Model, d.Effort, d.InputHash, d.Error) - i.e. removing d.Evidence, d.TreeHash, d.BaseSHA and d.HeadSHA from withinCaps entirely - leaves `go test ./...` green, and no behavioural shell test can distinguish it either, since the values in play (a 64-hex tree hash, 40-hex SHAs, the literal EvidenceSandbox) are all far under MaxShort = 1024. withinCaps is the audit store's admission check: whether an oversized field is rejected or silently accepted into an append-only log is exactly the kind of property the repository is otherwise careful to pin. A table case in internal/fsm/run feeding an LLMCallData with an over-MaxShort TreeHash and asserting withinCaps is false would kill the mutation.",
+      "evidence": [
+        {"path": "internal/fsm/run/fold.go", "line": 561, "note": "the four added fields can be deleted with the full suite staying green"},
+        {"path": "internal/fsm/run/types.go", "line": 41, "note": "MaxShort = 1 << 10, well above any realistic value of these four fields, so only a synthetic test can reach the guard"},
+        {"path": "internal/fsm/run/event.go", "line": 115, "note": "the fields the guard now covers are the sandbox audit trio plus Evidence"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The jsonl migration left a doc comment describing a constant that no longer exists, and the pair of copies diverged. In internal/reviewlog/reviewlog.go the const declaration was deleted but its four-line doc comment was kept and reworded, so lines 17-20 are now a free-floating comment sitting immediately above `type Summary` and documenting an identifier absent from the package - `grep -n maxJSONLLineBytes internal/reviewlog/` matches the comment and nothing else. internal/runchain/runchain.go got the identical rewording but kept the const (line 17), so the same edit was applied to both copies and the deletion to only one. Both surviving comments also still assert \"callers size the buffer two bytes larger,\" which neither package now does - that moved into jsonl.NewScanner - so a maintainer reading either file is told this package manages a buffer it no longer touches. gofmt, go vet and golangci-lint are all clean on this, so nothing mechanical will catch it. Separately and cosmetically, both files place the new internal/jsonl import inside the stdlib block (reviewlog.go:6, runchain.go:6) while keeping a separate module group below; gofmt tolerates it, goimports would not.",
+      "evidence": [
+        {"path": "internal/reviewlog/reviewlog.go", "line": 17, "note": "doc comment for maxJSONLLineBytes; the const it documents was deleted in this diff"},
+        {"path": "internal/reviewlog/reviewlog.go", "line": 22, "note": "the comment now abuts `type Summary struct`, the next declaration"},
+        {"path": "internal/runchain/runchain.go", "line": 13, "note": "same comment, but here the const survives at line 17 - the copies diverged"},
+        {"path": "internal/jsonl/jsonl.go", "line": 14, "note": "the +2 sizing this comment describes now lives in NewScanner, not in either caller"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestReportIsMachineReadableAndNamesWhatMustBeCleared cannot fail. Report's must_clear and blocked tags carry no omitempty (status.go:41-42), so both string literals appear in every marshalled Report regardless of content. Proven by mutation: deleting the NEEDS_REVISION fixture on line 26 entirely (leaving `root := t.TempDir()` and an empty repository) leaves the test passing. The name promises the report \"names what must be cleared\"; the body asserts only that two struct tags exist, and the fixture it sets up is decorative. The related gap is that the Blocker payload is almost entirely unpinned: blanking RunID, Verdict, Kind, Path, BlockingCount, AttemptNumber and MaxAttempts at status.go:72-73 and keeping only Target leaves `go test ./...` green, so every field the report exists to hand an operator can be dropped without a red test. Only Target survives, via the \"task-c\" substring check in TestEmitReportsExitOneWhenSomethingMustBeCleared. Making this test assert the fixture's target and run id appear in the marshalled must_clear entry would close both.",
+      "evidence": [
+        {"path": "internal/status/status_test.go", "line": 24, "note": "the test still passes with its NEEDS_REVISION fixture removed"},
+        {"path": "internal/status/status_test.go", "line": 35, "note": "asserts the tag literal \"must_clear\", not any content under it"},
+        {"path": "internal/status/status.go", "line": 41, "note": "must_clear and blocked have no omitempty, so both tags are unconditionally emitted"},
+        {"path": "internal/status/status.go", "line": 72, "note": "blanking every Blocker field but Target leaves the full suite green"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The migration to the shared scanner is partial, and internal/jsonl's package doc overstates it as complete: \"centralises the line cap shared by every reader of the repository's .jsonl files.\" Five readers were migrated on this branch (state, findings, fsm/record, runchain, reviewlog); four .jsonl readers still use bufio's 64 KiB default and would fail the whole file on one long line - internal/tasksource/tasksource.go:63 reading .beads/issues.jsonl, internal/knowledge/knowledge.go:73 reading metareview's own *.jsonl knowledge files, internal/epicsource/epicsource.go:86, and internal/sessionhistory/sessionhistory.go:226. Flagged low rather than blocking because none of those four files is in this diff (the branch did not regress them) and internal/jsonl/jsonl.go belongs to another shard - the claim itself should be narrowed or the remaining readers migrated, and the cross-shard reviewer is better placed to decide which. Raised here because reviewlog.go and runchain.go are two of the migrated copies in this shard, and \"did every copy get the fix\" is the question that migration invites.",
+      "evidence": [
+        {"path": "internal/jsonl/jsonl.go", "line": 1, "note": "\"every reader of the repository's .jsonl files\" - four readers still use the bufio default"},
+        {"path": "internal/tasksource/tasksource.go", "line": 63, "note": "bare bufio.NewScanner over .beads/issues.jsonl, no Buffer call"},
+        {"path": "internal/knowledge/knowledge.go", "line": 73, "note": "bare bufio.NewScanner over *.jsonl knowledge files"},
+        {"path": "internal/epicsource/epicsource.go", "line": 86, "note": "bare bufio.NewScanner over a JSONL issues file"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Tree.Files is a new exported field that no caller reads. escalation.go:41-56 consumes Root, TreeHash, BaseSHA and HeadSHA and ignores Files; a repository-wide grep for `.Files` under internal/fsm finds only the increment at sandbox.go:75 and the assertion in the package's own test. Either surface it where it would be useful - the count of files a judge could read is exactly the kind of thing the audit row wants next to TreeHash - or drop it, so the API does not carry a field whose only consumer is the test that justifies it.",
+      "evidence": [
+        {"path": "internal/fsm/sandbox/sandbox.go", "line": 39, "note": "Files int - written at line 75, never read outside the package"},
+        {"path": "internal/fsm/cli/escalation.go", "line": 50, "note": "the only production caller uses Root, TreeHash, BaseSHA, HeadSHA and not Files"}
+      ]
+    }
+  ],
+  "blockingCount": 6
+}

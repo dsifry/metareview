@@ -679,7 +679,12 @@ func TestStillPresentDecodeCapsOversizedStatusList(t *testing.T) {
 type recordingJudge struct{ diffs []string }
 
 func (r *recordingJudge) Call(_ context.Context, req judge.Request) (judge.Verdict, error) {
-	if in, ok := req.Input.(judge.AdjudicateInput); ok {
+	// Both arms select per subject, so both are recorded: an arm whose evidence nothing inspects
+	// is an arm whose selection nothing pins.
+	switch in := req.Input.(type) {
+	case judge.AdjudicateInput:
+		r.diffs = append(r.diffs, in.Diff)
+	case judge.StillPresentInput:
 		r.diffs = append(r.diffs, in.Diff)
 	}
 	return judge.Verdict{Decision: true, Confidence: 0.9}, nil
@@ -929,5 +934,93 @@ func TestEscalationParseErrorKeepsTheFinding(t *testing.T) {
 	}
 	if !kept {
 		t.Errorf("an unparseable escalation must leave the finding for a human: %+v", out)
+	}
+}
+
+// selectionFixture is the diff TestAdjudicateSelectsEachCandidatesOwnFile uses: early.go, then
+// enough filler to pass the budget, then late.go. A shared cut cannot reach late.go, so a call
+// that receives earlyMarker for a late.go subject is being handed another file's hunks.
+func selectionFixture(t *testing.T) string {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("diff --git a/early.go b/early.go\n--- a/early.go\n+++ b/early.go\n@@ -1,2 +1,3 @@\n+\tearlyMarker()\n")
+	b.WriteString("diff --git a/filler.go b/filler.go\n--- a/filler.go\n+++ b/filler.go\n@@ -1,900 +1,900 @@\n")
+	for b.Len() < judge.MaxDiffBytes+5000 {
+		b.WriteString("+// " + strings.Repeat("f", 70) + "\n")
+	}
+	b.WriteString("diff --git a/late.go b/late.go\n--- a/late.go\n+++ b/late.go\n@@ -1,2 +1,3 @@\n+\tlateMarker()\n")
+	full := b.String()
+	if strings.Index(full, "lateMarker") < judge.MaxDiffBytes {
+		t.Fatalf("fixture invalid: late.go must sit past the %d budget", judge.MaxDiffBytes)
+	}
+	return full
+}
+
+// Per-candidate selection was applied at three call sites and pinned at one. Rewriting the
+// still-present site to a shared cut left the entire suite green, while the still-present arm is
+// what decides whether a fix landed - a wrong answer there terminates or re-runs the SDLC loop on
+// evidence that cannot contain the answer.
+func TestStillPresentSelectsEachBugsOwnFile(t *testing.T) {
+	full := selectionFixture(t)
+	rec := &recordingJudge{}
+	r := mustNew(t, rec, false)
+	ex, _ := r.Executor(StillPresent)
+	snap := run.Snapshot{RunID: "mrv-sp", Iteration: 1, AllFound: []run.Bug{
+		{ID: "b1", Desc: "bug in early", File: "early.go", Line: 1},
+		{ID: "b2", Desc: "bug in late", File: "late.go", Line: 1},
+	}}
+	a := &audits{}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: snap, Node: verifyNode, Diff: machine.Diff{Text: full}, StartIndex: 0, Audit: a.fn}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(rec.diffs) != 2 {
+		t.Fatalf("got %d still-present calls, want 2", len(rec.diffs))
+	}
+	if !strings.Contains(rec.diffs[0], "earlyMarker") {
+		t.Errorf("bug 0 did not receive early.go:\n%.300s", rec.diffs[0])
+	}
+	if !strings.Contains(rec.diffs[1], "lateMarker") {
+		t.Errorf("bug 1 did not receive late.go (a shared cut cannot reach it):\n%.300s", rec.diffs[1])
+	}
+	if strings.Contains(rec.diffs[1], "earlyMarker") {
+		t.Errorf("bug 1 received another file's content:\n%.300s", rec.diffs[1])
+	}
+}
+
+// NeedsJudge is what the machine's pre-flight gates on, so an LLM-calling kind that reports
+// false is never validated: a bad model id or an unsupported effort reaches the run instead of
+// failing at init. The machine's own pre-flight tests build a fake registry, so nothing
+// exercised these assignments - setting stillPresentKind's NeedsJudge to false left the whole
+// of `go test ./...` green. Asserted here, where the real values are declared, and for every
+// kind at once so a new one cannot be added without deciding.
+func TestKindInfoDeclaresWhichKindsCallAJudge(t *testing.T) {
+	r := mustNew(t, &recordingJudge{}, false)
+	want := map[string]bool{
+		// The two kinds that call a judge in-process, both exec: fork.
+		MatchThenAdjudicate: true,
+		StillPresent:        true,
+		// Host-executed kinds carry no model of their own - review-lenses allows only inline and
+		// subagent, so the host agent does the work in its own session - and cmd runs a command.
+		// There is nothing for judge pre-flight to validate.
+		ReviewLenses: false,
+		AgentEdit:    false,
+		Cmd:          false,
+	}
+	info := r.Info()
+	for name, needs := range want {
+		got, ok := info[name]
+		if !ok {
+			t.Errorf("kind %q is not registered", name)
+			continue
+		}
+		if got.NeedsJudge != needs {
+			t.Errorf("kind %q: NeedsJudge = %v, want %v", name, got.NeedsJudge, needs)
+		}
+	}
+	for name := range info {
+		if _, covered := want[name]; !covered {
+			t.Errorf("kind %q is registered but this test does not say whether it calls a judge", name)
+		}
 	}
 }

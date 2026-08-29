@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -247,5 +248,121 @@ func TestEscalatesAClaimAgainstAnUnchangedFile(t *testing.T) {
 	}
 	if len(out.Confirmed) != 1 || len(out.Rejected) != 0 {
 		t.Errorf("the second opinion should have recovered it: confirmed=%d rejected=%d", len(out.Confirmed), len(out.Rejected))
+	}
+}
+
+// The escalated judge must be TOLD the tree exists. Measured before this test: an escalated
+// adjudicate call carried a prompt containing none of "head/", "base/", "sandbox" or the tree
+// path - the same question, the same model, the same effort and the same ContextForClaim excerpt
+// as the first arm, differing only in the subprocess working directory. A judge that is not told
+// it can read the files has no reason to, so the second opinion re-asks the first one and the
+// evidence=sandbox label in the audit describes a capability nothing invoked.
+func TestEscalatedPromptNamesTheEvidenceTree(t *testing.T) {
+	root := t.TempDir()
+	tree, err := sandbox.Materialize(root, "base-sha", "head-sha", []string{"server.go"},
+		func(rev, path string) ([]byte, bool, error) { return []byte(rev + " " + path + "\n"), true, nil })
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	var prompts []string
+	fakeCLI := func(_ context.Context, _ string, _ []string, prompt string) ([]byte, int, error) {
+		prompts = append(prompts, prompt)
+		return []byte(`{"type":"item.completed","item":{"type":"agent_message","text":"{\"reasoning\":\"r\",\"is_real\":true,\"confidence\":0.95}"}}` + "\n" +
+			`{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1}}` + "\n"), 0, nil
+	}
+	router, err := judge.NewWithCodex(nil, judge.Keys{}, judge.URLs{}, func() string { return "n0" },
+		judge.Clock{Now: func() time.Time { return time.Unix(0, 0) }, After: time.After}, fakeCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := New(Deps{
+		Judge: &scriptedJudge{real: false},
+		Escalate: func(context.Context, run.Snapshot, *workflow.Node) (*Escalation, error) {
+			return &Escalation{
+				Judge: judge.WithCodexWorkDir(router, tree.Root), Model: "codex/gpt-5.6-sol", Effort: "medium",
+				Evidence: run.EvidenceSandbox, Root: tree.Root,
+				TreeHash: tree.TreeHash, BaseSHA: tree.BaseSHA, HeadSHA: tree.HeadSHA,
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex, _ := reg.Executor(MatchThenAdjudicate)
+	a := &audits{}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: escalationSnap(), Node: adjNode, Diff: machine.Diff{Text: escalationDiff}, StartIndex: 0, Audit: a.fn}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(prompts) == 0 {
+		t.Fatal("the escalated judge was never called")
+	}
+	got := prompts[len(prompts)-1]
+	for _, want := range []string{sandbox.Head + "/", sandbox.Base + "/"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("escalated prompt never mentions %q, so nothing tells the judge to read the tree", want)
+		}
+	}
+}
+
+// The escalation arm applies the same confidence floor as the primary - a confirmation below
+// AdjudicateThreshold is not a confirmation - but only the primary was pinned: deleting
+// `&& v.Confidence >= AdjudicateThreshold` from secondOpinion left the suite green, so a judge
+// answering "real, 0.30" would have promoted a rejected finding to confirmed.
+func TestEscalationAppliesTheConfidenceFloor(t *testing.T) {
+	root := t.TempDir()
+	tree, err := sandbox.Materialize(root, "base-sha", "head-sha", []string{"server.go"},
+		func(rev, path string) ([]byte, bool, error) { return []byte(rev + " " + path + "\n"), true, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name       string
+		confidence float64
+		wantReal   bool
+	}{
+		{"above the floor", 0.95, true},
+		{"below the floor", AdjudicateThreshold - 0.01, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeCLI := func(_ context.Context, _ string, _ []string, _ string) ([]byte, int, error) {
+				return []byte(fmt.Sprintf(`{"type":"item.completed","item":{"type":"agent_message","text":"{\"reasoning\":\"r\",\"is_real\":true,\"confidence\":%v}"}}`, tc.confidence) + "\n" +
+					`{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}` + "\n"), 0, nil
+			}
+			router, err := judge.NewWithCodex(nil, judge.Keys{}, judge.URLs{}, func() string { return "n0" },
+				judge.Clock{Now: func() time.Time { return time.Unix(0, 0) }, After: time.After}, fakeCLI)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reg, err := New(Deps{
+				Judge: &scriptedJudge{real: false},
+				Escalate: func(context.Context, run.Snapshot, *workflow.Node) (*Escalation, error) {
+					return &Escalation{Judge: judge.WithCodexWorkDir(router, tree.Root), Model: "codex/x", Effort: "medium",
+						Evidence: run.EvidenceSandbox, Root: tree.Root, TreeHash: tree.TreeHash, BaseSHA: tree.BaseSHA, HeadSHA: tree.HeadSHA}, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ex, _ := reg.Executor(MatchThenAdjudicate)
+			raw, err := ex.Execute(context.Background(), machine.ExecInput{
+				Snap: escalationSnap(), Node: adjNode, Diff: machine.Diff{Text: escalationDiff}, StartIndex: 0, Audit: (&audits{}).fn})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			var out adjudicateOut
+			if err := json.Unmarshal(raw, &out); err != nil {
+				t.Fatal(err)
+			}
+			var promoted bool
+			for _, b := range out.Confirmed {
+				if b.Verdict == run.VerdictRealButUngold {
+					promoted = true
+				}
+			}
+			if promoted != tc.wantReal {
+				t.Errorf("confidence %v: promoted=%v, want %v", tc.confidence, promoted, tc.wantReal)
+			}
+		})
 	}
 }

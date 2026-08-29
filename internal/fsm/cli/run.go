@@ -31,7 +31,9 @@ const GoldensMaxBytes = 512 << 10
 
 // Run is `metareview fsm <args>`; it prints one JSON envelope (or the agent prompt) and returns the exit code.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, cwd string, deps Deps) int {
-	c := &ctxDeps{ctx: ctx, deps: deps, cwd: cwd}
+	c := newCtxDeps(ctx, deps, cwd)
+	// Evidence trees live for the invocation that built them, not for the life of the machine.
+	defer c.removeSandboxes()
 	inv := &invocation{c: c, stdin: stdin, out: stdout, err: stderr}
 	if len(args) == 0 {
 		return inv.usage("subcommand required: init|state|advance|record|gate|judge|converge|diff|export|workflows|--agent-prompt")
@@ -46,7 +48,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return inv.usage(err.Error())
 	}
 	inv.p = p
-	c.noEscalate = p.bools["no-escalate"] // default off means escalation is ON
+	c.applyGlobalFlags(p)
 	switch cmd {
 	case "workflows":
 		return inv.workflows()
@@ -85,7 +87,7 @@ type parsed struct {
 	pos   []string
 }
 
-var boolFlags = map[string]bool{"--calibration": true, "--repair": true, "--replace": true, "--accept-workflow-change": true, "--include-vars": true, "--no-escalate": true}
+var boolFlags = map[string]bool{"--calibration": true, "--repair": true, "--replace": true, "--accept-workflow-change": true, "--include-vars": true, "--escalate": true}
 
 func parseArgs(args []string) (*parsed, error) {
 	p := &parsed{flags: map[string]string{}, bools: map[string]bool{}, vars: map[string]string{}}

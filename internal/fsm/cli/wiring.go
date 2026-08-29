@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -34,10 +36,28 @@ const (
 	EnvHome         = "HOME"
 )
 
-// git runs one git command through the Exec seam and returns trimmed stdout.
+// git runs one git command through the Exec seam and returns TRIMMED stdout. It is for short
+// outputs - SHAs, ref names, worktree lines. Never use it for file content: the trim silently
+// removes leading and trailing blank lines, which shifts every line number below them. Use
+// gitRaw for bytes that are going to be read as a file.
 func (c *ctxDeps) git(dir string, args ...string) (string, int, error) {
 	out, _, code, err := c.deps.Exec(c.ctx, dir, nil, args...)
 	return strings.TrimSpace(string(out)), code, err
+}
+
+// gitCtx returns TRIMMED stdout and gitRawCtx returns it byte for byte; both take the context
+// explicitly, for callers handed one narrower than the invocation's. Never use the trimming form
+// for file content: the trim removes leading and trailing blank lines, shifting every line number
+// below them. Materializing this repository's own branch is ~540 files and so ~1,000 git
+// subprocesses; a caller that cancels must be able to stop them.
+func (c *ctxDeps) gitCtx(ctx context.Context, dir string, args ...string) (string, int, error) {
+	out, code, err := c.gitRawCtx(ctx, dir, args...)
+	return strings.TrimSpace(string(out)), code, err
+}
+
+func (c *ctxDeps) gitRawCtx(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+	out, _, code, err := c.deps.Exec(ctx, dir, nil, args...)
+	return out, code, err
 }
 
 // ctxDeps binds Deps to one invocation.
@@ -45,8 +65,42 @@ type ctxDeps struct {
 	ctx  context.Context
 	deps Deps
 	cwd  string
-	// noEscalate turns off the sandbox second opinion for rejected cross-file candidates.
-	noEscalate bool
+	// escalate opts in to the sandbox second opinion for rejected cross-file candidates.
+	// It is off by default; see escalation for why.
+	escalate bool
+	// sandboxRoots are the evidence trees this invocation materialized. They are removed when it
+	// ends: one machine accumulated 1015 of them (37MB) in a day because nothing ever did.
+	sandboxRoots []string
+}
+
+// newCtxDeps binds Deps to one invocation.
+func newCtxDeps(ctx context.Context, deps Deps, cwd string) *ctxDeps {
+	return &ctxDeps{ctx: ctx, deps: deps, cwd: cwd}
+}
+
+// applyGlobalFlags copies the flags that are not owned by a single subcommand onto the invocation.
+// It exists so the mapping from flag name to field is testable: with the assignment inline in Run,
+// rewriting `p.bools["escalate"]` to a constant made the documented flag a no-op with the whole
+// internal/fsm/cli suite still green, because every escalation test set the field directly.
+func (c *ctxDeps) applyGlobalFlags(p *parsed) {
+	c.escalate = p.bools["escalate"] // opt-in; escalation is OFF by default
+}
+
+// removeSandboxes deletes the evidence trees this invocation created. The trees are written
+// read-only (0444 files under 0555 directories) so that a judge cannot edit its own evidence,
+// which also means they cannot be removed without restoring write permission first.
+func (c *ctxDeps) removeSandboxes() {
+	for _, root := range c.sandboxRoots {
+		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			_ = os.Chmod(path, 0o700)
+			return nil
+		})
+		_ = os.RemoveAll(root)
+	}
+	c.sandboxRoots = nil
 }
 
 // rootOf resolves the main worktree of cwd (spec 5 §2): the first `worktree` line of `git worktree list --porcelain`;
@@ -176,11 +230,17 @@ func (c *ctxDeps) nonce() string {
 
 // escalation returns the second-opinion provider for this run, or nil to disable it.
 //
-// On by default: unattended, a false reject drops a real finding and nothing says so, while a
-// false confirm only costs a human a look. Off for --no-escalate, and off for mock and
-// unaudited runs, whose verdicts are fixtures rather than judgments.
+// Off unless --escalate. The asymmetry that motivates it is real - unattended, a false reject
+// drops a real finding and nothing says so, while a false confirm only costs a human a look -
+// but the implementation shipped default-on and a review found it both inert and harmful: the
+// escalated judge is handed the identical prompt (nothing tells it a tree exists), the tree's
+// contents are whitespace-trimmed so line numbers shift, and a git failure is reported as
+// "escalation unavailable", which records the finding as a hallucination. A guardrail that
+// silently converts real findings into hallucinations is worse than none, so it is opt-in until
+// those are fixed. The intent is to return it to default-on; docs/fsm/escalation-reenable.md is
+// the checklist for that. Also off for mock and unaudited runs, whose verdicts are fixtures.
 func (c *ctxDeps) escalation(root string, scenario *mockai.Scenario, mode judgeMode) kind.EscalateFunc {
-	if c.noEscalate || scenario != nil || mode != judgeReal {
+	if !c.escalate || scenario != nil || mode != judgeReal {
 		return nil
 	}
 	return c.escalationFor(root)

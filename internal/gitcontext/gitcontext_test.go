@@ -328,3 +328,50 @@ func commandOutput(t *testing.T, dir, name string, args ...string) string {
 	}
 	return string(out)
 }
+
+// diff.noprefix is an ordinary, documented gitconfig setting. With it set, git writes
+// `diff --git f.go f.go` and every consumer on this branch keys on a `b/` prefix to find the
+// post-image path - so ChangedPaths comes back empty, DiffHasFile is false for every file, and
+// each candidate is judged with no evidence. hardenDiff exists to make the payload independent of
+// local git configuration; pinning the prefixes is part of that or the guarantee is not delivered.
+func TestHardenDiffPinsPathPrefixes(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@x", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@x")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	// The setting under test, in the repository the review will read.
+	run("config", "diff.noprefix", "true")
+	if err := os.WriteFile(filepath.Join(root, "f.go"), []byte("package f\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "f.go")
+	run("commit", "-q", "-m", "base")
+	head := exec.Command("git", "rev-parse", "HEAD")
+	head.Dir = root
+	baseOut, err := head.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := strings.TrimSpace(string(baseOut))
+	if err := os.WriteFile(filepath.Join(root, "f.go"), []byte("package f\n\nfunc Added() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "f.go")
+	run("commit", "-q", "-m", "change")
+
+	ctx, err := Collect(root, base)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if !strings.Contains(ctx.Diff, "diff --git a/f.go b/f.go") {
+		first, _, _ := strings.Cut(ctx.Diff, "\n")
+		t.Errorf("diff header must carry a/ and b/ prefixes regardless of diff.noprefix; got %q", first)
+	}
+}

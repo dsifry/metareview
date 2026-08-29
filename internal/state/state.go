@@ -14,11 +14,6 @@ import (
 	"time"
 )
 
-// maxJSONLLineBytes is this package's name for the shared JSONL line cap.
-// bufio rejects a token equal to the buffer maximum, and ScanLines needs the
-// line terminator to fit alongside the token, so callers size the buffer two
-// bytes larger to admit a line of exactly this length ending in CRLF.
-
 // closeFile is a seam so the Close-failure branch below can be tested. A
 // permission- or descriptor-based test would be the alternative, and those
 // stop failing when the suite runs as root, which is the normal case in CI.

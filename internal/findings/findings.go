@@ -12,10 +12,8 @@ import (
 	"github.com/dsifry/metareview/internal/state"
 )
 
-// maxJSONLLineBytes is this package's name for the shared JSONL line cap.
-// bufio rejects a token equal to the buffer maximum, and ScanLines needs the
-// line terminator to fit alongside the token, so callers size the buffer two
-// bytes larger to admit a line of exactly this length ending in CRLF.
+// maxJSONLLineBytes is this package's name for the shared JSONL line cap. The buffer sizing that
+// used to be explained here now lives in jsonl.NewScanner, which every reader in this package uses.
 const maxJSONLLineBytes = jsonl.MaxLineBytes
 
 type Run struct {

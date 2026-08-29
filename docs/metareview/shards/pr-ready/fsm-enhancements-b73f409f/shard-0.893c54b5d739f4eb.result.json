@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0-893c54b5d739f4eb",
+  "kind": "shard",
+  "shardId": "shard-0",
+  "shardHash": "893c54b5d739f4eb",
+  "planHash": "232e5c0c067629e5",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5 shard-0 reviewer",
+  "reviewedAt": "2026-08-29T05:57:10Z",
+  "blockingCount": 1,
+  "evidence": [
+    {"note": "Branch frozen: no source, test, doc, config or golden file in the repository was created, edited or deleted, and no binary was built into the tree. Every experiment ran against a full rsync copy of the repository in the session scratchpad, with an isolated GOCACHE. The only file written into the repository is this result JSON."},
+    {"note": "Method: mutation testing, not coverage reading. internal/fsm/* is at 100% statements, so each guard introduced or moved by this shard was deleted or inverted in the scratch copy and the suite re-run to see whether anything went red. Baseline `go test ./...` green in 21s before any mutation."},
+    {"path": "internal/jsonl/jsonl.go", "line": 23, "note": "MUTATION (pinned): sc.Buffer(..., MaxLineBytes+2) -> MaxLineBytes. Six tests across six packages go red with 'bufio.Scanner: token too long': jsonl TestScannerAcceptsAnExactlyMaxLengthLine (LF and CRLF), findings TestReadJSONLAcceptsExactlyMaxLine + ...CRLF, record TestExistsReadsAnExactlyMaxLengthRow, state, reviewlog and runchain equivalents. The off-by-two this shard's two call sites now inherit is genuinely held, in both migrated readers."},
+    {"path": "internal/fsm/judge/judge.go", "line": 211, "note": "MUTATION (pinned): clone.codexWorkDir = dir -> \"\" fails judge/TestWithCodexWorkDirConfinesOnlyCodexJudges, cli/TestEscalationForBuildsAConfinedSandboxJudge, cli/TestSandboxCarriesFilesFindingsNameEvenWhenUnchanged and kind/TestEscalationEndToEndWithMocks. Same four for judge.go:533 workDir: j.codexWorkDir -> \"\". judge.go:207 `return j` -> `return nil` fails TestWithCodexWorkDirConfinesOnlyCodexJudges. The plumbing is pinned; the containment property those comments claim is not, and cannot be - see finding 1."},
+    {"path": "cmd/metareview/main.go", "line": 111, "note": "MUTATION (pinned): replacing `if code != 0 { os.Exit(code) }` with a discard makes the built binary exit 0 on a blocked tree where clean exits 1; tests/go/test-cli-baseline.sh:38-40 catches exactly that. Also probed the dispatch guard directly: `status --json` exits 1 with JSON on a blocked tree and 0 on a clean one, while `status --json --foo`, `status --json extra`, `status -json` and `status --JSON` all exit 2 with 'Unknown command: status' - a mistyped invocation is not a silent exit 0, so there is no fail-open for a hook branching on the exit code."},
+    {"path": "internal/fsm/judge/testdata/prompts/adjudicate.fenced.golden", "line": 2, "note": "MUTATION (pinned): deleting the seven added addendum lines from this golden fails TestJ1Goldens. On the producing side, dropping `system += RubricAddendum` (prompts.go:227) fails TestJ1Goldens, TestJ4RequestShapes and TestAdjudicateCarriesTheMetareviewRubric; making it unconditional so --calibration also carries it fails TestJ1Goldens, TestJ4RequestShapes and TestCalibrationSendsThePureReferencePrompt. Both halves of the spec row's claim - appended on every judged adjudicate call, omitted under --calibration - are held."},
+    {"path": "docs/README.codex.md", "line": 54, "note": "The five->eight lens correction is real and is now pinned: tests/manifest/test-skills.sh:104-107 greps README.md, docs/quickstart.md, docs/README.claude.md, docs/README.codex.md and commands/review-artifact.md for the literal 'five required' and fails on a hit; rubrics/artifact-review-rubric.md:68-288 and skills/review-artifact/SKILL.md:15 both enumerate exactly eight lenses. This document was the last copy of a duplicated claim that had drifted."},
+    {"note": "Read-only sanity gates over the scratchpad copy at the reviewed head: `gofmt -l .` empty, `go vet` clean on all four Go packages in this shard, and `golangci-lint run` (v2, the repository's own .golangci.yml) reports 0 issues over cmd/..., internal/findings, internal/fsm/record, internal/fsm/judge, internal/jsonl and internal/status."},
+    {"note": "Out of shard, reported to the orchestrator rather than filed here: `go test ./...` over the frozen scratch copy fails intermittently (roughly 1 run in 4) in internal/fsm/cli, internal/fsm/kind and internal/fsm/machine, with a different test each time and none reproducible in isolation at 40-60 repetitions. Reproduced with an isolated GOCACHE, so it is not a build-cache artifact of the mutation runs. No test in this shard's chunks is implicated; the affected files live in shards 1, 3 and 5."}
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The containment claim behind sandbox evidence is a comment, not a mechanism, and it is duplicated in three files. internal/fsm/judge/judge.go:201-203 says WithCodexWorkDir 'returns j with its codex judge confined to dir', that it is 'the containment half of sandbox evidence', and that handing the CLI a materialized tree 'is what makes \"the evidence\" an enumerable set'; judge.go:186-187 says codexWorkDir 'narrows a codex judge to a materialized evidence tree'. The whole implementation is judge.go:211 (clone.codexWorkDir = dir) -> judge.go:533 (workDir on codexJudge) -> internal/fsm/cli/deps.go:109 (cmd.Dir = dir). A process's working directory is the resolution root for relative paths; it is not a read boundary - the child can still open any absolute path, and `..` walks out of the tree in one hop. The flag that is a boundary, `--sandbox read-only` at internal/fsm/judge/codex.go:59, restricts writes and network, not the read set, and its own comment says so ('a judge reads; it must never edit the tree it is judging'). So the second-opinion judge can read metareview's own repository, the real working tree the sandbox was copied from, and anything else on the box, and the Escalation's recorded TreeHash/BaseSHA/HeadSHA (internal/fsm/cli/escalation.go:50-57) describe the tree that was *offered*, not the evidence the verdict rests on. deps.go:107-108 states the falsehood outright: 'A caller that has materialized an evidence tree passes it here so the CLI cannot read past it.' This is the class the branch's own new RubricAddendum instructs judges to treat as real (internal/fsm/judge/prompts.go, 'a comment, doc line, test name or specification row that asserts a property the code does not have is a real finding, even when the code behaves correctly, because the next reader will rely on it'), and the reliance is concrete: the next reader sees 'containment' and does not add the boundary. Mutation confirms the asymmetry - deleting the assignment at judge.go:211 or the wiring at judge.go:533 reddens four tests, so the *plumbing* is pinned, while no test anywhere asserts that a read outside the tree fails, because nothing makes it fail. Fix: either state the real property (it sets the CLI's working directory so relative paths resolve inside the evidence tree, and is not a read boundary) in all three places, or make it true - run codex under a sandbox profile rooted at the tree, and only then call the recorded hashes an audit record.",
+      "evidence": [
+        {"path": "internal/fsm/judge/judge.go", "line": 201, "note": "'confined to dir ... the containment half of sandbox evidence ... makes \"the evidence\" an enumerable set'"},
+        {"path": "internal/fsm/judge/judge.go", "line": 186, "note": "'codexWorkDir narrows a codex judge to a materialized evidence tree' - the same claim on the field"},
+        {"path": "internal/fsm/cli/deps.go", "line": 108, "note": "'so the CLI cannot read past it' immediately above cmd.Dir = dir, which is the entire mechanism"},
+        {"path": "internal/fsm/judge/codex.go", "line": 59, "note": "--sandbox read-only is the only real restriction and it bounds writes and network, not reads"},
+        {"path": "internal/fsm/cli/escalation.go", "line": 50, "note": "WithCodexWorkDir(j, tree.Root) alongside TreeHash/BaseSHA/HeadSHA, which are presented as the record of what the escalating judge saw"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "`status --json` ships as a contract for host hooks but is invisible from the CLI's own surface. cmd/metareview/main.go:104-115 adds the branch and its comment calls it 'the contract a host hook branches on', and docs/0.10.0-candidates.md:277 refers to it as shipped in 0.9.0 - but printHelp (main.go:37 and :56) still advertises only `metareview status`, and neither commands/status.md nor skills/status/SKILL.md mentions the flag. tests/go/test-cli-baseline.sh:12-22 greps --help for every other command form, so the omission is not merely undocumented, it is unpinned in the one place the repository pins usage strings. Add a usage line, the Commands entry, and a baseline grep alongside the existing ones.",
+      "evidence": [
+        {"path": "cmd/metareview/main.go", "line": 104, "note": "the new branch and its 'contract a host hook branches on' comment"},
+        {"path": "cmd/metareview/main.go", "line": 37, "note": "printHelp's Usage block lists `metareview status` only"},
+        {"path": "cmd/metareview/main.go", "line": 56, "note": "the Commands entry for status makes no mention of a machine-readable mode"},
+        {"path": "commands/status.md", "line": 5, "note": "the shipped command doc shows only the bare `metareview status` invocation"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Residue from the jsonl extraction, in this shard's two call sites. internal/findings/findings.go:15-18 keeps the four-line explanation of a buffer this file no longer sizes - 'callers size the buffer two bytes larger' described the `scanner.Buffer(...)` call deleted at line 486 - and the aliasing const at line 19 is now referenced only from findings_test.go, not from any production statement in the package. Separately, both converted files place the new module import inside the stdlib block (findings.go:6, internal/fsm/record/record.go:11) while keeping their other module imports in the group three lines below; gofmt accepts this, so CI's gofmt gate cannot catch it, and internal/fsm/judge/judge.go:7-20 in this same shard shows the convention being followed. Sibling packages disagree on whether the alias survives at all, which the cross-shard result for this plan also records.",
+      "evidence": [
+        {"path": "internal/findings/findings.go", "line": 16, "note": "comment describing a two-byte-larger buffer that this package no longer allocates"},
+        {"path": "internal/findings/findings.go", "line": 6, "note": "internal/jsonl imported inside the stdlib group; internal/state is in the group below"},
+        {"path": "internal/fsm/record/record.go", "line": 11, "note": "the same misgrouping, three lines above internal/fsm/errs in the correct group"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The spec row introducing the two confirmed-side verdicts describes one of its own cases wrongly. docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md:261-263 defines 'checked_but_unverified: a judge WAS asked and returned no usable answer' and closes by insisting the two verdicts are distinct because '\"no one could look\" is not \"a judge looked and was unsure\"'. At internal/fsm/kind/kind.go:583-587 the escalation could not be *built* (resolve returned an error from sandbox materialization or judge construction): no second judge was asked at all, and the first arm did return a usable answer - it decided not-real. Both halves of the sentence are false on that path, and it is exactly the '\"no one could look\"' case the row says this verdict is not. The parenthetical 'or a failed escalation' names the case but contradicts the clause it qualifies, so a human triaging the two verdicts is told the opposite of what the code does. Either widen the definition ('a judge was asked and gave no usable answer, or a second opinion that was required could not be obtained') or split the failed-escalation path off.",
+      "evidence": [
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md", "line": 261, "note": "'checked_but_unverified: a judge WAS asked and returned no usable answer'"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md", "line": 263, "note": "'\"no one could look\" is not \"a judge looked and was unsure\"' - the contrast the failed-build path violates"},
+        {"path": "internal/fsm/kind/kind.go", "line": 586, "note": "VerdictCheckedButUnverified returned when resolve() errored, i.e. no second judge was ever asked"}
+      ]
+    }
+  ]
+}

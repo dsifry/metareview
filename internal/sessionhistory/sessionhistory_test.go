@@ -128,3 +128,31 @@ func mustWrite(t *testing.T, path, text string) {
 		t.Fatal(err)
 	}
 }
+
+// A Claude Code transcript routinely carries lines well past bufio's 64 KiB default, and up to
+// maxCandidateFiles of them are scanned, so one oversized line anywhere in a user's home is
+// enough. readJSONLSignal used a bare scanner and propagated its error, and Collect passes that
+// up to learning/review.go, which aborts: `metareview learn --post-merge` failed outright with
+// "bufio.Scanner: token too long" rather than degrading to the signals it could read. The
+// repository's own jsonl.NewScanner exists for exactly this and was applied to five of nine
+// readers; this was one of the four it missed.
+func TestReadJSONLSignalHandlesLinesPastTheDefaultScannerLimit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	// One line far past 64 KiB, carrying a parseable signal.
+	big := `{"timestamp":"2026-08-29T00:00:00Z","type":"user","message":{"role":"user","content":"` +
+		strings.Repeat("x", 200_000) + `"}}`
+	if err := os.WriteFile(path, []byte(big+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ts, text, ok, err := readJSONLSignal(path)
+	if err != nil {
+		t.Fatalf("a long but valid line must not fail the scan: %v", err)
+	}
+	if !ok {
+		t.Fatal("the signal in an oversized line was not read")
+	}
+	if ts == "" || text == "" {
+		t.Errorf("timestamp=%q text=%q", ts, text)
+	}
+}

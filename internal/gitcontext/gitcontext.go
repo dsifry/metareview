@@ -347,7 +347,27 @@ func hardenDiff(args []string) []string {
 			out = append(out, flag)
 		}
 	}
+	// diff.noprefix=true is an ordinary documented gitconfig setting, and it survives both flags
+	// above: git then writes `diff --git f.go f.go`. Every consumer of this payload finds the
+	// post-image path by its b/ prefix, so an unpinned prefix makes ChangedPaths empty and every
+	// candidate unverified_no_evidence - the review passes over content nobody saw, which is the
+	// exact outcome this function exists to prevent. Pin them unless the caller set its own.
+	if !hasPrefixFlag(args, "--src-prefix") && !hasPrefixFlag(args, "--no-prefix") {
+		out = append(out, "--src-prefix=a/")
+	}
+	if !hasPrefixFlag(args, "--dst-prefix") && !hasPrefixFlag(args, "--no-prefix") {
+		out = append(out, "--dst-prefix=b/")
+	}
 	return append(out, args[1:]...)
+}
+
+func hasPrefixFlag(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag || strings.HasPrefix(a, flag+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 func git(root string, args ...string) (string, error) {

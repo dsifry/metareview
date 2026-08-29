@@ -1,7 +1,6 @@
 package knowledge
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dsifry/metareview/internal/jsonl"
 	"github.com/dsifry/metareview/internal/repo"
 )
 
@@ -70,7 +70,7 @@ func collectFacts(root string) ([]Fact, error) {
 		if err != nil {
 			return nil, err
 		}
-		scanner := bufio.NewScanner(file)
+		scanner := jsonl.NewScanner(file)
 		lineNumber := 0
 		for scanner.Scan() {
 			lineNumber++

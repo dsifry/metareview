@@ -1,7 +1,6 @@
 package sessionhistory
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/dsifry/metareview/internal/githubcontext"
+	"github.com/dsifry/metareview/internal/jsonl"
 )
 
 const MaxSignals = 8
@@ -223,7 +223,7 @@ func readJSONLSignal(path string) (string, string, bool, error) {
 	}
 	// Read-only path: there is nothing a Close error could tell the caller.
 	defer func() { _ = file.Close() }()
-	scanner := bufio.NewScanner(file)
+	scanner := jsonl.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {

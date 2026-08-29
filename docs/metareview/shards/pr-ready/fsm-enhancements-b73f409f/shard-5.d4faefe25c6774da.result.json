@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-5.d4faefe25c6774da",
+  "kind": "shard",
+  "shardId": "shard-5",
+  "shardHash": "d4faefe25c6774da",
+  "planHash": "232e5c0c067629e5",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5 (adversarial mutation review)",
+  "reviewedAt": "2026-08-28T23:55:00-07:00",
+  "blockingCount": 6,
+  "evidence": [
+    {
+      "note": "Baseline: scratch copy of the repo at f22d23f built and `go test ./internal/fsm/... ./internal/jsonl/... ./internal/learning/... ./internal/sessionhistory/...` green before any mutation. Live tree never modified; all mutation was done in a scratchpad copy."
+    },
+    {
+      "note": "Mutation testing method: each guard/claim in this shard was deleted or inverted in the scratch copy and the suite re-run. RED = pinned, GREEN = unpinned finding. 26 mutations run."
+    },
+    {
+      "path": "internal/fsm/judge/diffselect.go",
+      "line": 397,
+      "note": "Mutation D11: `!ok` -> `ok` in the returned truncated flag. WHOLE SUITE GREEN. The term is both semantically inverted and unpinned."
+    },
+    {
+      "path": "internal/fsm/cli/deps.go",
+      "line": 40,
+      "note": "Empirical probe: from a cwd outside the repo, `codex sandbox -- /bin/ls /Users/dsifry/Developer/metareview/.git` listed the directory successfully, while `codex sandbox -- sh -c 'echo x > <repo>/ZZZ_probe.txt'` returned 'Operation not permitted'. The sandbox restricts writes, not reads."
+    },
+    {
+      "path": "internal/fsm/cli/run.go",
+      "line": 806,
+      "note": "Mutation S2: make StatusLines label every run '  mock' unconditionally. WHOLE SUITE GREEN. No test pins the negative direction of the mock label."
+    },
+    {
+      "note": "Mutations that came back RED (guards correctly pinned, no finding): viewKeys mock half; jsonl MaxLineBytes+2 -> +2/+1/+0; findings.Blocks; ChangedPaths>0 guard in adjudicate; NeedsJudge on both kinds; ParseError -> CheckedButUnverified; MaxDiffBytes 1<<26 -> 1<<20; verdicts map additions; stillPresent Decode checkPayload; escalate==nil guard; MentionsOtherFiles trigger; cmd.Dir = dir; ContextFor elided; windowLines budget<=0; SelectDiff n==0 window; disclosureReserve; maxReferencedFiles; maxPathList; rootFile {2,}; namedPaths tail dedup; postImagePathFromHeader LastIndex and Unquote branch; ctx.Err() guard in the RecordLLMCall closure; sessionhistory malformed-JSON skip. This shard is, on the whole, unusually well pinned."
+    },
+    {
+      "path": "internal/fsm/export/export_test.go",
+      "line": 350,
+      "note": "Checked for vacuity: inserted a len(h.fs.opens)==0 fatal before the O_NOFOLLOW loop; TestF8Redaction still passed, so the new flag assertions are non-vacuous."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "ContextForClaim reports the primary file's truncation state INVERTED, and nothing pins it. `primary, ok, _ := ContextFor(...)` binds `ok` to ContextFor's second return value, which is named `truncated`, not `ok` (diffselect.go:307 declares `(out string, truncated bool, hash string)`). Line 397 then returns `alreadyTruncated || !ok || len(out) < len(diff)`, so `!ok` contributes 'truncated' exactly when the primary was NOT truncated, and contributes nothing when it WAS. Mutating `!ok` to `ok` leaves the entire suite green, so no test constrains the term in either direction. The flag is the `DiffTruncated` field of AdjudicateInput -- the one signal that tells the judge it is not seeing the whole story, which is the property this entire diff was written to make trustworthy (see the ContextFor doc at diffselect.go:337: 'truncated is true whenever the judge is not seeing the whole story'). The defect is currently masked by the third term, `len(out) < len(diff)`, which is true for essentially every multi-file diff -- i.e. the function happens to return `true` for the wrong reason. Fix: name the variable `truncated` and OR it in un-negated.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/diffselect.go",
+          "line": 387,
+          "note": "`primary, ok, _ := ContextFor(...)` -- `ok` is bound to ContextFor's `truncated` return"
+        },
+        {
+          "path": "internal/fsm/judge/diffselect.go",
+          "line": 397,
+          "note": "`return out, alreadyTruncated || !ok || len(out) < len(diff), ...` -- the negation inverts the primary's truncation state"
+        },
+        {
+          "path": "internal/fsm/judge/diffselect.go",
+          "line": 307,
+          "note": "ContextFor's signature names the second return `truncated`, confirming the misnaming at 387"
+        }
+      ]
+    },
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "deps.go asserts a read-confinement property the code does not have, and the audit schema in this same shard is built on that assertion. deps.go:39-40 says the evidence sandbox root 'is outside the repository on purpose: a judge confined to it cannot read .git or anything else the working tree holds', and deps.go:107-108 says 'A caller that has materialized an evidence tree passes it here so the CLI cannot read past it.' The only mechanism is `cmd.Dir = dir` (deps.go:109) plus codex's `--sandbox read-only` (judge/codex.go:59). Neither confines READS. Verified empirically on this machine: from a cwd outside the repository, `codex sandbox -- /bin/ls <repo>/.git` succeeded and listed HEAD, config, index, hooks; a write to the same repo returned 'Operation not permitted'. codex's read-only policy is documented as read-anywhere / write-nothing. So an escalated judge can read the real working tree, .git included, past the tree it was given. The knock-on is in this shard too: run/event.go:115-117 claims TreeHash/BaseSHA/HeadSHA 'content-address what the judge COULD have read', and 'without them the recorded input no longer determines the verdict and replay becomes a claim rather than a check'. Because reads are not confined, the recorded tree hash does not determine what the judge read, so a row stamped `Evidence: sandbox` still leaves replay a claim. Either narrow the sandbox for real (a read-only policy scoped to the tree, e.g. codex's sandbox-state readable roots, or a chroot/container), or rewrite both comments and the event.go rationale to say what is actually guaranteed (writes blocked, cwd set) so nobody downstream relies on confinement that is not there. Note that cli/escalation_test.go names its test `TestEscalationForBuildsAConfinedSandboxJudge` -- deleting `cmd.Dir = dir` does turn it red, but that only pins that the cwd is set, not that anything is confined.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/deps.go",
+          "line": 39,
+          "note": "'It is outside the repository on purpose: a judge confined to it cannot read .git or anything else the working tree holds.'"
+        },
+        {
+          "path": "internal/fsm/cli/deps.go",
+          "line": 108,
+          "note": "'A caller that has materialized an evidence tree passes it here so the CLI cannot read past it.' -- immediately above `cmd.Dir = dir`, the only mechanism"
+        },
+        {
+          "path": "internal/fsm/run/event.go",
+          "line": 115,
+          "note": "TreeHash/BaseSHA/HeadSHA documented as content-addressing 'what the judge COULD have read', which is false while reads are unconfined"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The evidence sandbox directory is created and never removed. RealDeps binds TempDir to `os.MkdirTemp(\"\", pattern)` (deps.go:69), cli/escalation.go:37 calls it as `c.deps.TempDir(\"mrv-evidence-\")`, and sandbox.Materialize then writes the branch's changed files plus every file any finding names into it at base and head. There is no RemoveAll, defer, or t.Cleanup for that path anywhere outside tests -- grep for RemoveAll across internal/fsm/cli and internal/fsm/sandbox returns nothing. Every fsm run that escalates a cross-file rejection therefore leaves a permanent copy of the repository's source under the system temp directory, unbounded in count. This is both a disk leak and source material at rest outside the repo with no lifecycle. The nearby comment claiming the root is 'outside the repository on purpose' makes the absence of cleanup more consequential, not less: the copy is somewhere the repository's own ignore rules and cleanup never reach.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/deps.go",
+          "line": 69,
+          "note": "`TempDir: func(pattern string) (string, error) { return os.MkdirTemp(\"\", pattern) }` -- creates, never removes"
+        },
+        {
+          "path": "internal/fsm/cli/deps.go",
+          "line": 41,
+          "note": "The Deps seam carries no matching Remove/Cleanup member, so no caller can be expected to tear the tree down"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The shard-invalidation correction in this shard's commands/review-pr-ready.md was applied to 2 of 8 copies of the same instruction; six still carry the superseded rule, including the two files agents actually load. This shard changes commands/review-pr-ready.md:33-35 from 'only the edited file's shard and the cross-shard result go ignored: re-review those two and leave the rest' to the corrected 'Editing a file changes only its own bucket's shards, unless the total branch diff crosses a bits boundary, which re-cuts every shard in the plan.' skills/review-task-done/SKILL.md:57 got the same correction. Still stating the old, now-known-wrong rule: CLAUDE.md:91, AGENTS.md:111, docs/README.claude.md:81, docs/README.codex.md:88, skills/review-pr-ready/SKILL.md:59, commands/review-task-done.md:33. CLAUDE.md and AGENTS.md are the standing instructions for every agent driving this harness, so an agent that follows them after a fix round will re-review one shard plus cross-shard and commit stale results for every other shard the re-cut invalidated -- exactly the failure the correction was written to prevent. The correct behaviour is pinned in code (contextprofile/plan_test.go:279 'crossing the bits boundary must re-cut the plan'), which makes the stale prose a documented contradiction of tested behaviour rather than merely out of date.",
+      "evidence": [
+        {
+          "path": "commands/review-pr-ready.md",
+          "line": 33,
+          "note": "the corrected wording introduced by this shard"
+        },
+        {
+          "path": "CLAUDE.md",
+          "line": 91,
+          "note": "still says 'Editing a file invalidates only its own shard's result: re-review that shard and the cross-shard pack, and leave the rest.'"
+        },
+        {
+          "path": "AGENTS.md",
+          "line": 111,
+          "note": "same superseded sentence"
+        },
+        {
+          "path": "skills/review-pr-ready/SKILL.md",
+          "line": 59,
+          "note": "still says only the edited file's shard and the cross-shard result go ignored"
+        },
+        {
+          "path": "commands/review-task-done.md",
+          "line": 33,
+          "note": "same superseded sentence"
+        },
+        {
+          "path": "internal/contextprofile/plan_test.go",
+          "line": 279,
+          "note": "'crossing the bits boundary must re-cut the plan, but every shard id survived' -- the tested behaviour the stale docs contradict"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestMockTaintedGuards claims two guards it does not hold, and its second claim is provably unpinned. (a) Its comment at cli_test.go:693 reads 'MockTainted should also be true when Mock is set', but the fixture immediately below sets `Mock: \"\"` and `MockTainted: false` -- neither field is set, so the `s.Mock != \"\"` half of the guard at envelope.go:167 is never exercised by this test. The comment describes a case the code below it does not construct. (b) Its comment at cli_test.go:706 reads 'StatusLines function also uses the same condition for output formatting / Verify that StatusLines works correctly with runs', but the only assertion is `len(lines) >= 2 && strings.Contains(lines[0], \"fsm runs:\")` over a run created with mockInit -- a mock run, so the condition cannot be distinguished either way. Mutating StatusLines to label EVERY run '  mock' unconditionally leaves the whole suite green: no test anywhere pins that a non-mock run is not labelled mock. Given the repository contract that 'a mock: true FSM row never satisfies a gate', mislabelling a real run is the direction that silently invalidates good work. Either construct the cases the comments describe (a view with Mock set and MockTainted false; a StatusLines assertion over a non-mock run) or delete the claims.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 693,
+          "note": "'// MockTainted should also be true when Mock is set' followed by a fixture with Mock:\"\" and MockTainted:false"
+        },
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 706,
+          "note": "'StatusLines function also uses the same condition' followed by an assertion that only checks the header line"
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 806,
+          "note": "`if s.Mock != \"\" || s.MockTainted { mock = \"  mock\" }` -- forcing this to always-true leaves the suite green"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "adjudicateExec's sync.Once does not give the 'once per executor invocation' guarantee its two doc comments assert. kind.go:71-72 says EscalateFunc 'is called lazily - at most once per executor invocation', and kind.go:559 repeats 'resolve builds the escalation at most once per executor invocation'. The mechanism is a `sync.Once` field on the adjudicateExec struct (kind.go:399), and that struct is created once inside kind.New (kind.go:115) and held for the lifetime of the Registry, not of one Execute call. The guarantee it actually provides is 'once per Registry'. Today this is invisible because cli/wiring.go:203 builds a fresh Registry per CLI process and machine.Advance is called exactly once per process (the only non-test call site is cli/run.go:467), so one Registry sees one Execute. But the comment is what a future in-process driver loop would be read against, and the failure mode is silent and bad: the evidence tree is materialized from the first iteration's snapshot, the fix node then rewrites the code, and every later iteration's second opinion is judged against the stale tree while Escalation.TreeHash still names the first iteration's tree. State whose lifetime is the Registry should either be keyed by run/iteration or the comments should say 'once per Registry' and the invariant that keeps that safe should be written down where a driver author will see it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 71,
+          "note": "'It is called lazily - at most once per executor invocation'"
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 399,
+          "note": "`once sync.Once` is a field of adjudicateExec, whose lifetime is the Registry's"
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 559,
+          "note": "'resolve builds the escalation at most once per executor invocation' -- repeats the same overstatement"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "disclosureReserve does not do what its doc says, and SelectDiff can exceed its budget. diffselect.go:209-211 says the constant is 'the room kept for the two [metareview: ...] notices so the selection still fits its budget once they are prepended'. It is subtracted only on the cutInside path (diffselect.go:170). On the far more common path -- hunks elided but none cut open -- the 'showing N of M hunks' notice is written at diffselect.go:181-184 with no byte reserved for it, and kbytes was never charged for it. Reproduced directly: a 40-hunk single-file diff with budget=200 returns 236 bytes. The overshoot is bounded at roughly one notice (~80 bytes) per selection, and ContextForClaim can stack up to five selections, so at the production budget of judge.MaxDiffBytes = 30000 the worst case is a few hundred bytes over. Small, but the comment states a property the code does not deliver, and the constant's whole purpose is that property.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/diffselect.go",
+          "line": 209,
+          "note": "'the room kept for the two [metareview: ...] notices so the selection still fits its budget once they are prepended'"
+        },
+        {
+          "path": "internal/fsm/judge/diffselect.go",
+          "line": 170,
+          "note": "disclosureReserve is subtracted only inside the `if n == 0` cutInside branch"
+        },
+        {
+          "path": "internal/fsm/judge/diffselect.go",
+          "line": 181,
+          "note": "the elided-hunks notice is prepended without being charged against kbytes; measured 236 bytes returned for a 200-byte budget"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two edge cases in windowLines, both latent at production budgets. (a) A single-line hunk gets its @@ header emitted twice. With len(h.lines)==1 the clamp at diffselect.go:222-224 drives centre to 0, so lo==hi==0, and diffselect.go:243-244 builds `[]string{h.lines[0]}` then appends `h.lines[0:1]` -- verified: windowLines returns [\"@@ -1,1 +1,1 @@\", \"@@ -1,1 +1,1 @@\"]. The result is a malformed hunk handed to a judge. (b) When budget <= 0 the early return at diffselect.go:216-218 hands back the ENTIRE hunk, which is the opposite of the caller's stated intent at diffselect.go:165-168 ('Rather than blow the budget or send nothing, keep a line window centred on the candidate's line'). Verified: a 500-line hunk with budget=100 returns 19,184 bytes. Reaching it requires len(header) + 256 >= budget, which cannot happen at judge.MaxDiffBytes = 30000 or at the per-ref share of 5000, so this is defensive code that does the wrong thing rather than a live bug -- but it is the branch that runs if the budget is ever tuned down. Returning h.lines[:1] (the @@ header alone) would honour the stated intent.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/diffselect.go",
+          "line": 216,
+          "note": "`if len(h.lines) == 0 || budget <= 0 { return h.lines }` -- returns the whole oversized hunk"
+        },
+        {
+          "path": "internal/fsm/judge/diffselect.go",
+          "line": 243,
+          "note": "`out := []string{h.lines[0]}` then append(h.lines[lo:hi+1]) duplicates line 0 when lo==0"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The Preflight doc comment in this shard was half-updated. types.go:106-107 now reads 'runs before Create for every judge-calling node (KindInfo.NeedsJudge) at Init, and on the Advance that would run a fork node'. The first clause was corrected to NeedsJudge; the second clause in the same sentence still says 'fork node'. The Advance-side call site at machine/machine.go:634 gates on needsJudge, not on exec:fork, and machine.go:558-559 explicitly warns that 'exec: fork is not the same question: the cmd kind forks a subprocess and carries no model'. So the sentence now documents two different predicates for the two call sites, one of which is the predicate the code was deliberately changed away from.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/types.go",
+          "line": 106,
+          "note": "'for every judge-calling node (KindInfo.NeedsJudge) at Init, and on the Advance that would run a fork node'"
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 634,
+          "note": "the Advance-side Preflight call gates on needsJudge(...), not on exec: fork"
+        }
+      ]
+    }
+  ]
+}

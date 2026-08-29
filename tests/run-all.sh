@@ -44,3 +44,14 @@ if [ -f tests/go/test-learning-render.sh ]; then bash tests/go/test-learning-ren
 if [ -f tests/go/test-learning-writers.sh ]; then bash tests/go/test-learning-writers.sh; fi
 if [ -f tests/go/test-learn-post-merge.sh ]; then bash tests/go/test-learn-post-merge.sh; fi
 if [ -f tests/go/test-fsm.sh ]; then bash tests/go/test-fsm.sh; fi
+
+# CI runs shellcheck over every *.sh (.github/workflows/test.yml) but run-all.sh did not, so a
+# shell defect could pass the whole local suite and fail CI - which is exactly what happened on
+# 2026-08-29 with SC2043. Run it here when it is available so local and CI agree; skip with a
+# notice when it is not, rather than making the suite unrunnable without it.
+if command -v shellcheck >/dev/null 2>&1; then
+  find . -name '*.sh' -not -path './node_modules/*' -print0 | xargs -0 shellcheck -x
+  echo "shellcheck: ok"
+else
+  echo "shellcheck: SKIPPED (not installed; CI still enforces it)" >&2
+fi

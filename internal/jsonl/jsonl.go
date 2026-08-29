@@ -1,5 +1,11 @@
-// Package jsonl centralises the line cap shared by every reader of the repository's
-// .jsonl files (findings.jsonl, runs.jsonl, review logs, run chains).
+// Package jsonl centralises the line cap shared by every JSONL reader in this repository:
+// findings.jsonl, runs.jsonl, review logs, run chains, the beads and epic ledgers, knowledge
+// records, evidence receipts, and the ~/.claude and ~/.codex session transcripts.
+//
+// The claim is "every", and it is checked: TestNoBareScannerOutsideThisPackage fails if a bare
+// bufio.NewScanner appears anywhere else in internal/. The doc previously said "every" while
+// four of nine readers still ran bufio's 64 KiB default, and one of them - session-history
+// discovery - aborted `metareview learn --post-merge` outright on any real transcript.
 package jsonl
 
 import (

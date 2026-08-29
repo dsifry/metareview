@@ -21,9 +21,9 @@ const CodexBin = "codex"
 // CodexExec runs one codex invocation. stdout is the `--json` event stream, and
 // code is the process exit status. err is non-nil only when the process could
 // not be run at all — a model that refuses is a clean exit with an error event.
-// dir is the working directory the CLI runs in. Empty means inherit the caller's, which is
-// the historical behaviour; a materialized sandbox (internal/fsm/sandbox) narrows a judge to
-// the evidence it was given, since the CLI can read and execute inside whatever it inherits.
+// dir is the working directory the CLI runs in. Empty means inherit the caller's, which is the
+// historical behaviour; a materialized sandbox (internal/fsm/sandbox) is passed here so the tree
+// is what the judge's relative paths resolve against. It does not confine reads.
 type CodexExec func(ctx context.Context, dir string, args []string, stdin string) (stdout []byte, code int, err error)
 
 // codexEfforts is the CLI's reasoning-effort enum, which is wider than the HTTP

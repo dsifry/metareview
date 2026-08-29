@@ -690,27 +690,41 @@ func TestMockTaintedGuards(t *testing.T) {
 	if env["mock"] != true {
 		t.Fatalf("viewKeys: mock should be true when MockTainted=true, got %v", env["mock"])
 	}
-	// MockTainted should also be true when Mock is set
-	env2 := envelope{}
-	view2 := machine.View{
-		RunID: "test-run-2",
-		Snapshot: run.Snapshot{
-			Mock:        "",
-			MockTainted: false,
-		},
+	// The guard is `s.Mock != "" || s.MockTainted`, so BOTH halves need a case. The comment here
+	// used to say "MockTainted should also be true when Mock is set" above a fixture that set
+	// neither field, so the s.Mock half was never exercised by the test that claimed it.
+	for _, tc := range []struct {
+		name        string
+		mock        string
+		mockTainted bool
+		want        bool
+	}{
+		{"neither", "", false, false},
+		{"Mock set alone", "mock/judge.yaml", false, true},
+		{"MockTainted alone", "", true, true},
+		{"both", "mock/judge.yaml", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := envelope{}
+			viewKeys(env, machine.View{RunID: "test-run-2", Snapshot: run.Snapshot{Mock: tc.mock, MockTainted: tc.mockTainted}})
+			if env["mock"] != tc.want {
+				t.Errorf("mock = %v, want %v (Mock=%q MockTainted=%v)", env["mock"], tc.want, tc.mock, tc.mockTainted)
+			}
+		})
 	}
-	viewKeys(env2, view2)
-	if env2["mock"] != false {
-		t.Fatalf("viewKeys: mock should be false when both Mock and MockTainted are empty/false, got %v", env2["mock"])
-	}
-	// StatusLines function also uses the same condition for output formatting
-	// Verify that StatusLines works correctly with runs
+
+	// StatusLines renders a mock run distinguishably - the previous version of this block only
+	// asserted that it did not crash and that the header was present, which the comment above it
+	// described as verifying "the same condition for output formatting". It does not share the
+	// condition unless the mock marker actually reaches the line.
 	h := newHarness(t)
 	h.must(StatusOK, 0, mockInit...)
-	// For this test, we verify that StatusLines doesn't crash and properly formats runs
 	lines := StatusLines(context.Background(), h.deps, h.root)
 	if len(lines) < 2 || !strings.Contains(lines[0], "fsm runs:") {
 		t.Fatalf("StatusLines: unexpected output: %v", lines)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "mock") {
+		t.Errorf("a mock run must be marked as such in status output, or a mock row reads as a real one:\n%s", strings.Join(lines, "\n"))
 	}
 }
 

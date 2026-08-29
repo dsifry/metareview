@@ -141,3 +141,98 @@ func TestMaterializeSurfacesFilesystemErrors(t *testing.T) {
 		}
 	})
 }
+
+// Two input paths can name one destination: escalation dedups by raw string, but changedPaths
+// yields "internal/x.go" while judge prose yields "./internal/x.go" - two keys, one file after
+// Clean. Writing the second one hit the tree's own 0444 mode and returned EACCES, and because
+// adjudicateExec caches the builder error under a sync.Once, one such candidate turned EVERY
+// cross-file rejection in the run into checked_but_unverified. A duplicate is not an error; it
+// is the same evidence named twice.
+func TestMaterializeToleratesDuplicateDestinations(t *testing.T) {
+	root := t.TempDir()
+	body := []byte("package x\n")
+	show := func(rev, path string) ([]byte, bool, error) { return body, true, nil }
+	tree, err := Materialize(root, "B", "H", []string{"internal/x.go", "./internal/x.go", "internal/x.go"}, show)
+	if err != nil {
+		t.Fatalf("a path named twice must not fail the batch: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, Head, "internal", "x.go"))
+	if err != nil || string(got) != string(body) {
+		t.Fatalf("materialized file: %q %v", got, err)
+	}
+	// The hash must count the evidence once, or the same tree addresses differently depending on
+	// how many times a finding happened to mention the file.
+	plain := t.TempDir()
+	once, err := Materialize(plain, "B", "H", []string{"internal/x.go"}, show)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree.TreeHash != once.TreeHash {
+		t.Errorf("naming a path twice changed the tree hash:\n dup %s\nonce %s", tree.TreeHash, once.TreeHash)
+	}
+	if tree.Files != once.Files {
+		t.Errorf("Files = %d with a duplicate, %d without", tree.Files, once.Files)
+	}
+}
+
+// TreeHash is what makes the audit honest: when the prompt no longer carries the evidence, the
+// recorded input stops determining the verdict unless the tree is content-addressed. Nothing
+// pinned that. Replacing the per-file hash line with the digest alone - dropping the side and
+// the path - left `go test ./...` fully green while collapsing two distinct trees onto one
+// address: a file present only at head hashes the same as the same file present only at base
+// (an addition and a deletion share an address), and a.go hashes the same as z.go at identical
+// content (a rename becomes invisible).
+func TestTreeHashAddressesSideAndPathNotJustContent(t *testing.T) {
+	body := []byte("package x\n")
+	only := func(side string) ShowFunc {
+		return func(rev, path string) ([]byte, bool, error) {
+			if (side == Head && rev == "H") || (side == Base && rev == "B") {
+				return body, true, nil
+			}
+			return nil, false, nil
+		}
+	}
+	headOnly, err := Materialize(t.TempDir(), "B", "H", []string{"a.go"}, only(Head))
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseOnly, err := Materialize(t.TempDir(), "B", "H", []string{"a.go"}, only(Base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headOnly.TreeHash == baseOnly.TreeHash {
+		t.Error("a file added on the branch and the same file deleted share an address: the side is not hashed")
+	}
+
+	same := func(rev, path string) ([]byte, bool, error) { return body, true, nil }
+	aGo, err := Materialize(t.TempDir(), "B", "H", []string{"a.go"}, same)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zGo, err := Materialize(t.TempDir(), "B", "H", []string{"z.go"}, same)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aGo.TreeHash == zGo.TreeHash {
+		t.Error("two different paths with identical content share an address: the path is not hashed")
+	}
+}
+
+// Containment is about a ".." COMPONENT, not a ".." prefix. A directory named "..dir" is an
+// ordinary name that escapes nothing, and refusing it failed the whole batch - dropping every
+// other file's evidence over a path that was never a traversal.
+func TestMaterializeDistinguishesDotDotComponentFromDotDotPrefix(t *testing.T) {
+	show := func(rev, path string) ([]byte, bool, error) { return []byte("x\n"), true, nil }
+	tree, err := Materialize(t.TempDir(), "B", "H", []string{"..dir/file.go", "pkg/..name.go"}, show)
+	if err != nil {
+		t.Fatalf("names that merely begin with dots are not traversal: %v", err)
+	}
+	if tree.Files != 4 { // two paths, two sides
+		t.Errorf("Files = %d, want 4", tree.Files)
+	}
+	for _, bad := range []string{"../x.go", "./../../x.go", "a/../../b.go", "/abs/x.go"} {
+		if _, err := Materialize(t.TempDir(), "B", "H", []string{bad}, show); err == nil {
+			t.Errorf("%q escapes the tree and must be refused", bad)
+		}
+	}
+}

@@ -411,3 +411,102 @@ func TestAllReferencedPathsSkipsRepeats(t *testing.T) {
 		t.Fatalf("got %v, want each path once", got)
 	}
 }
+
+// DiffTruncated is the one signal telling a judge it is not seeing the whole story, so its two
+// states both have to be constrained. ContextForClaim bound ContextFor's second return - named
+// `truncated` - to a variable named `ok` and then OR'd in `!ok`, so the term contributed
+// "truncated" exactly when the primary file was NOT truncated and contributed nothing when it
+// was. The bug was masked by a third term, len(out) < len(diff), which is true for essentially
+// any multi-file diff: the function returned the right answer for the wrong reason, and mutating
+// !ok to ok left the whole suite green.
+func TestContextForClaimReportsTruncationOfThePrimaryFile(t *testing.T) {
+	two := "diff --git a/pkg/a.go b/pkg/a.go\n--- a/pkg/a.go\n+++ b/pkg/a.go\n@@ -1,2 +1,3 @@\n+\taMarker()\n" +
+		"diff --git a/pkg/b.go b/pkg/b.go\n--- a/pkg/b.go\n+++ b/pkg/b.go\n@@ -1,2 +1,3 @@\n+\tbMarker()\n"
+
+	// Both files carried in full: the judge IS seeing the whole story, so the flag must be false.
+	// The old code got this right only by accident - its `!ok` term was false here because the
+	// primary selection reports itself truncated by construction on this path, so the answer came
+	// entirely from the length test. Pinning it means the inverted term cannot be reintroduced
+	// without a failure.
+	out, truncated, _ := ContextForClaim(two, false, "pkg/a.go", 1, "compare with pkg/b.go", 1<<20)
+	if !strings.Contains(out, "aMarker") || !strings.Contains(out, "bMarker") {
+		t.Fatalf("fixture invalid: both files must be carried, got %q", out)
+	}
+	if truncated {
+		t.Error("a claim whose primary and referenced files are both carried whole is not truncated")
+	}
+
+	// An upstream truncation always survives.
+	if _, truncated, _ := ContextForClaim(two, true, "pkg/a.go", 1, "compare with pkg/b.go", 1<<20); !truncated {
+		t.Error("alreadyTruncated must survive")
+	}
+}
+
+// h.lines[0] is the @@ header, and the window is taken from h.lines[lo:hi+1] with the header
+// prepended - so a hunk whose only line IS the header comes back with it twice. With
+// len(h.lines)==1 the clamp drives centre to 0, giving lo==hi==0, and the result is a malformed
+// hunk: two @@ headers and no body. A judge reading that sees a hunk that cannot be parsed back.
+func TestWindowLinesDoesNotDuplicateTheHunkHeader(t *testing.T) {
+	h := hunk{start: 1, lines: []string{"@@ -1,1 +1,1 @@"}}
+	got := windowLines(h, 1, 4000)
+	if len(got) != 1 {
+		t.Errorf("a header-only hunk must come back once, got %d lines: %q", len(got), got)
+	}
+	// And the ordinary case must be unaffected: header, then the window.
+	h2 := hunk{start: 1, lines: []string{"@@ -1,3 +1,3 @@", " a", "+b", " c"}}
+	got2 := windowLines(h2, 2, 4000)
+	if len(got2) == 0 || got2[0] != "@@ -1,3 +1,3 @@" {
+		t.Fatalf("the header must lead: %q", got2)
+	}
+	for _, line := range got2[1:] {
+		if strings.HasPrefix(line, "@@") {
+			t.Errorf("a second @@ header appears in the body: %q", got2)
+		}
+	}
+}
+
+// "The same file" has to mean the same thing everywhere, or a finding is denied evidence the diff
+// plainly carries. DiffHasFile compared raw strings, so a discover node emitting "./internal/x.go"
+// or "a/internal/x.go" - both ordinary spellings, both produced by real tools - was treated as
+// naming a file absent from the diff, and its finding was kept as unverified_no_evidence for a
+// human who would have found it right there in the patch.
+func TestDiffHasFileNormalisesOrdinaryPathSpellings(t *testing.T) {
+	diff := "diff --git a/internal/x.go b/internal/x.go\n--- a/internal/x.go\n+++ b/internal/x.go\n@@ -1,2 +1,3 @@\n+\tmarker()\n"
+	for _, spelling := range []string{
+		"internal/x.go",
+		"./internal/x.go",
+		"a/internal/x.go",
+		"b/internal/x.go",
+		"internal/./x.go",
+		" internal/x.go ",
+	} {
+		if !DiffHasFile(diff, spelling) {
+			t.Errorf("DiffHasFile(%q) = false; the diff carries that file", spelling)
+		}
+	}
+	for _, absent := range []string{"internal/y.go", "x.go", "other/internal/x.go"} {
+		if DiffHasFile(diff, absent) {
+			t.Errorf("DiffHasFile(%q) = true; that file is not in the diff", absent)
+		}
+	}
+}
+
+// A finding that quotes its own file the way a diff header writes it ("b/pkg/a.go") is naming the
+// same file, not a second one. Keying the dedup on the raw string spent a maxReferencedFiles slot
+// and a share of the budget on that alias - showing the primary twice and dropping a genuine
+// second file to make room for it.
+func TestReferencedPathsTreatsAliasesOfTheOwnFileAsTheSameFile(t *testing.T) {
+	diff := "diff --git a/pkg/a.go b/pkg/a.go\n--- a/pkg/a.go\n+++ b/pkg/a.go\n@@ -1,2 +1,3 @@\n+\taMarker()\n" +
+		"diff --git a/pkg/b.go b/pkg/b.go\n--- a/pkg/b.go\n+++ b/pkg/b.go\n@@ -1,2 +1,3 @@\n+\tbMarker()\n"
+	text := "as written in b/pkg/a.go and ./pkg/a.go, compare with pkg/b.go"
+	got := ReferencedPaths(diff, "pkg/a.go", text)
+	if len(got) != 1 || NormalizePath(got[0]) != "pkg/b.go" {
+		t.Errorf("ReferencedPaths = %v, want only the genuinely other file pkg/b.go", got)
+	}
+	all := AllReferencedPaths("pkg/a.go", text)
+	for _, p := range all {
+		if NormalizePath(p) == "pkg/a.go" {
+			t.Errorf("AllReferencedPaths returned an alias of the candidate's own file: %v", all)
+		}
+	}
+}

@@ -112,9 +112,11 @@ type LLMCallData struct {
 	// browsing and one reached from excerpts cannot be compared row-for-row, so fsm diff
 	// has to see the difference rather than silently treat them as alike.
 	Evidence string `json:"evidence,omitempty"`
-	// TreeHash, BaseSHA and HeadSHA content-address what the judge COULD have read when
-	// Evidence is EvidenceSandbox. Without them the recorded input no longer determines the
-	// verdict and replay becomes a claim rather than a check.
+	// TreeHash, BaseSHA and HeadSHA content-address the evidence the judge was OFFERED when
+	// Evidence is EvidenceSandbox - the tree that was materialized for it, addressed so a replay
+	// can rebuild the same one. They do not bound what it could read: the working directory is
+	// not a read boundary (see judge.WithCodexWorkDir), so this records the input that was
+	// prepared, not a proof that nothing else was consulted.
 	TreeHash string `json:"tree_hash,omitempty"`
 	BaseSHA  string `json:"base_sha,omitempty"`
 	HeadSHA  string `json:"head_sha,omitempty"`

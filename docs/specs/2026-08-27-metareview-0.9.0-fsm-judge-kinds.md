@@ -258,9 +258,12 @@ func New(d Deps) (*Registry, error)   // Registry.Mock() == d.Mock; New refuses 
 // The last two are confirmed-side and carry Confidence 0. A judge's schema is one boolean, so an
 // outcome that is not a judgment would otherwise be recorded as one - and hallucination drops the
 // finding. unverified_no_evidence: no judge was asked, because the diff carries no hunks for the
-// candidate's file. checked_but_unverified: a judge WAS asked and returned no usable answer (a reply
-// that did not parse, or a failed escalation). The two are distinct because a human triaging them
-// takes different actions: "no one could look" is not "a judge looked and was unsure".
+// candidate's file. checked_but_unverified: the second opinion did not settle the finding - either a
+// judge was asked and returned no usable answer (a reply that did not parse), or the escalation
+// could not be BUILT at all, in which case no second judge was asked and the first arm's rejection
+// is not trusted on its own. The two verdicts are distinct because a human triaging them takes
+// different actions: unverified_no_evidence means the diff carried nothing to look at, while
+// checked_but_unverified means the check that was supposed to settle it did not complete.
 // Registry.Executor(name) for host-only kinds returns (nil, false).
 ```
 `Info()`: `review-lenses {subagent, [inline subagent], ValidateParams: lenses absent (→ 8) or an integer 1..8}`, `match-then-adjudicate {fork, [fork]}`,
