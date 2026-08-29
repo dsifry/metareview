@@ -69,8 +69,12 @@ type Deps struct {
 }
 
 // EscalateFunc resolves the second opinion for a run. It is called lazily - at most once per
-// executor invocation, on the first cross-file rejection - because materializing an evidence
-// tree costs real time and a run that confirms everything must not pay it. Returning a nil
+// REGISTRY, on the first cross-file rejection - because materializing an evidence tree costs real
+// time and a run that confirms everything must not pay it. The sync.Once lives on the executor
+// struct, which kind.New creates once and the Registry holds for its lifetime, so the guarantee
+// is per registry rather than per Execute call. That is the same thing in production only because
+// cli builds a registry per invocation; a caller that reused one across runs would get one
+// evidence tree for all of them. Returning a nil
 // Escalation, or an error, leaves the finding unresolved rather than rejected.
 type EscalateFunc func(ctx context.Context, snap run.Snapshot, node *workflow.Node) (*Escalation, error)
 
@@ -560,7 +564,7 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 	return json.RawMessage(run.MarshalCanonical(out)), nil
 }
 
-// resolve builds the escalation at most once per executor invocation and remembers the
+// resolve builds the escalation at most once per registry (see EscalateFunc) and remembers the
 // outcome, error included: a sandbox that could not be materialized will not be retried for
 // every remaining candidate.
 func (e *adjudicateExec) resolve(ctx context.Context, snap run.Snapshot, node *workflow.Node) (*Escalation, error) {

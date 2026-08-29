@@ -31,7 +31,7 @@ const GoldensMaxBytes = 512 << 10
 
 // Run is `metareview fsm <args>`; it prints one JSON envelope (or the agent prompt) and returns the exit code.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, cwd string, deps Deps) int {
-	c := &ctxDeps{ctx: ctx, deps: deps, cwd: cwd}
+	c := newCtxDeps(ctx, deps, cwd)
 	// Evidence trees live for the invocation that built them, not for the life of the machine.
 	defer c.removeSandboxes()
 	inv := &invocation{c: c, stdin: stdin, out: stdout, err: stderr}
@@ -48,7 +48,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return inv.usage(err.Error())
 	}
 	inv.p = p
-	c.escalate = p.bools["escalate"] // opt-in; escalation is OFF by default
+	c.applyGlobalFlags(p)
 	switch cmd {
 	case "workflows":
 		return inv.workflows()

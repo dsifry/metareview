@@ -350,3 +350,27 @@ func TestFindingPathsThatEscapeTheTreeAreSkippedNotFatal(t *testing.T) {
 		t.Errorf("a well-formed referenced path must still reach the tree: %v", err)
 	}
 }
+
+// The flag-to-field mapping, which was unpinned end to end: every escalation test set c.escalate
+// directly, so rewriting the assignment in Run to a constant made the documented flag a no-op
+// with the whole package still green. This drives the real argument parser into the real
+// assignment, so the two cannot drift.
+func TestEscalateFlagReachesTheField(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"state"}, false},
+		{[]string{"state", "--escalate"}, true},
+	} {
+		p, err := parseArgs(tc.args[1:])
+		if err != nil {
+			t.Fatalf("parseArgs(%v): %v", tc.args, err)
+		}
+		c := newCtxDeps(context.Background(), Deps{}, "/repo")
+		c.applyGlobalFlags(p)
+		if c.escalate != tc.want {
+			t.Errorf("%v: c.escalate = %v, want %v", tc.args, c.escalate, tc.want)
+		}
+	}
+}

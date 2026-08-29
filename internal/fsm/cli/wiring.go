@@ -64,6 +64,19 @@ type ctxDeps struct {
 	sandboxRoots []string
 }
 
+// newCtxDeps binds Deps to one invocation.
+func newCtxDeps(ctx context.Context, deps Deps, cwd string) *ctxDeps {
+	return &ctxDeps{ctx: ctx, deps: deps, cwd: cwd}
+}
+
+// applyGlobalFlags copies the flags that are not owned by a single subcommand onto the invocation.
+// It exists so the mapping from flag name to field is testable: with the assignment inline in Run,
+// rewriting `p.bools["escalate"]` to a constant made the documented flag a no-op with the whole
+// internal/fsm/cli suite still green, because every escalation test set the field directly.
+func (c *ctxDeps) applyGlobalFlags(p *parsed) {
+	c.escalate = p.bools["escalate"] // opt-in; escalation is OFF by default
+}
+
 // removeSandboxes deletes the evidence trees this invocation created. The trees are written
 // read-only (0444 files under 0555 directories) so that a judge cannot edit its own evidence,
 // which also means they cannot be removed without restoring write permission first.

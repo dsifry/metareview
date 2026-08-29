@@ -283,8 +283,14 @@ func ContextFor(diff string, alreadyTruncated bool, file string, line, budget in
 }
 
 // maxReferencedFiles caps how many extra files one finding can pull in. The finding text is
-// untrusted reviewer output, so it selects which of OUR OWN hunks to show and nothing more -
-// but an uncapped list would still let one finding crowd out the budget.
+// untrusted reviewer output, and for prompt construction it selects which of OUR OWN hunks to
+// show and nothing more - an uncapped list would still let one finding crowd out the budget.
+//
+// It does NOT stay inside the diff everywhere: cli.referencedByFindings feeds these same paths to
+// the evidence sandbox, which materializes repository files at both revisions. That path filters
+// anything escaping the tree before it gets there, and this cap bounds how many files one finding
+// can cause to be copied - but the claim "our own hunks and nothing more" is true of the prompt,
+// not of the sandbox.
 const maxReferencedFiles = 4
 
 // referencedPath matches a path-shaped token inside a finding's prose: two or more slash
