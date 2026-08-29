@@ -1,0 +1,260 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-4.0354c8293a32fc54",
+  "kind": "shard",
+  "shardId": "shard-4",
+  "shardHash": "0354c8293a32fc54",
+  "planHash": "232e5c0c067629e5",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "note": "Method: mutation testing in an isolated `git clone --local` of the repository at f22d23f under the scratchpad. The live tree was never modified and no binary was built into it. Baseline `go test ./...` green. Eighteen mutations applied one at a time and reverted; each SURVIVING mutation was re-verified against the FULL `go test ./...`, and the one mutation that only broke the build on an unused import (removing the `slices.Contains` guard) was re-run with the import kept live so the signal is a test result and not a compile error. internal/fsm/* is at 100% statement coverage, so coverage was ignored as evidence throughout."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 333,
+      "note": "SURVIVED: deleting \"--no-textconv\" from the flag list at line 345 leaves `go test ./...` fully green. Proven load-bearing by an empirical probe (temporary test, removed): a scratch repo with `.gitattributes` containing `*.go diff=hide` and `diff.hide.textconv=/bin/echo REDACTED` yields Collect().Diff containing the added code with the flag present, and containing \"REDACTED\" with the real added line entirely absent once the flag is removed."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 345,
+      "note": "Empirical probe (temporary test, removed) through gitcontext.Collect on scratch repos: with a clean gitconfig the first diff line is `diff --git a/f.go b/f.go`; with `diff.noprefix=true` set the hardened invocation still returns `diff --git f.go f.go`. Feeding that shape to internal/fsm/judge yields ChangedPaths=[], DiffHasFile=false, and ContextFor emitting \"no diff is available for f.go; it is not among the changed files\" with an empty path list. `git diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/` was verified to restore the a//b/ prefixes under diff.noprefix=true."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 346,
+      "note": "SURVIVED (import kept live via `_ = slices.Contains(args, flag)` so the result is a test outcome, not an unused-import build error): removing the dedupe guard and always appending both flags leaves ./internal/gitcontext and ./internal/contextpack green. Duplicate --no-textconv is harmless to git, so the guard has no observable behaviour and nothing pins it."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 338,
+      "note": "The comment's claim that \"internal/fsm/gate/git.go pins its own diffs the same way\" was checked and is TRUE: gate/git.go:209 and :221 pass --no-ext-diff --no-textconv explicitly at every patch-producing call. Worth recording because gate's RealExec ALSO sets `-c diff.external=` and GIT_EXTERNAL_DIFF=\"\" (git.go:59, :61), which on git 2.50.1 makes git try to exec the empty string and abort with \"fatal: external diff died\" (exit 128) - verified at the shell. The explicit per-call flags are what save it. gate/git.go is unchanged on this branch, so this is context, not a finding here."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 671,
+      "note": "SURVIVED: setting stillPresentKind.Info().NeedsJudge to false leaves all of `go test ./internal/fsm/...` green. The identical mutation on adjudicateKind (kind.go:351) is KILLED by TestProductRunAndJudge in ./internal/fsm/cli. Inverting the predicate to always-true (machine.go:562) is also killed, by four tests. One of the two new NeedsJudge assignments is pinned; the other is not."
+    },
+    {
+      "path": "internal/status/status.go",
+      "line": 73,
+      "note": "SURVIVED: deleting the line that populates BlockingCount, AttemptNumber and MaxAttempts leaves ./internal/status and ./cmd/... green. A repository-wide grep finds no assertion on `blocking_count`, `attempt_number`, `max_attempts`, BlockingCount, AttemptNumber or MaxAttempts anywhere outside status.go itself."
+    },
+    {
+      "path": "internal/status/status.go",
+      "line": 60,
+      "note": "SURVIVED: removing `MustClear: []Blocker{}` so the field marshals as JSON null instead of [] leaves the suite green. The only test that touches it, status_test.go:52, is `if len(r.MustClear) != 0` - vacuously satisfied by nil, so it cannot distinguish the two states the initialiser exists to distinguish."
+    },
+    {
+      "path": "internal/fsm/judge/codex.go",
+      "line": 118,
+      "note": "KILLED (guard is genuinely pinned): reverting `trimPrefixFold(model, CodexPrefix) == \"\"` to `model == CodexPrefix` fails TestValidateCodexRejectsAnEmptyModelInAnyCase. Also KILLED: assigning ev.Usage.Input raw instead of Input-Cached (line 172), assigning Output raw instead of Output-ReasoningOu, and removing clampTok from all five fields - each fails TestParseCodexEventsClampsInconsistentUsage and/or TestCodexJudgeHappyPath. Also KILLED: passing \"\" instead of j.workDir at line 92 fails TestCodexJudgeRunsInItsConfiguredWorkDir, TestWithCodexWorkDirConfinesOnlyCodexJudges, TestEscalationForBuildsAConfinedSandboxJudge and TestSandboxCarriesFilesFindingsNameEvenWhenUnchanged. The whole codex.go chunk is well pinned."
+    },
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 55,
+      "note": "KILLED (all three): dropping row.EvidenceSame from the Same conjunction, deleting the `if !row.EvidenceSame { r.EvidenceMismatch++ }` counter, and removing the empty-string normalisation from evidenceOf each fail TestReportCompareFlagsCrossEvidenceRows. The removal of the row-level Index field is pinned in both directions by fork_test.go:1302 (the key must be absent from the row) and :1306 (the per-side index must survive). The comment's claim that compare() is split out so it can be exercised directly is true - that test calls it directly."
+    },
+    {
+      "path": "internal/state/state.go",
+      "line": 17,
+      "note": "Cross-checked the four packages that took the same jsonl.NewScanner refactor: internal/findings/findings.go:15-19 and internal/runchain/runchain.go:13-17 kept both the doc comment and a `const maxJSONLLineBytes = jsonl.MaxLineBytes` alias; internal/state/state.go:17-20 and internal/reviewlog/reviewlog.go:17-20 kept only the comment and deleted the constant. state.go is in this shard; reviewlog.go is not."
+    },
+    {
+      "note": "Toolchain and rubric sweep: gofmt -l clean and go vet clean over every package this shard touches. No TODO or FIXME marker and no eval-style unsafe execution is introduced by any added line in the shard's fourteen chunks. Every chunk is part 1/1, so no diff context is truncated. .golangci.yml uses `default: standard`, so the new imports placed inside the stdlib block (state.go:8, findings.go:6, runchain.go:6, reviewlog.go:6) are gofmt-clean and violate no configured linter. No untracked source files are involved. New source in this shard does carry tests (internal/status/status_test.go, internal/fsm/judge/diffselect_test.go, and the machine/judge/cli tests exercised above); the test gaps recorded below are specific unpinned lines, not a wholesale absence of tests."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "hardenDiff does not pin the diff path prefixes, so it does not deliver the guarantee its own doc comment states. The comment says it \"pins a diff invocation to git's own patch output\" so that \"the bytes we measure, chunk, hash and lint\" are the patch and the review cannot \"pass over content nobody saw\". --no-ext-diff and --no-textconv close the external-driver and textconv routes, but `diff.noprefix=true` - an ordinary, documented gitconfig setting a developer may well have on - survives both and changes the header shape to `diff --git f.go f.go`. Verified through gitcontext.Collect on a scratch repo: with diff.noprefix set, ctx.Diff's first line is `diff --git f.go f.go`. Every consumer of that payload on this branch keys on the b/ prefix: postImagePathFromHeader (internal/fsm/judge/diffselect.go:70,75) takes the post-image path from the last ` b/` or ` \"b/`, so ChangedPaths returns [], DiffHasFile returns false, and ContextFor emits \"no diff is available for <file>; it is not among the changed files\" followed by an EMPTY changed-paths list. Under the escalation contract added in this same branch (docs/fsm/driving-a-workflow.md), a candidate whose file the diff does not carry becomes unverified_no_evidence and is never judged. The net effect is a run that reports success while judging nothing, silently - precisely the failure mode the comment claims to have closed, reached by a different config knob. `diff.mnemonicPrefix=true` is the same class for the staged and working-tree diffs Collect also gathers (git emits c/ i/ w/ prefixes there). Fix verified at the shell: adding `--src-prefix=a/ --dst-prefix=b/` to the same flag list restores a//b/ under diff.noprefix=true, and it costs nothing when the setting is absent.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 333,
+          "note": "\"hardenDiff pins a diff invocation to git's own patch output\" - the stated guarantee"
+        },
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 345,
+          "note": "the pinned set is only --no-ext-diff and --no-textconv; nothing pins src/dst prefixes"
+        },
+        {
+          "path": "internal/fsm/judge/diffselect.go",
+          "line": 75,
+          "note": "strings.LastIndex(rest, \" b/\") - path extraction requires the b/ prefix and returns \"\" without it"
+        },
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 118,
+          "note": "the branch diff Collect builds and hands to the reviewer is produced through this hardened git()"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The --no-textconv half of the new guard is load-bearing but completely unpinned: deleting it from the flag list leaves the entire `go test ./...` green. It is not decorative - an empirical probe shows that without it, a repository whose .gitattributes maps *.go to a textconv driver has ctx.Diff replaced by the driver's rendering, with the added code absent from the reviewed payload entirely. The asymmetry is the tell: the sibling threat named in the same comment (an external diff driver, both via gitconfig and via GIT_EXTERNAL_DIFF) has two dedicated tests, TestCollectIgnoresExternalDiffDriver and TestCollectIgnoresExternalDiffEnvVar, and removing --no-ext-diff is killed by both. The textconv arm has neither. The reason the existing suite cannot catch it is that branchfiles.go:107 and :129 pass --no-textconv explicitly in their own arg lists, so the BranchFiles tests are insensitive to hardenDiff; the Collect() payload at gitcontext.go:118-173 does NOT pass it and depends on hardenDiff alone. A test in the shape of the two external-diff tests, over Collect rather than over BranchFiles, closes it.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 345,
+          "note": "--no-textconv can be deleted here with the whole suite staying green"
+        },
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 335,
+          "note": "\"or a textconv filter\" - the comment names the threat the code does not test"
+        },
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 107,
+          "note": "\"--no-textconv\" passed explicitly here, which is why the BranchFiles tests cannot detect its loss from hardenDiff"
+        },
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 118,
+          "note": "the Collect diff args carry no --no-textconv of their own; hardenDiff is the only protection for this payload"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The new KindInfo.NeedsJudge flag is pinned on one of its two assignments and not the other. Setting stillPresentKind's NeedsJudge to false leaves all of `go test ./internal/fsm/...` green; the same mutation on adjudicateKind is killed immediately by TestProductRunAndJudge. NeedsJudge is not cosmetic: machine.needsJudge (machine.go:561) is the predicate machine.go:101 and machine.go:634 use to decide whether Preflight validates judge configuration for a node, and types.go:106 documents exactly that contract. still-present is the sdlc-loop's verify node and is judge-driven (fork exec, statusOut decoded from a judge verdict, Reduce emitting run.BugStatus). With its flag silently lost, an invalid judge model or effort would no longer be caught at Init for a workflow whose verify node is still-present, and would instead fail partway through a run that has already spent calls. This is the duplicated-guard pattern: the field was introduced in this change specifically because \"exec: fork does not imply it\", and only half of the resulting classification is defended by a test.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 671,
+          "note": "stillPresentKind NeedsJudge: true - flipping to false is invisible to the suite"
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 351,
+          "note": "adjudicateKind NeedsJudge: true - the same flip here is killed by TestProductRunAndJudge"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 85,
+          "note": "the new field's contract: callers that validate judge configuration must key on this rather than on Exec"
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 634,
+          "note": "needsJudge gates whether Preflight runs at all for the node"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Three fields of the new machine-readable status contract ship untested. status.go is introduced as \"the contract\" a host hook branches on, and Blocker's blocking_count, attempt_number and max_attempts are the operator-facing part of it - how many blockers remain and which attempt of how many, which is the escalation signal the CLAUDE.md Completion Rule depends on. Deleting the line that populates all three leaves ./internal/status and ./cmd/... green, and a repository-wide grep finds no assertion on any of the three names outside status.go. The decision surface around them IS well covered (Blocked, the HasUnresolvedBlockers filter and Emit's exit code are each killed by a test), which makes the gap a specific one: what the report DECIDES is pinned, what it REPORTS is not. Every field could ship as zero and the suite would stay green. The rubric treats new source without relevant tests as blocking; one assertion over a populated Blocker closes it.",
+      "evidence": [
+        {
+          "path": "internal/status/status.go",
+          "line": 73,
+          "note": "BlockingCount / AttemptNumber / MaxAttempts populated here; deleting the line is invisible to the suite"
+        },
+        {
+          "path": "internal/status/status.go",
+          "line": 29,
+          "note": "the three fields are part of the published JSON contract (blocking_count, attempt_number, max_attempts)"
+        },
+        {
+          "path": "internal/status/status_test.go",
+          "line": 52,
+          "note": "the only MustClear assertion is a length check; no test inspects a Blocker's contents"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "MustClear is deliberately initialised to []Blocker{} rather than left nil so the JSON emits \"must_clear\": [] instead of null - a real wire-contract choice for the hook consumers the package doc describes. Nothing pins it: removing the initialiser leaves the suite green, because the only test that touches the field is `if len(r.MustClear) != 0`, and len(nil) is also 0. The check is vacuous with respect to exactly the distinction the initialiser exists to make. An assertion on the marshalled JSON (that must_clear is [] and not null on a clean repository) would pin it.",
+      "evidence": [
+        {
+          "path": "internal/status/status.go",
+          "line": 60,
+          "note": "MustClear: []Blocker{} - the [] vs null choice"
+        },
+        {
+          "path": "internal/status/status_test.go",
+          "line": 52,
+          "note": "len(r.MustClear) != 0 cannot distinguish nil from an empty slice"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The comment justifying the dropped json.MarshalIndent error misdescribes the type it is reasoning about. It says \"Report holds only strings, bools, ints and slices of the same, so marshalling cannot fail; a branch here would be unreachable and untestable.\" Report holds []reviewlog.Summary, whose RunChain is []runchain.Record, whose Target field is a map[string]string (internal/runchain/runchain.go:41). The conclusion still happens to hold - a map with string keys always marshals, and Go's encoder replaces invalid UTF-8 rather than erroring - but the justification is not a description of this type graph, so the next person who adds a float64 or an `any` to Summary will read a reason that was never actually checking what it claims to check. Restating it as \"no field in the graph can produce a marshal error (no floats, no channels, no custom Marshalers)\" would make the comment true of the code and would keep working as a review prompt.",
+      "evidence": [
+        {
+          "path": "internal/status/status.go",
+          "line": 88,
+          "note": "\"Report holds only strings, bools, ints and slices of the same\""
+        },
+        {
+          "path": "internal/runchain/runchain.go",
+          "line": 41,
+          "note": "Target map[string]string, reachable from Report via Reviews[].RunChain[]"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "state.go's jsonl migration left an orphaned doc comment: the const maxJSONLLineBytes was deleted, but its four-line doc comment was kept and now documents an identifier the package no longer declares (\"maxJSONLLineBytes is this package's name for the shared JSONL line cap\"), while sitting immediately above an unrelated var. The same refactor was applied four ways across four packages: findings.go:15-19 and runchain.go:13-17 kept both the comment and a `const maxJSONLLineBytes = jsonl.MaxLineBytes` alias, while state.go:17-20 and reviewlog.go:17-20 kept only the comment. A reader grepping for the name in state.go finds documentation and no declaration. Either delete the stranded comment or restore the alias, and do it the same way in all four.",
+      "evidence": [
+        {
+          "path": "internal/state/state.go",
+          "line": 17,
+          "note": "doc comment for a constant this package no longer declares"
+        },
+        {
+          "path": "internal/findings/findings.go",
+          "line": 19,
+          "note": "the sibling package kept `const maxJSONLLineBytes = jsonl.MaxLineBytes` under the identical comment"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The status package doc asserts in the present tense that \"the hooks are thin shims over it, which is what keeps the enforcement model-agnostic rather than one implementation per host drifting apart\". No hooks ship in this repository: there is no hooks directory, and no hook configuration in .claude-plugin, .codex-plugin or .agents. status.Emit's only caller is cmd/metareview/main.go:108. The design intent is sound and the contract is the right shape for it, but the sentence describes an integration that does not exist yet, which is the kind of claim a later reader will act on. Stating it as intent (\"a host hook is meant to be a thin shim over it\") makes the doc true of the tree.",
+      "evidence": [
+        {
+          "path": "internal/status/status.go",
+          "line": 7,
+          "note": "\"the hooks are thin shims over it\" - present tense, no such hooks in the tree"
+        },
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 108,
+          "note": "status.Emit's only caller; nothing else consumes the contract"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "hardenDiff's slices.Contains dedupe guard has no observable behaviour and nothing pins it. Removing it and always appending both flags leaves ./internal/gitcontext and ./internal/contextpack green once the import is kept live so the result is a test outcome rather than an unused-import compile error. Passing --no-textconv twice is harmless to git, so the guard buys nothing except the `slices` dependency and a branch a reader has to reason about; the only call site that would ever trigger it is branchfiles.go:107,129, which pass --no-textconv explicitly. If the dedupe is meant to matter, a test should say why; otherwise the loop is simpler without it.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 346,
+          "note": "if !slices.Contains(args, flag) - removable with the suite green, and duplicate flags are harmless to git"
+        },
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 107,
+          "note": "the only arg list that already carries --no-textconv, i.e. the only case the guard can fire on"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 4
+}

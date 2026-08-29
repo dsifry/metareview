@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-232e5c0c067629e5",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "232e5c0c067629e5",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5 cross-shard reviewer",
+  "reviewedAt": "2026-08-29T05:46:41Z",
+  "blockingCount": 5,
+  "evidence": [
+    {"note": "Branch frozen: no source, test, doc or config file in the repository was created, edited or deleted. The only file written is this result JSON. All experiments ran against a full copy of the tree in the session scratchpad; no binary was built into the repository."},
+    {"note": "No shard result exists yet for plan 232e5c0c067629e5 (the results directory holds only earlier plans' shard-00..shard-3f files), so this review was conducted directly against the seams rather than by aggregating shard inputs. Read the full text of internal/fsm/judge/diffselect.go, internal/fsm/sandbox/sandbox.go, internal/fsm/cli/escalation.go, internal/fsm/kind/kind.go's diff, internal/fsm/machine/diff.go, internal/fsm/run/event.go + types.go, internal/jsonl/jsonl.go, internal/status/status.go, internal/fsm/judge/prompts.go, plus every doc and spec hunk in the range."},
+    {"path": "internal/fsm/cli/escalation.go", "line": 102, "note": "Findings 1 and 2 were proved empirically, not inferred. Copied the tree to the scratchpad, added two throwaway probe tests to internal/fsm/cli that reuse the real escalationHarness (real git repo, real diff, real sandbox.Materialize, only the codex subprocess faked), ran them, then deleted the probes. Probe 1: a repo file whose bytes are \"package f\\n\\nfunc Added() {}\\n\" is materialized into the sandbox as \"package f\\n\\nfunc Added() {}\" - the trailing newline is gone. Probe 2: a repo file whose bytes are \"\\n\\npackage f\\n\\nfunc Added() {}\\n\" is materialized as \"package f\\n\\nfunc Added() {}\", moving `func Added` from line 5 in the repository to line 3 in the tree the escalating judge reads. Both probes also counted 591 leftover mrv-evidence-* directories in $TMPDIR on this machine."},
+    {"path": "internal/jsonl/jsonl.go", "line": 1, "note": "Finding 3 was established by enumerating every bufio.NewScanner and jsonl.NewScanner call site in internal/ and cmd/ and then checking, per call site, whether the file it scans is a .jsonl file."},
+    {"note": "Read-only sanity gates over the scratchpad copy: `gofmt -l ./internal ./cmd` empty and `go vet ./...` clean at the reviewed head."}
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "The evidence sandbox does not contain the code it claims to contain: every materialized file is whitespace-trimmed, so it matches neither revision and its line numbers shift. internal/fsm/cli/escalation.go:99-108 builds the sandbox.ShowFunc out of `c.git(root, \"show\", \"--no-ext-diff\", rev+\":\"+path)` and returns `[]byte(out)`, but `c.git` at internal/fsm/cli/wiring.go:38-41 is `strings.TrimSpace(string(out))` - a helper written for short git outputs (SHAs, ref names, worktree lines), never for file content. sandbox.Materialize then writes those trimmed bytes and content-addresses them into Tree.TreeHash. Two consequences, both proved by running the real provider in the scratchpad copy: (a) every file in head/ and base/ loses its trailing newline, and a file with leading blank lines loses those too - a file that is \"\\n\\npackage f\\n\\nfunc Added() {}\\n\" in the repository becomes \"package f\\n\\nfunc Added() {}\" in the sandbox, moving `func Added` from line 5 to line 3; (b) because run.Finding carries File and Line taken from the diff's post-image numbering, the escalating judge is pointed at the wrong line of a file whose content is not either revision's. That defeats the purpose of the arm: escalation exists specifically to rescue findings the excerpt arm got wrong, and it is fed misaligned evidence. It also falsifies two claims in other shards - internal/fsm/sandbox/sandbox.go:9-10 (\"content-addressing the tree restores it\") and CHANGELOG.md:30-32 (\"content-addresses it with a tree hash so a verdict stays replayable\") - since the hash addresses a tree that reproduces no commit. Nothing catches it: internal/fsm/cli/escalation_test.go:81-91 asserts only os.Stat existence of head/f.go, base/f.go and head/'new file.go', never a byte of content, and internal/fsm/sandbox/sandbox_test.go drives Materialize through a fake ShowFunc that returns exact bytes, so the corruption lives entirely in the seam between the two packages. Fix: give escalation.go a raw git accessor (c.deps.Exec directly, untrimmed) instead of reusing c.git, and add a content-equality assertion to escalation_test.go for both a file with a trailing newline and a file with leading blank lines.",
+      "evidence": [
+        {"path": "internal/fsm/cli/escalation.go", "line": 102, "note": "showFile returns c.git(...) output as the file body handed to sandbox.Materialize"},
+        {"path": "internal/fsm/cli/wiring.go", "line": 39, "note": "c.git returns strings.TrimSpace(string(out)) - the trim that corrupts every materialized file"},
+        {"path": "internal/fsm/sandbox/sandbox.go", "line": 70, "note": "os.WriteFile(dest, body, 0o444) and sha256 of the same trimmed body into TreeHash"},
+        {"path": "internal/fsm/cli/escalation_test.go", "line": 81, "note": "the only sandbox assertions are os.Stat existence checks; no test reads a materialized file's bytes"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The evidence sandbox is created per run and never deleted. internal/fsm/cli/escalation.go:37 calls c.deps.TempDir(\"mrv-evidence-\"), bound to os.MkdirTemp at internal/fsm/cli/deps.go:69; `grep -rn RemoveAll` over internal/ shows no cleanup anywhere for that directory, while internal/fsm/gate/git.go:255 is this codebase's own convention for exactly this pattern (`defer func() { _ = os.RemoveAll(dir) }()`). The sandbox is a full copy of every changed path at BOTH revisions, plus every path any finding names, written mode 0444 - on this branch that is 538 files per escalating run. Measured on the reviewing machine: 591 `mrv-evidence-*` directories already sitting in $TMPDIR, i.e. the leak is not hypothetical, it is already happening from the new test suite. Escalation is on by default, so every unattended `fsm advance` that rejects a cross-file candidate adds another copy. Nothing in CHANGELOG.md, docs/fsm/driving-a-workflow.md or skills/fsm/SKILL.md says the tree is retained, so this is not a documented deliberate choice. The judge call has already returned by the time escalationFor's caller is done with the tree, so a `defer`-style removal after the executor finishes is safe; if retention is wanted for replay it needs to be a stated contract with a location and a retention rule, not an unbounded /tmp leak.",
+      "evidence": [
+        {"path": "internal/fsm/cli/escalation.go", "line": 37, "note": "dir, err := c.deps.TempDir(\"mrv-evidence-\") - the only creation site; nothing removes it"},
+        {"path": "internal/fsm/cli/deps.go", "line": 69, "note": "TempDir is os.MkdirTemp(\"\", pattern), i.e. the system temp directory"},
+        {"path": "internal/fsm/gate/git.go", "line": 255, "note": "the sibling convention in the same module: defer os.RemoveAll(dir) for a temporary git working area"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "internal/jsonl's package doc claims a guarantee it does not deliver, and the refactor stopped at five of nine call sites. jsonl.go:1-2 reads 'Package jsonl centralises the line cap shared by every reader of the repository's .jsonl files (findings.jsonl, runs.jsonl, review logs, run chains).' Five readers were converted: internal/state/state.go:63, internal/fsm/record/record.go:155, internal/runchain/runchain.go:112, internal/findings/findings.go:486, internal/reviewlog/reviewlog.go:287. Four readers of .jsonl files were not, and still run bufio's 64 KiB default: internal/sessionhistory/sessionhistory.go:226 (reads ~/.claude/projects/*/*.jsonl and ~/.codex/history.jsonl transcripts, where lines over 64 KiB are routine - a single assistant turn with a large tool result exceeds it), internal/knowledge/knowledge.go:73 (every *.jsonl under the knowledge directory), internal/epicsource/epicsource.go:86 and internal/tasksource/tasksource.go:63 (both .beads/issues.jsonl). All four check scanner.Err(), so the failure mode is a hard 'bufio.Scanner: token too long' that aborts the whole file - post-merge learning or epic/task resolution failing outright on input another component wrote successfully, which is precisely the failure jsonl.go's own doc comment describes and claims to have eliminated. This is the pattern this branch has shipped repeatedly: one semantic change applied to most, not all, of its call sites. It is invisible per shard because jsonl.go is in shard-5 while none of the four unconverted files appear in the diff at all.",
+      "evidence": [
+        {"path": "internal/jsonl/jsonl.go", "line": 2, "note": "'the line cap shared by every reader of the repository's .jsonl files' - the overstated guarantee"},
+        {"path": "internal/sessionhistory/sessionhistory.go", "line": 226, "note": "bare bufio.NewScanner over .jsonl session transcripts, 64 KiB default"},
+        {"path": "internal/knowledge/knowledge.go", "line": 73, "note": "bare bufio.NewScanner; the enclosing loop filters on .jsonl at line 61"},
+        {"path": "internal/tasksource/tasksource.go", "line": 63, "note": "bare bufio.NewScanner over .beads/issues.jsonl (same at internal/epicsource/epicsource.go:86)"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "A spec row now asserts a property the code does not have. Preflight's trigger changed from exec to kind: internal/fsm/machine/machine.go:101 and :634 now call needsJudge(deps.Kinds, node), which reads the new workflow.KindInfo.NeedsJudge (internal/fsm/workflow/workflow.go:85-88), set true only on match-then-adjudicate (kind.go:351) and still-present (kind.go:671). cmdKind (kind.go:735) is exec: fork and is deliberately no longer preflighted. internal/fsm/machine/types.go:106 was updated to say so. docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md section 8 was NOT: its 'Spec 5 r4 asks, owned here' bullet - a line edited in this very change set, to correct the RecordLLMCall signature - still specifies 'Deps.Preflight ... called after Resolve and before Create for every `exec: fork` node at Init, and on the Advance that would run a fork node'. That is now false in both halves. The spec is the authority the fsm packages are built against, and the two are in different shards (spec in shard-5, machine.go in shard-3, types.go and workflow.go in shard-4), so no per-shard reviewer sees the divergence. Note this is exactly the class the new RubricAddendum instructs judges to treat as real: 'A comment, doc line, test name or specification row that asserts a property the code does not have is a real finding' (internal/fsm/judge/prompts.go:47-49). Related, lower: the same fork spec's CallSide declaration at docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:166 still omits the Evidence field the code added, although the prose two lines above mentions it.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine.go", "line": 101, "note": "if n := w.NodeFor(st); n != nil && needsJudge(deps.Kinds, n) - the Init trigger, no longer n.Exec == \"fork\""},
+        {"path": "internal/fsm/machine/types.go", "line": 106, "note": "the Deps.Preflight comment WAS updated to 'every judge-calling node (KindInfo.NeedsJudge)'"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md", "line": 451, "note": "section 8 still specifies Preflight 'for every `exec: fork` node at Init, and on the Advance that would run a fork node'"},
+        {"path": "internal/fsm/kind/kind.go", "line": 735, "note": "cmdKind: DefaultExec fork, no NeedsJudge - the node that silently lost its preflight"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Untrusted finding text selects which repository files are copied into the judge's sandbox, contradicting two doc claims, and one malformed path in that text disables escalation for the rest of the run. internal/fsm/judge/diffselect.go:285-288 states the containment argument for the whole design: 'The finding text is untrusted reviewer output, so it selects which of OUR OWN hunks to show and nothing more.' AllReferencedPaths (diffselect.go:361-377) deliberately drops the diff filter, and internal/fsm/cli/escalation.go:61-77 (referencedByFindings) feeds its output straight into sandbox.Materialize's path list - so the untrusted text does select arbitrary repository paths at head, well beyond 'our own hunks'. CHANGELOG.md:30-32 makes the same overstatement from the other side: the sandbox is 'every changed path at base and head, mode 0444, nothing else', when it is in fact the changed set PLUS up to maxReferencedFiles paths per finding that the branch never touched. Path containment itself holds (sandbox.go:54-57 refuses anything that cleans to '..' or is absolute), but the refusal is a hard error: Materialize returns it, escalationFor propagates it, and adjudicateExec.resolve caches it in resolveErr under sync.Once (kind.go:558-564), so a single finding whose prose contains a relative path like '../../internal/x.go' - which referencedPath at diffselect.go:295 matches, since '.' and '-' are in its character class - turns every subsequent cross-file rejection in that run into checked_but_unverified. Untrusted reviewer prose should not be able to switch the second-opinion arm off for a whole run; filter the referenced paths for containment before Materialize sees them (silently dropping the ones that escape) rather than letting one bad token become a run-wide error.",
+      "evidence": [
+        {"path": "internal/fsm/judge/diffselect.go", "line": 286, "note": "'it selects which of OUR OWN hunks to show and nothing more' - contradicted by AllReferencedPaths + escalation.go"},
+        {"path": "internal/fsm/cli/escalation.go", "line": 68, "note": "judge.AllReferencedPaths(f.File, f.IssueText) results appended to the sandbox path list, unfiltered by the diff"},
+        {"path": "internal/fsm/sandbox/sandbox.go", "line": 55, "note": "a path that cleans to '..' is a hard error rather than a skipped entry"},
+        {"path": "internal/fsm/kind/kind.go", "line": 561, "note": "e.once.Do caches resolveErr, so one poisoned finding disables escalation for every later candidate"},
+        {"path": "CHANGELOG.md", "line": 30, "note": "'every changed path at base and head, mode 0444, nothing else' - the sandbox also carries unchanged referenced paths"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Report.EvidenceMismatch cannot count the divergence the docs sell it for. internal/fsm/machine/diff.go:49-52: compare() returns early whenever row.A or row.B is nil, so EvidenceSame is computed and EvidenceMismatch incremented only for two-sided rows. But the escalated call and the primary call it follows are issued with the SAME judge.Request Input (kind.go:529 and :588 both build ContextForClaim over the same candidate), and InputHash is computed from Input alone (judge.go:535, prompts.go:183) - the model is not in it. So an escalating run emits two llm_call rows with identical (node, iter, kind, input_hash) where a --no-escalate run emits one; the second is disambiguated only by the unexported occurrence counter and pairs with nothing on the other side. The realistic comparison - a run with escalation against the same run with --no-escalate, which is precisely what an operator would diff - therefore reports evidence_mismatch: 0. skills/fsm/SKILL.md:42, docs/fsm/driving-a-workflow.md:117-119 and docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:123-125 all present evidence_mismatch as the signal for exactly that case. Same=false still surfaces the row, so this is a reporting gap rather than a silent pass, but the documented counter does not mean what three documents say it means.",
+      "evidence": [
+        {"path": "internal/fsm/machine/diff.go", "line": 50, "note": "if row.A == nil || row.B == nil { return } - one-sided rows never reach the EvidenceMismatch increment"},
+        {"path": "internal/fsm/judge/judge.go", "line": 535, "note": "InputHash: InputHash(r.Input) - model and effort are not part of the hash, so the escalated row collides with the primary"},
+        {"path": "skills/fsm/SKILL.md", "line": 42, "note": "'fsm diff never calls a cross-evidence row same' presented alongside evidence_mismatch as the operator's signal"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Residue from the jsonl extraction, spread across four packages. internal/state/state.go:17-20 and internal/reviewlog/reviewlog.go:17-20 still carry the full four-line doc comment for a `maxJSONLLineBytes` constant that the same commit deleted from those files - in state.go it now sits immediately above the unrelated `closeFile` var, and in reviewlog.go above `type Summary`, documenting a +2 buffer rule that neither file performs any more. internal/findings/findings.go:15-19 and internal/runchain/runchain.go:13-17 kept both the comment and an aliasing const, so the four sibling packages now disagree on whether the alias exists. Separately, all five converted files (state.go:8, reviewlog.go:6, runchain.go:6, findings.go:6, internal/fsm/record/record.go:11) had the new module import inserted into the stdlib import block, while the same files keep their other module imports in a separate group below - gofmt accepts it, but it breaks the grouping convention visible three lines away in each file. Cross-shard because the five files are spread over shard-0, shard-2 and shard-4 and each looks locally harmless.",
+      "evidence": [
+        {"path": "internal/state/state.go", "line": 17, "note": "doc comment for maxJSONLLineBytes with no such constant in the package"},
+        {"path": "internal/reviewlog/reviewlog.go", "line": 17, "note": "the same orphaned comment, now attached to type Summary"},
+        {"path": "internal/runchain/runchain.go", "line": 17, "note": "the sibling package kept const maxJSONLLineBytes = jsonl.MaxLineBytes, so the four packages disagree"},
+        {"path": "internal/fsm/record/record.go", "line": 11, "note": "module import placed inside the stdlib block, against the file's own grouping"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The two new path predicates that gate the whole feature are unnormalized string heuristics with no shared definition and no observability. (a) internal/fsm/kind/kind.go:517-527 decides 'no evidence, no question' by exact string equality between cand.File and git's post-image path (judge.DiffHasFile -> parseUnifiedDiff -> postImagePathFromHeader). A discover node that emits './internal/x.go', 'a/internal/x.go', a leading-slash path, or a pre-rename path silently converts a judgeable finding into an unjudged unverified_no_evidence for a human; nothing normalizes the candidate's file, and no counter or warning records how often the guard fires, so a systematic mismatch between a reviewer's path convention and git's would look exactly like a run where nothing was checkable. (b) internal/fsm/judge/diffselect.go:302's rootFile regex `\\b[A-Za-z0-9_-]{2,}\\.[A-Za-z0-9]{1,5}\\b` matches version strings: 'metareview 0.10.0' yields '10.0', and MentionsOtherFiles (kind.go:571) is deliberately NOT diff-filtered, so a finding that names no file at all triggers a sandbox materialization and a second full judge call. Both predicates are consumed from packages other than the one that defines them (kind consumes judge; cli consumes judge), which is why neither shard sees the combination. A single normalization helper in judge, applied to cand.File before DiffHasFile and to namedPaths' output, plus a run-level count of unverified_no_evidence and of escalations triggered, would make both observable.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 524, "note": "exact-string DiffHasFile(in.Diff.Text, cand.File) decides whether a candidate is ever judged"},
+        {"path": "internal/fsm/judge/diffselect.go", "line": 302, "note": "rootFile matches '10.0' out of a version string; the stem>=2 rule excludes 'e.g.' but not this"},
+        {"path": "internal/fsm/kind/kind.go", "line": 571, "note": "MentionsOtherFiles is the escalation trigger and is intentionally not diff-filtered, so the regex's false positives cost a sandbox plus a judge call"}
+      ]
+    }
+  ]
+}

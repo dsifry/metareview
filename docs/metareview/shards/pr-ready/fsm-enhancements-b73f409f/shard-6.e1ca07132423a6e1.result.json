@@ -1,0 +1,224 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-6.e1ca07132423a6e1",
+  "kind": "shard",
+  "shardId": "shard-6",
+  "shardHash": "e1ca07132423a6e1",
+  "planHash": "232e5c0c067629e5",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-29T00:00:00Z",
+  "evidence": [
+    {
+      "note": "Method: mutation testing plus behavioural probes in a private copy of the tree under the scratchpad; the live tree was never modified and no binary was built into it. Baseline `go test ./...` GREEN before and after every mutation. Twelve mutations applied one at a time and reverted; every survivor was re-verified against the FULL `go test ./...` in a second, freshly made private copy, because internal/fsm/* is at 100% statement coverage and coverage proves nothing here. Two findings are direct empirical observations (temporary probe tests, deleted afterwards), not inferences from suite colour."
+    },
+    {
+      "note": "Note on the shared scratchpad: a sibling reviewer of this same plan is mutating files IN PLACE inside the session scratchpad copy at scratchpad/mr (observed internal/fsm/export/export_test.go modified, then internal/fsm/cli/run.go modified with a run.go.bak beside it, while the live tree stayed clean). Every conclusion reported here was therefore re-measured in a uniquely named private copy that no sibling shares."
+    },
+    {
+      "path": "internal/fsm/cli/escalation.go",
+      "line": 86,
+      "note": "changedPaths returns (nil, nil) on a nonzero git exit, which is the production shape of a git failure."
+    },
+    {
+      "path": "internal/fsm/cli/escalation.go",
+      "line": 15,
+      "note": "The doc comment claims the escalated judge is 'confined to a materialized tree'; nothing tells the judge the tree exists."
+    },
+    {
+      "path": "skills/fsm/SKILL.md",
+      "line": 41,
+      "note": "'so a codex/ judge can read both sides of the claim' - the escalated prompt never mentions the tree."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 40,
+      "note": "ctxDeps.git TrimSpaces its output; showFile uses it, so materialized evidence is not the file's bytes."
+    },
+    {
+      "path": "internal/learning/review.go",
+      "line": 24,
+      "note": "ReviewOptions.HomeDir has no writer anywhere in the repository."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "The escalated judge is never told the sandbox exists, so the 'sandbox evidence' second opinion is the same question with the same evidence, and the audit label is asserted rather than earned. Measured directly: with a fake CodexExec capturing the prompt, an escalated adjudicate call carries a 2081-byte prompt that does not contain 'head/', 'base/', 'sandbox', 'working directory', 'filesystem', or the sandbox path itself. kind.secondOpinion (kind.go:589-590) builds judge.AdjudicateInput with the SAME judge.ContextForClaim excerpt the first arm used, and escalationFor sets Model/Effort to node.Model/node.Effort (escalation.go:50-51) - the same model at the same effort. The only difference between arm 1 and arm 2 is codexJudge's cmd.Dir (codex.go:92). Consequences: (a) escalation.go:21-23 justifies skipping HTTP judges because escalating to them 'would re-ask the same question with the same evidence at twice the cost' - which is exactly what the codex escalation does; (b) skills/fsm/SKILL.md:40-42 tells operators the changed files are materialized 'so a codex/ judge can read both sides of the claim'; (c) run.EvidenceSandbox, TreeHash, BaseSHA and HeadSHA are recorded on the llm_call (kind.go:421-423) for a verdict that was in fact reached from excerpts, so machine/diff.go's cross-evidence rule (diff.go:56-62, pinned by the new TestReportCompareFlagsCrossEvidenceRows) refuses to compare rows on the strength of a label that does not describe the call; (d) this shard's own docs/0.10.0-candidates.md lists the missing piece under 'If it is built' - 'Tell the judge about the sandbox in the {diff} SLOT VALUE, never the template' - but the feature shipped without it. Fix: put the sandbox layout and the instruction to read it into the {diff} slot value for escalated calls (never the byte-pinned template), and add a test asserting the escalated prompt names the tree; until then the honest audit value is excerpt, not sandbox.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/escalation.go",
+          "line": 15,
+          "note": "'confined to a materialized tree of the changed files at base and head' - confinement happens, communication does not."
+        },
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 41,
+          "note": "'so a codex/ judge can read both sides of the claim'"
+        },
+        {
+          "note": "Probe (temporary test, since deleted): escalationFor(...).Judge.Call(adjudicate) with CodexExec capturing (dir, prompt). dir = /var/folders/.../mrv-evidence-4052271198; prompt length 2081; 'does NOT mention' for every one of head/, base/, sandbox, working directory, on disk, filesystem, and the dir string itself."
+        }
+      ]
+    },
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "changedPaths swallows a nonzero git exit, so a git failure silently drops the finding the escalation exists to save - and the test that claims to cover this passes for the wrong reason. gate.RealExec converts an ExitError into (code, nil error) (gate/git.go:65-72), so the production shape of 'git diff failed' is code!=0 with err==nil. escalation.go:86-87 then returns (nil, nil), escalationFor returns (nil, nil), and kind.secondOpinion reads that as 'escalation deliberately unavailable: the rejection stands' (kind.go:583), rejecting the candidate as VerdictHallucination. Probed directly: with Exec returning ([]byte(\"fatal: bad revision\"), stderr, 128, nil), escalationFor returns esc=nil err=nil. That is reachable - a resumed run whose recorded BaseSHA no longer resolves after a rebase or gc exits 128 - and it is the precise outcome TestEscalationForSurfacesGitFailures says is impossible: 'Every way the sandbox can fail to be built must surface as an error, so the caller keeps the finding as checked_but_unverified. Silently returning \"unavailable\" would let a broken sandbox read as agreement with the cheap arm's rejection - a finding dropped by an outage' (escalation_test.go:133-136). Its 'listing the changed files fails' subtest fakes err=os.ErrPermission, which RealExec never returns for a nonzero exit, so the assertion never touches the production path. Mutation confirms the guard is unpinned as well as wrong: deleting '|| code != 0' from escalation.go:86 leaves the FULL `go test ./...` green (re-verified in a private pristine copy). Fix: return an error carrying the exit code and stderr when code != 0, and re-point the test's fake at (code=128, err=nil).",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/escalation.go",
+          "line": 86,
+          "note": "if err != nil || code != 0 { return nil, err } - a nonzero exit returns a nil error and no paths."
+        },
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 70,
+          "note": "code, err = ee.ExitCode(), nil - the exec seam nils the error for every nonzero git exit."
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 583,
+          "note": "return run.Bug{}, false // escalation deliberately unavailable: the rejection stands"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The materialized evidence is not the file's bytes: showFile reads through ctxDeps.git, which TrimSpaces its output (wiring.go:40), so every file written into the sandbox has leading and trailing whitespace stripped. Probed: the repository's f.go is \"package f\\n\\nfunc Added() {}\\n\" and head/f.go in the sandbox is \"package f\\n\\nfunc Added() {}\" - the trailing newline is gone. Two consequences beyond tidiness. First, a file whose first bytes are blank lines loses them, which shifts EVERY line number in the sandbox relative to the line numbers the findings carry, so a judge checking 'server.go:42' reads a different line than the reviewer meant. Second, TreeHash is advertised as content-addressing what the judge could read so a verdict stays replayable (sandbox package doc; spec row for llm_call in docs/specs/2026-08-26-...md:182) - it content-addresses the mangled bytes, and two revisions differing only in trailing whitespace hash identically. The sandbox package's own tests cannot catch this because fakeShow returns exact bytes; the trimming lives entirely on the cli seam. Fix: give showFile a raw exec path that does not trim (c.deps.Exec directly), and assert byte equality between the source revision and the materialized file.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 40,
+          "note": "return strings.TrimSpace(string(out)), code, err - shared with every git call, including git show."
+        },
+        {
+          "path": "internal/fsm/cli/escalation.go",
+          "line": 109,
+          "note": "return []byte(out), true, nil - out is already trimmed."
+        },
+        {
+          "note": "Probe (temporary test, since deleted): want \"package f\\n\\nfunc Added() {}\\n\", got \"package f\\n\\nfunc Added() {}\" from head/f.go in the materialized tree."
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The evidence sandbox is never deleted. escalation.go:37 takes a directory from Deps.TempDir (os.MkdirTemp, deps.go:69) and nothing in internal/fsm removes it - the only RemoveAll in the FSM tree is gate/git.go:255 for its own scratch. The tree is 13 MB for this repository's own branch by the measurement recorded in this shard's docs/0.10.0-candidates.md, it is written once per escalating run, and sandbox.Materialize chmods every file 0o444, so what accumulates in the system temp directory is read-only. Escalation is ON by default, so this is the normal path, not an edge case. Fix: return a cleanup func on the Escalation (or defer removal when the executor finishes) and pin it with a test that the directory is gone after the run.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/escalation.go",
+          "line": 37,
+          "note": "dir, err := c.deps.TempDir(\"mrv-evidence-\") - the returned path is never remembered for cleanup."
+        },
+        {
+          "note": "grep -rn RemoveAll over internal/fsm (non-test) returns exactly one hit, internal/fsm/gate/git.go:255, unrelated to the evidence sandbox."
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "showFile reports every git failure as 'this path does not exist at this revision'. escalation.go:106-108 maps any nonzero exit to (nil, false, nil) and discards stderr, and the doc comment at 98-99 names only the benign case ('A path absent at a revision is not an error: a file added on the branch has no base side'). A bad revision, an unreadable object, a path git refuses (a submodule or a directory), or a corrupted pack all silently produce an evidence tree with that file missing, while tree.Files and TreeHash present the truncated set as the complete evidence and the run records evidence=sandbox. This is not the same code path as the changedPaths finding above: that one loses the whole escalation, this one loses individual files inside an escalation that still reports success. Fix: distinguish the 'absent at this revision' exit from other failures (git exits 128 with a recognisable 'exists on disk, but not in' / 'unknown revision' message, or use `git cat-file -e` first) and surface the rest as errors.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/escalation.go",
+          "line": 106,
+          "note": "if code != 0 { return nil, false, nil } - stderr is dropped and the caller cannot tell absence from failure."
+        },
+        {
+          "path": "internal/fsm/cli/escalation.go",
+          "line": 98,
+          "note": "The comment asserts only the benign reading of the branch it guards."
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "ReviewOptions.HomeDir is a new exported option that nothing writes and no test exercises, so the determinism its comment promises is not achieved in this package. review.go:21-23 says 'Empty means the caller's real home, which is correct in production and non-deterministic in tests: coverage of the discovery paths then tracks whatever session data the machine happens to hold'. But the only caller, cmd/metareview/main.go:304-323, parses --post-merge, --base, --github-pr and --session-root and never sets HomeDir; internal/learning has no test file for review.go at all (no review_test.go; RunPostMerge has no test caller in the repository); and grep shows no other writer. The sessionhistory half of the change is genuinely tested (sessionhistory_test.go, fixture_home_test.go), but the plumbing added here is inert: deleting the field and the argument would change no test outcome. Either give post-merge review a test that sets HomeDir (which is what would make the commit's claim true), or drop the field.",
+      "evidence": [
+        {
+          "path": "internal/learning/review.go",
+          "line": 24,
+          "note": "HomeDir string - added with a comment about test determinism, and set by nobody."
+        },
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 304,
+          "note": "options := learning.ReviewOptions{} followed by a flag loop that never assigns HomeDir."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "skills/fsm/SKILL.md:44-45 states 'Roughly 2x the judge tokens on a run where a fifth of the rejections are cross-file' as if measured. The only measurement in the branch (docs/0.10.0-candidates.md, in this same shard) reports the sandbox arm at 5.7x mean tokens per call over ten candidates, and escalation re-judges only the cross-file REJECTIONS, so a fifth of rejections escalating costs roughly 1 + 0.2 * (rejected share) * 5.7 - which reaches 2x only if nearly every adjudicate call is a rejection. And since the judge is never told the tree exists (first finding), the escalated call is actually a same-size prompt, i.e. about 1x, not 5.7x. The number is not derivable from anything recorded; either derive it or drop the multiplier.",
+      "evidence": [
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 44,
+          "note": "'Roughly 2x the judge tokens on a run where a fifth of the rejections are cross-file.'"
+        },
+        {
+          "path": "docs/0.10.0-candidates.md",
+          "line": 84,
+          "note": "The measurement it must come from: 23,763 vs 136,541 mean tokens per call, 5.7x, over ten candidates."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestForkCompatibleNodelessState's comment claims more than the test does: 'All four nil combinations must be decided, and none may panic' (fork_test.go:1190-1191), but only three are asserted - nodeless/nodeless (1221), nodeless-then-node (1224), node-then-nodeless (1227). The fourth, a node on both sides of a copied state, is never exercised here; it is the branch at fork.go:391 that also compares Kind and Exec, so it is the one combination with more than nil-ness to decide. Either add the fourth assertion or say three.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/fork_test.go",
+          "line": 1191,
+          "note": "'All four nil combinations must be decided, and none may panic.'"
+        },
+        {
+          "path": "internal/fsm/machine/fork_test.go",
+          "line": 1227,
+          "note": "The last of exactly three compatible() assertions in the test."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestCallRowCarriesNoDeadIndexField does not hold the property it names. It asserts only that the marshalled row has no 'index' key for a CallRow whose Index would be the zero value, so the omitempty shape of the defect walks straight past it: re-adding `Index int `json:\"index,omitempty\"`` to CallRow leaves the FULL `go test ./...` green (mutation re-verified in a private pristine copy). Marshal a row through DiffRuns with repeated calls and assert the row-level identity comes from occurrence, or assert on the struct's field set, rather than on the absence of a key that an omitempty zero would also omit.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/fork_test.go",
+          "line": 1293,
+          "note": "func TestCallRowCarriesNoDeadIndexField - the row is built with Index unset, so a zero-valued omitempty field is indistinguishable from no field."
+        },
+        {
+          "note": "Mutation: add `Index int` with json:\"index,omitempty\" to CallRow in machine/diff.go; go test -count=1 ./... exits 0."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "escalationFor's returned closure ignores its ctx parameter: every git call inside it goes through ctxDeps.git, which passes c.ctx (wiring.go:39), so the context the executor hands kind.EscalateFunc governs nothing. Materializing this repository's own branch is ~540 files, i.e. ~1,000 git subprocesses, and a cancelled or deadlined caller cannot stop any of them. Today c.ctx and the passed ctx happen to share a root (there is no context.WithTimeout or WithCancel anywhere in internal/fsm/machine, kind or cli), so the bug is latent rather than live - which is exactly why it should be fixed now: the parameter's presence promises a cancellation path that does not exist, and the day a per-node deadline is added it will be silently ignored.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/escalation.go",
+          "line": 25,
+          "note": "func(ctx context.Context, snap run.Snapshot, node *workflow.Node) - ctx is never referenced in the body."
+        },
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 39,
+          "note": "out, _, code, err := c.deps.Exec(c.ctx, dir, nil, args...) - the invocation context, not the caller's."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 6
+}

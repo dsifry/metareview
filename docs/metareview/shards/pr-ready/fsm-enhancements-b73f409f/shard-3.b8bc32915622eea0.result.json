@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3.b8bc32915622eea0",
+  "kind": "shard",
+  "shardId": "shard-3",
+  "shardHash": "b8bc32915622eea0",
+  "planHash": "232e5c0c067629e5",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 715,
+      "note": "Method: mutation testing in a scratch copy built from git archive f22d23fa (never the live tree). Baseline `go test ./...` green three consecutive times with GOFLAGS=-count=1. 22 mutations applied across the shard's production surface; each reverted after the run. Surviving mutants were then confirmed non-equivalent with throwaway probe tests, so every 'unpinned' finding below is a real behaviour change no committed test observes."
+    },
+    {
+      "path": "internal/fsm/machine/fork.go",
+      "line": 391,
+      "note": "compatible() nil-node handling is fully pinned in both directions. Dropping the (pn==nil)!=(n==nil) clause fails TestForkCompatibleNodelessState ('a node added on a copied nodeless state must be incompatible'); narrowing it to (pn==nil && n!=nil) panics on the node-removed case, which the same test catches. The replacement comment accurately describes what validateGraph permits."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 692,
+      "note": "stillPresentKind.Decode payload cap is pinned: deleting checkPayload(o) fails TestStillPresentDecodeCapsOversizedStatusList with 'Decode accepted a 273420-byte payload the fold will reject'. The test's fixture guards (shortOK on each id, and the >MaxPayload-envelopeMargin assertion) both really constrain the fixture."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 524,
+      "note": "The no-evidence skip is well pinned: deleting the block, and separately relabelling its verdict to VerdictCheckedButUnverified, both fail TestAdjudicateDoesNotJudgeACandidateWithNoEvidence. Dropping the ChangedPaths(diff)>0 clause also fails it. The primary arm's AdjudicateThreshold and its parse-error keep are pinned by TestK3Composition."
+    },
+    {
+      "path": "internal/jsonl/jsonl.go",
+      "line": 23,
+      "note": "The MaxLineBytes+2 scanner budget is pinned three ways: +2 -> +1 and +2 -> +0 both fail TestScannerAcceptsAnExactlyMaxLengthLine, and swapping jsonl.NewScanner for a bare-cap bufio.Scanner (with the bufio import added, so the build still succeeds) fails TestExistsReadsAnExactlyMaxLengthRow in internal/fsm/record and TestReadFindingsAcceptsAnExactlyMaxLengthLine in internal/reviewlog respectively. Both new fixtures really are exactly MaxLineBytes."
+    },
+    {
+      "path": "internal/reviewlog/reviewlog.go",
+      "line": 304,
+      "note": "findings.Blocks() adoption is pinned in both packages. Reverting to `record.Status != \"open\"` (keeping the findings import so the failure is a test failure, not a build break) fails TestOverridePendingFindingsAreUnresolvedBlockers here and TestRepeatedBlockerThemesIncludesOverridePendingFindings in internal/learning; widening it to admit \"overridden\" fails TestOverriddenFindingsAreNotUnresolvedBlockers; dropping the spec-contract arm fails TestSpecContractFindingsAreAlwaysUnresolvedBlockers."
+    },
+    {
+      "path": "tests/go/test-cli-baseline.sh",
+      "line": 24,
+      "note": "Ran the added block by hand against a freshly built binary: clean tree prints blocked:false / must_clear:[] and exits 0; after planting a NEEDS_REVISION task-done log it prints blocked:true, names t-1, and exits 1. The script is wired into tests/run-all.sh:14, which CI runs via `npm test`. shellcheck -x is clean, and the claim that the exit decision cannot be reached from a Go test holds (cmd/metareview has no test files)."
+    },
+    {
+      "path": "docs/specs/2026-08-26-metareview-0.9.0-build-plan.md",
+      "line": 3,
+      "note": "All six documents the new SUPERSEDED banner links to exist under docs/specs/ (fsm-run-persistence, fsm-core, fsm-fork, fsm-judge-kinds, fsm-cli, and the fsm-enhancements companion). No dead links."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 345,
+      "note": "Confirmed against real git that `git diff --stat` ignores both diff.external and GIT_EXTERNAL_DIFF, while `git diff` honours them. This is what makes the DiffStat row of the new test's table an assertion that cannot fail (finding below), and it is also why only the Diff row reported under the --no-ext-diff mutation."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "Per-candidate evidence selection is applied at three call sites and pinned at one. TestAdjudicateSelectsEachCandidatesOwnFile (kind_test.go:692) exists precisely to pin that a judge is never asked about a file whose hunks are not in its evidence, and it does pin kind.go:529 (rewriting that call to the shared judge.CutDiff fails the test). Rewriting kind.go:715 (still-present, whose comment says 'per bug, for the same reason adjudicate selects per candidate') and kind.go:588 (secondOpinion / escalation) the same way leaves the ENTIRE suite green. Both mutants are non-equivalent: with the shard test's own fixture (early.go, ~30KB of filler.go, late.go past judge.MaxDiffBytes), probe tests show the still-present judge and the escalation judge each receive early.go's hunks instead of late.go's, and answer anyway. The still-present arm is the one that decides whether a fix landed, so a wrong answer there terminates or re-runs the SDLC loop on evidence that cannot contain the answer -- the exact failure the shard's new test was written to prevent, left unpinned in two of the three places the fix was applied. Add the equivalent late-file assertion for StillPresent and for secondOpinion.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 715},
+        {"path": "internal/fsm/kind/kind.go", "line": 588},
+        {"path": "internal/fsm/kind/kind_test.go", "line": 692}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The new extdiff_test.go states 'Every git diff in this package feeds the review, so the hardening has to hold on all of them, not just the branch diff', but it only covers the non-truncated Collect path, and the sharding path is unpinned. Deleting hardenDiff() from internal/gitcontext/branchfiles.go:37 (realGit) leaves the whole suite green. It is not an equivalent mutant: branchfiles' own argv carries --no-textconv but NOT --no-ext-diff, so realGit's hardenDiff call is the only thing stopping a diff.external driver from replacing the per-file branch diffs. A probe on a truncating fixture with diff.external set collapses ctx.BranchDiffFull from 408,503 real bytes to 32 bytes of driver output -- which is the content the shard planner measures, hashes and hands to reviewers. Separately, the --no-textconv half of hardenDiff (gitcontext.go:345) is also unpinned: removing it from the list leaves the suite green, so only one of the two flags the test's comment names is actually tested. Extend the new tests to CollectWith on a truncating fixture, and add a textconv (not just diff.external) case.",
+      "evidence": [
+        {"path": "internal/gitcontext/branchfiles.go", "line": 37},
+        {"path": "internal/gitcontext/gitcontext.go", "line": 345},
+        {"path": "internal/gitcontext/extdiff_test.go", "line": 13}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The exec:fork -> needsJudge fix was applied to two identical guards and only the Init copy is pinned. TestPreflightSkipsNonJudgeForkNodes (handoffs_test.go:264) calls h.init and never Advance, so reverting machine.go:634 alone -- `needsJudge(s.m.deps.Kinds, node)` back to `node.Exec == \"fork\"` -- leaves the whole suite green, while reverting the Init copy at machine.go:100 (or the needsJudge body itself) is caught. The mutant is non-equivalent: a probe that runs Advance on the same cmdnode.yaml workflow with an Advance-time Preflight fails with `ERR_JUDGE_MODEL: model id is empty`, i.e. the run aborts on a legal cmd node naming a knob the operator never set. This is the runtime path (the Advance-time pre-flight re-checks calibration per iteration, which Init cannot cover), so the untested copy is the more consequential one. Add an Advance-level case to that test.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine.go", "line": 634},
+        {"path": "internal/fsm/machine/handoffs_test.go", "line": 264}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "An assertion that cannot fail. The new table in TestCollectIgnoresExternalDiffDriver checks both ctx.Diff and ctx.DiffStat for SENTINEL-EXTERNAL-DRIVER-OUTPUT, but `git diff --stat` never invokes diff.external or GIT_EXTERNAL_DIFF (verified directly against git: with diff.external configured, `git diff` prints the sentinel while `git diff --stat` prints the normal stat). Under the --no-ext-diff mutation only the Diff row reported. The DiffStat row therefore reads as coverage of a second output that is not being tested at all; either drop it or replace it with a case that can actually distinguish hardened from unhardened (e.g. the --numstat/--name-only outputs, or a textconv filter, which --stat does honour).",
+      "evidence": [
+        {"path": "internal/gitcontext/extdiff_test.go", "line": 42},
+        {"path": "internal/gitcontext/extdiff_test.go", "line": 46}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Asymmetric confidence gating in the escalation arm. kind.go:542 (primary) applies `v.Decision && v.Confidence >= AdjudicateThreshold` and is pinned by TestK3Composition's 0.69 case; kind.go:599 (secondOpinion) applies the same rule but is unpinned -- deleting `&& v.Confidence >= AdjudicateThreshold` there leaves the suite green, because every escalation test scripts Confidence 0.9. A second opinion that says 'real' at 0.1 confidence would then rescue a rejection. The direction is the safe one (it keeps findings), but the threshold is stated as a rule and nothing holds it.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 599},
+        {"path": "internal/fsm/kind/kind.go", "line": 542}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The `cand.File != \"\"` clause of the no-evidence guard (kind.go:524) is unpinned: removing it leaves the suite green. It is not equivalent -- judge.DiffHasFile(diff, \"\") is false for any parsed diff, so without it a finding that names no file at all (the `{IssueText: \"c2\"}` shape TestK3Composition already uses) would be marked VerdictUnverifiedNoEvidence and never judged whenever the diff is non-empty. TestK3Composition only exercises that candidate with an unparseable diff, where ChangedPaths is empty and the guard is short-circuited anyway.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 524}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The four new reviewlog severity tests read as an enumeration of the policy but leave a hole: critical is pinned, low is pinned, and high arrives via the override tests, but medium is not. Widening isOpenBlocker's severity set from (critical|high) to `!= \"low\"` leaves the suite green, so nothing distinguishes 'only high and critical block' from 'anything but low blocks'. One more case with severity \"medium\" closes it.",
+      "evidence": [
+        {"path": "internal/reviewlog/reviewlog.go", "line": 310},
+        {"path": "internal/reviewlog/reviewlog_test.go", "line": 289}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Misattributed doc comment. needsJudge was inserted between the `// Advance runs one step (spec 2 §5.4).` comment and the Advance method, so godoc now attaches that spec reference to the unexported helper and the exported Machine.Advance has no documentation at all -- `go doc -all ./internal/fsm/machine` prints Advance bare, alongside documented siblings Open and Fork. Move needsJudge above the `// ---- Advance` section marker, or below Advance.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine.go", "line": 556},
+        {"path": "internal/fsm/machine/machine.go", "line": 565}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Import grouping: reviewlog_test.go adds `github.com/dsifry/metareview/internal/jsonl` inside the stdlib block (between \"encoding/json\" and \"os\") while the same file already keeps module imports in a separate group. record_test.go's addition of the same import is grouped correctly, so the two halves of one change disagree. gofmt does not regroup and golangci-lint's standard set has no gci/goimports-local linter, so CI will not catch it.",
+      "evidence": [
+        {"path": "internal/reviewlog/reviewlog_test.go", "line": 4}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Suspected suite instability: an early full-suite run showed internal/fsm/cli, internal/fsm/judge and internal/fsm/kind escalation/sandbox tests failing, which would have undermined every 'the suite stays green' claim in this review. Refuted: the scratch copy had been rsynced from the live worktree while a concurrent agent's own mutations and probe files were present in it. Rebuilding the scratch tree from `git archive f22d23fa` gives a suite that is green on three consecutive full runs and on six parallel (-p 16) runs of ./internal/fsm/..., with no flakes.",
+      "evidence": [
+        {"note": "Reproduced clean baseline from the reviewed commit rather than from the live worktree; all mutation results reported here were re-derived on that tree."}
+      ]
+    }
+  ],
+  "blockingCount": 3
+}

@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1.8965ce0fa4b5ea00",
+  "kind": "shard",
+  "shardId": "shard-1",
+  "shardHash": "8965ce0fa4b5ea00",
+  "planHash": "232e5c0c067629e5",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-29T05:53:16Z",
+  "evidence": [
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 37,
+      "note": "Mutation testing was done in a scratch copy of the tree (rsync to the session scratchpad); the live repository was never edited and no binary was built into it. Baseline: go test ./internal/gitcontext ./internal/jsonl ./internal/fsm/judge ./internal/fsm/machine ./internal/fsm/cli all pass."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 203,
+      "note": "Pinned by mutation (each of these turns the suite red, so the guard is genuinely held): Escalate: c.escalation(...) -> Escalate: nil fails cli/kind/judge escalation tests; each of the three clauses of escalation() (noEscalate, scenario != nil, mode != judgeReal) removed individually fails TestEscalationIsWiredOnByDefault."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 101,
+      "note": "Pinned by mutation: needsJudge() forced to true fails TestPreflightSeam and the new TestPreflightSkipsNonJudgeForkNodes; dropping needsJudge from the Advance-side call at machine.go:634 fails TestPreflightSeam plus three internal/fsm/cli tests. Both Preflight call sites are held."
+    },
+    {
+      "path": "internal/jsonl/jsonl.go",
+      "line": 23,
+      "note": "Pinned by mutation and the doc comment is accurate: MaxLineBytes+2 -> +1 fails only the CRLF subtest, -> bare cap fails both LF and CRLF, exactly as the comment on NewScanner and the new test claim."
+    },
+    {
+      "path": "internal/fsm/judge/codex.go",
+      "line": 92,
+      "note": "Pinned by mutation: j.exec(actx, j.workDir, ...) -> j.exec(actx, \"\", ...) fails the three new work-dir tests plus kind's TestEscalationEndToEndWithMocks and cli's sandbox tests; validateCodex's trimPrefixFold -> strings.TrimPrefix fails TestValidateCodexRejectsAnEmptyModelInAnyCase for CODEX/, Codex/, cOdEx/; removing clampTok fails TestParseCodexEventsClampsInconsistentUsage. MaxAttempts is 5 (judge.go:38), so the new test comment's \"five attempts\" is accurate."
+    },
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 56,
+      "note": "The spec line added to docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md is correct: compare() sets EvidenceSame from evidenceOf(A)==evidenceOf(B), forces Same=false when it is false, and increments EvidenceMismatch, so a row whose sides saw excerpt vs sandbox can never be `same`."
+    },
+    {
+      "path": "internal/fsm/judge/prompts.go",
+      "line": 227,
+      "note": "adjudicate.plain.golden matches the rendered prompt: RubricAddendum is appended only for KindAdjudicate and only when calibration is false, and both the plain and fenced goldens carry the block while adjudicate.calibration.golden does not. tests/manifest/test-skills.sh and tests/go/test-learn-post-merge.sh both pass when run in the scratch copy."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "SPEC CONTRACT: two spec rows still say judge pre-flight runs \"after Resolve and before Create at Init for every `exec: fork` node, and on the Advance that would run a fork node\", but the code gates on KindInfo.NeedsJudge (machine.go:101 and :634 via needsJudge, machine/types.go:106, workflow/workflow.go:85), and this shard's new test TestPreflightSkipsNonJudgeForkNodes exists precisely to pin that a `cmd` node with `exec: fork` is NOT pre-flighted. docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md is itself a chunk of this shard, and its line 472 still states the old contract; the same sentence appears in fsm-core.md:451, and commit c233068 (\"docs: correct spec drift found by the round-seven review\") rewrote that very paragraph for a different drift (RecordLLMCall's signature) while leaving this row untouched. A reader of either spec will conclude a cmd/fork node is validated at init when it is not. Fix: update both rows to \"every judge-calling node (KindInfo.NeedsJudge)\".",
+      "evidence": [
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md", "line": 472},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md", "line": 451},
+        {"path": "internal/fsm/machine/machine.go", "line": 101},
+        {"path": "internal/fsm/machine/handoffs_test.go", "line": 233}
+      ]
+    },
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "The new HOME fixture makes CI execute the ~/.claude and ~/.codex discovery paths, but only with tiny lines, certifying a path that breaks on real session data. readJSONLSignal uses a bare bufio.NewScanner (64 KiB default token limit) instead of the repository's own jsonl.NewScanner (1 MiB + 2), and collectSignals/Collect propagate the scanner error, so learning/review.go:73-75 aborts the whole command. Probe (scratch copy, temp HOME with one ~/.claude/projects/p/a.jsonl line of 100 KB): sessionhistory.Collect returns `bufio.Scanner: token too long`, available=false, and `metareview learn --post-merge` would exit with that error rather than degrade. Claude Code transcripts routinely carry >64 KiB lines, and up to 80 candidate files are scanned (maxCandidateFiles), so one oversized line anywhere in the home scan is enough. Fix: use jsonl.NewScanner in readJSONLSignal (and either skip or truncate an over-long record rather than failing the run); optionally add a large-line fixture to this script so the path is actually covered.",
+      "evidence": [
+        {"path": "tests/go/test-learn-post-merge.sh", "line": 43},
+        {"path": "internal/sessionhistory/sessionhistory.go", "line": 226},
+        {"path": "internal/learning/review.go", "line": 73},
+        {"path": "internal/jsonl/jsonl.go", "line": 22}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The replacement lens assertion still cannot detect the failure it was written for. The comment says the old five-name prefix \"matched whether the document listed five or eight, so the assertion could not fail\"; the new loop greps each lens name anywhere in SKILL.md, and every lens name also appears in prose on the same page (\"The Security lens uses `rubrics/security-review-rubric.md`\"). Demonstrated in the scratch copy: deleting \", Security,\" from the required-lens enumeration on SKILL.md:15 leaves `bash tests/manifest/test-skills.sh` at exit 0; only removing every occurrence of the word makes it fail. So a lens can still be dropped from the list the skill actually instructs agents to run while reviewlog.artifactReviewComplete keeps requiring eight, which is the exact eight-passing-reviews-permanently-unresolvable failure the comment describes. Fix: assert the enumerated list itself (e.g. grep the full comma-joined sequence, or grep -c on the enumerating line).",
+      "evidence": [
+        {"path": "tests/manifest/test-skills.sh", "line": 97},
+        {"path": "skills/review-artifact/SKILL.md", "line": 15},
+        {"path": "internal/reviewlog/reviewlog.go", "line": 169}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The hardening added at branchfiles.go:37 is correct but nothing holds it, and its failure mode is silent. Mutation: `exec.Command(\"git\", hardenDiff(args)...)` -> `exec.Command(\"git\", args...)` leaves the whole internal/gitcontext suite green (8.9s, ok). A probe in the scratch copy (repo with diff.external set to a script echoing a sentinel, a branch diff large enough to set DiffTruncated so collectBranchFiles runs) shows the difference: BranchFilteredDiffBytes 205624 with the guard, 104 bytes of driver output without it, i.e. every branch-file byte count, file hash and therefore the shard plan would be built from the external driver's rendering. extdiff_test.go's own comment claims coverage it does not have -- \"Every git diff in this package feeds the review, so the hardening has to hold on all of them, not just the branch diff\" -- yet both of its cases use a small repo that never reaches the branch-file path and assert only ctx.Diff/ctx.DiffStat. Fix: one case with a truncated diff asserting BranchDiffFull/BranchFilteredDiffBytes.",
+      "evidence": [
+        {"path": "internal/gitcontext/branchfiles.go", "line": 37},
+        {"path": "internal/gitcontext/extdiff_test.go", "line": 15},
+        {"path": "internal/gitcontext/gitcontext.go", "line": 339}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The --no-escalate flag's effect is unpinned end to end. escalation() reads c.noEscalate and TestEscalationIsWiredOnByDefault sets that field directly, but nothing connects the flag to the field: mutation `c.noEscalate = p.bools[\"no-escalate\"]` -> `c.noEscalate = false` (making the documented flag a no-op) leaves the entire internal/fsm/cli suite green (27s, ok). The field comment added here says it \"turns off the sandbox second opinion\", and prompt.go:48 and docs/fsm/driving-a-workflow.md:115 present --no-escalate to operators and agents as the knob that prevents a local codex binary being spawned over a materialized tree, so a silent regression would spend money and exec a CLI the operator explicitly declined. Fix: one cli-level test that passes --no-escalate through Run/parseArgs and asserts no escalation provider reaches kind.New.",
+      "evidence": [
+        {"path": "internal/fsm/cli/wiring.go", "line": 48},
+        {"path": "internal/fsm/cli/run.go", "line": 49},
+        {"path": "internal/fsm/cli/escalation_test.go", "line": 194}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 'five required' loop is vacuous today and narrower than the property its comment states (\"no user-facing document may claim a different count than the gate enforces\"). None of the five listed documents contains the word \"five\" at all, and the check matches only that exact phrase: appending \"Run the five lenses.\" to docs/quickstart.md keeps the script at exit 0, while \"The five required lenses...\" in README.md fails it. It also cannot notice a document being renamed or moved -- grep on a missing path is simply false, so the loop passes. Low because it is a documentation guard, not a code path, but the comment overstates what it enforces.",
+      "evidence": [
+        {"path": "tests/manifest/test-skills.sh", "line": 103}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Assertion that cannot fail: `if tok.Total() < 0` in TestParseCodexEventsClampsInconsistentUsage. With this fixture the unclamped values are Input 10-99 = -89 and Output 3-50 = -47 against CacheRead 99 + Reasoning 50, so Total() is +13 even with the clamp removed -- verified by mutating clampTok away, which fires the two Errorf checks above it and never this one. The test therefore names a property (\"must never be negative\") that its input cannot exercise; either drop the check or use a fixture where the negative components dominate (e.g. cached 99 with reasoning 0).",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex_test.go", "line": 399}
+      ]
+    }
+  ],
+  "blockingCount": 5
+}
