@@ -174,12 +174,39 @@ func verdictIsUnresolved(verdict string) bool {
 var currentLenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation", "security", "testingquality", "datamigration"}
 var legacyLenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation"}
 
-// lensEraCutoff is the date the eight-lens rule landed: security (0.7.0) and testing-quality /
-// data-migration (0.8.0) both shipped on 2026-08-24. A log from before it predates those lenses
-// and is judged against the five that were required then; a log from that day onward is judged
-// against the full current set whether or not it declares one, so the legacy rubric cannot be
-// obtained by leaving the marker out.
-const lensEraCutoff = "20260824"
+// lensEra records a rubric and the date it took effect. Adding a lens means appending an era, not
+// editing currentLenses: a log has to stay judged against the rubric of its own date, or every
+// completed review becomes incomplete the day the next lens ships - which is the failure the
+// Required lenses marker exists to prevent, returning exactly when it is needed.
+//
+// Eras are ordered oldest first and compared as YYYYMMDD strings. Security (0.7.0) and
+// testing-quality / data-migration (0.8.0) both shipped on 2026-08-24.
+type lensEra struct {
+	from   string
+	lenses []string
+}
+
+var lensEras = []lensEra{
+	{from: "", lenses: legacyLenses},
+	{from: "20260824", lenses: currentLenses},
+}
+
+// eraLenses is the rubric in force when this run happened. A run ID with no parseable date is
+// judged against the newest rubric, not the oldest: the grandfather is an allowance for provenance
+// we can verify, and treating unknown provenance as old would let any log claim it.
+func eraLenses(runID string) []string {
+	date := runDate(runID)
+	if date == "" {
+		return lensEras[len(lensEras)-1].lenses
+	}
+	lenses := lensEras[0].lenses
+	for _, era := range lensEras {
+		if era.from <= date {
+			lenses = era.lenses
+		}
+	}
+	return lenses
+}
 
 // requiredLenses answers which lenses this particular log had to cover.
 //
@@ -188,22 +215,30 @@ const lensEraCutoff = "20260824"
 // an artifact log only reaches a gate once someone edits the file it reviewed, the result is a
 // blocker that can never be resolved by fixing anything - only by a standing override. So the log
 // declares its own set, and one written before the marker existed falls back to the set of its era.
+// requiredLenses answers which lenses this particular log had to cover: the rubric in force on its
+// date, plus anything its own declaration adds.
+//
+// The date is the authority and the declaration may only strengthen. A declaration that could
+// reduce the requirement would be an opt-out written by the thing being judged - a current review
+// could declare the legacy five and drop security, testing-quality and data-migration, which is
+// precisely the escape the unmarked path already refuses. An unrecognised declaration adds
+// nothing; the era floor still applies.
 func requiredLenses(declared []string, runID string) []string {
-	if len(declared) > 0 {
-		// A declaration records which rubric a review was written under; it does not get to invent
-		// one. Honouring an arbitrary set would let a log name a single lens, satisfy it with a
-		// single row, and be reported complete - declaring security, testing-quality and
-		// data-migration away. Only a set that matches a rubric this tool has actually shipped is
-		// honoured; anything else falls through to the current set rather than to the weaker one.
-		if known := knownRubric(declared); known != nil {
-			return known
+	required := map[string]bool{}
+	for _, name := range eraLenses(runID) {
+		required[name] = true
+	}
+	if known := knownRubric(declared); known != nil {
+		for _, name := range known {
+			required[name] = true
 		}
-		return currentLenses
 	}
-	if date := runDate(runID); date != "" && date < lensEraCutoff {
-		return legacyLenses
+	out := make([]string, 0, len(required))
+	for name := range required {
+		out = append(out, name)
 	}
-	return currentLenses
+	sort.Strings(out)
+	return out
 }
 
 // runDate extracts the YYYYMMDD segment of a run ID (mrv-20260705-...), or "" when there is none.

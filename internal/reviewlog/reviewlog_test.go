@@ -417,6 +417,10 @@ func TestArtifactLensSetIsGrandfathered(t *testing.T) {
 		// An all-digit run of eight characters is not a date. Accepting one as legacy would hand the
 		// five-lens rubric to any log carrying a plausible-looking id, which is the opposite of a
 		// grandfather bounded by verifiable provenance.
+		// A declaration may strengthen what a log is held to; it may never weaken it. Declaring the
+		// legacy five on a post-cutoff log is an opt-out of security, testing-quality and
+		// data-migration - the exact escape the unmarked path already refuses after the cutoff.
+		{"post-cutoff log cannot declare the legacy rubric", log("mrv-20260829-1-artifact-a-1", "feasibility, completeness, scope-and-alignment, architecture, intent-preservation", rows(five...)), true},
 		// A declaration is provenance, not permission. Accepting an arbitrary one lets a log name a
 		// one-lens rubric, satisfy it with a single row, and be reported complete - so a current
 		// review could skip security, testing-quality and data-migration by declaring them away.
@@ -433,5 +437,40 @@ func TestArtifactLensSetIsGrandfathered(t *testing.T) {
 				t.Errorf("HasUnresolvedBlockers = %v, want %v", got, tc.blocking)
 			}
 		})
+	}
+}
+
+// The era table is what keeps the marker meaningful across the NEXT lens addition. Judging a log
+// against a live "current" set means every existing declaration stops matching the day a lens is
+// added, and every completed review becomes incomplete again - the standing-override failure the
+// marker exists to prevent, returning at exactly the moment it is needed. Eras are keyed by the
+// date a rubric took effect, so adding a lens means appending an era and leaves older logs alone.
+func TestLensErasAreKeyedByDate(t *testing.T) {
+	for _, tc := range []struct {
+		runID string
+		want  []string
+	}{
+		{"mrv-20260705-1-artifact-a-1", legacyLenses},
+		{"mrv-20260823-1-artifact-a-1", legacyLenses},
+		{"mrv-20260824-1-artifact-a-1", currentLenses},
+		{"mrv-20260829-1-artifact-a-1", currentLenses},
+		{"mrv-notadate-1-artifact-a-1", currentLenses},
+	} {
+		got := eraLenses(tc.runID)
+		if !sameLensSet(got, tc.want) {
+			t.Errorf("eraLenses(%s) = %v, want %v", tc.runID, got, tc.want)
+		}
+	}
+	// Appending a future era must not reach back. This is the property that breaks if the rule is
+	// "whatever the current set happens to be".
+	saved := lensEras
+	defer func() { lensEras = saved }()
+	ninth := append(append([]string{}, currentLenses...), "supplychain")
+	lensEras = append(append([]lensEra{}, lensEras...), lensEra{from: "20270101", lenses: ninth})
+	if !sameLensSet(eraLenses("mrv-20260829-1-artifact-a-1"), currentLenses) {
+		t.Error("adding a later era must not change what an earlier log is judged against")
+	}
+	if !sameLensSet(eraLenses("mrv-20270102-1-artifact-a-1"), ninth) {
+		t.Error("a log written in the new era must be judged against it")
 	}
 }
