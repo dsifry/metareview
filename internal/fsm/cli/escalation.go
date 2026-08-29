@@ -92,7 +92,7 @@ func (c *ctxDeps) referencedByFindings(snap run.Snapshot, changed []string) []st
 			// for the entire run. diffselect's own comment sets the intended cost of a spurious
 			// path: "at worst costs one escalation". So the untrusted half is filtered here,
 			// where the provenance is known, and the guard downstream stays fail-closed.
-			if clean := filepath.Clean(p); clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+			if escapesTree(p) {
 				continue
 			}
 			extra = append(extra, p)
@@ -101,11 +101,30 @@ func (c *ctxDeps) referencedByFindings(snap run.Snapshot, changed []string) []st
 	return extra
 }
 
+// escapesTree reports whether a path cannot be written inside the evidence tree. It checks for a
+// ".." COMPONENT rather than a ".." prefix: a directory may legitimately be named "..dir", and
+// rejecting it would drop a real file from the evidence for looking like traversal.
+func escapesTree(p string) bool {
+	clean := filepath.Clean(p)
+	if clean == "." || filepath.IsAbs(clean) {
+		return true
+	}
+	for _, part := range strings.Split(filepath.ToSlash(clean), "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // changedPaths lists what the branch touched, NUL-delimited so a path containing a space or a
 // newline survives (git quotes those in its line-oriented output, and the quoting is lossy to
 // parse; -z avoids the question).
 func (c *ctxDeps) changedPaths(ctx context.Context, root, base, head string) ([]string, error) {
-	out, code, err := c.gitCtx(ctx, root, "diff", "--no-ext-diff", "--name-only", "-z", "--no-renames", base+".."+head)
+	// Raw, not trimmed: the output is NUL-delimited and a path may legitimately begin or end with
+	// whitespace, which TrimSpace would silently rewrite into a different path - dropping that
+	// file from the evidence.
+	raw, code, err := c.gitRawCtx(ctx, root, "diff", "--no-ext-diff", "--name-only", "-z", "--no-renames", base+".."+head)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +137,7 @@ func (c *ctxDeps) changedPaths(ctx context.Context, root, base, head string) ([]
 		return nil, fmt.Errorf("git diff %s..%s failed with exit code %d", base, head, code)
 	}
 	var paths []string
-	for _, p := range strings.Split(out, "\x00") {
+	for _, p := range strings.Split(string(raw), "\x00") {
 		if p != "" {
 			paths = append(paths, p)
 		}

@@ -503,3 +503,19 @@ func TestOnlyCriticalAndHighSeveritiesBlock(t *testing.T) {
 		t.Error("a spec-contract finding must block regardless of severity")
 	}
 }
+
+// A declaration that repeats a lens is malformed, and malformed is not "the legacy rubric".
+// Comparing only the count of UNIQUE names let "the five legacy lenses, one of them twice" match
+// legacyLenses, so a pre-cutoff log could satisfy the gate with five rows on an invalid marker.
+func TestDuplicateLensDeclarationIsNotAShippedRubric(t *testing.T) {
+	dup := append(append([]string{}, legacyLenses...), legacyLenses[0])
+	if known := knownRubric(dup); known != nil {
+		t.Errorf("a declaration repeating a lens matched %v; it names no shipped rubric", known)
+	}
+	if known := knownRubric(legacyLenses); known == nil {
+		t.Error("the legacy rubric itself must still be recognised")
+	}
+	if known := knownRubric(currentLenses); known == nil {
+		t.Error("the current rubric must still be recognised")
+	}
+}

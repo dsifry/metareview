@@ -490,3 +490,23 @@ func TestDiffHasFileNormalisesOrdinaryPathSpellings(t *testing.T) {
 		}
 	}
 }
+
+// A finding that quotes its own file the way a diff header writes it ("b/pkg/a.go") is naming the
+// same file, not a second one. Keying the dedup on the raw string spent a maxReferencedFiles slot
+// and a share of the budget on that alias - showing the primary twice and dropping a genuine
+// second file to make room for it.
+func TestReferencedPathsTreatsAliasesOfTheOwnFileAsTheSameFile(t *testing.T) {
+	diff := "diff --git a/pkg/a.go b/pkg/a.go\n--- a/pkg/a.go\n+++ b/pkg/a.go\n@@ -1,2 +1,3 @@\n+\taMarker()\n" +
+		"diff --git a/pkg/b.go b/pkg/b.go\n--- a/pkg/b.go\n+++ b/pkg/b.go\n@@ -1,2 +1,3 @@\n+\tbMarker()\n"
+	text := "as written in b/pkg/a.go and ./pkg/a.go, compare with pkg/b.go"
+	got := ReferencedPaths(diff, "pkg/a.go", text)
+	if len(got) != 1 || NormalizePath(got[0]) != "pkg/b.go" {
+		t.Errorf("ReferencedPaths = %v, want only the genuinely other file pkg/b.go", got)
+	}
+	all := AllReferencedPaths("pkg/a.go", text)
+	for _, p := range all {
+		if NormalizePath(p) == "pkg/a.go" {
+			t.Errorf("AllReferencedPaths returned an alias of the candidate's own file: %v", all)
+		}
+	}
+}

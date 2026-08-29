@@ -266,6 +266,12 @@ func knownRubric(declared []string) []string {
 }
 
 func sameLensSet(a, b []string) bool {
+	// Length first: comparing only the count of UNIQUE names let a declaration that repeats a lens
+	// match a shipped rubric, so "the five legacy lenses, one of them twice" was honoured as the
+	// legacy set. A declaration is provenance; a malformed one is not evidence of anything.
+	if len(a) != len(b) {
+		return false
+	}
 	seen := map[string]bool{}
 	for _, name := range a {
 		seen[name] = true

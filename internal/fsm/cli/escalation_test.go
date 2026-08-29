@@ -439,3 +439,92 @@ func TestEscalationRefusesAnEmptyEvidenceTree(t *testing.T) {
 		t.Error("an empty evidence tree must be an error, not a sandbox the judge is pointed at")
 	}
 }
+
+// The two failure paths of the blob read itself: ls-tree says the file is there, and reading it
+// then fails. Both must surface, for the same reason as every other sandbox failure - a tree
+// missing a file it was supposed to carry is not evidence, and the caller must keep the finding
+// rather than record a verdict against a partial tree.
+func TestShowFileSurfacesBlobReadFailures(t *testing.T) {
+	for _, shape := range []struct {
+		name string
+		fail func() ([]byte, []byte, int, error)
+	}{
+		{"nonzero exit", func() ([]byte, []byte, int, error) { return []byte("fatal: bad object"), nil, 128, nil }},
+		{"transport error", func() ([]byte, []byte, int, error) { return nil, nil, 1, os.ErrPermission }},
+	} {
+		t.Run(shape.name, func(t *testing.T) {
+			h, c, snap, _ := escalationHarness(t)
+			real := c.deps.Exec
+			c.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
+				// ls-tree still reports the file as present; only the blob read fails.
+				if len(args) > 1 && args[0] == "cat-file" && args[1] == "blob" {
+					return shape.fail()
+				}
+				return real(ctx, dir, env, args...)
+			}
+			if _, err := c.escalationFor(h.root)(context.Background(), snap, &workflow.Node{Model: "codex/x"}); err == nil {
+				t.Error("a file that ls-tree lists but cat-file cannot read must surface as an error")
+			}
+		})
+	}
+}
+
+// The evidence trees are removed when the invocation ends. They are written read-only so a judge
+// cannot edit its own evidence, which is also what makes removal need a chmod pass first: without
+// it RemoveAll fails on the 0444 files and the tree survives, which is how one machine reached
+// 1015 of them.
+func TestRemoveSandboxesDeletesReadOnlyTrees(t *testing.T) {
+	h, c, snap, _ := escalationHarness(t)
+	if _, err := c.escalationFor(h.root)(context.Background(), snap, &workflow.Node{Model: "codex/x"}); err != nil {
+		t.Fatalf("escalationFor: %v", err)
+	}
+	if len(c.sandboxRoots) == 0 {
+		t.Fatal("no sandbox root was recorded")
+	}
+	root := c.sandboxRoots[0]
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("the tree should exist before removal: %v", err)
+	}
+	c.removeSandboxes()
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Errorf("the evidence tree survived removal: %v", err)
+	}
+	if len(c.sandboxRoots) != 0 {
+		t.Error("the recorded roots must be cleared, or a second call would retry deleted paths")
+	}
+
+	// A root that is already gone - removed by hand, or by a previous call - must not stop the
+	// rest being cleaned up. WalkDir reports the failure to the callback, which ignores it: the
+	// point of this pass is best-effort chmod, and a missing tree needs no chmod.
+	live := t.TempDir()
+	c.sandboxRoots = []string{filepath.Join(t.TempDir(), "already-removed"), live}
+	c.removeSandboxes()
+	if _, err := os.Stat(live); !os.IsNotExist(err) {
+		t.Errorf("a missing earlier root stopped the rest being removed: %v", err)
+	}
+}
+
+// escapesTree decides which judge-authored paths may reach the evidence tree, so each way out is
+// worth stating: an absolute path, a "." that names no file, and a ".." component - but NOT a name
+// that merely begins with dots, which is an ordinary directory.
+func TestEscapesTree(t *testing.T) {
+	for _, tc := range []struct {
+		path    string
+		escapes bool
+	}{
+		{"internal/x.go", false},
+		{"./internal/x.go", false},
+		{"..dir/file.go", false},
+		{"pkg/..name.go", false},
+		{"../secrets.env", true},
+		{"./../../x.go", true},
+		{"a/../../b.go", true},
+		{"/etc/shadow", true},
+		{".", true},
+		{"", true},
+	} {
+		if got := escapesTree(tc.path); got != tc.escapes {
+			t.Errorf("escapesTree(%q) = %v, want %v", tc.path, got, tc.escapes)
+		}
+	}
+}

@@ -148,10 +148,16 @@ type AdjudicateInput struct {
 	DiffTruncated   bool        `json:"diff_truncated"`
 	DiffContextHash string      `json:"diff_context_hash"`
 	Candidate       run.Finding `json:"candidate"`
-	// SandboxRoot is set only on an escalated call, where the changed files have been
-	// materialized at both revisions on disk. It adds SandboxAddendum to the system message; the
-	// vendored template itself is untouched, so provenance still holds.
-	SandboxRoot string `json:"sandbox_root,omitempty"`
+	// Sandbox is set only on an escalated call, where the changed files have been materialized at
+	// both revisions on disk. It adds SandboxAddendum to the system message; the vendored template
+	// itself is untouched, so provenance still holds.
+	//
+	// A bool, not the path: InputHash covers this struct, and the tree lives in a per-invocation
+	// temp directory, so carrying the path gave every escalated call a fresh input_hash even when
+	// the evidence and the prompt were identical - defeating the replay the hash exists for. The
+	// tree itself is addressed by TreeHash in the audit; what the input needs to record is only
+	// that this call was given one.
+	Sandbox bool `json:"sandbox,omitempty"`
 }
 
 // SandboxAddendum tells an escalated judge that the excerpt is not all it has. The first arm has
@@ -219,7 +225,7 @@ func RenderPrompt(kind string, in any, fence, calibration bool, nonce string) (s
 			return "", "", errs.E(CodePromptTemplate, "adjudicate expects AdjudicateInput", "kind", kind)
 		}
 		system, template = SystemAdjudicate, TemplateAdjudicate
-		if ai.SandboxRoot != "" {
+		if ai.Sandbox {
 			system += SandboxAddendum
 		}
 		slots["diff"], slots["candidate"] = ai.Diff, ai.Candidate.IssueText

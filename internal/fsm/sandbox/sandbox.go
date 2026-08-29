@@ -39,6 +39,15 @@ type Tree struct {
 	Files    int
 }
 
+func hasParentComponent(clean string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(clean), "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // Materialize writes head/<path> and base/<path> under root for every path given.
 //
 // Paths are contained: anything that escapes root once cleaned is refused rather than
@@ -59,7 +68,9 @@ func Materialize(root, baseSHA, headSHA string, paths []string, show ShowFunc) (
 	written := map[string]bool{}
 	for _, rel := range sorted {
 		clean := filepath.Clean(rel)
-		if clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+		// A ".." COMPONENT, not a ".." prefix: a directory may legitimately be named "..dir", and
+		// refusing it would fail the batch over a real file that never escapes anything.
+		if clean == "." || filepath.IsAbs(clean) || hasParentComponent(clean) {
 			return nil, fmt.Errorf("sandbox: path escapes the tree: %q", rel)
 		}
 		if written[clean] {

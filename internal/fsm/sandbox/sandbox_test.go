@@ -217,3 +217,22 @@ func TestTreeHashAddressesSideAndPathNotJustContent(t *testing.T) {
 		t.Error("two different paths with identical content share an address: the path is not hashed")
 	}
 }
+
+// Containment is about a ".." COMPONENT, not a ".." prefix. A directory named "..dir" is an
+// ordinary name that escapes nothing, and refusing it failed the whole batch - dropping every
+// other file's evidence over a path that was never a traversal.
+func TestMaterializeDistinguishesDotDotComponentFromDotDotPrefix(t *testing.T) {
+	show := func(rev, path string) ([]byte, bool, error) { return []byte("x\n"), true, nil }
+	tree, err := Materialize(t.TempDir(), "B", "H", []string{"..dir/file.go", "pkg/..name.go"}, show)
+	if err != nil {
+		t.Fatalf("names that merely begin with dots are not traversal: %v", err)
+	}
+	if tree.Files != 4 { // two paths, two sides
+		t.Errorf("Files = %d, want 4", tree.Files)
+	}
+	for _, bad := range []string{"../x.go", "./../../x.go", "a/../../b.go", "/abs/x.go"} {
+		if _, err := Materialize(t.TempDir(), "B", "H", []string{bad}, show); err == nil {
+			t.Errorf("%q escapes the tree and must be refused", bad)
+		}
+	}
+}

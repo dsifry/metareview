@@ -117,11 +117,15 @@ for doc in README.md docs/quickstart.md docs/README.claude.md docs/README.codex.
   # Any claim of a lens count other than eight, not just the exact phrase "five required": none
   # of these documents contains the word "five" at all today, so matching one phrase asserted
   # nothing. "Run the five lenses." could be appended to any of them and this stayed at exit 0.
-  if grep -Eqi '\b(one|two|three|four|five|six|seven|nine|ten|[0-9]+) (required )?lenses\b' "$doc"; then
-    echo "FAIL: $doc claims a lens count other than eight, which is what artifactReviewComplete enforces:"
-    grep -Ein '\b(one|two|three|four|five|six|seven|nine|ten|[0-9]+) (required )?lenses\b' "$doc" | head -3
-    exit 1
-  fi
+  # Read the count and compare it, rather than trying to enumerate every wrong spelling: the
+  # first attempt at this matched [0-9]+ and so rejected a document that correctly said
+  # "8 lenses", while allowing "eight" only because that word had been left out of the list.
+  while read -r count; do
+    case "$(printf '%s' "$count" | tr '[:upper:]' '[:lower:]')" in
+      eight|8) ;;
+      *) echo "FAIL: $doc claims $count lenses; artifactReviewComplete enforces eight"; exit 1 ;;
+    esac
+  done < <(grep -Eoi '\b(one|two|three|four|five|six|seven|eight|nine|ten|[0-9]+) (required )?lenses\b' "$doc" | awk '{print $1}')
 done
 grep -q 'return the actual artifact-review verdict' skills/review-artifact/SKILL.md
 grep -q 'parallel subagents by default' docs/quickstart.md

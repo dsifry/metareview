@@ -360,12 +360,17 @@ func namedPaths(text string) []string {
 // of four sampled rejections were exactly that.
 func ReferencedPaths(diff, own, text string) []string {
 	var out []string
-	seen := map[string]bool{own: true}
+	// Keyed on the normalized path, like DiffHasFile: prose that quotes the candidate's own file
+	// from a diff header ("b/internal/x.go") names the same file, not an extra one. Keying on the
+	// raw string spent a maxReferencedFiles slot and a share of the budget on an alias of the
+	// primary - showing it twice and dropping a genuine second file to make room.
+	seen := map[string]bool{NormalizePath(own): true}
 	for _, m := range namedPaths(text) {
-		if seen[m] || !DiffHasFile(diff, m) {
+		key := NormalizePath(m)
+		if seen[key] || !DiffHasFile(diff, m) {
 			continue
 		}
-		seen[m] = true
+		seen[key] = true
 		if out = append(out, m); len(out) == maxReferencedFiles {
 			break
 		}
@@ -392,12 +397,13 @@ func MentionsOtherFiles(own, text string) bool {
 // claim depends on, which a tree of only the changed files cannot.
 func AllReferencedPaths(own, text string) []string {
 	var out []string
-	seen := map[string]bool{own: true}
+	seen := map[string]bool{NormalizePath(own): true}
 	for _, m := range namedPaths(text) {
-		if seen[m] {
+		key := NormalizePath(m)
+		if seen[key] {
 			continue
 		}
-		seen[m] = true
+		seen[key] = true
 		if out = append(out, m); len(out) == maxReferencedFiles {
 			break
 		}
