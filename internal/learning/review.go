@@ -18,7 +18,11 @@ type ReviewOptions struct {
 	Base        string
 	GitHubPR    string
 	SessionRoot string
-	Now         time.Time
+	// HomeDir overrides where session history is discovered. Empty means the caller's real
+	// home, which is correct in production and non-deterministic in tests: coverage of the
+	// discovery paths then tracks whatever session data the machine happens to hold.
+	HomeDir string
+	Now     time.Time
 }
 
 type ReviewResult struct {
@@ -66,7 +70,7 @@ func RunPostMerge(root string, options ReviewOptions) (ReviewResult, error) {
 	if err != nil {
 		return ReviewResult{}, err
 	}
-	session, err := sessionhistory.Collect(root, sessionhistory.Options{SessionRoot: options.SessionRoot})
+	session, err := sessionhistory.Collect(root, sessionhistory.Options{SessionRoot: options.SessionRoot, HomeDir: options.HomeDir})
 	if err != nil {
 		return ReviewResult{}, err
 	}
