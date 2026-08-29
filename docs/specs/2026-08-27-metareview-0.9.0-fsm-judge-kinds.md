@@ -240,6 +240,18 @@ Executors `Audit` immediately after each `Judge.Call` returns; a non-parse error
 ```go
 type Deps struct { Judge judge.Judge; Mock bool }   // no runner here: the cmd kind uses ExecInput.Runner (converge.Caller — Run + Call), the session's single guarded runner
 func New(d Deps) (*Registry, error)   // Registry.Mock() == d.Mock; New refuses Mock:true with a non-*judge.MockJudge and Mock:false with one (ERR_MOCK_MISMATCH)
+// RubricAddendum (judge.RubricAddendum) is appended to SystemAdjudicate on every judged
+// adjudicate call and omitted under --calibration. It is metareview's, not harnesseval's:
+// the vendored verifier asks "is this a real bug in the diff", which is correct for the
+// benchmark it came from and wrong for a merge gate. Measured on this repository, it rejected
+// unpinned invariants - a symlink guard, an exit-code row and a keep-hash each deletable with
+// the whole suite green - as "a test-coverage gap, not incorrect behaviour". All three were
+// real. Better evidence cannot fix that: the question was wrong, not the context. The addendum
+// declares that an invariant nothing holds, an assertion that cannot fail, and a comment or
+// spec row asserting a property the code lacks are all real findings. It is APPENDED rather
+// than merged so the vendored system string stays byte-identical, and --calibration still
+// sends exactly what the reference sends (ledgered parity deviation).
+
 // Bug.Verdict constants: run.VerdictMatched = "matched", run.VerdictRealButUngold = "real_but_ungold",
 // run.VerdictHallucination = "hallucination", run.VerdictUnverifiedNoEvidence = "unverified_no_evidence",
 // run.VerdictCheckedButUnverified = "checked_but_unverified" (typed in run; Decode validates the set for every kind incl. cmd).

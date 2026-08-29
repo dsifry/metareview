@@ -23,8 +23,35 @@ const (
 // testdata/prompts/*.python.txt). still-present's f-string diff slot is
 // rewritten to {diff}; the product template adds the confidence line.
 const (
-	SystemMatch        = "You are a precise code review evaluator. Always respond with valid JSON."
-	SystemAdjudicate   = "You are a strict code review verifier. Always respond with valid JSON."
+	SystemMatch      = "You are a precise code review evaluator. Always respond with valid JSON."
+	SystemAdjudicate = "You are a strict code review verifier. Always respond with valid JSON."
+
+	// RubricAddendum is metareview's, not harnesseval's. The vendored verifier asks whether a
+	// finding is a real bug in the diff - the right question for the benchmark it came from,
+	// and the wrong one for a gate that decides whether a change may merge.
+	//
+	// Measured on this repository's own branch, it rejected an entire class as "a test-coverage
+	// gap, not incorrect behaviour": a symlink guard, an exit-code row and a keep-hash that could
+	// each be deleted with the whole suite still green. All three were real, and an unheld
+	// invariant is precisely what a gate exists to catch - better evidence does not help, because
+	// the question itself was wrong. It is appended to the system prompt rather than merged into
+	// it so the vendored string stays byte-identical, and it is omitted under --calibration so
+	// the apples-to-apples path still sends exactly what the reference sends.
+	RubricAddendum = "\n\nAdditional criteria for this reviewer (these extend, and where they conflict they override, " +
+		"the instructions above).\n" +
+		"This review gates a change before it merges; it is not a bug-finding benchmark. A finding is REAL when a " +
+		"maintainer must act on it before merge, which is broader than a wrong computation.\n" +
+		"- An invariant that nothing holds is a real finding. If the finding shows that a guard, check, error-code " +
+		"row or assertion can be deleted or inverted with the test suite still passing, answer is_real true. " +
+		"Working-but-unpinned is the defect: nothing keeps it working. Do not dismiss this as \"only a test-coverage " +
+		"gap\".\n" +
+		"- An assertion that cannot fail is a real finding: a test, subtest or check whose condition is unreachable, " +
+		"tautological, or satisfied by something other than the property it names.\n" +
+		"- A comment, doc line, test name or specification row that asserts a property the code does not have is a " +
+		"real finding, even when the code behaves correctly, because the next reader will rely on it.\n" +
+		"Still answer false for a finding the code contradicts, one that restates intended behaviour, or one whose " +
+		"premise about a tool or language is wrong. If what you were given is not enough to decide, say exactly what " +
+		"was missing in your reasoning rather than guessing."
 	SystemStillPresent = SystemAdjudicate
 
 	TemplateMatch = `You are evaluating AI code review tools.
@@ -196,6 +223,8 @@ func RenderPrompt(kind string, in any, fence, calibration bool, nonce string) (s
 	}
 	if calibration {
 		fence = false
+	} else if kind == KindAdjudicate {
+		system += RubricAddendum
 	}
 	values := map[string]string{}
 	for k, v := range slots {

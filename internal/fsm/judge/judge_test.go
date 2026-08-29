@@ -378,8 +378,13 @@ func TestJ4RequestShapes(t *testing.T) {
 			}
 		}
 		req := d.reqs[0]
+		// calibration sends the reference system prompt unchanged; a judged call carries the addendum
+		wantSystem := SystemAdjudicate
+		if !c.calib {
+			wantSystem += RubricAddendum
+		}
 		if route(c.model) == provAnthropic {
-			if req.URL.String() != "https://api.anthropic.com/v1/messages" || req.Header.Get("x-api-key") != "sk-ant-test" || req.Header.Get("anthropic-version") != "2023-06-01" || req.Header.Get("anthropic-beta") != "" || b["system"] != SystemAdjudicate {
+			if req.URL.String() != "https://api.anthropic.com/v1/messages" || req.Header.Get("x-api-key") != "sk-ant-test" || req.Header.Get("anthropic-version") != "2023-06-01" || req.Header.Get("anthropic-beta") != "" || b["system"] != wantSystem {
 				t.Errorf("anthropic request: %s %v", req.URL, req.Header)
 			}
 			msgs := b["messages"].([]any)
@@ -391,7 +396,7 @@ func TestJ4RequestShapes(t *testing.T) {
 				t.Errorf("openai request: %s", req.URL)
 			}
 			msgs := b["messages"].([]any)
-			if len(msgs) != 2 || msgs[0].(map[string]any)["role"] != "system" || msgs[0].(map[string]any)["content"] != SystemAdjudicate {
+			if len(msgs) != 2 || msgs[0].(map[string]any)["role"] != "system" || msgs[0].(map[string]any)["content"] != wantSystem {
 				t.Error("openai messages")
 			}
 		}
