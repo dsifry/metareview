@@ -268,7 +268,19 @@ func normalizedReviewer(value string) string {
 	value = strings.ToLower(value)
 	value = strings.ReplaceAll(value, "&", "and")
 	replacer := strings.NewReplacer("-", "", "_", "", "/", "", " ", "")
-	return replacer.Replace(value)
+	return canonicalLens(replacer.Replace(value))
+}
+
+// canonicalLens folds spellings of the same lens onto one key. The scope lens is written both ways
+// in this repository - the artifact scaffold declares "scope-alignment" while the reviewer row it
+// asks for is "Scope and alignment" - and both already appear in committed review logs, so folding
+// here is what lets a declared set and a reviewer table refer to the same lens. Dropping it makes
+// every newly completed artifact review permanently incomplete.
+func canonicalLens(name string) string {
+	if name == "scopealignment" {
+		return "scopeandalignment"
+	}
+	return name
 }
 
 func reviewerVerdictComplete(value string) bool {
