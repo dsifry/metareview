@@ -183,16 +183,33 @@ func trimPrefixFold(value, prefix string) string {
 // realJudge is the HTTP implementation, and the router for codex/ models.
 type realJudge struct {
 	codex CodexExec
-	doer  Doer
-	keys  Keys
-	urls  URLs
-	nonce func() string
-	clock Clock
+	// codexWorkDir narrows a codex judge to a materialized evidence tree. Empty inherits the
+	// caller's directory, which is metareview's own repo - read and exec access to all of it.
+	codexWorkDir string
+	doer         Doer
+	keys         Keys
+	urls         URLs
+	nonce        func() string
+	clock        Clock
 }
 
 // New builds the real judge; base URLs are validated once.
 func New(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock) (Judge, error) {
 	return NewWithCodex(doer, keys, urls, nonce, clock, nil)
+}
+
+// WithCodexWorkDir returns j with its codex judge confined to dir. It is the containment
+// half of sandbox evidence: the CLI can read and execute inside whatever directory it is
+// given, so handing it a materialized tree is what makes "the evidence" an enumerable set.
+// A non-codex judge is returned unchanged.
+func WithCodexWorkDir(j Judge, dir string) Judge {
+	rj, ok := j.(*realJudge)
+	if !ok {
+		return j
+	}
+	clone := *rj
+	clone.codexWorkDir = dir
+	return &clone
 }
 
 // NewWithCodex is New plus the Codex CLI seam. When codex is nil a codex/ model
@@ -513,7 +530,7 @@ func (j *realJudge) Call(ctx context.Context, r Request) (v Verdict, err error) 
 			return Verdict{Kind: r.Kind, Model: r.Model, Effort: r.Effort, InputHash: InputHash(r.Input)},
 				errs.E(CodeJudgeModel, "no codex runner is wired for "+r.Model, "model", r.Model, "provider", "codex")
 		}
-		return (&codexJudge{exec: j.codex, nonce: j.nonce, clock: j.clock}).Call(ctx, r)
+		return (&codexJudge{exec: j.codex, nonce: j.nonce, clock: j.clock, workDir: j.codexWorkDir}).Call(ctx, r)
 	}
 	v = Verdict{Kind: r.Kind, Model: r.Model, Effort: r.Effort, InputHash: InputHash(r.Input)}
 	system, user, err := RenderPrompt(r.Kind, r.Input, r.Fence, r.Calibration, j.nonce())

@@ -72,7 +72,7 @@ func TestRealCodexExec(t *testing.T) {
 
 	t.Run("stdout and stdin", func(t *testing.T) {
 		codexBin = "cat"
-		out, code, err := realCodexExec(context.Background(), nil, "the prompt")
+		out, code, err := realCodexExec(context.Background(), "", nil, "the prompt")
 		if err != nil || code != 0 || strings.TrimSpace(string(out)) != "the prompt" {
 			t.Fatalf("out=%q code=%d err=%v", out, code, err)
 		}
@@ -80,7 +80,7 @@ func TestRealCodexExec(t *testing.T) {
 
 	t.Run("a non-zero exit is an answer, not a failure to run", func(t *testing.T) {
 		codexBin = "sh"
-		out, code, err := realCodexExec(context.Background(), []string{"-c", "printf partial; exit 3"}, "")
+		out, code, err := realCodexExec(context.Background(), "", []string{"-c", "printf partial; exit 3"}, "")
 		if err != nil {
 			t.Fatalf("a process that ran must not report err: %v", err)
 		}
@@ -91,7 +91,7 @@ func TestRealCodexExec(t *testing.T) {
 
 	t.Run("a missing binary is a failure to run", func(t *testing.T) {
 		codexBin = "metareview-no-such-binary"
-		_, code, err := realCodexExec(context.Background(), nil, "")
+		_, code, err := realCodexExec(context.Background(), "", nil, "")
 		if err == nil {
 			t.Fatal("expected an error when the CLI is not installed")
 		}

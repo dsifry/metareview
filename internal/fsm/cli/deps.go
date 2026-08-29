@@ -98,8 +98,11 @@ var codexBin = judge.CodexBin
 // an argument so it never appears in the process table, and the environment is
 // inherited: the OAuth session the CLI reads lives under the user's home, and
 // metareview never handles the token itself.
-func realCodexExec(ctx context.Context, args []string, stdin string) ([]byte, int, error) {
+func realCodexExec(ctx context.Context, dir string, args []string, stdin string) ([]byte, int, error) {
 	cmd := exec.CommandContext(ctx, codexBin, args...)
+	// Empty means inherit, which is metareview's own repository. A caller that has
+	// materialized an evidence tree passes it here so the CLI cannot read past it.
+	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(stdin)
 	var out bytes.Buffer
 	cmd.Stdout = &out

@@ -21,7 +21,10 @@ const CodexBin = "codex"
 // CodexExec runs one codex invocation. stdout is the `--json` event stream, and
 // code is the process exit status. err is non-nil only when the process could
 // not be run at all — a model that refuses is a clean exit with an error event.
-type CodexExec func(ctx context.Context, args []string, stdin string) (stdout []byte, code int, err error)
+// dir is the working directory the CLI runs in. Empty means inherit the caller's, which is
+// the historical behaviour; a materialized sandbox (internal/fsm/sandbox) narrows a judge to
+// the evidence it was given, since the CLI can read and execute inside whatever it inherits.
+type CodexExec func(ctx context.Context, dir string, args []string, stdin string) (stdout []byte, code int, err error)
 
 // codexEfforts is the CLI's reasoning-effort enum, which is wider than the HTTP
 // providers'. Taken from the API's own rejection message for an invalid value.
@@ -31,9 +34,10 @@ var codexEfforts = map[string]bool{
 
 // codexJudge answers Requests by shelling out to the Codex CLI.
 type codexJudge struct {
-	exec  CodexExec
-	nonce func() string
-	clock Clock
+	exec    CodexExec
+	nonce   func() string
+	clock   Clock
+	workDir string // empty: inherit the caller's directory
 }
 
 // Call renders the same prompts the HTTP providers use and parses the same way,
@@ -85,7 +89,7 @@ func (j *codexJudge) Call(ctx context.Context, r Request) (v Verdict, err error)
 			}
 		}
 		actx, cancel := context.WithTimeout(ctx, AttemptTimeout)
-		stdout, code, execErr := j.exec(actx, args, prompt)
+		stdout, code, execErr := j.exec(actx, j.workDir, args, prompt)
 		cancel()
 
 		text, tokens, found := parseCodexEvents(stdout)

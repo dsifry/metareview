@@ -13,6 +13,7 @@ import (
 
 // fakeCodex records the invocation and replays a canned event stream.
 type fakeCodex struct {
+	dir    string
 	args   []string
 	stdin  string
 	stdout string
@@ -21,9 +22,9 @@ type fakeCodex struct {
 	calls  int
 }
 
-func (f *fakeCodex) exec(_ context.Context, args []string, stdin string) ([]byte, int, error) {
+func (f *fakeCodex) exec(_ context.Context, dir string, args []string, stdin string) ([]byte, int, error) {
 	f.calls++
-	f.args, f.stdin = args, stdin
+	f.args, f.stdin, f.dir = args, stdin, dir
 	return []byte(f.stdout), f.code, f.err
 }
 
@@ -176,7 +177,7 @@ func TestCodexJudgeReportsTokensEvenWhenTheCallFails(t *testing.T) {
 // hung the FSM.
 func TestCodexJudgeBoundsEachAttempt(t *testing.T) {
 	var gotDeadline bool
-	exec := func(ctx context.Context, _ []string, _ string) ([]byte, int, error) {
+	exec := func(ctx context.Context, _ string, _ []string, _ string) ([]byte, int, error) {
 		if _, ok := ctx.Deadline(); ok {
 			gotDeadline = true
 		}
@@ -201,9 +202,9 @@ func TestCodexJudgeStopsOnCancellation(t *testing.T) {
 	// clock rather than a real race. A test clock should decide which case is
 	// ready; it should never leave that to chance.
 	never := Clock{Now: codexClock().Now, After: func(time.Duration) <-chan time.Time { return make(chan time.Time) }}
-	j := &codexJudge{exec: func(c context.Context, a []string, s string) ([]byte, int, error) {
+	j := &codexJudge{exec: func(c context.Context, d string, a []string, s string) ([]byte, int, error) {
 		cancel()
-		return f.exec(c, a, s)
+		return f.exec(c, d, a, s)
 	}, nonce: func() string { return "n0" }, clock: never}
 	if _, err := j.Call(ctx, codexRequest()); err == nil {
 		t.Fatal("a cancelled call must return an error")
@@ -413,5 +414,76 @@ func TestValidateCodexRejectsAnEmptyModelInAnyCase(t *testing.T) {
 	}
 	if err := validateCodex("codex/gpt-5.6-sol", "medium", false); err != nil {
 		t.Errorf("a real model must still validate: %v", err)
+	}
+}
+
+// The judge process must run inside the evidence it is given, not inside metareview's own
+// working directory. realCodexExec sets no cmd.Dir today, so the CLI inherits the repo root
+// with read AND exec access to everything in it - verified against the live binary, which
+// read go.mod and ran git rev-parse. WorkDir is what narrows that to a materialized tree.
+func TestCodexJudgeRunsInItsConfiguredWorkDir(t *testing.T) {
+	var gotDir string
+	f := func(_ context.Context, dir string, _ []string, _ string) ([]byte, int, error) {
+		gotDir = dir
+		return []byte(codexStream(`{"reasoning":"r","is_real":true,"confidence":0.9}`)), 0, nil
+	}
+	j := &codexJudge{exec: f, nonce: func() string { return "n0" }, clock: codexClock(), workDir: "/evidence/tree"}
+	if _, err := j.Call(context.Background(), codexRequest()); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if gotDir != "/evidence/tree" {
+		t.Errorf("exec ran in %q, want the configured work dir", gotDir)
+	}
+}
+
+// Unset means "inherit", which is today's behaviour: the seam must not invent a directory.
+func TestCodexJudgeWithNoWorkDirPassesEmpty(t *testing.T) {
+	var gotDir = "unset"
+	f := func(_ context.Context, dir string, _ []string, _ string) ([]byte, int, error) {
+		gotDir = dir
+		return []byte(codexStream(`{"reasoning":"r","is_real":true,"confidence":0.9}`)), 0, nil
+	}
+	j := &codexJudge{exec: f, nonce: func() string { return "n0" }, clock: codexClock()}
+	if _, err := j.Call(context.Background(), codexRequest()); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if gotDir != "" {
+		t.Errorf("exec dir = %q, want empty when unconfigured", gotDir)
+	}
+}
+
+// WithCodexWorkDir is the containment seam: it confines a codex judge to a materialized
+// evidence tree without touching anything else about it, and leaves other judges alone.
+func TestWithCodexWorkDirConfinesOnlyCodexJudges(t *testing.T) {
+	var gotDir string
+	codex := func(_ context.Context, dir string, _ []string, _ string) ([]byte, int, error) {
+		gotDir = dir
+		return []byte(codexStream(`{"reasoning":"r","is_real":true,"confidence":0.9}`)), 0, nil
+	}
+	base, err := NewWithCodex(nil, Keys{}, URLs{}, func() string { return "n0" }, codexClock(), codex)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	confined := WithCodexWorkDir(base, "/evidence")
+	if _, err := confined.Call(context.Background(), codexRequest()); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if gotDir != "/evidence" {
+		t.Errorf("confined judge ran in %q, want /evidence", gotDir)
+	}
+
+	// the original must be unchanged: confinement returns a copy, it does not mutate
+	gotDir = ""
+	if _, err := base.Call(context.Background(), codexRequest()); err != nil {
+		t.Fatalf("base call: %v", err)
+	}
+	if gotDir != "" {
+		t.Errorf("confining one judge changed the original, which ran in %q", gotDir)
+	}
+
+	// a judge that is not the HTTP/codex router is returned as-is
+	mock := NewMock(Script{})
+	if got := WithCodexWorkDir(mock, "/evidence"); got != Judge(mock) {
+		t.Error("a non-router judge must be returned unchanged")
 	}
 }
