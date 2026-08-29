@@ -104,7 +104,27 @@ type LLMCallData struct {
 	Tokens     TokenTotals     `json:"tokens"`
 	DurationMS int64           `json:"duration_ms"`
 	Error      string          `json:"error,omitempty"`
+	// Evidence names HOW the judge saw the code: EvidenceExcerpt (the prompt carried
+	// selected hunks) or EvidenceSandbox (the judge read a materialized tree itself).
+	// Empty means EvidenceExcerpt, so existing rows keep their meaning.
+	//
+	// It is recorded because the two are not the same question. A verdict reached by
+	// browsing and one reached from excerpts cannot be compared row-for-row, so fsm diff
+	// has to see the difference rather than silently treat them as alike.
+	Evidence string `json:"evidence,omitempty"`
+	// TreeHash, BaseSHA and HeadSHA content-address what the judge COULD have read when
+	// Evidence is EvidenceSandbox. Without them the recorded input no longer determines the
+	// verdict and replay becomes a claim rather than a check.
+	TreeHash string `json:"tree_hash,omitempty"`
+	BaseSHA  string `json:"base_sha,omitempty"`
+	HeadSHA  string `json:"head_sha,omitempty"`
 }
+
+// How a judge saw the code, recorded on every llm_call.
+const (
+	EvidenceExcerpt = "excerpt"
+	EvidenceSandbox = "sandbox"
+)
 
 // CmdCallData audits one guarded command call.
 type CmdCallData struct {

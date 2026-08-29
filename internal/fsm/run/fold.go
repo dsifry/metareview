@@ -558,7 +558,7 @@ func withinCaps(p any) bool {
 			}
 		}
 	case *LLMCallData:
-		return shortOK(d.Kind, d.Model, d.Effort, d.InputHash, d.Error)
+		return shortOK(d.Kind, d.Model, d.Effort, d.InputHash, d.Error, d.Evidence, d.TreeHash, d.BaseSHA, d.HeadSHA)
 	case *CmdCallData:
 		return shortOK(d.Name, d.InputHash, d.Error) && argvOK(d.Argv) && canonLenStr(d.Stdout) <= MaxDetail && canonLenStr(d.Stderr) <= MaxStderr
 	case *OverflowHandlerData:
