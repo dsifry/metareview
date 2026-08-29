@@ -6,7 +6,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
-if [ -x bin/metareview ]; then MRV="$ROOT/bin/metareview"; else go build -o "$ROOT/bin/metareview" ./cmd/metareview; MRV="$ROOT/bin/metareview"; fi
+# Always rebuild. Reusing an existing bin/metareview (a gitignored local artifact) let this gate
+# certify a binary older than the tree: the --agent-prompt golden below passed against a stale
+# build after prompt.go had already changed, so the run reported ok on behaviour that no longer
+# existed. A few seconds of build is cheaper than a green gate that means nothing.
+go build -o "$ROOT/bin/metareview" ./cmd/metareview
+MRV="$ROOT/bin/metareview"
 
 WORK="$(cd "$(mktemp -d)" && pwd -P)"   # resolved: an export refuses symlinked path components (/var on macOS)
 trap 'rm -rf "$WORK"' EXIT
