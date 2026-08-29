@@ -341,3 +341,73 @@ func TestContextForClaimWithNoReferencesMatchesContextFor(t *testing.T) {
 		t.Errorf("no-reference path diverged from ContextFor:\n got %q\nwant %q", got, want)
 	}
 }
+
+// A finding can contradict a file the branch never touched - "the code now requires eight
+// lenses but these four documents still say five". Nothing in the diff can settle that, and a
+// sandbox of only the changed files cannot either. The trigger must still fire, and the
+// evidence set must be able to include an unchanged file.
+func TestMentionsOtherFilesSeesUnchangedPaths(t *testing.T) {
+	text := "internal/reviewlog/reviewlog.go requires eight, but skills/review-artifact/SKILL.md says five"
+	if !MentionsOtherFiles("internal/reviewlog/reviewlog.go", text) {
+		t.Error("a claim against an unchanged file must still count as cross-file")
+	}
+	if MentionsOtherFiles("internal/reviewlog/reviewlog.go", "a purely local bug on line 170") {
+		t.Error("a finding naming no other file is not cross-file")
+	}
+	if MentionsOtherFiles("internal/reviewlog/reviewlog.go", "see internal/reviewlog/reviewlog.go again") {
+		t.Error("naming only its own file is not cross-file")
+	}
+}
+
+// The paths a finding names are evidence whether or not the branch changed them, so the
+// sandbox has to be able to carry them. ReferencedPaths stays diff-filtered for selecting
+// hunks; this is the wider set used to build the evidence tree.
+func TestAllReferencedPathsIgnoresTheDiff(t *testing.T) {
+	text := "docs/guide.md and skills/nowhere/SKILL.md and internal/x/y.go"
+	got := AllReferencedPaths("internal/x/y.go", text)
+	if len(got) != 2 || got[0] != "docs/guide.md" || got[1] != "skills/nowhere/SKILL.md" {
+		t.Fatalf("got %v, want both named paths excluding the finding's own file", got)
+	}
+	// distinct paths: repeating one would dedup to a single entry and never reach the cap
+	var many strings.Builder
+	for i := 0; i < 50; i++ {
+		many.WriteString("dir/f" + strconv.Itoa(i) + ".go ")
+	}
+	if n := len(AllReferencedPaths("a.go", many.String())); n != maxReferencedFiles {
+		t.Errorf("got %d refs, want the cap of %d", n, maxReferencedFiles)
+	}
+}
+
+func TestNamedPathsEdgeCases(t *testing.T) {
+	t.Run("a slash-bearing match from rootFile is not double counted", func(t *testing.T) {
+		// rootFile can match inside a longer path; only bare names may be added.
+		got := namedPaths("see internal/x/y.go for details")
+		if len(got) != 1 || got[0] != "internal/x/y.go" {
+			t.Fatalf("got %v, want just the full path", got)
+		}
+	})
+	t.Run("prose abbreviations are not files", func(t *testing.T) {
+		if got := namedPaths("e.g. a bug, i.e. a real one"); len(got) != 0 {
+			t.Errorf("got %v, want none: a two-character stem minimum excludes these", got)
+		}
+	})
+	t.Run("a bare name and its own full path collapse to one", func(t *testing.T) {
+		got := namedPaths("docs/guide.md, referred to later as guide.md")
+		if len(got) != 1 || got[0] != "docs/guide.md" {
+			t.Fatalf("got %v, want one entry", got)
+		}
+	})
+	t.Run("a bare name that is nobody's tail is kept", func(t *testing.T) {
+		got := namedPaths("docs/guide.md and README.md")
+		if len(got) != 2 {
+			t.Fatalf("got %v, want both", got)
+		}
+	})
+}
+
+func TestAllReferencedPathsSkipsRepeats(t *testing.T) {
+	got := AllReferencedPaths("a.go", "docs/x.md and docs/x.md again and docs/y.md")
+	if len(got) != 2 || got[0] != "docs/x.md" || got[1] != "docs/y.md" {
+		t.Fatalf("got %v, want each path once", got)
+	}
+}

@@ -20,6 +20,13 @@ import (
 func escalationHarness(t *testing.T) (*harness, *ctxDeps, run.Snapshot, *[]string) {
 	t.Helper()
 	h := newHarness(t)
+	// a tracked file that exists at HEAD but is NOT in base..head, so it can only reach the
+	// evidence tree by being named in a finding
+	if err := os.WriteFile(filepath.Join(h.root, "notes.md"), []byte("five lenses\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, h.root, "add", "notes.md")
+	git(t, h.root, "commit", "-q", "-m", "notes")
 	base := git(t, h.root, "rev-parse", "HEAD")
 	if err := os.WriteFile(filepath.Join(h.root, "f.go"), []byte("package f\n\nfunc Added() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -203,4 +210,42 @@ func TestEscalationIsWiredOnByDefault(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A finding can turn on a file the branch never touched. The sandbox must carry it, or the
+// escalated judge is handed the same evidence gap that caused the rejection.
+func TestSandboxCarriesFilesFindingsNameEvenWhenUnchanged(t *testing.T) {
+	h, c, snap, ranIn := escalationHarness(t)
+	// seed.txt exists at HEAD and is NOT in base..head (the harness commits it first)
+	snap.Findings = []run.Finding{{
+		File: "f.go", Line: 1,
+		IssueText: "f.go now requires eight, but notes.md still documents five",
+	}}
+	esc, err := c.escalationFor(h.root)(context.Background(), snap, &workflow.Node{Model: "codex/x", Effort: "medium"})
+	if err != nil || esc == nil {
+		t.Fatalf("escalationFor: %v %v", esc, err)
+	}
+	if _, err := esc.Judge.Call(context.Background(), judge.Request{
+		Kind: judge.KindAdjudicate, Model: esc.Model, Effort: esc.Effort,
+		Input: judge.AdjudicateInput{Diff: "d", Candidate: run.Finding{IssueText: "x", File: "f.go"}},
+	}); err != nil {
+		t.Fatalf("judge call: %v", err)
+	}
+	dir := (*ranIn)[0]
+	if _, err := os.Stat(filepath.Join(dir, sandbox.Head, "notes.md")); err != nil {
+		t.Errorf("an unchanged file a finding names must be in the evidence tree: %v", err)
+	}
+}
+
+// A finding naming a path the branch already changed adds nothing to the evidence tree.
+func TestReferencedByFindingsSkipsAlreadyChangedPaths(t *testing.T) {
+	_, c, _, _ := escalationHarness(t)
+	snap := run.Snapshot{Findings: []run.Finding{
+		{File: "f.go", IssueText: "f.go contradicts notes.md"},
+		{File: "f.go", IssueText: "and again notes.md"},
+	}}
+	got := c.referencedByFindings(snap, []string{"f.go", "notes.md"})
+	if len(got) != 0 {
+		t.Errorf("got %v, want none: both paths are already in the changed set", got)
+	}
 }

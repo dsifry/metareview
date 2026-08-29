@@ -294,6 +294,34 @@ const maxReferencedFiles = 4
 // comes from DiffHasFile instead: a match is only used when the diff actually carries it.
 var referencedPath = regexp.MustCompile(`[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]+`)
 
+// rootFile matches a bare filename with no directory - README.md, CLAUDE.md, package.json.
+// Requiring a slash misses exactly the documents that sit at the repository root, which is
+// where the user-facing ones live. The stem must be at least two characters so prose
+// abbreviations ("e.g.", "i.e.") do not match; anything else that slips through is filtered by
+// existence when the evidence tree is built, and at worst costs one escalation.
+var rootFile = regexp.MustCompile(`\b[A-Za-z0-9_-]{2,}\.[A-Za-z0-9]{1,5}\b`)
+
+// namedPaths is every path-shaped token in a finding's prose, directories or bare filenames.
+func namedPaths(text string) []string {
+	out := referencedPath.FindAllString(text, -1)
+	for _, m := range rootFile.FindAllString(text, -1) {
+		// rootFile's character class contains no slash, so every match here is a bare name.
+		// A bare name that is the tail of a path already matched is that same file written
+		// twice, not a second one: "internal/x/y.go" must not also yield "y.go".
+		tail := false
+		for _, p := range out {
+			if strings.HasSuffix(p, "/"+m) {
+				tail = true
+				break
+			}
+		}
+		if !tail {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // ReferencedPaths returns the paths a finding's text names, excluding its own file and
 // anything the diff does not carry, capped at maxReferencedFiles in first-mentioned order.
 //
@@ -304,8 +332,40 @@ var referencedPath = regexp.MustCompile(`[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\.[
 func ReferencedPaths(diff, own, text string) []string {
 	var out []string
 	seen := map[string]bool{own: true}
-	for _, m := range referencedPath.FindAllString(text, -1) {
+	for _, m := range namedPaths(text) {
 		if seen[m] || !DiffHasFile(diff, m) {
+			continue
+		}
+		seen[m] = true
+		if out = append(out, m); len(out) == maxReferencedFiles {
+			break
+		}
+	}
+	return out
+}
+
+// MentionsOtherFiles reports whether a finding's text names a path other than its own file,
+// whether or not the branch changed that file. It is the escalation trigger: a claim like "the
+// code now requires eight lenses but these four documents still say five" is cross-file even
+// though the documents are unchanged, and filtering on the diff would silently never escalate
+// exactly the findings a second opinion is best at.
+func MentionsOtherFiles(own, text string) bool {
+	for _, m := range namedPaths(text) {
+		if m != own {
+			return true
+		}
+	}
+	return false
+}
+
+// AllReferencedPaths is ReferencedPaths without the diff filter: every path the text names
+// except the finding's own, capped. A sandbox built from these can carry an unchanged file the
+// claim depends on, which a tree of only the changed files cannot.
+func AllReferencedPaths(own, text string) []string {
+	var out []string
+	seen := map[string]bool{own: true}
+	for _, m := range namedPaths(text) {
+		if seen[m] {
 			continue
 		}
 		seen[m] = true

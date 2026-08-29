@@ -30,6 +30,10 @@ func (c *ctxDeps) escalationFor(root string) kind.EscalateFunc {
 		if err != nil || len(paths) == 0 {
 			return nil, err
 		}
+		// Findings routinely turn on a file the branch never touched. A tree of only the
+		// changed files cannot settle those, so every path any finding names is carried too -
+		// at head, since an unchanged file has no separate base side.
+		paths = append(paths, c.referencedByFindings(snap, paths)...)
 		dir, err := c.deps.TempDir("mrv-evidence-")
 		if err != nil {
 			return nil, err
@@ -52,6 +56,26 @@ func (c *ctxDeps) escalationFor(root string) kind.EscalateFunc {
 			HeadSHA:  tree.HeadSHA,
 		}, nil
 	}
+}
+
+// referencedByFindings collects the paths this run's findings name that are not already in
+// the changed set. Bounded by the per-finding cap in AllReferencedPaths and by dedup here.
+func (c *ctxDeps) referencedByFindings(snap run.Snapshot, changed []string) []string {
+	have := map[string]bool{}
+	for _, p := range changed {
+		have[p] = true
+	}
+	var extra []string
+	for _, f := range snap.Findings {
+		for _, p := range judge.AllReferencedPaths(f.File, f.IssueText) {
+			if have[p] {
+				continue
+			}
+			have[p] = true
+			extra = append(extra, p)
+		}
+	}
+	return extra
 }
 
 // changedPaths lists what the branch touched, NUL-delimited so a path containing a space or a

@@ -212,3 +212,40 @@ func TestEscalationProviderReturningNilLeavesTheRejection(t *testing.T) {
 		t.Errorf("no escalation available: both rejections stand, got confirmed=%d rejected=%d", len(out.Confirmed), len(out.Rejected))
 	}
 }
+
+// The finding that motivated the widened trigger: code changed on the branch contradicts a
+// document the branch never touched. Filtering the trigger on the diff means the named file is
+// absent, the finding looks local, and it is never escalated - which is what happened to the
+// five-versus-eight lens finding in four consecutive runs.
+func TestEscalatesAClaimAgainstAnUnchangedFile(t *testing.T) {
+	esc := &scriptedJudge{real: true}
+	reg, err := New(Deps{
+		Judge: &scriptedJudge{real: false},
+		Escalate: func(context.Context, run.Snapshot, *workflow.Node) (*Escalation, error) {
+			return &Escalation{Judge: esc, Model: "codex/x", Effort: "medium", Evidence: run.EvidenceSandbox}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	ex, _ := reg.Executor(MatchThenAdjudicate)
+	// server.go IS in escalationDiff; docs/unchanged-guide.md is NOT in it at all
+	snap := run.Snapshot{RunID: "mrv-unchanged", Iteration: 1, Findings: []run.Finding{
+		{IssueText: "server.go requires eight but docs/unchanged-guide.md still says five", File: "server.go", Line: 1},
+	}}
+	raw, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: snap, Node: adjNode, Diff: machine.Diff{Text: escalationDiff}, StartIndex: 0, Audit: (&audits{}).fn})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(esc.calls) != 1 {
+		t.Fatalf("escalation ran %d times; a claim against an unchanged file must still escalate", len(esc.calls))
+	}
+	var out adjudicateOut
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Confirmed) != 1 || len(out.Rejected) != 0 {
+		t.Errorf("the second opinion should have recovered it: confirmed=%d rejected=%d", len(out.Confirmed), len(out.Rejected))
+	}
+}

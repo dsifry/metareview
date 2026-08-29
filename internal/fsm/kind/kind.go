@@ -568,7 +568,12 @@ func (e *adjudicateExec) resolve(ctx context.Context, snap run.Snapshot, node *w
 // the finding should be kept. It is only consulted for rejections, so it can never turn a
 // confirmation into a rejection - the error escalation exists to prevent.
 func (e *adjudicateExec) secondOpinion(ctx context.Context, in machine.ExecInput, cand run.Finding, index *int) (run.Bug, bool) {
-	if e.escalate == nil || len(judge.ReferencedPaths(in.Diff.Text, cand.File, cand.IssueText)) == 0 {
+	// The trigger deliberately does NOT filter on the diff. A finding that contradicts an
+	// UNCHANGED file - "the code requires eight lenses, these documents still say five" - is
+	// exactly the cross-file case a second opinion settles, and filtering on the diff would
+	// mean never escalating it. Measured: that finding was rejected in four consecutive runs
+	// and never escalated once.
+	if e.escalate == nil || !judge.MentionsOtherFiles(cand.File, cand.IssueText) {
 		return run.Bug{}, false
 	}
 	desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
