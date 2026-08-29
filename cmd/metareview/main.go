@@ -23,6 +23,7 @@ import (
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/setup"
+	"github.com/dsifry/metareview/internal/status"
 	"github.com/dsifry/metareview/internal/taskdone"
 	"github.com/dsifry/metareview/internal/version"
 )
@@ -98,6 +99,21 @@ func main() {
 
 	if args[0] == "fsm" {
 		os.Exit(fsmcli.Run(context.Background(), args[1:], os.Stdin, os.Stdout, os.Stderr, mustCwd(), fsmcli.RealDeps()))
+	}
+
+	// status --json is the contract a host hook branches on: one machine-readable answer to
+	// "may work proceed, and if not, what must be cleared". Exits 1 when something must be
+	// cleared, so a hook needs no parsing to make the common decision.
+	if len(args) == 2 && args[0] == "status" && args[1] == "--json" {
+		report, err := status.Build(mustCwd())
+		exitOnErr(err)
+		out, err := json.MarshalIndent(report, "", "  ")
+		exitOnErr(err)
+		fmt.Println(string(out))
+		if report.Blocked {
+			os.Exit(1)
+		}
+		return
 	}
 
 	if len(args) == 1 && args[0] == "status" {

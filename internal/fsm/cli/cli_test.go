@@ -587,7 +587,7 @@ func TestExitTableAndHelpers(t *testing.T) {
 		{"ERR_RUN_LOCKED", phaseOpen, false, 2}, {"ERR_RUN_LOCKED", phaseInit, false, 1},
 		{"ERR_STORE_PATH", phaseInit, false, 2}, {"ERR_STORE_PATH", phaseAdvance, false, 1},
 		{"ERR_RUNS_JSONL", phaseInit, false, 2}, {"ERR_RUNS_JSONL", phaseAdvance, false, 1},
-		{"ERR_AUDIT_TORN", phaseOpen, false, 1}, {"ERR_AUDIT_NOT_TORN", phaseOpen, false, 2}, {"ERR_WHATEVER", phaseNone, false, 2}, {"ERR_INTERNAL", phaseAdvance, false, 1},
+		{"ERR_AUDIT_TORN", phaseOpen, false, 1}, {"ERR_AUDIT_NOT_TORN", phaseOpen, false, 2}, {"ERR_RUN_ESCALATED", phaseAdvance, false, 2}, {"ERR_WHATEVER", phaseNone, false, 2}, {"ERR_INTERNAL", phaseAdvance, false, 1},
 	}
 	for _, c := range cases {
 		if got := exitFor(c.code, c.ph, c.mov); got != c.want {
@@ -628,6 +628,90 @@ func TestExitTableAndHelpers(t *testing.T) {
 		}
 	}()
 	(&ctxDeps{deps: h.deps}).nonce()
+}
+
+func TestContextErrorGuardOnJudgeCall(t *testing.T) {
+	// When judge call is cancelled (ctx.Err() != nil), RecordLLMCall should
+	// receive an empty LLMCallData, preventing the call from being recorded
+	h := newHarness(t)
+	h.env[EnvOpenAIKey] = "k"
+	env := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium")
+	id := env["run_id"].(string)
+	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
+	h.must(StatusOK, 0, "record", "node-output", "--node", "discover", "--data", h.file("f.json", findingsData), "--run", id)
+	h.must(machine.StatusAdvanced, 0, "advance", "--run", id)
+
+	// Get the initial event count
+	store := h.deps.Store(h.root)
+	log, _ := store.Events(id)
+	eventsBefore := len(log.Events)
+
+	// Set up cancellation during the judge call
+	cand := h.file("cand.json", `{"candidate":{"issue_text":"x"}}`)
+	diff := h.file("d.diff", "x")
+	ctx, cancel := context.WithCancel(context.Background())
+	h.doer.onDo = cancel
+	h.out.Reset()
+	code := Run(ctx, []string{"judge", "--kind", "adjudicate", "--model", "gpt-5.2", "--effort", "medium", "--input", cand, "--context", diff, "--run", id}, strings.NewReader(""), &h.out, &h.errb, h.cwd, h.deps)
+
+	// The code should be 1 (retryable error due to cancellation)
+	output := h.out.String()
+	if code != 1 {
+		t.Fatalf("context cancel should return 1, got %d; output: %s", code, output)
+	}
+
+	// No LLMCall should be recorded when context is cancelled
+	// Check if seq appears in the output
+	if strings.Contains(output, `"seq"`) {
+		t.Fatalf("cancelled judge should not record seq: %s", output)
+	}
+
+	// Verify no new llm_call event was added to the store
+	log, _ = store.Events(id)
+	eventsAfter := len(log.Events)
+	if eventsAfter != eventsBefore {
+		t.Fatalf("cancelled judge should not add events: before=%d, after=%d", eventsBefore, eventsAfter)
+	}
+
+	h.doer.onDo = nil
+}
+
+func TestMockTaintedGuards(t *testing.T) {
+	// viewKeys must detect MockTainted when Mock is empty
+	env := envelope{}
+	view := machine.View{
+		RunID: "test-run",
+		Snapshot: run.Snapshot{
+			Mock:        "",
+			MockTainted: true,
+		},
+	}
+	viewKeys(env, view)
+	if env["mock"] != true {
+		t.Fatalf("viewKeys: mock should be true when MockTainted=true, got %v", env["mock"])
+	}
+	// MockTainted should also be true when Mock is set
+	env2 := envelope{}
+	view2 := machine.View{
+		RunID: "test-run-2",
+		Snapshot: run.Snapshot{
+			Mock:        "",
+			MockTainted: false,
+		},
+	}
+	viewKeys(env2, view2)
+	if env2["mock"] != false {
+		t.Fatalf("viewKeys: mock should be false when both Mock and MockTainted are empty/false, got %v", env2["mock"])
+	}
+	// StatusLines function also uses the same condition for output formatting
+	// Verify that StatusLines works correctly with runs
+	h := newHarness(t)
+	env = h.must(StatusOK, 0, mockInit...)
+	// For this test, we verify that StatusLines doesn't crash and properly formats runs
+	lines := StatusLines(context.Background(), h.deps, h.root)
+	if len(lines) < 2 || !strings.Contains(lines[0], "fsm runs:") {
+		t.Fatalf("StatusLines: unexpected output: %v", lines)
+	}
 }
 
 const cmdsScenario = `calls:
