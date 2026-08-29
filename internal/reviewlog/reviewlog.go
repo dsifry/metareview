@@ -190,7 +190,15 @@ const lensEraCutoff = "20260824"
 // declares its own set, and one written before the marker existed falls back to the set of its era.
 func requiredLenses(declared []string, runID string) []string {
 	if len(declared) > 0 {
-		return declared
+		// A declaration records which rubric a review was written under; it does not get to invent
+		// one. Honouring an arbitrary set would let a log name a single lens, satisfy it with a
+		// single row, and be reported complete - declaring security, testing-quality and
+		// data-migration away. Only a set that matches a rubric this tool has actually shipped is
+		// honoured; anything else falls through to the current set rather than to the weaker one.
+		if known := knownRubric(declared); known != nil {
+			return known
+		}
+		return currentLenses
 	}
 	if date := runDate(runID); date != "" && date < lensEraCutoff {
 		return legacyLenses
@@ -215,6 +223,32 @@ func runDate(runID string) string {
 		return ""
 	}
 	return date
+}
+
+// knownRubric returns the shipped lens set the declaration names, or nil when it names none.
+func knownRubric(declared []string) []string {
+	for _, rubric := range [][]string{currentLenses, legacyLenses} {
+		if sameLensSet(declared, rubric) {
+			return rubric
+		}
+	}
+	return nil
+}
+
+func sameLensSet(a, b []string) bool {
+	seen := map[string]bool{}
+	for _, name := range a {
+		seen[name] = true
+	}
+	if len(seen) != len(b) {
+		return false
+	}
+	for _, name := range b {
+		if !seen[name] {
+			return false
+		}
+	}
+	return true
 }
 
 func splitLenses(value string) []string {

@@ -417,6 +417,12 @@ func TestArtifactLensSetIsGrandfathered(t *testing.T) {
 		// An all-digit run of eight characters is not a date. Accepting one as legacy would hand the
 		// five-lens rubric to any log carrying a plausible-looking id, which is the opposite of a
 		// grandfather bounded by verifiable provenance.
+		// A declaration is provenance, not permission. Accepting an arbitrary one lets a log name a
+		// one-lens rubric, satisfy it with a single row, and be reported complete - so a current
+		// review could skip security, testing-quality and data-migration by declaring them away.
+		{"partial declared set does not certify itself", log("mrv-20260829-1-artifact-a-1", "feasibility", rows(five[:1]...)), true},
+		{"unknown lens in the declaration falls back to current", log("mrv-20260829-1-artifact-a-1", "feasibility, completeness, vibes", rows(five...)), true},
+		{"pre-cutoff log cannot declare its way out either", log("mrv-20260705-1-artifact-a-1", "feasibility", rows(five[:1]...)), true},
 		{"impossible calendar date is not legacy", log("mrv-20260230-1-artifact-a-1", "", rows(five...)), true},
 		{"month 13 is not legacy", log("mrv-20261305-1-artifact-a-1", "", rows(five...)), true},
 		{"day 00 is not legacy", log("mrv-20260700-1-artifact-a-1", "", rows(five...)), true},

@@ -118,7 +118,9 @@ done
 # the source matched neither. It did exactly that on 2026-08-29. Any script that drives the real
 # binary must build it first.
 fsm_script="$ROOT/tests/go/test-fsm.sh"
-if grep -Eq '\[ +-x +(\$ROOT/)?bin/metareview +\]' "$fsm_script"; then
+# The pattern has to cover the forms a reuse would actually be written in - [ or [[, quoted or
+# bare, with or without $ROOT - or the guard only stops the exact spelling that was there before.
+if grep -Eq '\[\[? +-x +"?(\$ROOT/|\./)?bin/metareview"?' "$fsm_script"; then
   echo "FAIL: test-fsm.sh reuses an existing bin/metareview; it must rebuild so the gate cannot certify stale code"; exit 1
 fi
 grep -Eq '^go build -o "\$ROOT/bin/metareview"' "$fsm_script" || {
