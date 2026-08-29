@@ -32,6 +32,8 @@ const GoldensMaxBytes = 512 << 10
 // Run is `metareview fsm <args>`; it prints one JSON envelope (or the agent prompt) and returns the exit code.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, cwd string, deps Deps) int {
 	c := &ctxDeps{ctx: ctx, deps: deps, cwd: cwd}
+	// Evidence trees live for the invocation that built them, not for the life of the machine.
+	defer c.removeSandboxes()
 	inv := &invocation{c: c, stdin: stdin, out: stdout, err: stderr}
 	if len(args) == 0 {
 		return inv.usage("subcommand required: init|state|advance|record|gate|judge|converge|diff|export|workflows|--agent-prompt")

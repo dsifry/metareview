@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/dsifry/metareview/internal/fsm/judge"
@@ -39,6 +40,7 @@ func (c *ctxDeps) escalationFor(root string) kind.EscalateFunc {
 		if err != nil {
 			return nil, err
 		}
+		c.sandboxRoots = append(c.sandboxRoots, dir)
 		tree, err := sandbox.Materialize(dir, snap.BaseSHA, snap.Head, paths, c.showFile(root))
 		if err != nil {
 			return nil, err
@@ -84,8 +86,16 @@ func (c *ctxDeps) referencedByFindings(snap run.Snapshot, changed []string) []st
 // parse; -z avoids the question).
 func (c *ctxDeps) changedPaths(root, base, head string) ([]string, error) {
 	out, code, err := c.git(root, "diff", "--no-ext-diff", "--name-only", "-z", "--no-renames", base+".."+head)
-	if err != nil || code != 0 {
+	if err != nil {
 		return nil, err
+	}
+	// gate.RealExec reports a failed git as (code, nil): a nonzero exit arrives with err == nil.
+	// Returning (nil, nil) here would read to the caller as "escalation deliberately unavailable,
+	// the rejection stands", and the finding would be recorded as a hallucination - a real finding
+	// deleted by an outage, which is the failure escalation exists to prevent. A resumed run whose
+	// recorded BaseSHA no longer resolves after a rebase or gc exits 128 on exactly this call.
+	if code != 0 {
+		return nil, fmt.Errorf("git diff %s..%s failed with exit code %d", base, head, code)
 	}
 	var paths []string
 	for _, p := range strings.Split(out, "\x00") {
@@ -100,13 +110,33 @@ func (c *ctxDeps) changedPaths(root, base, head string) ([]string, error) {
 // added on the branch has no base side, and the judge is told so by its absence from base/.
 func (c *ctxDeps) showFile(root string) sandbox.ShowFunc {
 	return func(rev, path string) ([]byte, bool, error) {
-		out, code, err := c.git(root, "show", "--no-ext-diff", rev+":"+path)
+		// Absence and failure must be distinguishable. Mapping every nonzero exit to "absent"
+		// means an unreadable object produces a partial or empty tree that still carries a
+		// well-formed TreeHash, and the judge is asked to settle a claim inside a directory that
+		// was never materialized while the audit records evidence=sandbox.
+		//
+		// `cat-file -e` cannot answer this: it exits 128 both for a path missing from the tree and
+		// for a revision that does not resolve. `ls-tree` separates them - it exits 0 whether or
+		// not the path is there and says which by printing it, so a nonzero exit is a real failure.
+		listed, code, err := c.git(root, "ls-tree", "--name-only", "-z", rev, "--", path)
 		if err != nil {
 			return nil, false, err
 		}
 		if code != 0 {
+			return nil, false, fmt.Errorf("git ls-tree %s -- %s failed with exit code %d", rev, path, code)
+		}
+		if strings.Trim(listed, "\x00") == "" {
 			return nil, false, nil
 		}
-		return []byte(out), true, nil
+		// Read the blob raw. c.git trims, and a file body must reach the tree byte for byte or
+		// its line numbers no longer match the finding that points into it.
+		out, code, err := c.gitRaw(root, "cat-file", "blob", rev+":"+path)
+		if err != nil {
+			return nil, false, err
+		}
+		if code != 0 {
+			return nil, false, fmt.Errorf("git cat-file blob %s:%s failed with exit code %d", rev, path, code)
+		}
+		return out, true, nil
 	}
 }

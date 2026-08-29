@@ -135,29 +135,42 @@ func TestEscalationForSurfacesTempDirFailure(t *testing.T) {
 // the finding as checked_but_unverified. Silently returning "unavailable" would let a broken
 // sandbox read as agreement with the cheap arm's rejection - a finding dropped by an outage.
 func TestEscalationForSurfacesGitFailures(t *testing.T) {
-	t.Run("listing the changed files fails", func(t *testing.T) {
-		h, c, snap, _ := escalationHarness(t)
-		c.deps.Exec = func(_ context.Context, _ string, _ []string, args ...string) ([]byte, []byte, int, error) {
-			return nil, nil, 1, os.ErrPermission
-		}
-		if _, err := c.escalationFor(h.root)(context.Background(), snap, &workflow.Node{Model: "codex/x"}); err == nil {
-			t.Error("want the git failure surfaced")
-		}
-	})
-
-	t.Run("reading a file at a revision fails", func(t *testing.T) {
-		h, c, snap, _ := escalationHarness(t)
-		realExec := c.deps.Exec
-		c.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
-			if len(args) > 0 && args[0] == "show" {
-				return nil, nil, 1, os.ErrPermission
+	// Both shapes matter, and the second is the one that actually occurs: gate.RealExec converts
+	// an *exec.ExitError into (code, nil), so the production form of "git failed" is a nonzero
+	// code with a nil error. An earlier version of this test used os.ErrPermission in both fakes -
+	// a channel git failures never use - so it asserted the invariant while never exercising the
+	// path that breaks it.
+	for _, shape := range []struct {
+		name string
+		fail func() ([]byte, []byte, int, error)
+	}{
+		{"nonzero exit with nil error (the production shape)", func() ([]byte, []byte, int, error) { return []byte("fatal: bad revision"), nil, 128, nil }},
+		{"transport error", func() ([]byte, []byte, int, error) { return nil, nil, 1, os.ErrPermission }},
+	} {
+		t.Run("listing the changed files fails: "+shape.name, func(t *testing.T) {
+			h, c, snap, _ := escalationHarness(t)
+			c.deps.Exec = func(_ context.Context, _ string, _ []string, args ...string) ([]byte, []byte, int, error) {
+				return shape.fail()
 			}
-			return realExec(ctx, dir, env, args...)
-		}
-		if _, err := c.escalationFor(h.root)(context.Background(), snap, &workflow.Node{Model: "codex/x"}); err == nil {
-			t.Error("want the git show failure surfaced")
-		}
-	})
+			if _, err := c.escalationFor(h.root)(context.Background(), snap, &workflow.Node{Model: "codex/x"}); err == nil {
+				t.Error("want the git failure surfaced, not a silent (nil, nil) that reads as agreement")
+			}
+		})
+
+		t.Run("reading a file at a revision fails: "+shape.name, func(t *testing.T) {
+			h, c, snap, _ := escalationHarness(t)
+			realExec := c.deps.Exec
+			c.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
+				if len(args) > 0 && (args[0] == "ls-tree" || args[0] == "cat-file") {
+					return shape.fail()
+				}
+				return realExec(ctx, dir, env, args...)
+			}
+			if _, err := c.escalationFor(h.root)(context.Background(), snap, &workflow.Node{Model: "codex/x"}); err == nil {
+				t.Error("want the file-read failure surfaced")
+			}
+		})
+	}
 
 	t.Run("a path that escapes the sandbox is refused", func(t *testing.T) {
 		h, c, snap, _ := escalationHarness(t)
@@ -280,5 +293,34 @@ func TestEscalateFlagIsPinned(t *testing.T) {
 	// The agent contract has to name the knob it now requires.
 	if !strings.Contains(AgentPrompt, "--escalate") || strings.Contains(AgentPrompt, "--no-escalate") {
 		t.Error("the agent prompt must document --escalate and must not still document --no-escalate")
+	}
+}
+
+// The tree has to hold the file, not an approximation of it. showFile went through ctxDeps.git,
+// which TrimSpaces its output - a helper written for SHAs and ref names. Every materialized file
+// lost its trailing newline, and one with leading blank lines lost those too, moving every
+// declaration below them up by as many lines. The judge is pointed at Finding.Line, taken from the
+// diff's post-image numbering, so it reads the wrong line of a file that matches neither revision.
+func TestSandboxMaterializesExactBytes(t *testing.T) {
+	h, c, snap, _ := escalationHarness(t)
+	// Leading and trailing blank lines are the whole point: they are what a trim destroys.
+	body := "\n\n// leading blanks are significant\npackage f\n\nfunc Added() {}\n\n\n"
+	if err := os.WriteFile(filepath.Join(h.root, "f.go"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, h.root, "add", "f.go")
+	git(t, h.root, "commit", "-q", "-m", "whitespace that matters")
+	snap.Head = git(t, h.root, "rev-parse", "HEAD")
+
+	esc, err := c.escalationFor(h.root)(context.Background(), snap, &workflow.Node{Model: "codex/x"})
+	if err != nil || esc == nil {
+		t.Fatalf("escalationFor: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(c.sandboxRoots[len(c.sandboxRoots)-1], "head", "f.go"))
+	if err != nil {
+		t.Fatalf("read materialized file: %v", err)
+	}
+	if string(got) != body {
+		t.Errorf("materialized bytes differ from the file at that revision:\n got %q\nwant %q", got, body)
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -34,10 +36,19 @@ const (
 	EnvHome         = "HOME"
 )
 
-// git runs one git command through the Exec seam and returns trimmed stdout.
+// git runs one git command through the Exec seam and returns TRIMMED stdout. It is for short
+// outputs - SHAs, ref names, worktree lines. Never use it for file content: the trim silently
+// removes leading and trailing blank lines, which shifts every line number below them. Use
+// gitRaw for bytes that are going to be read as a file.
 func (c *ctxDeps) git(dir string, args ...string) (string, int, error) {
 	out, _, code, err := c.deps.Exec(c.ctx, dir, nil, args...)
 	return strings.TrimSpace(string(out)), code, err
+}
+
+// gitRaw runs one git command and returns stdout byte for byte.
+func (c *ctxDeps) gitRaw(dir string, args ...string) ([]byte, int, error) {
+	out, _, code, err := c.deps.Exec(c.ctx, dir, nil, args...)
+	return out, code, err
 }
 
 // ctxDeps binds Deps to one invocation.
@@ -48,6 +59,26 @@ type ctxDeps struct {
 	// escalate opts in to the sandbox second opinion for rejected cross-file candidates.
 	// It is off by default; see escalation for why.
 	escalate bool
+	// sandboxRoots are the evidence trees this invocation materialized. They are removed when it
+	// ends: one machine accumulated 1015 of them (37MB) in a day because nothing ever did.
+	sandboxRoots []string
+}
+
+// removeSandboxes deletes the evidence trees this invocation created. The trees are written
+// read-only (0444 files under 0555 directories) so that a judge cannot edit its own evidence,
+// which also means they cannot be removed without restoring write permission first.
+func (c *ctxDeps) removeSandboxes() {
+	for _, root := range c.sandboxRoots {
+		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			_ = os.Chmod(path, 0o700)
+			return nil
+		})
+		_ = os.RemoveAll(root)
+	}
+	c.sandboxRoots = nil
 }
 
 // rootOf resolves the main worktree of cwd (spec 5 §2): the first `worktree` line of `git worktree list --porcelain`;
