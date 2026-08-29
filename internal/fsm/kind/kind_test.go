@@ -780,3 +780,148 @@ func TestAdjudicateDoesNotJudgeACandidateWithNoEvidence(t *testing.T) {
 		t.Error("an unverifiable finding must be kept for a human, not silently dropped")
 	}
 }
+
+// scriptedJudge answers by candidate text so a test can make the two arms disagree.
+type scriptedJudge struct {
+	real     bool
+	err      error
+	parseErr string
+	calls    []string
+}
+
+func (s *scriptedJudge) Call(_ context.Context, req judge.Request) (judge.Verdict, error) {
+	if in, ok := req.Input.(judge.AdjudicateInput); ok {
+		s.calls = append(s.calls, in.Candidate.IssueText)
+	}
+	if s.err != nil {
+		return judge.Verdict{}, s.err
+	}
+	return judge.Verdict{Decision: s.real, Confidence: 0.9, ParseError: s.parseErr}, nil
+}
+
+func escalationSnap() run.Snapshot {
+	return run.Snapshot{RunID: "mrv-esc", Iteration: 1, Findings: []run.Finding{
+		// names another file the diff carries: the cheap arm can only show one side
+		{IssueText: "server.go disagrees with scripts/deploy.py", File: "server.go", Line: 1},
+		// names nothing else: excerpts are as good as browsing
+		{IssueText: "a plain local bug", File: "server.go", Line: 1},
+	}}
+}
+
+const escalationDiff = "diff --git a/server.go b/server.go\n--- a/server.go\n+++ b/server.go\n@@ -1,2 +1,3 @@\n+\tx()\n" +
+	"diff --git a/scripts/deploy.py b/scripts/deploy.py\n--- a/scripts/deploy.py\n+++ b/scripts/deploy.py\n@@ -1,2 +1,3 @@\n+\ty()\n"
+
+func runEscalation(t *testing.T, primary, esc judge.Judge) adjudicateOut {
+	t.Helper()
+	r, err := New(Deps{Judge: primary, Escalate: esc})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	raw, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: escalationSnap(), Node: adjNode, Diff: machine.Diff{Text: escalationDiff}, StartIndex: 0, Audit: (&audits{}).fn})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var out adjudicateOut
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return out
+}
+
+// A false reject silently drops a real bug; a false confirm only costs a human a look. So a
+// second, more expensive opinion is spent on rejections - and only where excerpts are known
+// to be weakest, which measurement showed is cross-file claims.
+func TestEscalatesOnlyCrossFileRejections(t *testing.T) {
+	primary := &scriptedJudge{real: false}
+	esc := &scriptedJudge{real: true}
+	out := runEscalation(t, primary, esc)
+	if len(esc.calls) != 1 || !strings.Contains(esc.calls[0], "deploy.py") {
+		t.Fatalf("escalation calls = %v; want exactly the cross-file candidate", esc.calls)
+	}
+	var rescued, stillRejected bool
+	for _, b := range out.Confirmed {
+		if strings.Contains(b.Desc, "deploy.py") {
+			rescued = true
+		}
+	}
+	for _, b := range out.Rejected {
+		if b.Desc == "a plain local bug" {
+			stillRejected = true
+		}
+	}
+	if !rescued {
+		t.Error("a cross-file rejection the second opinion confirms must be recovered")
+	}
+	if !stillRejected {
+		t.Error("a local rejection must stand: escalation is not a blanket re-judge")
+	}
+}
+
+// Escalation exists to recover false rejects. Letting it delete a confirmation would create
+// the very error it was introduced to prevent, so a confirmed candidate is never re-asked.
+func TestEscalationNeverFlipsAConfirmIntoAReject(t *testing.T) {
+	primary := &scriptedJudge{real: true}
+	esc := &scriptedJudge{real: false}
+	out := runEscalation(t, primary, esc)
+	if len(esc.calls) != 0 {
+		t.Errorf("escalation ran on a confirmed candidate: %v", esc.calls)
+	}
+	if len(out.Rejected) != 0 || len(out.Confirmed) != 2 {
+		t.Errorf("confirmations must survive: confirmed=%d rejected=%d", len(out.Confirmed), len(out.Rejected))
+	}
+}
+
+// If the second opinion cannot be obtained, the finding is not resolved either way. Keeping
+// the cheap arm's rejection would drop it on the strength of an escalation that never ran.
+func TestEscalationFailureKeepsTheFinding(t *testing.T) {
+	primary := &scriptedJudge{real: false}
+	esc := &scriptedJudge{err: errors.New("sandbox unavailable")}
+	out := runEscalation(t, primary, esc)
+	var kept bool
+	for _, b := range out.Confirmed {
+		if strings.Contains(b.Desc, "deploy.py") && b.Verdict == run.VerdictCheckedButUnverified {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Errorf("a failed escalation must leave the finding for a human: %+v", out)
+	}
+}
+
+// With no escalation judge configured, behaviour is exactly as before.
+func TestNoEscalationJudgeLeavesRejectionsAlone(t *testing.T) {
+	out := runEscalation(t, &scriptedJudge{real: false}, nil)
+	if len(out.Rejected) != 2 || len(out.Confirmed) != 0 {
+		t.Errorf("without an escalation judge both rejections stand: %+v", out)
+	}
+}
+
+// When both arms agree the finding is not real, the rejection stands: escalation is a second
+// look, not a veto on rejecting anything.
+func TestEscalationAgreeingKeepsTheRejection(t *testing.T) {
+	esc := &scriptedJudge{real: false}
+	out := runEscalation(t, &scriptedJudge{real: false}, esc)
+	if len(esc.calls) != 1 {
+		t.Fatalf("escalation calls = %v, want 1", esc.calls)
+	}
+	if len(out.Rejected) != 2 || len(out.Confirmed) != 0 {
+		t.Errorf("both arms agreeing must leave both rejected: confirmed=%d rejected=%d", len(out.Confirmed), len(out.Rejected))
+	}
+}
+
+// An unparseable second opinion is not a second opinion. It must not be read as agreement
+// with the rejection, which would drop the finding on a transport failure.
+func TestEscalationParseErrorKeepsTheFinding(t *testing.T) {
+	out := runEscalation(t, &scriptedJudge{real: false}, &scriptedJudge{real: true, parseErr: "bad json"})
+	var kept bool
+	for _, b := range out.Confirmed {
+		if strings.Contains(b.Desc, "deploy.py") && b.Verdict == run.VerdictCheckedButUnverified {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Errorf("an unparseable escalation must leave the finding for a human: %+v", out)
+	}
+}

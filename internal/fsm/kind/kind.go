@@ -57,6 +57,14 @@ var commitPattern = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 type Deps struct {
 	Judge judge.Judge
 	Mock  bool
+	// Escalate, when set, gives a rejected cross-file candidate a second opinion from a
+	// judge with wider evidence access (see internal/fsm/sandbox). Optional: nil disables
+	// escalation entirely and the primary judge's verdict stands.
+	//
+	// Only rejections are escalated, and only for candidates whose text names another file
+	// the diff carries. A false reject silently drops a real bug while a false confirm only
+	// costs a human a look, and measurement showed excerpts are weakest on cross-file claims.
+	Escalate judge.Judge
 }
 
 // Registry holds the built-ins.
@@ -83,7 +91,7 @@ func New(d Deps) (*Registry, error) {
 	r.kinds[AgentEdit] = agentEdit{}
 	r.kinds[StillPresent] = stillPresentKind{}
 	r.kinds[Cmd] = cmdKind{}
-	r.execs[MatchThenAdjudicate] = &adjudicateExec{judge: d.Judge}
+	r.execs[MatchThenAdjudicate] = &adjudicateExec{judge: d.Judge, escalate: d.Escalate}
 	r.execs[StillPresent] = &stillPresentExec{judge: d.Judge}
 	r.execs[Cmd] = cmdExec{}
 	return r, nil
@@ -364,7 +372,10 @@ func (adjudicateKind) Reduce(s run.Snapshot, out any) (run.Delta, error) {
 }
 
 // adjudicateExec is the fork executor (spec 4 §4.2).
-type adjudicateExec struct{ judge judge.Judge }
+type adjudicateExec struct {
+	judge    judge.Judge
+	escalate judge.Judge
+}
 
 // call performs one judge call and audits it; parse failures are never errors.
 func call(ctx context.Context, j judge.Judge, in machine.ExecInput, req judge.Request) (judge.Verdict, error) {
@@ -495,6 +506,8 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		if real {
 			desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
 			confirmed = append(confirmed, run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictRealButUngold, Confidence: v.Confidence})
+		} else if second, ok := e.secondOpinion(ctx, in, cand, &index); ok {
+			confirmed = append(confirmed, second)
 		} else {
 			desc, _ := run.CapText(cand.IssueText, run.MaxShort)
 			rejected = append(rejected, run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictHallucination, Confidence: v.Confidence})
@@ -504,6 +517,31 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 	// Desc is capped, ids are deduplicated and never empty (BugID of any text).
 	out := adjudicateOut{Confirmed: dedupBugs(confirmed), Rejected: dedupBugs(rejected)}
 	return json.RawMessage(run.MarshalCanonical(out)), nil
+}
+
+// secondOpinion re-judges one rejected candidate against wider evidence, and reports whether
+// the finding should be kept. It is only consulted for rejections, so it can never turn a
+// confirmation into a rejection - the error escalation exists to prevent.
+func (e *adjudicateExec) secondOpinion(ctx context.Context, in machine.ExecInput, cand run.Finding, index *int) (run.Bug, bool) {
+	if e.escalate == nil || len(judge.ReferencedPaths(in.Diff.Text, cand.File, cand.IssueText)) == 0 {
+		return run.Bug{}, false
+	}
+	desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
+	diff, truncated, diffHash := judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, cand.IssueText, judge.MaxDiffBytes)
+	v, err := call(ctx, e.escalate, in, judge.Request{Kind: judge.KindAdjudicate, Index: *index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand}})
+	*index++
+	if err != nil {
+		// The second opinion never arrived, so nothing decided this finding. Keeping the
+		// first arm's rejection would drop it on the strength of a check that did not run.
+		return run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified}, true
+	}
+	if v.ParseError != "" {
+		return run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified}, true
+	}
+	if v.Decision && v.Confidence >= AdjudicateThreshold {
+		return run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictRealButUngold, Confidence: v.Confidence}, true
+	}
+	return run.Bug{}, false // both arms agree it is not real
 }
 
 // dedupBugs collapses repeated ids (a candidate that equals a golden's text
