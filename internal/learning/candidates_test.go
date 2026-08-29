@@ -127,6 +127,42 @@ func assertKnowledge(t *testing.T, candidates []Candidate, kind, text string) {
 	t.Fatalf("missing knowledge candidate kind=%s text=%q in %+v", kind, text, candidates)
 }
 
+func TestRepeatedBlockerThemesIncludesOverridePendingFindings(t *testing.T) {
+	// A recurring blocker that was escalated (override-pending) should still become
+	// a knowledge candidate, since it is a pattern worth learning from. Before the
+	// fix, isBlocking checked record.Status != "open", so override-pending was dropped,
+	// causing repeatedBlockerThemes to exclude escalated findings.
+	result := ExtractCandidates(Input{
+		Findings: []findings.Record{
+			{
+				ID:             "mrvf-1",
+				Reviewer:       "architecture-reviewer",
+				Severity:       "high",
+				Classification: "blocking",
+				Status:         "override-pending",
+				Title:          "Context risk",
+				Finding:        "First occurrence of context risk blocker.",
+				Fingerprint:    "pr:architecture:context-risk",
+			},
+			{
+				ID:             "mrvf-2",
+				Reviewer:       "architecture-reviewer",
+				Severity:       "high",
+				Classification: "blocking",
+				Status:         "override-pending",
+				Title:          "Context risk",
+				Finding:        "Second occurrence of context risk blocker.",
+				Fingerprint:    "pr:architecture:context-risk-2",
+			},
+		},
+	})
+
+	if len(result.Knowledge) < 1 {
+		t.Fatalf("expected repeated-blocker-theme candidate from override-pending findings: %+v", result.Knowledge)
+	}
+	assertKnowledge(t, result.Knowledge, "repeated-blocker-theme", "Repeated blocker theme")
+}
+
 func assertCalibration(t *testing.T, candidates []Candidate, disposition string) {
 	t.Helper()
 	for _, candidate := range candidates {

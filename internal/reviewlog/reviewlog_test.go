@@ -238,6 +238,98 @@ func artifactReviewMarkdown(runID, target, verdict string, rows []string) string
 		"## Findings\n\nNo blocking findings.\n"
 }
 
+func TestOverridePendingFindingsAreUnresolvedBlockers(t *testing.T) {
+	// A pending override must be treated as an unresolved blocker in the review log.
+	// The isOpenBlocker function must use findings.Blocks(status) to correctly
+	// identify both "open" and "override-pending" statuses as blocking.
+	// Using a PASS verdict ensures only findings (not verdict) determine unresolved status.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "PASS", "mrvf-task-001"))
+	mustWrite(t, filepath.Join(root, ".metareview", "findings.jsonl"), `{"id":"mrvf-task-001","runId":"mrv-task","status":"override-pending","classification":"blocking","severity":"high","title":"Escalated blocker","target":{"id":"task-1","type":"beads-task"}}`+"\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if !logs[0].HasUnresolvedBlockers {
+		t.Fatalf("override-pending finding must mark the review as having unresolved blockers; "+
+			"isOpenBlocker must use findings.Blocks() to treat override-pending as blocking: %+v", logs[0])
+	}
+	if len(logs[0].FindingIDs) != 1 || logs[0].FindingIDs[0] != "mrvf-task-001" {
+		t.Fatalf("expected override-pending finding in summary: %+v", logs[0])
+	}
+}
+
+func TestOverriddenFindingsAreNotUnresolvedBlockers(t *testing.T) {
+	// A granted override must NOT be treated as an unresolved blocker.
+	// Only "open" and "override-pending" statuses should be blocking.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "PASS", "mrvf-task-001"))
+	mustWrite(t, filepath.Join(root, ".metareview", "findings.jsonl"), `{"id":"mrvf-task-001","runId":"mrv-task","status":"overridden","classification":"blocking","severity":"high","title":"Granted override","target":{"id":"task-1","type":"beads-task"}}`+"\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if logs[0].HasUnresolvedBlockers {
+		t.Fatalf("overridden (granted) finding must not mark the review as having unresolved blockers: %+v", logs[0])
+	}
+}
+
+func TestSpecContractFindingsAreAlwaysUnresolvedBlockers(t *testing.T) {
+	// Spec-contract findings are always blocking regardless of severity.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "PASS", "mrvf-task-001"))
+	mustWrite(t, filepath.Join(root, ".metareview", "findings.jsonl"), `{"id":"mrvf-task-001","runId":"mrv-task","status":"open","classification":"spec-contract","severity":"medium","title":"Spec contract violation","target":{"id":"task-1","type":"beads-task"}}`+"\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 || !logs[0].HasUnresolvedBlockers {
+		t.Fatalf("spec-contract finding must always be blocking, even with medium severity: %+v", logs)
+	}
+}
+
+func TestBlockingWithCriticalSeverityIsUnresolvedBlocker(t *testing.T) {
+	// Blocking classification with critical severity is a blocker.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "PASS", "mrvf-task-001"))
+	mustWrite(t, filepath.Join(root, ".metareview", "findings.jsonl"), `{"id":"mrvf-task-001","runId":"mrv-task","status":"open","classification":"blocking","severity":"critical","title":"Critical blocking issue","target":{"id":"task-1","type":"beads-task"}}`+"\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 || !logs[0].HasUnresolvedBlockers {
+		t.Fatalf("blocking finding with critical severity must be blocking: %+v", logs)
+	}
+}
+
+func TestBlockingWithLowSeverityIsNotUnresolvedBlocker(t *testing.T) {
+	// Blocking classification with low severity is NOT a blocker (only high/critical matter).
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "PASS", "mrvf-task-001"))
+	mustWrite(t, filepath.Join(root, ".metareview", "findings.jsonl"), `{"id":"mrvf-task-001","runId":"mrv-task","status":"open","classification":"blocking","severity":"low","title":"Low severity blocking issue","target":{"id":"task-1","type":"beads-task"}}`+"\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if logs[0].HasUnresolvedBlockers {
+		t.Fatalf("blocking finding with low severity must not be blocking: %+v", logs[0])
+	}
+}
+
 func mustWrite(t *testing.T, path, text string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

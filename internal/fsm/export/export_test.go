@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -117,7 +119,7 @@ func (m *memFS) ReadDir(dir string) ([]os.DirEntry, error) {
 	return out, nil
 }
 
-func itoa(i int) string { return string(rune('0' + i%10)) }
+func itoa(i int) string { return fmt.Sprintf("%d", i) }
 
 // ---- a fold-valid run with a marker in every redacted field ---------------------------------------
 
@@ -343,10 +345,27 @@ func TestF8Redaction(t *testing.T) {
 	if string(h.fs.files[filepath.Join(out, "workflow.yaml")]) != string(h.raw) || string(h.fs.files[filepath.Join(out, "notes.md")]) != "sidecar bytes" {
 		t.Fatal("sidecars copied")
 	}
-	// destination flags and perms
+	// destination flags and perms: verify O_NOFOLLOW is present (symlink-attack control)
+	expectedFlags := os.O_WRONLY | os.O_CREATE | os.O_EXCL | syscall.O_NOFOLLOW
 	for _, o := range h.fs.opens {
-		if !strings.HasSuffix(o, " "+itoa(os.O_WRONLY|os.O_CREATE|os.O_EXCL|0x100)+" -rw-------") && !strings.Contains(o, "-rw-------") {
-			t.Fatalf("open flags/perm: %s", o)
+		parts := strings.Fields(o)
+		if len(parts) < 3 {
+			t.Fatalf("open string malformed: %s", o)
+		}
+		flagStr := parts[len(parts)-2]
+		permStr := parts[len(parts)-1]
+		var flag int
+		if _, err := fmt.Sscanf(flagStr, "%d", &flag); err != nil {
+			t.Fatalf("cannot parse flag %q in %s: %v", flagStr, o, err)
+		}
+		if flag != expectedFlags {
+			t.Fatalf("open flags mismatch: got %d (0x%x), expected %d (0x%x) with O_NOFOLLOW=%d; string: %s", flag, flag, expectedFlags, expectedFlags, syscall.O_NOFOLLOW, o)
+		}
+		if permStr != "-rw-------" {
+			t.Fatalf("open perm mismatch: got %s, expected -rw-------; string: %s", permStr, o)
+		}
+		if flag&syscall.O_NOFOLLOW == 0 {
+			t.Fatalf("O_NOFOLLOW missing from flags in %s", o)
 		}
 	}
 	if len(h.fs.mkdirs) != 1 || !strings.HasSuffix(h.fs.mkdirs[0], out+" -rwx------") {
