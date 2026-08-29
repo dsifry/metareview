@@ -2,11 +2,12 @@ package reviewlog
 
 import (
 	"encoding/json"
-	"github.com/dsifry/metareview/internal/jsonl"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dsifry/metareview/internal/jsonl"
 )
 
 func TestDiscoverReviewLogsDeterministically(t *testing.T) {

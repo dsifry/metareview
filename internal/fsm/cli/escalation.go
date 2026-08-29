@@ -29,7 +29,7 @@ func (c *ctxDeps) escalationFor(root string) kind.EscalateFunc {
 		if node == nil || !strings.HasPrefix(strings.ToLower(node.Model), judge.CodexPrefix) {
 			return nil, nil
 		}
-		paths, err := c.changedPaths(root, snap.BaseSHA, snap.Head)
+		paths, err := c.changedPaths(ctx, root, snap.BaseSHA, snap.Head)
 		if err != nil || len(paths) == 0 {
 			return nil, err
 		}
@@ -42,9 +42,17 @@ func (c *ctxDeps) escalationFor(root string) kind.EscalateFunc {
 			return nil, err
 		}
 		c.sandboxRoots = append(c.sandboxRoots, dir)
-		tree, err := sandbox.Materialize(dir, snap.BaseSHA, snap.Head, paths, c.showFile(root))
+		tree, err := sandbox.Materialize(dir, snap.BaseSHA, snap.Head, paths, c.showFile(ctx, root))
 		if err != nil {
 			return nil, err
+		}
+		// An empty tree is not evidence. Every path being absent at both revisions means the
+		// changed set and the finding's references produced nothing readable, and escalating into
+		// an empty directory would record evidence=sandbox with a well-formed TreeHash over
+		// nothing - a verdict attributed to evidence that was never materialized. Tree.Files is
+		// the count that makes this checkable; before this it was written and never read.
+		if tree.Files == 0 {
+			return nil, fmt.Errorf("sandbox: no files materialized for %s..%s (%d paths offered)", snap.BaseSHA, snap.Head, len(paths))
 		}
 		j, err := c.newJudge()
 		if err != nil {
@@ -96,8 +104,8 @@ func (c *ctxDeps) referencedByFindings(snap run.Snapshot, changed []string) []st
 // changedPaths lists what the branch touched, NUL-delimited so a path containing a space or a
 // newline survives (git quotes those in its line-oriented output, and the quoting is lossy to
 // parse; -z avoids the question).
-func (c *ctxDeps) changedPaths(root, base, head string) ([]string, error) {
-	out, code, err := c.git(root, "diff", "--no-ext-diff", "--name-only", "-z", "--no-renames", base+".."+head)
+func (c *ctxDeps) changedPaths(ctx context.Context, root, base, head string) ([]string, error) {
+	out, code, err := c.gitCtx(ctx, root, "diff", "--no-ext-diff", "--name-only", "-z", "--no-renames", base+".."+head)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +128,7 @@ func (c *ctxDeps) changedPaths(root, base, head string) ([]string, error) {
 
 // showFile reads one path at one revision. A path absent at a revision is not an error: a file
 // added on the branch has no base side, and the judge is told so by its absence from base/.
-func (c *ctxDeps) showFile(root string) sandbox.ShowFunc {
+func (c *ctxDeps) showFile(ctx context.Context, root string) sandbox.ShowFunc {
 	return func(rev, path string) ([]byte, bool, error) {
 		// Absence and failure must be distinguishable. Mapping every nonzero exit to "absent"
 		// means an unreadable object produces a partial or empty tree that still carries a
@@ -130,7 +138,7 @@ func (c *ctxDeps) showFile(root string) sandbox.ShowFunc {
 		// `cat-file -e` cannot answer this: it exits 128 both for a path missing from the tree and
 		// for a revision that does not resolve. `ls-tree` separates them - it exits 0 whether or
 		// not the path is there and says which by printing it, so a nonzero exit is a real failure.
-		listed, code, err := c.git(root, "ls-tree", "--name-only", "-z", rev, "--", path)
+		listed, code, err := c.gitCtx(ctx, root, "ls-tree", "--name-only", "-z", rev, "--", path)
 		if err != nil {
 			return nil, false, err
 		}
@@ -142,7 +150,7 @@ func (c *ctxDeps) showFile(root string) sandbox.ShowFunc {
 		}
 		// Read the blob raw. c.git trims, and a file body must reach the tree byte for byte or
 		// its line numbers no longer match the finding that points into it.
-		out, code, err := c.gitRaw(root, "cat-file", "blob", rev+":"+path)
+		out, code, err := c.gitRawCtx(ctx, root, "cat-file", "blob", rev+":"+path)
 		if err != nil {
 			return nil, false, err
 		}

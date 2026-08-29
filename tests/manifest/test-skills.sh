@@ -114,8 +114,13 @@ done
 
 # and no user-facing document may claim a different count than the gate enforces
 for doc in README.md docs/quickstart.md docs/README.claude.md docs/README.codex.md commands/review-artifact.md; do
-  if grep -q 'five required' "$doc"; then
-    echo "FAIL: $doc says 'five required' but artifactReviewComplete requires eight lenses"; exit 1
+  # Any claim of a lens count other than eight, not just the exact phrase "five required": none
+  # of these documents contains the word "five" at all today, so matching one phrase asserted
+  # nothing. "Run the five lenses." could be appended to any of them and this stayed at exit 0.
+  if grep -Eqi '\b(one|two|three|four|five|six|seven|nine|ten|[0-9]+) (required )?lenses\b' "$doc"; then
+    echo "FAIL: $doc claims a lens count other than eight, which is what artifactReviewComplete enforces:"
+    grep -Ein '\b(one|two|three|four|five|six|seven|nine|ten|[0-9]+) (required )?lenses\b' "$doc" | head -3
+    exit 1
   fi
 done
 grep -q 'return the actual artifact-review verdict' skills/review-artifact/SKILL.md

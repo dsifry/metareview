@@ -441,3 +441,52 @@ func TestContextForClaimReportsTruncationOfThePrimaryFile(t *testing.T) {
 		t.Error("alreadyTruncated must survive")
 	}
 }
+
+// h.lines[0] is the @@ header, and the window is taken from h.lines[lo:hi+1] with the header
+// prepended - so a hunk whose only line IS the header comes back with it twice. With
+// len(h.lines)==1 the clamp drives centre to 0, giving lo==hi==0, and the result is a malformed
+// hunk: two @@ headers and no body. A judge reading that sees a hunk that cannot be parsed back.
+func TestWindowLinesDoesNotDuplicateTheHunkHeader(t *testing.T) {
+	h := hunk{start: 1, lines: []string{"@@ -1,1 +1,1 @@"}}
+	got := windowLines(h, 1, 4000)
+	if len(got) != 1 {
+		t.Errorf("a header-only hunk must come back once, got %d lines: %q", len(got), got)
+	}
+	// And the ordinary case must be unaffected: header, then the window.
+	h2 := hunk{start: 1, lines: []string{"@@ -1,3 +1,3 @@", " a", "+b", " c"}}
+	got2 := windowLines(h2, 2, 4000)
+	if len(got2) == 0 || got2[0] != "@@ -1,3 +1,3 @@" {
+		t.Fatalf("the header must lead: %q", got2)
+	}
+	for _, line := range got2[1:] {
+		if strings.HasPrefix(line, "@@") {
+			t.Errorf("a second @@ header appears in the body: %q", got2)
+		}
+	}
+}
+
+// "The same file" has to mean the same thing everywhere, or a finding is denied evidence the diff
+// plainly carries. DiffHasFile compared raw strings, so a discover node emitting "./internal/x.go"
+// or "a/internal/x.go" - both ordinary spellings, both produced by real tools - was treated as
+// naming a file absent from the diff, and its finding was kept as unverified_no_evidence for a
+// human who would have found it right there in the patch.
+func TestDiffHasFileNormalisesOrdinaryPathSpellings(t *testing.T) {
+	diff := "diff --git a/internal/x.go b/internal/x.go\n--- a/internal/x.go\n+++ b/internal/x.go\n@@ -1,2 +1,3 @@\n+\tmarker()\n"
+	for _, spelling := range []string{
+		"internal/x.go",
+		"./internal/x.go",
+		"a/internal/x.go",
+		"b/internal/x.go",
+		"internal/./x.go",
+		" internal/x.go ",
+	} {
+		if !DiffHasFile(diff, spelling) {
+			t.Errorf("DiffHasFile(%q) = false; the diff carries that file", spelling)
+		}
+	}
+	for _, absent := range []string{"internal/y.go", "x.go", "other/internal/x.go"} {
+		if DiffHasFile(diff, absent) {
+			t.Errorf("DiffHasFile(%q) = true; that file is not in the diff", absent)
+		}
+	}
+}

@@ -3,6 +3,7 @@ package judge
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -101,12 +102,27 @@ func parseHunkRange(line string) (start, count int) {
 // precondition for adjudicating a finding: a judge cannot evaluate a candidate whose file
 // is absent from the evidence, and that is knowable without spending the call.
 func DiffHasFile(diff, path string) bool {
+	want := NormalizePath(path)
 	for _, b := range parseUnifiedDiff(diff) {
-		if b.path == path {
+		if NormalizePath(b.path) == want {
 			return true
 		}
 	}
 	return false
+}
+
+// NormalizePath is the one definition of "the same file" shared by every path predicate here and
+// in kind. Exact string equality was the previous rule, so a discover node that emitted
+// "./internal/x.go" or "a/internal/x.go" - both ordinary ways to write a path, and both produced
+// by real tools - was judged to have no evidence for a file the diff plainly carried, and its
+// finding was kept as unverified_no_evidence for a human who would have found it right there.
+func NormalizePath(p string) string {
+	p = strings.TrimSpace(p)
+	p = strings.TrimPrefix(p, "./")
+	for _, prefix := range []string{"a/", "b/"} {
+		p = strings.TrimPrefix(p, prefix)
+	}
+	return path.Clean(p)
 }
 
 // SelectDiff returns the slice of a unified diff that bears on one candidate: the hunks of
@@ -118,10 +134,11 @@ func DiffHasFile(diff, path string) bool {
 // budget bytes of the whole branch diff - on a 538-file branch that is the alphabetically
 // first dozen files and nothing the candidate refers to.
 func SelectDiff(diff, path string, line, budget int) (out string, ok bool, hash string) {
+	want := NormalizePath(path) // the same definition of "same file" DiffHasFile uses
 	var block *fileBlock
 	all := parseUnifiedDiff(diff)
 	for i := range all {
-		if all[i].path == path {
+		if NormalizePath(all[i].path) == want {
 			block = &all[i]
 			break
 		}
@@ -214,6 +231,12 @@ const disclosureReserve = 256
 // by position in the hunk only: no language, no syntax, no notion of a statement or block.
 func windowLines(h hunk, target, budget int) []string {
 	if len(h.lines) == 0 || budget <= 0 {
+		return h.lines
+	}
+	// h.lines[0] is the @@ header and the window is prepended with it, so a hunk that is nothing
+	// but a header has no body to window: returning here avoids emitting the header twice, which
+	// produced a hunk with two @@ lines and no content.
+	if len(h.lines) == 1 {
 		return h.lines
 	}
 	centre := 1

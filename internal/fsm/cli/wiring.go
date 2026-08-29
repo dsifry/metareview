@@ -45,9 +45,18 @@ func (c *ctxDeps) git(dir string, args ...string) (string, int, error) {
 	return strings.TrimSpace(string(out)), code, err
 }
 
-// gitRaw runs one git command and returns stdout byte for byte.
-func (c *ctxDeps) gitRaw(dir string, args ...string) ([]byte, int, error) {
-	out, _, code, err := c.deps.Exec(c.ctx, dir, nil, args...)
+// gitCtx returns TRIMMED stdout and gitRawCtx returns it byte for byte; both take the context
+// explicitly, for callers handed one narrower than the invocation's. Never use the trimming form
+// for file content: the trim removes leading and trailing blank lines, shifting every line number
+// below them. Materializing this repository's own branch is ~540 files and so ~1,000 git
+// subprocesses; a caller that cancels must be able to stop them.
+func (c *ctxDeps) gitCtx(ctx context.Context, dir string, args ...string) (string, int, error) {
+	out, code, err := c.gitRawCtx(ctx, dir, args...)
+	return strings.TrimSpace(string(out)), code, err
+}
+
+func (c *ctxDeps) gitRawCtx(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+	out, _, code, err := c.deps.Exec(ctx, dir, nil, args...)
 	return out, code, err
 }
 

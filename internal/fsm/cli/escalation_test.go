@@ -238,7 +238,8 @@ func TestEscalationIsOffUnlessRequested(t *testing.T) {
 // escalated judge is handed the same evidence gap that caused the rejection.
 func TestSandboxCarriesFilesFindingsNameEvenWhenUnchanged(t *testing.T) {
 	h, c, snap, ranIn := escalationHarness(t)
-	// seed.txt exists at HEAD and is NOT in base..head (the harness commits it first)
+	// notes.md exists at HEAD and is NOT in base..head - the harness commits it before taking the
+	// base SHA, so it can only reach the evidence tree by being named in a finding
 	snap.Findings = []run.Finding{{
 		File: "f.go", Line: 1,
 		IssueText: "f.go now requires eight, but notes.md still documents five",
@@ -372,5 +373,69 @@ func TestEscalateFlagReachesTheField(t *testing.T) {
 		if c.escalate != tc.want {
 			t.Errorf("%v: c.escalate = %v, want %v", tc.args, c.escalate, tc.want)
 		}
+	}
+}
+
+// The context the executor hands EscalateFunc has to govern the work it triggers. Every git call
+// inside the closure went through ctxDeps.git, which passes the invocation's context, so the
+// executor's context governed nothing: materializing this repository's own branch is ~540 files
+// and so ~1,000 git subprocesses, and a cancelled or timed-out node could not stop any of them.
+func TestEscalationHonoursTheContextItIsGiven(t *testing.T) {
+	h, c, snap, _ := escalationHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var sawCancelled bool
+	real := c.deps.Exec
+	c.deps.Exec = func(got context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
+		if got.Err() != nil {
+			sawCancelled = true
+		}
+		return real(got, dir, env, args...)
+	}
+	_, _ = c.escalationFor(h.root)(ctx, snap, &workflow.Node{Model: "codex/x"})
+	if !sawCancelled {
+		t.Error("git ran with a context that was not the one the executor passed, so cancelling a node cannot stop the ~1,000 subprocesses it starts")
+	}
+}
+
+// Routing strips the codex/ prefix case-insensitively, so this guard has to match the same way or
+// a run started with --judge-model Codex/gpt-5.6-sol reaches the Codex CLI while escalation
+// decides it is not agentic and silently declines. Every existing fixture used a lowercase model,
+// so dropping strings.ToLower left the suite green.
+func TestEscalationMatchesTheCodexPrefixCaseInsensitively(t *testing.T) {
+	h, c, snap, _ := escalationHarness(t)
+	for _, model := range []string{"codex/gpt-5.6-sol", "Codex/gpt-5.6-sol", "CODEX/gpt-5.6-sol"} {
+		esc, err := c.escalationFor(h.root)(context.Background(), snap, &workflow.Node{Model: model})
+		if err != nil {
+			t.Fatalf("%s: %v", model, err)
+		}
+		if esc == nil {
+			t.Errorf("model %q routes to the Codex CLI but escalation declined it as non-agentic", model)
+		}
+	}
+	// A non-codex model is still declined: an HTTP judge cannot read a tree.
+	esc, err := c.escalationFor(h.root)(context.Background(), snap, &workflow.Node{Model: "gpt-5.2"})
+	if err != nil || esc != nil {
+		t.Errorf("a non-agentic judge must not be escalated to: esc=%v err=%v", esc, err)
+	}
+}
+
+// A tree with no files in it is not evidence: escalating into an empty directory records
+// evidence=sandbox and a well-formed TreeHash over nothing, so the audit says the judge read a
+// materialized tree when it read an empty folder. Tree.Files existed only to be incremented -
+// no production caller read it - and this is what makes it load-bearing.
+func TestEscalationRefusesAnEmptyEvidenceTree(t *testing.T) {
+	h, c, snap, _ := escalationHarness(t)
+	real := c.deps.Exec
+	c.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
+		// Every path reports as absent at both revisions: ls-tree succeeds and lists nothing.
+		if len(args) > 0 && args[0] == "ls-tree" {
+			return nil, nil, 0, nil
+		}
+		return real(ctx, dir, env, args...)
+	}
+	if _, err := c.escalationFor(h.root)(context.Background(), snap, &workflow.Node{Model: "codex/x"}); err == nil {
+		t.Error("an empty evidence tree must be an error, not a sandbox the judge is pointed at")
 	}
 }

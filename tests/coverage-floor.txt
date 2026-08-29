@@ -1,6 +1,8 @@
 # Per-package combined coverage floor (unit + shell suite). Regenerate: bash tests/coverage.sh --update-floor
-# 2026-08-29: findings/runchain/state lowered by ~1 statement each when the JSONL scanner moved
-# to internal/jsonl (100%, floored). Nothing became less tested - the covered code left the package.
+# 2026-08-29: findings/runchain/state lowered when the JSONL scanner moved to internal/jsonl
+# (100%, floored). Measured base -> head: state 58 -> 53 statements, runchain 107 -> 102,
+# findings likewise - about five statements each, not the "~1" this note first claimed. Nothing
+# became less tested; the covered code left the package.
 # 2026-08-29: sessionhistory 86.3 -> 85.2. The old value was only reachable on a machine holding
 # real ~/.claude session data: sessionhistory scans the home in addition to --session-root, so CI
 # measured 79.1 from identical code and could never pass. tests/go/test-learn-post-merge.sh now
