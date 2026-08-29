@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/dsifry/metareview/internal/fsm/judge"
@@ -76,6 +77,16 @@ func (c *ctxDeps) referencedByFindings(snap run.Snapshot, changed []string) []st
 				continue
 			}
 			have[p] = true
+			// These paths come from model prose, not from git. sandbox.Materialize refuses a path
+			// that escapes the tree - correctly, since a diff-derived path doing that is a bug -
+			// but that refusal is fatal to the whole batch, and escalationFor's error is cached
+			// under a sync.Once, so one malformed string in one finding would disable escalation
+			// for the entire run. diffselect's own comment sets the intended cost of a spurious
+			// path: "at worst costs one escalation". So the untrusted half is filtered here,
+			// where the provenance is known, and the guard downstream stays fail-closed.
+			if clean := filepath.Clean(p); clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+				continue
+			}
 			extra = append(extra, p)
 		}
 	}

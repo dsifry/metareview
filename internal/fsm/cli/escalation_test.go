@@ -324,3 +324,29 @@ func TestSandboxMaterializesExactBytes(t *testing.T) {
 		t.Errorf("materialized bytes differ from the file at that revision:\n got %q\nwant %q", got, body)
 	}
 }
+
+// A path a judge's prose invented is untrusted input, and one malformed string must not cost the
+// run its escalation. sandbox.Materialize refuses an escaping path and that refusal is fatal to
+// the batch, while escalationFor's error is cached under a sync.Once - so without filtering here,
+// a finding whose text contained "../../etc/passwd" would turn every cross-file rejection in the
+// run into checked_but_unverified.
+func TestFindingPathsThatEscapeTheTreeAreSkippedNotFatal(t *testing.T) {
+	h, c, snap, _ := escalationHarness(t)
+	snap.Findings = []run.Finding{{
+		File: "f.go",
+		// ../secrets.env and ./../../x.go both escape the tree once cleaned, and
+		// AllReferencedPaths does return them - verified rather than assumed.
+		IssueText: "this mirrors ../secrets.env and ./../../x.go and ./notes.md",
+	}}
+	esc, err := c.escalationFor(h.root)(context.Background(), snap, &workflow.Node{Model: "codex/x"})
+	if err != nil {
+		t.Fatalf("a malformed path in judge prose must not fail the batch: %v", err)
+	}
+	if esc == nil {
+		t.Fatal("escalation was not built")
+	}
+	// The legitimate relative path is still carried.
+	if _, err := os.Stat(filepath.Join(c.sandboxRoots[len(c.sandboxRoots)-1], "head", "notes.md")); err != nil {
+		t.Errorf("a well-formed referenced path must still reach the tree: %v", err)
+	}
+}
