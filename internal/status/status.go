@@ -4,9 +4,10 @@
 // metareview's Completion Rule is prose in CLAUDE.md - "before saying work is done, run the
 // appropriate gate". Prose is not a gate: an agent can skip it, or run it, read NEEDS_REVISION
 // and carry on. A host hook can enforce it, but only against a machine-readable contract, and
-// `metareview status` printed for humans. This is that contract; the hooks are thin shims over
-// it, which is what keeps the enforcement model-agnostic rather than one implementation per
-// host drifting apart.
+// `metareview status` printed for humans. This is that contract. A host hook is meant to be a
+// thin shim over it, which is what would keep the enforcement model-agnostic rather than one
+// implementation per host drifting apart - but no hook ships in this repository yet, so this is
+// the surface they will sit on rather than a description of something already wired.
 package status
 
 import (
@@ -85,8 +86,11 @@ func Emit(root string, w io.Writer) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	// Report holds only strings, bools, ints and slices of the same, so marshalling cannot
-	// fail; a branch here would be unreachable and untestable.
+	// Report holds strings, bools, ints, slices of those, and []reviewlog.Summary, whose own
+	// fields bottom out in the same kinds - not "only strings, bools, ints and slices of the
+	// same", as this said before. What makes encoding/json fail is a channel, a func, a cyclic
+	// pointer graph or a failing custom Marshaler, and the type graph contains none, so a branch
+	// here would be unreachable and untestable.
 	out, _ := json.MarshalIndent(r, "", "  ")
 	if _, err := fmt.Fprintln(w, string(out)); err != nil {
 		return 0, err

@@ -103,8 +103,9 @@ type Deps struct {
 	Nonce     func() string
 	MockLoad  func(dir string) (hash string, err error)
 	Terminal  func(ctx context.Context, v View) error
-	// Preflight (optional) runs before Create for every judge-calling node (KindInfo.NeedsJudge) at Init, and on the Advance that would run a
-	// fork node, before any append of that node's work (spec 5 §8: judge pre-flight).
+	// Preflight (optional) runs before Create for every judge-calling node (KindInfo.NeedsJudge) at Init, and on the Advance that would run
+	// such a node, before any append of that node's work (spec 5 §8: judge pre-flight). Both clauses
+	// gate on NeedsJudge, not on exec: a cmd node is exec: fork and is never pre-flighted.
 	Preflight func(node *workflow.Node, calibration bool) error
 }
 

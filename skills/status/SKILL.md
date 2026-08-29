@@ -13,6 +13,17 @@ Run:
 metareview status
 ```
 
+For a host hook or any programmatic caller, use the machine-readable form instead:
+
+```bash
+metareview status --json
+```
+
+It emits `{version, mode, git, beads, metaswarm, reviews, must_clear, blocked}`. `must_clear` names
+every review with unresolved blockers (target, run id, verdict, kind, log path, blocking count,
+attempt of max) and `blocked` is the single boolean to branch on. Exit 1 means something must be
+cleared, 0 means nothing does, so a hook can gate on the exit code alone.
+
 Report:
 
 - repository mode

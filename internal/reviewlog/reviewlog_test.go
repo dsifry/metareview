@@ -474,3 +474,31 @@ func TestLensErasAreKeyedByDate(t *testing.T) {
 		t.Error("a log written in the new era must be judged against it")
 	}
 }
+
+// The severity policy is "critical and high block; medium and low do not", and only three of its
+// four cases were pinned - medium had none, so widening the set from (critical|high) to
+// != "low" left the suite green and silently promoted every medium finding to a blocker. The
+// enumeration is now complete, which is the point of an enumeration.
+func TestOnlyCriticalAndHighSeveritiesBlock(t *testing.T) {
+	for _, tc := range []struct {
+		severity string
+		blocks   bool
+	}{
+		{"critical", true},
+		{"high", true},
+		{"medium", false},
+		{"low", false},
+		{"", false},
+	} {
+		t.Run(tc.severity, func(t *testing.T) {
+			got := isOpenBlocker(findingRecord{Status: "open", Classification: "blocking", Severity: tc.severity})
+			if got != tc.blocks {
+				t.Errorf("severity %q: isOpenBlocker = %v, want %v", tc.severity, got, tc.blocks)
+			}
+		})
+	}
+	// spec-contract blocks whatever its severity, which is the one exception to the rule above.
+	if !isOpenBlocker(findingRecord{Status: "open", Classification: "spec-contract", Severity: "low"}) {
+		t.Error("a spec-contract finding must block regardless of severity")
+	}
+}

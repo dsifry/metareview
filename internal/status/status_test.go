@@ -34,6 +34,25 @@ func writeRuns(t *testing.T, root string, lines ...string) {
 	}
 }
 
+// must_clear is initialised to an empty slice rather than left nil so the JSON emits [] and not
+// null - a wire-contract choice for the hook consumers the package doc describes, and one nothing
+// pinned: removing the initialiser was green, because the only test touching the field asked
+// len(...) == 0, which a nil slice satisfies. A hook doing `for (const b of r.must_clear)` breaks
+// on null and not on [].
+func TestMustClearIsAnEmptyArrayNotNull(t *testing.T) {
+	r, err := Build(t.TempDir())
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"must_clear":[]`) {
+		t.Errorf("a clean repository must emit must_clear as [], not null:\n%s", b)
+	}
+}
+
 // The contract a host hook sits on: one machine-readable answer to "may I proceed, and if
 // not, what must be cleared". Prose output cannot be a gate - a hook has to branch on it.
 func TestReportIsMachineReadableAndNamesWhatMustBeCleared(t *testing.T) {
