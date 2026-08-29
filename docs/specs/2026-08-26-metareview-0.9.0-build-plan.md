@@ -1,7 +1,10 @@
 # metareview 0.9.0 — TDD build & orchestration plan
 
-> **Status:** REVISION 3 (2026-08-26) — re-review pending. Companion to
-> [`2026-08-26-metareview-0.9.0-fsm-enhancements.md`](2026-08-26-metareview-0.9.0-fsm-enhancements.md)
+> **Status:** REVISION 3 (2026-08-26) — **SUPERSEDED.** Escalated review and split into five successor
+> build baselines: [`fsm-run-persistence`](2026-08-26-metareview-0.9.0-fsm-run-persistence.md),
+> [`fsm-core`](2026-08-27-metareview-0.9.0-fsm-core.md), [`fsm-fork`](2026-08-27-metareview-0.9.0-fsm-fork.md),
+> [`fsm-judge-kinds`](2026-08-27-metareview-0.9.0-fsm-judge-kinds.md), and [`fsm-cli`](2026-08-27-metareview-0.9.0-fsm-cli.md).
+> Companion to [`2026-08-26-metareview-0.9.0-fsm-enhancements.md`](2026-08-26-metareview-0.9.0-fsm-enhancements.md)
 > (the design spec). This document locks the interfaces, corrects the spec where it is wrong about the
 > current binary, fixes the CLI contract the spec left open, and sequences the build so independent
 > packages can be written in parallel — each test-first, each under a hard 100% coverage gate.
