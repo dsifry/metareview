@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-16-3-d79734b5cf43be1a-claude-opus-5",
+  "kind": "shard",
+  "shardId": "shard-16-3",
+  "shardHash": "d79734b5cf43be1a",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T06:38:37Z",
+  "evidence": [
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 363,
+      "note": "sourceAssignmentBlockers rewritten to a chunk-level invariant; verified against contextprofile.Chunk/Shard in internal/contextprofile/shards.go:27-41."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 459,
+      "note": "resultBlockers now validates schema version, id, kind, verdict, reviewer, RFC3339 reviewedAt, shard-id shape and file-name agreement; the old SourceManifestHash staleness check is correctly replaced by content-hash freshness (MatchShard/MatchesPlan, lines 174-193)."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 60,
+      "note": "shardIDPattern ^shard-[0-9a-f]{1,3}(-[0-9]+)?$ matches every id PlanShards can emit: shardIDForPath renders ceil(bits/4) hex digits with bits capped at maxBucketBits=12 (internal/contextprofile/shards.go:18,114-127), and the split suffix is fmt.Sprintf(\"%s-%d\", id, index) at shards.go:229."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 703,
+      "note": "ingested/ingestedCode neutralise newlines, control chars, the mrvf- finding-id prefix and table pipes; markdown.InlineCode (internal/markdown/markdown.go:17) widens the fence for embedded backticks, so a reviewer-supplied string cannot forge a cell. Covered by TestShardedReviewMarkdownCannotForgeTableCells and TestRenderersNeutraliseShardIDAndVerdict."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest_test.go",
+      "line": 11,
+      "note": "36 tests accompany the manifest.go rewrite, covering freshness by shard hash and plan hash, ignored/oversize/unreadable results, filename-id mismatch, duplicates, disposition closure semantics and the evidence rule. go test ./internal/reviewmanifest/... passes at 90.4% unit-only against a 97.0 merged floor (tests/coverage-floor.txt:21)."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.sha256",
+      "line": 1,
+      "note": "Independently regenerated all three hashes with shasum -a 256 over each line of internal/fsm/run/testdata/oracle.jsonl: byte-for-byte identical to the committed file, so the prev-hash chain oracle consumed by internal/fsm/run/store_test.go:813 is genuinely externally derived and not a Go self-fulfilling fixture."
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 1257,
+      "note": "Verified every helper the shard's test code calls (raw2, appendBytes, writeBytes, symlink, chmod, fileMode, mkdir, joinLines, badFile, fileOwnerCanChmod, mustErr, countType, allPresent, sdlcWith, mustResolve) resolves in internal/fsm/machine/helpers_test.go or machine_test.go; no dead or missing helper."
+    },
+    {
+      "note": "Verification run: gofmt -l over internal/reviewmanifest and internal/fsm/machine is clean, go vet on reviewmanifest, fsm/machine and fsm/run is clean, and go test on all three packages passes. No TODO/FIXME markers, no eval or other unsafe execution, and no truncated diff context in this shard."
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 46,
+      "note": "The err-then-deref assertions (Open torn/repair) are safe: Go short-circuits || so mo.View() is never reached on a nil machine."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "sourceAssignmentBlockers does not enforce the invariant its own doc comment states. It records pathSeen[chunk.Path] on any single chunk and only flags chunkCounts[key] > 1, so a plan that assigns parts 1 and 3 of a three-part file but drops part 2 produces zero blockers: the file counts as assigned and no duplicate exists. chunk.Parts is available and unused here. Not a regression (the previous check was path-level) and not reachable without an upstream PlanShards bug, which is precisely what this invariant exists to catch, so the practical exposure is the loss of a defence-in-depth check rather than a live defect.",
+      "evidence": [
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 377,
+          "note": "pathSeen[chunk.Path] = true is set by any one chunk; nothing compares the set of observed Part values against chunk.Parts."
+        },
+        {
+          "path": "internal/reviewmanifest/manifest_test.go",
+          "line": 332,
+          "note": "TestChunkAssignedToExactlyOneShard covers the duplicate-chunk and unassigned-path cases only; the dropped-part case has no test."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "IgnoredResult.Reason is sanitised twice on one path and not at all on the other. shardResultBlockers builds the reason with ingested(result.ShardHash) already applied, and both renderers then apply ingested() again to the whole reason, so an embedded pipe becomes the double escape \\\\| and renders as a stray backslash. crossShardBlockers builds its reason with a bare firstNonEmpty and no sanitisation at all. Both reasons land in bullet lists rather than table rows, so neither can forge a cell and the impact is cosmetic plus an inconsistent contract about who owns sanitisation; the fix is to store raw reasons and sanitise only at render.",
+      "evidence": [
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 408,
+          "note": "Reason is composed as \"no current shard has hash \" + ingested(...) at construction time."
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 444,
+          "note": "The cross-shard reason uses firstNonEmpty with no ingested() wrapper, the opposite convention from the shard branch."
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 753,
+          "note": "ShardedReviewMarkdown applies ingested(ignored.Reason) a second time; Markdown does the same at line 301."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "ShardedReviewMarkdown renders the plan hash with a bare markdown.InlineCode, so when there is no plan it emits the empty code span \"- Plan hash: ``\". The function is reachable in exactly that state: its guard also passes when the only content is ignored or unreadable result files, which is the normal shape of an unsharded review that still has stale result files on disk. Markdown() already has the purpose-built manifestHashText helper for this case (\"not sharded\") and ShardedReviewMarkdown does not use it.",
+      "evidence": [
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 731,
+          "note": "\"- Plan hash: \" + markdown.InlineCode(manifest.SourceManifestHash) with no empty-hash branch."
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 311,
+          "note": "manifestHashText exists precisely to state \"not sharded\" for an empty hash and is used only by Markdown()."
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 723,
+          "note": "The early-return guard passes when len(aggregate.Ignored) > 0 or len(manifest.UnreadableResults) > 0 even with an empty ShardPlan."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0a-review",
+  "kind": "shard",
+  "shardId": "shard-0a",
+  "shardHash": "50f8dadef8765889",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T06:36:43Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/machine/sidecar.go",
+      "line": 60,
+      "note": "FSSidecar.Write/Read/List verified against the repo: run-id and name validation (regex excludes audit.* and lock, the only reserved names the store uses per internal/fsm/run/store_jsonl.go:61 and :349), O_EXCL|O_NOFOLLOW at 0600, MaxPayload-bounded reads through a LimitReader. Write has no size cap, but the only caller writes workflow bytes already bounded by MaxWorkflowBytes (internal/fsm/machine/machine.go:76, internal/fsm/machine/fork.go:119) and MaxWorkflowBytes == run.MaxPayload == 256<<10, so the write and read boundaries coincide exactly - no write-then-unreadable asymmetry."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 288,
+      "note": "Apply fails closed to *FoldError with a zero state on every rejection path (version, init ordering, seq gap, unknown type, canonicalization, per-field caps, node scope, stamps, provenance, mock taint, post-terminal). cow() at line 264 copies every mutable container, and the only shared values are json.RawMessage node outputs which are never mutated, so the fold is pure as documented."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 705,
+      "note": "decodePayload switch covers 15 of the 16 EventTypes (internal/fsm/run/event.go:49) explicitly and its default arm is reachable only for TypeFork after knownType filtering; DisallowUnknownFields is set. withinCaps has no arm for NodeOutputData/EmptyData, which is correct: those payloads carry no capped string field and are bounded by the MaxPayload check at fold.go:43."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 372,
+      "note": "The node_output arm no longer discards the Canonical error on p.Output, which closes the corruption path the comment describes: Canonical(nil) errors, and OutputHash(nil) equals the sha256 of the empty string, so a stored empty result would have been accepted by the matching delta_applied. Verified the delta arm at line 121 recomputes OutputHash over the stored canonical bytes."
+    },
+    {
+      "path": "internal/runchain/runchain.go",
+      "line": 114,
+      "note": "ReadRuns raises the scanner cap from bufio's 64 KiB default to maxJSONLLineBytes+2 and still returns scanner.Err() at line 132, so an over-long line is a hard error rather than a silently truncated record. internal/runchain/runchain_test.go:247 pins the boundary with an exactly-1 MiB fixture line."
+    },
+    {
+      "path": "tests/go/test-override.sh",
+      "line": 1,
+      "note": "set -euo pipefail, builds the binary into a mktemp dir under an EXIT trap, and covers request, pending-exit-nonzero, unknown-flag rejection, self-grant refusal, grant with attribution, FINDINGS.md rendering of both halves, and re-override refusal. The `grep -q '\"fixedInRunId\"' ... && fail` assertion at line 60 is safe under set -e because a failing command that precedes the final && in a list is exempt."
+    },
+    {
+      "note": "Repository-level verification on the frozen branch: go build ./... clean, go vet clean for run/machine/runchain, gofmt reports no diff on all three Go files, go test passes, and internal/fsm/machine and internal/fsm/run are both at 100.0% statement coverage. No eval, no TODO/FIXME markers, no truncated diff context, and no duplicated service in this shard."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two readers of the same runs.jsonl file disagree at the 1 MiB boundary by two bytes, and the new test's name overstates what it proves. internal/runchain/runchain.go:114 sizes the scanner at maxJSONLLineBytes+2, admitting a line of exactly 1<<20 bytes, while internal/fsm/record/record.go:154 sizes its scanner at exactly 1<<20, which bufio rejects with ErrTooLong for a 1<<20-byte line (the buffer can never hold the line plus its terminator). A row of exactly 1 MiB - the fixture the new test writes - therefore reads fine through runchain and makes record.appendRow fail permanently, and no writer enforces any cap on escalationReason. The test is named TestReadersAcceptOneMiBLines (plural) but only exercises runchain.ReadRuns. Net effect is still an improvement (the gap shrinks from ~1 MiB to 2 bytes), hence low: either share one constant across both readers or rename the test to name the single reader it covers.",
+      "evidence": [
+        {
+          "path": "internal/runchain/runchain.go",
+          "line": 114,
+          "note": "scanner.Buffer(make([]byte, 0, 64*1024), maxJSONLLineBytes+2) admits a 1<<20-byte line"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 154,
+          "note": "sc.Buffer(make([]byte, 0, 1<<20), 1<<20) rejects the same line with bufio.ErrTooLong"
+        },
+        {
+          "path": "internal/runchain/runchain_test.go",
+          "line": 247,
+          "note": "TestReadersAcceptOneMiBLines exercises only ReadRuns despite the plural name"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Misplaced doc comment in the new fold.go: the paragraph describing cow() sits immediately above func (st FoldState) NextIndex, so godoc renders cow's description as the documentation of the exported NextIndex method, and cow itself (line 264) is undocumented. Move the cow paragraph down to the cow declaration.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 259,
+          "note": "cow doc paragraph precedes NextIndex at line 262; cow is declared at line 264 with no comment of its own"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "FSSidecar writes into the run directory without the symlink hardening the store applies to the same directory. internal/fsm/run/store_jsonl.go:80 checkComponents Lstats .metareview, runs and the run id and refuses any component that is a symlink or not a real directory before opening audit.jsonl; FSSidecar.Write/Read apply O_NOFOLLOW to the leaf only, so a symlinked <root>/.metareview/runs/<id> would redirect the sidecar write that the store would have refused. Impact is bounded (local write access is already required, and O_CREATE|O_EXCL cannot clobber an existing file), but the two writers into one directory should share one hardening rule.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/sidecar.go",
+          "line": 66,
+          "note": "leaf-only O_NOFOLLOW; no component check on <root>/.metareview/runs/<id>"
+        },
+        {
+          "path": "internal/fsm/run/store_jsonl.go",
+          "line": 80,
+          "note": "checkComponents rejects a symlinked or non-directory component before the store touches the same run dir"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The MemSidecar test double can diverge from FSSidecar in exactly the dimension the double exists to model. FSSidecar.List filters entries through ValidSidecarName, so audit.* and lock are never listed; MemSidecar.List filters only on the run-id prefix, and Put bypasses checkSidecarArgs entirely, so a test that Puts a reserved or malformed name sees it come back from List while production would not. Reuse ValidSidecarName in MemSidecar.List (or validate in Put) so a passing test cannot depend on behaviour FSSidecar does not have.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/sidecar.go",
+          "line": 178,
+          "note": "MemSidecar.List filters only by the runID+\"/\" key prefix"
+        },
+        {
+          "path": "internal/fsm/machine/sidecar.go",
+          "line": 197,
+          "note": "Put stores any name without calling checkSidecarArgs, unlike Write at line 136"
+        },
+        {
+          "path": "internal/fsm/machine/sidecar.go",
+          "line": 117,
+          "note": "FSSidecar.List gates every entry on ValidSidecarName"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

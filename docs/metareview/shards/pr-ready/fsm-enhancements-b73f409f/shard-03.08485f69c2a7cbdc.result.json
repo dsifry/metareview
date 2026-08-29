@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-03.08485f69c2a7cbdc",
+  "kind": "shard",
+  "shardId": "shard-03",
+  "shardHash": "08485f69c2a7cbdc",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T16:58:26Z",
+  "evidence": [
+    {
+      "path": "docs/README.codex.md",
+      "line": 70,
+      "note": "120,000-byte context limit claim verified against internal/contextprofile/profile.go:23 (DefaultLargeDiffBytes = 120000) and the strict > comparison at profile.go:146."
+    },
+    {
+      "path": "docs/README.codex.md",
+      "line": 88,
+      "note": "4,000-byte untracked threshold and UNTRACKED_TRUNCATED verified against internal/gitcontext/gitcontext.go:17 and internal/contextprofile/profile.go:21."
+    },
+    {
+      "path": "docs/README.codex.md",
+      "line": 78,
+      "note": "Result path/name convention shard-<id>.<shardHash>.result.json and cross-shard.<planHash>.result.json matches internal/reviewmanifest/manifest.go:62 and internal/shardpack/shardpack.go:472-474."
+    },
+    {
+      "path": "docs/README.codex.md",
+      "line": 77,
+      "note": "\"cross-shard.md when there is more than one shard\" matches the len(plan.Shards) > 1 guard at internal/shardpack/shardpack.go:188 and crossShardBlockers at internal/reviewmanifest/manifest.go:432-436."
+    },
+    {
+      "path": "docs/README.codex.md",
+      "line": 66,
+      "note": "metareview fsm --agent-prompt exists (internal/fsm/cli/run.go:40); docs/fsm/driving-a-workflow.md exists and docs/fsm/ is in package.json files, so the reference is not broken for npm installs."
+    },
+    {
+      "path": "docs/README.codex.md",
+      "line": 49,
+      "note": "$fsm skill row is backed by skills/fsm/SKILL.md and .codex-plugin/plugin.json ships the whole ./skills/ directory, so the Codex skill resolves."
+    },
+    {
+      "path": "docs/README.codex.md",
+      "line": 60,
+      "note": ".metareview/runs/ and .metareview/shards/ both contain a self-ignoring .gitignore with '*', and .gitignore excludes .metareview/* — the transient/durable split described is accurate."
+    },
+    {
+      "path": "internal/epicsource/epicsource.go",
+      "line": 87,
+      "note": "defer file.Close() -> defer func() { _ = file.Close() }() is behaviour-preserving on a read-only os.Open handle; no error path is lost because nothing is written."
+    },
+    {
+      "path": "internal/epicsource/epicsource.go",
+      "line": 87,
+      "note": "Validation evidence: go test ./internal/epicsource/ passes at 83.2% package coverage and the coverprofile block 85.2,87.21 covering the changed defer is hit (count 1), so the edited line is exercised."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new Sharded review section in docs/README.codex.md is a near-verbatim fifth copy of the same prose already in AGENTS.md, CLAUDE.md and docs/README.claude.md. It is correct today, but the 120,000/4,000 byte constants and the result-path grammar are now restated in four hand-maintained files with no test pinning them to the code, so a future constant change can silently leave three docs wrong. Non-blocking: consider a single canonical section the others link to, or a doc-anchor test like tests/go/agent-prompt-anchors.txt.",
+      "evidence": [
+        {
+          "path": "docs/README.codex.md",
+          "line": 68,
+          "note": "grep for the sentence \"cannot be held in one review context\" hits AGENTS.md, CLAUDE.md, docs/README.codex.md and docs/README.claude.md."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Considered flagging the epicsource.go defer change as an untested source change per the rubric's \"source changes lack relevant tests\" rule. Verified it is not: the change is semantically identical to the previous defer file.Close() on a read-only handle, and the coverprofile shows the edited statement block executed by the existing epicsource tests. No new test is warranted.",
+      "evidence": [
+        {
+          "path": "internal/epicsource/epicsource.go",
+          "line": 87,
+          "note": "Coverage block github.com/dsifry/metareview/internal/epicsource/epicsource.go:85.2,87.21 has hit count 1."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

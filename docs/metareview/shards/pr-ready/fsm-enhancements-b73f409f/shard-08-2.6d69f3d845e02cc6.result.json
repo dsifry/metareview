@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-08-2.6d69f3d845e02cc6",
+  "kind": "shard",
+  "shardId": "shard-08-2",
+  "shardHash": "6d69f3d845e02cc6",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:06:12Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 1,
+      "note": "Whole-file review of the single new file in this shard (369 lines, 15138 bytes, one chunk 1/1, no truncation). Diff applies cleanly to the working tree; every line cited below was re-read from the checked-out file rather than from the pack."
+    },
+    {
+      "path": "internal/fsm/judge/codex.go",
+      "line": 41,
+      "note": "go test ./internal/fsm/judge -run 'Codex|Itoa|Anthropic' -count=1 passes; go tool cover -func reports 100.0% of statements for all four functions in the code under test (Call:41, validateCodex:110, parseCodexEvents:143, itoa:172). Source changes are therefore accompanied by relevant tests per the rubric's blocking policy."
+    },
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 187,
+      "note": "go test -run Codex -count=50 -race is green, so the flake described in the TestCodexJudgeStopsOnCancellation comment (both select cases ready under the pre-filled fake clock) is genuinely fixed by the never-firing timer, not merely masked."
+    },
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 118,
+      "note": "TestCodexJudgeBuildsASafeInvocation's argv assertions match the literal built at codex.go:53-61 (exec --json, --sandbox read-only, --skip-git-repo-check, --color never, -m wireModel, -c model_reasoning_effort, trailing '-'), and the stdin/argv leak check at :151-153 correctly pins the prompt to stdin as codex.go:60 intends."
+    },
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 292,
+      "note": "TestAnthropicEffortTableMatchesTheAPI's model lists agree with judge.go: the six xhigh-capable ids are all in anthropicEffortCapable (judge.go:132) and none match anthropicNoXHigh (judge.go:139); the three refused ids match anthropicNoXHigh exactly and are refused via validate's supportsXHigh check at judge.go:291-293."
+    },
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 324,
+      "note": "TestCodexJudgeDoesNotStartWhenAlreadyCancelled pins the top-of-loop ctx.Err() guard at codex.go:76 and TestCodexJudgeCancellationInterruptsTheBackoffWait pins the select at codex.go:81-86; the latter is deterministic because Go evaluates a select's channel operands in source order before choosing, so cancel() inside the After seam closes an already-retrieved Done channel."
+    },
+    {
+      "path": "internal/fsm/cli/deps.go",
+      "line": 102,
+      "note": "The production CodexExec is exec.CommandContext(ctx, codexBin, args...), so the per-attempt deadline TestCodexJudgeBoundsEachAttempt asserts is actually honoured end to end; the deadline is not a seam-only fiction."
+    },
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 369,
+      "note": "gofmt -l reports nothing for the package, go vet ./internal/fsm/judge is clean, and the file contains no TODO or FIXME markers, no eval-style dynamic execution, and no untracked-source concerns."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The retry backoff schedule is never asserted. codexClock's After (internal/fsm/judge/codex_test.go:44-51) discards the requested duration and returns a pre-filled channel, so no test in this file observes backoff(classBackoff, attempt-1) at all. codex.go:62-67 claims parity with the HTTP arm on 'the same attempt ceiling, per-attempt deadline and backoff', and the ceiling (codex_test.go:155) and deadline (codex_test.go:181) are both pinned, but a regression that dropped the delay to zero — hammering the Codex CLI and its OAuth session five times in a row — would pass every test here. The HTTP arm does not have this gap: judge_test.go:285 gives testClock a sleeps recorder precisely so the ladder's durations can be checked.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex_test.go",
+          "line": 46,
+          "note": "After ignores its time.Duration argument and returns a channel that is already ready, so every backoff wait is a no-op and the requested delay is never recorded."
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 285,
+          "note": "testClock(sleeps *[]time.Duration) shows the package already has the pattern for recording backoff durations; the codex clock deliberately does not use it."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestCodexJudgeStopsOnCancellation asserts a bound rather than a value: `if f.calls >= MaxAttempts` (internal/fsm/judge/codex_test.go:203). The true value is 1, but the test would still pass if cancellation were honoured only on the last attempt (4 of 5 execs spawned after the caller went away) — nearly the whole defect the test exists to prevent. The sibling test added in the same file asserts exactly (`f.calls != 1`, codex_test.go:359), so the weaker form here is an inconsistency rather than a deliberate tolerance.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex_test.go",
+          "line": 203,
+          "note": "if f.calls >= MaxAttempts { ... } passes for 1, 2, 3 or 4 calls; only 5 fails."
+        },
+        {
+          "path": "internal/fsm/judge/codex_test.go",
+          "line": 359,
+          "note": "The backoff-wait test asserts f.calls != 1, the exact form this test should use."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestCodexJudgeBoundsEachAttempt under-specifies its own guarantee. It only records whether ctx.Deadline() is set (internal/fsm/judge/codex_test.go:175-182); it does not check the deadline is AttemptTimeout (judge.go:39, 180s) rather than some accidental shorter or longer value, and the fake exec returns immediately, so nothing demonstrates that a genuinely hung exec is aborted. The failure message promises more than the assertion delivers. The guarantee does hold in production (internal/fsm/cli/deps.go:102 uses exec.CommandContext), so this is a test-strength gap, not a live defect.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex_test.go",
+          "line": 181,
+          "note": "Only presence of a deadline is asserted, not its value; the fake exec never blocks, so cancellation of a hung call is not exercised."
+        },
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 87,
+          "note": "context.WithTimeout(ctx, AttemptTimeout) is the behaviour under test; AttemptTimeout's value is unpinned by this shard."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The hand-rolled `quote` helper (internal/fsm/judge/codex_test.go:38-40) reimplements strconv.Quote / json.Marshal and escapes only backslash and double-quote. Any fixture text containing a newline, tab or other control character produces a syntactically invalid JSON line, which parseCodexEvents (codex.go:150) silently skips as an unknown line; the resulting failure surfaces as 'codex produced no agent message' rather than as the assertion the author wrote, and in an error-path test could pass for the wrong reason. Since codexStream already builds the surrounding line by concatenation, `json.Marshal(text)` would be both shorter and correct.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex_test.go",
+          "line": 39,
+          "note": "strings.ReplaceAll for backslash and quote only — control characters are passed through raw into a JSON string literal."
+        },
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 150,
+          "note": "json.Unmarshal failures are skipped by design, so a malformed fixture degrades into a missing-message error instead of a parse error."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Duplicate coverage: TestCodexPrefixStrippingMatchesRouting (internal/fsm/judge/codex_test.go:211-220) and the opening assertions of TestCodexRoutingAndValidation (codex_test.go:223-229) check the same route()/wireModel() pair for the same 'codex/gpt-5.6-sol' input. The first test's contribution is the mixed-case cases; the lowercase case in the second is redundant with it and adds a second place to update when the fixture model id changes.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex_test.go",
+          "line": 212,
+          "note": "route(model) != provCodex and wireModel(model) != \"gpt-5.6-sol\" for the lowercase id, already covered by the loop in the preceding test."
+        },
+        {
+          "path": "internal/fsm/judge/codex_test.go",
+          "line": 223,
+          "note": "The same two assertions repeated verbatim for the lowercase id at the head of TestCodexRoutingAndValidation."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The already-cancelled-caller guard that TestCodexJudgeDoesNotStartWhenAlreadyCancelled locks in exists only on the codex arm. codex.go:76 checks ctx.Err() at the top of every attempt including the first; the HTTP arm's identical loop (judge.go:530) has no such check, and judge_test.go:571-575 asserts only the returned error, not that the doer was left untouched — so realJudge still enters attempt 0 with a dead context. Benign in practice (net/http fails a cancelled request before dialling) but it means the hardening this shard tests is one-armed, and a future non-net/http Doer would not be covered.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 530,
+          "note": "for attempt := 0; attempt < MaxAttempts; attempt++ with no ctx.Err() check before the first j.attempt call, unlike codex.go:76."
+        },
+        {
+          "path": "internal/fsm/judge/codex_test.go",
+          "line": 324,
+          "note": "TestCodexJudgeDoesNotStartWhenAlreadyCancelled has no HTTP-arm counterpart asserting the doer is never invoked."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestAnthropicEffortTableMatchesTheAPI (internal/fsm/judge/codex_test.go:292-319) tests the Anthropic HTTP effort table and has nothing to do with the Codex CLI provider this file otherwise covers. Its assertions are correct and verified against judge.go:132-147 and judge.go:291-293, but its placement makes the codex provider's test file the home of an unrelated HTTP-arm regression test, where a future reader maintaining judge_test.go will not find it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex_test.go",
+          "line": 292,
+          "note": "Anthropic xhigh table test lives in codex_test.go rather than judge_test.go, which owns the HTTP effort vocabulary."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

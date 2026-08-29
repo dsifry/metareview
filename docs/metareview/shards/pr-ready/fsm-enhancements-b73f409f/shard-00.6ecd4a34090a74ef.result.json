@@ -1,0 +1,16 @@
+{"schemaVersion":1,"id":"shard-00-review","kind":"shard",
+ "shardId":"shard-00","shardHash":"6ecd4a34090a74ef","planHash":"2ee4294a41b3ad7b",
+ "verdict":"PASS",
+ "reviewer":"claude-opus-5 task-done-rubric","reviewedAt":"2026-08-27T00:00:00Z",
+ "evidence":[
+  {"path":"cmd/metareview/main.go","line":487,"note":"handleOverride/mustResultFile/appendCrossShardResult: unknown flags exit 2, --cross-shard-result is single-valued, result files validated via reviewmanifest.ParseResult before any write; empty --reason is rejected downstream by findings.RequestOverride (minOverrideReason=12), so no silent no-op."},
+  {"path":"internal/findings/findings.go","line":181,"note":"supersedeLegacyContextRisk is idempotent (only rewrites status==open rows), backs the ledger up once before the first alias pass, and leaves FixedInRunID empty so learning never reads it as a fix."},
+  {"path":"internal/findings/findings.go","line":355,"note":"unresolvedBlockingFrom/openForRun switched to Blocks(status); verified findings.Blocks returns true for open and override-pending only, so superseded/overridden stop blocking as intended and pending overrides still hold the gate."},
+  {"path":"internal/findings/findings.go","line":475,"note":"scanner.Buffer raised to 1 MiB + 2 with the CRLF/terminator rationale documented at the maxJSONLLineBytes constant; matches the stated 1 MiB JSONL line cap."},
+  {"path":"internal/fsm/run/testdata/oracle.sh","line":1,"note":"manual testdata regenerator; set -euo pipefail, no eval, external sha256 only, no network or destructive action outside its own testdata directory."},
+  {"path":"workflows/sdlc-loop.yaml","line":1,"note":"declarative workflow; the only cmds escape hatch is commented out and documented as requiring --allow-custom-cmds with a sha256, so no unsafe execution is introduced."},
+  {"path":"skills/status/SKILL.md","line":27,"note":"durable/transient lists updated consistently: docs/metareview/shards/ commit, .metareview/shards/ local, matching CLAUDE.md's durable-output contract."},
+  {"note":"Rubric blocking checks all clear for this shard: no eval or other unsafe execution, no TODO/FIXME markers in the diff, every chunk is part 1/1 so no diff context is truncated, no duplicated inventoried code path, and the source changes are covered by tests/go/test-override.sh, internal/findings/override_test.go and internal/findings/findings_test.go."}
+ ],
+ "findings":[],
+ "blockingCount":0}

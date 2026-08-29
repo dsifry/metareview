@@ -1,7 +1,7 @@
 {
   "name": "metareview",
-  "version": "0.8.3",
-  "description": "Go-based metaswarm-compatible internal review harness for plans, specs, decompositions, task-done code review, acceptance evidence, PR readiness, and post-merge learning",
+  "version": "0.9.0",
+  "description": "Go-based metaswarm-compatible internal review harness for plans, specs, decompositions, task-done code review, acceptance evidence, PR readiness, and post-merge learning, plus FSM workflow runs (metareview fsm).",
   "author": {
     "name": "David Sifry"
   },
@@ -15,13 +15,14 @@
     "metaswarm",
     "beads",
     "codex",
-    "post-merge-learning"
+    "post-merge-learning",
+    "workflow"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "metareview",
     "shortDescription": "Internal review harness, adversarial gates, and post-merge learning for Codex",
-    "longDescription": "Use metareview to run metaswarm-compatible internal reviews over specs, plans, decompositions, artifacts, task-done code changes, acceptance evidence, PR readiness, and post-merge learning with durable Markdown artifacts and JSONL state. Packaged releases use a built Go binary; source checkout mode requires Go 1.22+.",
+    "longDescription": "Use metareview to run metaswarm-compatible internal reviews over specs, plans, decompositions, artifacts, task-done code changes, acceptance evidence, PR readiness, and post-merge learning with durable Markdown artifacts and JSONL state. Packaged releases use a built Go binary; source checkout mode requires Go 1.26+. metareview fsm drives sdlc-loop and review-loop workflow runs with auditable, swappable judge calls.",
     "developerName": "David Sifry",
     "category": "Coding",
     "capabilities": [
@@ -39,7 +40,8 @@
       "Use metareview to run epic-ready review.",
       "Use metareview to run pr-ready review.",
       "Use metareview to run post-merge learning.",
-      "Use metareview to show review status."
+      "Use metareview to show review status.",
+      "Use metareview fsm to drive the sdlc-loop workflow on this change."
     ],
     "brandColor": "#374151",
     "screenshots": []

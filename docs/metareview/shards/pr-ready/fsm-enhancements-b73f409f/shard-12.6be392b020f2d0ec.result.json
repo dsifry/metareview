@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-12.6be392b020f2d0ec",
+  "kind": "shard",
+  "shardId": "shard-12",
+  "shardHash": "6be392b020f2d0ec",
+  "planHash": "014639e60cb3cab9",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/judge/codex.go", "line": 64, "note": "codex exec is invoked with the caller ctx only; no per-attempt timeout and no retry loop"},
+    {"path": "internal/fsm/judge/judge.go", "line": 564, "note": "HTTP arm wraps each attempt in AttemptTimeout; grep for WithTimeout/WithDeadline across cmd/ and internal/ finds only this and cmdexec.go:229"},
+    {"path": "internal/fsm/judge/judge.go", "line": 530, "note": "HTTP arm retries MaxAttempts=5 with backoff; the codex arm sets Attempts=1 and returns on first failure"},
+    {"path": "internal/fsm/cli/deps.go", "line": 101, "note": "realCodexExec sets only cmd.Stdout; stderr is discarded and there is no deadline"},
+    {"path": "internal/fsm/judge/codex.go", "line": 142, "note": "hand-rolled itoa duplicating strconv.Itoa; math.MinInt negation overflows and yields \"-\""},
+    {"path": "internal/fsm/judge/codex_test.go", "line": 227, "note": "TestItoa covers 0,7,42,-3,1234567 only; no MinInt case"},
+    {"path": "internal/fsm/machine/diff.go", "line": 83, "note": "call rows keyed by node/iter/kind/input_hash; CallSide.Index is recorded but not part of the key"},
+    {"path": "internal/fsm/kind/kind.go", "line": 445, "note": "adjudicate/still-present emit indexed calls per candidate/bug in one node+iter, so identical inputs collide in the diff key"},
+    {"path": "internal/contextprofile/profile.go", "line": 205, "note": "the LocalBytes fix the new tests pin is present and matches the two added regression tests"},
+    {"path": "README.md", "line": 55, "note": "release notes add a 0.8.3 section while internal/version/version.go declares 0.9.0 and this branch ships the FSM"},
+    {"path": "internal/version/version.go", "line": 3, "note": "Version = \"0.9.0\", matching package.json but not the newest README changelog heading"},
+    {"path": ".golangci.yml", "line": 7, "note": "default: standard with no exclusions; wired into CI at .github/workflows/test.yml:54, so the config is actually enforced"},
+    {"path": "internal/fsm/machine/helpers_test.go", "line": 10, "note": "every helper including the timeDuration alias and badFile has at least one non-helper use in the package, so unused will not fire"}
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The Codex judge arm has neither a per-call timeout nor the retry ladder the HTTP arm uses. internal/fsm/judge/codex.go:64 calls j.exec with the caller's ctx and sets v.Attempts = 1; internal/fsm/cli/deps.go:101 builds that exec with exec.CommandContext and no deadline, and a grep for WithTimeout/WithDeadline across cmd/ and internal/ finds only internal/fsm/judge/judge.go:564 (the HTTP arm) and internal/fsm/cmdexec/cmdexec.go:229. So a `codex exec` that hangs (stalled OAuth refresh, upstream stall) hangs the FSM run forever with no bound, and a single transient CLI failure is fatal where the same failure over HTTP would be retried five times with backoff. The convergence budget atom counts tokens, not wall clock, so nothing else stops it. This is an undocumented asymmetry between two providers the spec treats as swappable.",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex.go", "line": 64, "note": "j.exec called with the bare caller ctx; Attempts hard-coded to 1"},
+        {"path": "internal/fsm/judge/judge.go", "line": 530, "note": "HTTP arm: MaxAttempts retry loop with classified backoff"},
+        {"path": "internal/fsm/cli/deps.go", "line": 101, "note": "realCodexExec: exec.CommandContext with no timeout wrapper anywhere upstream"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "itoa (internal/fsm/judge/codex.go:142) reimplements strconv.Itoa to avoid an import that costs nothing (strconv is already in the binary transitively) and is wrong for math.MinInt: n = -n overflows back to a negative value, the digit loop never runs, and the function returns \"-\". Unreachable today because the only inputs are process exit codes, but it is untested at that boundary (codex_test.go:227 covers 0, 7, 42, -3, 1234567).",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex.go", "line": 142, "note": "hand-rolled integer formatting, MinInt returns \"-\""},
+        {"path": "internal/fsm/judge/codex_test.go", "line": 227, "note": "TestItoa has no MinInt case"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "A failed codex invocation produces an error with no diagnostic content: codex.go:70 reports only \"codex exited N\", and internal/fsm/cli/deps.go:101 never captures cmd.Stderr, so the CLI's own explanation (bad model id, expired session, unsupported -c key) is dropped on the floor. Debugging a judge misconfiguration from the audit log is guesswork.",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex.go", "line": 70, "note": "error text is exit status only"},
+        {"path": "internal/fsm/cli/deps.go", "line": 101, "note": "only cmd.Stdout is wired; stderr discarded"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "validateCodex's model check does not do what its message says. internal/fsm/judge/codex.go:81 reports \"model id is empty or exceeds MaxShort\", but run.CapText(\"\", MaxShort) at internal/fsm/run/canonical.go:115 returns over=false for the empty string, so emptiness is caught only by the separate model == CodexPrefix comparison. Latent rather than live, because route() only reaches this arm for ids that already carry the \"codex/\" prefix, but the guard is weaker than it reads and a direct codexJudge construction would pass an empty wire model to -m.",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex.go", "line": 81, "note": "over || model == CodexPrefix; the emptiness claim comes from the second term only"},
+        {"path": "internal/fsm/run/canonical.go", "line": 115, "note": "CapText returns (\"\", false) for the empty string"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "DiffRuns collapses judge calls that share (node, iter, kind, input_hash) but differ in Index: internal/fsm/machine/diff.go:83 builds the map key without Index, and diff.go:91 overwrites row.A/row.B on a repeat, so the earlier call is silently dropped from the report. internal/fsm/kind/kind.go:445 and :590 emit indexed calls per candidate and per bug within one node+iter, so two identical candidate texts or two identically-worded bugs produce one row instead of two and the diff under-reports the calls made. The alignment key matches spec 3 section 4 as written, so this may be a spec bug rather than a code bug, but the report is lossy either way.",
+      "evidence": [
+        {"path": "internal/fsm/machine/diff.go", "line": 83, "note": "key struct omits Index although CallSide carries it"},
+        {"path": "internal/fsm/kind/kind.go", "line": 590, "note": "still-present emits one indexed call per bug in the same node and iter"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "README release notes are a version behind the release. The diff adds a \"What Changed In 0.8.3\" section describing sharded review, while internal/version/version.go:3 and package.json both say 0.9.0 and this branch ships the whole FSM subsystem; the FSM appears only as a Use Cases bullet with no changelog entry. A reader of the README cannot tell what 0.9.0 changed.",
+      "evidence": [
+        {"path": "README.md", "line": 55, "note": "newest changelog heading is 0.8.3"},
+        {"path": "internal/version/version.go", "line": 3, "note": "Version = \"0.9.0\""}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

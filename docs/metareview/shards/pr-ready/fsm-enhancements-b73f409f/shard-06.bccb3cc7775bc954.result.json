@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-06.bccb3cc7775bc954",
+  "kind": "shard",
+  "shardId": "shard-06",
+  "shardHash": "bccb3cc7775bc954",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {"path": "internal/findings/findings_test.go", "line": 371, "note": "New supersede tests reviewed against internal/findings/findings.go:198-247; the table pins all three legacy fingerprint prefixes, the empty fixedInRunId contract and the .pre-0.8.3.bak backup."},
+    {"path": "internal/findings/findings.go", "line": 478, "note": "readJSONL sets scanner.Buffer to maxJSONLLineBytes+2, which is exactly what the new exact-limit and CRLF exact-limit tests pin; the two-pass padding loop in the tests converges exactly because the JSON string length prefix is fixed."},
+    {"path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 105, "note": "TestX1RealRunner exercises the real exec runner end to end: literal argv, exact env, stdin, cwd, exit code, process-group timeout with grandchild reaping, output caps at and over MaxOutput, parent-context cancellation and spawn failure."},
+    {"path": "internal/fsm/cmdexec/cmdexec.go", "line": 210, "note": "cappingWriter keeps MaxOutput+1 bytes and keeps draining; TestX3CappingWriter asserts exactly that invariant with three writes."},
+    {"path": "tests/manifest/test-skills.sh", "line": 20, "note": "Ran the manifest script from the repo root: exit 0, so every newly listed file (skills/fsm/SKILL.md, commands/fsm.md, docs/fsm/*, workflows/*.yaml, testdata/fsm/agent-prompt.golden, tests/go/agent-prompt-anchors.txt) exists and all new grep anchors match."},
+    {"note": "Validation run locally: go vet clean on both packages; go test -race -count=3 ./internal/fsm/cmdexec/... passes (21.7s, no flakes); go test -cover reports 100.0% for internal/fsm/cmdexec and 92.8% for internal/findings. No TODO/FIXME markers, no eval or shell interpolation, no untracked source files in this shard."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "backupOnce (internal/findings/findings.go:234-248) is new in this change and its idempotency branch -- the os.Stat guard that stops a second reconcile from overwriting the pre-0.8.3 ledger backup with the already-superseded ledger -- is never exercised. Coverage confirms it: go tool cover -func puts backupOnce at 55.6%, the lowest of any function in the package, while supersedeLegacyContextRisk's doc comment explicitly promises idempotency. The guard is correct by inspection, so this is a regression-test gap on a backup-destroying path rather than a live defect; a third table row that calls Reconcile twice and asserts the .bak still holds the original pre-supersede bytes would close it.",
+      "evidence": [
+        {"path": "internal/findings/findings.go", "line": 235},
+        {"path": "internal/findings/findings_test.go", "line": 426},
+        {"note": "go tool cover -func=/tmp/f.out: backupOnce 55.6%, supersedeLegacyContextRisk 92.9%; no repository coverage gate covers findings.go (tests/go/test-override-coverage.sh gates override.go only), so this does not break CI."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "sha() at internal/fsm/cmdexec/cmdexec_test.go:236-241 contains dead code: it binds h := run.OutputHash, discards it with _ = h, and then delegates to sha256Sum. The discarded reference is actively misleading -- run.OutputHash canonicalizes JSON before hashing, whereas the InputHash the test is checking is a plain sha256.Sum256 of the raw stdin (cmdexec.go:139). The wrapper also duplicates sha256Sum from sha_test.go, and the same file already calls sha256Sum directly at line 293, so the two spellings sit side by side for one hash. Deleting sha() and using sha256Sum at line 156 removes both problems.",
+      "evidence": [
+        {"path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 236},
+        {"path": "internal/fsm/cmdexec/cmdexec.go", "line": 139}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "readAll at internal/fsm/cmdexec/cmdexec_test.go:69-78 always returns a nil error and swallows the real one, so a mid-stream read failure in the helper child silently truncates the reported stdin and surfaces only as the opaque t.Fatal(\"stdin\") at line 154. It also loops forever on a (0, nil) read. io.ReadAll(os.Stdin) does the same job correctly; the hand-rolled loop buys nothing here.",
+      "evidence": [
+        {"path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 69},
+        {"path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 154}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestX1RealRunner and TestX2Guarded are monolithic: each asserts a couple of dozen independent behaviors in one sequential body, indexes the audit log positionally (audits[1], audits[2], audits[len-1]) so inserting a case renumbers later assertions, and uses bare failure messages such as t.Fatal(\"stdin\"), t.Fatal(\"at cap\") and t.Fatal(\"over cap\") that print neither the actual nor the expected value. The first failure also hides every later assertion in the same test. Subtests keyed by behavior would isolate failures without changing what is covered.",
+      "evidence": [
+        {"path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 105},
+        {"path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 243}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "t.Setenv(\"SECRET_TOKEN\", \"parent-secret\") at internal/fsm/cmdexec/cmdexec_test.go:122 is inert. Guarded.Environ is stubbed on the line above it, so g.env never reads the process environment and the parent secret cannot reach the child by construction; the scrubbing property is proven instead by SECRET_TOKEN appearing in the stub list and not in wantEnv. Harmless, but it reads as an end-to-end guarantee the test does not make -- the os.Environ wiring lives in internal/fsm/cli/deps.go:90 and is covered elsewhere.",
+      "evidence": [
+        {"path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 122},
+        {"path": "internal/fsm/cli/deps.go", "line": 90}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

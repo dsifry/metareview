@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-39-a2a4f5a9e29094d3",
+  "kind": "shard",
+  "shardId": "shard-39",
+  "shardHash": "a2a4f5a9e29094d3",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T11:05:00-07:00",
+  "evidence": [
+    {
+      "path": "internal/prready/shardwiring_test.go",
+      "line": 237,
+      "note": "Mutation run in a scratchpad copy of the repo (the branch itself was not modified): replacing the chunk body in internal/shardpack/shardpack.go:528 with the empty string left TestRealWriterProducesNonEmptyPacks GREEN, while internal/shardpack TestPackUsesMeasuredBytes went red. The prready test therefore does not prove what its comment claims."
+    },
+    {
+      "path": "internal/prready/shardwiring_test.go",
+      "line": 113,
+      "note": "Mutation: changing internal/prready/review.go:289 to pass \"\" as keepPlanHash to packWriter.Prune left both ./internal/prready and ./internal/shardpack fully green, even though writer.Prune (internal/shardpack/shardpack.go:247-266) would then delete every plan directory under the target, including the set just written."
+    },
+    {
+      "path": "internal/prready/shardwiring_test.go",
+      "line": 165,
+      "note": "Mutations that DID get caught: removing the rollback call on a failed Write (review.go:203-205) reddens TestPackWriteErrorRunsRollback; removing packRollback() from the review-failure path (review.go:280) reddens TestPackRollbackRunsWhenTheReviewFails; making a Prune error fail the run reddens TestPruneFailureDoesNotDiscardTheRun. The rollback and prune-tolerance wiring is genuinely pinned."
+    },
+    {
+      "path": "internal/tasksource/coverage_test.go",
+      "line": 1,
+      "note": "go test ./internal/tasksource -coverprofile reports 100.0% of statements with every function at 100%, so the file's opening claim of covering every remaining branch holds for the suite as a whole; the two findings below are about which test covers which branch, not about total coverage."
+    },
+    {
+      "path": "internal/tasksource/coverage_test.go",
+      "line": 133,
+      "note": "Verified the defensive-seam subtests hit the branches they name: the unresolvable root reaches EvalSymlinks(rootAbs), file.md/child.md reaches the non-IsNotExist EvalSymlinks branch (ENOTDIR on darwin), and the two absPath swaps separate the root and candidate calls. The 128 KiB single-line ledger does surface bufio.ErrTooLong through scanner.Err() rather than reading as a no-match."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/adjudicate.calibration.golden",
+      "line": 1,
+      "note": "Regenerating is not needed: go test ./internal/fsm/judge passes, and the golden is consistent with RenderPrompt(KindAdjudicate, fixedInputs, fence=true, calibration=true). It correctly pins the two properties that matter here: calibration disables fencing (no <<<DATA- marker) and format() is single-pass, so the fixture's {{1}}, its literal {diff} and its fake <<<END-<nonce> line are all inserted verbatim and never rescanned. No finding."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestRealWriterProducesNonEmptyPacks cannot fail for the reason its comment gives. The comment says it proves \"the planned chunks are actually backed by the measured diff end to end, and that no pack is written with an empty body\", but both assertions are inert against exactly that defect. (1) strings.Contains(body, \"src/file\") is satisfied by the pack's own metadata: shardPack writes every chunk path into the \"## Chunks\" list (internal/shardpack/shardpack.go:517-521) and into each \"### <path> (part n/m)\" heading (line 527), so it matches even when every diff body is empty. (2) The empty-block guard looks for \"```diff\\n```\", a string markdown.FencedCodeBlock can never produce: internal/markdown/*.go:56 renders fence+language+\"\\n\"+content+\"\\n\"+fence, so an empty body is \"```diff\\n\\n```\" with a blank line between the fences. Confirmed by mutation in a scratchpad copy: substituting \"\" for files[c.Path].Diff[c.ByteStart:c.ByteEnd] left the whole ./internal/prready suite green (only internal/shardpack's own TestPackUsesMeasuredBytes caught it). Either assert on the fenced region after the \"--- source diff below\" marker, or assert on content that only the diff carries (e.g. \"+f00 line\") plus a corrected empty-fence literal.",
+      "evidence": [
+        {
+          "path": "internal/prready/shardwiring_test.go",
+          "line": 263
+        },
+        {
+          "path": "internal/prready/shardwiring_test.go",
+          "line": 266
+        },
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 517
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestPlanIsWrittenAndPrunedWithMatchingHash does not verify the \"MatchingHash\" half of its name. fakeWriter.Prune discards all four arguments and only increments a counter, and the test asserts nothing beyond prunes == 1, so the plan hash handed to Prune is never compared with writer.lastPlan.PlanHash. This is the one Prune argument that is safety-critical: writer.Prune keeps a directory only when name == keepPlanHash (internal/shardpack/shardpack.go:258), so a wrong or empty hash removes the pack set the run just wrote and the reviewer is left with no packs to read. Verified by mutation: passing \"\" as keepPlanHash at internal/prready/review.go:289 leaves ./internal/prready and ./internal/shardpack entirely green. Record scope/targetID/keepPlanHash on the fake and assert keepPlanHash == writer.lastPlan.PlanHash (and, while there, that the header's TargetID/Base/Head match analysisGit, which is also unchecked).",
+      "evidence": [
+        {
+          "path": "internal/prready/shardwiring_test.go",
+          "line": 55
+        },
+        {
+          "path": "internal/prready/shardwiring_test.go",
+          "line": 120
+        },
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 258
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The subtest \"relative path fails for an existing target\" only exercises an existing target because a sibling subtest happened to create file.md earlier in the same t.Run sequence (coverage_test.go:146-153). Run on its own (go test -run 'TestContainedPathDefensiveBranches/relative_path_fails_for_an_existing_target' -coverprofile), the only containedPath blocks executed are 118-145, i.e. the os.IsNotExist relPath return at tasksource.go:141-143 — the not-yet-created branch, which is what the very next subtest is for. It still passes, so the pair silently collapses into one branch and the final relPath error return at tasksource.go:153-155 loses its named test. Create the file inside the subtest that depends on it.",
+      "evidence": [
+        {
+          "path": "internal/tasksource/coverage_test.go",
+          "line": 179
+        },
+        {
+          "path": "internal/tasksource/coverage_test.go",
+          "line": 186
+        },
+        {
+          "path": "internal/tasksource/tasksource.go",
+          "line": 141
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestResolveFallsBackToAdvisoryWhenBeadsHasNoMatch never reaches the no-match path. The root is a bare t.TempDir() with no .beads directory, so resolveBeads returns at the os.IsNotExist early exit; a single-subtest coverage run covers only tasksource.go blocks 52.2-56.1 and never enters the scan loop or the post-loop \"return Source{}, false, nil\" at line 88. The test proves \"advisory when there is no ledger\", not \"advisory when the ledger has no matching id\" — a materially different case, since it is the one where a mistyped id silently downgrades a real Beads target. The post-loop branch is covered elsewhere (tasksource_test.go), so this is a naming/intent defect rather than a coverage hole; write the ledger with a non-matching id.",
+      "evidence": [
+        {
+          "path": "internal/tasksource/coverage_test.go",
+          "line": 24
+        },
+        {
+          "path": "internal/tasksource/tasksource.go",
+          "line": 54
+        },
+        {
+          "path": "internal/tasksource/tasksource.go",
+          "line": 88
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The \"a failed pack write must not leave review artifacts behind\" assertion is structurally guaranteed at the point it runs and so cannot currently fail. packWriter.Write is called at review.go:192, before any docs/ path is created: uniquePaths (review.go:847-857) only Stats, and both MkdirAll calls for docs/metareview/context and docs/metareview/reviews live inside the closure at review.go:210-216 that the failed Write returns before. The assertion is harmless as a future-ordering guard, but it is worth a comment saying so, otherwise it reads as evidence of cleanup behaviour that is in fact never executed.",
+      "evidence": [
+        {
+          "path": "internal/prready/shardwiring_test.go",
+          "line": 150
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 192
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 847
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Four fakeWriter knobs are dead: discovers, discoverErr, gcErr and found are declared and wired into Discover/GC but are never set or asserted anywhere in package prready (grep over *_test.go finds only the declarations and the two methods; shardingestion_test.go asserts only collections). The seam they exist for is the one real uncovered error path in the shard wiring: the Discover error return at review.go:183-184 is the only failure in this block with zero coverage in an isolated ./internal/prready run. Either add the discoverErr case (a Discover failure must fail the run before any pack is written) or drop the unused fields.",
+      "evidence": [
+        {
+          "path": "internal/prready/shardwiring_test.go",
+          "line": 28
+        },
+        {
+          "path": "internal/prready/shardwiring_test.go",
+          "line": 62
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 183
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestPackRollbackRunsWhenTheReviewFails is a permission-based test that self-skips: it chmods docs/metareview/reviews to 0555 and calls t.Skip(\"the review body unexpectedly succeeded; nothing proved\") if Create returns nil. Under root, or on a filesystem that ignores mode bits, the rollback and the prunes == 0 assertions evaporate and the run reports success. This is exactly the failure mode internal/tasksource/tasksource.go:23-28 cites when it argues for injected seams over permission tests (\"a permission-based test quietly stops failing when the suite runs as root\"), and prready already has a seam that could produce the same failure deterministically: give fakeWriter a hook that makes the review body fail, or inject a write error, rather than relying on the filesystem. It confirmably passes (not skips) as a non-root user on this machine, so the coverage is real today.",
+      "evidence": [
+        {
+          "path": "internal/prready/shardwiring_test.go",
+          "line": 170
+        },
+        {
+          "path": "internal/tasksource/tasksource.go",
+          "line": 23
+        }
+      ]
+    }
+  ],
+  "blockingCount": 2
+}

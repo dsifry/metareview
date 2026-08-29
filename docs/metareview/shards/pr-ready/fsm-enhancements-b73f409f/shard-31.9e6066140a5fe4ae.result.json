@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-31-9e6066140a5fe4ae",
+  "kind": "shard",
+  "shardId": "shard-31",
+  "shardHash": "9e6066140a5fe4ae",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T11:05:00-07:00",
+  "evidence": [
+    {
+      "path": "docs/tasks/m0-fsm-run-persistence.md",
+      "line": 11,
+      "note": "Ran the acceptance criteria empirically. `go test ./internal/fsm/run/ ./workflows/` passes with both packages at 100.0% of statements; `go test ./internal/fsm/... -cover` shows all 13 internal/fsm packages at 100.0%; `go list -deps ./internal/fsm/machine` shows machine pulls only errs, run, converge, gate, workflow and internal/state (no kind/judge/cmdexec/workflows), so the m1-m6 dependency-direction criterion holds; internal/fsm/run imports only internal/state, so 'no other fsm package imported by run' holds. The `bash tests/coverage.sh` criterion does NOT hold - see the blocking finding."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.sh",
+      "line": 13,
+      "note": "The R2b external-oracle claim in the spec (line 334) is genuine, not a tautology: oracle.sh computes each line's prev with sha256sum/shasum (never Go), and internal/fsm/run/store_test.go:813-820 compares Go's LineHash against the shell-produced testdata/oracle.sha256 line by line, with store_test.go:851-854 asserting a one-byte edit yields ERR_AUDIT_CHAIN. Goldens are regeneration-gated on FSM_RUN_UPDATE_GOLDEN=1 (golden_test.go:22) as the spec's R4 row states."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 43,
+      "note": "Apply enforces MaxPayload on canonical Data plus MaxShort on Type/Node/State only. No envelope field beyond those three is length-checked; Origin.Hash is only checked non-empty (fold.go:431-433). Verified in a scratchpad copy of the repo (the branch itself was left untouched): an event carrying a 4 MiB Origin.Hash is accepted by FoldFull and written by jsonlStore.Append, producing a 4,194,960-byte audit.jsonl line - 4x MaxLine - with no error."
+    },
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 153,
+      "note": "The store's own comment states 'no separate line check exists; ERR_EVENT_TOO_LARGE is reserved for a future envelope', matching the code: grep across the module finds CodeEventTooLarge only at errors.go:67 (definition), types_test.go:206 (a constant-string pin) and internal/fsm/cli/envelope.go:61 (exit-code table). No code path returns it."
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 30,
+      "note": "Canonical delegates to the package's own marshalCanonical, not to encoding/json's Encoder. Probe in a scratchpad copy comparing Canonical(raw) with json.Encoder{SetEscapeHTML(false)}.Encode(json.RawMessage(raw)) minus the newline: identical for '\"a<b&c>\"', '\"x\\u2028y\"' and '{\"k\": 1.0e2}', but DIFFERENT for a string holding U+FFFD (Canonical writes \\ufffd, the stdlib encoder writes the literal rune)."
+    },
+    {
+      "path": "internal/fsm/run/errors.go",
+      "line": 39,
+      "note": "ReasonTokensNegative and ReasonTokensTooLarge are shipped and enforced by Apply (fold.go:157-171 for llm_call, 166-171 for tokens), with tests at fold_test.go:1071-1103, but neither appears in the spec's Reason->Code table; MaxTokenCounter (types.go:115) and MaxEnv (types.go:54) are likewise absent from the spec's cap table."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 366,
+      "note": "ValidateRunID enforces `^mrv-[A-Za-z0-9-]{8,200}$` - a mandatory `mrv-` prefix and a restricted charset that the spec never states (it records only '{8,200}' at line 362). Confirmed empirically: Create(\"probe-run-0002\", ...) fails with ERR_STORE_PATH while `mrv-probe-run-0002` succeeds. Incidentally the message double-quotes the id (fmt.Errorf(\"invalid run id %q\", strconv.Quote(id)) renders `invalid run id \"\\\"probe-run-0002\\\"\"`)."
+    },
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 79,
+      "note": "countedType matches the spec's MaxEvents 'counts only' list exactly (needs_input, node_output, delta_applied, llm_call, tokens, record, tree) and postTerminalAllowed (fold.go:343-349) matches the spec's post-terminal allow-list exactly; List ordering (store.go:220-224), the .gitignore ensure via temp+rename (store_jsonl.go:104-116), O_NOFOLLOW/Lstat path checks (store_jsonl.go:86,121) and the per-store lock guards (store_jsonl.go:230,251; store_mem.go:71,109) all match the spec sections that describe them."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "Both task documents in this shard assert an acceptance criterion that is false at the reviewed head. docs/tasks/m0-fsm-run-persistence.md:11 says '`bash tests/coverage.sh` passes: internal/fsm/run and workflows at 100% statements, legacy floor held' and docs/tasks/m1-m6-fsm-packages.md:11 says '`bash tests/coverage.sh` passes (legacy floor held)'. The gate does not pass at head 334e752fda7ab5077090c61e1f8dc357b483545b: the GitHub Actions 'test' job for that exact sha (run 33191576085, job 'Behavioral suite and coverage gate') ends with `internal/learning 90.6% FAIL (floor 90.8)` and `internal/sessionhistory 79.1% FAIL (floor 86.3)`, then 'coverage gate FAILED' and exit 1. A local run of `bash tests/coverage.sh` on a clean scratchpad copy of the branch also failed the gate (`cmd/metareview 80.9% FAIL (floor 81.2)`), i.e. the failure is not a single-environment artifact even though the failing package differs. The 100%-for-internal/fsm/* half of the claim is true; the 'legacy floor held' half is not. Note that tests/coverage.sh and tests/coverage-floor.txt are both introduced by this branch, so the floor was authored here and the branch does not meet it.",
+      "evidence": [
+        {
+          "path": "docs/tasks/m0-fsm-run-persistence.md",
+          "line": 11,
+          "note": "Acceptance bullet claiming the combined coverage gate passes with the legacy floor held."
+        },
+        {
+          "path": "docs/tasks/m1-m6-fsm-packages.md",
+          "line": 11,
+          "note": "Same claim; CI job 98918099705 on head 334e752 fails the gate on internal/learning and internal/sessionhistory."
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The spec's justification for shipping MaxLine unenforced is false, and it contradicts the spec's own write path. docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:137 asserts MaxLine is 'always satisfiable given MaxPayload + the MaxShort envelope caps, so no separate line check is implemented'. The envelope is not fully capped: Apply caps only Data (MaxPayload) and Type/Node/State (MaxShort) at fold.go:43, and Origin.Hash is checked only for emptiness at fold.go:431-433. Verified in a scratchpad copy: an event with a 4 MiB Origin.Hash folds cleanly and jsonlStore.Append writes a 4,194,960-byte line, four times MaxLine, with no error - so a package whose stated principles are 'validated before write' and 'fail closed' (spec lines 91-94) writes an unbounded line. The related §0 row at line 25 ('every string field capped by name or by MaxShort') is false for the same reason. Separately, the write path at lines 270 and 273 lists a 'MaxLine' step inside both Create and Append, and the §0 resolution row at line 22 repeats it ('Create(runID, st0, first) has parity with Append (canonicalize, Apply from the zero state, MaxLine, fsync ...)'), yet no such step exists in either store (store.go:153 says so explicitly) and line 137 says it was deliberately omitted. One of the two statements must go, and the cap on Origin.Hash (or a real MaxLine check) is what actually makes the claim true.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 137,
+          "note": "MaxLine row: 'always satisfiable given MaxPayload + the MaxShort envelope caps, so no separate line check is implemented'."
+        },
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 273,
+          "note": "§5.2 Append sequence lists a 'MaxLine' step that does not exist in the code (see also line 270 for Create and line 22 for the §0 row)."
+        },
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 43,
+          "note": "Only Data/Type/Node/State are size-checked; Origin.Hash is unbounded (fold.go:431-433), and a 4 MiB hash produced a 4 MiB stored line in an empirical probe."
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Spec test row R7 (line 331) lists `ERR_EVENT_TOO_LARGE` among the store-conformance rows whose stated discriminator is 'store contract', but no store code path can produce that error: store.go:152-153 states that no line check exists and that ERR_EVENT_TOO_LARGE is reserved, and the only test in the module that mentions the constant is the string pin in types_test.go:206, which belongs to R13 ('every Reason/Code string') and would pass even if the store were deleted. This is a test row that cannot fail, and it makes the M0 acceptance bullet 'Every §4 fold rule and every §5 store rule has a discriminating test (R1-R14)' (docs/tasks/m0-fsm-run-persistence.md:9) untrue for that row. Either drop the row from R7 (the CLI spec already documents the code as effectively unreachable) or implement the MaxLine check the row implies.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 331,
+          "note": "R7 row listing ERR_EVENT_TOO_LARGE as a store-conformance test."
+        },
+        {
+          "path": "internal/fsm/run/types_test.go",
+          "line": 206,
+          "note": "The only test reference to CodeEventTooLarge is a constant-string pin; grep over the module finds no code path returning it."
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The normative definition of Canonical is wrong about the shipped implementation, and it matters because these bytes are what the audit chain hashes. Line 118 declares 'Canonical(raw) ... -> Encoder{SetEscapeHTML(false)}.Encode(json.RawMessage) minus \\n', and the §0 row at line 24 says the same. The implementation uses the package's own marshalCanonical (canonical.go:30), and the very next paragraph of the spec (lines 122-125) contradicts line 118 by stating that U+2028/U+2029/U+FFFD are written as escapes and that 'the escaping is this repository's choice rather than encoding/json's'. Verified by probe in a scratchpad copy: for a payload containing U+FFFD, Canonical yields \"z\\ufffdw\" while the stdlib Encoder with SetEscapeHTML(false) yields the literal replacement character - different bytes, therefore a different LineHash/OutputHash. A second implementation (or a re-verification tool) written against line 118 would compute a diverging chain. Replace the pseudocode with the actual rule.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 118,
+          "note": "Canonical declared as the stdlib Encoder with SetEscapeHTML(false); contradicted by lines 122-125 of the same section."
+        },
+        {
+          "path": "internal/fsm/run/canonical.go",
+          "line": 30,
+          "note": "Canonical returns marshalCanonical(json.RawMessage(raw)); probe shows the two encodings differ for U+FFFD."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The §2.4 Reason->Code table (lines 146-151) and the §2.3 cap table (lines 130-138) are stale relative to the shipped package this spec owns (§12 row 1). Apply rejects on ReasonTokensNegative and ReasonTokensTooLarge (errors.go:39-40; fold.go:157-171) and enforces MaxEnv and MaxTokenCounter (types.go:54,115), none of which appear in either table; the amendment ledger records only 'tokens_negative' and MaxEnv (lines 419, 418) and says nothing about tokens_too_large/MaxTokenCounter. Since the spec's own scope rule (line 12) is 'what a writer must produce for run to accept it', an enforced rejection rule that appears nowhere in the spec is a writer-contract gap; R2's 'one row per Reason ... from the §2.4 table' (line 326) is scoped to the incomplete table, though the tests do in fact cover both reasons (fold_test.go:1055-1103).",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 146,
+          "note": "Reason->Code table omits tokens_negative and tokens_too_large."
+        },
+        {
+          "path": "internal/fsm/run/errors.go",
+          "line": 40,
+          "note": "ReasonTokensTooLarge is shipped and enforced but appears in no table or ledger row of this spec."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Writer-visible run-id contract is under-specified: the spec gives only '{8,200}' (line 362) and the bare signature at line 261, while the code requires `^mrv-[A-Za-z0-9-]{8,200}$` (types.go:366) - a mandatory prefix and charset a writer cannot infer. Confirmed empirically (Create with 'probe-run-0002' -> ERR_STORE_PATH; 'mrv-probe-run-0002' -> ok). Minor code nit found while checking: types.go:371 applies %q to strconv.Quote(id), so the id is double-quoted in the error text.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 362,
+          "note": "Ledger row records only the {8,200} length change; the mrv- prefix requirement is stated nowhere."
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 366,
+          "note": "runIDPattern = `^mrv-[A-Za-z0-9-]{8,200}$`."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The §0 row at line 30 asserts '§9 export list complete', but §9 (lines 340-343) omits shipped exports: CodeFor, Counted, the Type* event-name constants, the Override type with its ten With* constructors, Builder.Lines, and TokenTotals.Negative/TooLarge (MarshalCanonical and NextIndex are covered by the ledger row at line 420). Also §8's declared Builder API (line 319) shows `Copy(parent, from, to, childID)` while the shipped helper is `Copy(parent []Event, from, to int64, childID string, edit func(*InitData)) []Event`. Cosmetic drift, but the 'complete' claim is what makes it a finding rather than an omission.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 340,
+          "note": "§9 export list; §0 line 30 asserts it is complete."
+        },
+        {
+          "path": "internal/fsm/run/builder.go",
+          "line": 1,
+          "note": "`go doc -all ./internal/fsm/run` lists Copy with a fifth `edit func(*InitData)` parameter plus Lines, Override, WithAt/WithIter/WithMock/WithNode/WithOrigin/WithPrev/WithRawData/WithSeq/WithState/WithType/WithVersion, CodeFor and Counted."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two descriptions of the MaxEvents rule disagree with each other and one is wrong. Line 138's authoritative 'counts only needs_input, node_output, delta_applied, llm_call, tokens, record, tree' matches countedType (store.go:79-85), but its exempt enumeration omits gate, converge and init, and the §0 summary row at line 27 says 'MaxEvents applies to non-terminal node events only', which is false: tree, tokens and record are counted and are not node-scoped (nodeScoped at fold.go:339-341 covers only needs_input/node_output/delta_applied/llm_call). Line 27 also omits fix_baseline from its exempt list while line 138 includes it.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 27,
+          "note": "§0 row RDM3-4 mischaracterises the counted set as 'non-terminal node events only' and lists a different exempt set than line 138."
+        },
+        {
+          "path": "internal/fsm/run/store.go",
+          "line": 79,
+          "note": "countedType is the authority and matches line 138's 'counts only' list, not line 27."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 4
+}

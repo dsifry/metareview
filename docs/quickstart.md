@@ -48,7 +48,7 @@ metareview review pr-ready --base <base-ref> --evidence "$tmp_evidence"
 metareview learn --post-merge <pr-number> --base <pre-merge-ref>
 ```
 
-`artifact` creates an incomplete review scaffold for specs, plans, and docs. The command exits nonzero while the scaffold is still `NOT_REVIEWED`; complete every required reviewer row and update the verdict before treating the artifact as reviewed. Artifact review runs the five required lenses as parallel subagents by default. Use `in-session-emulated` only when subagents are unavailable or the human explicitly requests no delegation, and state that the review is not independently adversarial and is weaker evidence. Use `--scaffold-only` only when scaffold creation itself is the intended action. `task-done` runs after a local task or chunk claims done. `epic-ready` runs when child tasks are complete. `pr-ready` runs before push or merge readiness. `learn --post-merge` runs after confirmed PR merge.
+`artifact` creates an incomplete review scaffold for specs, plans, and docs. The command exits nonzero while the scaffold is still `NOT_REVIEWED`; complete every required reviewer row and update the verdict before treating the artifact as reviewed. Artifact review runs the eight required lenses as parallel subagents by default. Use `in-session-emulated` only when subagents are unavailable or the human explicitly requests no delegation, and state that the review is not independently adversarial and is weaker evidence. Use `--scaffold-only` only when scaffold creation itself is the intended action. `task-done` runs after a local task or chunk claims done. `epic-ready` runs when child tasks are complete. `pr-ready` runs before push or merge readiness. `learn --post-merge` runs after confirmed PR merge.
 
 Lifecycle gate results use this contract:
 
@@ -57,7 +57,7 @@ Lifecycle gate results use this contract:
 - `NEEDS_REVISION`: fix blockers, then re-run the same gate with `--previous-run <run-id>`.
 - `ESCALATED`: stop same-target retries; human must narrow, split, or redesign the target.
 
-Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. `NOT_REVIEWED` artifact scaffolds are also blocking until completed.
+Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. `NOT_REVIEWED` artifact scaffolds are also blocking until completed. For `metareview fsm` see `docs/fsm/driving-a-workflow.md` (`3` = do the node's work; `1` + `GATE_FAILED` = run `resume_hint`).
 
 Task-done, epic-ready, and PR-ready context packs include a Context Profile. Task-done and PR-ready add a Context Shard Plan and prompt packs when the branch diff exceeds the review context limit, and a Review Manifest that accounts for source paths, generated path dispositions, chunk assignments, the plan hash, the shard results ingested, and manifest blockers; epic-ready renders "not sharded".
 
@@ -75,6 +75,7 @@ Commit:
 - `docs/metareview/context/`
 - `docs/metareview/learning/`
 - `docs/metareview/shards/` — the shard review results a later gate reads back
+- `docs/metareview/fsm/` — FSM run export bundles
 - `.metareview/knowledge/metareview.jsonl` in standalone fallback mode
 - `.metareview/calibration.jsonl`
 - `.metareview/learning-runs.jsonl`
@@ -84,6 +85,7 @@ Keep local:
 
 - `.metareview/findings.jsonl`
 - `.metareview/runs.jsonl`
+- `.metareview/runs/` (FSM runs; the directory ignores itself)
 - `.metareview/shards/` — the prompt packs, which are regenerated per plan and ignore themselves
 - other transient `.metareview/` state
 
@@ -98,8 +100,8 @@ The repository `.gitignore` keeps transient state local while allowing fallback 
 
 ## 6. Agent Syntax
 
-Codex users invoke metareview through `$setup`, `$review-artifact`, `$review-task-done`, `$review-epic-ready`, `$review-pr-ready`, `$learn-post-merge`, and `$status`.
+Codex users invoke metareview through `$setup`, `$review-artifact`, `$review-task-done`, `$review-epic-ready`, `$review-pr-ready`, `$learn-post-merge`, `$status`, and `$fsm`.
 
-Claude Code users invoke the same workflows through `/setup`, `/review-artifact`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/learn-post-merge`, and `/status`.
+Claude Code users invoke the same workflows through `/setup`, `/review-artifact`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/learn-post-merge`, `/status`, and `/fsm`.
 
 Direct CLI usage remains the source of truth when plugin skills are unavailable.

@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-03-2-review",
+  "kind": "shard",
+  "shardId": "shard-03-2",
+  "shardHash": "382f1d10b8527cf8",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T15:04:05Z",
+  "evidence": [
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 1,
+      "note": "Full new-file diff present and untruncated (585 lines, single chunk part 1/1); no eval or other unsafe execution, no TODO/FIXME markers introduced."
+    },
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 145,
+      "note": "Write uses staging dir plus rename-aside/rename-in/remove-aside; every failure path after MkdirTemp routes through fail() which RemoveAll's the temp dir, and a returned rollback restores the prior pack set."
+    },
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 477,
+      "note": "shardPack validates every chunk against the measured diff (missing path, ByteStart>ByteEnd, ByteEnd>len(diff)) before slicing, so no silent empty-diff pack is emitted."
+    },
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 368,
+      "note": "GC only deletes files matching the result naming pattern that are neither in the current plan map nor pass resultIsCurrent, so a counted result survives collection."
+    },
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 1,
+      "note": "Validation evidence: package has a 1139-line test file; go test ./internal/shardpack/ -cover reports ok with 100.0% statement coverage."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Prune is the only Writer method that does not resolve symlinks on root: Write, Discover and GC all call deps.EvalSymlinks(root) first, but Prune derives its directory from the raw root. If the caller passes a symlinked repo root, Prune computes a different path than Write wrote to, ReadDir returns NotExist, and Prune silently returns nil, so stale plan directories are never removed. Non-blocking (leak of stale pack dirs only), but the inconsistency is worth aligning.",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 247,
+          "note": "Prune: dir := filepath.Dir(Dir(root, ...)) uses the unresolved root, unlike Write line 150 and GC line 369 which call EvalSymlinks."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Discover treats any ReadDir failure on the results directory as 'no directory entries': the entries loop runs only under `if err == nil` and the error is otherwise dropped. A permission error or I/O error therefore looks identical to an empty/absent results dir, and the affected results are not reported in Found.Unreadable. Non-blocking, but a not-NotExist error would be better surfaced.",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 298,
+          "note": "entries, err := w.deps.ReadDir(dir) followed by `if err == nil {` with no else branch and no Unreadable/error propagation."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

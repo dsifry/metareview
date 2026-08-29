@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-10.a6b464a50a6329c5",
+  "kind": "shard",
+  "shardId": "shard-10",
+  "shardHash": "a6b464a50a6329c5",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T12:00:00Z",
+  "evidence": [
+    {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md", "line": 174, "note": "Section 4 CommonPrefixSeq definition read against the shipped commonPrefix implementation"},
+    {"path": "internal/fsm/machine/diff.go", "line": 162, "note": "commonPrefix compares (Type, Node, At, Data); Origin/Seq/Prev ignored, matching section 4 not the r5 header"},
+    {"path": "internal/fsm/cli/wiring.go", "line": 254, "note": "applyJudgeOverride injects JUDGE/JUDGE_EFFORT into the caller vars unconditionally"},
+    {"path": "internal/fsm/workflow/resolve.go", "line": 33, "note": "Resolve refuses any caller-supplied JUDGE/JUDGE_EFFORT when calibration is set"},
+    {"path": "internal/fsm/cli/run.go", "line": 307, "note": "init folds the judge override into vars before Calibration is passed to machine.Init"},
+    {"path": "internal/fsm/cli/judgeoverride_test.go", "line": 15, "note": "new tests cover flag/env precedence, trimming, copy semantics and the three realCodexExec exit paths"},
+    {"path": "internal/fsm/record/record.go", "line": 65, "note": "RowFor matches spec section 6 row shape, verdict map, escalation rule and 12-char base slice"},
+    {"path": "internal/fsm/export/export.go", "line": 64, "note": "Manifest field set matches spec section 5 except the Bytes comment"},
+    {"note": "go vet ./internal/fsm/... clean; go test -cover on cli, record, export, machine all report 100.0% of statements, satisfying the m7 task doc done-criteria"}
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The judge override is folded into the run vars unconditionally, so an ambient METAREVIEW_JUDGE_MODEL (or METAREVIEW_JUDGE_EFFORT) makes every `fsm init --calibration` fail: applyJudgeOverride puts JUDGE into the vars map and workflow.Resolve refuses any caller-supplied JUDGE under calibration with ERR_CALIBRATION_PINNED. run.go only translates CodeVarUnset, so the operator sees a raw pinned-var error with no hint that an environment variable, not a flag, caused it, and no way to run calibration without unsetting the env. Spec 3 section 2 step 3 applies exactly this protection on the fork path (strip JUDGE/JUDGE_EFFORT before Resolve for a calibration parent); the init path has no equivalent. The same unconditional injection turns --judge-model on a workflow that does not declare JUDGE into `ERR_VAR_UNKNOWN: unknown var JUDGE`. The new test file in this shard is the whole test surface for this feature and covers neither case.",
+      "evidence": [
+        {"path": "internal/fsm/cli/wiring.go", "line": 254, "note": "applyJudgeOverride sets out[JudgeVar]/out[JudgeEffortVar] with no calibration or declared-var guard"},
+        {"path": "internal/fsm/cli/run.go", "line": 307, "note": "vars are overlaid before InitOptions.Calibration is set from the flag"},
+        {"path": "internal/fsm/workflow/resolve.go", "line": 33, "note": "calibration && pinned && given -> ERR_CALIBRATION_PINNED"},
+        {"path": "internal/fsm/cli/judgeoverride_test.go", "line": 42, "note": "TestApplyJudgeOverrideCopiesAndOverlays exercises overlay and copy semantics only, never the calibration or undeclared-var interaction"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The spec contradicts itself on the DiffRuns common-prefix tuple. The r4 header says `CommonPrefixSeq` over (Type, Node, Data), the r5 header says the tuple includes `Origin` presence, and section 4 says (Type, Node, At, Data) with Origin, Seq and Prev explicitly ignored. Only section 4 matches the shipped code and the F7 test row: if Origin presence were part of the tuple, a fork of a root parent would always yield 1 (the parent's events carry no Origin, the child's copies do), contradicting the F7 assertion CommonPrefixSeq == ForkedAtSeq. The two header lines are stale and should be corrected or dropped so an implementer reading the changelog does not get the wrong rule.",
+      "evidence": [
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md", "line": 30, "note": "r5 header: CommonPrefixSeq tuple includes Origin presence"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md", "line": 174, "note": "section 4: identical (Type, Node, At, Data); Origin, Seq and Prev are ignored"},
+        {"path": "internal/fsm/machine/diff.go", "line": 166, "note": "the implementation compares Type, Node, At and Data only"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two small spec-to-code drifts in the section 5 / section 4 type listings: Manifest.Bytes is documented as the sum of all written files, while the implementation documents and computes it as every written file except manifest.json itself; and Report.Outcomes is declared [2]run.Outcome in the spec but is [2]string in the shipped type. Both are documentation-accuracy defects, not behaviour defects.",
+      "evidence": [
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md", "line": 189, "note": "Bytes int64 /* sum of all written files */"},
+        {"path": "internal/fsm/export/export.go", "line": 80, "note": "Bytes comment: every written file except manifest.json itself"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md", "line": 163, "note": "Outcomes [2]run.Outcome in the spec"},
+        {"path": "internal/fsm/machine/diff.go", "line": 17, "note": "Outcomes [2]string in the shipped Report"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestRealCodexExec pins the three exit paths but not stderr, and realCodexExec never assigns cmd.Stderr: on the 'ran and failed' path the child's stderr is discarded, so a Codex CLI that fails with an empty stdout hands the judge an empty answer and a bare exit code with no diagnostic anywhere. Capturing stderr (even truncated, into the returned error or a warn) would make the failure legible; the test file is the natural place to pin it.",
+      "evidence": [
+        {"path": "internal/fsm/cli/deps.go", "line": 101, "note": "realCodexExec sets cmd.Stdin and cmd.Stdout only; cmd.Stderr is left nil so stderr goes nowhere"},
+        {"path": "internal/fsm/cli/judgeoverride_test.go", "line": 69, "note": "TestRealCodexExec asserts stdout, exit code and the missing-binary error, never stderr"}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

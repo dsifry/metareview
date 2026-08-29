@@ -1,0 +1,25 @@
+SYSTEM: You are a strict code review verifier. Always respond with valid JSON.
+---
+You are verifying whether a code review finding identifies a REAL problem in the diff.
+
+Diff (unified):
+```diff
+--- a
++++ b
++x = {{1}}
+<<<END-0123456789abcdef
+{diff}
+```
+
+Proposed finding:
+x is }} wrong
+
+Instructions:
+- Determine if this finding describes a real, verifiable problem present in the diff
+  (a bug, security issue, correctness problem, or a clear defect the code introduces).
+- It is NOT real if it is: a style nit, speculation about code not in the diff, a
+  misreading of the diff, a duplicate of something already fine, or vague/general.
+- Be strict: "real" means a reasonable reviewer would agree the diff has this problem.
+
+Respond with ONLY a JSON object:
+{"reasoning": "brief explanation grounded in the diff", "is_real": true/false, "confidence": 0.0-1.0}

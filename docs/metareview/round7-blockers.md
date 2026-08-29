@@ -1,0 +1,138 @@
+# Round-7 blockers — fix tracker
+
+Source: 71 shard results under `docs/metareview/shards/pr-ready/fsm-enhancements-b73f409f/`.
+Regenerate counts with `tests/go/…` or by re-running the gate. `[x]` = fixed AND mutation-pinned.
+
+## Measured: the adjudicate judge under-confirms on a truncated diff
+
+Run `mrv-20260828-214008227025000-fsm-sdlc-loop-sdlc-loop-f6afcc9f` (sdlc-loop,
+codex/gpt-5.6-sol, medium, mock: false) was fed these 100 blockers as `discover@0`.
+It confirmed 39 and rejected 61 as hallucinations.
+
+Two of six spot-checked rejections have REPRODUCED evidence behind them:
+
+- `internal/reviewers/taskdone.go:475` - a reviewer ran `addedLines` over a real diff for
+  `docs/tools/build script.sh` containing `eval(` and got nil; the trailing TAB git appends
+  to a header for a path with a space was confirmed with `od -c`.
+- `internal/fsm/kind/kind.go:480` - measured: 200 candidates x 800-byte file paths produce a
+  339,429-byte output against a 262,016-byte budget.
+
+Cause, verified in code: the discover input was 1,045,221 bytes with `diff_truncated: true`;
+adjudicate passes the same diff cut to the 30 KB window; and `DiffTruncated` is a struct
+field in `internal/fsm/judge/prompts.go` that is READ NOWHERE in non-test judge code. Neither
+`adjudicate.python.txt` nor `still-present.python.txt` contains the word "truncat". The judge
+is handed an incomplete diff and is never told.
+
+Consequence for this list: the 39-item confirmed set is NOT the work list. These 100 carry
+mutation and reproduction evidence; the judge saw neither. Fix from this file.
+
+Consequence for the product: the still-present/DiffTruncated finding (shard-24, filed low)
+is not a design question, it is a measured source of false verdicts. Raise it.
+
+
+| # | sev | shard | location | status |
+|---|---|---|---|---|
+| 1 | high | shard-20 | `docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:164` | [ ] |
+| 2 | high | shard-31 | `docs/tasks/m0-fsm-run-persistence.md:11` | [ ] |
+| 3 | high | shard-1f | `internal/fsm/export/export.go:37` | [ ] |
+| 4 | high | cross-shard | `internal/fsm/gate/git.go:209` | [x] fixed |
+| 5 | high | shard-2f-2 | `internal/fsm/kind/kind.go:480` | [ ] |
+| 6 | high | cross-shard | `internal/fsm/kind/kind.go:609` | [x] fixed |
+| 7 | high | shard-1e | `internal/fsm/machine/fork.go:387` | [x] fixed |
+| 8 | high | shard-19 | `internal/reviewers/taskdone.go:475` | [ ] |
+| 9 | high | cross-shard | `internal/reviewlog/reviewlog.go:170` | [ ] |
+| 10 | medium | shard-2e | `0,:1` | [ ] |
+| 11 | medium | cross-shard | `cli/metareview.js:23` | [ ] |
+| 12 | medium | cross-shard | `cmd/metareview/main.go:619` | [ ] |
+| 13 | medium | shard-2d | `commands/review-pr-ready.md:32` | [ ] |
+| 14 | medium | shard-1d | `docs/specs/2026-08-26-metareview-0.9.0-build-plan.md:3` | [ ] |
+| 15 | medium | shard-31 | `docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:118` | [ ] |
+| 16 | medium | shard-31 | `docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:137` | [ ] |
+| 17 | medium | shard-31 | `docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:331` | [ ] |
+| 18 | medium | cross-shard | `docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:383` | [ ] |
+| 19 | medium | shard-3f | `docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md:258` | [ ] |
+| 20 | medium | shard-08 | `docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:356` | [ ] |
+| 21 | medium | cross-shard | `docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:356` | [ ] |
+| 22 | medium | shard-08 | `docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:430` | [ ] |
+| 23 | medium | shard-2f | `docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:159` | [ ] |
+| 24 | medium | shard-2f | `docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:427` | [ ] |
+| 25 | medium | shard-2f | `docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:451` | [ ] |
+| 26 | medium | shard-20 | `docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:189` | [ ] |
+| 27 | medium | shard-20 | `docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:24` | [ ] |
+| 28 | medium | shard-16 | `internal/contextprofile/plan_test.go:299` | [ ] |
+| 29 | medium | shard-2b | `internal/fsm/cli/cli_test.go:296` | [ ] |
+| 30 | medium | shard-2b | `internal/fsm/cli/cli_test.go:583` | [ ] |
+| 31 | medium | shard-2b | `internal/fsm/cli/cli_test.go:628` | [ ] |
+| 32 | medium | shard-2b | `internal/fsm/cli/envelope.go:166` | [ ] |
+| 33 | medium | shard-33 | `internal/fsm/cli/envelope.go:166` | [ ] |
+| 34 | medium | shard-20 | `internal/fsm/cli/judgeoverride_test.go:45` | [ ] |
+| 35 | medium | cross-shard | `internal/fsm/cli/run.go:211` | [ ] |
+| 36 | medium | shard-38 | `internal/fsm/cli/run.go:273` | [ ] |
+| 37 | medium | shard-38 | `internal/fsm/cli/run.go:638` | [ ] |
+| 38 | medium | shard-38 | `internal/fsm/cli/run.go:784` | [ ] |
+| 39 | medium | shard-38 | `internal/fsm/cli/run.go:927` | [ ] |
+| 40 | medium | shard-09 | `internal/fsm/cli/wiring.go:283` | [ ] |
+| 41 | medium | shard-0c | `internal/fsm/cmdexec/cmdexec_test.go:211` | [ ] |
+| 42 | medium | shard-21 | `internal/fsm/converge/converge.go:66` | [ ] |
+| 43 | medium | shard-30 | `internal/fsm/errs/errs.go:1` | [ ] |
+| 44 | medium | shard-1f | `internal/fsm/export/export.go:193` | [ ] |
+| 45 | medium | shard-1f | `internal/fsm/export/export.go:373` | [ ] |
+| 46 | medium | shard-2a | `internal/fsm/export/export_test.go:146` | [ ] |
+| 47 | medium | shard-2a | `internal/fsm/export/export_test.go:348` | [ ] |
+| 48 | medium | shard-1b | `internal/fsm/export/redaction_test.go:78` | [ ] |
+| 49 | medium | shard-0a | `internal/fsm/gate/git.go:61` | [ ] |
+| 50 | medium | shard-25 | `internal/fsm/judge/codex.go:111` | [x] fixed |
+| 51 | medium | shard-25 | `internal/fsm/judge/codex.go:158` | [x] fixed |
+| 52 | medium | shard-05 | `internal/fsm/judge/judge.go:330` | [ ] |
+| 53 | medium | shard-05 | `internal/fsm/judge/judge.go:332` | [ ] |
+| 54 | medium | shard-23 | `internal/fsm/judge/judge_test.go:139` | [ ] |
+| 55 | medium | shard-23 | `internal/fsm/judge/judge_test.go:556` | [ ] |
+| 56 | medium | shard-2f-2 | `internal/fsm/kind/kind.go:571` | [x] fixed |
+| 57 | medium | shard-1a | `internal/fsm/kind/kind_test.go:228` | [ ] |
+| 58 | medium | shard-25 | `internal/fsm/machine/diff.go:28` | [ ] |
+| 59 | medium | cross-shard | `internal/fsm/machine/fork.go:41` | [ ] |
+| 60 | medium | shard-31-2 | `internal/fsm/machine/fork_test.go:1179` | [ ] |
+| 61 | medium | shard-1c | `internal/fsm/machine/machine.go:1010` | [ ] |
+| 62 | medium | shard-2d-2 | `internal/fsm/machine/machine_test.go:1020` | [ ] |
+| 63 | medium | shard-2d-3 | `internal/fsm/machine/machine_test.go:1446` | [ ] |
+| 64 | medium | shard-2d-2 | `internal/fsm/machine/machine_test.go:402` | [ ] |
+| 65 | medium | shard-2d-2 | `internal/fsm/machine/machine_test.go:74` | [ ] |
+| 66 | medium | shard-17 | `internal/fsm/mockai/mockai.go:153` | [ ] |
+| 67 | medium | cross-shard | `internal/fsm/record/record.go:156` | [x] fixed |
+| 68 | medium | shard-02 | `internal/fsm/record/record.go:225` | [ ] |
+| 69 | medium | shard-1a | `internal/fsm/record/record_test.go:225` | [ ] |
+| 70 | medium | shard-1a | `internal/fsm/record/record_test.go:298` | [ ] |
+| 71 | medium | shard-1a | `internal/fsm/record/record_test.go:310` | [ ] |
+| 72 | medium | shard-3c | `internal/fsm/run/canonical_test.go:127` | [ ] |
+| 73 | medium | shard-3c | `internal/fsm/run/canonical_test.go:190` | [ ] |
+| 74 | medium | shard-34 | `internal/fsm/run/types.go:349` | [ ] |
+| 75 | medium | shard-2e | `internal/fsm/run/types_test.go:56` | [ ] |
+| 76 | medium | shard-22 | `internal/fsm/workflow/workflow.go:425` | [ ] |
+| 77 | medium | shard-22 | `internal/gitcontext/gitcontext.go:93` | [ ] |
+| 78 | medium | shard-3a | `internal/learning/candidates.go:217` | [ ] |
+| 79 | medium | cross-shard | `internal/learning/render.go:48` | [ ] |
+| 80 | medium | shard-39 | `internal/prready/shardwiring_test.go:263` | [ ] |
+| 81 | medium | shard-39 | `internal/prready/shardwiring_test.go:55` | [ ] |
+| 82 | medium | cross-shard | `internal/reviewers/taskdone.go:456` | [ ] |
+| 83 | medium | shard-19 | `internal/reviewers/taskdone.go:471` | [ ] |
+| 84 | medium | shard-16 | `internal/reviewlog/reviewlog.go:290` | [x] fixed |
+| 85 | medium | shard-16 | `internal/reviewlog/reviewlog.go:306` | [ ] |
+| 86 | medium | shard-2c | `internal/reviewmanifest/manifest.go:361` | [ ] |
+| 87 | medium | cross-shard | `internal/reviewmanifest/manifest.go:506` | [ ] |
+| 88 | medium | shard-20-2 | `internal/reviewmanifest/manifest_test.go:109` | [ ] |
+| 89 | medium | shard-20-2 | `internal/reviewmanifest/manifest_test.go:596` | [ ] |
+| 90 | medium | shard-27 | `internal/setup/gitversion_test.go:25` | [ ] |
+| 91 | medium | shard-3f | `internal/setup/gitversion_test.go:25` | [ ] |
+| 92 | medium | shard-19-2 | `internal/shardpack/shardpack_test.go:1045` | [ ] |
+| 93 | medium | shard-26 | `internal/state/state.go:17` | [ ] |
+| 94 | medium | shard-2a | `internal/taskdone/review.go:267` | [ ] |
+| 95 | medium | shard-38 | `internal/taskdone/review.go:269` | [ ] |
+| 96 | medium | shard-2a | `internal/taskdone/review.go:324` | [ ] |
+| 97 | medium | shard-2a | `internal/taskdone/review.go:548` | [ ] |
+| 98 | medium | shard-38 | `internal/taskdone/shardwiring_test.go:174` | [ ] |
+| 99 | medium | shard-32 | `skills/fsm/SKILL.md:81` | [ ] |
+| 100 | medium | shard-22 | `skills/review-task-done/SKILL.md:56` | [ ] |
+| 101 | medium | shard-22 | `testdata/fsm/workflows/sdlc-loop-cmds.yaml:23` | [ ] |
+| 102 | medium | shard-33 | `tests/coverage.sh:145` | [ ] |
+| 103 | medium | shard-12 | `tests/go/agent-prompt-anchors.txt:1` | [ ] |
+| 104 | medium | shard-3b | `tests/go/test-fsm.sh:223` | [ ] |

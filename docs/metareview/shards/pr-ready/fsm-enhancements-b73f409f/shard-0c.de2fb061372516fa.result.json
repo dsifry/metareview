@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0c.de2fb061372516fa",
+  "kind": "shard",
+  "shardId": "shard-0c",
+  "shardHash": "de2fb061372516fa",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 40,
+      "note": "ManifestContext.Satisfies matches spec section 6 of docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md clause for clause: reasons subset of {DIFF_TRUNCATED, LARGE_DIFF}, Present, ShardCount>0, ShardsCovered==ShardCount, (ShardCount==1 or CrossShard), Verdict==PASS. No drift found."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 134,
+      "note": "Checked the truncation downgrade for a hole: staged/worktree truncation raises LOCAL_DIFF_TRUNCATED, which is not in shardSatisfiableReasons, so sharded stays false and the 'Diff context was truncated' finding keeps blocking for local content that no shard pack carries. Same for UNTRACKED_OMITTED/UNTRACKED_TRUNCATED/DIFF_OVERSIZE. The downgrade is sound."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 453,
+      "note": "untrackedExcerpt writes '--- <rel>' then prefixes EVERY content line with '+', so addedUntrackedLines' claim that content can never begin a line with '--- ' is verified against the producer; a file cannot move the lint scope by naming a path of its own."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 368,
+      "note": "addedSourceLines: '+++ ' is honoured as metadata only while inHeader (before the first @@), and a bare '+++' in a hunk body is now kept, so an added source line starting with '++' is no longer walked past the lints. Verified /dev/null guard on deletions and that renames/quoted paths resolve through diffHeaderPath's LastIndex on ' b/' and ' \"b/'."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 246,
+      "note": "Verified the PASS_ADVISORY worry is a non-issue: the aggregate verdict is PASS unless blockers exist (verdictBlocks covers only NEEDS_REVISION/ESCALATED), so a shard result of PASS_ADVISORY still clears Satisfies' Verdict==PASS. Plan-hash freshness is enforced at ingestion (manifest.go:189), which is why Satisfies need not re-check PlanHash."
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 187,
+      "note": "The context-risk fingerprint change from reason-bearing to 'architecture:context-risk' has the section 8 migration behind it: legacyContextRiskPrefixes covers all three scopes (architecture:, pr:architecture:, epic:) and supersedeLegacyContextRisk marks old rows 'superseded' with an empty fixedInRunId, so prior open rows neither block nor read as fixes."
+    },
+    {
+      "path": "internal/reviewers/lintscope_test.go",
+      "line": 127,
+      "note": "Tests exist for every new production path in this shard. Ran go test ./internal/reviewers/: ok, 97.0% unit-only, floor for internal/reviewers is 97.7 combined (tests/coverage-floor.txt:19). Per-function coverage is 100% for Satisfies, RunTaskDone, manifestFound, contextRiskCoveredFound, addedLines, addedSourceLines, addedUntrackedLines, lintable, diffHeaderPath, postImagePath."
+    },
+    {
+      "path": ".github/workflows/gtg.yml",
+      "line": 96,
+      "note": "Walked the wait loop for the empty-RUNS case by hand: printf of an empty RUNS yields one blank line, so TOTAL (grep -c .) is 0 while PENDING (grep -vc completed) is 1, and the TOTAL>0 guard correctly reads that as 'not ready' rather than 'all done'. The || true guards keep the step alive under bash -e, and PIPESTATUS[0] is read while set +e is in force."
+    },
+    {
+      "path": ".github/workflows/gtg.yml",
+      "line": 33,
+      "note": "Action pinning matches the repository convention: actions/setup-python is pinned to a commit SHA with a version comment, exactly as .github/workflows/test.yml pins checkout, setup-go, setup-node and golangci-lint-action."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Undocumented narrowing of the deterministic lint scope. lintable() excludes every path ending .md/.markdown anywhere in the tree and everything under docs/, so an added TODO/FIXME or an unsafe dynamic-evaluation call in any Markdown file is now invisible to the gate. The change is deliberate, commented, and tested, but spec section 6 says only that 'the lints then run over the union added lines' and never states the prose carve-out; the spec should record the blind spot it accepts.",
+      "evidence": [
+        {
+          "path": "internal/reviewers/taskdone.go",
+          "line": 430,
+          "note": "lintable returns false for any .md/.markdown suffix and any docs/ prefix, matched case-insensitively."
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md",
+          "line": 222,
+          "note": "Spec section 6 describes the satisfied path as running 'the lints then ... over the union added lines' with no mention of a documentation exclusion."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "manifestFound returns the empty string whenever ShardCount == 0, which also suppresses the 'no shard review results were ingested' note and the manifest verdict it was added to surface. A run where a manifest is Present but reports zero shards therefore produces a blocking context-risk finding whose Found text says nothing about why the manifest failed to satisfy it, which is the diagnostic spec section 6's unsatisfied path asks for.",
+      "evidence": [
+        {
+          "path": "internal/reviewers/taskdone.go",
+          "line": 196,
+          "note": "Early return on manifest.ShardCount == 0 happens before the Present check that would emit 'no shard review results were ingested'."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Test gap on the single-shard satisfied plan. boolString is the only new function below 100% statement coverage (66.7%): its false branch is unreached, meaning no test exercises contextRiskCoveredFound for a satisfied plan with ShardCount == 1 and CrossShard == false — a combination Satisfies explicitly permits, so the advisory text for the commonest small-plan case is unverified.",
+      "evidence": [
+        {
+          "path": "internal/reviewers/taskdone.go",
+          "line": 221,
+          "note": "go tool cover -func reports boolString at 66.7%; every other new function in this file reports 100.0%."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "gtg.yml requests statuses: read but never reads commit statuses; the wait loop polls /check-runs only. Two consequences: an unused permission in the grant, and a legacy commit status (a non-check-run reporter) is neither waited for nor excluded by name, so gtg can be started before it settles.",
+      "evidence": [
+        {
+          "path": ".github/workflows/gtg.yml",
+          "line": 19,
+          "note": "permissions grants statuses: read; the only API calls in the file are repos/*/pulls/* and repos/*/commits/*/check-runs."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "Timeout budget is tight rather than wrong: timeout-minutes is 30 while the documented wait budget alone is 132 * 10s = 22 minutes, leaving roughly 8 minutes for pip install, the API round trips and gtg itself. If CI ever runs to its own 20-minute ceiling the job can be killed by the runner rather than reporting the warning the wait loop was written to emit.",
+      "evidence": [
+        {
+          "path": ".github/workflows/gtg.yml",
+          "line": 29,
+          "note": "timeout-minutes: 30 at job level against a 22-minute in-step retry budget plus install and gtg execution."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1c-rereview",
+  "kind": "shard",
+  "shardId": "shard-1c",
+  "shardHash": "159122e872d56f55",
+  "planHash": "19c95b4224fc2837",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/run.go", "line": 82, "note": "Read the full 983-line CLI entrypoint: subcommand dispatch, hand-rolled flag parsing, envelope emission, and exit-code contract; no eval-style execution, no TODO/FIXME markers, no truncated diff context in the pack."},
+    {"path": "internal/fsm/cli/run.go", "line": 140, "note": "readCapped enforces byte caps for --data/--input/--goldens/--context and maps overflow to ERR_INPUT_TOO_LARGE; stdin path uses a LimitReader of max+1 so the cap cannot be bypassed."},
+    {"path": "internal/fsm/cli/run.go", "line": 226, "note": "init refuses a mock scenario directory outside the repo root via relInside before loading it, and rejects duplicate run ids from both runs.jsonl and the run directory."},
+    {"path": "internal/fsm/cli/run.go", "line": 848, "note": "Untrusted-field marking checked across state/advance/judge/gate/diff envelopes: model-authored and gate-detail strings are consistently listed in untrusted[]."},
+    {"path": "internal/fsm/cli/cli_test.go", "line": 1, "note": "Source change is covered by an existing package test file; go vet on internal/fsm/cli, internal/taskdone, internal/prready is clean."},
+    {"path": "internal/prready/shardwiring_test.go", "line": 1, "note": "Reviewed the pr-ready shard wiring tests: they pin write/prune counts, plan-hash agreement with the context pack, rollback on write failure and on review-body failure, chunk-to-file backing, and non-empty real packs."},
+    {"path": "internal/taskdone/shardwiring_test.go", "line": 1, "note": "Reviewed the new task-done shard wiring tests: scope/budget header assertions, plan-hash in the context pack, rollback exactly once on body failure with no housekeeping, prune/gc failures not discarding a recorded run, and Discover called once."},
+    {"path": "internal/taskdone/shardwiring_test.go", "line": 148, "note": "The chmod 0o555 unwritable-directory technique is guarded by t.Skip when the review body still succeeds (e.g. running as root), so the test cannot pass vacuously by asserting on a path that never ran."},
+    {"path": "internal/fsm/judge/testdata/prompts/adjudicate.calibration.golden", "line": 1, "note": "Golden prompt fixtures for adjudicate and still-present calibration rendering; they deliberately embed brace and fence sequences to pin injection-resistant templating and contain no executable content."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Cosmetic: in gate(), the --input validation combines a decode error with an invalid FixEntryHead SHA in one branch, so a snapshot that decodes cleanly but carries a malformed fix_entry_head reports '--input is not a snapshot: <nil>', which does not tell the caller what was actually wrong. Non-blocking.",
+      "evidence": [{"path": "internal/fsm/cli/run.go", "line": 674, "note": "return in.usage(\"--input is not a snapshot: \" + fmt.Sprint(err)) reached with err == nil when only ValidSHA fails"}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead code: judge() normalizes k == \"still-present\" to judge.KindStillPresent twice, and KindStillPresent is itself the literal \"still-present\" (internal/fsm/judge/prompts.go:19), so both statements are no-ops. Harmless but misleading. Non-blocking.",
+      "evidence": [{"path": "internal/fsm/cli/run.go", "line": 740, "note": "second identical still-present normalization after judgeInput; the first is at line 709 and both are no-ops"}]
+    }
+  ],
+  "blockingCount": 0
+}

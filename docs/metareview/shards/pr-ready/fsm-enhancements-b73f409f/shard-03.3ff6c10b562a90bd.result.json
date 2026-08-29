@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-03-review",
+  "kind": "shard",
+  "shardId": "shard-03",
+  "shardHash": "3ff6c10b562a90bd",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": ".claude-plugin/marketplace.json",
+      "line": 11,
+      "note": "Version bumped 0.8.2 -> 0.9.0. Cross-checked against the other two manifests: package.json:3 and .claude-plugin/plugin.json:3 both read 0.9.0, so the three version sources agree; no other manifest field changed."
+    },
+    {
+      "path": "INSTALL.md",
+      "line": 9,
+      "note": "Prerequisite raised to Go 1.26+. Verified against go.mod line 3 ('go 1.26'), so the documented floor matches the module's own directive rather than trailing it."
+    },
+    {
+      "path": "INSTALL.md",
+      "line": 134,
+      "note": "New durable-output claims were each checked against shipped code, not taken on trust: git >= 2.31 is internal/setup/setup.go:184 (MinGitVersion) with internal/setup/gitversion_test.go covering the boundary; the self-ignoring FSM run dir is internal/fsm/run/store_jsonl.go:104-107; the self-ignoring prompt packs are internal/shardpack/shardpack.go:158 writing a '*' .gitignore. All four assertions hold."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+      "line": 1,
+      "note": "New 317-line spec. Scanned the whole shard diff for the rubric's blocking triggers: no TODO/FIXME markers, no eval-style execution (the spec mandates no shell, exec.CommandContext with pinned argv and a Setpgid kill group), and no truncated diff context in the pack."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+      "line": 131,
+      "note": "Spot-checked normative spec claims against the implementation rather than assuming doc/code agreement: the effort-capable Anthropic list matches internal/fsm/judge/judge.go:131 verbatim, the xhigh exclusion set matches judge.go:138 (anthropicNoXHigh) and its refusal at judge.go:291, the effort vocabulary matches judge.go:101, the retry cap matches judge.go:495-502, and the cmdexec env allow-list matches internal/fsm/cmdexec/cmdexec.go:36 ('PATH HOME LANG TMPDIR'). No drift found in any of these."
+    },
+    {
+      "path": "docs/tasks/m8-cli-suite-docs.md",
+      "line": 3,
+      "note": "Every identifier the task doc claims to deliver resolves in the tree: converge.Describe (internal/fsm/converge/converge.go:362), machine.OpenOptions (machine/types.go:120), Deps.Preflight (cli/wiring.go:208), NodeView (machine/types.go:224), View.Outgoing (workflow/workflow.go:704), RecordLLMCall (machine/machine.go:1043), judge.Preflight (judge/judge.go:308), mockai.MaxFileBytes (mockai/mockai.go:73), plus tests/go/test-fsm.sh, commands/fsm.md, skills/fsm/SKILL.md and docs/fsm/. The referenced spec docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md exists."
+    },
+    {
+      "path": "docs/tasks/m8-cli-suite-docs.md",
+      "line": 10,
+      "note": "The doc's stated done-criterion (exactly 100% statement coverage for every internal/fsm/* package and workflows/) was executed, not assumed: 'go test ./internal/fsm/... ./workflows/... -cover' reports 100.0% for all fourteen packages (cli, cmdexec, converge, errs, export, gate, judge, kind, machine, mockai, record, run, workflow, workflows). The claim is true at HEAD."
+    },
+    {
+      "path": "internal/fsm/workflow/testdata/cmds-preimage.sha256",
+      "line": 1,
+      "note": "New single-line fixture (64 hex chars). It is not the sha256 of cmds-preimage.json's bytes as the adjacent test comment loosely suggests; it is CmdsSHA256 of the list resolved under workDir /w, and internal/fsm/workflow/workflow_test.go:479-501 asserts it three ways (ResolveCmds return value, CmdsSHA256 of the list, and sha256 of the fixture with WORK substituted). Ran 'go test ./internal/fsm/workflow/': green, so the fixture and its consumer in another shard are mutually consistent."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Spec/code drift plus a dead injected dependency. This spec states that cmdexec takes its DurationMS from the runner's measured Result.Duration and has 'no Clock'. The shipped struct does declare a Clock field, and internal/fsm/cli/deps.go:90 populates it (Clock: now) when constructing the guarded runner -- but nothing in internal/fsm/cmdexec ever reads it (grep for 'Clock' in the package returns only the declaration). So the codebase carries an injected seam that is wired at the call site and silently ignored, while the spec of record says the seam should not exist. No behavioural bug today, but a future reader wiring a fake clock for cmd timing would get no effect and no error, and 100% statement coverage cannot catch it because a struct field is not a statement. Either drop the field and its assignment, or make the spec sentence match.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 72,
+          "note": "Spec text: \"DurationMS comes from the runner's measured Result.Duration (no `Clock`).\""
+        },
+        {
+          "path": "internal/fsm/cmdexec/cmdexec.go",
+          "line": 77,
+          "note": "Guarded declares 'Clock func() time.Time'; it is the only occurrence of Clock in the package, so the field is never read."
+        },
+        {
+          "path": "internal/fsm/cli/deps.go",
+          "line": 90,
+          "note": "The guarded-runner factory sets Clock: now on cmdexec.Guarded, wiring a dependency the callee ignores."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Ordered-list numbering in section 4.2 is out of sequence and survives from the previous plan's review of this same file: the pre-flight step is written as '0.' but placed after item '1.' in source order. Markdown renderers renumber ordered lists sequentially, so the rendered spec shows pre-flight as the second step, contradicting its own 'before any call' / 'with no spend' requirement -- the one ordering property the item exists to state. Move the pre-flight item above item 1.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 242,
+          "note": "Line 242 begins '0. Pre-flight (before any call)' while line 236 begins '1. If goldens:' and line 245 begins '2. Every candidate never seen'."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Considered and rejected: byte-pinned hash fixtures elsewhere on this branch lack a '-text' .gitattributes entry (.gitattributes covers only internal/fsm/judge/testdata/prompts/* and testdata/fsm/**), which would break sha assertions on a core.autocrlf checkout. It does not apply to this shard's file: workflow_test.go:479 reads cmds-preimage.sha256 through strings.TrimSpace, which strips a CR, so this particular fixture is line-ending safe. The exposure, if any, belongs to cmds-preimage.json, which is in a different shard.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow_test.go",
+          "line": 479,
+          "note": "wantSha := strings.TrimSpace(string(must(os.ReadFile(\"testdata/cmds-preimage.sha256\")))) -- TrimSpace absorbs a CRLF, so this shard's fixture is unaffected."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Considered and rejected: the spec's status header records that the artifact-review chain reached ESCALATED and that a human re-authorized attempt 4 in prose, which would normally be an unrecorded process exit. Checked docs/metareview/FINDINGS.md: two Process Overrides for this branch are recorded and granted by dsifry@warmstart.ai with request/grant actors and reasons, exactly as the CLAUDE.md override contract requires. Nothing to raise.",
+      "evidence": [
+        {
+          "path": "docs/metareview/FINDINGS.md",
+          "line": 9,
+          "note": "Granted override mrvf-20260827-130434731371000-pr-ready-branch-10d735e5-001 with a distinct requesting actor (orchestrator) and granting actor (dsifry@warmstart.ai)."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-2d-675c1ee62c7543f6",
+  "kind": "shard",
+  "shardId": "shard-2d",
+  "shardHash": "675c1ee62c7543f6",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:32:04Z",
+  "blockingCount": 1,
+  "evidence": [
+    {
+      "path": "internal/fsm/kind/decision.go",
+      "line": 15,
+      "note": "The Decision doc comment was checked clause by clause against the owning spec (docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:120-127, spec 3 section 1) and against the code: Raw = match / is_real / still_present per kind, nil for a null verdict, an absent or null bool, or an unknown kind; Effective = is_real AND confidence >= AdjudicateThreshold for adjudicate, still_present for still-present, Raw for match. Every clause holds; the section reference (spec 3 section 1) is the section that actually owns the type."
+    },
+    {
+      "path": "internal/fsm/kind/decision.go",
+      "line": 48,
+      "note": "AdjudicateThreshold is 0.7 (internal/fsm/kind/kind.go:46) and the effective rule here is byte-for-byte the rule the fork executor applies at kind.go:471 (v.Decision && v.Confidence >= AdjudicateThreshold), so a replayed verdict reproduces the decision the run actually made. The persisted verdict really does carry a confidence field for all three kinds (internal/fsm/judge/prompts.go:280-295 parsedMatch/parsedAdjudicate/parsedStillPresent), so Effective is not silently always-false."
+    },
+    {
+      "path": "internal/fsm/kind/decision_test.go",
+      "line": 16,
+      "note": "TestDecision was mutation-tested, not just read. Five mutations applied to a scratchpad copy of the tree: eff = r (drops the threshold) -> compile error, then FAIL; conf >= -> conf > (boundary) -> FAIL; threshold applied to every kind -> FAIL; confidence deref removed -> FAIL. Coverage of decision.go is 100% of statements with every block count >= 1, and the kind package as a whole reports 100.0%."
+    },
+    {
+      "path": "internal/fsm/kind/decision_test.go",
+      "line": 45,
+      "note": "TestNilJudgeExecutors is a real assertion, not a tautology: with errNoJudge removed both executors would return an empty output and no error for the empty ExecInput fixture, so the errs.Is(ERR_EXECUTOR_FAILED) and Fields[reason]==no_judge checks would fail. machine.CodeExecutorFailed is ERR_EXECUTOR_FAILED (internal/fsm/machine/types.go:255), which is what kind.New's doc comment promises."
+    },
+    {
+      "path": "commands/review-pr-ready.md",
+      "line": 6,
+      "note": "The usage line matches the parser exactly: --shard-result is repeatable (cmd/metareview/main.go:264-266) and --cross-shard-result is single valued, exiting 2 on a repeat (main.go:267-268, appendCrossShardResult at main.go:605-611)."
+    },
+    {
+      "path": "commands/review-pr-ready.md",
+      "line": 15,
+      "note": "Pack path verified against shardpack.Dir (internal/shardpack/shardpack.go:90-92 = .metareview/shards/<scope>/<slug>/<planHash>), results path against ResultsDir (shardpack.go:110-112 = docs/metareview/shards/<scope>/<slug>), and the plan.json key set against planFile (shardpack.go:114-124) which does carry planHash, shards, shardHash and resultsDir. Confirmed on disk in this run's own plan.json."
+    },
+    {
+      "path": "commands/review-pr-ready.md",
+      "line": 31,
+      "note": "The claim that the lints only run once the context-risk blocker is covered is correct and is not an idle statement: RunTaskDone returns early with only the context-risk finding when Manifest.Satisfies is false (internal/reviewers/taskdone.go:98-110), and pr-ready routes its branch diff through the same function (internal/reviewers/prready.go:129). The downgrade to advisory is taskdone.go:112-124."
+    },
+    {
+      "path": "commands/review-pr-ready.md",
+      "line": 37,
+      "note": "UNTRACKED_TRUNCATED verified end to end: maxUntrackedFileBytes is 4000 and the counter increments strictly above it (internal/gitcontext/gitcontext.go:17, :426-428); the reason is raised at internal/contextprofile/profile.go:152-153; it is deliberately absent from shardSatisfiableReasons (internal/reviewers/taskdone.go:37), so shard results can never clear it. Without --include-working-tree the count is zeroed (internal/prready/review.go:685-698), which is why the sentence is scoped to that flag."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 46,
+      "note": "go test ./internal/fsm/kind/ ./internal/contextprofile/ ./internal/shardpack/ ./internal/reviewmanifest/ ./internal/reviewers/ all pass at head 334e752fda7ab5077090c61e1f8dc357b483545b; the kind package is at 100.0% statement coverage. All mutation work was done on a copy under the scratchpad; the branch was not modified."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Step 5 states an invalidation rule the sharder does not have. \"After a fix round only the edited file's shard and the cross-shard result go ignored: re-review those two and leave the rest\" is true only for a bucket that fits the budget. PlanShards buckets by a hash of the path (stable under edits), but an over-budget bucket is then first-fit split over its own (Path, Part)-sorted chunk list (internal/contextprofile/shards.go:214-241), so growing one file pushes later chunks across the split boundary and changes the hash of every shard in that bucket. Separately, the bucket count itself is recomputed from the total diff size on every run (bits = bucketBits(needBuckets(total, budget)), shards.go:194-198), so a fix round that pushes the branch diff across a power-of-two boundary re-cuts every shard in the plan. Verified empirically on a scratchpad copy: a 24-file fixture with a split bucket, growing the first file of bucket 4 from 720 to 1440 bytes, invalidated shards 4 and 4-2 -- two results, not one. Split buckets are not hypothetical here: this very plan has shard-2d, shard-2d-2 and shard-2d-3 in one bucket (plus 08/08-2, 19/19-2, 20/20-2, 28/28-2, 2b/2b-2, 2f/2f-2, 31/31-2). The owning spec states the rule correctly -- \"Editing a file changes only its own bucket's shards, unless the sum of fileBytes crosses a bits boundary, which re-cuts everything\" (docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md:120-121) -- so the command doc is a lossy paraphrase of its own spec: bucket's shards (plural) became \"the edited file's shard\" (singular), and the bits caveat was dropped. The gate is fail-closed (missing shard result blockers, internal/reviewmanifest/manifest.go:422-428), so this cannot cause a false PASS, but an operator who follows the instruction literally re-reviews two shards and burns a whole gate run discovering that the rest were re-cut. Fix: say \"the edited file's bucket (every shard whose id shares the bucket prefix) and the cross-shard result\", and keep the spec's bits-boundary caveat.",
+      "evidence": [
+        {
+          "path": "commands/review-pr-ready.md",
+          "line": 32,
+          "note": "\"After a fix round only the edited file's shard and the cross-shard result go ignored: re-review those two and leave the rest.\""
+        },
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 231,
+          "note": "first-fit split inside an over-budget bucket: if bytes+size > budget { flush() } -- a grown file shifts later chunks into the next shard of the same bucket, so both shard hashes change"
+        },
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 194,
+          "note": "bits := bucketBits(needBuckets(total, budget)) -- the bucket count is derived from the whole diff's byte total, so crossing a power-of-two boundary renames and rehashes every shard"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md",
+          "line": 120,
+          "note": "the owning spec says \"its own bucket's shards\" (plural) and records the bits-boundary exception that the command doc drops"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Step 3's duplicate-blocker claim is too strong for the case an operator is most likely to hit. \"passing a shard whose result is already committed raises a `duplicate shard result` blocker\" does not hold when the explicit path IS the committed file: Discover appends explicit paths to the resultsDir listing and then deduplicates by resolved path (internal/shardpack/shardpack.go:308-327), so `--shard-result docs/metareview/shards/.../shard-2d.<hash>.result.json` on an already-committed file is a silent no-op, not a blocker. The repository's own test pins that behaviour (internal/shardpack/shardpack_test.go:844-852 appends explicit[0] a second time and asserts the repeat is deduplicated). The blocker at internal/reviewmanifest/manifest.go:411-414 fires only when a *different* file carries the same shard hash. The sentence would be accurate as \"passing a second file for a shard whose result is already committed\"; as written it invites an operator to conclude the flag is unusable against resultsDir at all.",
+      "evidence": [
+        {
+          "path": "commands/review-pr-ready.md",
+          "line": 28,
+          "note": "\"passing a shard whose result is already committed raises a `duplicate shard result` blocker\""
+        },
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 322,
+          "note": "seen[path] dedup over the concatenated discovered + explicit path list, so an explicit path identical to a discovered one never reaches the manifest twice"
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 414,
+          "note": "the duplicate shard result blocker is keyed on two distinct ReviewResults matching the same shard, not on the flag being used"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "errNoJudge is in the wrong file. It has nothing to do with Decision, both call sites are in kind.go (internal/fsm/kind/kind.go:409 and :582), and there is no import that forces it here -- kind.go already imports errs and machine. Spec 3 section 1 assigns this file exactly one thing: \"internal/fsm/kind decision.go (Decision)\" (docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:46). A reader looking for the no_judge error that kind.New's doc comment promises (kind.go:69-71) will not find it in kind.go. No behavioural effect; move it next to its callers.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/decision.go",
+          "line": 11,
+          "note": "func errNoJudge() defined in decision.go, above the Decision it is unrelated to"
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 409,
+          "note": "the only two callers, adjudicateExec.Execute (409) and stillPresentExec.Execute (582), both live in kind.go"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 46,
+          "note": "the spec's package table gives decision.go a single member: (Decision)"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The `len(verdict) == 0` half of the guard is unfalsifiable. json.Unmarshal on empty input already returns \"unexpected end of JSON input\", so the second operand covers the first. Verified by mutation on a scratchpad copy: rewriting line 26 to `if json.Unmarshal(verdict, &v) != nil` leaves the whole kind package green, including the test case that exists specifically for it (\"empty verdict\" at internal/fsm/kind/decision_test.go:32). In a package gated at 100% statement coverage this is a sub-expression no test can distinguish, and the accompanying test case reads as coverage it does not provide. Harmless defensively, but either drop the operand or note in the test that it pins short-circuit behaviour rather than an outcome.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/decision.go",
+          "line": 26,
+          "note": "if len(verdict) == 0 || json.Unmarshal(verdict, &v) != nil -- the first operand is redundant with the second"
+        },
+        {
+          "path": "internal/fsm/kind/decision_test.go",
+          "line": 32,
+          "note": "the \"empty verdict\" case still passes with the len check deleted, so it does not discriminate the branch it appears to test"
+        }
+      ]
+    }
+  ]
+}

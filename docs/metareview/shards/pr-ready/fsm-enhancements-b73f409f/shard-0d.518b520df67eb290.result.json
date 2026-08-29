@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0d-review",
+  "kind": "shard",
+  "shardId": "shard-0d",
+  "shardHash": "518b520df67eb290",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {"path": "CLAUDE.md", "line": 51, "note": "Docs-only change: /fsm command, FSM exit-code handling, Process Overrides section, sharded-review workflow. No eval, no TODO/FIXME, no code paths introduced."},
+    {"path": "internal/fsm/kind/kind_test.go", "line": 1, "note": "New table-heavy test file covering registry construction, Decode caps, Reduce union limits, match/adjudicate composition, still-present, instruction fencing and cmd executor; assertions check errs codes and audit events."},
+    {"path": "internal/fsm/kind/kind_test.go", "line": 738, "note": "assertFenced verifies untrusted snapshot/diff text appears only inside nonce fences - prompt-injection containment is actually asserted, not assumed."},
+    {"path": "internal/fsm/record/record_test.go", "line": 1, "note": "New tests for golden runs.jsonl rows, exact key set, verdict/status mapping, torn-tail repair, idempotency, id_conflict and write-error paths including flock and ctx cancellation."},
+    {"path": "internal/fsm/run/testdata/oracle.jsonl", "line": 1, "note": "Three-record hash-chained oracle fixture with escaped control chars; prev hashes are chained across seq 1-3, data only."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead test code: a 20,000-element run.BugStatus slice is built and then discarded via `_ = fatSt`, with no assertion. It costs allocation on every run and looks like an abandoned case that was meant to exercise a cap.",
+      "evidence": [{"path": "internal/fsm/kind/kind_test.go", "line": 228, "note": "var fatSt []run.BugStatus; 20000-iteration append loop; `_ = fatSt` at line 232"}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead assignment in TestK3Composition: the registry and executor are constructed, then immediately reconstructed two lines later against `mj`. The first `r = mustNew(...)` / `ex, _ = r.Executor(...)` pair is never used.",
+      "evidence": [{"path": "internal/fsm/kind/kind_test.go", "line": 500, "note": "r/ex assigned at 500-501 then overwritten at 503-504 before any use"}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The package-level `nanos` hook is overridden and never restored, unlike `flock` which is saved and restored in the same file. Any later test in the package that exercises the torn-fragment path silently gets the constant 42 filename, making tests order-dependent.",
+      "evidence": [
+        {"path": "internal/fsm/record/record_test.go", "line": 157, "note": "nanos = func() int64 { return 42 } with no defer/restore"},
+        {"path": "internal/fsm/record/record_test.go", "line": 276, "note": "flock is saved to orig and restored at line 281 - the intended pattern"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Comment and assertion disagree: the comment claims '63 x MaxText fits, 64 does not', but the passing case asserts only 60 findings. The exact boundary the comment documents is untested.",
+      "evidence": [{"path": "internal/fsm/kind/kind_test.go", "line": 203, "note": "comment at 203 vs ok(...fat[:60]) at 209"}]
+    }
+  ],
+  "blockingCount": 0
+}

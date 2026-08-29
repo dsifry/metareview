@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1a.91660c7d714789bb",
+  "kind": "shard",
+  "shardId": "shard-1a",
+  "shardHash": "91660c7d714789bb",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 130,
+      "note": "prepareAppend reviewed against the on-disk jsonl store to confirm the per-append full-log rescan is real, not an artifact of the diff."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 340,
+      "note": "marshalCanonical U+2028/U+2029/U+FFFD escaping pass read in full; the escapes are additive and idempotent, so canonical bytes are stable across re-encodes. No defect."
+    },
+    {
+      "path": "internal/fsm/gate/gate_test.go",
+      "line": 566,
+      "note": "TestG3TreeHashPin's hand-computed digest verified independently: printf 'abc\\ndef' | shasum -a 256 == d53d6b91af7caf8fe3d8021f116270137c0079d579a1e16965da80c2ed138ffb. The pin is correct."
+    },
+    {
+      "path": "internal/fsm/gate/gates.go",
+      "line": 33,
+      "note": "Builtin gate table read against gate_test.go's expectations: the nine Names(), the AllFound-before-Findings ordering in nothing_found/nothing_confirmed, and every gate code assertion match the implementation."
+    },
+    {
+      "path": "internal/fsm/run/store_jsonl.go",
+      "line": 224,
+      "note": "jsonlStore.Append calls readRaw + splitLines on every append, which is what makes the store.go count loop quadratic rather than amortized."
+    },
+    {
+      "path": "docs/index.html",
+      "line": 742,
+      "note": "Confirmed in the working tree, not just the diff: the added paragraph sits after the closing </footer>, outside every layout container on the page."
+    },
+    {
+      "path": "internal/fsm/run/types_test.go",
+      "line": 43,
+      "note": "Tests exist for the new run package (types_test.go, store_test.go, fold_test.go, canonical_test.go, golden_test.go), so the rubric's missing-test gate is satisfied for this shard's source files."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Quadratic append. prepareAppend (internal/fsm/run/store.go:130-166) recounts the counted-event total by walking every previously stored line and JSON-probing each one via lineType (store.go:171-178), and jsonlStore.Append (internal/fsm/run/store_jsonl.go:224-233) re-reads and re-splits the whole audit file on every single append. Recording n events is therefore O(n^2) in both file I/O and JSON parsing. With DefaultMaxEvents = 100000 (types.go) and MaxLine = 1MB, a long run pays this on every step, and the cost is paid while holding the run lock. The counted total is derivable incrementally (FoldState already threads through Append), so the rescan is avoidable.",
+      "evidence": [
+        {"path": "internal/fsm/run/store.go", "line": 156, "note": "for _, l := range lines { if countedType(lineType(l)) { n++ } } — full-log rescan per append"},
+        {"path": "internal/fsm/run/store_jsonl.go", "line": 224, "note": "raw, err := s.readRaw(runID) at the top of every Append re-reads the entire audit log"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "docs/index.html:742 appends a paragraph AFTER the closing </footer> tag and outside <main>, <footer> and the site's .wrap container. Every other block on the published landing page is wrapped; this one is not, so it renders full-bleed and unaligned at the very bottom of the GitHub Pages site. It is also the only mention of the fsm feature on the page (no nav or section entry), and it names docs/fsm/driving-a-workflow.md as inline <code> rather than a link, unlike every other doc reference in the adjacent footer paragraph — and that path is wrong as a relative href from docs/index.html anyway, where the file resolves as fsm/driving-a-workflow.md.",
+      "evidence": [
+        {"path": "docs/index.html", "line": 742, "note": "stray <p> emitted between </footer> and </body>, outside all layout containers"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "docs/0.8.0-candidates.md ships as a committed artifact that itself declares the behavior changes landing in this branch to be unverified: the C1 and C2 sections carry 'Status: BUILT (untested/unverified)' (lines 22 and 128) and 'Verification gate (NOT YET DONE ...)' headings (lines 101 and 176), with an explicit instruction not to run the verification until an external harnesseval batch finishes. The rubric blocks when source changes lack explicit validation evidence; a go build plus a self-described 'smoke check only — NOT the verification' is not that. Either land the verification result, or land the doc without the unverified-change sections so the branch does not carry a written record contradicting its own readiness gate.",
+      "evidence": [
+        {"path": "docs/0.8.0-candidates.md", "line": 22, "note": "Status: BUILT (untested/unverified) — DO NOT TEST until the batch finishes"},
+        {"path": "docs/0.8.0-candidates.md", "line": 101, "note": "Verification gate (NOT YET DONE — do not start until the current run finishes)"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Double-quoted run id in the error message. internal/fsm/run/types.go:371 formats with %q an argument that is already strconv.Quote(id), so an invalid id surfaces to the user as: invalid run id \"\\\"mrv-bad\\\"\". This error reaches the CLI through internal/fsm/cli/run.go:898 and internal/fsm/cli/wiring.go:222/228, so it is user-visible. Drop the strconv.Quote (and the strconv import if it becomes unused).",
+      "evidence": [
+        {"path": "internal/fsm/run/types.go", "line": 371, "note": "return fmt.Errorf(\"invalid run id %q\", strconv.Quote(id))"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "summarize (internal/fsm/run/store.go:192-197) returns on the parse error before assigning s.Torn, which is only set at line 198. EventsWithLines does set Log.Torn even when parseLines fails, so the information is available — but a run that is BOTH torn and chain-broken is listed with Torn=false. That hides the one remedy the operator has (RepairTail) behind a chain error that looks unrecoverable. Set s.Torn from the log before the error return.",
+      "evidence": [
+        {"path": "internal/fsm/run/store.go", "line": 194, "note": "if err != nil { s.Error = err.Error(); return s } precedes s.Torn = log.Torn != nil"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Inconsistent JSON strictness on the same stored line. parseLines uses a json.Decoder (internal/fsm/run/store.go:94), which decodes the first value and silently ignores any trailing bytes on the line, while lineType uses json.Unmarshal (store.go:175), which rejects them. A line carrying trailing bytes therefore decodes as a valid chained event but reports type \"\", so it is not countedType and escapes the MaxEvents cap entirely. The hash chain does detect such a line at the next append (CAS on ChainHead) or at the next line's Prev check, which keeps this out of medium severity, but the audit reader should be the strict one: use json.Unmarshal in parseLines so both paths agree on what a well-formed line is.",
+      "evidence": [
+        {"path": "internal/fsm/run/store.go", "line": 94, "note": "dec := json.NewDecoder(bytes.NewReader(line)) — trailing bytes after the first value are not rejected"},
+        {"path": "internal/fsm/run/store.go", "line": 175, "note": "lineType uses json.Unmarshal, which does reject trailing bytes, yielding type \"\""}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Scope and hygiene of docs/0.8.0-candidates.md on a 0.9.0 FSM branch. The doc is 0.8.0 review-quality planning material with no relationship to the FSM work this branch delivers, and line 3 embeds a developer-local absolute path (/Users/dsifry/Developer/harnesseval) as the cited source of evidence, along with cross-references to results files in that private sibling checkout that no other reader can resolve. Cite the lab by repository name rather than by one machine's filesystem layout, and land the doc on its own branch.",
+      "evidence": [
+        {"path": "docs/0.8.0-candidates.md", "line": 3, "note": "Source of evidence: the harnesseval lab (/Users/dsifry/Developer/harnesseval) — machine-local absolute path in a committed doc"}
+      ]
+    }
+  ],
+  "blockingCount": 3
+}

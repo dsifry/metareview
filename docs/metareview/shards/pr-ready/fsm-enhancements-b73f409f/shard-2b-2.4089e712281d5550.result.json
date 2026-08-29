@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2b-2.4089e712281d5550",
+  "kind": "shard",
+  "shardId": "shard-2b-2",
+  "shardHash": "4089e712281d5550",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/fsm/converge/converge_test.go",
+      "line": 1,
+      "note": "go test ./internal/fsm/converge/ -covermode=count reports 100.0% of statements; 36 source mutations applied to converge.go in an out-of-tree copy of the repo (scratchpad) were killed except the six recorded below, so the suite is genuinely load-bearing for AllFixed, max_iterations off-by-one, budget/no_fixation_progress comparison direction, Payload redaction and deep-copy, DisallowUnknownFields, exit-code handling, not-Class=custom, MaxDepth/MaxAtoms bounds, top-level all_fixed restriction, compound error abort, compound Class/Name/Reason joins, and Describe's Validate delegation."
+    },
+    {
+      "path": "internal/fsm/converge/converge_test.go",
+      "line": 46,
+      "note": "snap()'s claim that tokens are spread over the non-Input counters is true: Output=t/2, CacheRead=t-t/2-t/4, Reasoning=t/4 sums exactly to t for every value used (7, 10, 99, 100), so a Total() reading only Input would fail; verified against run/types.go:133."
+    },
+    {
+      "path": "internal/fsm/converge/converge_test.go",
+      "line": 119,
+      "note": "The redaction assertions are real, not tautological: mutating Payload to skip sha256 hashing, to keep NodeOutputs, or to use a shallow copy instead of Clone all fail the test. run.Snapshot.Clone (types.go:237) does deep-copy Vars, so the no-mutation assertion at line 143 is meaningful."
+    },
+    {
+      "path": "internal/fsm/run/event.go",
+      "line": 49,
+      "note": "EventTypes lists exactly the 16 declared Type* constants with no omission or duplicate; consumed by run/fold.go:331 knownType and machine.go:1028 sortedEventTypes. The header claim that the machine sets everything except Seq and Prev matches machine.go:441 stamp() (no Seq/Prev) and run/store.go:146-147 (Append sets them); Origin is set on the fork path at machine/fork.go:229. Pure type declarations, no logic; go vet clean."
+    },
+    {
+      "path": "internal/fsm/run/event.go",
+      "line": 167,
+      "note": "OverflowHandlerData is field-for-field identical to CmdCallData but is NOT redundant: run/fold.go:173 and :177 discriminate on the concrete type, and the double audit (cmd_call by the runner + overflow_handler by the machine) is specified in docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:437. Its Stdout/Stderr are covered by export redaction (export.go:407, export_test.go:174)."
+    },
+    {
+      "path": "internal/reviewers/epicready.go",
+      "line": 64,
+      "note": "Fingerprint stabilization is verified: reverting to the reason-suffixed form in a scratch copy fails internal/reviewers/sharded_test.go:207-209. The legacy prefix 'epic:context-risk:' at internal/findings/findings.go:201 ends in a colon and so cannot alias the new colon-free id."
+    },
+    {
+      "path": "internal/reviewers/epicready.go",
+      "line": 213,
+      "note": "The De Morgan rewrite of the no-eval intent guard is provably equivalent to the prior !(A||B||C) form; go test ./internal/reviewers/ passes and mutating the whole condition to true or false is killed, so both branches are exercised."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Comment claims a property the test does not check. The comment says 'A multi-document node is rejected too', but the node constructed is &yaml.Node{Kind: yaml.DocumentNode} with zero Content - an EMPTY document, which is what the t.Fatal message on the next line actually says. Verified by mutation: relaxing converge.go:113 from `len(node.Content) != 1` to `len(node.Content) < 1` (which accepts a multi-document node and silently parses only its first document) leaves the whole package green. The multi-document rejection is unverified. yaml.Unmarshal only ever decodes the first document, so the case is reachable only from hand-built nodes, which is exactly what this test constructs - it just does not build one. Fix: add `multi.Content = []*yaml.Node{scalar, scalar}` or drop the word 'multi-document' from the comment.",
+      "evidence": [
+        {"path": "internal/fsm/converge/converge_test.go", "line": 286, "note": "// A multi-document node is rejected too."},
+        {"path": "internal/fsm/converge/converge_test.go", "line": 287, "note": "multi := &yaml.Node{Kind: yaml.DocumentNode} has no Content, so this is the empty-document case"},
+        {"path": "internal/fsm/converge/converge.go", "line": 113, "note": "len(node.Content) != 1 is the branch the comment describes; only its len==0 half is exercised"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The stated rationale for MaxDepth and MaxAtoms is false, and the test that pins both boundaries never checks the invariant they exist for. converge.go:66 says 'MaxDepth bounds nesting so composite names stay within run.MaxShort' and converge.go:69 says MaxAtoms bounds leaves 'for the same reason'. Measured empirically in an out-of-tree copy: `any:` with MaxAtoms(32) children, each `{not: {not: {not: {cmd: <32-char name>}}}}` (the deepest legal shape, since a top-level any's children start at depth 1 and depth 4 is accepted), is accepted by Validate and yields a Predicate.Name() of 1668 bytes against run.MaxShort = 1024 (run/types.go:41). Cmd names are capped at 32 chars by workflow.go:267, so this is the true worst case and it exceeds the bound by 63%. No functional break: machine.go:775 does run.CapText(r.Atom, run.MaxShort) before the converge event and CapText accounts for canonical-encoding overhead, so fold.go:574's shortOK never rejects the row - but the truncation is silently discarded (`atom, _ :=`) and the comment tells a maintainer that no truncation can occur. TestC4ValidateAndParseErrors pins acceptance at exactly MaxAtoms and MaxDepth without ever asserting the resulting Name() length.",
+      "evidence": [
+        {"path": "internal/fsm/converge/converge.go", "line": 66, "note": "// MaxDepth bounds nesting so composite names stay within run.MaxShort. - measured worst case is 1668 vs MaxShort 1024"},
+        {"path": "internal/fsm/converge/converge.go", "line": 69, "note": "// MaxAtoms bounds the number of leaves for the same reason."},
+        {"path": "internal/fsm/converge/converge_test.go", "line": 263, "note": "'at MaxAtoms' asserts acceptance only; no assertion on the composite name length"},
+        {"path": "internal/fsm/converge/converge_test.go", "line": 266, "note": "'at MaxDepth' likewise"},
+        {"path": "internal/fsm/machine/machine.go", "line": 775, "note": "atom, _ := run.CapText(r.Atom, run.MaxShort) - the truncation flag that would surface the overrun is discarded"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 'all partial' case covers only the first-child-quiet path, so half of compound's `all` short-circuit is untested despite 100% statement coverage (the block is entered, just always by kid[0]). snap(4, 4, intp(5), 0, 5) makes no_fixation_progress quiet, so Evaluate returns at the first iteration and the accumulator branch is never reached with a non-empty names slice. Verified by mutation: adding `if !r.Stop && len(names) > 0 { return Result{Stop: true, Atom: \"BOGUS\", ...} }` to converge.go:323 - i.e. an `all` that reports a stop when a LATER child is quiet - leaves the package green. Fix: add a case where the first child fires and a later one does not, e.g. all: [no_fixation_progress, {max_iterations: 5}] against snap(0, 5, intp(5), 0, 5).",
+      "evidence": [
+        {"path": "internal/fsm/converge/converge_test.go", "line": 195, "note": "r, _ = allP.Evaluate(ctx, snap(4, 4, intp(5), 0, 5)) // nfp quiet, max fires - only kid[0] is quiet"},
+        {"path": "internal/fsm/converge/converge.go", "line": 323, "note": "if !r.Stop { return Result{Atom: c.Name(), ...} } - only ever taken on the first child by the suite"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 'cmd-empty' bad case passes for the wrong reason, so the empty-name guard it names is untested. TestC4 runs every bad case through Validate(node, []string{\"notify\"}); with cmdNames non-nil, `{cmd: ''}` is rejected by the unknown-cmd branch at converge.go:168 before the name==\"\" guard at converge.go:165 can matter. Verified by mutation: deleting `|| name == \"\"` from converge.go:165 leaves the package green. The guard is only reachable through Parse (cmdNames nil, the MustParse path the machine uses at machine.go:426), and no test exercises Parse with an empty cmd name - so a workflow that somehow reached Parse with `{cmd: ''}` would bind a cmdAtom named 'cmd:' and shell out to the empty name. Fix: assert `Parse(node(t, \"{cmd: ''}\"), nil)` returns ERR_BAD_CONVERGENCE alongside the existing non-string-cmd case at line 297.",
+      "evidence": [
+        {"path": "internal/fsm/converge/converge_test.go", "line": 248, "note": "{\"cmd-empty\", \"{cmd: ''}\"} in the bad table, validated with cmdNames=[\"notify\"]"},
+        {"path": "internal/fsm/converge/converge.go", "line": 165, "note": "if err := val.Decode(&name); err != nil || name == \"\" - the name==\"\" half is dead under the test's cmdNames"},
+        {"path": "internal/fsm/converge/converge.go", "line": 168, "note": "cmdNames != nil && !contains(cmdNames, name) is what actually rejects the empty name in the test"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Budget key-name validation is untested. The 'budget-extra' case {budget: {tokens: 5, dollars: 1}} is rejected by the len(val.Content) != 2 length check, not by the key-name check, so nothing pins converge.go:159's `val.Content[0].Value != \"tokens\"` clause. Verified by mutation: replacing that clause with `false` leaves the package green, meaning a tree could silently accept {budget: {dollars: 5}} as a 5-token budget without any test noticing. Fix: add {\"budget-wrong-key\", \"{budget: {dollars: 5}}\"} to the bad table.",
+      "evidence": [
+        {"path": "internal/fsm/converge/converge_test.go", "line": 246, "note": "{\"budget-extra\", \"{budget: {tokens: 5, dollars: 1}}\"} exercises the length check only"},
+        {"path": "internal/fsm/converge/converge.go", "line": 159, "note": "val.Content[0].Value != \"tokens\" - untested clause"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "One third of the error-abort assertion cannot fail. The loop at line 219 runs three sources through the same `len(fr.calls) != 1` check, but the third, \"not: {cmd: c}\", contains exactly one cmd atom, so fr.calls can never have more than one entry regardless of whether the error actually aborts evaluation. For that entry the assertion is a tautology; the two compound sources carry the real signal (mutating compound.Evaluate to `continue` on error is killed). Cosmetic, but it inflates the apparent strength of the check.",
+      "evidence": [
+        {"path": "internal/fsm/converge/converge_test.go", "line": 219, "note": "\"not: {cmd: c}\" is a single-atom tree"},
+        {"path": "internal/fsm/converge/converge_test.go", "line": 228, "note": "if len(fr.calls) != 1 - unfalsifiable for the not: source"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The zero-Kind guard is untested. Validate(nil, nil) at line 283 covers the node==nil half of converge.go:109, but no test passes a non-nil node with Kind 0. Verified by mutation: reducing the guard to `if node == nil {` leaves the package green (a Kind-0 node then falls through to the mapping check and produces a differently worded error). Low impact - workflow.go:213 already gates on rw.Convergence.Kind != 0 before calling - but the guard is defensive code with no test behind it.",
+      "evidence": [
+        {"path": "internal/fsm/converge/converge.go", "line": 109, "note": "if node == nil || node.Kind == 0 { - the Kind==0 half is unexercised"},
+        {"path": "internal/fsm/converge/converge_test.go", "line": 283, "note": "Validate(nil, nil) covers only the nil half"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two of the three intent phrases in the rewritten guard have no test. The line changed in this diff is behavior-preserving, but mutation shows only the 'without executing' clause is covered: deleting `&& !strings.Contains(intent, \"no eval\")` or `&& !strings.Contains(intent, \"avoid eval\")` leaves internal/reviewers green, while deleting the 'without executing' clause is killed. Pre-existing gap surfaced by touching the line; adding two epic-body fixtures would close it. (Unrelated: epicready.go:169 and :231 are the package's only zero-count blocks, both pre-existing `continue` statements outside this diff.)",
+      "evidence": [
+        {"path": "internal/reviewers/epicready.go", "line": 213, "note": "!strings.Contains(intent, \"without executing\") && !strings.Contains(intent, \"no eval\") && !strings.Contains(intent, \"avoid eval\") - only the first clause is pinned by a test"}
+      ]
+    }
+  ]
+}

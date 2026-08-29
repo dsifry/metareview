@@ -426,6 +426,10 @@ func addedUntrackedLines(text string) []string {
 	return lines
 }
 
+// executableExts are the suffixes whose contents run somewhere, so the docs/
+// exemption never covers them.
+var executableExts = []string{".html", ".htm", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".sh", ".bash", ".zsh", ".py", ".rb", ".pl", ".php", ".go"}
+
 // lintable reports whether a path carries code the deterministic lints judge.
 func lintable(path string) bool {
 	if path == "" {
@@ -435,6 +439,15 @@ func lintable(path string) bool {
 	// excluding it would silently widen the blind spot. Matched case-insensitively
 	// so README.MD is treated as the prose it is.
 	lower := strings.ToLower(path)
+	// Executable content is never prose, wherever it lives. pages.yml deploys the
+	// whole docs tree, so exempting the directory wholesale left the script in
+	// docs/presentations/*.html live and unlinted — one blind spot traded for
+	// another.
+	for _, ext := range executableExts {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
 	if strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".markdown") {
 		return false
 	}

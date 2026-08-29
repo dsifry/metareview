@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-13.523b2e6864245fba",
+  "kind": "shard",
+  "shardId": "shard-13",
+  "shardHash": "523b2e6864245fba",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 146,
+      "note": "Read the whole file in the repo, not only the diff: consent lookup, absolute argv[0] check, VerifyCmds re-hash, env allow-list, process-group timeout, output cap and typed decode all line up with the package doc and with docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md:73-75 (pre-exec refusals are unaudited by design)."
+    },
+    {
+      "path": "internal/setup/setup.go",
+      "line": 193,
+      "note": "gitStatus/parseGitVersion/atLeastVersion reviewed against internal/setup/gitversion_test.go and INSTALL.md:137; the 2.31 minimum and the seam-based tests match the documented promise."
+    },
+    {
+      "path": "internal/state/state.go",
+      "line": 28,
+      "note": "AppendJSONL named-return + closeFile seam is correct Go (err is the named result, so a Close error surfaces only when no earlier error did); ReadJSONL still returns scanner.Err()."
+    },
+    {
+      "path": "internal/reviewers/sharded_test.go",
+      "line": 1,
+      "note": "go test ./internal/reviewers ./internal/setup ./internal/state ./internal/fsm/cmdexec all pass; cmdexec is at 100.0% statement coverage, reviewers 97.0%."
+    },
+    {
+      "path": "docs/fsm/driving-a-workflow.md",
+      "line": 1,
+      "note": "Doc claims spot-checked against code: --agent-prompt exists (internal/fsm/cli/run.go:37), --repair is a real flag (run.go:87), ERR_CMDS_NOT_ALLOWED / ERR_RUN_ESCALATED exist (machine/types.go:235, cli/envelope.go:58), git >= 2.31 matches INSTALL.md:137."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "parseGitVersion returns whatever token follows the literal word \"version\", so non-version output that happens to contain that word yields a bogus Version string. \"not a version banner\" parses to \"banner\"; gitStatus then only rejects it because atLeastVersion's strconv.Atoi fails, and the reported action reads \"...found banner.\" The gitversion_test \"unparseable\" case therefore passes through the wrong branch, and parseGitVersion's `return \"\"` line is never exercised (go tool cover: parseGitVersion 80.0%). A digit-prefix check on the candidate would close both.",
+      "evidence": [
+        {"path": "internal/setup/setup.go", "line": 223},
+        {"path": "internal/setup/gitversion_test.go", "line": 26}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "A too-old git is reported but never affects any readiness signal: missingFullMetaswarmPrereqs only looks at Present flags, StandaloneReadiness.FullMetaswarmDescription still says \"advisory review can run with git and Go\", and `metareview setup --check` prints the JSON report and exits 0. An operator scripting on exit status or on fullMetaswarmReady sees a clean setup and then hits the FSM failure the check was added to prevent; only the free-text Action / versionOk fields carry the warning.",
+      "evidence": [
+        {"path": "internal/setup/setup.go", "line": 253},
+        {"path": "cmd/metareview/main.go", "line": 419}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new 1 MiB read cap is one-sided: ReadJSONL now rejects any line longer than maxJSONLLineBytes, but AppendJSONL enforces no matching write-side cap, and a JSONL file is read as a whole. One oversized row (e.g. a long ingested escalationReason on a runs.jsonl record) makes every subsequent ReadJSONL of that file return bufio.ErrTooLong, losing the entire run chain rather than the one row. Capping or rejecting at write time, or skipping over-long lines on read, would keep the failure local.",
+      "evidence": [
+        {"path": "internal/state/state.go", "line": 49},
+        {"path": "internal/state/state.go", "line": 66}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The cap constant and its five-line comment are duplicated verbatim in internal/state and internal/runchain, and a third JSONL reader sizes its buffer differently: internal/fsm/record/record.go:156 uses sc.Buffer(make([]byte,0,1<<20), 1<<20) with no +2, so a line of exactly 1 MiB that state and runchain admit is rejected there. Rubric duplication concern: one exported cap plus a shared newJSONLScanner helper would make the three readers agree by construction.",
+      "evidence": [
+        {"path": "internal/state/state.go", "line": 17},
+        {"path": "internal/runchain/runchain.go", "line": 13},
+        {"path": "internal/fsm/record/record.go", "line": 156}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Parent-context cancellation is audited as a spawn failure. execRunner returns ctx.Err() unchanged (cmdexec.go:250-252), but in Guarded.exec errs.Code(context.Canceled) is empty, so the err!=nil branch stamps data.Error = ERR_CMD_FAILED and rewrites the error as ERR_CMD_FAILED{reason: \"spawn\"}. The audited cmd_call for an operator-cancelled or shutdown-cancelled run is thus indistinguishable from a process that failed to start. The underlying error is preserved via errs.Wrap, so errors.Is still works; only the audit record and the surfaced code are wrong.",
+      "evidence": [
+        {"path": "internal/fsm/cmdexec/cmdexec.go", "line": 146},
+        {"path": "internal/fsm/cmdexec/cmdexec.go", "line": 151}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Suspected env escape: Guarded.env appends the workflow-declared names after MRV_RUN_ID and the {PATH,HOME,LANG,TMPDIR} base, and exec's last-wins semantics would let a declared name shadow the run id or PATH. Checked and refuted: workflow validation rejects those names outright (reservedEnv plus the MRV_/LD_/DYLD_/GIT_ prefixes), so no consented cmd can declare them.",
+      "evidence": [
+        {"path": "internal/fsm/cmdexec/cmdexec.go", "line": 109},
+        {"path": "internal/fsm/workflow/workflow.go", "line": 117}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Suspected rubric violation: sharded_test.go assembles the strings \"TO\"+\"DO\" and \"eval\"+\"(\" at run time, which is exactly the shape of lint evasion the task-done rubric blocks on. Refuted: these are test fixtures that must contain the markers to prove the lints run over the full branch diff, the concatenation is documented in a comment at the constants, and no marker is introduced into shipped source.",
+      "evidence": [
+        {"path": "internal/reviewers/sharded_test.go", "line": 21},
+        {"note": "Rubric blocks on TODO/FIXME added to the diff; a self-review fixture that must carry the marker is the documented exception here."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Order-dependent assertions: TestContextRiskFingerprintReasonIndependentAllScopes indexes taskA[0]/taskB[0] directly instead of using the byFingerprint helper the rest of the file uses. Any future reordering of RunTaskDone's early-return findings breaks the test with a confusing message rather than reporting the real regression.",
+      "evidence": [
+        {"path": "internal/reviewers/sharded_test.go", "line": 191}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-07-2.c322d4046802d216",
+  "kind": "shard",
+  "shardId": "shard-07-2",
+  "shardHash": "c322d4046802d216",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T06:34:30Z",
+  "evidence": [
+    {
+      "path": "tests/go/test-learn-post-merge.sh",
+      "line": 55,
+      "note": "Verified in bash that `set -euo pipefail; ! true; echo alive` still prints alive: POSIX/bash ignore -e for a pipeline preceded by `!`, so the removed `! git check-ignore -q ...` assertions never failed the script. The replacement `cmd && exit 1` is the correct idiom (verified `true && exit 1` exits 1, `false && exit 1` continues)."
+    },
+    {
+      "path": "tests/go/test-pr-ready-review.sh",
+      "line": 146,
+      "note": "All ten converted negative assertions are top-level statements (not inside functions or subshells), so `exit 1` terminates the test script as intended. Repo-wide grep for `^[[:space:]]*![[:space:]]` under tests/ returns zero hits, so the vacuous-assertion fix was applied consistently rather than partially."
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 860,
+      "note": "contextMarkdown's current signature is (runID, git, profile, plan contextprofile.ShardPlan, packDir string, manifest reviewmanifest.Manifest, aggregate reviewmanifest.AggregateResult, knowledgeContext, logs, evidenceText, ghCtx, prEvidence, gateEffect); the test call sites' new argument order and types match exactly."
+    },
+    {
+      "path": "internal/prready/review_markdown_test.go",
+      "line": 112,
+      "note": "manifestArgs uses reviewmanifest.Build/Aggregate/GeneratedPathDispositions, all of which exist (internal/reviewmanifest/manifest.go:192, :205, :230). `go test ./internal/prready/` passes (ok, 5.5s), so the signature adaptation compiles and the existing assertions still hold."
+    },
+    {
+      "path": "skills/review-pr-ready/SKILL.md",
+      "line": 13,
+      "note": "Documented flags verified against cmd/metareview/main.go:195-199 and :264-268: --shard-result appends (repeatable), --cross-shard-result is single-valued and rejects repetition (main.go:602-607). The claim that an explicit cross-shard result replaces a committed one matches Manifest.CrossShardResult being a single pointer (manifest.go:223-225), and the 'duplicate shard result' blocker for a doubly-supplied shard exists at manifest.go:414."
+    },
+    {
+      "path": "skills/review-pr-ready/SKILL.md",
+      "line": 43,
+      "note": "Numeric claims check out: maxUntrackedFileBytes = 4000 and maxDiffBytes = 120000 in internal/gitcontext/gitcontext.go:15-17, matching the documented 4,000-byte UNTRACKED_TRUNCATED threshold and the context limit the sharding prose describes."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The converted assertions in tests/go/test-pr-ready-review.sh (lines 146, 147, 181, 182, 198, 199, 251, 252, 274, 401) and tests/go/test-learn-post-merge.sh (55-57) fail with a bare `exit 1` and no diagnostic, so a regression prints nothing identifying which assertion tripped. The sibling suite tests/go/test-sharded-review.sh uses `|| fail \"<message>\"` for exactly this reason. Low severity: correctness is right and this only affects debuggability.",
+      "evidence": [
+        {
+          "path": "tests/go/test-pr-ready-review.sh",
+          "line": 146,
+          "note": "grep -q \"Unresolved review blockers\" ... && exit 1 — silent failure, no message identifying the failed assertion."
+        },
+        {
+          "path": "tests/go/test-sharded-review.sh",
+          "line": 129,
+          "note": "Contrasting convention in the same test tree: [ -n \"$log1\" ] || fail \"pr-ready run 1 produced no review log\"."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

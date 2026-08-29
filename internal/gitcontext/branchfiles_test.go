@@ -314,38 +314,6 @@ func TestRunGitErrorBranches(t *testing.T) {
 	}
 }
 
-func TestAddedLinesUnionUsesFullBranchDiff(t *testing.T) {
-	r := newRepo(t)
-	base := strings.TrimSpace(r.git("rev-parse", "HEAD"))
-	// A marker beyond the truncation boundary: only the untruncated branch diff has it.
-	for i := 0; i < 6; i++ {
-		r.write(fmt.Sprintf("src/aaa%02d.txt", i), filler(fmt.Sprintf("s%02d", i), 25_000))
-	}
-	r.write("src/zzz-late.txt", "LATE-BRANCH-MARKER\n")
-	r.commit("branch content")
-	r.write("staged.txt", "STAGED-MARKER\n")
-	r.git("add", "staged.txt")
-	r.write("worktree.txt", "WORKTREE-MARKER\n")
-	r.git("add", "worktree.txt")
-	r.git("commit", "-m", "add worktree file")
-	r.write("worktree.txt", "WORKTREE-MARKER\nchanged\n")
-	r.write("untracked.txt", "UNTRACKED-MARKER\n")
-
-	ctx, err := CollectWith(r.root, Options{Base: base})
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Join(AddedLines(ctx), "\n")
-	for _, marker := range []string{"LATE-BRANCH-MARKER", "STAGED-MARKER", "changed", "UNTRACKED-MARKER"} {
-		if !strings.Contains(lines, marker) {
-			t.Fatalf("AddedLines is missing %s", marker)
-		}
-	}
-	if strings.Contains(ctx.Diff, "LATE-BRANCH-MARKER") {
-		t.Skip("fixture did not truncate past the late marker; nothing proved")
-	}
-}
-
 func TestContextDiffJSONShapeUnchanged(t *testing.T) {
 	data, err := json.Marshal(Context{
 		BranchFiles:             []BranchFile{{Path: "a", Bytes: 1, Hash: "h", Diff: "d"}},

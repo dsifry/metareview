@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0c-review",
+  "kind": "shard",
+  "shardId": "shard-0c",
+  "shardHash": "396143515924204d",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 40,
+      "note": "ManifestContext.Satisfies gates on an allow-list of shard-satisfiable risk reasons, full shard coverage, cross-shard result when multi-shard, and a PASS verdict; no way to downgrade the context-risk blocker without complete coverage."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 107,
+      "note": "Blocking context-risk finding retained when the manifest does not satisfy; the advisory replacement is only emitted on the satisfied path, and the truncated-diff finding is only demoted to advisory when sharded."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 344,
+      "note": "addedLines now prefers BranchDiffFull with a fallback to git.Diff, so lints run over the untruncated measured diff; no nil/empty hazard."
+    },
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 1,
+      "note": "New table- and injection-driven test file covering layout, reproducibility, fence widening, atomic replace/rollback, prune, discovery, explicit results and GC, including every injected Deps failure branch. No eval, no TODO/FIXME, no truncated chunks."
+    },
+    {
+      "path": "tests/go/test-override-coverage.sh",
+      "line": 1411,
+      "note": "awk field usage matches the Go coverprofile format ($1 file:range, $3 hit count); set -euo pipefail and a trap-cleaned temp profile; no unsafe execution."
+    },
+    {
+      "path": "workflows/embed.go",
+      "line": 1466,
+      "note": "Read rejects any name containing '/', '\\\\' or '.' before joining the .yaml suffix, so embedded lookup cannot be steered outside the embedded tree; errors do not leak the underlying FS error."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "manifestFound returns an empty string whenever ShardCount == 0, so the 'no shard review results were ingested' detail can never appear in the blocking context-risk finding's Found text - the case where nothing was ingested is exactly the one it was written for. Cosmetic/diagnostic only; the gate still blocks correctly.",
+      "evidence": [
+        {
+          "path": "internal/reviewers/taskdone.go",
+          "line": 197,
+          "note": "early return on ShardCount == 0 precedes the !manifest.Present branch that appends the 'no shard review results were ingested' part"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

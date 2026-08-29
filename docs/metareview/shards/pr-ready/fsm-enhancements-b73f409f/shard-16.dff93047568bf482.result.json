@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-16.dff93047568bf482",
+  "kind": "shard",
+  "shardId": "shard-16",
+  "shardHash": "dff93047568bf482",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/deps.go", "line": 101, "note": "realCodexExec verified against judge/codex.go CodexExec contract: stdin prompt, exit code as answer"},
+    {"path": "internal/fsm/kind/decision.go", "line": 44, "note": "adjudicate rule matches kind.go:471 (is_real AND confidence >= AdjudicateThreshold = 0.7)"},
+    {"path": "internal/shardpack/shardpack.go", "line": 308, "note": "Discover appends explicit result paths after directory paths; dedup is by resolved path only"},
+    {"path": "internal/reviewmanifest/manifest.go", "line": 412, "note": "second result for the same shard id yields a duplicate shard result blocker, not precedence"},
+    {"path": "internal/gitcontext/gitcontext.go", "line": 17, "note": "maxUntrackedFileBytes = 4000 confirms the 4,000 byte claim in the doc"},
+    {"path": "internal/fsm/cli/cli_test.go", "line": 620, "note": "go test reports 100.0% statement coverage for internal/fsm/cli and internal/fsm/kind; deps.go and decision.go funcs all at 100%"}
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "commands/review-pr-ready.md documents a precedence rule the code does not implement: it says --shard-result and --cross-shard-result 'take precedence over a file of the same identity in resultsDir'. shardpack.Discover appends explicit paths after the directory listing and deduplicates by resolved path only (internal/shardpack/shardpack.go:308-334), so an externally supplied result for a shard that already has a current-hash file in resultsDir is ingested twice, and reviewmanifest.shardResultBlockers emits 'duplicate shard result shard-<id>' (internal/reviewmanifest/manifest.go:412-416), blocking the gate instead of overriding. Precedence holds only for the cross-shard result (last write wins on found.CrossShard, shardpack.go:344-353). The in-code doc comment at shardpack.go:287 states the real behaviour ('added to whatever the directory holds'), contradicting the command doc.",
+      "evidence": [
+        {"path": "commands/review-pr-ready.md", "line": 30, "note": "added doc line claiming explicit results take precedence over same-identity resultsDir files"},
+        {"path": "internal/shardpack/shardpack.go", "line": 308, "note": "explicit paths appended after directory paths, dedup keyed on resolved path"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 413, "note": "duplicate shard id becomes a blocker rather than an override"},
+        {"path": "internal/shardpack/shardpack_test.go", "line": 844, "note": "test only covers a repeated identical path, not two distinct paths with one identity"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "realCodexExec discards the child process stderr: only Stdout is wired to a buffer (internal/fsm/cli/deps.go:102-105). When codex exits nonzero the judge surfaces only 'codex exited N' (internal/fsm/judge/codex.go:69) with no diagnostic text, and the CLI's own error output is lost, making auth or model failures hard to diagnose from the run record.",
+      "evidence": [
+        {"path": "internal/fsm/cli/deps.go", "line": 104, "note": "cmd.Stdout set, cmd.Stderr left nil so stderr is discarded"},
+        {"path": "internal/fsm/judge/codex.go", "line": 69, "note": "error message carries only the exit code, no captured diagnostics"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "realCodexExec swallows context cancellation: exec.CommandContext kills the child on ctx cancel/deadline, producing an *exec.ExitError with ExitCode() -1, which the function returns as (out, -1, nil) (internal/fsm/cli/deps.go:107-110). The caller then reports CodeJudgeTransport 'codex exited -1' instead of ctx.Err(), so a deadline or cancellation is indistinguishable from a genuine CLI failure. The HTTP judge explicitly maps this case (internal/fsm/judge/judge.go:541-542).",
+      "evidence": [
+        {"path": "internal/fsm/cli/deps.go", "line": 108, "note": "ExitError path returns nil error even when ctx killed the process"},
+        {"path": "internal/fsm/judge/judge.go", "line": 541, "note": "HTTP arm checks ctx.Err() and returns it; the codex arm has no equivalent"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "commands/review-pr-ready.md step 5 states that after a fix round 'only the edited file's shard and the cross-shard result go ignored'. That holds while the bucket count is stable: shards are bucketed by path hash with bucketBits(needBuckets(total, budget)) (internal/contextprofile/shards.go:200-205), so an edit that pushes the total diff across a bucket threshold re-buckets every file and invalidates all shard hashes. The doc gives no hint that a re-plan can invalidate the whole set.",
+      "evidence": [
+        {"path": "commands/review-pr-ready.md", "line": 33, "note": "claims only the edited file's shard plus cross-shard are invalidated after a fix round"},
+        {"path": "internal/contextprofile/shards.go", "line": 200, "note": "bucket count derives from total diff size, so growth re-buckets every path"}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

@@ -34,7 +34,7 @@ type Options struct {
 }
 
 func realGit(root string, env []string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", hardenDiff(args)...)
 	cmd.Dir = root
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
@@ -154,24 +154,4 @@ func HashFields(fields ...string) string {
 		b.WriteString("\x00")
 	}
 	return b.String()
-}
-
-// AddedLines returns the added lines of the branch diff (untruncated when it was
-// measured) together with staged, working-tree and untracked additions.
-func AddedLines(ctx Context) []string {
-	branch := ctx.BranchDiffFull
-	if branch == "" {
-		branch = ctx.Diff
-	}
-	var lines []string
-	for _, text := range []string{branch, ctx.StagedDiff, ctx.WorkingTreeDiff, ctx.UntrackedExcerpts} {
-		for _, line := range strings.Split(text, "\n") {
-			if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-				lines = append(lines, strings.TrimPrefix(line, "+"))
-			} else if text == ctx.UntrackedExcerpts && line != "" && !strings.HasPrefix(line, "--- ") {
-				lines = append(lines, line)
-			}
-		}
-	}
-	return lines
 }

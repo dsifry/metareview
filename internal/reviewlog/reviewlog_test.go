@@ -1,6 +1,8 @@
 package reviewlog
 
 import (
+	"encoding/json"
+	"github.com/dsifry/metareview/internal/jsonl"
 	"os"
 	"path/filepath"
 	"strings"
@@ -236,6 +238,98 @@ func artifactReviewMarkdown(runID, target, verdict string, rows []string) string
 		"## Findings\n\nNo blocking findings.\n"
 }
 
+func TestOverridePendingFindingsAreUnresolvedBlockers(t *testing.T) {
+	// A pending override must be treated as an unresolved blocker in the review log.
+	// The isOpenBlocker function must use findings.Blocks(status) to correctly
+	// identify both "open" and "override-pending" statuses as blocking.
+	// Using a PASS verdict ensures only findings (not verdict) determine unresolved status.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "PASS", "mrvf-task-001"))
+	mustWrite(t, filepath.Join(root, ".metareview", "findings.jsonl"), `{"id":"mrvf-task-001","runId":"mrv-task","status":"override-pending","classification":"blocking","severity":"high","title":"Escalated blocker","target":{"id":"task-1","type":"beads-task"}}`+"\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if !logs[0].HasUnresolvedBlockers {
+		t.Fatalf("override-pending finding must mark the review as having unresolved blockers; "+
+			"isOpenBlocker must use findings.Blocks() to treat override-pending as blocking: %+v", logs[0])
+	}
+	if len(logs[0].FindingIDs) != 1 || logs[0].FindingIDs[0] != "mrvf-task-001" {
+		t.Fatalf("expected override-pending finding in summary: %+v", logs[0])
+	}
+}
+
+func TestOverriddenFindingsAreNotUnresolvedBlockers(t *testing.T) {
+	// A granted override must NOT be treated as an unresolved blocker.
+	// Only "open" and "override-pending" statuses should be blocking.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "PASS", "mrvf-task-001"))
+	mustWrite(t, filepath.Join(root, ".metareview", "findings.jsonl"), `{"id":"mrvf-task-001","runId":"mrv-task","status":"overridden","classification":"blocking","severity":"high","title":"Granted override","target":{"id":"task-1","type":"beads-task"}}`+"\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if logs[0].HasUnresolvedBlockers {
+		t.Fatalf("overridden (granted) finding must not mark the review as having unresolved blockers: %+v", logs[0])
+	}
+}
+
+func TestSpecContractFindingsAreAlwaysUnresolvedBlockers(t *testing.T) {
+	// Spec-contract findings are always blocking regardless of severity.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "PASS", "mrvf-task-001"))
+	mustWrite(t, filepath.Join(root, ".metareview", "findings.jsonl"), `{"id":"mrvf-task-001","runId":"mrv-task","status":"open","classification":"spec-contract","severity":"medium","title":"Spec contract violation","target":{"id":"task-1","type":"beads-task"}}`+"\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 || !logs[0].HasUnresolvedBlockers {
+		t.Fatalf("spec-contract finding must always be blocking, even with medium severity: %+v", logs)
+	}
+}
+
+func TestBlockingWithCriticalSeverityIsUnresolvedBlocker(t *testing.T) {
+	// Blocking classification with critical severity is a blocker.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "PASS", "mrvf-task-001"))
+	mustWrite(t, filepath.Join(root, ".metareview", "findings.jsonl"), `{"id":"mrvf-task-001","runId":"mrv-task","status":"open","classification":"blocking","severity":"critical","title":"Critical blocking issue","target":{"id":"task-1","type":"beads-task"}}`+"\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 || !logs[0].HasUnresolvedBlockers {
+		t.Fatalf("blocking finding with critical severity must be blocking: %+v", logs)
+	}
+}
+
+func TestBlockingWithLowSeverityIsNotUnresolvedBlocker(t *testing.T) {
+	// Blocking classification with low severity is NOT a blocker (only high/critical matter).
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "PASS", "mrvf-task-001"))
+	mustWrite(t, filepath.Join(root, ".metareview", "findings.jsonl"), `{"id":"mrvf-task-001","runId":"mrv-task","status":"open","classification":"blocking","severity":"low","title":"Low severity blocking issue","target":{"id":"task-1","type":"beads-task"}}`+"\n")
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if logs[0].HasUnresolvedBlockers {
+		t.Fatalf("blocking finding with low severity must not be blocking: %+v", logs[0])
+	}
+}
+
 func mustWrite(t *testing.T, path, text string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -243,5 +337,41 @@ func mustWrite(t *testing.T, path, text string) {
 	}
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// readFindings shares jsonl.NewScanner with every other .jsonl reader; this pins that it
+// uses it. findings.jsonl carries reviewer-supplied Found/Evidence strings, so a max-length
+// line is realistic, and a bare-cap scanner fails the WHOLE file — every finding, not one.
+func TestReadFindingsAcceptsAnExactlyMaxLengthLine(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".metareview"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	rec := findingRecord{ID: "mrvf-1", RunID: "r1", Status: "open", Target: map[string]any{"pad": ""}}
+	encode := func(v findingRecord) []byte {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return b
+	}
+	if pad := jsonl.MaxLineBytes - len(encode(rec)); pad > 0 {
+		rec.Target["pad"] = strings.Repeat("x", pad)
+	}
+	line := encode(rec)
+	if len(line) != jsonl.MaxLineBytes {
+		t.Fatalf("fixture is %d bytes, want %d", len(line), jsonl.MaxLineBytes)
+	}
+	body := append(append(line, '\n'), append(encode(findingRecord{ID: "mrvf-2", RunID: "r1", Status: "open"}), '\n')...)
+	if err := os.WriteFile(filepath.Join(root, ".metareview", "findings.jsonl"), body, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := readFindings(root)
+	if err != nil {
+		t.Fatalf("readFindings: %v", err)
+	}
+	if len(got) != 2 || got[0].ID != "mrvf-1" || got[1].ID != "mrvf-2" {
+		t.Fatalf("got %d records %+v, want both", len(got), got)
 	}
 }

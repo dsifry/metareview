@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1f-86dd9ae5a33f12f3",
+  "kind": "shard",
+  "shardId": "shard-1f",
+  "shardHash": "86dd9ae5a33f12f3",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T06:38:43Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cli/prompt.go",
+      "line": 5,
+      "note": "AgentPrompt verified against the shipped CLI: `go run ./cmd/metareview fsm --agent-prompt` is byte-identical to testdata/fsm/agent-prompt.golden, and every non-empty line of tests/go/agent-prompt-anchors.txt greps clean against the rendered text (the tests/go/test-fsm.sh:60-66 loop reproduced by hand)."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 31,
+      "note": "Every knob the prompt advertises exists: METAREVIEW_JUDGE_MODEL / METAREVIEW_JUDGE_EFFORT are declared here, and --repair, --at-iter, --goldens, --calibration, --include-vars, --max-bytes, --allow-custom-cmds, --accept-workflow-change, --repo-mode, --run-id, --work-dir, --mock-ai, --replace all appear in internal/fsm/cli. next_action's documented values (advance | record | none) match machine.go:513,518,529."
+    },
+    {
+      "path": "internal/setup/setup.go",
+      "line": 193,
+      "note": "gitStatus(lookup, version) matches the new table test's call shape; ToolStatus.Version/VersionOK exist (setup.go:49-50) and MinGitVersion is \"2.31\" (setup.go:184), so every case in gitversion_test.go asserts against real behaviour rather than a fiction."
+    },
+    {
+      "path": "internal/fsm/cmdexec/sha_test.go",
+      "line": 8,
+      "note": "sha256Sum is consumed only from cmdexec_test.go:239 and :293; it is a _test.go helper, so it cannot affect the production build, and `go build ./...` plus `go test ./internal/fsm/cmdexec/...` are clean."
+    },
+    {
+      "path": "internal/sessionhistory/sessionhistory.go",
+      "line": 224,
+      "note": "The Close change is on readJSONLSignal's read-only path; discarding the Close error there loses nothing, and the file handle is still released on every return. internal/sessionhistory tests pass."
+    },
+    {
+      "note": "Build and package tests re-run on the frozen branch: `go build ./...` clean; `go test ./internal/setup/... ./internal/fsm/cmdexec/... ./internal/sessionhistory/... ./internal/fsm/cli/...` all ok. `go run ./cmd/metareview setup --check` reports git present, version 2.50.1 — the production (nil-seam) branch of gitStatus works end to end."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Suspected rubric blocker: the added spec introduces a line containing a TODO marker (docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md:367, the TestContextRiskSatisfiedEmitsAdvisoryAndRunsLints bullet), which the TODO/FIXME lint would normally block on. Checked against the implementation: reviewers.lintable (internal/reviewers/taskdone.go:451) returns false for any .md path, so the line never reaches todoPattern (taskdone.go:93,159). Not a blocker.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md",
+          "line": 367,
+          "note": "the added line carrying the TODO token"
+        },
+        {
+          "path": "internal/reviewers/taskdone.go",
+          "line": 451,
+          "note": "lintable() excludes .md, so docs prose is out of lint scope"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Testing gap: gitversion_test.go injects the gitVersionOutput seam in every case, so the production default branch of gitStatus (setup.go:198-201, exec.Command(status.Path, \"version\")) is never executed by the suite — the one line that decides whether the check works on a real machine. Coverage after the new test: gitStatus 90.5%, parseGitVersion 80%, atLeastVersion 90.9%. Also untested: parseGitVersion on output with no \"version\" token followed by a field, and atLeastVersion's short-version branch (i >= len(hp), e.g. a bare \"2\"). Manually verified the real path works (setup --check reports git 2.50.1), so this is a coverage/regression-risk observation, not a defect.",
+      "evidence": [
+        {
+          "path": "internal/setup/setup.go",
+          "line": 198,
+          "note": "nil-seam default that shells out to git version; unexercised by the new table test"
+        },
+        {
+          "path": "internal/setup/gitversion_test.go",
+          "line": 32,
+          "note": "both tests always pass an explicit version func"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Mirror oracle: sha_test.go's sha256Sum re-implements the production hash exactly (sha256.Sum256 + hex.EncodeToString, cmdexec.go:138-141), so the assertions at cmdexec_test.go:239 and :293 compare the implementation with a copy of itself. A pinned literal digest for a fixed input would actually pin CmdCallData.InputHash's encoding. Minor: the encoding is trivial and stable.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cmdexec/sha_test.go",
+          "line": 8,
+          "note": "helper duplicates the production hashing expression"
+        },
+        {
+          "path": "internal/fsm/cmdexec/cmdexec.go",
+          "line": 138,
+          "note": "production InputHash computation the helper mirrors"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

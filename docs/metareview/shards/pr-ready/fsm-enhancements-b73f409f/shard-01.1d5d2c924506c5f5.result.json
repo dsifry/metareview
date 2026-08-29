@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-01.1d5d2c924506c5f5",
+  "kind": "shard",
+  "shardId": "shard-01",
+  "shardHash": "1d5d2c924506c5f5",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/contextprofile/shards.go",
+      "line": 188,
+      "note": "PlanShards v4 rewrite verified: chunksOf never emits a chunk larger than budget (newline-preferring cut, hard cut on an over-long line, no zero-progress iteration), bucket packing flushes before exceeding budget, and split shard ids (<id>-<n>) cannot collide with hex bucket ids."
+    },
+    {
+      "path": "internal/contextprofile/shards.go",
+      "line": 118,
+      "note": "bucketBits matches the pinned spec table (need 1->0, 3->2, 23->5, 4096->12, cap 12); verified against docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md:111 and internal/contextprofile/plan_test.go:99."
+    },
+    {
+      "path": "internal/contextprofile/shards.go",
+      "line": 193,
+      "note": "The oversize short-circuit (total > maxBranchDiffBytes -> empty plan, nil error) is intentional and covered: DIFF_OVERSIZE is raised separately in profile.go:137 and pinned by plan_test.go TestDiffOversizeReason."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 112,
+      "note": "BranchFile.Bytes is len(Diff) at the single construction site, so totalBytes (which sums Bytes) and chunksOf (which cuts len(Diff)) cannot disagree about the budget."
+    },
+    {
+      "path": "internal/fsm/record/record.go",
+      "line": 168,
+      "note": "appendRow lock discipline verified: flock is taken before readRows, deferred unlock runs before deferred Close (LIFO), the torn tail is preserved then truncated before Seek(0,2)+Write+Sync, and readRows re-reads from disk under the lock so a blocked second writer sees the first writer's row. Package coverage is 100.0%."
+    },
+    {
+      "path": "internal/fsm/record/record.go",
+      "line": 84,
+      "note": "Row shape and RowFor's verdict/status/escalation mapping match spec 3 section 6 (docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:243-268) key for key, including the dropped review-only keys."
+    },
+    {
+      "path": "commands/fsm.md",
+      "line": 13,
+      "note": "Exit-code table checked against the implementation, not the prose: machine.go:867/869 set ExitCode 1 for DONE(reviewed) and STOPPED, machine.go:833 sets 1 for GATE_FAILED, machine.go:685 sets 3 for NEEDS_INPUT, and cli/envelope.go:67 exitFor governs the 2 class. The subcommand list and --agent-prompt match cli/run.go:37-40 and cli/prompt.go."
+    },
+    {
+      "path": "commands/review-task-done.md",
+      "line": 6,
+      "note": "--shard-result (repeatable) and --cross-shard-result (single-slot) exist as documented at cmd/metareview/main.go:195-199 and 264-268."
+    },
+    {
+      "path": "internal/learnsource/source.go",
+      "line": 31,
+      "note": "The new shard-results exclude is exercised by internal/learnsource/source_test.go:180; gitcontext.CollectWithExcludes exists at internal/gitcontext/gitcontext.go:64."
+    },
+    {
+      "note": "Rubric blocking checks all clear for this shard: no eval or other unsafe execution, no TODO/FIXME markers, no truncated diff context, no duplicated inventoried code path (hashFields deliberately delegates to gitcontext.HashFields rather than re-defining the encoding), no untracked source files. go vet is clean over contextprofile, fsm/record, learnsource and epicsource; internal/fsm/record is at 100.0% statement coverage as its gate requires."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Operator docs overstate shard-result stability. docs/README.codex.md:87 and commands/review-task-done.md:33 both say editing a file invalidates only that file's shard (plus cross-shard). The implementation derives the bucket width from the whole diff -- shards.go:200 computes bits := bucketBits(needBuckets(total, budget)) -- so once a fix round pushes the total across a bits boundary every shard id and hash changes and every committed result is re-planned away. The spec acknowledges exactly this caveat (docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md:120); the user-facing docs drop it. It fails safe (unmatched results are ignored with a reason rather than silently accepted), so this is accuracy, not correctness.",
+      "evidence": [
+        {"path": "docs/README.codex.md", "line": 87, "note": "claims only the edited file's shard is invalidated"},
+        {"path": "commands/review-task-done.md", "line": 33, "note": "same unconditional claim in the command doc"},
+        {"path": "internal/contextprofile/shards.go", "line": 200, "note": "bucket width is a function of the whole diff total"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "docs/README.codex.md:59 lists the transient-local paths as .metareview/findings.jsonl, .metareview/runs.jsonl and .metareview/shards/, while the same commit's CLAUDE.md also lists .metareview/runs/ (FSM run state). The Codex-facing mirror is now missing an entry that the Claude-facing one has. Harmless in practice because the runs directory self-ignores, but the two files are meant to state the same contract.",
+      "evidence": [
+        {"path": "docs/README.codex.md", "line": 59, "note": "transient list omits .metareview/runs/"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead defensive branch: needBuckets normalizes budget <= 0 to DefaultMaxBytesPerShard (shards.go:99-101), but its sole production caller PlanShards already performs that exact normalization two lines earlier (shards.go:197-199), so the guard is unreachable outside direct test calls. Coverage confirms it: needBuckets reports 60.0% of statements. Either drop the duplicated guard or make PlanShards rely on it instead of normalizing twice.",
+      "evidence": [
+        {"path": "internal/contextprofile/shards.go", "line": 99, "note": "budget normalization duplicated from the caller"},
+        {"path": "internal/contextprofile/shards.go", "line": 198, "note": "PlanShards already normalized budget before calling needBuckets"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Field-key overload in the ERR_RUNS_JSONL envelope: record.go:166 sets \"line\" to a decimal line number, while record.go:202 sets the same \"line\" key to a run id for reason=id_conflict. Both go through cli/envelope.go failure() into error.fields verbatim, so a consumer that reads error.fields.line as a number breaks on the id_conflict variant. The shape is what spec 3 section 6 literally prescribes, so this is a spec wart being faithfully implemented rather than a deviation -- worth a distinct key (or the spec being corrected) rather than a silent overload.",
+      "evidence": [
+        {"path": "internal/fsm/record/record.go", "line": 202, "note": "\"line\" carries row.ID, not a line number"},
+        {"path": "internal/fsm/record/record.go", "line": 166, "note": "same key carries a decimal line number here"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

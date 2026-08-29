@@ -1,0 +1,376 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-5946b89296b16369-claude-opus-5-shard-agent",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "5946b89296b16369",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T16:25:19Z",
+  "evidence": [
+    {
+      "path": "tests/manifest/test-manifests.sh",
+      "line": 42,
+      "note": "read the whole manifest suite; the new workflow assertion names the two plugin.json files and no other manifest"
+    },
+    {
+      "path": ".agents/plugins/marketplace.json",
+      "line": 9,
+      "note": "third shipped manifest, edited on this branch for the Go floor, feature list still pre-0.9.0"
+    },
+    {
+      "path": "internal/fsm/judge/codex.go",
+      "line": 28,
+      "note": "codexEfforts read against judge.go's efforts map and against all three prose copies"
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 664,
+      "note": "hasValidEvidence read against both shardpack contract bodies and the spec"
+    },
+    {
+      "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+      "line": 122,
+      "note": "grepped every U+2028/EscapeHTML mention in docs/specs; no amendment retires this line"
+    },
+    {
+      "note": "Method: cross-shard only. Read the pack, then chased six repeated-rule seams across shard boundaries -- the Go-floor guard (now derived from git ls-files and consistent across all eight copies: verified clean), the plugin/marketplace feature enumerations, the canonical-encoder escape rule, the judge effort/provider vocabulary, the shard-result contract vs its validator, and the fsm exit/status/knob tables. Every claim below was verified by reading the named files in the frozen worktree; no file was edited. Only two per-shard results exist for this plan (shard-01, shard-04-3), so the seam analysis is drawn from the tree rather than from shard results."
+    },
+    {
+      "note": "Confirmed closed, not re-reported: the Go floor now reads 1.26 in go.mod and Go 1.26+ in all eight tracked copies (INSTALL.md, README.md, package.json, both plugin.json, .agents marketplace, cli/metareview.js, internal/setup/setup.go), and test-manifests.sh:71-88 derives the check from git ls-files rather than a list. The canonical.go doc comment and the export redaction table are likewise consistent with the code."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Sixth occurrence of the partially-corrected-claim class, and the second consecutive guard written around the copies that already pass. 0.9.0's headline feature is FSM workflow runs. The branch appended 'plus FSM workflow runs (metareview fsm)' to the feature enumeration in .claude-plugin/plugin.json:4 and to .codex-plugin/plugin.json:25's description and longDescription, and added a guard for exactly those two files: tests/manifest/test-manifests.sh:42-43 asserts JSON.stringify(codex/claude).includes(\"workflow\"). The third shipped manifest, .agents/plugins/marketplace.json:9, carries the same closed feature list -- 'task-done, epic-ready, pr-ready, artifact review, post-merge learning, and metaswarm-compatible quality gates' -- and still omits workflow runs. That file is not an oversight of scope: the same script reads it four lines below the new guard and asserts task-done (line 44), epic-ready (47), pr-ready (50) and post-merge learning (53) in it individually, and this very branch edited that exact description string (commit 060451b) to correct its Go floor without noticing the feature list beside it. The published agents marketplace therefore advertises a 0.9.0 that has no workflow runs, and the guard that exists to prevent precisely this certifies the repository as consistent because it does not look at the file. Add '.agents/plugins/marketplace.json' to the workflow assertion, or derive the list the way the Go-floor check at line 71 was just rewritten to do. Invisible per shard: the corrected copies are in shard-07/shard-1d, the stale copy and the guard in shard-1b/shard-10-3, and each reads as internally consistent.",
+      "evidence": [
+        {
+          "path": ".agents/plugins/marketplace.json",
+          "line": 9,
+          "note": "feature enumeration ends at 'metaswarm-compatible quality gates'; no workflow runs"
+        },
+        {
+          "path": "tests/manifest/test-manifests.sh",
+          "line": 42,
+          "note": "new guard checks the codex plugin only"
+        },
+        {
+          "path": "tests/manifest/test-manifests.sh",
+          "line": 43,
+          "note": "and the claude plugin only"
+        },
+        {
+          "path": "tests/manifest/test-manifests.sh",
+          "line": 53,
+          "note": "the same script already asserts a feature term against .agents/plugins/marketplace.json"
+        },
+        {
+          "path": ".claude-plugin/plugin.json",
+          "line": 4,
+          "note": "corrected copy: 'plus FSM workflow runs (metareview fsm)'"
+        },
+        {
+          "path": ".codex-plugin/plugin.json",
+          "line": 25,
+          "note": "corrected copy"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The canonical-encoding rule was corrected in the Go doc comment and left wrong in all three copies in the spec that owns it. internal/fsm/run/types.go:349-351 escapes U+2028, U+2029 and U+FFFD unconditionally, and canonical.go:15-17 was updated on this branch to say so ('U+2028/U+2029 and U+FFFD written as escapes'). docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:122 still states the opposite -- '<>& and U+2028/9 left as literal UTF-8' -- and the two definitional copies at :118 (the signature comment: json.Valid -> dup-key rejection -> Encoder{SetEscapeHTML(false)}.Encode minus \\n) and :24 (the FIN3-1/RC3-8/RT3-9 traceability row) omit the escape passes entirely. Nothing in the spec's amendment ledger retires any of the three, and U+FFFD appears nowhere in docs/specs at all. These bytes are what LineHash hashes and what the audit chain is verified against, so the spec is the document an independent verifier would implement from; implemented literally it produces non-matching hashes for any payload containing those runes, which is exactly the cross-toolchain case the escaping was added for. A previous cross-shard round reported this pair and only the code half was fixed. canonical.go is shard-08, types.go shard-1a, the spec shard-18.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 122,
+          "note": "'U+2028/9 left as literal UTF-8' -- false"
+        },
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 118,
+          "note": "signature comment omits the escape passes"
+        },
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 24,
+          "note": "traceability row repeats the incomplete definition"
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 349,
+          "note": "bytes.ReplaceAll escapes U+2028 unconditionally"
+        },
+        {
+          "path": "internal/fsm/run/canonical.go",
+          "line": 15,
+          "note": "doc comment corrected on this branch"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "An enumeration labelled exhaustive that the same branch made false. The Codex CLI judge added in commit eeb8fa4 accepts a wider effort set -- internal/fsm/judge/codex.go:28-29 admits none, minimal, low, medium, high, xhigh, max -- and judge.go:275-278 routes the whole codex arm to validateCodex before the HTTP effort table at judge.go:101 and before the API-key check. Three prose copies still state the narrow set as closed: docs/specs/...fsm-judge-kinds.md:117 'Effort vocabulary: low | medium | high | xhigh; anything else -> ERR_JUDGE_EFFORT_UNSUPPORTED{effort}', docs/specs/...fsm-cli.md:64 '--effort <low|medium|high|xhigh>' for the shipped fsm judge subcommand, and skills/fsm/SKILL.md:17 '--var JUDGE_EFFORT=<low|medium|high|xhigh>'. The SKILL copy contradicts itself: line 73 of the same file documents codex/<model> judging as supported, and that paragraph was added in the round-five fix that left line 17 alone. Worse, the spec that owns providers never mentions codex at all: fsm-judge-kinds.md:147-148 gives routing as 'anthropic for claude*/anthropic/*; openai for gpt*/openai/*/glm*/kimi*; else ERR_JUDGE_MODEL' with 'Missing key -> ERR_JUDGE_KEY{provider}', and the same file's r5 handoff describes judge.Preflight as 'routing + key presence + effort table' -- none of which is what the codex arm does. The consequence is not cosmetic: an operator following the spec believes codex/... is rejected as an unknown model and that every judge needs an API key. Only the seam shows it (codex.go in shard-12, judge.go in shard-02, the specs in shard-03/shard-04-2, SKILL.md in shard-19).",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 28,
+          "note": "codexEfforts admits none/minimal/max in addition to the four"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 275,
+          "note": "codex arm delegates before the effort table and the key check"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 117,
+          "note": "'anything else -> ERR_JUDGE_EFFORT_UNSUPPORTED'"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 147,
+          "note": "routing enumeration ends in 'else ERR_JUDGE_MODEL'; no codex arm"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 64,
+          "note": "fsm judge --effort <low|medium|high|xhigh>"
+        },
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 17,
+          "note": "narrow effort set"
+        },
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 73,
+          "note": "same file documents codex/<model> as supported"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The evidence rule this gate publishes is not the rule it enforces, and the test named to bind the two was shaped so it cannot see the gap. Both pack bodies -- internal/shardpack/shardpack.go:482 (cross-shard) and :492 (shard) -- and the spec at docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md:193 say 'each entry needs path AND line > 0, or a note of at least 12 characters; at least one entry'. The validator is an any(), not an each(): reviewmanifest.hasValidEvidence (manifest.go:664-671) returns true on the first valid ref and ignores the rest, and it is the only evidence check at the result level (manifest.go:491) and the finding level (manifest.go:506). A result carrying one good ref and twenty empty objects passes. TestEvidenceRuleMatchesValidator (manifest_test.go:281-310) is the test whose name asserts the stated rule equals the enforced one, and every case it builds sets result.Evidence to a one-element slice -- the one shape in which any() and each() cannot differ. Either tighten hasValidEvidence to require every entry, or restate the contract as 'at least one entry that qualifies'; as it stands the review harness's own gate is looser than the contract it hands every reviewing agent. shardpack.go is shard-03-2, manifest.go shard-16-3, manifest_test.go shard-10-3, the spec shard-1f.",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 482,
+          "note": "'each entry needs path AND line > 0, or a note of at least 12 characters'"
+        },
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 492,
+          "note": "identical wording in the shard contract body"
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 664,
+          "note": "hasValidEvidence returns true on the first valid ref"
+        },
+        {
+          "path": "internal/reviewmanifest/manifest_test.go",
+          "line": 300,
+          "note": "the binding test only ever assigns a one-element evidence slice"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md",
+          "line": 193,
+          "note": "spec repeats 'each entry'"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The trust-boundary enumeration of guardrail-weakening knobs exists in five copies and none was updated for the two knobs this branch added. --judge-model and --judge-effort are parsed at internal/fsm/cli/run.go:113 and folded into the run's vars at run.go:307 via applyJudgeOverrideFor, with METAREVIEW_JUDGE_MODEL / METAREVIEW_JUDGE_EFFORT as environment fallbacks (wiring.go:31-32, 162-163). They retarget the judge exactly as --var JUDGE / JUDGE_EFFORT does -- which every copy of the list does name: internal/fsm/cli/prompt.go:40, its pinned mirror testdata/fsm/agent-prompt.golden:36, tests/go/agent-prompt-anchors.txt:13, skills/fsm/SKILL.md:56-59 and docs/fsm/driving-a-workflow.md:89-91. In prompt.go the omission is only an inconsistency, because the very next paragraph (prompt.go:41-44) documents the flags. In SKILL.md and driving-a-workflow.md it is a hole: neither file mentions --judge-model, --judge-effort or the two env names anywhere, so a driver reading the operator docs never learns that an exported METAREVIEW_JUDGE_MODEL silently retargets every subsequent run's judge -- while the same SKILL.md was edited in round five to add both env names to its 'reads exactly these env names' list ten lines further down. A closed list that omits a live knob is the failure mode that list exists to prevent.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 31,
+          "note": "METAREVIEW_JUDGE_MODEL / METAREVIEW_JUDGE_EFFORT"
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 307,
+          "note": "applyJudgeOverrideFor folds the flags into the run vars"
+        },
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 56,
+          "note": "knob list omits --judge-model/--judge-effort; the file never mentions them"
+        },
+        {
+          "path": "docs/fsm/driving-a-workflow.md",
+          "line": 89,
+          "note": "same list, same omission, flags absent from the whole document"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 242,
+          "note": "spec's copy of the same list"
+        },
+        {
+          "path": "internal/fsm/cli/prompt.go",
+          "line": 40,
+          "note": "knob list; the flags are documented in the next paragraph only"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The spec asserts a generation guarantee that does not exist. docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md:194 says of the evidence rule 'the pack's contract text is generated from those constants, not hand-copied'. crossShardContractBody and shardContractBody (internal/shardpack/shardpack.go:477-496) are plain string literals with 12, the verdict enum, the severity enum and the disposition enum written out by hand; shardpack.go references reviewmanifest only for ReviewResult, IgnoredResult, IsResultFileName, ParseResult and MatchesPlan, never for EvidenceNoteMinLength or any Verdict*/Severity*/Disposition* constant, and no test pins the pack text against them. The values agree today by coincidence, and finding 4 above is what happens when they stop agreeing.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md",
+          "line": 194,
+          "note": "'generated from those constants, not hand-copied'"
+        },
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 477,
+          "note": "crossShardContractBody is a hand-written const string"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The agent-prompt anchor guard is shaped around what already passes. tests/go/test-fsm.sh:60 compares the emitted prompt byte-for-byte against testdata/fsm/agent-prompt.golden, so the anchor loop at test-fsm.sh:61-66 only earns its place when the golden is regenerated from prompt.go -- which is exactly when a dropped sentence would slip through. The anchor file pins exit 2, exit 1 + GATE_FAILED and exit 1 + ERR_*, but not the loop skeleton at agent-prompt.golden:5 ('advance -> exit 3: do the node's work -> record node-output -> advance') -- the one sentence docs/specs/...fsm-cli.md:228 names first among the sentences the prompt must state, and the only place exit 3 or the record step appears. Also unanchored: the record <event> note form (golden:24) and the whole judge-model/codex paragraph (golden:37-40). The >= 20 count at test-fsm.sh:66 measures the anchor file, not the prompt, so it cannot detect the gap.",
+      "evidence": [
+        {
+          "path": "tests/go/agent-prompt-anchors.txt",
+          "line": 2,
+          "note": "anchors jump from next_action straight to exit 2"
+        },
+        {
+          "path": "testdata/fsm/agent-prompt.golden",
+          "line": 5,
+          "note": "the loop skeleton, unanchored"
+        },
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 66,
+          "note": "the count is of anchors read, not of prompt lines covered"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The CLI spec's exit-code section describes a function that does not exist and a code path it says is unused. docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:166 calls the table 'the sole authority (cli.exitFor(command, phase, code) with phase in open|advance|fork|record|judge)'. The shipped signature is exitFor(code string, ph phase, repairMoved bool) (envelope.go:76) -- no command argument -- and the phase set has two more members, phaseInit and phaseNone (envelope.go:48-49), which are load-bearing: phaseNone short-circuits to 2 and phaseInit is the sole reason ERR_STORE_PATH and ERR_RUNS_JSONL return 2 instead of 1. The same paragraph at :183 states 'AdvanceResult.ExitCode is not used -- exitFor is the single source', but run.go:507 returns in.ok(env, r.Status, r.ExitCode) and ok() returns that int verbatim (run.go:148-153); exitFor is reached only from errEnvelope and takes a code, so it cannot decide a status exit at all. A change to machine.go's ExitCode would diverge from the documented authority with nothing to catch it.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 166,
+          "note": "exitFor(command, phase, code), phase in five values"
+        },
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 76,
+          "note": "actual signature: exitFor(code, ph, repairMoved)"
+        },
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 48,
+          "note": "phaseInit and phaseNone are absent from the documented set"
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 507,
+          "note": "the advance path returns r.ExitCode, not exitFor"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The Codex CLI judge provider is missing from the release's own account of itself. CHANGELOG.md:7 introduces 0.9.0 with 'judge calls (Anthropic and OpenAI-compatible) are auditable and swappable'; the word codex does not appear anywhere in the 0.9.0 entry, though internal/fsm/judge/codex.go ships a third provider that spawns a binary from PATH and uses the operator's OAuth session instead of an API key. docs/fsm/driving-a-workflow.md -- the guide README.md points at for FSM runs -- likewise never mentions codex/, --judge-model or --judge-effort, and its judge-swap section shows only --var JUDGE. skills/fsm/SKILL.md:73-78 is currently the only operator-facing description of the provider.",
+      "evidence": [
+        {
+          "path": "CHANGELOG.md",
+          "line": 7,
+          "note": "'(Anthropic and OpenAI-compatible)'"
+        },
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 16,
+          "note": "CodexPrefix: a third provider on the same branch"
+        },
+        {
+          "path": "docs/fsm/driving-a-workflow.md",
+          "line": 19,
+          "note": "judge-swap example uses --var JUDGE only; codex never mentioned"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two exit-table copies place ERR_AUDIT_TORN in the wrong bucket by their own stated rule, and one drops a whole exit-1 case. ERR_AUDIT_TORN is absent from the exit2 map and falls through to 'return 1' (envelope.go:108-112), which docs/specs/...fsm-cli.md:178 and skills/fsm/SKILL.md:37 both state explicitly. docs/fsm/driving-a-workflow.md:46 instead defines exit 1 as '... or an ERR_* after the run was mutated', and commands/fsm.md:15 as 'or an error after mutation' -- ERR_AUDIT_TORN is raised at Open, before this invocation mutates anything, so a reader applying either sentence places it at exit 2 and retries instead of running advance --repair. commands/fsm.md:13-15 also omits 'a gate that did not pass' from exit 1 (run.go:695-702 returns 1 with status OK) while advertising gate as a subcommand two lines later, and omits FORKED from exit 0.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 111,
+          "note": "default return 1 covers ERR_AUDIT_TORN"
+        },
+        {
+          "path": "docs/fsm/driving-a-workflow.md",
+          "line": 46,
+          "note": "exit 1 = 'an ERR_* after the run was mutated'"
+        },
+        {
+          "path": "commands/fsm.md",
+          "line": 15,
+          "note": "'or an error after mutation'; exit-1 row omits the failed-gate case"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two shard-result contract clauses are stated to reviewers but never enforced, so a malformed result is accepted silently. internal/shardpack/shardpack.go:480 requires a cross-shard result to carry shardHash \"\" as well as shardId \"\"; crossShardBlockers (manifest.go:451-455) checks only the shardId half, so a populated shardHash passes. And shardpack.go:490 lists planHash among a shard result's required fields, but result.PlanHash is consulted only by MatchesPlan (manifest.go:188), which is called for the cross-shard result alone (manifest.go:441); resultBlockers never inspects it for KindShard, so a shard result with an omitted or stale planHash is ingested as current. Both are the same shape as finding 4: the pack states a rule the validator does not hold.",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 480,
+          "note": "'shardHash \"\"' stated in the cross-shard contract"
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 452,
+          "note": "only the shardId half is enforced"
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 188,
+          "note": "MatchesPlan is the only reader of PlanHash, and runs for cross-shard only"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The CLI spec's status list omits the status every failure emits. docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:164 gives 'Statuses: ADVANCED, NEEDS_INPUT, DONE, STOPPED, GATE_FAILED, FORKED, OK' as the closed set; envelope.go:217 sets status ERROR on every error envelope and run.go:136 on every usage refusal. A driver written to switch exhaustively over the documented set has no arm for the status it will see most often.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 164,
+          "note": "seven statuses, ERROR absent"
+        },
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 217,
+          "note": "env[\"status\"] = \"ERROR\""
+        }
+      ]
+    }
+  ],
+  "blockingCount": 5
+}

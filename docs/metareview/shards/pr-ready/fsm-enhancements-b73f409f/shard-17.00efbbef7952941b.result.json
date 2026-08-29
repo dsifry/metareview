@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-17-review",
+  "kind": "shard",
+  "shardId": "shard-17",
+  "shardHash": "00efbbef7952941b",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+      "line": 1,
+      "note": "New 458-line spec document (spec 2: workflow, gates, convergence, machine core). Documentation-only addition; no executable source, so the rubric's 'source changes lack tests' rule does not apply. The spec itself mandates 100% statement coverage with TDD and enumerates per-package test rows (W0-W5, M0-M9) in section 7."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+      "line": 458,
+      "note": "Diff hunk header declares 458 added lines and the fenced block contains exactly 458 content lines: context is not truncated."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/match.plain.golden",
+      "line": 1,
+      "note": "New 18-line prompt golden fixture for the judge match prompt; the embedded '{{loop}}' and stray '}}' are deliberate template-escaping probes, and the file is test data with no executable content. Hunk declares 18 lines and 18 are present (no trailing newline, flagged by git)."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+      "line": 96,
+      "note": "Checked for rubric blockers across the whole shard: no eval or other unsafe execution construct, no TODO/FIXME markers, no untracked unsafe source files, and no duplicated inventoried service (the spec explicitly ledgers ownership boundaries against specs 3, 4 and 5 to avoid duplicate code paths)."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

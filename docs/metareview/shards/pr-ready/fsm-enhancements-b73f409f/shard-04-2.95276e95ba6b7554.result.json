@@ -1,0 +1,13 @@
+{"schemaVersion":1,"id":"shard-04-2-review","kind":"shard","shardId":"shard-04-2",
+ "shardHash":"95276e95ba6b7554","planHash":"2ee4294a41b3ad7b","verdict":"PASS",
+ "reviewer":"claude-opus-5 task-done-rubric","reviewedAt":"2026-08-27T00:00:00Z",
+ "evidence":[
+  {"path":"docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md","line":1,"note":"Whole-file addition (new file, 522 lines, single chunk part 1/1); diff hunk header @@ -0,0 +1,522 @@ and the closing fence are both present, so context is not truncated."},
+  {"path":"docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md","line":46,"note":"Documentation-only change: a design/spec artifact under docs/specs/. No executable source is added or modified in this shard, so the rubric's 'source changes lack tests' rule does not apply."},
+  {"path":"docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md","line":297,"note":"Section 5 specifies the black-box suite tests/go/test-fsm.sh with per-scenario rows, plus section 8 unit tables covering every Deps seam at 100% — validation evidence is planned and enumerated rather than absent."},
+  {"path":"docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md","line":218,"note":"Exit-code table is declared the sole authority with a stated design principle and one test row per (command, phase, code) triple; buckets for exit 0/1/2/3 are internally consistent with the section 3 statuses list."},
+  {"path":"docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md","line":540,"note":"Section 9 ledger records every deviation from plan r3 and each spec 2/3/4 handoff, so the change does not silently duplicate an inventoried code path; the CLI is stated as a thin shell over machine/kind/judge/run/export."},
+  {"path":"docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md","line":383,"note":"Secrets handling checked: hints never echo env values or x-api-key/Authorization, closed env-name set, proxy pinned off via a cloned transport, and explicit no-secret-in-either-stream test rows."},
+  {"note":"Grepped the entire shard pack for TODO, FIXME, XXX, HACK and eval( markers: zero matches, so no marker-based blocker applies."}
+ ],
+ "findings":[],"blockingCount":0}

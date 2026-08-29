@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0f.f1a2d3d5b5c09181",
+  "kind": "shard",
+  "shardId": "shard-0f",
+  "shardHash": "f1a2d3d5b5c09181",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T20:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/export/export.go",
+      "line": 466,
+      "note": "redactor.snapshot() redacts run.Snapshot with an enumerated if-chain, not a field map; no guard for newly added Snapshot fields"
+    },
+    {
+      "path": "internal/fsm/machine/fork.go",
+      "line": 445,
+      "note": "VerifyOrigin accepts ctx but never consults it while reading parent logs"
+    },
+    {
+      "path": "internal/fsm/export/export.go",
+      "line": 168,
+      "note": "Manifest.Bytes is summed before manifest.json is added to the file set"
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+      "line": 234,
+      "note": "spec section 5 mandates a reflection test pinning every run.Snapshot field name to the snapshot redaction map (fail closed on new fields)"
+    },
+    {
+      "path": "internal/fsm/export/export_test.go",
+      "line": 228,
+      "note": "F8 export tests cover the redaction table by fixture but contain no reflection over run.Snapshot; grep for reflect across internal/fsm finds it only in run/types_test.go"
+    },
+    {
+      "path": "internal/tasksource/containedpath_test.go",
+      "line": 12,
+      "note": "new table of containedPath escapes, verified against internal/tasksource/tasksource.go:117-157; every documented exit is pinned including the post-EvalSymlinks check"
+    },
+    {
+      "path": "package.json",
+      "line": 57,
+      "note": "npm test switched to tests/coverage.sh, which itself invokes tests/run-all.sh under GOFLAGS=-cover, so the behavioural suite is not dropped"
+    },
+    {
+      "path": "internal/fsm/cli/run.go",
+      "line": 927,
+      "note": "export --out is passed through invocation.abs(), so checkDest always receives an absolute path; the relative-path walk in checkDest is unreachable from the CLI"
+    },
+    {
+      "path": "workflows/embed_test.go",
+      "line": 20,
+      "note": "Read() traversal cases (../, a/b, suffixed name) are pinned; go test ./workflows passes"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Spec-contract gap on a redaction path: spec 3 section 5 requires a reflection test pinning that every run.Snapshot field name appears in the snapshot redaction map, so a new persisted field fails closed. redactor.snapshot() (internal/fsm/export/export.go:466) is instead a hand-written if-chain over vars, allowed_cmds, repo_root, work_dir, tree_status, last_error, stop_reason and node_outputs, and no test in the repository reflects over run.Snapshot for this purpose (reflect appears in internal/fsm only in internal/fsm/run/types_test.go, for SnapshotEqualIgnoringSeq). Adding a Snapshot field that carries a path, a var value or command output would therefore be exported to snapshot.json unredacted with the whole suite still green, including the 100% coverage gate, which cannot see an unwritten assertion.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 466,
+          "note": "snapshot() enumerates fields by hand; nothing fails when run.Snapshot grows a field"
+        },
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 228,
+          "note": "TestF8Redaction asserts the seeded markers only; no reflection over run.Snapshot anywhere in the export package"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 234,
+          "note": "A reflection test pins that every run.Snapshot field name appears in the snapshot redaction map (fail closed on new fields)"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Manifest.Bytes diverges from the spec. Spec 3 section 5 documents Bytes as the sum of all written files; export.go:168 sums the file set before manifest.json is inserted at line 173, so the reported byte count understates the bundle by the size of manifest.json, and the MaxBytes ceiling is likewise checked against the smaller number. The code comment on the field states the narrower rule, so this is a spec/implementation disagreement rather than an accident, but the test only asserts m.Bytes > 0 (internal/fsm/export/export_test.go:336), so neither reading is pinned.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 168,
+          "note": "m.Bytes summed over files before manifest.json is added at line 173"
+        },
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 336,
+          "note": "manifest assertions check only m.Bytes <= 0, so the excluded-manifest rule is unverified"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "VerifyOrigin (internal/fsm/machine/fork.go:445) takes a context.Context and never reads it. It performs one store.EventsWithLines read per distinct parent run id in the child log, which on a deep lineage is unbounded I/O that cannot be cancelled. Export calls it while holding no lock but inside a cancellable ctx (internal/fsm/export/export.go:166), so a cancelled export still walks every ancestor. A ctx.Err() check at the top of the per-parent loop would honour the parameter that is already in the signature.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/fork.go",
+          "line": 445,
+          "note": "func VerifyOrigin(ctx context.Context, ...) — ctx is unused in the body and in originReason"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "checkDest (internal/fsm/export/export.go) reconstructs its walk with p := string(filepath.Separator) and joins the components of filepath.Clean(out), so a relative Out is walked as if rooted at the filesystem root: the very first Lstat misses, the function returns nil, and both the symlink refusal and the non-empty-destination refusal are skipped while MkdirAll then creates the directory relative to the process cwd. Not currently reachable, because internal/fsm/cli/run.go:927 passes Out through invocation.abs(); it is a latent trap for any other caller of the exported export.Export, which does not itself require an absolute Out.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 213,
+          "note": "checkDest prefixes the separator and joins Clean(out) components, silently treating a relative path as rooted"
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 927,
+          "note": "the only in-tree caller absolutises Out first, so the CLI is unaffected"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

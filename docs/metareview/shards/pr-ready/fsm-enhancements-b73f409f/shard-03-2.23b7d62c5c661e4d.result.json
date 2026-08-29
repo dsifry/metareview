@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-03-2-rereview",
+  "kind": "shard",
+  "shardId": "shard-03-2",
+  "shardHash": "23b7d62c5c661e4d",
+  "planHash": "dd18c9f68eb9d5bd",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-26T12:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 515,
+      "note": "resultContractFor(crossShard bool) now renders a distinct contract per pack kind; crossShardContractBody names cross-shard.<planHash>.result.json, kind \"cross-shard\" and an empty shardId, which matches the validator in internal/reviewmanifest/manifest.go (KindCrossShard, MatchesPlan on planHash, and the \"cross-shard result must not name a shard\" blocker)."
+    },
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 571,
+      "note": "shardPack calls resultContractFor(false) and crossShardPack calls resultContractFor(true); no pack kind emits the other's wording."
+    },
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 547,
+      "note": "shardPack validates every chunk against the measured diff (missing file, ByteStart > ByteEnd, ByteEnd past diff length) and returns an error rather than emitting an empty block, so no pack can present truncated content as a complete diff."
+    },
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 249,
+      "note": "Write uses rename-aside then rename-in then remove-aside, clears a stale .aside first, removes the staging directory on every failure branch, and returns a rollback that restores the previous pack set; isPrunable at line 315 also reclaims orphaned .aside directories."
+    },
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 438,
+      "note": "GC re-applies Discover's content-based freshness test via resultIsCurrent before removing a result file, so a file the gate just counted is not collected because of its name."
+    },
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 1144,
+      "note": "Validation evidence: the shard's source file is covered by a 1175-line test file added in the same diff, including TestCrossShardPackStatesItsOwnContract which pins both the cross-shard contract wording and that the shard pack keeps the shard contract."
+    },
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 46,
+      "note": "Checked the whole shard for rubric blockers: no eval or other unsafe execution, no TODO/FIXME markers, no truncated diff context (single part 1/1 chunk, 22133 of 60000 bytes), and no duplication of an existing inventoried path -- shardpack is a new package and the only in-repo references to resultContractFor are here and in its test."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

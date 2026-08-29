@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1e-review",
+  "kind": "shard",
+  "shardId": "shard-1e",
+  "shardHash": "bd778baa03c8f8c2",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T22:24:19Z",
+  "evidence": [
+    {"path": "internal/fsm/run/builder.go", "line": 1, "note": "Reviewed the full new test-log Builder: stamping, chain derivation via LineHash of the previous canonical line, Init/Event defaults, and Copy fork semantics (Origin, lineage, fresh Seq/Prev)."},
+    {"path": "internal/fsm/run/store_test.go", "line": 1, "note": "Reviewed 928 lines of store conformance tests: create/append CAS, lock contention, MaxEvents, torn-tail repair and sidecars, symlink and permission path refusals, List ordering and error rows, external oracle fixture."},
+    {"path": "internal/fsm/run/canonical_test.go", "line": 1, "note": "Reviewed canonical-form, hash, CapText boundary and value-pin tests; assertions match the documented contract (whitespace stripping, key order, duplicate-key rejection, idempotence, UTF-8 safe truncation)."},
+    {"path": "internal/fsm/kind/decision_test.go", "line": 1, "note": "Reviewed decision-mapping table cases and the nil-judge executor test asserting CodeExecutorFailed with reason no_judge."},
+    {"path": "CHANGELOG.md", "line": 52, "note": "Reviewed the new 0.9.0 and 0.8.3 sections; documentation only, consistent with the FSM feature set described elsewhere in the branch."},
+    {"path": "tests/coverage-floor.txt", "line": 1, "note": "Reviewed the new per-package coverage floor list; data file with a regeneration comment, no internal/fsm entries (those are gated at 100% separately)."},
+    {"path": "internal/fsm/run/builder.go", "line": 336, "note": "Ran go vet over internal/fsm/run and internal/fsm/kind: clean. Confirmed every Override constructor in builder.go has at least one call site elsewhere in the tree, so no dead exported API. No TODO/FIXME markers, no eval-style execution, and every chunk in this shard is part 1/1 (no truncated diff context)."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Builder.stamp declares a third parameter as the blank identifier (_ []Override) and never applies it; Init passes its overrides to stamp anyway and then applies them itself in the loop that follows. The dead parameter reads as if stamp honours overrides and invites a future caller to rely on that. Drop the parameter or apply it inside stamp.",
+      "evidence": [
+        {"path": "internal/fsm/run/builder.go", "line": 336, "note": "func (b *Builder) stamp(typ string, data any, _ []Override) Event — third argument ignored"},
+        {"path": "internal/fsm/run/builder.go", "line": 300, "note": "Init calls b.stamp(TypeInit, d, o) then re-applies o in its own loop"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The torn-tail sidecar permission assertion stats matches[0] (the lexicographically first sidecar accumulated across loop iterations) rather than the sidecar this iteration created, and discards the Stat error, so a nil FileInfo would panic instead of failing the test cleanly. Assert on the sidecar whose bytes were just matched.",
+      "evidence": [
+        {"path": "internal/fsm/run/store_test.go", "line": 1119, "note": "fi, _ := os.Stat(matches[0]) followed by fi.Mode().Perm() != 0o600 inside the per-tail loop"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The mk helper in TestSummarizeIncompleteFork declares kind Kind and extra ...string parameters that are never used (kind is explicitly discarded with _ = kind, extra is never referenced) and has a single call site passing an empty kind. Dead test scaffolding; simplify the signature to mk(to int64).",
+      "evidence": [
+        {"path": "internal/fsm/run/store_test.go", "line": 914, "note": "mk := func(to int64, kind Kind, extra ...string) Log { ... _ = kind ... }"},
+        {"path": "internal/fsm/run/store_test.go", "line": 917, "note": "_ = kind discard proving the parameter is unused"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-31-2.d5837010d84be838",
+  "kind": "shard",
+  "shardId": "shard-31-2",
+  "shardHash": "d5837010d84be838",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "shard-reviewer",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/machine/fork_test.go",
+      "line": 1130,
+      "note": "Mutation-tested the shard's headline regression test. Removing the occurrence disambiguator in internal/fsm/machine/diff.go:99-100 (`k.occurrence = seen[k]`) fails TestDiffRunsKeepsRepeatedCallsWithTheSameInput at fork_test.go:1180 with 'got 1 rows for the repeated input, want 2'. The test is live and genuinely catches the bug its comment describes."
+    },
+    {
+      "path": "internal/fsm/machine/fork_test.go",
+      "line": 305,
+      "note": "Checked the shard for vacuous (empty-input) loops. TestF2NoCommitRecovery's 'copied llm_call without origin' loop is not vacuous: instrumenting the loop shows the forked child carries 1 llm_call event, so the origin assertion has something to assert on."
+    },
+    {
+      "path": "internal/fsm/machine/fork_test.go",
+      "line": 979,
+      "note": "Mutation: restricting the cmdCalls tally in internal/fsm/machine/machine.go:417 to `ev.Origin == nil` (i.e. ignore copied cmd_calls) fails TestF10ForkFailureSweeps at fork_test.go:985 with 'ordinal 0'. The ordinal-continuity assertion really reads the child's counter, not the parent's, despite h.runner.ordinal being a shared harness field."
+    },
+    {
+      "path": "internal/fsm/machine/fork_test.go",
+      "line": 128,
+      "note": "The unasserted half of this comment is nonetheless true: probing the child after Fork(from=adjudicate)+advance shows two fresh llm_call events at node=adjudicate iter=0 with Index 0 and 1 and Origin==nil, so adjudicate does re-run from index 0 and discover does not re-run."
+    },
+    {
+      "path": "testdata/fsm/scenarios/sdlc-loop/happy/judge.yaml",
+      "line": 5,
+      "note": "The third row (node: judge) is not dead weight in an sdlc-loop scenario: it scripts the standalone `fsm judge --run <live>` call exercised at tests/go/test-fsm.sh:122-123, which asserts index 0 and decision true against this row's confidence 0.8. mockai.Load (internal/fsm/mockai/mockai.go:86-97) keys rows on (kind,node,iter,index) and rejects duplicates; this file loads clean, tokens are in range, and no key collides."
+    },
+    {
+      "path": "internal/fsm/machine/fork_test.go",
+      "line": 1,
+      "note": "Validation run read-only from a scratchpad copy of the tree (nothing built or written inside the repo): go build ./... OK; go vet ./internal/fsm/machine clean; golangci-lint run ./internal/fsm/machine/... reports 0 issues; go test ./internal/fsm/machine -count=1 passes with 100.0% statement coverage (go tool cover -func shows no sub-100% block in fork.go or diff.go); bash tests/go/test-fsm.sh passes end-to-end, which drives testdata/fsm/scenarios/sdlc-loop/happy through the real binary."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The regression test this shard adds does not assert the field its own fix documents, and that field is inert. internal/fsm/machine/diff.go:28-31 documents CallRow.Index as what \"distinguishes several calls of one kind in the same node@iter with the same input\", but nothing ever assigns it: DiffRuns builds the row at diff.go:105 as `&CallRow{Node, Iter, Kind, InputHash, occurrence}` and the exported Index stays 0. The real disambiguator is the unexported `occurrence` (diff.go:38-39, 'never ships'). Proved by probe: diffing two runs with two repeated same-input calls produces two rows whose canonical JSON both read {\"node\":\"n\",\"iter\":0,\"kind\":\"adjudicate\",\"input_hash\":\"same-input-hash\",\"index\":0,...}. Since internal/fsm/cli/run.go:918 ships the whole Report in the `fsm diff` envelope, the two repeated rows are indistinguishable by their identity fields in the CLI output — the exact scenario the fix and its test exist for — and docs/specs/2026-08-26-metareview-0.9.0-build-plan.md:402 lists `index` as an llm_calls row field. TestDiffRunsKeepsRepeatedCallsWithTheSameInput (fork_test.go:1130-1197) asserts row survival and A/B pairing but never touches row.Index, which is why the inert field and the false comment survived. Fix: either populate Index from occurrence (and assert Index 0/1 on the two rows in the test), or delete the field and the comment that claims it does the disambiguating.",
+      "evidence": [
+        { "path": "internal/fsm/machine/fork_test.go", "line": 1179 },
+        { "path": "internal/fsm/machine/diff.go", "line": 28 },
+        { "path": "internal/fsm/machine/diff.go", "line": 105 },
+        { "path": "internal/fsm/cli/run.go", "line": 918 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "An assertion that cannot fail. fork_test.go:798 checks the one-sided diff rows as `if r5, r9 := byHash[\"i5\"], byHash[\"i9\"]; r5.B != nil || r9.A != nil || r5.Same || r9.Same`. byHash is map[string]CallRow (a value map), so a missing key yields the zero CallRow — A/B nil and Same false — and the check passes when the rows are absent entirely. Proved by mutation: adding `if row.A == nil || row.B == nil { continue }` before diff.go:126 (dropping every one-sided row) leaves TestF7DiffRuns green; only TestF7DiffSortAndPrefixEdges (fork_test.go:1017) catches it. The neighbouring i1/i2/i3/i4 assertions do fail on a missing row (nil deref or negated zero value), so this is the one weak spot. Add `r5.A == nil || r9.B == nil` to the condition, or look the rows up with the two-value map form.",
+      "evidence": [
+        { "path": "internal/fsm/machine/fork_test.go", "line": 798 },
+        { "path": "internal/fsm/machine/diff.go", "line": 126 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead scaffolding kept alive by blank assignments, which is what hides it from the linter. fork_test.go:760 declares `bp := func(v bool) *bool { return &v }`, never calls it, and silences the compiler with `_ = bp` at fork_test.go:801. Likewise fork_test.go:982-983 discard `c` (the fork whose only assertion is `err != nil`) and `adj` (a seqOfTransitionInto result computed at fork_test.go:889 and never compared to anything). golangci-lint reports 0 issues precisely because of the blank assignments. Either use them for the assertion they were evidently written for (e.g. `adj` to pin which checkpoint the append-failure fork copied up to) or delete them.",
+      "evidence": [
+        { "path": "internal/fsm/machine/fork_test.go", "line": 760 },
+        { "path": "internal/fsm/machine/fork_test.go", "line": 801 },
+        { "path": "internal/fsm/machine/fork_test.go", "line": 983 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Comment claims more than the assertion under it checks. fork_test.go:128 says the child's first advance 're-runs adjudicate from index 0 (the executor is invoked; discover is not)', but the only assertion is `r.Status != StatusAdvanced || r.To != \"fix\"`. Neither the executor invocation nor 'from index 0' is checked here; the invocation is checked in TestF1TwoIterationCheckpoints (fork_test.go:252-256) and the index-0 restart is checked nowhere in the shard. I verified the claim is true by probe (fresh llm_calls at index 0 and 1 on the child), so this is a documentation-strength gap, not a wrong claim — but it is the same shape as the defect above: the reader trusts the comment, and the index restart would regress silently. One extra assertion over the child's llm_call Index values would close it.",
+      "evidence": [
+        { "path": "internal/fsm/machine/fork_test.go", "line": 128 },
+        { "path": "internal/fsm/machine/fork_test.go", "line": 130 }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

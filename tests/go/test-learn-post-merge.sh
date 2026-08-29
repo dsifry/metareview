@@ -35,6 +35,18 @@ cat > .metareview/findings.jsonl <<'JSONL'
 JSONL
 printf '{"timestamp":"2026-05-26T10:00:00Z","message":"Reviewer correction: preserve original intent after plan iteration."}\n' > "$TMP/sessions/session.jsonl"
 
+# A controlled HOME. sessionhistory scans ~/.codex and ~/.claude in addition to --session-root,
+# so without this the discovery paths execute only on machines that happen to hold real session
+# data: this package measured 86.3% locally and 79.1% on CI from identical code, and the floor
+# was set from the higher number, so CI could never pass. The fixture also exercises the .json
+# and .md shapes, which no run reached before.
+export HOME="$TMP/home"
+mkdir -p "$HOME/.claude/projects/p" "$HOME/.codex/sessions" "$HOME/.codex/memories/rollout_summaries"
+printf '{"timestamp":"2026-05-26T11:00:00Z","message":"earlier session note"}\n' > "$HOME/.claude/projects/p/a.jsonl"
+printf '{"created_at":"2026-05-26T12:00:00Z","summary":"codex single-object transcript"}' > "$HOME/.codex/sessions/one.json"
+printf '# rollout\n\ngenerated summary body\n' > "$HOME/.codex/memories/rollout_summaries/s.md"
+printf '{"time":"2026-05-26T13:00:00Z","text":"codex history line"}\n' > "$HOME/.codex/history.jsonl"
+
 "$TMP/metareview" learn --post-merge 7 --base "$base" --session-root "$TMP/sessions" > "$TMP/learn.out"
 accepted_path="$(cat "$TMP/learn.out")"
 test -f "$accepted_path"

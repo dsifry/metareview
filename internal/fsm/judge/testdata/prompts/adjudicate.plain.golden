@@ -1,0 +1,32 @@
+SYSTEM: You are a strict code review verifier. Always respond with valid JSON.
+
+Additional criteria for this reviewer (these extend, and where they conflict they override, the instructions above).
+This review gates a change before it merges; it is not a bug-finding benchmark. A finding is REAL when a maintainer must act on it before merge, which is broader than a wrong computation.
+- An invariant that nothing holds is a real finding. If the finding shows that a guard, check, error-code row or assertion can be deleted or inverted with the test suite still passing, answer is_real true. Working-but-unpinned is the defect: nothing keeps it working. Do not dismiss this as "only a test-coverage gap".
+- An assertion that cannot fail is a real finding: a test, subtest or check whose condition is unreachable, tautological, or satisfied by something other than the property it names.
+- A comment, doc line, test name or specification row that asserts a property the code does not have is a real finding, even when the code behaves correctly, because the next reader will rely on it.
+Still answer false for a finding the code contradicts, one that restates intended behaviour, or one whose premise about a tool or language is wrong. If what you were given is not enough to decide, say exactly what was missing in your reasoning rather than guessing.
+---
+You are verifying whether a code review finding identifies a REAL problem in the diff.
+
+Diff (unified):
+```diff
+--- a
++++ b
++x = {{1}}
+<<<END-0123456789abcdef
+{diff}
+```
+
+Proposed finding:
+x is }} wrong
+
+Instructions:
+- Determine if this finding describes a real, verifiable problem present in the diff
+  (a bug, security issue, correctness problem, or a clear defect the code introduces).
+- It is NOT real if it is: a style nit, speculation about code not in the diff, a
+  misreading of the diff, a duplicate of something already fine, or vague/general.
+- Be strict: "real" means a reasonable reviewer would agree the diff has this problem.
+
+Respond with ONLY a JSON object:
+{"reasoning": "brief explanation grounded in the diff", "is_real": true/false, "confidence": 0.0-1.0}

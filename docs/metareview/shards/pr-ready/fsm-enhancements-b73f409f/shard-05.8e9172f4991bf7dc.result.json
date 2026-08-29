@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-05-review",
+  "kind": "shard",
+  "shardId": "shard-05",
+  "shardHash": "8e9172f4991bf7dc",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": ".github/workflows/test.yml",
+      "line": 1,
+      "note": "New CI workflow: read-only permissions, pinned action majors, go-version-file from go.mod, runs npm test coverage gate; no secrets or pull_request_target exposure."
+    },
+    {
+      "path": "internal/epicready/review.go",
+      "line": 500,
+      "note": "Shard-plan markdown replaced by a static explanatory section; contextprofile is still referenced by contextprofile.Markdown on the preceding line, so no dangling import in this hunk."
+    },
+    {
+      "path": "internal/fsm/gate/git.go",
+      "line": 167,
+      "note": "RealExec scrubs all GIT_* env, disables terminal prompts, external diff drivers, system config and pager; argument injection is bounded by ValidRef/ValidSHA plus --end-of-options on every ref-taking call."
+    },
+    {
+      "path": "internal/fsm/gate/git.go",
+      "line": 253,
+      "note": "RevParse pins to a 40-char sha via ^{commit} and rejects code!=0; IsAncestor relies on exit 1 being non-error in run(), which runEnv deliberately allows only for codes 0 and 1."
+    },
+    {
+      "path": "internal/fsm/gate/git.go",
+      "line": 357,
+      "note": "WorkTree uses a scratch GIT_INDEX_FILE in a MkdirTemp dir removed via defer, so the repo index is never mutated; write-tree output length-checked at 40."
+    },
+    {
+      "path": "internal/fsm/gate/git.go",
+      "line": 381,
+      "note": "Cut backs up to a rune start; indexing s[i] is safe because the branch only runs when len(s) > max >= 0."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/adjudicate.plain.golden",
+      "line": 1,
+      "note": "Golden prompt fixture exercising brace and fence escaping in judge prompt rendering; data only, no executable content."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/match.fenced.golden",
+      "line": 1,
+      "note": "Golden prompt fixture for the match prompt with template-delimiter and stray-brace inputs; data only."
+    },
+    {
+      "path": "internal/fsm/run/golden_test.go",
+      "line": 498,
+      "note": "Golden regression test regenerates only under FSM_RUN_UPDATE_GOLDEN=1 and otherwise compares the committed log and every prefix snapshot, including a count check."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow_test.go",
+      "line": 736,
+      "note": "Extensive table-driven validation coverage: reason+at asserted for ~60 invalid documents, reserved env names, cap boundaries, resolve/calibration errors, and cmd pinning/verification paths."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow_test.go",
+      "line": 1019,
+      "note": "ResolveCmds/VerifyCmds tested with injected lookPath and hash fakes plus a pinned preimage fixture, covering mismatch/missing/appeared and symlink and irregular-file cases."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Test robustness: TestGoldenPrefixes ignores bufio.Scanner errors (no sc.Err()/ws.Err() check) and indexes stored[:i+1] while iterating the snapshot file. If the snapshot file ever holds more lines than the log file (or the log scan aborts early on an over-long line), the test panics with an index-out-of-range instead of reporting a clean failure. Test-only, non-blocking.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/golden_test.go",
+          "line": 541,
+          "note": "stored[:i+1] is driven by the snapshot scanner, not by len(stored); neither scanner's Err() is checked."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Style: asExit hand-rolls a type assertion on *exec.ExitError instead of errors.As, so a wrapped ExitError would be reported as a run failure rather than an exit code. Harmless for exec.Cmd.Run today, which returns the ExitError unwrapped.",
+      "evidence": [
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 199,
+          "note": "asExit uses err.(*exec.ExitError) rather than errors.As."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

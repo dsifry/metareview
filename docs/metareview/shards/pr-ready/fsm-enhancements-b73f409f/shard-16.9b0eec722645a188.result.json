@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-16-review",
+  "kind": "shard",
+  "shardId": "shard-16",
+  "shardHash": "9b0eec722645a188",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "commands/review-pr-ready.md",
+      "line": 51,
+      "note": "Flag list updated with --shard-result/--cross-shard-result and a new sharded-review section; documentation only, no executable content, no TODO/FIXME markers."
+    },
+    {
+      "path": "internal/fsm/cli/deps.go",
+      "line": 52,
+      "note": "RealDeps binds each seam to a real implementation with no failure path; exercised by internal/fsm/cli/cli_test.go:88 and :618."
+    },
+    {
+      "path": "internal/fsm/cli/deps.go",
+      "line": 76,
+      "note": "newHTTPClient clones http.DefaultTransport and nils Proxy; judge.NewHTTPClient (internal/fsm/judge/judge.go:94) sets Timeout and CheckRedirect on the client, so replacing Transport preserves both. Asserted at internal/fsm/cli/cli_test.go:621."
+    },
+    {
+      "path": "internal/fsm/kind/decision.go",
+      "line": 48,
+      "note": "AdjudicateThreshold resolves to the package constant at internal/fsm/kind/kind.go:46 (0.7), matching the doc comment and the existing adjudicate rule at kind.go:471."
+    },
+    {
+      "path": "internal/fsm/kind/decision_test.go",
+      "line": 15,
+      "note": "TestDecision covers all three kinds, unknown kind, null/empty/garbage verdicts, absent and null decision fields, and both sides of the adjudicate confidence threshold including missing confidence."
+    },
+    {
+      "path": "internal/fsm/kind/decision.go",
+      "line": 21,
+      "note": "Unmarshal failure and empty verdict both return the zero Decision, so a malformed verdict cannot yield a spurious Raw/Effective; no unsafe execution, no eval, no shell interpolation in the shard."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

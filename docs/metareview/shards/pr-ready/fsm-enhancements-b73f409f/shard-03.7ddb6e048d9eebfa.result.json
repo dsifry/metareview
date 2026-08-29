@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-03-review",
+  "kind": "shard",
+  "shardId": "shard-03",
+  "shardHash": "7ddb6e048d9eebfa",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/workflow/workflow_test.go",
+      "line": 473,
+      "note": "The new testdata/cmds-preimage.sha256 fixture is load-bearing: the test asserts ResolveCmds's sha, CmdsSHA256 of the resolved list, and sha256 of the WORK-substituted JSON fixture all equal the pinned value. go test -count=1 ./internal/fsm/workflow/ passes, so the added fixture is validated, not decorative."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 43,
+      "note": "Verified the spec's package claims against code rather than the diff: go test -cover reports 100.0% of statements for internal/fsm/cmdexec, judge, kind and mockai, so the coverage assertions in the new spec hold."
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 131,
+      "note": "anthropicEffortCapable in the implementation matches the spec's r4 effort-capable list byte for byte, so the model-table findings below are spec-and-code defects, not spec-only drift."
+    },
+    {
+      "path": ".gitattributes",
+      "line": 1,
+      "note": "The spec's r4/r5 claim that prompt fixtures and scenarios carry -text is true: .gitattributes is tracked and the branch adds both entries. Not a finding."
+    },
+    {
+      "path": "internal/setup/setup.go",
+      "line": 83,
+      "note": "setup.Check builds Prerequisites entirely from commandStatus PATH lookups; ToolStatus has only Present/Path/Action and no version field, so no git or Go version is ever detected or reported."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The Anthropic effort-capable model table is wrong for three of its nine ids. The spec lists claude-opus-4-5, claude-opus-4-6 and claude-sonnet-4-6 as taking output_config.effort for the full low|medium|high|xhigh vocabulary (spec 3.3 defines that vocabulary), and judge.go implements exactly that by writing body[\"output_config\"] = {\"effort\": r.Effort} unconditionally for any capable id. Per the Anthropic API, effort on Opus 4.5 is limited to low/medium/high, and xhigh only arrived with Opus 4.7, so it is not accepted on Opus 4.6 or Sonnet 4.6 either. A judge configured with any of those three ids at effort xhigh sends a body the API rejects with a 400. It fails closed (the 400 is mapped to ERR_JUDGE_EFFORT_UNSUPPORTED at judge.go:561) rather than misbehaving, which is why this is medium and not high, but the run is unrunnable in a configuration the table advertises as supported. Fix: make the table per-id effort sets, not one capable/legacy bit.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 158,
+          "note": "effort-capable list includes claude-opus-4-5, claude-opus-4-6 and claude-sonnet-4-6 with no per-id effort ceiling"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 299,
+          "note": "body[\"output_config\"] = map[string]any{\"effort\": r.Effort} is written for every capable id with no xhigh guard"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 131,
+          "note": "anthropicEffortCapable is a flat []string, so the model cannot carry a maximum supported effort"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Calibration mode is structurally impossible for two ids the same table declares supported. The spec pins calibration to thinking: {type: \"disabled\"} for every Anthropic model, and judge.go implements that as an unconditional branch taken before the family switch. claude-fable-5 and claude-mythos-5 have thinking always on and reject any explicit thinking configuration -- both {type: \"disabled\"} and {type: \"enabled\", budget_tokens: N} return 400 -- so every calibration request against those two ids fails at the provider. The effort-capable list at spec line 158 names both, so nothing in the product refuses the combination earlier: judge.Preflight checks routing, key presence and the effort table only, and would let a fable-5 calibration run reach the network before failing. Fix: refuse calibration for always-thinking ids in Preflight, or omit the thinking key for them.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 155,
+          "note": "calibration is specified as thinking: {type: \"disabled\"} for the Anthropic provider with no per-family exception"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 297,
+          "note": "case r.Calibration: body[\"thinking\"] = {\"type\": \"disabled\"} runs before the capable/legacy switch, so it applies to fable-5 and mythos-5"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "INSTALL.md's new prerequisite line documents a check that does not exist. It tells the reader that metareview fsm needs git >= 2.31 and that `metareview setup --check` reports it. setup.Check assembles Prerequisites from commandStatus PATH lookups only, and ToolStatus carries just Present/Path/Action -- there is no version probe for git anywhere in the repository (a repo-wide grep for 2.31 in Go sources returns nothing; the only hits are prose). commands/setup.md and skills/setup/SKILL.md likewise describe no version check. A user on git 2.28 gets a clean setup report and then a runtime failure in gate.Git.CommonDir, which is exactly the outcome the documented check is supposed to prevent. The spec's own ledger lists \"git >= 2.31 in INSTALL + /setup\" as a deliverable, so the INSTALL half shipped without the /setup half.",
+      "evidence": [
+        {
+          "path": "INSTALL.md",
+          "line": 137,
+          "note": "\"metareview fsm needs git >= 2.31 (metareview setup --check reports it)\" -- added by this diff"
+        },
+        {
+          "path": "internal/setup/setup.go",
+          "line": 83,
+          "note": "Git: commandStatus(lookup, \"git\", ...) is a bare PATH presence check; no version is executed or parsed"
+        },
+        {
+          "path": "internal/setup/setup.go",
+          "line": 40,
+          "note": "ToolStatus is {Present, Path, Action} -- the report has no field capable of carrying a version"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The Go floor is raised in INSTALL.md but left stale in two places the same branch touches. go.mod declares go 1.26, so a 1.22 toolchain cannot build the module at all, yet .claude-plugin/plugin.json's description -- a line this branch edits to append the FSM clause -- still reads \"source checkout mode requires Go 1.22+\", and setup.go's remediation string still says \"Install Go 1.22+ and ensure go is on PATH\". Both are user-facing.",
+      "evidence": [
+        {
+          "path": "INSTALL.md",
+          "line": 9,
+          "note": "raised to \"Go 1.26+ when running from a source checkout\""
+        },
+        {
+          "path": ".claude-plugin/plugin.json",
+          "line": 4,
+          "note": "description edited in this branch still advertises Go 1.22+ alongside the new FSM clause"
+        },
+        {
+          "path": "internal/setup/setup.go",
+          "line": 82,
+          "note": "Go: commandStatus(lookup, \"go\", \"Install Go 1.22+ and ensure go is on PATH.\")"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The spec's own cmdexec type listing is stale against the code it specifies. r5 added Spec.Ordinal and the prose two paragraphs down states `Spec.Ordinal = CmdCalls(name)`, but the struct literal in section 2 still shows Spec without an Ordinal field. A reader implementing from the type block would miss the field the mock ordinal contract depends on.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 60,
+          "note": "type Spec struct { Name; Argv; Dir; Stdin; Timeout; Env } -- Ordinal missing"
+        },
+        {
+          "path": "internal/fsm/cmdexec/cmdexec.go",
+          "line": 45,
+          "note": "Ordinal int // prior cmd_call count for Name (durable mock ordinal)"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 3
+}

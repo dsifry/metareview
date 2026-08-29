@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-02",
+  "kind": "shard",
+  "shardId": "shard-02",
+  "shardHash": "c318b1910c3d842e",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T12:00:00Z",
+  "evidence": [
+    {
+      "note": "Verified against the working tree, not the diff alone: go build ./... and go vet ./... both exit 0."
+    },
+    {
+      "note": "go test -cover on the three touched packages: internal/fsm/record 100.0%, internal/contextprofile 81.0% in-package (100% for every shards.go function under -coverpkg across ./internal/...), internal/learnsource 70.8%."
+    },
+    {
+      "note": "Rubric blocking checks cleared: no eval or other unsafe execution, no TODO/FIXME markers added, no truncated diff context, no duplicated inventoried service or code path, no unsafe untracked source files in the shard."
+    },
+    {
+      "path": "commands/fsm.md",
+      "line": 14,
+      "note": "Every documented reference resolves in the tree: skills/fsm/SKILL.md, docs/fsm/driving-a-workflow.md, and the subcommand list init|state|advance|record|gate|judge|converge|diff|export|workflows|--agent-prompt matches internal/fsm/cli/run.go:37-71."
+    },
+    {
+      "path": "commands/review-task-done.md",
+      "line": 6,
+      "note": "--shard-result (repeatable) and --cross-shard-result (single valued) exist and behave as documented: cmd/metareview/main.go:195-199 and appendCrossShardResult at cmd/metareview/main.go:602-607."
+    },
+    {
+      "path": "docs/tasks/pr-b-slices-1-2.md",
+      "line": 26,
+      "note": "Acceptance references resolve: tests/go/test-shardpack-coverage.sh and docs/tasks/pr-b-shard-ingestion.md both exist and the coverage script is wired into tests/run-all.sh."
+    },
+    {
+      "path": "docs/tasks/process-overrides.md",
+      "line": 27,
+      "note": "tests/go/test-override.sh and tests/go/test-override-coverage.sh exist and are both invoked by tests/run-all.sh."
+    },
+    {
+      "path": "internal/fsm/record/record.go",
+      "line": 225
+    },
+    {
+      "path": "internal/contextprofile/shards.go",
+      "line": 188
+    },
+    {
+      "path": "internal/learnsource/source.go",
+      "line": 34
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Torn-tail repair can silently discard a concurrently appended run row. appendRow takes an advisory flock at record.go:196, then reads the file through a SEPARATE os.ReadFile inside readRows at record.go:200 (readRows opens path(root) itself, it does not read the locked fd), and later truncates the locked fd to the offset captured by that read: f.Truncate(t.offset) at record.go:225. The file's own comment at record.go:182-188 establishes that runs.jsonl has a second writer, state.AppendJSONL, which takes no lock (internal/state/state.go:32 opens O_CREATE|O_WRONLY|O_APPEND with no flock) and is called by internal/artifactreview/review.go:149, internal/epicready/review.go:204, internal/taskdone/review.go:239 and internal/prready/review.go:262. If that writer appends a complete row between record.go:200 and record.go:225, the Truncate rolls the file back past it and the row is gone with no error and no warning. The comment reasons about exactly this hazard for the write POSITION and fixes it with O_APPEND, then the repair path reintroduces the same class of lost write. Cheap fix: fstat the locked fd immediately before the truncate and skip the repair (or re-read from the locked fd) when the size no longer equals t.offset + len(t.fragment). Note this defect is invisible to the package's 100% statement coverage: record_test.go covers the torn-tail branch but never a concurrent append during it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 225,
+          "note": "f.Truncate(t.offset) using an offset read out-of-band at line 200"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 182,
+          "note": "the comment that documents the unlocked second writer this truncate then races"
+        },
+        {
+          "path": "internal/state/state.go",
+          "line": 32,
+          "note": "state.AppendJSONL opens runs.jsonl O_APPEND and never takes the flock"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 239,
+          "note": "a live caller appending to the same .metareview/runs.jsonl"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The terminal recorder can block forever and is not cancellable. record.go:196 takes a blocking syscall.Flock(LOCK_EX) with no LOCK_NB and no deadline, while the sibling JSONL writer in the same subsystem uses LOCK_EX|LOCK_NB with explicit EWOULDBLOCK handling at internal/fsm/run/store_jsonl.go:351-353. Terminal checks ctx.Err() once at record.go:99 and then hands off to appendRow, so a context cancellation or deadline cannot interrupt the wait. A stale lock holder wedges every terminal FSM run with no diagnostic. Aligning on the store_jsonl.go non-blocking-plus-retry shape would also make the failure legible as an errs.E code rather than a hang.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 196,
+          "note": "blocking LOCK_EX with no LOCK_NB and no timeout"
+        },
+        {
+          "path": "internal/fsm/run/store_jsonl.go",
+          "line": 351,
+          "note": "the sibling writer's non-blocking LOCK_EX|LOCK_NB with EWOULDBLOCK retry"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 99,
+          "note": "the only ctx.Err() check, before the blocking call"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead parameters and a dead exported API left behind by the v4 rewrite. PlanShards still takes profile Profile at shards.go:188 but its body (lines 189-252) never reads it, so the signature advertises a dependency on the profile (and on its RiskLevel) that no longer exists; every caller must still construct and pass one (internal/taskdone/review.go:104, internal/prready/review.go:106). PlanSourceHash at shards.go:86 discards its Profile with _ and is exported with no non-test caller anywhere in the repo, its only reference being internal/contextprofile/plan_test.go:87 asserting that clean and dirty profiles hash alike, which is trivially true given the parameter is ignored. Drop the parameter, or the function, rather than leaving a public seam that only its own test uses.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 188,
+          "note": "PlanShards(profile Profile, ...) - profile is never referenced in the body"
+        },
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 86,
+          "note": "PlanSourceHash(_ Profile, files) - exported, only referenced from plan_test.go:87"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "PlanShards fails open on an oversize branch diff with no signal. At shards.go:193-194 a total above maxBranchDiffBytes (16 MiB, internal/contextprofile/profile.go:27) returns an empty ShardPlan and a nil error, which is indistinguishable at the call site from 'not sharded'. Meanwhile riskReasons at internal/contextprofile/profile.go:143 raises ReasonDiffOversize for the same condition, so the run is context-risk, and both gates only write prompt packs when len(shardPlan.Shards) > 0 (internal/taskdone/review.go:153, internal/prready/review.go around line 106). The result is a context-risk blocker with no packs written and no message explaining that sharding was skipped because the diff is oversize, leaving the driver with no next step. The same silent-empty return also covers len(branchFiles) == 0 at shards.go:190-191, so the two very different causes are indistinguishable. Returning a reason (or letting the context markdown say why) would make the dead end diagnosable.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 193,
+          "note": "oversize branch diff returns ShardPlan{}, nil with no reason"
+        },
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 143,
+          "note": "the same threshold raises ReasonDiffOversize, so the run is context-risk"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 153,
+          "note": "packs are written only when len(shardPlan.Shards) > 0"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Unreachable defensive branch in needBuckets. shards.go:99-101 defaults budget when budget <= 0, but the sole call site at shards.go:201 passes a budget already normalized three lines earlier at shards.go:197-200, so the guard can never fire. The total <= 0 guard at shards.go:102-104 is reachable only when every BranchFile has Bytes == 0 and is untested. Coverage confirms both: go tool cover reports needBuckets at 60.0% of statements while every other function in shards.go is at 100% under -coverpkg. Either delete the duplicated default or drop the normalization at the call site so there is one owner of the rule.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 99,
+          "note": "budget <= 0 default that the only caller has already applied"
+        },
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 197,
+          "note": "PlanShards normalizes budget before calling needBuckets at line 201"
+        },
+        {
+          "note": "go tool cover -func with -coverpkg=./internal/contextprofile over ./internal/... reports needBuckets 60.0%, the only sub-100% function in shards.go apart from two sort comparators."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new docs/metareview/fsm exclude is untested, and the exclusion set is narrower than its own stated rationale. source.go:34-35 adds docs/metareview/fsm and docs/metareview/fsm/** alongside the shard-result excludes, but the only test for this behaviour, TestCollectExcludesShardResults at internal/learnsource/source_test.go:157-186, writes and asserts on a shards path only (source_test.go:167 and 180); nothing exercises the fsm half, so a typo or a later regression in that pattern would pass. Separately, the comment's rationale - 'audit records of the review, not source under review' - applies equally to docs/metareview/reviews/ and docs/metareview/FINDINGS.md, which remain in the learning diff even though reviewlog.Discover already supplies those logs as structured summaries (source.go:25), so their raw diff is both audit noise and duplicated context. Every other gate excludes the whole tree - {\".metareview\", \".metareview/**\", \"docs/metareview\", \"docs/metareview/**\"} at internal/taskdone/review.go:439-441, internal/prready/review.go:828-830 and internal/epicready/review.go:446-448 - so post-merge learning is now the one consumer with a hand-maintained partial list that must be extended for every new docs/metareview subdirectory.",
+      "evidence": [
+        {
+          "path": "internal/learnsource/source.go",
+          "line": 34,
+          "note": "docs/metareview/fsm excludes added here"
+        },
+        {
+          "path": "internal/learnsource/source_test.go",
+          "line": 180,
+          "note": "the only assertion checks docs/metareview/shards/, never the fsm path"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 439,
+          "note": "generatedMetareviewPathExcludes excludes all of docs/metareview/**, the broader rule this partial list diverges from"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "record.Row is marshalled by an encoder whose error-swallowing is justified for a different package's types. record.go:213 calls run.MarshalCanonical(row); that helper discards the encoder error at internal/fsm/run/types.go:349 with the comment 'the types in this package never fail to encode'. Row is declared in package record, outside that guarantee, so the premise is asserted about a type its author cannot see. Today Row is safe - every field is string, int, bool or map[string]string - but a future field carrying a func, a chan or a custom MarshalJSON would write an empty line into runs.jsonl with no error surfaced, in the one code path whose job is durable audit recording. Either check the error at the call site or restate the invariant on Row.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 213,
+          "note": "run.MarshalCanonical(row) on a type outside the run package"
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 349,
+          "note": "_ = enc.Encode(v) justified by 'the types in this package never fail to encode'"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

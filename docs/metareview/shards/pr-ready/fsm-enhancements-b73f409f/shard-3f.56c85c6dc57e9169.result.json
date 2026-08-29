@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3f.56c85c6dc57e9169",
+  "kind": "shard",
+  "shardId": "shard-3f",
+  "shardHash": "56c85c6dc57e9169",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 2,
+  "evidence": [
+    {
+      "path": "internal/setup/gitversion_test.go",
+      "line": 25,
+      "note": "Mutation test: with `go test -overlay` I replaced internal/setup/setup.go with a copy whose entire parse-failure guard (`v := parseGitVersion(out); if v == \"\" { status.Action = \"Could not parse the git version...\"; return status }`, setup.go:209-213) was reduced to the bare assignment. `go test ./internal/setup/` still passes (ok, 3.611s), including the subtest literally named \"unparseable\". The guard is dead under this suite."
+    },
+    {
+      "path": "internal/setup/setup.go",
+      "line": 210,
+      "note": "Coverage confirms the same thing independently: `go test -run TestGitStatus -covermode=count` leaves setup.go:199.3,199.36 and 200.4,202.1 (the v==\"\" arm) and 231.2,231.11 (parseGitVersion's `return \"\"`) at 0 hits, while every other block in gitStatus/parseGitVersion/atLeastVersion is hit."
+    },
+    {
+      "path": "internal/setup/gitversion_test.go",
+      "line": 47,
+      "note": "Reproduced parseGitVersion standalone in a scratchpad program: \"not a version banner\" -> \"banner\" (the scan matches the literal word `version` anywhere in the line and takes the next field), \"totally bogus\" -> \"\". So the fixture reaches atLeastVersion(\"banner\", \"2.31\"), which returns false on the Atoi error, and the Action assertion passes off the `Upgrade git:` message rather than the `Could not parse` one."
+    },
+    {
+      "path": "internal/setup/setup.go",
+      "line": 46,
+      "note": "The INSTALL.md promise the test's header comment cites does hold end to end: INSTALL.md:137 states `metareview fsm` needs git >= 2.31 and that `metareview setup --check` reports it, and running the built binary prints \"version\": \"2.50.1\", \"versionOk\": true under prerequisites.git. MinGitVersion is 2.31 and the `exactly the minimum` case (2.31.0) is genuinely load-bearing."
+    },
+    {
+      "path": "internal/fsm/cli/prompt.go",
+      "line": 3,
+      "note": "The doc comment's claim is true, verified empirically: built the binary into the scratchpad, `metareview fsm --agent-prompt` is byte-identical to testdata/fsm/agent-prompt.golden (cmp clean, 4494 bytes), and all 28 non-empty lines of tests/go/agent-prompt-anchors.txt grep-match the emitted text (test-fsm.sh:57-66 does exactly this and requires >= 20 anchors)."
+    },
+    {
+      "path": "internal/fsm/cli/prompt.go",
+      "line": 11,
+      "note": "Exit-code claims check out against internal/fsm/cli/envelope.go: exit2 (envelope.go:52-65) is documented and implemented as \"refusals before any mutation whatever the phase\" and contains ERR_CMDS_NOT_ALLOWED, ERR_WORKFLOW_CHANGED and ERR_RUN_ESCALATED, so \"exit 2: nothing was recorded ... unless the code is a consent or escalation code\" is accurate; phaseNone (run-less commands) also maps to 2."
+    },
+    {
+      "path": "internal/fsm/cli/prompt.go",
+      "line": 46,
+      "note": "\"fsm judge without --run is unaudited\" is accurate: run.go:770-793 only wraps the judge call in o.m.RecordLLMCall when --run was given; without it the CLI calls j.Call directly and persists nothing."
+    },
+    {
+      "path": "internal/fsm/cmdexec/sha_test.go",
+      "line": 8,
+      "note": "Test-only helper, used at cmdexec_test.go:239 and :293 as the oracle for CmdCallData.InputHash. It recomputes the same two stdlib lines as cmdexec.go:138-141 (sha256.Sum256 + hex), which for a fully specified hash is a legitimate oracle rather than a mirror of a decision; no unsafe execution, no new production surface. Package builds and `go test ./internal/fsm/cmdexec/` passes."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md",
+      "line": 108,
+      "note": "Probed the spec's hard identifiers against the built code rather than reading around them: mrv-file-v4 (gitcontext/branchfiles.go:141), mrv-source-v4 / mrv-bucket-v4 / mrv-chunk-v4 / mrv-shard-v4 / mrv-plan-v4 (contextprofile/shards.go:77,126,167,178,246), DefaultMaxBytesPerShard = 60000 (shards.go:15), maxBucketBits = 12 (shards.go:18), maxBranchDiffBytes = 16<<20 as a var (profile.go:27). All match."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md",
+      "line": 210,
+      "note": "Struct and format claims also match: Chunk{Path,Part,Parts,ByteStart,ByteEnd,Hash} and Shard{ID,Chunks,Bytes,Hash} (contextprofile/shards.go:27-41), BranchFile{Path,Bytes,Hash,Diff} (gitcontext/branchfiles.go:17-22), shardIDPattern ^shard-[0-9a-f]{1,3}(-[0-9]+)?$ and resultNamePattern (reviewmanifest/manifest.go:60-62), MaxResultBytes = 256*1024 (manifest.go:30), TargetSlug = Slugify + sha256(scope||target)[:8] (shardpack/shardpack.go:84-86), Deps' eight fields with no clock (shardpack.go:26-35), and the 1 MiB scanner buffers in state/runchain/findings/reviewlog."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md",
+      "line": 294,
+      "note": "Ran the gate the spec specifies: `bash tests/go/test-shardpack-coverage.sh` reports \"shardpack coverage: 100% (178 blocks)\", and its zero-hit test is real (awk 'NR>1 && $3==0' over the profile, $3 being the hit count), not a vacuous grep. tests/run-all.sh:20-21 registers it next to test-sharded-review.sh as §7 says."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md",
+      "line": 258,
+      "note": "The live plan for this very run corroborates the mechanism: .metareview/shards/pr-ready/fsm-enhancements-b73f409f/6bdab66d3d8430ba/plan.json carries exactly the §4.3 key set (planHash, scope, target, targetSlug, resultsDir, base, head, budget, shards[.chunks]), budget 60000, 70 shards totalling 1,932,436 bytes with max 59,956 (none over budget) and sub-shard ids of the -2 form, i.e. ~2.1x need = ceil(1932436/60000) = 33."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "gitversion_test.go's `unparseable` case does not exercise the unparseable branch. parseGitVersion scans for the literal word `version` anywhere in the output, so \"not a version banner\" yields \"banner\", not \"\": the call falls through to atLeastVersion(\"banner\",\"2.31\") -> false, and the assertion passes off the `Upgrade git: ... found banner.` message. Deleting setup.go's whole `if v == \"\"` guard leaves the suite green (verified with go test -overlay), and coverage shows that arm plus parseGitVersion's `return \"\"` at 0 hits. So the one branch the case is named for is untested, and the behaviour nobody looked at is that a garbage banner is reported to the operator as \"version\": \"banner\" instead of the intended `Could not parse the git version` action. Fix: use a fixture with no `version` token (e.g. \"totally bogus\") for this case, or add one, and assert the message, not just the substring \"2.31\".",
+      "evidence": [
+        {
+          "path": "internal/setup/gitversion_test.go",
+          "line": 25,
+          "note": "the case row: {\"unparseable\", \"not a version banner\\n\", nil, false, \"2.31\"}"
+        },
+        {
+          "path": "internal/setup/setup.go",
+          "line": 210,
+          "note": "the guard that stays at 0 hits and can be deleted without failing a test"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The spec contradicts its own review record. §14's r7 row reads \"Pack count understated (Feasibility) | §7: measured 46, ~2 x need\", and §14's prose says the Feasibility lens reproduced §4.2 on the PR #13 diff at \"46 shards, max exactly 60,000 bytes\". §7 still carries the pre-fix r6 figures: \"43 shard packs plus one cross-shard pack ... max 59,999, mean 31,921\". The internal arithmetic shows which is stale -- 1,372,619 / 43 = 31,921 (the printed mean), while 1,372,619 / 46 = 29,840 -- so §7 was never updated and the r7 row asserts a change the document does not contain. A reader auditing which review findings were actually closed is misled, and the cost figure a future implementer would budget from (~1.9x need vs ~2x need, max 59,999 vs a shard exactly at the 60,000 budget) is the wrong one.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md",
+          "line": 258,
+          "note": "§7: \"43 shard packs plus one cross-shard pack ... max 59,999, mean 31,921\""
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md",
+          "line": 435,
+          "note": "§14 r7 row claiming §7 now reads 46, and §14:419-420 claiming 46 shards / max exactly 60,000"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two usage lines in AgentPrompt show a flag as freely optional when the CLI couples it. `fsm judge ... [--context <diff-file>]` is bracketed, but run.go:719-721 makes --context REQUIRED for adjudicate/still-present and REFUSED for match (usage, exit 2) -- an agent following the bracket gets ERR_USAGE on two of the three kinds. `fsm export --run <id> [--out <dir>] [--include-vars]` shows the two independently, but --include-vars requires an explicit --out (ERR_EXPORT_DEST, per docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md and export.Export). Both are one-word fixes in the prompt text; note the golden and the anchors file move with it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/prompt.go",
+          "line": 30,
+          "note": "judge usage line brackets --context; run.go:720 refuses/requires it by kind"
+        },
+        {
+          "path": "internal/fsm/cli/prompt.go",
+          "line": 33,
+          "note": "export usage line brackets --include-vars independently of --out"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "AgentPrompt's judge-retarget paragraph is unqualified, but the override is applied only at `init`. c.applyJudgeOverrideFor is called from exactly one site, run.go:307 inside init(); fork() builds ForkOptions{Vars: p.vars} at run.go:572 with no override applied, and the parser accepts --judge-model/--judge-effort on every subcommand (run.go:113), so `fsm advance --from adjudicate --judge-model X` (or the same via METAREVIEW_JUDGE_MODEL) is silently a no-op and the child re-judges with the parent's JUDGE var. The 0.9.0 CLI spec's own recipe for re-judging is `advance --from adjudicate --var JUDGE=...`, which is the form that works. Recommend scoping the sentence to init, or naming --var JUDGE as the fork-time form. (Also minor: \"gate ... (unaudited with --input)\" implies the run-backed form is audited; `fsm gate` appends no audit event either way -- gate events are written by advance, not by the subcommand.)",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/prompt.go",
+          "line": 41,
+          "note": "\"--judge-model / --judge-effort (or METAREVIEW_JUDGE_MODEL / ...) retarget the judge ... folded into the run's vars\", stated without scoping to init"
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 572,
+          "note": "fork() passes p.vars straight through; no applyJudgeOverride call on this path"
+        }
+      ]
+    }
+  ]
+}

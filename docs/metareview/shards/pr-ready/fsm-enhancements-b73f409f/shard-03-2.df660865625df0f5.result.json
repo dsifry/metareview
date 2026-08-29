@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-03-2.df660865625df0f5",
+  "kind": "shard",
+  "shardId": "shard-03-2",
+  "shardHash": "df660865625df0f5",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 190,
+      "note": "Write stages into MkdirTemp and uses rename-aside then rename-in then remove-aside, so an existing pack set is never destroyed before its replacement lands; every post-staging failure path routes through fail() which removes the staging dir."
+    },
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 553,
+      "note": "shardPack validates every chunk against the measured diff (missing path, ByteStart > ByteEnd, ByteEnd beyond diff length) before slicing, so no pack can silently render an empty diff block. Chunk bounds originate in internal/contextprofile/shards.go:141,159 and are non-negative by construction."
+    },
+    {
+      "path": "internal/tasksource/tasksource.go",
+      "line": 20,
+      "note": "Package-level seams absPath/relPath/readFile are only mutated in tests via a deferred swap helper (internal/tasksource/coverage_test.go:116,158,180) and no test in that package calls t.Parallel, so the globals cannot race."
+    },
+    {
+      "note": "go test ./internal/shardpack/ ./internal/tasksource/ -cover passes at 100.0% of statements for both packages; no TODO/FIXME markers, no eval-style dynamic execution, and both chunks are part 1/1 (no truncated context)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Discover swallows every ReadDir error on the results directory (internal/shardpack/shardpack.go:298: results are collected only under `if err == nil`), unlike Prune (line 249) and GC (line 374), which both distinguish os.IsNotExist from a real failure. An unreadable-but-present results directory is therefore reported as 'no shard results' rather than as an error. The behaviour is fail-closed (the gate then blocks on missing shard coverage), so this is a diagnosability gap, not a correctness hole.",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 298,
+          "note": "entries, err := w.deps.ReadDir(dir) followed by `if err == nil` with no else branch"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Prune is the only Writer method that does not resolve root through Deps.EvalSymlinks: it computes its directory from the raw root (internal/shardpack/shardpack.go:248), while Write, Discover and GC all resolve first. On a real filesystem both spellings designate the same directory so no pack is missed today, but the asymmetry means an injected Deps whose EvalSymlinks rewrites root would leave Prune reading a different tree than Write wrote to.",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 248,
+          "note": "dir := filepath.Dir(Dir(root, scope, targetID, keepPlanHash)) with no EvalSymlinks, versus Write/Discover/GC which resolve root first"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Rel trims at the first occurrence of \".metareview/shards/\" (internal/shardpack/shardpack.go:103). A repository whose own root path contains that substring would have its pack directory rendered from the wrong offset in the committed review log. Anchoring the match at the repository root, or using filepath.Rel against it, would remove the ambiguity.",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 103,
+          "note": "strings.Index(filepath.ToSlash(dir), relPrefix) takes the first match rather than the root-anchored one"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

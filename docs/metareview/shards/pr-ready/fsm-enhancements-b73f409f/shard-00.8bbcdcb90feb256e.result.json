@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-00.8bbcdcb90feb256e",
+  "kind": "shard",
+  "shardId": "shard-00",
+  "shardHash": "8bbcdcb90feb256e",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T21:05:00Z",
+  "evidence": [
+    {
+      "path": "internal/findings/findings.go",
+      "line": 220,
+      "note": "Verified the migration cannot supersede current rows: legacyContextRiskPrefixes all end in ':', while the post-0.8.3 fingerprints are 'architecture:context-risk' (internal/reviewers/taskdone.go:110), 'architecture:context-risk-covered' (taskdone.go:123) and 'epic:context-risk' (internal/reviewers/epicready.go:64), none of which carry the trailing colon, so no live blocker is silently aliased away."
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 144,
+      "note": "The activeExisting predicate change from status==\"open\" to status!=\"fixed\" is deliberate and covered: TestReconcileKeepsOverrideWhenTheFindingRecurs (internal/findings/override_test.go:158) asserts a granted override survives a later reconcile of the same fingerprint."
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 478,
+      "note": "scanner.Buffer max is maxJSONLLineBytes+2 and readJSONL returns scanner.Err(), so an oversized line surfaces as bufio.ErrTooLong rather than being silently truncated into a partial record."
+    },
+    {
+      "path": "workflows/sdlc-loop.yaml",
+      "line": 1,
+      "note": "The new embedded workflow is parsed and asserted by internal/fsm/workflow/workflow_test.go:83-97, internal/fsm/machine/handoffs_test.go:114 and workflows/embed_test.go; gate atoms such as no_fixation_progress resolve in internal/fsm/converge/converge.go:129."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.sh",
+      "line": 1,
+      "note": "Ran shellcheck -x on the new script (CI shellchecks every *.sh via .github/workflows/test.yml:53) - exit 0, so the new .shellcheckrc SC2016-only disable does not mask a defect here."
+    },
+    {
+      "note": "Validation run locally: gofmt -l on the changed Go files is empty, go vet ./cmd/... ./internal/findings/... ./workflows/... is clean, and go test ./internal/findings/... ./workflows/... passes. Behavioral coverage for the new CLI surface exists in tests/go/test-override.sh, tests/go/test-override-coverage.sh and tests/go/test-sharded-review.sh (the latter asserts exit 2 for a missing --shard-result at line 201 and for a repeated --cross-shard-result at line 211). No eval, no TODO/FIXME markers, no truncated diff context, and no duplicated inventoried code path in this shard."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "handleOverride's flag loop accepts a flag with no value silently: 'metareview override request <id> --reason' leaves reason empty, and 'override request <id> --reason --by dave' takes \"--by\" as the reason text. Both are caught downstream only by the minOverrideReason length check in internal/findings/override.go, which reports a length problem rather than the real 'you forgot the value' mistake. The list subcommand already sets the better precedent by rejecting any unknown token outright; the list subcommand rejects any unknown token outright.",
+      "evidence": [
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 541,
+          "note": "case \"--reason\": value consumed only when i+1 < len(args), with no error otherwise"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "mustResultFile reports 'does not exist' for every os.Stat failure, so a permission-denied or symlink-loop path is diagnosed as a missing file. Since this path exits 2 with nothing written, the message is the operator's only signal.",
+      "evidence": [
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 622,
+          "note": "reject(\"does not exist\") is used for any non-nil os.Stat error"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "defaultActor swallows the git config failure and returns an empty string, which becomes 'override request needs an actor (--by)' from internal/findings/override.go:60. Correct refusal, but the operator is never told that the cause was an unreadable git identity and that --by is the remedy.",
+      "evidence": [
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 592,
+          "note": "exec git config user.email; err returns \"\" with no diagnostic"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

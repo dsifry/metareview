@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-16.f4ab4300f35f3337",
+  "kind": "shard",
+  "shardId": "shard-16",
+  "shardHash": "f4ab4300f35f3337",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/run/store_jsonl.go", "line": 1, "note": "Read the whole file on disk against internal/fsm/run/store.go (splitLines, prepareCreate, prepareAppend, summarize), canonical.go (LineHash) and types.go (TornTail, TornFile, Options.maxEvents). Every doc comment I could check is accurate: checkComponents really does Lstat-and-reject symlinks before Create/Mkdir so the O_NOFOLLOW-on-final-component gap is closed by the prior validate(); removeNeverCreated really does unlink `lock` last; writeLine really does return the first of Write/Sync; the long io.ReadAll comment in readRaw correctly describes the torn-tail/RepairTail hazard it fixes."},
+    {"path": "internal/fsm/run/store_jsonl.go", "line": 466, "note": "TornFiles' 'with their sha256' claim verified: LineHash (canonical.go:97) is hex(sha256(bytes)), applied to the whole sidecar, so the name is misleading but the value is right."},
+    {"note": "go test -count=1 ./... passes on the frozen tree. Per-package coverage: internal/fsm/run 100.0%, internal/reviewlog 87.6%, internal/contextprofile 81.0%, internal/state 19.0% (state is exercised from other packages)."},
+    {"path": "internal/contextprofile/shards.go", "line": 176, "note": "Mutation-tested PlanShards against plan_test.go by copying the tree to a scratch dir. Deleting the over-budget flush (`if bytes+size > budget { flush() }`) fails TestShardNeverExceedsBudget; replacing the hard cut in chunksOf with a next-newline extension fails TestChunkNeverExceedsBudget and TestOverLongLineHardCut; making the sub-shard index global instead of per-bucket fails TestOverBudgetBucketSplitsLocally. Those four tests are real."},
+    {"path": "internal/reviewlog/reviewlog.go", "line": 17, "note": "Verified the bufio rationale comment empirically with a standalone program: a token of exactly 1<<20 bytes is rejected at max=1<<20 (with LF, with CRLF, and even at EOF with no terminator), accepted at max+1 with LF and at max+2 with CRLF. The comment is correct as written."},
+    {"path": "internal/contextprofile/plan_test.go", "line": 82, "note": "fileHashOf's 'mrv-file-v4' domain tag matches the production producer at internal/gitcontext/branchfiles.go:141, and the test-local `fields` helper matches HashFields at branchfiles.go:148, so TestSourceDiffHashFromDocumentedPreimage is a genuine independent pin of the len:bytes\\0 preimage."},
+    {"path": "internal/contextprofile/plan_test.go", "line": 166, "note": "Recomputed the pinned bucketBits table by hand against shards.go:104 (1->0, 2->1, 3->2, 4->2, 5->3, 23->5, 4096->12, 100000->12). All eight rows are correct, including the two that exit through the maxBucketBits cap."},
+    {"path": ".gitattributes", "line": 1, "note": "Both -text globs point at directories that exist and hold byte-exact fixtures (internal/fsm/judge/testdata/prompts/*.golden, testdata/fsm/{scenarios,workflows})."}
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The behaviour change in isOpenBlocker is entirely untested, and its new comment asserts a property nothing verifies. reviewlog.go:306-308 replaces `record.Status != \"open\"` with `!findings.Blocks(record.Status)` and comments 'A pending override still blocks; a granted one does not.' I copied the tree to a scratch directory, reverted that single line back to `record.Status != \"open\"`, and `go test -count=1 ./...` passed across the whole repository. So the new half of the claim (override-pending keeps a review-log summary blocking) has zero coverage anywhere, in the one component that renders HasUnresolvedBlockers for /status and the pr-ready gate. The other half of the comment ('a granted one does not') describes behaviour the old predicate already had, since \"overridden\" != \"open\" was false before too, so the comment reads as if both clauses were new when only one is. internal/reviewlog has no test that constructs a findings.jsonl row with status override-pending or overridden at all (grep for override-pending/StatusOverridePending in internal/reviewlog returns only the production line). Add a reviewlog test with an override-pending high/blocking row and a granted one, asserting the summary blocks in the first case and not the second.",
+      "evidence": [
+        {"path": "internal/reviewlog/reviewlog.go", "line": 306, "note": "the new comment claiming pending-blocks / granted-does-not"},
+        {"path": "internal/reviewlog/reviewlog.go", "line": 307, "note": "if !findings.Blocks(record.Status) — mutating this back to record.Status != \"open\" breaks no test in the repo"},
+        {"path": "internal/findings/override.go", "line": 53, "note": "Blocks returns true for \"open\" and StatusOverridePending only, so \"overridden\" was already non-blocking under the old predicate"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Two of the four copies of the 1 MiB JSONL line fix ship with no test, and the diff's own comment overstates what is covered. The identical fix lands in four readers in this PR; internal/findings and internal/runchain each got a dedicated regression test that builds a line of exactly maxJSONLLineBytes and asserts it is readable (findings_test.go:506-539, runchain_test.go:254-258), but internal/reviewlog.readFindings and internal/state.ReadJSONL got none. I deleted BOTH `scanner.Buffer(...)` calls in the scratch copy and `go test -count=1 ./...` passed. state.ReadJSONL is the reader for .metareview/runs.jsonl — the file six call sites write through state.AppendJSONL — and reviewlog.readFindings is the reader for .metareview/findings.jsonl, so these are exactly the two paths where a >64 KiB row silently turns into a bufio ErrTooLong that ReadJSONL/readFindings surface as a plain error. Mirror the existing exact-length fixture into internal/state and internal/reviewlog.",
+      "evidence": [
+        {"path": "internal/reviewlog/reviewlog.go", "line": 290, "note": "scanner.Buffer added to readFindings; removable with no test failure"},
+        {"path": "internal/state/state.go", "line": 66, "note": "scanner.Buffer added to ReadJSONL; removable with no test failure"},
+        {"path": "internal/findings/findings_test.go", "line": 520, "note": "the exact-length regression test that internal/findings and internal/runchain got and these two did not"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestLargeDiffKeepsTotal's comment claims coverage of the branch+local byte accounting, but the fixture bypasses it, and that new production block is untested anywhere. plan_test.go:299 says 'LARGE_DIFF still measures branch + local bytes, as it does today', yet the fixture supplies no BranchFiles and sets ctx.FilteredDiffBytes = len(Diff)+len(StagedDiff) by hand. FromGit's recomputation at profile.go:83-90 is guarded by `if branch := branchDiffBytes(git); branch > 0`, which is 0 here, so the block never executes; the test only asserts 'FilteredDiffBytes > 120000 implies LARGE_DIFF' over a value it fed in itself. That block is new in this PR (it is a + line in the diff of internal/contextprofile/profile.go), and I confirmed by deleting all eight lines of it in a scratch copy that `go test -count=1 ./...` still passes repo-wide — including the `rawDiffBytes = git.BranchRawDiffBytes + local` sub-branch. So the one piece of new logic that actually implements 'branch + local, taken directly rather than by subtraction (which would double-count)' has no test, and the test that names it gives false assurance. Give the fixture BranchFiles plus StagedDiff/WorkingTreeDiff/UntrackedExcerpts and assert the resulting FilteredDiffBytes and RawDiffBytes values.",
+      "evidence": [
+        {"path": "internal/contextprofile/plan_test.go", "line": 299, "note": "comment claims branch+local measurement is what is under test"},
+        {"path": "internal/contextprofile/plan_test.go", "line": 301, "note": "ctx.FilteredDiffBytes set by hand; ctx.BranchFiles is nil so branchDiffBytes(git) == 0"},
+        {"path": "internal/contextprofile/profile.go", "line": 83, "note": "the new branch+local block, deletable with no test failure anywhere in the repo"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestNewlinePathCannotCollide cannot fail, and its premise is factually wrong. The comment says 'Two files whose naive concatenation would be identical' and the failure message says 'length-prefixed fields must make these preimages distinct', but SourceDiffHash's preimage is (path, hash) pairs where every hash is a fixed 16 hex characters, so path/field boundaries are never ambiguous there and no naive-concat collision is possible regardless of length prefixing. I verified this two ways: a standalone reimplementation with all length prefixes stripped still produces different digests for the two inputs (bd7e57c36a90f0eb vs c6e0816c67086d80), and stripping the length prefixes out of gitcontext.HashFields itself in a scratch copy leaves TestNewlinePathCannotCollide PASSING while TestSourceDiffHashFromDocumentedPreimage correctly fails. The test is also structurally incapable of exercising the production file-hash encoding: bf() feeds hashes computed by the test's own fileHashOf in as data. The property is genuinely pinned by TestSourceDiffHashFromDocumentedPreimage, so this is redundancy plus a misleading comment rather than a coverage hole; the encoding that actually needs the length prefix is the file-level (path, diff) preimage, where fileHash(\"ab\",\"c\") and fileHash(\"a\",\"bc\") collide without it.",
+      "evidence": [
+        {"path": "internal/contextprofile/plan_test.go", "line": 93, "note": "'Two files whose naive concatenation would be identical' — they are not, under SourceDiffHash's fixed-width-hash preimage"},
+        {"path": "internal/contextprofile/plan_test.go", "line": 97, "note": "the assertion still passes with length prefixing removed from gitcontext.HashFields"},
+        {"path": "internal/gitcontext/branchfiles.go", "line": 148, "note": "HashFields — the encoding the test claims to be defending"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestSourceDiffHashIgnoresLocalChanges is a tautology against the current signature. PlanSourceHash is declared `func PlanSourceHash(_ Profile, files []gitcontext.BranchFile) string` (shards.go:82) — the Profile parameter is discarded at compile time — and the test calls it twice with the same `files` slice, so `PlanSourceHash(clean, files) != PlanSourceHash(dirty, files)` is a compile-time identity that no implementation of SourceDiffHash could make fail. The eight lines building the clean/dirty FileProfile fixture with SourceWorktree and SourceUntracked entries are dead weight that make the test read as if it were checking a filtering rule. Either assert the property where it is actually decidable (that the branch-files slice handed to PlanShards excludes local sources) or drop the fixture and keep the guarantee as the `_ Profile` signature plus a comment.",
+      "evidence": [
+        {"path": "internal/contextprofile/plan_test.go", "line": 79, "note": "TestSourceDiffHashIgnoresLocalChanges builds clean/dirty profiles"},
+        {"path": "internal/contextprofile/plan_test.go", "line": 87, "note": "both sides pass the identical `files` slice"},
+        {"path": "internal/contextprofile/shards.go", "line": 82, "note": "PlanSourceHash(_ Profile, files) — the profile argument is unused"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestAppendJSONLKeepsTheWriteErrorWhenCloseAlsoFails does not exercise a write error. The name and the comment ('Close must not overwrite a more specific earlier failure') describe the Write-fails-and-Close-also-fails path, but the fixture passes `make(chan int)`, which fails inside json.Marshal at state.go:44 and returns before file.Write at state.go:48 is ever reached. What the test proves is that a marshal error survives the deferred Close, which is worth having but is not what the name says; the `_, err = file.Write(...)` error branch has no coverage. Rename it to match the fixture, or add a second seam (or an already-closed descriptor) so the actual Write failure is what races the Close failure.",
+      "evidence": [
+        {"path": "internal/state/state_test.go", "line": 29, "note": "test name claims the write error is what is preserved"},
+        {"path": "internal/state/state_test.go", "line": 39, "note": "AppendJSONL(path, make(chan int)) — a marshal error, not a write error"},
+        {"path": "internal/state/state.go", "line": 44, "note": "json.Marshal returns before file.Write is reached"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "maxJSONLLineBytes is copied verbatim into four packages in this PR, with the same four-line rationale comment and the same `scanner.Buffer(make([]byte, 0, 64*1024), maxJSONLLineBytes+2)` incantation: internal/state:17, internal/findings:15, internal/reviewlog:17, internal/runchain:13. None existed at the base commit. These packages read files each other write (state.AppendJSONL is the writer for .metareview/runs.jsonl and findings.jsonl; the other three are readers), so the value is a cross-package interop invariant with no single definition and no test pinning the four equal — if one is ever lowered, the only symptom is 'bufio.Scanner: token too long'. The codebase already states the opposite discipline for exactly this kind of shared constant: gitcontext.HashFields is documented as 'the single definition of that encoding' precisely because a drifted second copy would be silent. Related asymmetry worth a line of thought while fixing: the constant is described as 'the JSONL line cap' but nothing enforces it on the write side, so state.AppendJSONL will happily write a row longer than 1 MiB that no reader can then parse, taking the whole file with it.",
+      "evidence": [
+        {"path": "internal/reviewlog/reviewlog.go", "line": 21, "note": "third copy of the constant, added by this PR"},
+        {"path": "internal/state/state.go", "line": 21, "note": "the copy in the package that also owns the writer, AppendJSONL"},
+        {"path": "internal/gitcontext/branchfiles.go", "line": 145, "note": "HashFields documents the single-definition rule this duplication departs from"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two small robustness gaps in the new jsonlStore, both on error paths. (1) TornFiles maps any os.ReadDir failure on the run directory to ERR_RUN_NOT_FOUND, so EACCES or ENOTDIR is reported to the operator as 'run not found' — every other reader in the file distinguishes IsNotExist from the rest (compare readRaw at store_jsonl.go:180-185, which reserves CodeRunNotFound for os.IsNotExist and routes everything else to pathErr). (2) Lock leaks the lock-file descriptor when syscall.Flock fails with anything other than EWOULDBLOCK: the EWOULDBLOCK arm closes f, but the generic `return nil, pathErr(0, err)` two lines later does not, and s.held was not populated so nothing else will close it. Both are cosmetic today (100% statement coverage in internal/fsm/run, and the flock arm is only reachable on EINTR/EBADF), but the first actively misleads and the second is a one-line fix.",
+      "evidence": [
+        {"path": "internal/fsm/run/store_jsonl.go", "line": 40, "note": "TornFiles: any ReadDir error becomes CodeRunNotFound"},
+        {"path": "internal/fsm/run/store_jsonl.go", "line": 181, "note": "readRaw shows the intended pattern: CodeRunNotFound only for os.IsNotExist"},
+        {"path": "internal/fsm/run/store_jsonl.go", "line": 358, "note": "Lock returns without closing f when Flock fails with a non-EWOULDBLOCK error"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new .gitattributes covers internal/fsm/judge/testdata/prompts/* and testdata/fsm/**, but not internal/fsm/run/testdata/**, which holds the other byte-exact fixtures added by this work: golden-log.jsonl and golden-snapshots.jsonl are compared with bytes.Equal in golden_test.go, and oracle.sha256 pins a digest over oracle content. On a checkout with core.autocrlf=true those files are CRLF-normalized and both comparisons fail with a 'golden drifted, review and regenerate deliberately' message that points the reader at the wrong cause. CI is ubuntu-latest only (.github/workflows/test.yml:19), and the package will not build on Windows anyway because store_jsonl.go uses syscall.O_NOFOLLOW and syscall.Flock with no build constraint, so this is latent rather than live — but the same one-line glob that protects the judge goldens should protect these.",
+      "evidence": [
+        {"path": ".gitattributes", "line": 1, "note": "only two glob lines; internal/fsm/run/testdata is not among them"},
+        {"path": "internal/fsm/run/golden_test.go", "line": 38, "note": "bytes.Equal over testdata/golden-log.jsonl"},
+        {"path": "internal/fsm/run/store_jsonl.go", "line": 536, "note": "syscall.O_NOFOLLOW with no //go:build constraint, so the package is Unix-only regardless"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestBitsBoundaryRecutsAll is weaker than its name and can silently vanish. The name promises the plan is re-cut in full, but the only assertion is `survived == len(after)` — it passes as soon as a single shard id changes, not when all do. It also opens with a t.Skip if the fixture stops crossing a bits boundary, so a later change to DefaultMaxBytesPerShard or to bucketBits could turn the test into a no-op that still reports success. Assert survived == 0 (which holds today: at bits=1 the ids are one hex digit and at bits=5 they are two, so no id can survive) and make the boundary condition a t.Fatal rather than a t.Skip.",
+      "evidence": [
+        {"path": "internal/contextprofile/plan_test.go", "line": 252, "note": "TestBitsBoundaryRecutsAll"},
+        {"path": "internal/contextprofile/plan_test.go", "line": 261, "note": "t.Skip turns a stale fixture into a silent pass"},
+        {"path": "internal/contextprofile/shards.go", "line": 116, "note": "shardIDForPath renders ceil(bits/4) hex digits, so ids at bits=1 and bits=5 can never coincide"}
+      ]
+    }
+  ],
+  "blockingCount": 3
+}

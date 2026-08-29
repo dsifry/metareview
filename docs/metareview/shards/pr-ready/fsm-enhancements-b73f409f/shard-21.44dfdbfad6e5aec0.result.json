@@ -1,0 +1,206 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-21-44dfdbfad6e5aec0",
+  "kind": "shard",
+  "shardId": "shard-21",
+  "shardHash": "44dfdbfad6e5aec0",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T10:41:00-07:00",
+  "evidence": [
+    {
+      "path": "internal/fsm/converge/converge.go",
+      "line": 66,
+      "note": "Empirically disproved the MaxDepth/MaxAtoms doc claim in a scratchpad copy of HEAD (git archive extract, repo untouched). A flat `all` of 32 `cmd:` atoms using the maximum-length declared cmd name allowed by internal/fsm/workflow/workflow.go:268 (^[a-z][a-z0-9_-]{0,31}$) is accepted by Validate and yields compound.Name() = 1188 bytes against run.MaxShort = 1024 (internal/fsm/run/types.go:41). A tree at the depth limit with 32 children per level is also accepted: Describe reports atoms=1048576 depth=4 and Name() = 38966436 bytes."
+    },
+    {
+      "path": "internal/fsm/converge/converge.go",
+      "line": 354,
+      "note": "Payload's redaction is safe against caller mutation: run.Snapshot.Clone (internal/fsm/run/types.go:237) deep-copies Vars through cloneStringMap and NodeOutputs through a per-key copy, so overwriting c.Vars[k] with the sha256 does not reach the machine's live snapshot. Verified by reading Clone, not assumed."
+    },
+    {
+      "path": "internal/fsm/converge/converge.go",
+      "line": 94,
+      "note": "MustParse's claim that 'the error path of parse cannot recur on validated input' checks out. internal/fsm/workflow/workflow.go:213-217 runs converge.Validate(w.Convergence, w.cmdNames()) whenever Convergence is present, and internal/fsm/machine/machine.go:426 calls MustParse only under `if w.Convergence != nil`. MustParse passes cmdNames=nil, which is strictly more permissive than the validating call, with identical top/depth seeding, so it cannot reject what Validate accepted."
+    },
+    {
+      "path": "internal/fsm/converge/converge.go",
+      "line": 180,
+      "note": "Plan C3 (a give-up can never carry class `fixed` through all/not) is genuinely enforced. `top` is only true at the root and for direct children of a depth-0 `any` (key == \"any\" && depth == 0), so all_fixed under `all`, under `not`, or under a nested `any` is rejected; not.Class() is hardcoded to run.OutcomeCustom; and compound.Class() can only surface OutcomeFixed from a top-level any whose first child is all_fixed, where Stop is false. Package coverage is 100.0% of statements and go vet is clean."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles_test.go",
+      "line": 738,
+      "note": "TestBranchFilesDefeatDiffAttributes is a real assertion, not a no-op. Reproduced the fixture in a throwaway repo: with `hidden.txt -diff` in .gitattributes, `git diff --no-renames --no-textconv BASE..HEAD -- hidden.txt` emits 'Binary files /dev/null and b/hidden.txt differ' and hides SECRET-CHANGE, while adding --text (what collectBranchFiles passes at internal/gitcontext/branchfiles.go:104) restores the hunk. Dropping --text from production would fail this test."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles_test.go",
+      "line": 828,
+      "note": "TestContextDiffJSONShapeUnchanged has real failure power. internal/gitcontext/gitcontext.go:21-53 declares exactly 23 marshalled fields plus the four json:\"-\" branch measurements, matching the 23-entry `want` list and the len(got) != len(want) check, so adding a field without json:\"-\" or renaming a tag fails the test."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles_test.go",
+      "line": 603,
+      "note": "The oracle is independent in the dimension that matters (one whole-branch invocation vs. production's per-path loop) and all seven tests pass. Coverage of internal/gitcontext from unit tests alone is 85.1%; the only uncovered statements in branchfiles.go are the realGit stderr-message path (lines 48-51) and measureBranchFiles' two error returns (124-125, 131-132). tests/coverage-floor.txt:10 pins the package at 86.8 and tests/coverage.sh:10-12 enforces 100% only for ./internal/fsm/... and ./workflows, so this is within contract."
+    },
+    {
+      "path": "testdata/fsm/agent-prompt.golden",
+      "line": 1,
+      "note": "The golden is live and accurate: `go run ./cmd/metareview fsm --agent-prompt` is byte-identical to it (cmp clean), and tests/go/test-fsm.sh:60-67 pins it with cmp plus an anchor sweep requiring >= 20 lines of tests/go/agent-prompt-anchors.txt, followed by a forbidden-phrase grep with a planted control. Every flag named in its subcommand list (--repair, --at-iter, --goldens, --calibration, --max-bytes, --include-vars, --allow-custom-cmds, --accept-workflow-change, --work-dir, --run-id, --mock-ai, --repo-mode, --judge-model, --judge-effort, --from, --replace) exists in internal/fsm/cli."
+    },
+    {
+      "path": "tests/manifest/test-manifests.sh",
+      "line": 951,
+      "note": "The derived Go-floor check works and is not vacuous. Ran the suite: exit 0. Mutation-tested the logic read-only by substituting goFloor=\"1.99\": it fires on .agents/plugins/marketplace.json. The drift the comment describes was real at the base commit -- 61ffdf7:go.mod already said `go 1.26` while 61ffdf7:package.json:49 still said 'Go 1.22+', so the deleted hardcoded includes(\"Go 1.22\") assertion was checking a stale string."
+    },
+    {
+      "path": "docs/tasks/m7-fork-record-export.md",
+      "line": 8,
+      "note": "The task doc's claims hold: docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md exists; internal/fsm/record and internal/fsm/export exist; VerifyOrigin (machine/fork.go:445), DiffRuns (machine/diff.go:64), CodeForkIncomplete (machine/types.go:242), WorkflowSource (record/record.go:48), MaxEvents and run.Counted (fork.go:255,300) all exist; Fork is a *Machine method at fork.go:66 rather than a package function, which the shorthand `machine.Fork` blurs but does not misstate. record, export, machine and kind all report 100.0% coverage and go vet is clean."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Both bound constants document a guarantee the code does not provide. converge.go:66 says 'MaxDepth bounds nesting so composite names stay within run.MaxShort' and converge.go:69 says 'MaxAtoms bounds the number of leaves for the same reason'. Neither is true. (a) MaxAtoms is tested per any/all node at converge.go:245 (len(val.Content) > MaxAtoms), not over the tree, and nothing anywhere caps total leaves -- internal/fsm/cli/run.go:867-875 just reports Describe's count. With MaxDepth = 4 and 32 children per level, Validate/Describe accept a tree of 32^4 = 1,048,576 atoms; measured Name() on such a tree is 38,966,436 bytes, ~38,000x MaxShort. (b) The single-level case already breaks the MaxShort claim without any nesting: cmd names may be 32 chars (workflow.go:268), so `cmd:<name>` is 36 bytes, and a flat all of 32 of them names 32*36 + 31 separators + 'all(' + ')' = 1188 bytes against run.MaxShort = 1024 (run/types.go:41). Both figures were produced by building the trees and calling Parse/Describe against this commit. The recorded event stays well-formed because machine.go:775 does run.CapText(r.Atom, run.MaxShort) before appending, so this is not record corruption -- but compound.Evaluate rebuilds the full uncapped name via c.Name() on every non-firing evaluation (converge.go:396 and 402), so a workflow supplied through the --workflow <path> knob makes the FSM allocate a multi-megabyte string at each loop boundary, and MaxShort is silently doing the load-bearing work the constants are documented to do. Either enforce the invariant (thread a running atom budget through parse, and/or cap Name() at MaxShort where it is built) or rewrite the two comments to say what the constants actually bound: MaxDepth bounds nesting depth, MaxAtoms bounds children per compound node, and run.CapText is what keeps the recorded atom within MaxShort.",
+      "evidence": [
+        {
+          "path": "internal/fsm/converge/converge.go",
+          "line": 66
+        },
+        {
+          "path": "internal/fsm/converge/converge.go",
+          "line": 69
+        },
+        {
+          "path": "internal/fsm/converge/converge.go",
+          "line": 245
+        },
+        {
+          "path": "internal/fsm/converge/converge.go",
+          "line": 369
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 775
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new Go-floor check's own comment overstates its reach. It concludes 'every tracked file that states a floor is checked', but the scan only recognises the literal shape /Go (\\d+\\.\\d+)\\+/ -- 'Go 1.26 or later', 'go >= 1.26', 'requires go1.26', and even 'Go 1.26.0+' all slip past. That is the same failure mode the comment is criticising, just moved from a hardcoded file list to a hardcoded phrasing. It happens to be harmless today (I grepped: every floor statement in the tree currently uses the 'Go X.Y+' form), and the statedAnywhere === 0 guard correctly stops a vacuous pass, so this is a wording fix rather than a logic fix. Two smaller points on the same block: the catch's rationale 'binary or unreadable: carries no prose floor' is wrong about binaries -- fs.readFileSync(file, 'utf8') does not throw on binary content, it returns replacement characters, so that branch only fires for a tracked path missing or unreadable in the worktree; and the deleted assertion specifically pinned package.json, whereas the derived check pins no particular file, so package.json could drop its 'runtime' description entirely and the suite would stay green as long as some other tracked file states a floor.",
+      "evidence": [
+        {
+          "path": "tests/manifest/test-manifests.sh",
+          "line": 945
+        },
+        {
+          "path": "tests/manifest/test-manifests.sh",
+          "line": 955
+        },
+        {
+          "path": "tests/manifest/test-manifests.sh",
+          "line": 963
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestBranchFilesLiteralPathspecs lists six exotic filenames as though each one requires GIT_LITERAL_PATHSPECS, but only one of them actually distinguishes the two modes. Reproduced with this git: 'star*name.txt', 'brack[et].txt', '-dash.txt' and a unicode name all produce identical diff bytes with and without the env var; only ':colon.txt' collapses to zero bytes in pathspec-magic form (the leading colon is parsed as magic). The test therefore does have genuine failure power -- removing the env var from collectBranchFiles fails it -- so this is not a can't-fail assertion, but five of the six names are decoration and a reader would reasonably conclude the guard is broader than it is. Worth a comment naming ':colon.txt' as the load-bearing case, or adding a name that actually exercises glob magic (e.g. a file literally named '*' alongside a decoy it would otherwise match).",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/branchfiles_test.go",
+          "line": 683
+        },
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 103
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "wholeBranchDiffBytes' comment says the oracle runs 'ONE invocation in the pathspec-magic form (no GIT_LITERAL_PATHSPECS)', but the pathspec-magic form is only emitted when excludes is non-empty; the three call sites that pass nil (lines 603, 677, and the excludes-free path) run a bare `git diff BASE..HEAD` with no pathspec at all. The oracle is still correct and still independent in the way that matters, but 'in the pathspec-magic form' describes only one of the four uses.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/branchfiles_test.go",
+          "line": 554
+        },
+        {
+          "path": "internal/gitcontext/branchfiles_test.go",
+          "line": 560
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestRunGitErrorBranches is named for the run-git error branches as a class but reaches only two of the four. Injecting a failure on '--no-textconv' short-circuits inside collectBranchFiles (branchfiles.go:104-107), so measureBranchFiles' own branchPaths and per-path error returns (branchfiles.go:124-125, 131-132) are never exercised -- that helper only runs when Options.Excludes is non-empty (gitcontext.go:94-99) and this test passes no excludes. Confirmed against the coverage profile: those are exactly the uncovered statements, and measureBranchFiles sits at 80.0%. Not a contract violation (internal/gitcontext is floor-enforced at 86.8, not 100), but a third subtest with Excludes set would close the gap and make the test's name true.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/branchfiles_test.go",
+          "line": 774
+        },
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 121
+        },
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 94
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "cmdAtom.Evaluate decodes the sanctioned command's stdout with DisallowUnknownFields but never checks for trailing content, so stdout of '{\"stop\":true}{\"stop\":false}' or '{\"stop\":true} garbage' is silently accepted using only the first object. Given that this value decides whether a loop terminates and the command is only consented to, not trusted to be well-behaved, a dec.More() check after Decode (returning CodeCmdOutputInvalid) would make the '{stop, reason}' contract in the error string literally true.",
+      "evidence": [
+        {
+          "path": "internal/fsm/converge/converge.go",
+          "line": 342
+        },
+        {
+          "path": "internal/fsm/converge/converge.go",
+          "line": 345
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "maxIter's reason string reports the raw zero-based iteration index against a one-based bound, so max_iterations: 3 stops with 'iteration 2 reached max_iterations 3'. The stop condition itself (s.Iteration+1 >= m.n) is correct against machine.go:844's snap.Iteration+1 increment; only the human-facing message is off by one, and it lands in the run's converge event and the transition summary at machine.go:782.",
+      "evidence": [
+        {
+          "path": "internal/fsm/converge/converge.go",
+          "line": 311
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 844
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "MustParse discards parse's error with `p, _ :=` and returns a nil Predicate on failure, which machine.go:426 stores as sess.pred and would nil-deref at the first loop boundary. I verified the doc's reasoning holds today (see evidence), so this is defence-in-depth rather than a live bug, but the failure mode of a wrong assumption is a panic in the FSM driver rather than an ERR_BAD_CONVERGENCE. Returning the error, or panicking with the detail, would fail loudly at the point the invariant breaks.",
+      "evidence": [
+        {
+          "path": "internal/fsm/converge/converge.go",
+          "line": 94
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 426
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

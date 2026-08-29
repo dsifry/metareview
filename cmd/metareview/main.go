@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	fsmcli "github.com/dsifry/metareview/internal/fsm/cli"
 	"os"
 	"os/exec"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/setup"
+	"github.com/dsifry/metareview/internal/status"
 	"github.com/dsifry/metareview/internal/taskdone"
 	"github.com/dsifry/metareview/internal/version"
 )
@@ -33,6 +35,8 @@ Usage:
   metareview setup --check
   metareview setup --bootstrap-prereqs --dry-run
   metareview status
+  metareview fsm <subcommand> [flags]        (metareview fsm --agent-prompt for the driver contract)
+
   metareview override request <finding-id> --reason "<text>" [--by <who>] [--escalation "<text>"]
   metareview override grant <finding-id> --reason "<text>" [--by <who>]
   metareview override list [--pending]
@@ -93,6 +97,22 @@ func main() {
 		return
 	}
 
+	if args[0] == "fsm" {
+		os.Exit(fsmcli.Run(context.Background(), args[1:], os.Stdin, os.Stdout, os.Stderr, mustCwd(), fsmcli.RealDeps()))
+	}
+
+	// status --json is the contract a host hook branches on: one machine-readable answer to
+	// "may work proceed, and if not, what must be cleared". Exits 1 when something must be
+	// cleared, so a hook needs no parsing to make the common decision.
+	if len(args) == 2 && args[0] == "status" && args[1] == "--json" {
+		code, err := status.Emit(mustCwd(), os.Stdout)
+		exitOnErr(err)
+		if code != 0 {
+			os.Exit(code)
+		}
+		return
+	}
+
 	if len(args) == 1 && args[0] == "status" {
 		report := repo.Detect(mustCwd())
 		fmt.Printf("metareview %s\n", version.Version)
@@ -100,6 +120,9 @@ func main() {
 		fmt.Printf("git: %s\n", present(report.Capabilities.Git))
 		fmt.Printf("beads: %s\n", present(report.Capabilities.Beads))
 		fmt.Printf("metaswarm: %s\n", present(report.Capabilities.Metaswarm))
+		for _, line := range fsmcli.StatusLines(context.Background(), fsmcli.RealDeps(), mustCwd()) {
+			fmt.Println(line)
+		}
 		return
 	}
 

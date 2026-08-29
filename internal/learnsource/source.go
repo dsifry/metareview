@@ -26,9 +26,15 @@ func Collect(root string, options Options) (Context, error) {
 	if err != nil {
 		return Context{}, err
 	}
-	// Committed shard results are audit records of the review, not source under
-	// review: post-merge learning never reads them back.
-	git, err := gitcontext.CollectWithExcludes(root, options.Base, []string{"docs/metareview/shards", "docs/metareview/shards/**"})
+	// Committed shard results and FSM export bundles are audit records of the
+	// review, not source under review: post-merge learning never reads them back.
+	// docs/metareview/fsm/ arrived with the FSM work and has to be excluded for
+	// the same reason the shard results are — otherwise a run's own redacted
+	// event log is ingested as code to learn from.
+	git, err := gitcontext.CollectWithExcludes(root, options.Base, []string{
+		"docs/metareview/shards", "docs/metareview/shards/**",
+		"docs/metareview/fsm", "docs/metareview/fsm/**",
+	})
 	if err != nil {
 		return Context{}, err
 	}

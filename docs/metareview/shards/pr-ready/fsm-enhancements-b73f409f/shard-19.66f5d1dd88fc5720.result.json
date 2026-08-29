@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-19-review",
+  "kind": "shard",
+  "shardId": "shard-19",
+  "shardHash": "66f5d1dd88fc5720",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/envelope.go", "line": 118, "note": "exitFor: checked every code branch against the documented exit contract (phaseNone=2, repairMoved/advance promotions to 1, exit2 refusal table fallback); mapping is total and has no unreachable branch"},
+    {"path": "internal/fsm/cli/envelope.go", "line": 169, "note": "failure(): error classification order (errs.Error, StoreError, FoldError, context cancel, default internal) is correct and cmds_json is deliberately dropped from fields"},
+    {"path": "internal/fsm/cli/envelope.go", "line": 232, "note": "finish()/print(): default keys and untrusted-path merging; JSON marshal only sees map/string/int/bool values so the ignored marshal error is safe"},
+    {"path": "internal/fsm/machine/harness_test.go", "line": 1, "note": "Test-only harness: fake kinds, executors, git, store wrappers and runner; no production code path, no TODO/FIXME, no unsafe execution"},
+    {"path": "internal/fsm/record/clock.go", "line": 5, "note": "Trivial time seam; single statement, no logic to fault"},
+    {"path": "tests/coverage.sh", "line": 975, "note": "awk per-package aggregation of the textfmt profile is correct (col1 file:range, col2 numstmts, col3 count); the required-package-absent and floor-package-absent checks close the silent-skip holes and the empty-REQUIRED guard prevents a no-op gate"},
+    {"path": "tests/coverage.sh", "line": 1040, "note": "--update-floor refuses to lower any existing floor line unless --allow-floor-decrease is passed; comment lines are skipped when loading the old floor"},
+    {"path": "tests/run-all.sh", "line": 1080, "note": "Added smoke-tag vet/list gate and new guarded test-script invocations; all follow the existing `if [ -f ... ]` pattern so a missing script cannot fail the suite"},
+    {"path": "internal/fsm/judge/testdata/prompts/still-present.fenced.golden", "line": 292, "note": "Golden prompt fixture; untrusted bug text and diff are both wrapped in nonce-delimited DATA fences with an explicit data-not-instructions preamble, so the fencing contract is what is being asserted"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "countingStore.Lock reads and writes the shared firstLock field without holding c.mu, while Append and EventsWithLines on the same struct do take the mutex. The mutex's presence implies these fakes are exercised from more than one goroutine (fork paths lock a second run), so the failLockRun=\"child\" bookkeeping is an unsynchronized read/write that -race could flag. Test-only, no production impact.",
+      "evidence": [
+        {"path": "internal/fsm/machine/harness_test.go", "line": 580, "note": "Lock() mutates c.firstLock and compares against it with no c.mu guard, unlike Append/EventsWithLines above and below it"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "failure() caps field values with run.CapText(v, run.MaxShort) only on the errs.Error branch; the StoreError and FoldError branches write fe.Reason/fe.Type into fields uncapped, so an unusually long fold reason lands in the envelope at full length (detail itself is still capped by MaxDetail). Cosmetic inconsistency in output bounding, not a correctness or safety defect.",
+      "evidence": [
+        {"path": "internal/fsm/cli/envelope.go", "line": 190, "note": "fields[\"seq\"], fields[\"type\"], fields[\"reason\"] assigned directly from the FoldError without a CapText pass"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

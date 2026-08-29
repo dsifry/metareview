@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2f-00efbbef7952941b-claude-opus-5",
+  "kind": "shard",
+  "shardId": "2f",
+  "shardHash": "00efbbef7952941b",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5 shard reviewer",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 3,
+  "evidence": [
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+      "line": 427,
+      "note": "ledger bullet still carries the pre-r4 loop-boundary rule"
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+      "line": 451,
+      "note": "r5 bullet declares a RecordLLMCall parameter the implementation does not take"
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+      "line": 159,
+      "note": "Resolve error contract for an undeclared $X"
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+      "line": 110,
+      "note": "claims the printed 2.2 example is the fixture W1 pins"
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+      "line": 421,
+      "note": "the W0/W2/W3 test-row inventory names rows that do not exist"
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 751,
+      "note": "convergence is evaluated whenever the terminal gate fails; no AllFixed guard"
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 1047,
+      "note": "RecordLLMCall(ctx, call) - no key parameter"
+    },
+    {
+      "path": "internal/fsm/workflow/resolve.go",
+      "line": 54,
+      "note": "an undeclared $X resolves to the empty string, no error"
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/match.plain.golden",
+      "line": 7,
+      "note": "the golden pins the verbatim {{loop}} value - the only real defense for that property"
+    },
+    {
+      "path": "internal/fsm/judge/judge_test.go",
+      "line": 140,
+      "note": "the sibling authority assertion is unreachable when the bug it names is present"
+    },
+    {
+      "note": "Verified empirically: go test -cover ./internal/fsm/... reports 100.0% of statements for every fsm package plus workflows, so the spec's 100% claim (section 7) holds; the section 6 error/warn code list was checked name by name against non-test sources and every code exists; gate (9 built-ins, TreeHash preimage, ValidSHA, GIT_* scrubbing, excludesFile/attributesFile disabled), converge (AllFixed, MaxDepth 4, MaxAtoms 32, all_fixed placement, not->custom, max_iterations Iteration+1>=N, Payload var redaction), section 9 run amendments (MaxEnv 16, tokens_negative, NextIndex, MarshalCanonical), section 5.7 outcome/status/exit mapping, section 5.5 Record refusals, Init ordering (Create before sidecar, reserved_name, Preflight, tighten-only RepoMode) and the sidecar caps (O_EXCL, O_NOFOLLOW, MaxPayload, ValidateRunID) all match the shipped code."
+    },
+    {
+      "note": "Verified empirically in a scratch clone (branch untouched): the section 2.2 example as printed does parse (Parse returns 7 transitions, no warnings), so only its 'W1 pins it' half is false; and mutating RenderPrompt to unescape {{ }} inside slot values leaves the whole judge package green once goldens are regenerated, confirming the judge_test.go:139-141 authority check cannot fail."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Stale guard left at the ledger layer. Section 8 bullet 3 (line 427) still states the loop boundary as 'TerminalFor gate first, convergence only when !AllFixed, then the loop gate and remaining transitions', which contradicts this same document's r4 header ('the loop boundary evaluates convergence whenever the terminal gate fails (no !AllFixed guard)') and section 5.4 step 6 ('always when tt failed - bounded loops'), and contradicts the implementation: machine.go:749-751 evaluates s.pred whenever the terminal transition's gate failed, with no AllFixed test anywhere in transitions(). The difference is observable, not cosmetic: for a user workflow whose terminal gate is not all_fixed (machine_test.go:783-797, terminal gate confirmed_empty with every bug fixed) the stale rule would skip convergence and the run would end GATE_FAILED instead of the shipped overflow. A reader implementing or refactoring from the ledger would reintroduce the unbounded-loop bug r4 removed.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+          "line": 427,
+          "note": "'convergence only when !AllFixed' - the pre-r4 rule"
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 751,
+          "note": "pred.Evaluate runs whenever the terminal gate failed; no AllFixed guard exists"
+        },
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 783,
+          "note": "the discriminating row: confirmed_empty terminal gate, all bugs fixed, expects overflow"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Signature claim the code does not have. Section 8's r5 bullet (line 451) declares 'Machine.RecordLLMCall(ctx, key string, call func(ctx, Stamp) (run.LLMCallData, error)) (int64, error)'. The shipped function is RecordLLMCall(ctx context.Context, call func(context.Context, Stamp) (run.LLMCallData, error)) (int64, error) (machine.go:1047) - there is no key parameter; the key is derived internally as run.Key(JudgeNode, snap.Iteration) at machine.go:1063. Everything else in the bullet (Node 'judge', Index = NextIndex('judge@<iter>'), Fence = !Calibration, ERR_RUN_TERMINAL on terminal runs) does match. The phantom parameter is duplicated at the other layer - docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:98 and :512 - so the CLI spec that consumes this contract is wrong the same way, and nothing in internal/ calls RecordLLMCall yet, so no compile error catches it.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+          "line": 451,
+          "note": "'Machine.RecordLLMCall(ctx, key string, call func(ctx, Stamp) ...)'"
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 1047,
+          "note": "the shipped signature takes only ctx and the closure"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 98,
+          "note": "the same phantom key parameter restated in the CLI spec (other shard)"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Error contract asserted for a path that silently succeeds. Section 2.4 line 159 states '$X referencing an undeclared var -> ERR_VAR_UNKNOWN{name} (detected at Parse as well: reason unknown_var)'. Resolve does not do this: sub() looks the name up in the effective map and returns the zero value, so an undeclared $X becomes the empty string (resolve.go:48-55). Probed in a scratch clone: parsing the W1 example, setting Nodes[\"adjudicate\"].Model = \"$NOPE\" and calling Resolve returns err=nil and Model == \"\" - a fork node would be dispatched with an empty model rather than refused. Only Parse refuses, and with a different code (ERR_WORKFLOW_INVALID{reason: unknown_var}, workflow.go:609/618), which is what the tests assert. Section 7's W3 inventory compounds it by naming a row that does not exist ('$JUDGEX -> ERR_VAR_UNKNOWN'): no test in internal/fsm/workflow asserts CodeVarUnknown for a template reference - the only CodeVarUnknown row is a caller-supplied FOO (workflow_test.go:393). Either the sentence should say Parse refuses it with unknown_var and Resolve assumes parsed input, or Resolve should return ERR_VAR_UNKNOWN and a test should pin it.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+          "line": 159,
+          "note": "claims Resolve raises ERR_VAR_UNKNOWN for an undeclared $X"
+        },
+        {
+          "path": "internal/fsm/workflow/resolve.go",
+          "line": 54,
+          "note": "return effective[m[1:]] - an undeclared name yields \"\", never an error"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow_test.go",
+          "line": 393,
+          "note": "the only CodeVarUnknown assertion is for a caller-supplied var, not a $X reference"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The section 7 test inventory (line 421) overstates the rows that exist. (a) 'W0 order row: a document with an unknown top-level key AND version: 2 -> unknown_key' - no such row: workflow_test.go:177 adds the unknown key to an otherwise valid version-1 document, so nothing discriminates the claimed table order (the behaviour is right - KnownFields decoding fails before the version check - but it is unpinned). (b) 'bad_env one per reserved literal and prefix' - the suite covers PATH, SHELLOPTS, MRV_ and LD_ only (workflow_test.go:202-208, 232): 2 of the 22 reserved literals and 2 of the 4 reserved prefixes; DYLD_ and GIT_ are untested. (c) 'bad_cmd x8' enumerates nine sub-rules and omits the two rows that do exist (unknown field, non-mapping cmds). (d) 'bad_version (one)' contradicts this document's own section 2.3 table, which puts 'version: one' under bad_yaml - and that is what the test asserts (workflow_test.go:181), with bad_version pinned by 'version: 2' (line 186).",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+          "line": 421,
+          "note": "W0/W2 row inventory"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow_test.go",
+          "line": 177,
+          "note": "the only unknown-top-key row keeps version: 1 - no ordering discrimination"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow_test.go",
+          "line": 202,
+          "note": "bad_env rows: charset, dup, PATH, MRV_, LD_, count, SHELLOPTS - not one per literal and prefix"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "'This example parses (W1 pins it)' (line 110) is half false. The document's section 2.2 example is headed 'workflow: sdlc-loop' and uses the nothing_found / nothing_confirmed clean exits (lines 87, 99, 101); the fixture W1 actually pins is 'workflow: example' with findings_empty / confirmed_empty (workflow_test.go:39-61). Nothing in the suite parses the text as printed, so it can rot silently - and it also differs from the shipped workflows/sdlc-loop.yaml (which has no cmds block and no cmd atom), so a reader cannot tell which artifact it is meant to be. Verified in a scratch clone that the printed example does parse today (7 transitions, no warnings), so this is drift risk rather than a live error.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+          "line": 110,
+          "note": "'This example parses (W1 pins it)'"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow_test.go",
+          "line": 39,
+          "note": "the fixture W1 pins is a different document (name and gates differ)"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The shard's golden is the sole defense for the property its sibling assertion claims to check independently. judge_test.go:127 introduces 'authority checks independent of the golden', but the one covering match.plain (judge_test.go:139-141, 'values are inserted verbatim, never rescanned') is guarded by strings.Contains(user, \"{{\"), and the only {{ in the rendered match prompt comes from the golden comment value itself - so the guard is true exactly when the bug is absent and the assertion can never fire. Confirmed by mutation in a scratch clone: unescaping {{ and }} inside slot values in RenderPrompt makes match.plain.golden drift (good), but after regenerating goldens with FSM_JUDGE_UPDATE_GOLDEN=1 the whole judge package passes with the bug in place. match.plain.golden itself is correct and does pin the verbatim insertion (line 7 keeps 'off-by-one in {{loop}}', line 10 keeps the unrescanned '{candidate}' and '}}'); the fix belongs in the assertion (drop the Contains guard, or assert on the value directly). Noted here because the golden is this shard's chunk; judge_test.go belongs to another shard.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/testdata/prompts/match.plain.golden",
+          "line": 7,
+          "note": "'off-by-one in {{loop}}' - the pinned verbatim value"
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 139,
+          "note": "the guard makes the assertion unreachable in the failure mode it names"
+        }
+      ]
+    }
+  ]
+}

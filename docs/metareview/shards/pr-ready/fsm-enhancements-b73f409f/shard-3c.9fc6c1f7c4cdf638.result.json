@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3c.9fc6c1f7c4cdf638",
+  "kind": "shard",
+  "shardId": "shard-3c",
+  "shardHash": "9fc6c1f7c4cdf638",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T18:20:00Z",
+  "blockingCount": 2,
+  "evidence": [
+    {
+      "path": "internal/fsm/run/canonical_test.go",
+      "line": 185,
+      "note": "Mutation test in a scratch copy of the tree (git archive HEAD into the session scratchpad; the repo itself was never modified). Deleting BOTH U+2028/U+2029 ReplaceAll lines from marshalCanonical (internal/fsm/run/types.go:349-350) leaves the ENTIRE repo suite green on the pinned toolchain: 'go test ./...' exits 0 and TestCanonicalIsToolchainIndependent itself still PASSes."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 349,
+      "note": "Empirically established on go1.27.0 (a standalone probe with json.Encoder + SetEscapeHTML(false)): encoding/json ALREADY escapes U+2028/U+2029 itself on 1.27, for both a map value and a json.RawMessage, so the two ReplaceAll calls are no-ops under the toolchain the repo pins. It writes U+FFFD raw, so the third ReplaceAll is live - and deleting it IS caught (TestCapText: 'spurious truncation of \"a\\xffb\" at 7')."
+    },
+    {
+      "path": "go.mod",
+      "line": 14,
+      "note": "toolchain go1.27.0; .github/workflows/test.yml:30 uses setup-go with go-version-file: go.mod, so CI resolves to the same go1.27.0. Local and CI therefore run the identical toolchain, and neither can observe the U+2028 divergence the test is named for. Re-ran the two mutations under GOTOOLCHAIN=go1.26.7 (installed and verified with 'go version'): there the U+2028 deletion DOES go red in TestCanonicalNormalForm and TestOracle - the discriminating power exists only on a toolchain nothing in this repo runs."
+    },
+    {
+      "path": "internal/fsm/run/canonical_test.go",
+      "line": 127,
+      "note": "canonLen uses json.Marshal, which HTML-escapes < > & - exactly what MarshalCanonical disables. Adding \"a<b\" to the TestCapText input set in the scratch copy makes the test fail against correct code: 'CapText(\"a<b\",4) = \"a<\" encodes to 9 bytes' (the real canonical encoding of \"a<\" is 4 bytes)."
+    },
+    {
+      "path": "tests/coverage-floor.txt",
+      "line": 1,
+      "note": "Verified by running the real gate end to end in a throwaway clone of the branch (bash tests/coverage.sh): exit 0, 'coverage gate passed', every one of the 28 floor lines reported 'ok' and every internal/fsm/* package and workflows reported 100.0%. The floors are current 1.27 measurements, not stale."
+    },
+    {
+      "path": "tests/coverage.sh",
+      "line": 149,
+      "note": "The header line committed in coverage-floor.txt is byte-identical to the line --update-floor writes, and the filter ($1 !~ /^internal\\/fsm\\// && $1 != \"workflows\") explains exactly which packages are absent. internal/version is the only ./... package with no floor line; it declares a single const and zero statements, so it can never appear in a coverage profile - not an enforcement gap."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestCanonicalIsToolchainIndependent (canonical_test.go:186-224) does not test what its name and comment claim, on any toolchain this repository actually runs. Deleting the U+2028/U+2029 escaping from marshalCanonical (types.go:349-350) leaves the whole suite green under go1.27.0 - 'go test ./...' exits 0 and this very test still passes - because encoding/json on 1.27 already emits those escapes, as a direct probe confirms. The comment at canonical_test.go:190-194 tells the reader the opposite: 'which CI caught and no local run could, because the two differ only across versions'. That was true before this branch pinned the toolchain; it is false now. go.mod:14 pins toolchain go1.27.0 and .github/workflows/test.yml:30 feeds go.mod to setup-go, so CI and local are the same release and neither can catch the regression. The guard is therefore inert everywhere, and the 100%-statement gate cannot see it because the lines still execute. This matters because the escaping is the reason the audit chain hashes reproducibly across releases: if it were dropped, runs recorded on 1.26 and 1.27 would hash differently and no gate would notice. Confirmed the discriminating power is real but unreachable: under GOTOOLCHAIN=go1.26.7 the same deletion turns TestCanonicalNormalForm and TestOracle red. Cheapest honest fixes, either or both: (a) correct the comment to say this test only discriminates on Go <= 1.26 and that the canonical bytes are otherwise pinned only by testdata/oracle.jsonl; (b) add a CI job running the suite under GOTOOLCHAIN=go1.26.7 - which would also make the 'go 1.26' distribution promise in go.mod:3 a tested one instead of the manual verification claimed in commit 1dd0730.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/canonical_test.go",
+          "line": 190
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 349
+        },
+        {
+          "path": "go.mod",
+          "line": 14
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestCapText's oracle is not the canonical encoding it is named for, and the three characters the sibling test singles out are missing from its input set. canonical_test.go:125 states 'caps are measured on the canonical JSON-string encoding', and the helper is called canonLen - but canonLen (canonical_test.go:127-131) starts from json.Marshal, which HTML-escapes < > & to six-byte \\u003c forms, while MarshalCanonical exists precisely to turn that off (types.go:330-347, SetEscapeHTML(false)) and CapText's encodedRuneLen correctly budgets them at one byte (canonical.go:139-147). The two disagree by a factor of six on exactly the characters TestCanonicalNormalForm advertises as 'keeps <>& literal' (canonical_test.go:12, case 'html' at :19), and no CapText case contains one, so that branch of the budget is unverified. This is not theoretical: adding \"a<b\" to the input list at canonical_test.go:133 makes the test fail against correct code - 'CapText(\"a<b\",4) = \"a<\" encodes to 9 bytes', where the true canonical encoding is 4 bytes. So the next person who extends the table gets a red test from a wrong oracle and is pushed toward 'fixing' the encoder. Fix: have canonLen call MarshalCanonical(s) (or Canonical over it) instead of json.Marshal, and add an HTML case to the input set. Note the oracle IS faithful for U+FFFD, because that path routes through Canonical - which is why the U+FFFD mutation is caught and this one is not.",
+        "evidence": [
+        {
+          "path": "internal/fsm/run/canonical_test.go",
+          "line": 127
+        },
+        {
+          "path": "internal/fsm/run/canonical.go",
+          "line": 139
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two assertions in this file cannot fail. (1) canonical_test.go:208 - 'if strings.ContainsAny(got, ls+ps)' with the message 'a raw separator survived into the canonical bytes' runs only after :205-207 has already required got == c.want by exact equality, and every want string (:187-191) is pure ASCII; any raw separator makes the equality check fire first, so this branch is unreachable. (2) canonical_test.go:236 - 'if len(literal) != 6' guards a compile-time constant string literal whose length can only change if someone edits the literal on the line above, so it can never catch a defect in the code under test. Neither is harmful, but the same class ('dead assertion') was already treated as blocking earlier in this PR (commit cde8d0a) and the shellcheck step in test.yml:47-50 exists because fifteen never-failing assertions were found in the shell suite. Either delete them or make (1) a real check by asserting on marshalCanonical's output before comparing to want.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/canonical_test.go",
+          "line": 208
+        },
+        {
+          "path": "internal/fsm/run/canonical_test.go",
+          "line": 236
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestValuePins claims to be a value pin for Outcomes (canonical_test.go:97, 'R13: value pins the statement-coverage gate cannot see'; spec R13 at docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:337 lists 'Outcomes'), but canonical_test.go:114 only asserts len == 7 and the first and last elements. The five middle values (OutcomeClean, OutcomeReviewed, OutcomeStalled, OutcomeOverflow, OutcomeCustom, types.go:34) can be reordered or renamed without the pin firing, and order is observable - Outcomes is the ordered set the run log serialises. A slice literal comparison against the full expected order costs one line.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/canonical_test.go",
+          "line": 114
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 34
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Checked and cleared: tests/coverage-floor.txt omits internal/version, the one ./... package with no floor line, which under tests/coverage.sh:100-103 would mean 'no floor' (reported, not enforced). Not a gap - internal/version/version.go contains a single const and zero statements, so it can never appear in a coverage profile at all, and the --update-floor generator only ever writes packages present in the merged profile. Also cleared: the values themselves are current rather than stale, and the file matches what --update-floor emits.",
+      "evidence": [
+        {
+          "path": "tests/coverage-floor.txt",
+          "line": 2
+        },
+        {
+          "path": "internal/version/version.go",
+          "line": 3
+        }
+      ]
+    }
+  ]
+}

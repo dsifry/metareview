@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0a-review",
+  "kind": "shard",
+  "shardId": "shard-0a",
+  "shardHash": "7b37d55946c575f8",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/machine/sidecar.go",
+      "line": 60,
+      "note": "FSSidecar.Write/Read/List: name and run-id validation, O_EXCL|O_NOFOLLOW 0600 creation, MaxPayload-bounded reads via LimitReader; no eval, no TODO/FIXME; exercised by internal/fsm/machine/machine_test.go (FSSidecar at lines 1272-1837, incl. an injected failing Open)"
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 287,
+      "note": "Apply: schema/seq/init ordering, stamp, provenance, mock-taint, post-terminal and per-payload rules all fail closed to *FoldError with zero state; cow() copies every mutable container before mutation, so the fold stays pure; tests present in internal/fsm/run/fold_test.go (1121 lines)"
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 766,
+      "note": "withinCaps covers every decoded payload type with the §2.3 caps; decodePayload uses DisallowUnknownFields and its default arm is reachable only for TypeFork after knownType filtering"
+    },
+    {
+      "path": "internal/runchain/runchain.go",
+      "line": 112,
+      "note": "ReadRuns raises the bufio.Scanner cap to 1 MiB + 2 so a 1 MiB JSONL line plus terminator is admitted; internal/runchain/runchain_test.go:253 builds an exactly-maxJSONLLineBytes fixture line, so the boundary is validated"
+    },
+    {
+      "path": "tests/go/test-override.sh",
+      "line": 1,
+      "note": "Shell test is set -euo pipefail, builds the binary into a mktemp dir with an EXIT trap, and asserts request/grant/self-grant-refusal/pending-exit-code/unknown-flag/re-override paths plus FINDINGS.md rendering; the `grep -q ... && fail` line is exempt from set -e as a non-final && element and is followed by further commands"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Misplaced doc comment: the two-line paragraph describing cow() (\"cow returns a state whose containers are fresh ...\") sits directly above func (st FoldState) NextIndex, so godoc attaches cow's description to the exported NextIndex method and cow itself is left undocumented. Move the cow paragraph to immediately above func (st FoldState) cow().",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 250,
+          "note": "cow() doc paragraph precedes the NextIndex declaration at line 253; cow is declared at line 255 with no comment"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

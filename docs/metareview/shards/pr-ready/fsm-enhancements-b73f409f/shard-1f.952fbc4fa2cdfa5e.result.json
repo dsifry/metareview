@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1f.952fbc4fa2cdfa5e",
+  "kind": "shard",
+  "shardId": "shard-1f",
+  "shardHash": "952fbc4fa2cdfa5e",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:25:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/export/export.go",
+      "line": 1,
+      "note": "New export package (spec 3 section 5): builds manifest.json, audit.redacted.jsonl, snapshot.json, workflow.yaml and sidecars in memory, checks MaxBytes, then checks the destination and writes. `go test -cover ./internal/fsm/export/` reports 100.0% of statements; export_test.go and redaction_test.go accompany it."
+    },
+    {
+      "path": "internal/fsm/export/export.go",
+      "line": 131,
+      "note": "Claim `never empty: init always carries the exported marker` verified true: run.Apply (internal/fsm/run/fold.go:27) rejects any log whose first event is not init with ReasonFirstNotInit, and Export folds via run.FoldFull before the loop, so log.Events[0] is always TypeInit and the TypeInit branch at export.go:379-380 unconditionally marks `exported`."
+    },
+    {
+      "path": "internal/fsm/export/export.go",
+      "line": 369,
+      "note": "Claim `known kinds keep their outputs whole; anything else fails closed` verified: knownKinds lists exactly the five kinds registered in internal/fsm/kind/kind.go (reviewLenses:256, adjudicateKind:321, agentEdit:508, stillPresentKind:551, cmdKind:608), and kindOf returns \"\" for a node absent from the workflow, which knownKinds[\"\"] rejects. Checked the cmd kind for a stdout leak: cmdKind.Decode (kind.go:616) decodes a run.Delta only, so keeping a cmd node output whole does not re-expose the stdout that TypeCmdCall blanks at export.go:407."
+    },
+    {
+      "path": "internal/fsm/export/export.go",
+      "line": 455,
+      "note": "Claim in statusBlock verified against the producer: internal/fsm/gate/gates.go:121 formats the commit_exists detail as \"...\\n--- status ---\\n%s--- working diff ---\\n%s\", which is exactly the pair of markers statusBlock cuts on, and the gate name literal at export.go:398 matches gates.go:98. Truncation cannot leak the diff body, because a detail truncated before the second marker also lacks the diff."
+    },
+    {
+      "path": "internal/fsm/export/export.go",
+      "line": 130,
+      "note": "Checked the lines/events index alignment that `line = lines[i]` depends on: internal/fsm/run/store.go:88-108 parseLines appends exactly one Event per input line and errors out otherwise, so lines[i] always corresponds to log.Events[i]. No off-by-one."
+    },
+    {
+      "path": "package.json",
+      "line": 52,
+      "note": "The `Go 1.26+` runtime string now agrees with go.mod:3 (`go 1.26`). Verified, not assumed."
+    },
+    {
+      "path": "package.json",
+      "line": 57,
+      "note": "`\"test\": \"bash tests/coverage.sh\"` points at a file that exists and is a strict superset of the old target: tests/coverage.sh runs the unit suite under coverage and then invokes `bash tests/run-all.sh` (coverage.sh:66), so nothing the old `npm test` ran was dropped."
+    },
+    {
+      "path": "package.json",
+      "line": 29,
+      "note": "The three additions to `files` are each load-bearing for the documented `go run ./cmd/metareview` fallback: workflows/ holds the only go:embed in the tree (workflows/embed.go:12 `//go:embed *.yaml`, confirmed by grepping every go:embed directive), go.sum is required to build gopkg.in/yaml.v3 and go.mod was already shipped, and docs/fsm/ is the new driver documentation. No missing companion file found."
+    },
+    {
+      "note": "Empirical verification was run in a throwaway copy of the tree under the scratchpad, never in the repository: the branch is untouched (git status shows only pre-existing untracked artifacts). Four probes were executed, and all four confirmed the findings below; the two panic probes and the relative-Out probe each reproduced on the first run."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "export.go:37 claims \"FS is the destination seam: every write goes through it so tests assert flags and perms literally.\" No test asserts the flags. The only assertion over the recorded opens is export_test.go:348, `if !strings.HasSuffix(o, \" \"+itoa(...)+\" -rw-------\") && !strings.Contains(o, \"-rw-------\")`. Every recorded open string ends in os.FileMode(0o600).String() == \"-rw-------\" (memFS.OpenFile, export_test.go:89), so the second conjunct is always false and the whole condition is unreachable: the t.Fatalf inside the loop can never run. Confirmed by executing the identical condition against a deliberately wrong flag value in a scratchpad copy -- it did not fire. Two consequences. (1) The O_NOFOLLOW on the bundle write (export.go:222) is a security control against a pre-planted symlink in the destination, and nothing verifies it is still there; dropping syscall.O_NOFOLLOW would leave the whole suite green and the 100% coverage gate satisfied, because coverage measures that writeFile ran, not what it passed. (2) The dead conjunct is masking a real platform mismatch: the test hardcodes 0x100 (darwin's O_NOFOLLOW) rather than syscall.O_NOFOLLOW, and the helper `itoa` at export_test.go:120 is `string(rune('0' + i%10))`, i.e. one decimal digit of the flag word. On CI (.github/workflows/test.yml:19, ubuntu-latest) Linux O_NOFOLLOW is 0x20000, so the intended comparison is \"3\" against an expected \"7\" and would fail -- the tautology is the only reason CI is green. Even repaired, a one-decimal-digit comparison is not \"literally\": the probe showed the flag set with no O_NOFOLLOW at all renders as \"1\", so many wrong flag words share a digit. Fix: record the flag as a full integer and assert the exact expected flag word using syscall.O_NOFOLLOW, or delete the claim at export.go:37.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 37,
+          "note": "claims tests assert flags and perms literally"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 222,
+          "note": "O_EXCL|O_NOFOLLOW|0600, the control that is left unasserted"
+        },
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 348,
+          "note": "condition whose second conjunct is always false, so the loop body is dead"
+        },
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 120,
+          "note": "itoa keeps one decimal digit of the flag word"
+        },
+        {
+          "path": ".github/workflows/test.yml",
+          "line": 19,
+          "note": "ubuntu-latest, where O_NOFOLLOW is 0x20000 and the hardcoded 0x100 would not match"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "export.go:193-194 states that checkDest \"walks every component from the filesystem root down to Out: a symlink refuses, ENOENT on trailing components is tolerated (MkdirAll creates them), an existing non-empty Out refuses.\" That is only true when Out is absolute. Line 196 strips a leading separator and then rebuilds each prefix from filepath.Separator, so a relative Options.Out of \"rel/bundle\" makes the function Lstat \"/rel\" and \"/rel/bundle\" -- paths unrelated to the directory it is about to write into. In practice \"/rel\" does not exist, checkDest hits the ErrNotExist branch at line 201 and returns nil, so BOTH guards are skipped: the symlink refusal and the non-empty refusal. Export then proceeds to MkdirAll and write. Reproduced in a scratchpad copy: checkDest(fs, \"rel/bundle\") returned nil with \"rel/bundle\" registered as both a symlink and a non-empty directory. This is not reachable through the CLI today, because internal/fsm/cli/run.go:927 passes Out through invocation.abs (run.go:157-162), which joins a relative flag onto cwd -- but Options.Out is an exported field of an exported API whose doc comment promises a security property it does not have for half its inputs, and the CLI's absolutisation is the only thing standing between the two. Fix: reject a non-absolute Out with CodeExportDest, or absolutise inside checkDest, and either way make the comment state the precondition.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 193,
+          "note": "comment promising a whole-path symlink walk"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 196,
+          "note": "TrimPrefix + rebuild from filepath.Separator fabricates absolute prefixes for a relative Out"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 201,
+          "note": "first ErrNotExist returns nil, skipping the non-empty check too"
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 927,
+          "note": "the only caller absolutises, which is why the gap is latent rather than live"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "redactor.event panics on an init event whose payload folds cleanly but is not an object with the expected keys. export.go:373-374 does `var data map[string]any; _ = json.Unmarshal(ev.Data, &data)`, discarding the error, and the TypeInit branch then writes into that map (line 379) and type-asserts two keys without a comma-ok (line 393-394). run.Apply accepts an init event with `\"data\":null` and with `\"data\":{}`: Canonical() only requires valid JSON with no duplicate keys (internal/fsm/run/canonical.go:23), and decodePayload's strict decode into *InitData (fold.go:474-478) succeeds on both, since InitData has no required-field validation. Reproduced both in a scratchpad copy: `\"data\":null` leaves data nil and panics with \"assignment to entry in nil map\" at export.go:379; `\"data\":{}` panics with \"interface conversion: interface {} is nil, not string\" at export.go:393. Every other map access in the same function is comma-ok guarded (lines 382, 386, 400, 405, 411, 416, 421, 427), so this is an inconsistency rather than a considered choice. A hand-edited or otherwise corrupt audit line is exactly the input class this package is written to survive -- the store already has typed errors for it (CodeAuditChain in run/store.go:96-102, ReasonBadPayload in fold.go) and the audit hash chain is unkeyed, so a local editor can rewrite it -- and a panic replaces a typed ERR_ envelope with a crashed CLI. Fix: return a typed error when the init payload is not an object, or guard the two assertions.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 373,
+          "note": "unmarshal error discarded; data can remain nil"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 379,
+          "note": "write into a possibly-nil map"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 393,
+          "note": "unchecked .(string) on data[\"repo_root\"] and data[\"work_dir\"]"
+        },
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 474,
+          "note": "strict decode into *InitData accepts null and {}, so the fold does not filter these"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "A sidecar can silently replace the redacted snapshot in the bundle. export.go:147 stores the redacted projection under \"snapshot.json\", and the sidecar copy loop at line 152-159 then writes `files[n] = b` for every name from Sidecar.List with no collision check. machine.ValidSidecarName (internal/fsm/machine/sidecar.go:19-24) permits `snapshot.json` and `manifest.json` -- its regexp `^[a-z][a-z0-9._-]{0,63}$` matches both, and its only exclusions are the `audit.` prefix and `lock`. So a file named snapshot.json sitting in .metareview/runs/<id>/ overwrites the redacted snapshot with unredacted bytes, and one named manifest.json is itself silently overwritten at line 173 after its size has already been counted into Manifest.Bytes at line 166-168. The `audit.` exclusion shows collisions with the run directory's own reserved names were considered; the export's reserved names were not. Impact is bounded (a sidecar is operator-supplied local content, so this corrupts the bundle's contract rather than leaking a secret), hence low. Fix: skip or refuse a sidecar whose name collides with a bundle filename, the same way SidecarWorkflow is already skipped at line 153.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 157,
+          "note": "unconditional files[n] = b overwrites an earlier bundle entry"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 147,
+          "note": "the redacted snapshot.json that a sidecar of the same name would replace"
+        },
+        {
+          "path": "internal/fsm/machine/sidecar.go",
+          "line": 19,
+          "note": "ValidSidecarName permits snapshot.json and manifest.json; only audit.* and lock are reserved"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The MaxBytes cap is not a cap on what is written. Manifest.Bytes is summed at export.go:166-168 before manifest.json is added to the map at line 173, and the refusal at line 170 compares that pre-manifest total against max, so the bundle actually written always exceeds MaxBytes by the size of manifest.json. That size is not constant: the manifest embeds Redacted []int64 and Records []int64, one entry per redacted and per record event, so it grows with the run. The Bytes field's own comment (line 76) is accurate about what it counts, but the error text at line 171, \"bundle is %d bytes (max %d)\", presents the pre-manifest total as the bundle size. Fix: either state the exclusion in the CodeExportTooLarge message and the MaxBytes doc, or count the manifest by marshalling it before the check.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 170,
+          "note": "cap compared against a total that excludes manifest.json"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 173,
+          "note": "manifest.json added to the write set after the check"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 3
+}

@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-09-8b71c85f87d0ebd5",
+  "kind": "shard",
+  "shardId": "shard-09",
+  "shardHash": "8b71c85f87d0ebd5",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "go.mod",
+      "line": 16,
+      "note": "Adds `require gopkg.in/yaml.v3 v3.0.1` as a direct dependency (used by internal/fsm/mockai/mockai.go and internal/fsm/workflow). Verified go.sum already carries both the h1: and /go.mod hashes for v3.0.1, and `go mod tidy` produces a byte-identical go.mod and go.sum, so the module graph is complete and minimal."
+    },
+    {
+      "path": "go.mod",
+      "line": 14,
+      "note": "`toolchain go1.27.0` above `go 1.26`. Cross-checked .github/workflows/test.yml:30, which uses `go-version-file: go.mod`; actions/setup-go honours the toolchain directive from that file, so the CI build uses the same pinned toolchain the comment claims the coverage floors were measured against. No consumer-facing regression: the `go` directive stays at 1.26."
+    },
+    {
+      "path": "internal/fsm/mockai/mockai_test.go",
+      "line": 1,
+      "note": "New test file for the mockai package. Ran `go test ./internal/fsm/mockai/ -cover`: passes at 100.0% of statements. `go vet ./internal/fsm/mockai/` is clean."
+    },
+    {
+      "path": "internal/fsm/mockai/mockai_test.go",
+      "line": 43,
+      "note": "TestS1Load asserts Hash() is sha256 over the raw file bytes (not the parsed model) and that a comment-only edit moves the hash — the right property for a mock identity that is stamped into audit events. Strict-decode rejections are table-driven over unknown key, duplicate call key, negative tokens, malformed YAML, duplicate/unnamed/negative cmd rows and duplicate YAML keys; each is checked against errs.Is(err, CodeMockInvalid), matching mockai.go's Load error construction."
+    },
+    {
+      "path": "internal/fsm/mockai/mockai_test.go",
+      "line": 105,
+      "note": "TestS3Runner exercises the documented fakeRunner matching rule from mockai.go's Runner doc comment: exact `call == Ordinal` first, then the first `repeat` row with `call <= Ordinal`, then CodeMockUnscripted with an `ordinal` field. It also pins the security-relevant property that rows are keyed by Spec.Name and never by argv (the `nope` case passes Argv []string{\"/notify\"} and still expects unscripted)."
+    },
+    {
+      "path": "internal/fsm/mockai/mockai_test.go",
+      "line": 122,
+      "note": "TestLoadTooLarge asserts CodeMockInvalid with Fields[\"reason\"] == \"too_large\", which pins that the MaxFileBytes guard at mockai.go short-circuits before yaml decode — the guard exists because the peek reads judge.yaml before the run is verified."
+    },
+    {
+      "path": "tests/go/agent-prompt-anchors.txt",
+      "line": 1,
+      "note": "Data-only fixture, no executable content. Verified it is actually consumed: tests/go/test-fsm.sh:66 reads it line by line and greps each line into the generated `metareview fsm --agent-prompt` output, failing the suite on any missing anchor, with a floor of >= 20 anchors. Independently grep -F'd all 28 non-empty lines against testdata/fsm/agent-prompt.golden: every one is present verbatim."
+    },
+    {
+      "path": "tests/go/agent-prompt-anchors.txt",
+      "line": 17,
+      "note": "The line 'The workflow structure is deterministic and the LLM calls are auditable and swappable; the results are not deterministic.' does not trip the forbidden-phrase guard in tests/go/test-fsm.sh (regex '(^|[^-])deterministic results?|results are deterministic'), and the anchors file itself is not in that guard's scan set, so there is no self-inflicted failure."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/mockai/mockai_test.go:53 — `if h2, _ := LoadHash(dir2); h2 == h` discards the error. If LoadHash ever started failing on that input, h2 would be \"\" and the assertion 'comment edit must change the hash' would pass vacuously. Checking the error alongside the value would make the test fail loudly instead of silently weakening.",
+      "evidence": [
+        {"path": "internal/fsm/mockai/mockai_test.go", "line": 53, "note": "Error from LoadHash discarded; assertion can pass vacuously on the empty-string hash."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The token-validation guard in mockai.go is `if tok.Negative() || tok.TooLarge()`, but the only fixture in the `bad` table is \"bad-tokens\" with `tokens: {input: -1}`, which exercises Negative() alone. Because both conditions sit on one statement, the 100% statement-coverage gate cannot see that the TooLarge() arm is untested; a regression that dropped TooLarge() from the condition would be caught by no test in this shard.",
+      "evidence": [
+        {"path": "internal/fsm/mockai/mockai_test.go", "line": 65, "note": "bad-tokens fixture uses input: -1 only; the TooLarge() arm of the same guard has no fixture."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/mockai/mockai_test.go:124 — the too-large fixture's YAML prefix uses a top-level key `judge:` with a `verdict:` row, neither of which exists in the mockai `file`/`callRow` schema (the keys are `calls:`/`cmds:` and rows have `raw:`, not `verdict:`). The test still asserts correctly because the size guard fires before decode, but the fixture reads as though it were a valid scenario and would mislead the next person editing it. Using a `calls:`-shaped prefix would make the intent (valid content, rejected purely on size) unambiguous.",
+      "evidence": [
+        {"path": "internal/fsm/mockai/mockai_test.go", "line": 124, "note": "Fixture prefix 'judge:' / 'verdict:' does not match the mockai YAML schema (calls:/cmds:, raw:)."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestS3Runner never asserts Result.Stderr, so the Stderr wiring in mockai.go's result() helper (and the scenario `stderr:` field the `good` fixture declares at line 5) is executed but unverified — a row that dropped stderr on the floor would still pass this suite.",
+      "evidence": [
+        {"path": "internal/fsm/mockai/mockai_test.go", "line": 108, "note": "Runner assertions cover Stdout, ExitCode and Duration but never Result.Stderr."}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

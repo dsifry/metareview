@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1b.bbd7c99ff8bfbb64",
+  "kind": "shard",
+  "shardId": "shard-1b",
+  "shardHash": "bbd7c99ff8bfbb64",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/judge/prompts.go",
+      "line": 227,
+      "note": "format() is a single-pass str.format emulation; traced {{ / }} unescaping and slot substitution by hand against the committed goldens (match.calibration.golden lines 7 and 10 keep {{loop}} and {candidate} verbatim, line 18 unescapes to a single brace) — values are provably never rescanned."
+    },
+    {
+      "path": "internal/fsm/judge/prompts.go",
+      "line": 336,
+      "note": "Parse's default branch treats any unrecognised kind as still-present; verified unreachable because judge.go:519 calls RenderPrompt first, which returns ERR_PROMPT_TEMPLATE for an unknown kind before Parse can be reached."
+    },
+    {
+      "path": "internal/fsm/judge/prompts.go",
+      "line": 393,
+      "note": "Still-present fail-closed path checked end to end: unparseable JSON, missing still_present and MaxDetail overflow all return decision=true; adjudicate/match parse errors surface as Verdict.ParseError, which internal/fsm/kind/kind.go:386 records on the llm_call event and kind.go:471 uses to refuse confirmation, so nothing is dropped silently."
+    },
+    {
+      "path": "internal/fsm/gate/gates.go",
+      "line": 61,
+      "note": "nothing_found / nothing_confirmed refuse once AllFound is non-empty, and all_fixed / bugs_remain are exact complements over converge.AllFixed (converge.go:27 returns false for an empty AllFound), so verify cannot exit clean while bugs remain and cannot exit fixed having found nothing."
+    },
+    {
+      "path": "internal/fsm/gate/gates.go",
+      "line": 100,
+      "note": "commit_exists: ERR_GIT is defined at internal/fsm/gate/git.go:24, every git error is reported rather than swallowed, and the failure detail is capped by run.CapDetail with DetailTruncated set."
+    },
+    {
+      "path": "internal/fsm/run/store_mem.go",
+      "line": 68,
+      "note": "memStore Create/Append/Lock semantics compared line by line with store_jsonl.go:137/223/337: both stores leave Create lock-free, both check run-existence before the lock on Append, and store_test.go:44 drives both through one shared conformance table."
+    },
+    {
+      "path": "workflows/review-loop.yaml",
+      "line": 1,
+      "note": "Validated against internal/fsm/workflow/workflow.go Parse/validateGraph: gates all exist in gate.Builtin, outcomes clean/reviewed are in run.Outcomes (types.go:34), failed is declared and node-free, no loop means no convergence block is required (workflow.go:198), and workflow_test.go:116 plus machine_test.go exercise it."
+    },
+    {
+      "path": "tests/go/test-task-done-review.sh",
+      "line": 99,
+      "note": "Reproduced the underlying claim in bash 3.2: `set -euo pipefail; ! echo hi | grep -q hi; echo reached` prints reached, so the old `! grep -q` assertion could never fail. The new `grep -q ... && exit 1` form is live, and the whole script still exits 0 on this branch."
+    },
+    {
+      "path": "internal/learning/review.go",
+      "line": 278,
+      "note": "markdownList removal verified as dead-code only: at ce27f37^ the learning copy had no caller (git grep shows callers only in epicready/prready/taskdone/reviewmanifest, each with its own local copy), and go build ./... plus go vet ./... are clean."
+    },
+    {
+      "path": "internal/runchain/runchain_test.go",
+      "line": 247,
+      "note": "New test asserts the fixture is exactly maxJSONLLineBytes (runchain.go:17) and exceeds bufio's 64 KiB default; ReadRuns sets the scanner budget to maxJSONLLineBytes+2 at runchain.go:114, so the boundary the test pins is the real one."
+    },
+    {
+      "path": "internal/fsm/judge/smoke_test.go",
+      "line": 1,
+      "note": "Build-tagged smoke test is really reachable: tests/run-all.sh:11-12 vets and lists it, and `go vet -tags smoke ./internal/fsm/judge/` plus `go test -tags smoke -list TestSmoke` both succeed here, so it cannot rot unnoticed."
+    },
+    {
+      "path": "internal/fsm/run/testdata/golden-log.jsonl",
+      "line": 1,
+      "note": "Golden log is asserted byte-for-byte by golden_test.go:38 and every prev hash chains; regeneration is gated behind FSM_RUN_UPDATE_GOLDEN=1 rather than happening on failure."
+    },
+    {
+      "path": "docs/README.claude.md",
+      "line": 49,
+      "note": "Documentation lines checked against the code they describe: the .metareview/runs/ and .metareview/shards/ transient contract and the sharded-review workflow match CLAUDE.md and the shard pack, and workflows/embed.go exposes exactly the sdlc-loop and review-loop names the text claims."
+    },
+    {
+      "note": "Package-level verification run on the frozen tree: go build ./... and go vet ./... clean; go test -cover reports 100.0% for internal/fsm/run, internal/fsm/gate, internal/fsm/judge and workflows; tests/go/test-task-done-review.sh exits 0."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/testdata/golden-log.jsonl is compared with bytes.Equal (golden_test.go:38) but is not covered by any .gitattributes rule. .gitattributes only pins internal/fsm/judge/testdata/prompts/* and testdata/fsm/** as -text, so a clone with core.autocrlf=true would rewrite the run goldens' line endings and fail TestGoldenPrefixes for a reason unrelated to the code. Add internal/fsm/run/testdata/** -text for parity with the judge fixtures.",
+      "evidence": [
+        {"path": ".gitattributes", "line": 1, "note": "only prompts and testdata/fsm are marked -text"},
+        {"path": "internal/fsm/run/testdata/golden-log.jsonl", "line": 1, "note": "byte-exact fixture with no -text rule protecting it"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "store_mem.go:11 documents memStore as \"the in-memory RunStore used by tests and dry runs\", but NewMemStore has no non-test caller anywhere in the tree (only store_test.go, machine/harness_test.go and machine_test.go). \"dry runs\" describes intent, not current wiring; the comment should say tests only until a dry-run path exists.",
+      "evidence": [
+        {"path": "internal/fsm/run/store_mem.go", "line": 11, "note": "comment claims a dry-run consumer that does not exist yet"},
+        {"path": "internal/fsm/run/store_mem.go", "line": 18, "note": "NewMemStore's only callers are _test.go files"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/judge/testdata/prompts/match.calibration.golden is byte-identical (md5 3f6c78b0b24ea1b35ca4e48a19ce8323) to match.plain.golden and match.fenced.golden, because match is never fenced and calibration does not swap the match template. judge_test.go:148-152 already asserts fenced == unfenced for match directly, so the third fixture adds a maintenance surface without adding coverage. Harmless, but worth collapsing or annotating so a future reader does not mistake it for a distinct calibration shape.",
+      "evidence": [
+        {"path": "internal/fsm/judge/testdata/prompts/match.calibration.golden", "line": 1, "note": "identical bytes to the plain and fenced match goldens"},
+        {"path": "internal/fsm/judge/judge_test.go", "line": 148, "note": "the match fenced == unfenced invariant is already asserted in code"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "RenderPrompt populates the `fenced` map only for adjudicate and still-present, so the match prompt interpolates the untrusted candidate issue_text and golden comment as raw prompt text even when Fence is true. Confirmed deliberate and bounded: docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md:125 states \"match is never fenced\", and :295 records the impact bound (a crafted candidate can claim a golden and skip adjudication, but its own text never propagates, since matched bugs carry the golden's text forward) with product-mode fencing named as a follow-up. Recorded so the follow-up is not lost, not as a defect in this diff.",
+      "evidence": [
+        {"path": "internal/fsm/judge/prompts.go", "line": 168, "note": "KindMatch sets no fenced entries, unlike lines 182 and 193"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md", "line": 295, "note": "spec states the bound and defers product-mode match fencing"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Suspected fail-open in Parse: the default branch of the kind switch (prompts.go:336) silently treats any unknown kind as still-present, while the shared fail() helper derives its fail-closed decision from `kind == KindStillPresent`, which would be false for such a kind. Checked and dismissed: judge.go:519 calls RenderPrompt before any request is sent, and RenderPrompt returns ERR_PROMPT_TEMPLATE for an unrecognised kind, so Parse is never reached with one. No change needed.",
+      "evidence": [
+        {"path": "internal/fsm/judge/prompts.go", "line": 336, "note": "default branch absorbs unknown kinds into still-present"},
+        {"path": "internal/fsm/judge/judge.go", "line": 519, "note": "RenderPrompt rejects unknown kinds before Parse can run"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-13.8bb2b4f8ad011e76",
+  "kind": "shard",
+  "shardId": "shard-13",
+  "shardHash": "8bb2b4f8ad011e76",
+  "planHash": "5946b89296b16369",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 93,
+      "note": "Guarded.env was checked against the trust-boundary claim in docs/fsm/driving-a-workflow.md: the child env is exactly {PATH,HOME,LANG,TMPDIR} present in the parent, plus MRV_RUN_ID, plus the declared names. No shadowing escape exists: internal/fsm/workflow/workflow.go:117-118 reserves PATH/HOME/LANG/TMPDIR and the MRV_/LD_/DYLD_/GIT_ prefixes, so a workflow cannot declare an env name that overrides MRV_RUN_ID or the loader variables. Doc and code agree."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 214,
+      "note": "Output-cap arithmetic verified end to end: cappingWriter retains at most MaxOutput+1 bytes and keeps draining (returns len(p), nil, so the pipe never blocks), and exec's `len(res.Stdout) > MaxOutput` at line 153 detects overflow precisely because of that extra byte. Stdout/Stderr are separate cappingWriters on separate pipe goroutines, so there is no shared-buffer race."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 148,
+      "note": "Error classification reviewed for mis-audit: on a runner error data.ExitCode is forced to unknownExit and data.Error carries errs.Code(err) (ERR_CMD_TIMEOUT survives); a spawn failure with no code is wrapped as ERR_CMD_FAILED{reason:spawn}. Pre-exec refusals (not consented, relative argv[0], ERR_CMD_CHANGED from workflow.VerifyCmds) leave data.Name empty and are correctly never audited (lines 176-180, 194-196). The exec runner's switch checks ctx.Err() before tctx.Err(), so a parent cancellation is never mislabelled a timeout, and a kill-vs-exit race at the deadline still classifies as ERR_CMD_TIMEOUT."
+    },
+    {
+      "path": "internal/reviewers/sharded_test.go",
+      "line": 22,
+      "note": "The new test file is fixture-safe against metareview's own lints: the work marker (line 22), its fingerprint (line 23) and the unsafe-call string (line 24) are assembled from concatenated fragments, so neither the quality:todo lint nor the security:eval lint fires on this diff itself while the fixtures still drive the lints under test. go test ./internal/reviewers/... passes at 97.0% statement coverage."
+    },
+    {
+      "path": "internal/setup/setup.go",
+      "line": 193,
+      "note": "gitStatus separates presence from version correctly (Present stays true for an old git), MinGitVersion 2.31 matches the `git >= 2.31` prerequisite stated in the new docs/fsm/driving-a-workflow.md, and atLeastVersion's field-by-field compare returns the right answers on the boundary cases I hand-checked (2.39.5 >= 2.31 true, 2.30.9 false, bare \"2\" false). internal/setup/gitversion_test.go covers the seam cases; go vet and go test are clean for the package (86.7% coverage)."
+    },
+    {
+      "path": "internal/state/state.go",
+      "line": 28,
+      "note": "AppendJSONL's named-return + deferred closeFile pattern is correct: the marshal/write error wins (`cerr != nil && err == nil`), the early MkdirAll return shadows deliberately before any file exists, and internal/state/state_test.go:11-42 covers both branches (Close error surfaced; Close error not masking the marshal error). ReadJSONL's `_ = file.Close()` on the read-only path is justified."
+    },
+    {
+      "path": "docs/fsm/driving-a-workflow.md",
+      "line": 90,
+      "note": "The doc's factual claims were spot-checked against shipped code rather than trusted: exit 1 for DONE(reviewed) is internal/fsm/machine/machine.go:865-867 (StatusDone defaults to 0, OutcomeReviewed sets ExitCode 1); --repair, --accept-workflow-change, --include-vars, --at-iter, --allow-custom-cmds are real flags (internal/fsm/cli/run.go:87,113); ERR_VAR_FROZEN, ERR_FORK_INCOMPLETE, ERR_RUN_LOCKED, ERR_AUDIT_FULL, ERR_AUDIT_TORN all exist; audit.torn-*.bin (internal/fsm/run/store.go:38) and runs/.torn/ (internal/fsm/machine/machine.go:346) are real paths. No doc-vs-code drift found."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Read/write asymmetry in the JSONL cap. ReadJSONL now admits lines up to maxJSONLLineBytes (internal/state/state.go:66), but AppendJSONL (state.go:28-50) enforces no matching limit, so a record that marshals to more than 1 MiB is written happily and then makes the ENTIRE file unreadable: scanner.Scan stops and internal/state/state.go:78 returns bufio.ErrTooLong, so every callsite (internal/taskdone/review.go:239, internal/prready/review.go:262, internal/epicready/review.go:204, internal/artifactreview/review.go:149, internal/learning/*) loses the whole run/finding history rather than one row. The change is a strict improvement over the previous 64 KiB default and current run records are far below 1 MiB, so this is a durability observation, not a regression — but a symmetric cap (or skipping an over-long line instead of failing the read) would close it.",
+      "evidence": [
+        {"path": "internal/state/state.go", "line": 66, "note": "read cap raised to maxJSONLLineBytes+2"},
+        {"path": "internal/state/state.go", "line": 78, "note": "scanner.Err() returns bufio.ErrTooLong for the whole file"},
+        {"path": "internal/state/state.go", "line": 28, "note": "AppendJSONL writes any size without a matching cap"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Testing gap on the very behaviour the state.go change adds. internal/state/state_test.go covers only the closeFile seam; nothing in the repo writes a line longer than bufio's 64 KiB default and reads it back, so the scanner.Buffer sizing at internal/state/state.go:66 — including the deliberate +2 the comment reasons about — has no regression guard. grep for maxJSONLLineBytes finds it only in state.go. A single round-trip test with a ~100 KiB record would pin it.",
+      "evidence": [
+        {"path": "internal/state/state.go", "line": 66, "note": "the +2 buffer sizing is uncovered by any test"},
+        {"path": "internal/state/state_test.go", "line": 11, "note": "only the closeFile seam branches are tested"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead field: Guarded.Clock (internal/fsm/cmdexec/cmdexec.go:77) is never read anywhere in the package — grep for Clock in internal/fsm/cmdexec returns only the declaration — yet internal/fsm/cli/deps.go:90 populates it on every constructed Guarded. Event timestamps are in fact stamped centrally by session.audit (internal/fsm/machine/machine.go:466), so the field is a vestige. Harmless today, but a reader of cmdexec's audit path is invited to assume cmd_call carries a cmdexec-controlled clock when it does not.",
+      "evidence": [
+        {"path": "internal/fsm/cmdexec/cmdexec.go", "line": 77, "note": "Clock declared, never referenced in the package"},
+        {"path": "internal/fsm/cli/deps.go", "line": 90, "note": "the caller still passes now into it"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "parseGitVersion (internal/setup/setup.go:224) returns whatever token follows the literal word \"version\", with no check that the token looks like a version. Output such as \"not a version banner\" yields Version=\"banner\", so gitStatus stores a bogus Version and rejects it only as a side effect of atLeastVersion's strconv.Atoi failure, producing the misleading operator message \"Upgrade git: metareview fsm needs git >= 2.31, found banner.\" instead of the intended \"Could not parse the git version\" branch at setup.go:211 — which is consequently unreachable for that class of input. A leading-digit check on the candidate token would route it correctly.",
+      "evidence": [
+        {"path": "internal/setup/setup.go", "line": 224, "note": "no shape check on the token after \"version\""},
+        {"path": "internal/setup/setup.go", "line": 211, "note": "the parse-failure branch is bypassed by such input"},
+        {"path": "internal/setup/setup.go", "line": 216, "note": "wrong message: reports the garbage token as a found version"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The git-version verdict influences no machine-readable signal. missingFullMetaswarmPrereqs (internal/setup/setup.go:254-267) inspects only Beads/Metaswarm/Superpowers Present flags, and cmd/metareview/main.go:420-424 prints the report and returns with exit 0 regardless, so `metareview setup --check` reports standalone.fullMetaswarmReady exactly the same for a git 2.20 as for a git 2.50 — only the free-text Action and versionOk fields carry the warning. This is consistent with the pre-existing design (an entirely absent git is also not in that list and also exits 0), so I am not treating it as a regression introduced here; flagged because an operator scripting on exit status or on fullMetaswarmReady still gets a clean setup and then hits the FSM failure this check was added to prevent.",
+      "evidence": [
+        {"path": "internal/setup/setup.go", "line": 254, "note": "readiness ignores git entirely, version or not"},
+        {"path": "cmd/metareview/main.go", "line": 420, "note": "setup --check always exits 0"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The production branch of gitStatus is untested. internal/setup/gitversion_test.go injects the gitVersionOutput seam in every case, so the default closure at internal/setup/setup.go:198-201 — exec.Command(status.Path, \"version\").Output(), the one line that decides whether the check works on a real machine, and the only caller shape used by Check at setup.go:90 — is never executed by the suite. I confirmed manually that the real path works (`go run ./cmd/metareview setup --check` reports the local git version and VersionOK true), so this is regression risk rather than a defect.",
+      "evidence": [
+        {"path": "internal/setup/setup.go", "line": 198, "note": "default seam closure never exercised by tests"},
+        {"path": "internal/setup/setup.go", "line": 90, "note": "Check passes nil, taking exactly that branch"}
+      ]
+    }
+  ]
+}

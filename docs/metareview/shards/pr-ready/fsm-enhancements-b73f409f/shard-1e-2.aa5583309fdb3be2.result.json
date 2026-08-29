@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1e-2.aa5583309fdb3be2",
+  "kind": "shard",
+  "shardId": "shard-1e-2",
+  "shardHash": "aa5583309fdb3be2",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/fsm/run/store_test.go",
+      "line": 1,
+      "note": "New 995-line conformance suite for the run store. Executed against the real tree: `go test ./internal/fsm/run/ -count=1` passes, `-race` passes, and `-cover` reports 100.0% of statements, which is what tests/coverage.sh:80-84 requires of every internal/fsm/* package."
+    },
+    {
+      "path": "internal/fsm/run/store_test.go",
+      "line": 40,
+      "note": "Table over both implementations (NewJSONLStore, NewMemStore) via stores(); every conformance test runs both, and TestStoreFoldEquivalence compares the canonical snapshots of the two stores, so the mem store cannot silently diverge from the on-disk one."
+    },
+    {
+      "path": "internal/fsm/run/store_test.go",
+      "line": 386,
+      "note": "TestJSONLTornTail covers all three torn shapes (mid-line, complete-without-newline, valid JSON prefix), asserts Events does not mutate the file, that append onto a torn log is refused, that RepairTail needs the lock, truncates to the clean prefix, writes a 0600 sidecar with the exact torn bytes, and that a second repair reports ERR_AUDIT_NOT_TORN. The offset-0 case (whole run torn) asserts the run dir is removed and bytes preserved under .torn/."
+    },
+    {
+      "path": "tests/go/test-git-context.sh",
+      "line": 58,
+      "note": "The grep assertion is lowered to 'invalid git base'. Verified this is required, not cosmetic: internal/gitcontext/gitcontext.go:305, 319 and 327 now emit lowercase, while `git show 61ffdf7:internal/gitcontext/gitcontext.go` (lines 261, 275, 283) emitted 'Invalid git base'. grep is case-sensitive, so the old assertion would fail; the new one still fails if the wording regresses. A repo-wide grep for the old capitalised string finds no remaining consumer outside prior review artifacts."
+    },
+    {
+      "path": "tests/coverage-floor.txt",
+      "line": 2,
+      "note": "Checked the floor list against `go list ./...`: every non-fsm package is present except internal/version and workflows. workflows is handled by the 100%-required branch of tests/coverage.sh:80-84, and internal/version contains only a const (zero statements), so it can never appear in the merged profile. The floor file therefore has no enforcement hole."
+    },
+    {
+      "path": "tests/coverage-floor.txt",
+      "line": 1,
+      "note": "The header names the exact regeneration command (bash tests/coverage.sh --update-floor), which matches the flag parsed at tests/coverage.sh:33-40, and the script never lowers a line without --allow-floor-decrease, so the floor is a ratchet rather than a snapshot that can silently sag."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "internal/fsm/run/store_test.go:190 does an unchecked type assertion, se.Cause.(*FoldError).Reason. If Append ever returned ERR_APPEND_REJECTED with a non-FoldError cause, the test would panic with an opaque runtime error instead of failing cleanly. Verified this is only a diagnostics-quality nit and not a correctness gap: storeErrE has already asserted the code, the assertion is inside a test, and the suite passes, so the panic path is unreachable for current behaviour. Not blocking.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store_test.go",
+          "line": 190,
+          "note": "se.Cause.(*FoldError).Reason != ReasonStamp -- comma-ok form would turn a future type change into a failure rather than a panic."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "internal/fsm/run/store_test.go:496 stats matches[0] -- the lexicographically first sidecar -- to assert mode 0600, inside a loop that runs three times. On the second and third iterations it re-checks the sidecar written by the first iteration rather than the one just produced, so a permissions regression affecting only later repairs would not be caught. The bytes assertion just above (lines 488-495) does scan all matches for this iteration's tail, so the sidecar itself is verified; only the mode check is narrow. Sidecar creation is a single code path, so this is a robustness nit, not a live gap.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store_test.go",
+          "line": 496,
+          "note": "fi, _ := os.Stat(matches[0]) after sort.Strings(matches) -- checks the oldest sidecar, not the one this iteration wrote."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Inconsistent root-user guards: store_test.go:677 uses os.Geteuid() and store_test.go:917 uses os.Getuid() for the same purpose (skipping permission-based assertions when modes are ignored). Both work in practice; the effective uid is the correct one for permission checks. Cosmetic only, and the mode-0 chmod at line 916 is left in place on a t.TempDir file, which RemoveAll still unlinks via the parent directory permission. No cleanup leak.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store_test.go",
+          "line": 677,
+          "note": "os.Geteuid() != 0 guard here vs os.Getuid() at line 917 for the same class of permission-dependent assertion."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "The user-visible CLI error string changes from 'Invalid git base' to 'invalid git base' (Go convention: error strings are not capitalised). Checked for stale consumers across the whole repo -- code, tests, docs, skills and plugin commands -- and the only match for the old string is inside previously committed shard review artifacts under docs/metareview/shards/. The behavioural test in this shard is the one consumer and it was updated in lockstep. No blocking impact.",
+      "evidence": [
+        {
+          "path": "tests/go/test-git-context.sh",
+          "line": 58,
+          "note": "grep -q 'invalid git base' matches internal/gitcontext/gitcontext.go:305, 319, 327 exactly."
+        }
+      ]
+    }
+  ]
+}

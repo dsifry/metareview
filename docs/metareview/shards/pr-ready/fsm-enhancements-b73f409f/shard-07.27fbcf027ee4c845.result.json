@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-07.27fbcf027ee4c845",
+  "kind": "shard",
+  "shardId": "shard-07",
+  "shardHash": "27fbcf027ee4c845",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": ".claude-plugin/marketplace.json",
+      "line": 11,
+      "note": "Version bump 0.8.2 to 0.9.0 verified consistent across every manifest that declares one: package.json:3, .claude-plugin/plugin.json:3, .codex-plugin/plugin.json:3 and internal/version/version.go:3 all read 0.9.0, and CHANGELOG.md:3 has the matching 0.9.0 entry. tests/manifest/test-manifests.sh:32 asserts claudeMarketplace.plugins[0].version === pkg.version, so this exact bump is enforced. .agents/plugins/marketplace.json declares no version field, so it cannot drift."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+      "line": 100,
+      "note": "Spec API sketches checked against the shipped code, signature by signature: judge.New -> (Judge, error) at internal/fsm/judge/judge.go:194, judge.Preflight at judge.go:308, CutDiff/FenceBlock/RenderPrompt at internal/fsm/judge/prompts.go:137/151/163, kind.New(Deps) (*Registry, error) at internal/fsm/kind/kind.go:75, cmdexec.Guarded/Run/Call at internal/fsm/cmdexec/cmdexec.go:69/171/184, mockai.Load with the 512 KB cap at internal/fsm/mockai/mockai.go:73-82. All match."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+      "line": 181,
+      "note": "Every load-bearing constant in the spec was checked against the source of truth rather than taken on trust: MaxTokens 1024/2048/1024/512 (internal/fsm/judge/prompts.go:101-104), MaxDiffBytes 30000 (prompts.go:97), MaxAttempts 5 / AttemptTimeout 180s / MaxBody 4MB / CalibrationEff medium (judge.go:38-41), AdjudicateThreshold 0.7 (internal/fsm/kind/kind.go:46), DefaultURLs (judge.go:45). The Anthropic effort-capable list, the no-xhigh list and the legacy list at judge.go:131-151 are element-for-element what the spec's family table states."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+      "line": 128,
+      "note": "The .gitattributes claim holds: the repo file carries `internal/fsm/judge/testdata/prompts/* -text` and `testdata/fsm/** -text`, so the byte-exact provenance fixtures are not CRLF-normalized. No TODO/FIXME markers anywhere in the added spec, no eval or other unsafe execution introduced by either file, and the diff is not truncated."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stale test contract: the J8 row at docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md:308 still asserts \"ParseError is the decoder message only\", which the same spec contradicts at line 91, where Verdict.ParseError is defined as `decoder message + \"; raw: \" + CapText(Raw, MaxShort)` (an r5 change). The shipped code follows line 91: internal/fsm/judge/prompts.go:313 returns `msg + \"; raw: \" + capped` and prompts.go:347 returns `\"missing still_present; raw: \" + capped`. Anyone writing the J8 test to the spec's own words would write a test that fails against the shipped parser; the actual manifest test at internal/fsm/judge/judge_test.go:739-747 quietly checks only the fixture files for key material and asserts nothing about ParseError. The same staleness appears in the section 3.1 table at line 112, which gives the still-present error literal as `\"parse: missing still_present\"` with no raw suffix, while internal/fsm/kind/kind.go:386 persists `\"parse: \" + v.ParseError` capped at MaxShort into the llm_call event, i.e. with the raw suffix included.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 308,
+          "note": "J8 row: \"ParseError is the decoder message only\" - contradicts line 91 of the same spec."
+        },
+        {
+          "path": "internal/fsm/judge/prompts.go",
+          "line": 313,
+          "note": "return nil, kind == KindStillPresent, 0, msg + \"; raw: \" + capped"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 112,
+          "note": "Section 3.1 still-present row gives the Error literal without the \"; raw: \" suffix the code emits."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Section 3.2 (spec lines 132-133) enumerates the prompt fixture layout and names `<kind>.plain.txt` files (\"still-present.calibration.plain.txt and still-present.product.plain.txt\") as the vendored copies of the Go constants. No .plain.txt file exists: internal/fsm/judge/testdata/prompts/ holds only <kind>.python.txt plus three golden modes per kind (.calibration.golden, .plain.golden, .fenced.golden). The provenance test compares rewrite(python.txt) against the in-code constant directly (internal/fsm/judge/judge_test.go:28 reads only *.python.txt), so no .plain.txt is needed - but the spec's file inventory describes a layout that was never built, and its own J1 row (line 308) lists only `.plain.golden`/`.fenced.golden`, omitting the third mode the test loop actually generates and asserts (judge_test.go:112 builds kind + \".\" + mode.name + \".golden\" over all three modes).",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 132,
+          "note": "Names <kind>.plain.txt fixture files that do not exist in internal/fsm/judge/testdata/prompts/."
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 112,
+          "note": "Golden path is built for three modes; the spec's J1 row lists only two."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The `codex` provider - a third judge transport that spawns a local binary - is documented only as prose inside section 3.4 (spec lines 157-168) and is missing from every structural part of the spec that is meant to be the contract. The package summary line for judge (spec line 50) lists \"providers; retry; tokens; MockJudge; NewHTTPClient\" with no mention of it; the API sketch in section 3 (lines 88-103) declares New but not NewWithCodex or the CodexExec seam, both of which are shipped (internal/fsm/judge/judge.go:201, internal/fsm/judge/codex.go:24); none of the r3/r4/r5 revision notes in the status header (lines 3-12) record its addition; and the judge test table's rows J0-J9 (line 308) contain no codex row even though internal/fsm/judge/codex.go is under the 100%-coverage gate and has its own test file. The result is that the one judge path that executes a local process and reads an operator OAuth session under ~/.codex has no entry in the spec's test contract or freeze inventory - a reader auditing the trust boundary from the structural sections alone would not know it exists.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 50,
+          "note": "judge package inventory omits the codex provider."
+        },
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 24,
+          "note": "CodexExec seam and the whole codex judge are shipped but absent from the spec's API sketch and test table."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Undocumented calibration carve-out in the Anthropic family gate. Spec line 187 states flatly that \"any other claude* id -> ERR_JUDGE_MODEL{reason: unknown_family}\", and the J0 test row (line 308) repeats it as \"unknown claude-zeta -> ERR_JUDGE_MODEL\", with no mode qualifier. The shipped check is product-mode only: internal/fsm/judge/judge.go:290 reads `if capable, legacy := anthropicFamily(wireModel(model)); !calibration && !capable && !legacy`, so under --calibration an arbitrary or mistyped claude-* id passes Preflight and reaches the Anthropic API, failing there instead of locally. The behaviour is deliberate and pinned by a test (\"unknown family under calibration is accepted\", internal/fsm/judge/judge_test.go:766), which makes the spec the only thing that is wrong.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 187,
+          "note": "Unqualified claim that any other claude* id is refused with unknown_family."
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 290,
+          "note": "!calibration && !capable && !legacy - the refusal is skipped entirely in calibration mode."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Section 4.2's ordered list is numbered 1, 0, 2, 3 across spec lines 256, 262, 265 and 269, with the pre-flight step written as \"0.\" and placed after the match loop. CommonMark takes the start number from the first item and renumbers the rest, so the rendered spec shows the cliff check as step 2, after the per-pair match calls - the exact opposite of its own text, \"Pre-flight (before any call) ... with no spend\". The implementation does run the bound first, so this is a rendering defect in the spec rather than in the code, but it inverts the one ordering guarantee the step exists to make.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 262,
+          "note": "List item written as \"0. Pre-flight (before any call)\" but positioned and rendered after item 1."
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Investigated and dismissed. The spec's status header (line 3) states that its review chain is ESCALATED and that r4/r5 were \"applied provisionally\" pending human acceptance, which under CLAUDE.md's completion rule would normally mean a workflow exit recorded only in artifact prose. It is in fact recorded through the sanctioned mechanism: .metareview/findings.jsonl carries two pr-ready findings whose `found` field names this exact spec path, both with status \"overridden\", requested by the orchestrator at 2026-08-27T22:15:52Z and granted by dsifry@warmstart.ai at 2026-08-27T22:37:44Z with reasons citing chain exhaustion. Both render under \"Process Overrides\" in docs/metareview/FINDINGS.md:9-10, and requester and granter are distinct actors as the process requires.",
+      "evidence": [
+        {
+          "path": "docs/metareview/FINDINGS.md",
+          "line": 10,
+          "note": "Granted override naming docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md among the blocked targets."
+        }
+      ]
+    }
+  ]
+}

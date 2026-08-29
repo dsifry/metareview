@@ -7,6 +7,10 @@ cd "$ROOT"
 bash tests/manifest/test-manifests.sh
 bash tests/manifest/test-skills.sh
 
+# spec 5 §7 smoke gate: the real-provider judge test must vet and be listable behind its build tag
+go vet -tags smoke ./internal/fsm/judge/
+go test -tags smoke -list 'TestSmoke' ./internal/fsm/judge/ | grep TestSmoke >/dev/null
+
 if [ -f tests/go/test-cli-baseline.sh ]; then bash tests/go/test-cli-baseline.sh; fi
 if [ -f tests/go/test-npm-wrapper-cwd.sh ]; then bash tests/go/test-npm-wrapper-cwd.sh; fi
 if [ -f tests/go/test-setup-check.sh ]; then bash tests/go/test-setup-check.sh; fi
@@ -39,3 +43,4 @@ if [ -f tests/go/test-learning-prune.sh ]; then bash tests/go/test-learning-prun
 if [ -f tests/go/test-learning-render.sh ]; then bash tests/go/test-learning-render.sh; fi
 if [ -f tests/go/test-learning-writers.sh ]; then bash tests/go/test-learning-writers.sh; fi
 if [ -f tests/go/test-learn-post-merge.sh ]; then bash tests/go/test-learn-post-merge.sh; fi
+if [ -f tests/go/test-fsm.sh ]; then bash tests/go/test-fsm.sh; fi

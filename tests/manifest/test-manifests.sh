@@ -6,6 +6,7 @@ VERSION="$(node -p "require('$ROOT/package.json').version")"
 
 node -e '
 const fs = require("fs");
+const { execSync } = require("child_process");
 const files = [
   "package.json",
   ".codex-plugin/plugin.json",
@@ -38,6 +39,8 @@ if (!JSON.stringify(codex).includes("post-merge-learning")) throw new Error("cod
 if (!JSON.stringify(claude).includes("epic-ready")) throw new Error("claude plugin does not advertise epic-ready review");
 if (!JSON.stringify(claude).includes("pr-ready")) throw new Error("claude plugin does not advertise pr-ready review");
 if (!JSON.stringify(claude).includes("post-merge-learning")) throw new Error("claude plugin does not advertise post-merge learning");
+if (!JSON.stringify(codex).includes("workflow")) throw new Error("codex plugin does not advertise workflow runs");
+if (!JSON.stringify(claude).includes("workflow")) throw new Error("claude plugin does not advertise workflow runs");
 if (!JSON.stringify(JSON.parse(fs.readFileSync(".agents/plugins/marketplace.json", "utf8"))).includes("task-done")) {
   throw new Error("marketplace does not advertise task-done review");
 }
@@ -61,7 +64,34 @@ for (const required of ["docs/quickstart.md", "docs/README.codex.md", "docs/READ
 }
 if (!fs.readFileSync("LICENSE", "utf8").startsWith("MIT License")) throw new Error("LICENSE must contain MIT text");
 if (!JSON.stringify(pkg).includes("post-merge-learning")) throw new Error("package metadata does not advertise post-merge learning");
-if (!JSON.stringify(pkg).includes("Go 1.22")) throw new Error("package metadata does not describe Go runtime expectation");
+// The Go floor is stated in many files and go.mod is the one that enforces it.
+// Derived, never enumerated: the first version of this check listed exactly the
+// five artifacts whose drift had just been repaired, so it passed by construction
+// while .agents/plugins/marketplace.json and cli/metareview.js — both already
+// reported — still advertised the old floor. A hardcoded list can only ever check the
+// copies someone remembered; every tracked file that states a floor is checked.
+const goFloor = (fs.readFileSync("go.mod", "utf8").match(/^go (\d+\.\d+)(\.\d+)?$/m) || [])[1];
+if (!goFloor) throw new Error("go.mod does not declare a go directive");
+const tracked = execSync("git ls-files -z", { maxBuffer: 64 * 1024 * 1024 })
+  .toString("utf8").split("\0").filter(Boolean);
+const floorPattern = /Go (\d+\.\d+)\+/g;
+let statedAnywhere = 0;
+for (const file of tracked) {
+  if (file.startsWith("docs/metareview/")) continue; // generated review artifacts
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    continue; // binary or unreadable: carries no prose floor
+  }
+  for (const m of text.matchAll(floorPattern)) {
+    statedAnywhere++;
+    if (m[1] !== goFloor) {
+      throw new Error(`${file} advertises Go ${m[1]}+ but go.mod requires ${goFloor}`);
+    }
+  }
+}
+if (statedAnywhere === 0) throw new Error("no tracked file states a Go floor; the check would pass vacuously");
 if (pkg.scripts.build !== "go build -o bin/metareview ./cmd/metareview") throw new Error("package build script must create bin/metareview");
 if (pkg.scripts.prepack !== "npm run build") throw new Error("package prepack must build the packaged binary");
 '

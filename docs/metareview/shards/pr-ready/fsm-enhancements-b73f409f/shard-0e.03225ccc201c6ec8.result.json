@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0e-review",
+  "kind": "shard",
+  "shardId": "shard-0e",
+  "shardHash": "03225ccc201c6ec8",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 135,
+      "note": "riskReasons split verified against the 0.8.3 spec: DIFF_TRUNCATED is now branch-only, LOCAL_DIFF_TRUNCATED covers staged/worktree truncation, DIFF_OVERSIZE fires on branchDiffBytes > maxBranchDiffBytes. All three reasons are asserted in internal/contextprofile/plan_test.go:285-318 and internal/reviewers/sharded_test.go:176."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 143,
+      "note": "The DIFF_OVERSIZE bound agrees with the planner: PlanShards at internal/contextprofile/shards.go:193 returns an empty plan on the same total > maxBranchDiffBytes condition, so the reason is raised exactly when no packs can be written. Spec docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md:73 states the same 16 MiB package var."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 80,
+      "note": "FromGit branch accounting checked: BranchFiles is only populated when ctx.DiffTruncated is true (internal/gitcontext/gitcontext.go:76-88), so the branch > 0 guard is exactly the sharded path, and local bytes are added directly rather than by subtraction. BranchRawDiffBytes is always >= BranchFilteredDiffBytes when files exist (gitcontext.go:93-99), so the raw total never regresses below the filtered one."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 194,
+      "note": "The byPath[f.Path] = f.Bytes overwrite is deliberate and correct: git.Diff is the truncated text for exactly the runs where BranchFiles exists, so replacing (not adding to) the parsed byte count is what removes the fiction. Local bytes are preserved separately in LocalBytes, and reviewmanifest/manifest.go:513-526 consumes both to list a committed-and-dirty file in SourcePaths and LocalPaths."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 132,
+      "note": "ShardPlanMarkdown is moved, not deleted: internal/contextprofile/shards.go:264 defines the new two-argument form and internal/prready/review.go:873 and internal/taskdone/review.go:497 call it. go vet and go test are clean for internal/contextprofile, internal/prready and internal/reviewmanifest."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 99,
+      "note": "New FileProfile fields are exercised by tests: profile_test.go:99 (TestBranchFileWithLocalEditsKeepsItsLocalBytes) and profile_test.go:132 (TestCleanBranchFileHasNoLocalBytes) pin the exact semantics the code comment claims. filesFromGit reports 100.0% statement coverage in the unit run."
+    },
+    {
+      "path": "internal/prready/review_markdown_test.go",
+      "line": 118,
+      "note": "The manifestArgs helper matches the production wiring shape: internal/prready/review.go:218 passes profile, shardPlan, packDir, manifest and aggregate into contextMarkdown in the same positions the updated tests use, and reviewmanifest.GeneratedPathDispositions is the same source of dispositions. go test ./internal/prready passes."
+    },
+    {
+      "path": "tests/go/test-learn-post-merge.sh",
+      "line": 55,
+      "note": "This is a real fix for a vacuous assertion, not a stylistic rewrite: under set -e bash exempts a command whose value is inverted with !, so the old '! git check-ignore -q X' lines could never fail the script (verified: bash -c 'set -euo pipefail; ! true; echo reached' prints reached). The '&& exit 1' form is also exempt from set -e for the failing left operand, so the intended assertion now actually fires."
+    },
+    {
+      "path": "skills/review-pr-ready/SKILL.md",
+      "line": 43,
+      "note": "Documented flags verified against cmd/metareview/main.go:195-199: --shard-result appends (repeatable) and appendCrossShardResult (main.go:602-607) rejects a repeated --cross-shard-result with the exact rationale the doc gives. The 'duplicate shard result' blocker the doc promises exists at internal/reviewmanifest/manifest.go:414."
+    },
+    {
+      "path": "skills/review-pr-ready/SKILL.md",
+      "line": 379,
+      "note": "The 4,000-byte untracked threshold in the doc matches maxUntrackedFileBytes = 4000 at internal/gitcontext/gitcontext.go:17, and the claim that no shard result satisfies a local truncation reason matches the spec's shard-satisfiable set {DIFF_TRUNCATED, LARGE_DIFF} (docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md:96)."
+    },
+    {
+      "path": "commands/status.md",
+      "line": 9,
+      "note": "Every path claim in the status doc checks out: results land in docs/metareview/shards/<scope>/<target-slug> (internal/shardpack/shardpack.go:448), pack dirs self-ignore with a '*' .gitignore (shardpack.go:158), and .metareview/runs/ writes its own self-ignoring .gitignore (internal/fsm/run/store_jsonl.go:104-107)."
+    },
+    {
+      "note": "No TODO or FIXME markers, no eval or other unsafe execution, and no duplicated service or code path is introduced anywhere in this shard's diff."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Local-byte disclosure has a hole on the non-sharded path. sourceOf (internal/contextprofile/profile.go:278) checks git.ChangedFiles first, so a file that is committed on the branch AND dirty in the working tree gets Source=\"branch\". In filesFromGit (profile.go:206-213), LocalBytes is only assigned when the path is in the BranchFiles map or when Source != SourceBranch, and BranchFiles is nil whenever the branch diff was not truncated (internal/gitcontext/gitcontext.go:76-79). So on any non-sharded run such a file reports LocalBytes=0 and is dropped from Manifest.LocalPaths by the LocalBytes > 0 test at internal/reviewmanifest/manifest.go:522 - the same omission TestCleanBranchFileHasNoLocalBytes and its sibling were written to prevent, just outside the case they cover. Impact is limited: with no BranchFiles there are no shard packs, so nothing is silently outside a pack, and pr-ready separately blocks on non-generated working-tree changes. Worth a test on the BranchFiles-empty case rather than a code change under freeze.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 211,
+          "note": "else if file.Source != SourceBranch: a ChangedFiles path with no BranchFiles entry falls through both arms, leaving LocalBytes at zero."
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 522,
+          "note": "LocalPaths admits a branch-sourced file only when LocalBytes > 0, so the zero above erases the disclosure."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "sourceOf does a linear scan of ChangedFiles, StagedFiles and UntrackedFiles per path, and filesFromGit calls it once per entry of byPath (internal/contextprofile/profile.go:206), making file classification quadratic in the changed-file count - on precisely the very large branches that trigger sharding. The result is also discarded for every branch file, since the next line overwrites Source with SourceBranch when the path is in the BranchFiles map. A prebuilt map[string]string (or calling sourceOf only in the non-branch arm) would be both linear and less wasteful.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 278,
+          "note": "sourceOf performs three O(n) slice scans and is invoked once per path in the enclosing O(n) loop."
+        },
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 208,
+          "note": "file.Source = SourceBranch discards the sourceOf result for every branch file, so the scan was pure overhead there."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The rewritten assertions in tests/go/test-learn-post-merge.sh fail with a bare 'exit 1' and no diagnostic, so a regression reports only a nonzero status with no indication of which of the three files became ignored. They also treat any nonzero git check-ignore status as success, including exit 128 (a git error such as a bad pathspec or an unreadable repo), which would let a broken invocation pass as 'not ignored'. A message on failure - or an explicit test of status 1 - would make the assertion diagnose as well as detect.",
+      "evidence": [
+        {
+          "path": "tests/go/test-learn-post-merge.sh",
+          "line": 55,
+          "note": "git check-ignore -q ... && exit 1 exits silently and cannot distinguish 'not ignored' (status 1) from a git error (status 128)."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

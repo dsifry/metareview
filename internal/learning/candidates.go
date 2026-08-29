@@ -214,7 +214,7 @@ func calibrationDisposition(record findings.Record) string {
 }
 
 func isBlocking(record findings.Record) bool {
-	if record.Status != "open" {
+	if !findings.Blocks(record.Status) {
 		return false
 	}
 	return record.Classification == "spec-contract" ||

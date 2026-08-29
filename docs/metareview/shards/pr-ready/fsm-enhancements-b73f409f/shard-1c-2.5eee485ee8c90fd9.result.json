@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1c-2.5eee485ee8c90fd9",
+  "kind": "shard",
+  "shardId": "shard-1c-2",
+  "shardHash": "5eee485ee8c90fd9",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/tasksource/coverage_test.go",
+      "line": 1,
+      "note": "Test-only addition: 212 lines covering the remaining Resolve/resolveBeads/resolveMarkdown/containedPath branches. No production source changes in this shard."
+    },
+    {
+      "path": "internal/tasksource/tasksource.go",
+      "line": 27,
+      "note": "Verified the absPath/relPath/readFile seams the tests swap actually exist and are the only injection points; each defensive branch asserted by the new tests maps to a real error path (lines 118-157, 103-106, 85-87)."
+    },
+    {
+      "note": "Validation executed against the frozen branch: `go test ./internal/tasksource/ -cover -count=1` -> ok, coverage: 100.0% of statements; `go vet ./internal/tasksource/` clean; `gofmt -l internal/tasksource/` empty. No TODO/FIXME markers, no eval-style dynamic execution, no untracked source files, diff not truncated (part 1/1 of a single file)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Implicit subtest-ordering dependency: TestContainedPathDefensiveBranches/\"relative path fails for an existing target\" relies on file.md being created by the earlier sibling subtest \"a candidate under a regular file\". Confirmed by running it in isolation (`-run '.../relative_path_fails_for_an_existing_target'`), where it still PASSes but for the wrong reason - with file.md absent, containedPath takes the not-yet-created branch (tasksource.go:141-147) and the assertion is satisfied by relPath failing there instead of at line 153. The subtest only pins the branch it names when the whole parent test runs in order. Creating the file inside the subtest would make it self-contained.",
+      "evidence": [
+        {
+          "path": "internal/tasksource/coverage_test.go",
+          "line": 186,
+          "note": "subtest asserts only that the error contains 'rel failed', which both relPath call sites produce"
+        },
+        {
+          "path": "internal/tasksource/tasksource.go",
+          "line": 153,
+          "note": "the existing-target relPath error path the subtest is meant to cover"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The swap() helper mutates package-level seam vars (absPath, relPath, readFile) with no synchronisation, so the suite is silently order- and parallelism-fragile: adding t.Parallel() to any test in package tasksource would introduce a data race and cross-test seam bleed. Currently safe - no test in the package calls t.Parallel - and restore is correctly deferred (survives t.Fatal via Goexit), so this is a latent hazard rather than a present defect. A doc comment on swap noting 'callers must not be parallel' would fix it.",
+      "evidence": [
+        {
+          "path": "internal/tasksource/coverage_test.go",
+          "line": 207,
+          "note": "generic swap helper writes shared package state without a mutex or parallel guard"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

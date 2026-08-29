@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-16-2.b71c79560e001898",
+  "kind": "shard",
+  "shardId": "shard-16-2",
+  "shardHash": "b71c79560e001898",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/machine/machine_test.go", "line": 1, "note": "reviewed part 1/2 of the new machine_test.go (M1 init/consent, M2 happy paths, M3 gate failures, M4 convergence/overflow, M5 tree, M6 Record, M7 Open)"},
+    {"path": "internal/fsm/machine/machine.go", "line": 292, "note": "verified readGoldens normalises a JSON null to an empty slice, so the goldens-null-ok table case is a correct expectation"},
+    {"path": "internal/fsm/workflow/workflow.go", "line": 677, "note": "verified the loop_without_clean_exit warning text asserted by the machine test"},
+    {"path": "internal/fsm/machine/types.go", "line": 32, "note": "MaxDiffBytes is a package-level var the tests mutate to force diff truncation"},
+    {"path": "internal/fsm/machine/machine_test.go", "line": 1891, "note": "go test ./internal/fsm/machine/ passes (ok, 1.1s) and go vet is clean; no TODO/FIXME markers introduced"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead assertion: the warning check uses `&&` where `||` is meant. `if !strings.HasPrefix(w, \"WORKFLOW_WARNING\") && !strings.Contains(w, \"loop_without_clean_exit\")` can only fail when BOTH are false, so once the prefix matches the reason substring is never verified. The machine could propagate any WORKFLOW_WARNING body and this test would still pass; the reason text is only asserted in internal/fsm/workflow/workflow_test.go:355, not in the propagation path this test covers.",
+      "evidence": [{"path": "internal/fsm/machine/machine_test.go", "line": 74, "note": "!HasPrefix(...) && !Contains(...) short-circuits the substring check"}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Global fixture leak: MaxDiffBytes (a package-level var in types.go) is set to 2 and restored four lines later by plain assignment, not defer. The t.Fatalf on the intervening truncation assertion aborts the goroutine before the restore, leaving MaxDiffBytes = 2 for every subsequent test in the package and cascading unrelated failures that hide the real one. Use defer func(old int){ MaxDiffBytes = old }(MaxDiffBytes).",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 245, "note": "MaxDiffBytes = 2 with no deferred restore"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 249, "note": "restore is unreachable if the assertion between them fatals"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Fixture double-rename: sdlcWith already rewrites `workflow: sdlc-loop` to `workflow: sdlc-loop-test`, and the following line pipes the result through renamed(), whose Replace matches the `workflow: sdlc-loop` prefix again and yields `workflow: sdlc-loop-test-test`. Verified by direct experiment. Harmless today (only uniqueness matters) but it means the fixture name is not what the code reads, and the same pattern is repeated for ce.yaml.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 770, "note": "renamed() re-applied to an already-renamed sdlcWith fixture"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 786, "note": "same double rename for ce.yaml"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Hidden ordering coupling in TestM1InitErrors: the table shares one harness and cases mutate it cumulatively, and the assertion after the loop (mock id == \"scen/ok#\" + 16 a's) silently depends on the prep closure of the mock-registry-mismatch table row having seeded h.mockHash[\"/repo/scen/ok\"]. Reordering or deleting that row breaks an assertion 30 lines away with no indication why. The cases are also not t.Run subtests, so a shared-state failure is not isolated.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 112, "note": "prep seeds h.mockHash consumed far outside the loop"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 144, "note": "post-loop assertion depends on that earlier row"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Unguarded slice indexing in assertions: r.Untrusted[0], r.Warnings[0] and Snapshot.Warnings[0] are indexed without a length check, so a regression that produces an empty slice panics and aborts the whole test binary instead of reporting a clean failure for the one case. Cheap fix: len(...) == 0 || ... in the same condition, as is already done for r.NeedsInput == nil at line 226.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 451, "note": "r.Untrusted[0] indexed with no length guard"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 935, "note": "r.Untrusted[0] again after only a len(r.Warnings) check"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 74, "note": "Snapshot.Warnings[0] indexed with no length guard"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead statement `_ = raw` sits between the table literal and the loop, but raw is genuinely used later (h.files[\"/x/w.yaml\"] = raw). It is leftover scaffolding that now misleads a reader into thinking raw is unused in this test.",
+      "evidence": [{"path": "internal/fsm/machine/machine_test.go", "line": 121, "note": "_ = raw is redundant; raw is used at line 185"}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "renamed(body any) takes an untyped parameter and its type switch has no default: any value that is neither string nor []byte silently produces empty workflow bytes, turning a future call-site mistake into a confusing ERR_WORKFLOW_INVALID rather than a compile error. A []byte parameter with an explicit string(...) at the two string call sites would be type-safe.",
+      "evidence": [{"path": "internal/fsm/machine/machine_test.go", "line": 1880, "note": "type switch over any with no default branch"}]
+    }
+  ],
+  "blockingCount": 0
+}

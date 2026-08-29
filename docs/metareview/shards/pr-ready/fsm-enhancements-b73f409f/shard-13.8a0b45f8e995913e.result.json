@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-13.8a0b45f8e995913e",
+  "kind": "shard",
+  "shardId": "shard-13",
+  "shardHash": "8a0b45f8e995913e",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    { "path": "internal/fsm/cmdexec/cmdexec.go", "line": 148, "note": "reviewed consent guardrails, env allow-list, output caps and audit payload construction against the package doc contract" },
+    { "path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 208, "note": "verified the new code carries tests: timeout, process-group kill, output caps, spawn failure, parent cancellation, env allow-list" },
+    { "path": "internal/state/state.go", "line": 66, "note": "verified the new scanner cap against the sibling reader in internal/fsm/record/record.go:156 over the same runs.jsonl file" },
+    { "path": "internal/fsm/workflow/workflow.go", "line": 118, "note": "checked the suspected MRV_RUN_ID env-override path; reservedPfx blocks MRV_ names, so the concern is a false positive" },
+    { "path": "internal/reviewers/sharded_test.go", "line": 191, "note": "reviewed the sharded reviewer tests; assembled lint markers are a deliberate fixture technique, documented in the file" },
+    { "path": "docs/fsm/driving-a-workflow.md", "line": 43, "note": "checked the documented exit codes, error codes and consent flags against internal/fsm/cli and internal/fsm/machine; the prose is accurate" }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Parent-context cancellation is audited as a spawn failure. execRunner returns a bare ctx.Err() (cmdexec.go:246-248), so in Guarded.exec errs.Code(err) is empty (cmdexec.go:148) and the error is relabelled ERR_CMD_FAILED with reason=spawn (cmdexec.go:151) and written to the durable cmd_call row. The package doc at cmdexec.go:60-63 promises cancellation is returned as ctx.Err() and that reason=spawn means the process could not start, so the audit cannot distinguish an aborted run from a missing binary. cmdexec_test.go:211 only asserts errors.Is(err, context.Canceled), which still passes through errs.Wrap, so the mislabel is untested.",
+      "evidence": [
+        { "path": "internal/fsm/cmdexec/cmdexec.go", "line": 151, "note": "cancellation relabelled ERR_CMD_FAILED reason=spawn" },
+        { "path": "internal/fsm/cmdexec/cmdexec.go", "line": 62, "note": "doc contract says cancellation is returned as ctx.Err()" }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "AppendJSONL still writes uncapped lines while ReadJSONL now caps tokens at 1 MiB (state.go:66). A finding whose Found field is a single long diff line (internal/reviewers/taskdone.go:136 and :166 copy the raw added line with no truncation) can exceed the cap; the row is written successfully and then makes every subsequent ReadJSONL of that file fail with bufio.ErrTooLong, with no repair path. The diff narrows the exposure (64 KiB to 1 MiB) rather than introducing it, hence low. Related: internal/fsm/record/record.go:156 reads the same runs.jsonl with max token 1<<20 and no +2, so by state.go's own comment (state.go:18-20) a line of exactly 1 MiB is accepted by one reader and rejected by the other.",
+      "evidence": [
+        { "path": "internal/state/state.go", "line": 66, "note": "read cap raised to 1 MiB + 2 with no matching write-side cap" },
+        { "path": "internal/state/state.go", "line": 49, "note": "AppendJSONL writes the marshalled record with no length check" }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Guarded.Clock is declared (cmdexec.go:77) and populated by the production wiring (internal/fsm/cli/deps.go:90 passes now) but is never read anywhere in the package. Dead API surface on a security-sensitive struct invites a future reader to assume timestamps come from the injected clock when they do not; the exec runner uses time.Now directly at cmdexec.go:243/249.",
+      "evidence": [
+        { "path": "internal/fsm/cmdexec/cmdexec.go", "line": 77, "note": "Clock field never read in the package" },
+        { "path": "internal/fsm/cli/deps.go", "line": 90, "note": "production wiring supplies the unused Clock" }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Unescaped pipe inside a GFM table cell. docs/fsm/driving-a-workflow.md:43 writes `DONE(fixed|clean)` in the exit-code table; GitHub-flavoured Markdown splits cells on | even inside a code span, so the row renders as extra columns and the rest of the exit-0 meaning is dropped. Needs \\| .",
+      "evidence": [
+        { "path": "docs/fsm/driving-a-workflow.md", "line": 43, "note": "table row splits on the pipe inside DONE(fixed|clean)" }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Test indexes a slice without a length guard: sharded_test.go:191 reads taskA[0] and taskB[0] from RunTaskDone results. If the ordering assumption or the early return ever changes so the slice is empty, the suite panics with an index out of range instead of reporting the intended message, which loses the diagnostic the surrounding t.Fatalf was written to give. The neighbouring assertions use the byFingerprint helper defined at sharded_test.go:43 for exactly this reason.",
+      "evidence": [
+        { "path": "internal/reviewers/sharded_test.go", "line": 191, "note": "unguarded index into the RunTaskDone result slice" }
+      ]
+    }
+  ]
+}

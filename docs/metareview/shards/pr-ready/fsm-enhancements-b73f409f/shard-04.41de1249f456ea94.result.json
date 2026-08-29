@@ -1,0 +1,11 @@
+{"schemaVersion":1,"id":"shard-04-review","kind":"shard","shardId":"shard-04",
+ "shardHash":"41de1249f456ea94","planHash":"2ee4294a41b3ad7b","verdict":"PASS",
+ "reviewer":"claude-opus-5 task-done-rubric","reviewedAt":"2026-08-27T00:00:00Z",
+ "evidence":[
+  {"path":"docs/fsm/sdlc-loop-example.md","line":1,"note":"Whole file is a new documentation transcript (59 added lines, no source code); no executable code introduced, so no test obligation under the rubric."},
+  {"path":"docs/fsm/sdlc-loop-example.md","line":53,"note":"Checked the documented CLI surface (fsm init/advance/record node-output, --workflow, --mock-ai, --from/--at-iter) against CLAUDE.md's FSM contract; commands and flags are consistent."},
+  {"path":"docs/fsm/sdlc-loop-example.md","line":88,"note":"Exit-code semantics match the documented contract: 0 for OK/ADVANCED/DONE, 3 for NEEDS_INPUT, 1 with GATE_FAILED plus resume_hint that forks a child run id."},
+  {"path":"docs/fsm/sdlc-loop-example.md","line":103,"note":"Closing note states the parent row stays needs-revision and that a mock:true row never satisfies a gate, matching the durable-output rule in CLAUDE.md."},
+  {"path":"docs/fsm/sdlc-loop-example.md","line":49,"note":"Scanned all added lines for TODO/FIXME markers, eval or other unsafe execution, and truncated diff context; none present and the single chunk covers bytes 0-4554 of 4554."}
+ ],
+ "findings":[],"blockingCount":0}

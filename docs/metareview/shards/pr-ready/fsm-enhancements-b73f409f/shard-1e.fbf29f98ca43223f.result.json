@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1e.fbf29f98ca43223f",
+  "kind": "shard",
+  "shardId": "shard-1e",
+  "shardHash": "fbf29f98ca43223f",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T03:42:06Z",
+  "blockingCount": 1,
+  "evidence": [
+    {
+      "path": "internal/fsm/run/canonical_test.go",
+      "line": 27,
+      "note": "Reviewed canonical_test.go, store_test.go, builder.go, decision_test.go, CHANGELOG.md, tests/coverage-floor.txt and tests/go/test-git-context.sh against rubrics/task-done-review-rubric.md."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 356,
+      "note": "Reproduced the marshalCanonical ReplaceAll defect with a throwaway test in package run: Canonical([]byte(`{\"s\":\"\\\\ufffd\"}`)) returns nil error and INVALID JSON ({\"s\":\"\\<U+FFFD>\"}), and a store Append of that payload is rejected ERR_APPEND_REJECTED / ERR_AUDIT_INVALID (bad_payload)."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 305,
+      "note": "Verified the tests/go/test-git-context.sh grep change ('Invalid git base' -> 'invalid git base') matches the actual error strings emitted at gitcontext.go:305, 319 and 327."
+    },
+    {
+      "path": "internal/fsm/kind/decision.go",
+      "line": 48,
+      "note": "Verified decision_test.go's confidence expectations against AdjudicateThreshold = 0.7 (internal/fsm/kind/kind.go:46): 0.7 effective true, 0.6 and absent-confidence effective false is correct."
+    },
+    {
+      "path": "tests/coverage.sh",
+      "line": 84,
+      "note": "Checked tests/coverage-floor.txt for completeness: every package from `go list ./...` outside internal/fsm/* and workflows has a floor line except internal/version, which declares only a const and therefore contributes no statements to the profile, so it can never appear. Not a gap."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Canonical/marshalCanonical corrupts any payload string whose text contains the literal 6-character sequence backslash-u-f-f-f-d, and the new tests in this shard do not cover it. internal/fsm/run/types.go:356 post-processes the encoder output with bytes.ReplaceAll(out, `\\ufffd`, \"\\ufffd\"), a byte-level unescape that cannot tell a stdlib-emitted escape from an escaped backslash the payload itself contained. The encoder writes such a string as \\\\ufffd; the ReplaceAll matches at the second backslash and yields backslash + raw U+FFFD, which is not a legal JSON escape. Reproduced: Canonical([]byte(`{\"s\":\"\\\\ufffd\"}`)) returns a nil error with output {\"s\":\"\\<U+FFFD>\"} that json.Valid rejects, so Canonical silently violates the idempotence its own doc comment (internal/fsm/run/canonical.go:17) and TestCanonicalNormalForm (canonical_test.go:44-46) assert. End to end the damage is denial rather than chain corruption -- Fold re-canonicalizes and decodePayload fails, so a store Append of such a payload returns ERR_APPEND_REJECTED / ERR_AUDIT_INVALID (bad_payload) and the event can never be recorded. That content is not exotic: this repository's own internal/fsm/run/types.go:356 contains the sequence, so an sdlc-loop run recording a diff, node output or judge reasoning over that file cannot record the event. TestCanonicalIsToolchainIndependent (canonical_test.go:195) is exactly the test that pins this escaping contract and it only exercises U+2028/U+2029, leaving the U+FFFD half of the same post-processing untested. Fix by escaping at encode time (a custom encoder or a rune-aware rewrite) rather than by ReplaceAll over the encoded bytes, and add the literal-escape-sequence case to the toolchain-independence table.",
+      "evidence": [
+        {"path": "internal/fsm/run/types.go", "line": 356},
+        {"path": "internal/fsm/run/canonical.go", "line": 17},
+        {"path": "internal/fsm/run/canonical_test.go", "line": 195},
+        {"path": "internal/fsm/run/canonical_test.go", "line": 27}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stale doc comment on the canonical form, now contradicted by the tests added in this shard. internal/fsm/run/canonical.go:16 still states the canonical bytes keep \"HTML characters and U+2028/U+2029 ... as literal UTF-8\", but canonical_test.go:27 (\"unicode-line-seps-escaped\") and TestCanonicalIsToolchainIndependent pin the opposite for U+2028/U+2029: they are now escaped by marshalCanonical itself. The comment documents the exact byte contract the audit chain hashes over, so an external verifier written from it would disagree with the implementation.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 16},
+        {"path": "internal/fsm/run/canonical_test.go", "line": 27}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead parameter in Builder.stamp. internal/fsm/run/builder.go:101 takes a third argument `_ []Override` that is never used; Init passes its overrides to it (builder.go:66) and then applies them itself in a loop afterwards, while Event passes nil. A reader of Init reasonably concludes stamp applies the overrides, which it does not; the parameter should be dropped.",
+      "evidence": [
+        {"path": "internal/fsm/run/builder.go", "line": 101}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Builder.Copy panics instead of failing cleanly on the malformed logs the Override API exists to build. builder.go:174 indexes pb.lines[ev.Seq-1], assuming parent Seq values are exactly 1..n in order, and builder.go:154 dereferences parent[0] without a length check. WithSeq (builder.go:13) is provided precisely so tests can construct logs with wrong Seq values, so forking such a log gives an index-out-of-range panic that aborts the whole test binary rather than a readable failure.",
+      "evidence": [
+        {"path": "internal/fsm/run/builder.go", "line": 174},
+        {"path": "internal/fsm/run/builder.go", "line": 154}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Unchecked type assertion in a test assertion path: internal/fsm/run/store_test.go:190 does se.Cause.(*FoldError).Reason without the comma-ok form. If Append ever returns CodeAppendRejected with a differently typed cause, the test panics with a nil-interface conversion instead of reporting the actual cause, which is the opposite of what the storeErrE helper above it was written to achieve.",
+      "evidence": [
+        {"path": "internal/fsm/run/store_test.go", "line": 190}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Weak sidecar assertion in TestJSONLTornTail: the loop already scans all matches to find this iteration's sidecar bytes (store_test.go:488-495), but the permission check at store_test.go:496 stats matches[0], the lexicographically first sidecar. On iterations 2 and 3 that re-checks the sidecar written by iteration 1, so the 0600 mode of the newly created sidecar is never actually asserted for those cases. Stat the sidecar the loop just identified instead.",
+      "evidence": [
+        {"path": "internal/fsm/run/store_test.go", "line": 496}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead parameters in the TestSummarizeIncompleteFork helper: store_test.go:924 declares mk(to int64, kind Kind, extra ...string) but discards kind with `_ = kind` at line 927 and never reads extra; both call sites pass only (to, \"\"). The signature suggests fork-kind and extra-argument coverage that the test does not have. Reduce it to mk(to int64).",
+      "evidence": [
+        {"path": "internal/fsm/run/store_test.go", "line": 924},
+        {"path": "internal/fsm/run/store_test.go", "line": 927}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "internal/fsm/run/builder.go is a 188-line test-fixture API (Builder, Override, eleven With* constructors) that lives in a non-test file, so it compiles into the production binary and counts toward the 100%-statement gate that tests/coverage.sh imposes on internal/fsm/*. Verified no non-test caller exists anywhere in the module. Accepted rather than blocking because cross-package tests in internal/fsm/machine and internal/fsm/export legitimately need it; a dedicated runtest package would keep it out of the shipped package and out of the coverage denominator.",
+      "evidence": [
+        {"path": "internal/fsm/run/builder.go", "line": 28},
+        {"path": "tests/coverage.sh", "line": 84}
+      ]
+    }
+  ]
+}

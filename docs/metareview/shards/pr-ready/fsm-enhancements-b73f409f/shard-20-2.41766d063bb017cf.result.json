@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "id": "r-shard-20-2",
+  "kind": "shard",
+  "shardId": "shard-20-2",
+  "shardHash": "41766d063bb017cf",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5 shard reviewer",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/reviewmanifest/manifest_test.go",
+      "line": 109,
+      "note": "read the full rewritten unit-test file against internal/reviewmanifest/manifest.go and re-derived every assertion"
+    },
+    {
+      "path": "tests/go/test-sharded-review.sh",
+      "line": 57,
+      "note": "executed the end-to-end script (passes in 5s) and traced every helper to its call sites"
+    },
+    {
+      "note": "verified the mrvf- leak empirically with a go test -overlay probe: Markdown() contains a harvestable mrvf- token, ShardedReviewMarkdown() does not"
+    },
+    {
+      "note": "combined coverage for internal/reviewmanifest measured at 97.0%, exactly the tests/coverage-floor.txt line, so the rewrite is not a coverage regression"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestManifestMarkdownNeutralisesResultDerivedText's doc comment (manifest_test.go:595-596) claims it 'holds the same rule for the context pack, so the two renderers cannot drift apart'. It does not: it only sets Reviewer and an ignored Reason, omitting the UnreadableResults surface its sibling TestShardedReviewMarkdownNeutralisesResultDerivedText covers (manifest_test.go:604). The renderers HAVE drifted. Aggregate builds the blocker string \"unreadable result file \"+file at manifest.go:243 without ingested(), and Markdown renders aggregate.Blockers through markdownList (manifest.go:304-305), which only applies markdown.PlainText. Confirmed empirically via a go test -overlay probe: with manifest.UnreadableResults = [\"docs/metareview/shards/mrvf-injected-unreadable.json\"], Markdown() output contains 'mrvf-' (true) while ShardedReviewMarkdown() does not (false). The blocker text is committed into the context pack (internal/prready/review.go:874, internal/taskdone/review.go:498). Exploitability is limited because discovered result basenames are constrained by resultNamePattern and a nonexistent --shard-result is rejected with exit 2 at the CLI, but the stated invariant is false and the test that is supposed to pin it cannot fail.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 596},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 243},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 305}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestResultSchemaVersionDistinct (manifest_test.go:98) is named for, and its comment at manifest_test.go:109-111 explicitly claims, proving 'which constant the check uses' -- ResultSchemaVersion rather than the manifest's own SchemaVersion. It cannot. manifest.go:23 sets SchemaVersion = 1 and manifest.go:27 sets ResultSchemaVersion = 1, so `result.SchemaVersion != ResultSchemaVersion` and `result.SchemaVersion != SchemaVersion` are the same predicate for every possible input. Both halves of the test (the +1 rejection and the at-version acceptance) pass identically under either implementation. The comment's own premise -- 'The two are equal today' -- is precisely why the conclusion that follows it is unreachable. The second half is inert and duplicates the PASS assertions already made by TestFreshByShardHash.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 109},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 23},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 27}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestMarkdownRendersResultsPlainText (manifest_test.go:366) has two weak spots. Its layout assertion is gated on strings.Contains(line, \"injected\"), so a renderer that dropped the ingested reviewer string entirely would pass with the loop body never executing -- the sibling ShardedReviewMarkdown test explicitly guards against exactly that ('the reviewer name was dropped rather than neutralised'), but this one does not. And the manifest.IgnoredResults entry with an embedded newline set up at manifest_test.go:371 is never asserted on: it renders under '### Ignored Result Files' and contains no 'injected' substring, so if PlainText stopped stripping newlines from an ignore reason this test would still pass.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 366},
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 371}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "tests/go/test-sharded-review.sh:57 documents write_results as taking [ONLY-CSV] and [SKIP_CROSS], and the embedded node script implements both branches (only-list filtering, and suppressing the cross-shard result). No call site ever passes them: all three invocations are `write_results \"$repo\" \"$plan\"` (lines 147, 179, 246). The two negative paths those parameters exist for -- a plan where only some shards have results, and a multi-shard plan with every shard result present but no cross-shard result -- are therefore never exercised end to end, though the file header advertises that the script covers 'the negative cases'. Both are covered at unit level (TestCrossShardRequiredOnlyForMultiShard), so this is dead helper code plus an overstated header rather than a coverage hole.",
+      "evidence": [
+        {"path": "tests/go/test-sharded-review.sh", "line": 57},
+        {"path": "tests/go/test-sharded-review.sh", "line": 147}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestWaivedMediumFindingBlocks (manifest_test.go:247) is named for the waived disposition but actually loops over waived, accepted-risk, deferred and open. The name understates the contract it pins, so a future edit that narrows the loop back to waived would not read as a regression.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 247}
+      ]
+    }
+  ],
+  "blockingCount": 2
+}

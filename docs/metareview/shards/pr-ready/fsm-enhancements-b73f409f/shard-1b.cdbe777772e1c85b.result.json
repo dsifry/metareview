@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1b-review",
+  "kind": "shard",
+  "shardId": "shard-1b",
+  "shardHash": "cdbe777772e1c85b",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/judge/prompts.go",
+      "line": 268,
+      "note": "Traced the single-pass str.format emulation: {{ and }} escapes each advance i by one extra byte, slot name slicing t[i+1:i+j] with i+=j lands on the closing brace, unterminated slot and lone '}' both return ERR_PROMPT_TEMPLATE, and slot values are written verbatim without rescanning (confirmed by testdata/prompts/match.calibration.golden, which renders literal {candidate} and }} from the untrusted values)."
+    },
+    {
+      "path": "internal/fsm/judge/prompts.go",
+      "line": 175,
+      "note": "CutDiff backs off to a rune start before slicing and cannot index out of range because the cut only runs when len(diff) > MaxDiffBytes; truncated is sticky from the caller's already-truncated flag; sha1 names the post-cut bytes."
+    },
+    {
+      "path": "internal/fsm/judge/prompts.go",
+      "line": 330,
+      "note": "Parse fail-closed behaviour checked: match/adjudicate require the bool and return decision false on parse failure, still-present returns decision true on failure and persists still_present:null with a perr string; stripFences cannot panic on a bare or unterminated fence since SplitN always yields at least two parts when the prefix matches."
+    },
+    {
+      "path": "internal/fsm/gate/gates.go",
+      "line": 96,
+      "note": "commitExists requires both a new commit since FixEntryHead and a clean tree, reports every git failure as CodeGit so the audit shows it, and emits status plus working diff in the ERR_NO_COMMIT detail; nothing_found/nothing_confirmed refuse once AllFound is non-empty, so a discovery miss cannot end a loop clean."
+    },
+    {
+      "path": "internal/fsm/run/store_mem.go",
+      "line": 66,
+      "note": "Lock ordering audited: get() never locks and is only called under mu; Create/Append/RepairTail/EventsWithLines/Lock hold mu for their whole body; List snapshots ids and releases mu before calling Events, so no re-entrant deadlock. Append and RepairTail both refuse without the lock held (CodeRunLocked), EventsWithLines copies lines before parsing, and the unlock closure re-acquires mu."
+    },
+    {
+      "path": "internal/runchain/runchain_test.go",
+      "line": 245,
+      "note": "New test sizes its fixture from maxJSONLLineBytes (1<<20 in runchain.go:17) and asserts the exact length plus the >64 KiB bufio-default guard; strings is already imported at runchain_test.go:6, so the hunk compiles."
+    },
+    {
+      "path": "workflows/review-loop.yaml",
+      "line": 8,
+      "note": "review-loop transitions cover both discover outcomes and both adjudicate outcomes; vars declare required JUDGE/JUDGE_EFFORT with defaults for the reviewer side and repo_mode advisory."
+    },
+    {
+      "path": "docs/README.claude.md",
+      "line": 52,
+      "note": "Sharded-review docs agree with CLAUDE.md: results are committed under docs/metareview/shards/ while .metareview/shards/ packs stay local; no TODO/FIXME markers, eval, or truncated diff context anywhere in this shard, and every source file changed here has an adjacent test (gate_test.go, judge_test.go, store_test.go, runchain_test.go)."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

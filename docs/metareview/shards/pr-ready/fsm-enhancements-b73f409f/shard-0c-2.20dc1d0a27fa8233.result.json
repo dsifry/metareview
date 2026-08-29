@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0c-2-20dc1d0a27fa8233",
+  "kind": "shard",
+  "shardId": "shard-0c-2",
+  "shardHash": "20dc1d0a27fa8233",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 1,
+      "note": "1175-line new test suite reviewed in full: layout/slug, byte-reproducible packs, fence widening, atomic replace via aside, rollback, Prune, Discover, explicit results, GC, and every injected Deps failure branch"
+    },
+    {
+      "path": "tests/go/test-override-coverage.sh",
+      "line": 12,
+      "note": "new 100%-coverage guard for internal/findings/override.go; executed locally, reports 'override coverage: 100% (59 blocks)'"
+    },
+    {
+      "path": "workflows/embed.go",
+      "line": 24,
+      "note": "Read rejects names containing / \\ or . before joining .yaml, so only embedded workflow files resolve; workflows/embed_test.go covers both the rejection and unknown-name branches"
+    },
+    {
+      "note": "Verified against the working tree, not the diff alone: go test ./workflows/ ./internal/shardpack/ passes, bash tests/go/test-override-coverage.sh exits 0, and tests/run-all.sh:26 invokes the new script"
+    },
+    {
+      "path": "tests/coverage.sh",
+      "line": 80,
+      "note": "checked the claim that workflows needs no coverage-floor.txt line: coverage.sh enforces exact 100% for internal/fsm/* and workflows, and requires them present in the merged profile, so the missing floor line is by design not a gap"
+    },
+    {
+      "path": "internal/shardpack/shardpack.go",
+      "line": 404,
+      "note": "read resultIsCurrent/GC in the source to confirm the behavior the new tests pin: a result file GC cannot read is treated as not current and removed"
+    },
+    {
+      "note": "Rubric blocking checks: no eval, no TODO/FIXME markers in any of the three files (grep clean), no truncated diff context, no untracked-source risk, and the shard is itself test/validation code so the tests-present requirement is met"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Comment contradicts the assertion four lines below it. The comment claims a result file GC cannot read 'is left alone rather than removed blind', but the test then requires that file to be gone ('an unreadable result is not current and should be collected'), which matches shardpack.go:404 resultIsCurrent returning false on a ReadFile error. The comment is a leftover from an earlier intent; it should be corrected so a future reader does not restore the opposite behavior. The underlying behavior means a transient read error (EACCES/EMFILE) permanently deletes a still-current committed result, which is recoverable from git but worth an explicit note.",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack_test.go",
+          "line": 1045,
+          "note": "comment says left alone; assertion at line 1055 requires it collected"
+        },
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 405,
+          "note": "resultIsCurrent returns false when ReadFile errors, so GC removes the file"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestRollbackRestoresAside does not test what its name says. It writes a pack set, writes it again, then asserts rollback removes the directory entirely (line 243) - the delete-only path where asideRestore has been cleared. The restore-the-previous-set path is covered elsewhere (the aside-cleanup subtest). The name misdescribes the pinned behavior and hides that a rollback after a successful replace does not restore the prior pack set, contrary to the Write doc comment in shardpack.go:143.",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack_test.go",
+          "line": 221,
+          "note": "test named RestoresAside asserts only removal of the created set"
+        },
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 143,
+          "note": "doc comment claims rollback restores any previous pack set"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two cross-shard tests silently vacate themselves on a fixture shape change via t.Skip rather than failing. TestCrossShardPackOnlyForMultiShard skips unless the plan has exactly one shard, and TestCrossShardPackStatesItsOwnContract skips unless it has two or more; both consume shared fixtures, so a later budget or fixture tweak turns the contract regression test into a no-op with no signal. t.Fatalf on an unexpected shard count would keep the guard honest.",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack_test.go",
+          "line": 183,
+          "note": "t.Skipf when the fixture does not produce a single shard"
+        },
+        {
+          "path": "internal/shardpack/shardpack_test.go",
+          "line": 1147,
+          "note": "t.Skip when the fixture produces a single shard"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new coverage guard discards go test stdout, so a failure prints only 'override coverage: go test failed' with no failing test name - go test writes its failure detail to stdout, which is sent to /dev/null. tests/coverage.sh:50 carries an explicit comment that this exact pattern previously surfaced in CI as a bare exit 1 with nothing to diagnose and captures output to a log instead; the new script repeats the pattern. Capturing to a temp file and cat-ing it on failure would match the established convention.",
+      "evidence": [
+        {
+          "path": "tests/go/test-override-coverage.sh",
+          "line": 12,
+          "note": "go test output redirected to /dev/null before the failure branch"
+        },
+        {
+          "path": "tests/coverage.sh",
+          "line": 50,
+          "note": "existing comment documenting why unit test output must be captured"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "tests/go/test-override-coverage.sh is a near-verbatim copy of tests/go/test-shardpack-coverage.sh, differing only in the package under test, the file filter and the message prefix. The duplication is small and both scripts pass today, but a fix to the awk profile parsing or the mode handling now has to be made twice; a single parameterised script taking package and file-pattern arguments would remove the second copy.",
+      "evidence": [
+        {
+          "path": "tests/go/test-override-coverage.sh",
+          "line": 20,
+          "note": "same awk NR>1 && $3==0 uncovered-block scan as the shardpack script"
+        },
+        {
+          "path": "tests/go/test-shardpack-coverage.sh",
+          "line": 22,
+          "note": "the original of the duplicated block"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "workflows.Names discards the ReadDir error with a comment asserting the embedded tree always reads. That holds for embed.FS today, but the function then returns an empty slice on any future change to the embed pattern, and callers cannot distinguish 'no workflows' from 'could not read'. Since the package is held at exactly 100% statement coverage by tests/coverage.sh, returning the error would need a covered branch - an acceptable trade-off, so this is recorded rather than required.",
+      "evidence": [
+        {
+          "path": "workflows/embed.go",
+          "line": 17,
+          "note": "entries, _ := files.ReadDir(\".\") silently swallows the error"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-18-2.3d6c67c0044035d8",
+  "kind": "shard",
+  "shardId": "shard-18-2",
+  "shardHash": "3d6c67c0044035d8",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/findings/override_test.go",
+      "line": 1,
+      "note": "Reviewed the full 538-line override test suite against the implementation in internal/findings/override.go; it drives every exported entry point (RequestOverride, GrantOverride, ListOverrides, PendingOverrides), both storage-seam failure paths, the FINDINGS.md rendering, and the Reconcile interactions."
+    },
+    {
+      "path": "internal/fsm/errs/errs.go",
+      "line": 1,
+      "note": "Reviewed the coded-error type against its existing test file internal/fsm/errs/errs_test.go and all eight errs.Wrap call sites; behaviour matches the documented contract."
+    },
+    {
+      "note": "Verification run: `go test ./internal/findings/ ./internal/fsm/errs/ -cover` passes; internal/fsm/errs is at 100.0% and every function in internal/findings/override.go reports 100.0% in `go tool cover -func` (the package total of 92.8% comes entirely from findings.go, which is not in this shard). `go test ./internal/findings/ -race -count=1` also passes, so the package-level loadRecords/saveRecords seam swaps in override_test.go are safe (no test in the package calls t.Parallel)."
+    },
+    {
+      "note": "No TODO/FIXME markers, no unsafe execution (no eval/exec), no untracked-source or truncation problems in either chunk; both files are new, self-contained, and carry no duplicated helper names against internal/findings/findings_test.go."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "A requested override that Reconcile later closes as genuinely fixed leaves no durable audit trace. overrideLines (internal/findings/override.go:177-193) renders only StatusOverridePending and StatusOverridden, so once the fix transition added at internal/findings/findings.go:139-147 moves the record to \"fixed\", it disappears from the Process Overrides section of FINDINGS.md — the only committed surface, since .metareview/findings.jsonl is gitignored (.gitignore:8-9). TestReconcileClosesAPendingOverrideThatWasActuallyFixed (internal/findings/override_test.go:539-584) asserts the unblocking but never asserts the escalation stays visible. Marked false-positive rather than blocking: the provenance fields survive on the record and post-merge learning reads the local JSONL in place, so no data is lost — only the rendered history of an exception that no longer applies.",
+      "evidence": [
+        {"path": "internal/findings/override.go", "line": 177},
+        {"path": "internal/findings/override_test.go", "line": 580}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Neither override half validates the timestamp format: RequestOverride (internal/findings/override.go:65-68) and GrantOverride (internal/findings/override.go:99-102) accept any non-empty trimmed string as Now, and ListOverrides orders newest-first with a plain lexicographic string comparison on UpdatedAt (internal/findings/override.go:129). A non-RFC3339 value therefore silently corrupts override ordering rather than being refused. The tests themselves normalise this by seeding Now: \"t\" in ten places (e.g. internal/findings/override_test.go:126, :220, :313), so the suite would not catch a caller that passed a non-timestamp. The only production caller (cmd/metareview/main.go:562) does pass time.RFC3339, which keeps this advisory rather than blocking.",
+      "evidence": [
+        {"path": "internal/findings/override.go", "line": 65},
+        {"path": "internal/findings/override_test.go", "line": 126}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The request/grant separation is only enforced on the request path, and the test suite locks the bypass in as intended behaviour. GrantOverride refuses a self-grant by comparing against record.OverrideRequestedBy (internal/findings/override.go:106-108), but TestGrantWithoutRequestIsAllowed (internal/findings/override_test.go:156-167) confirms an open finding can be granted with no prior request at all — so an orchestrating agent that simply never calls `override request` faces no separation check whatsoever. This matches the documented \"audit metadata, not authentication\" stance in CLAUDE.md and the doc comment at internal/findings/override.go:80-88, so it is recorded as a known limitation rather than a defect; worth a line in the CLI help so operators do not read `override grant` as an enforced human-only gate.",
+      "evidence": [
+        {"path": "internal/findings/override_test.go", "line": 156},
+        {"path": "internal/findings/override.go", "line": 106}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "errs.Wrap panics on a nil *Error: it dereferences e at internal/fsm/errs/errs.go:44 (`c := *e`) with no nil guard, while the sibling helper handles the nil cause explicitly one line above. (*Error).Error() at internal/fsm/errs/errs.go:52 has the same nil-receiver exposure. All eight current call sites pass a freshly built errs.E(...) literal (internal/fsm/cmdexec/cmdexec.go:151, :259; internal/fsm/machine/machine.go:676, :978; internal/fsm/judge/judge.go:578, :583; internal/fsm/gate/git.go:132, :251), so nothing reaches it today — kept advisory as a robustness note on a package documented as the one error type shared by every internal/fsm package.",
+      "evidence": [
+        {"path": "internal/fsm/errs/errs.go", "line": 44},
+        {"path": "internal/fsm/errs/errs.go", "line": 52}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

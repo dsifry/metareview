@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-00.2bfbd409ababa749",
+  "kind": "shard",
+  "shardId": "shard-00",
+  "shardHash": "2bfbd409ababa749",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T06:36:50Z",
+  "evidence": [
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 630,
+      "note": "explicit --shard-result validation discards ParseResult's ignore reason"
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 154,
+      "note": "activeExisting widened from status==open to status!=fixed"
+    },
+    {
+      "path": "internal/findings/override.go",
+      "line": 53,
+      "note": "Blocks(): open and override-pending block; overridden and superseded do not"
+    },
+    {
+      "path": "skills/status/SKILL.md",
+      "line": 27,
+      "note": "commit/keep lists updated for shards only, not for the FSM paths this branch adds"
+    },
+    {
+      "note": "Verified against the working tree, not the diff alone: gofmt -l . is clean, go vet ./... passes, shellcheck -x internal/fsm/run/testdata/oracle.sh passes (CI lints every *.sh), workflows/sdlc-loop.yaml is parsed and graph-validated by internal/fsm/workflow tests via workflows.Read, and the new legacy context-risk prefixes (trailing colon) provably cannot match the new reason-independent fingerprints (architecture:context-risk, pr:architecture:context-risk, epic:context-risk), so the supersede pass cannot alias a live row. Override behaviour is covered by tests/go/test-override.sh and a 100%-block coverage gate over override.go."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "mustResultFile drops ParseResult's ignore reason: `if _, _, err := reviewmanifest.ParseResult(data); err != nil` (cmd/metareview/main.go:630) treats only a JSON unmarshal failure as invalid. reviewmanifest.ParseResult (internal/reviewmanifest/manifest.go:148-158) returns (zero, reason, nil) for a file over MaxResultBytes and (zero, \"\", nil) for any well-formed JSON object, so an oversized result file, an empty {}, a literal null, or a JSON document of a completely different schema passes the CLI guard with exit 0. The function's own doc comment and docs/tasks/pr-b-shard-ingestion.md both claim a bad --shard-result exits 2 with nothing written; that holds only for non-JSON input. Impact is limited to diagnosability, not gate correctness: shardpack.Discover (internal/shardpack/shardpack.go:332-339) re-parses and files the same file under Ignored with the reason, which reaches the review log via IgnoredResults, and the shard simply stays uncovered, so the gate fails closed.",
+      "evidence": [
+        {"path": "cmd/metareview/main.go", "line": 630, "note": "err-only check ignores the reason return"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 151, "note": "oversize returns a reason with a nil error"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "handleOverride hand-rolls flag parsing instead of reusing flagValue, so it is inconsistent with every other flag in the binary. `metareview override request ID --reason` with no value silently leaves reason empty (the `if i+1 < len(args)` guard has no else) and surfaces as the generic 'needs a reason of at least 12 characters' on exit 1, where flagValue (cmd/metareview/main.go:467-473) would print 'Missing value for --reason' and exit 2. Worse, `--reason --by dave` is accepted with the literal string '--by' as the recorded reason, because unlike flagValue this parser does not reject a value beginning with '--'. The recorded reason is audit data that a human later reads to judge an exception, so a silently captured flag name is a bad audit row.",
+      "evidence": [
+        {"path": "cmd/metareview/main.go", "line": 541, "note": "--reason/--by/--escalation parsed without a missing-value or --prefix guard"},
+        {"path": "cmd/metareview/main.go", "line": 467, "note": "flagValue, the guard the rest of the CLI uses"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "A granted override permanently silences its fingerprint for that target, with no expiry and no re-open on a changed git head. activeExisting was widened from `record.Status == \"open\"` to `record.Status != \"fixed\"` (internal/findings/findings.go:154), so once a record reaches StatusOverridden the same fingerprint is never re-created on any later run for the same target; Blocks (internal/findings/override.go:53) excludes it, and the activeCurrent filter still requires status==open, so the finding also disappears from Result.Findings and therefore from the review log body. That is defensible as the point of an override, but nothing in the diff bounds it to the head or the run that was excepted, and there is no withdraw command, so an acknowledged exception outlives the code it was granted against. Worth an explicit decision (and a doc line) rather than an emergent consequence of the != \"fixed\" widening.",
+      "evidence": [
+        {"path": "internal/findings/findings.go", "line": 154, "note": "status != fixed now suppresses recreation for overridden and superseded rows"},
+        {"path": "internal/findings/override.go", "line": 53, "note": "Blocks excludes StatusOverridden with no head or expiry condition"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Documentation drift inside this branch: skills/status/SKILL.md:27-28 is edited to add docs/metareview/shards/ and .metareview/shards/ to the commit/keep lists, but omits the two FSM paths the same branch documents everywhere else — docs/metareview/fsm/ export bundles as durable (CLAUDE.md:69, AGENTS.md:77, INSTALL.md:137, README.md:242) and .metareview/runs/ as transient/self-ignoring. The /status skill is precisely the thing an agent runs to answer 'commit or keep local?', so an agent following it would leave FSM export bundles uncommitted.",
+      "evidence": [
+        {"path": "skills/status/SKILL.md", "line": 27, "note": "commit list has shards but no docs/metareview/fsm/"},
+        {"path": "CLAUDE.md", "line": 69, "note": "the durable/transient contract this skill is supposed to report"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Comment does not describe the code it annotates. internal/findings/findings.go:487 justifies the 1 MiB scanner buffer with 'A run row can carry long ingested strings', but readJSONL parses finding Records out of .metareview/findings.jsonl; run rows live in runs.jsonl behind a different reader. The buffer bump is right (a finding's found/evidence strings are the long ones), the stated reason is not, which will mislead the next person deciding whether the cap still applies.",
+      "evidence": [
+        {"path": "internal/findings/findings.go", "line": 487, "note": "buffer rationale names run rows in a Record reader"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

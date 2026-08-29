@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-32.b2419d16abb22abd",
+  "kind": "shard",
+  "shardId": "shard-32",
+  "shardHash": "b2419d16abb22abd",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "tests/run-all.sh",
+      "line": 11,
+      "note": "Ran the new smoke gate exactly as written: `go vet -tags smoke ./internal/fsm/judge/` exits 0 and `go test -tags smoke -list 'TestSmoke' ./internal/fsm/judge/ | grep TestSmoke >/dev/null` prints TestSmokeProvider and exits 0. Also ran it under the coverage gate's environment (GOFLAGS='-cover -covermode=atomic' GOCOVERDIR=<tmp>, the shape tests/coverage.sh:67 uses): both still exit 0 and nothing is written into GOCOVERDIR, so the new gate cannot perturb the merged 100%-of-statements requirement on internal/fsm/*."
+    },
+    {
+      "path": "tests/run-all.sh",
+      "line": 12,
+      "note": "Mutation-checked the gate rather than trusting it: `-list 'TestNoSuchSmoke'` exits 1 (a renamed/deleted smoke test fails the suite) and the same command WITHOUT -tags smoke also exits 1 (proving the test really is behind the build tag, which is what the comment on line 10 claims). With set -euo pipefail at run-all.sh:2 both failures abort the suite, so the gate is not vacuous."
+    },
+    {
+      "path": "internal/fsm/judge/smoke_test.go",
+      "line": 15,
+      "note": "The gated test is real, not a placeholder: TestSmokeProvider skips only when OPENAI_API_KEY is unset and otherwise makes a live adjudicate call and t.Fatalf's on err or a nil Parsed. So the run-all.sh line gates something that would actually fail if the provider arm broke."
+    },
+    {
+      "path": "tests/run-all.sh",
+      "line": 21,
+      "note": "Every script newly registered by this diff exists on disk (test-shardpack-coverage.sh, test-sharded-review.sh, test-override.sh, test-override-coverage.sh, test-fsm.sh), so none of the `if [ -f ... ]` guards is silently vacuous; `comm` over ls tests/go/*.sh vs the paths referenced in run-all.sh shows no unregistered script either. bash -n passes on all six files and shellcheck on tests/run-all.sh exits 0."
+    },
+    {
+      "path": "skills/fsm/SKILL.md",
+      "line": 33,
+      "note": "Exit-code table verified against the implementation, not the prose: machine.go:862-870 gives DONE for OutcomeFixed/OutcomeClean (ExitCode 0), DONE with ExitCode 1 for OutcomeReviewed and STOPPED with ExitCode 1 otherwise; machine.go:685 returns ExitCode 3 for NEEDS_INPUT and does so before any append, which is what makes the documented 'advance is idempotent at NEEDS_INPUT' true; envelope.go:52-107 exitFor puts ERR_CMDS_NOT_ALLOWED and ERR_RUN_ESCALATED in the exit-2 set and everything post-mutation at 1."
+    },
+    {
+      "path": "skills/fsm/SKILL.md",
+      "line": 46,
+      "note": "Fork/judge-swap claims check out. fork.go:199-204 compares git HEAD to the checkpoint head and its error text is the doc's own 'fork first, then commit: git worktree add <dir> <head> ... --work-dir' recipe; fork.go:154-161 refuses a --var whose name was used by a node in the copied prefix (ERR_VAR_FROZEN), which is exactly why a JUDGE swap on sdlc-loop is only accepted at --at-iter 0 (adjudicate/verify consume $JUDGE from iteration 0 onward) while review-loop.yaml has no loop; fork.go:31-42 MaxAttempts=3 backs 'three non-PASS attempts on one fork lineage'."
+    },
+    {
+      "path": "skills/fsm/SKILL.md",
+      "line": 88,
+      "note": "Files/retention claims spot-checked: run/store_jsonl.go:104-107 writes the self-ignoring .gitignore under .metareview/runs, store_jsonl.go:259 names the dropped bytes audit.torn-<seq>-<nanos>.bin in the run dir, store_jsonl.go:275-278 keeps never-durable fragments under runs/.torn, export.go:118-123 defaults the bundle to docs/metareview/fsm/<id> and refuses --include-vars without --out, and run.go:950-987 StatusLines lists runs from rootOf() = the first `git worktree list --porcelain` block, i.e. the main worktree. `go run ./cmd/metareview fsm --agent-prompt` exits 0 and prints the contract the skill tells the driver to read."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 91,
+      "note": "The documented cmds child environment is exact: Guarded.env copies only PATH/HOME/LANG/TMPDIR when present, appends MRV_RUN_ID, then the workflow-declared env names. That precision is what makes the separate 'the binary reads exactly these env names' bullet read as an equally exhaustive statement (see the medium finding)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "SKILL.md:81-83 states, in the section headed 'Trust boundary (read before passing any knob)', that 'The binary reads exactly these env names: ANTHROPIC_API_KEY, OPENAI_API_KEY, ANTHROPIC_BASE_URL, OPENAI_BASE_URL, METAREVIEW_JUDGE_MODEL, METAREVIEW_JUDGE_EFFORT, MOCK_AI, MRV_RUN_ID, HOME (plus PATH and, on Linux, SSL_CERT_* through the Go runtime). No proxy variables are honoured.' The list is presented as closed and explicitly accounts for names read by the Go runtime rather than by metareview code, so it invites an operator to treat anything absent from it as irrelevant. Two things are missing. (1) TMPDIR: internal/fsm/gate/git.go:249 calls os.MkdirTemp(\"\", \"mrv-index-*\"), which on unix resolves through os.TempDir() to $TMPDIR, and that directory is where the scratch git index for the working-tree hash is created (WorkTree is on the normal advance path). I reproduced it: a program calling os.MkdirTemp(\"\", \"mrv-index-*\") with TMPDIR pointed at a scratch directory created mrv-index-* inside it. So TMPDIR is read by the binary and steers where it writes, and the same document already names TMPDIR one bullet earlier as part of the cmds child environment - the omission is inconsistent inside a single section. (2) The codex arm: internal/fsm/cli/deps.go:101-103 builds exec.CommandContext without setting cmd.Env, so the spawned `codex` process inherits the entire parent environment - every proxy variable, every API key, everything. The doc's neighbouring bullet (SKILL.md:76-79) goes out of its way to reassure that 'metareview never handles that credential and no API key is required for it' and that the spawn sits outside the allowed_cmds consent gate, but never says the child gets the whole environment, in pointed contrast to the exactly-enumerated cmds child env. Net effect: for a codex/ judge the closed env set and 'no proxy variables are honoured' do not describe the process metareview actually runs. Both are one-line doc fixes: add TMPDIR (os.MkdirTemp) to the enumeration, and state that the codex child inherits the full environment (unlike a consented cmd). Note the same closed list in docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:356-359 omits TMPDIR too, so fixing the skill without the spec would leave the stale copy behind - the identical-guard-at-another-layer pattern.",
+      "evidence": [
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 81,
+          "note": "'The binary reads exactly these env names: ...' - the word 'exactly', plus the parenthetical covering PATH and SSL_CERT_* 'through the Go runtime', makes this an exhaustive claim about runtime-read names as well."
+        },
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 249,
+          "note": "dir, err := os.MkdirTemp(\"\", \"mrv-index-*\") - empty dir argument means os.TempDir(), i.e. $TMPDIR on unix. Verified experimentally: TMPDIR=<scratch> made the mrv-index-* directory appear under <scratch>."
+        },
+        {
+          "path": "internal/fsm/cli/deps.go",
+          "line": 101,
+          "note": "func realCodexExec: cmd := exec.CommandContext(ctx, codexBin, args...) with cmd.Env left nil, so os.Environ() is inherited wholesale by the codex child; the function's own comment says 'the environment is inherited' but SKILL.md never surfaces that."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "ERR_REPO_ROOT_MISMATCH is undocumented anywhere a driver will look, and the skill's exit-2 rule is unactionable for it. SKILL.md:32 says exit 2 means 'usage, or a refusal before anything was recorded: fix the input and retry - unless the code is a consent (ERR_CMDS_NOT_ALLOWED) or escalation (ERR_RUN_ESCALATED) code'. envelope.go:55 puts ERR_REPO_ROOT_MISMATCH in the exit-2 set, but it is raised when the checkout moved (mock runs are path-bound), which no amount of 'fix the input and retry' resolves; an agent following the skill literally will retry forever or give up without telling the human what actually happened. docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:361-362 lists 'a moved checkout -> ERR_REPO_ROOT_MISMATCH (mock runs are path-bound)' as required content for skills/fsm/SKILL.md + commands/fsm.md, and grep over all non-spec Markdown finds the code in none of them (nor in docs/fsm/driving-a-workflow.md). One clause in the exit-2 row fixes it.",
+      "evidence": [
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 32,
+          "note": "exit-2 row names only ERR_CMDS_NOT_ALLOWED and ERR_RUN_ESCALATED as the codes that are not retry-after-fixing-the-input."
+        },
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 55,
+          "note": "exit2 map includes CodeRepoRootMismatch = \"ERR_REPO_ROOT_MISMATCH\" (envelope.go:22), so it surfaces as exit 2 with the doc's misleading advice attached."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two lines in SKILL.md are unusable as written by the audience the skill targets. (a) SKILL.md:75 ends the model bullet with 'high effort is Go-only'. A driving agent cannot decode that: it is not a constraint on the CLI at all - judge.go:101 accepts high on every provider - it is spec shorthand (docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md:329) meaning the Go judge ADDS the high level relative to the reference implementation's table. As phrased it reads like a restriction and will be acted on as one. Either drop it from the skill or say 'high is metareview's own addition to the provider tables'. (b) SKILL.md:23 says 'If you do not know where a run is: metareview fsm state --run <id>' - the case where you do not know where the run is is precisely the case where --run may be unavailable, and both the authoritative contract (internal/fsm/cli/prompt.go:7) and commands/fsm.md render this as bare `metareview fsm state`, which resolves flag -> MRV_RUN_ID -> newest non-errored run (wiring.go:219). The skill's variant is the only copy of the three that requires the id.",
+      "evidence": [
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 75,
+          "note": "'... plus codex/<model> ids judged through the Codex CLI; `high` effort is Go-only.' - contrast judge.go:101 var efforts = {low, medium, high, xhigh}, which accepts high for both HTTP providers."
+        },
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 23,
+          "note": "'metareview fsm state --run <id>' vs internal/fsm/cli/prompt.go:7 'metareview fsm state' for the same instruction."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

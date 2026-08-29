@@ -47,12 +47,16 @@ hash, and `resultsDir`.
 3. Write one result per shard into `resultsDir` as `shard-<id>.<shardHash>.result.json`, and
    `cross-shard.<planHash>.result.json` for a multi-shard plan. Each pack states the exact contract.
    `--shard-result` (repeatable) and `--cross-shard-result` (once: a plan has one cross-shard
-   result) pass a file in from elsewhere, and take precedence over a file of the same identity
-   in `resultsDir`.
+   result) pass a file in from elsewhere. `--cross-shard-result` replaces a committed one, since a
+   plan holds a single cross-shard slot; `--shard-result` does **not** — an explicit path is
+   ingested alongside the `resultsDir` listing, so passing a shard whose result is already
+   committed raises a `duplicate shard result` blocker. Replace the committed file instead.
 4. Re-run with `--previous-run <run-id>`. With every shard covered and the aggregate passing, the
    context-risk blocker becomes advisory and the lints run over the whole branch diff.
-5. Commit the results in `docs/metareview/shards/` with the review log. After a fix round only the
-   edited file's shard and the cross-shard result go ignored: re-review those two and leave the rest.
+5. Commit the results in `docs/metareview/shards/` with the review log. Editing a file changes only
+   its own bucket's shards, unless the total branch diff crosses a bits boundary, which re-cuts every
+   shard in the plan. After a fix round, re-review only the affected shards and the cross-shard result;
+   leave the rest.
 
 Local content is in no pack. Commit or remove staged, worktree and untracked files first — an
 untracked file over 4,000 bytes raises `UNTRACKED_TRUNCATED`, which shard results can never satisfy.

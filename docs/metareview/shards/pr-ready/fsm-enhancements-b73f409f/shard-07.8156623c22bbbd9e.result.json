@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-07.8156623c22bbbd9e",
+  "kind": "shard",
+  "shardId": "shard-07",
+  "shardHash": "8156623c22bbbd9e",
+  "planHash": "daa5e2b77b4d0503",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 188,
+      "note": "Reviewed the shard diff against rubrics/task-done-review-rubric.md and verified every suspicion against the checked-out files rather than the diff text."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 161,
+      "note": "Cross-checked gitcontext.AddedLines against the production lint scanner reviewers.addedLines and grepped the whole tree for callers."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 513,
+      "note": "Traced FileProfile.Source into profilePaths to establish the downstream effect of the branch/local classification."
+    },
+    {
+      "note": "go vet ./internal/gitcontext/ ./internal/contextprofile/ is clean and go test over contextprofile, gitcontext and reviewmanifest passes on this branch."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Duplicate, dead, and weaker copy of the lint input builder. internal/gitcontext/branchfiles.go:161 adds an exported AddedLines(ctx) that re-implements internal/reviewers/taskdone.go:349 addedLines(git). Nothing in production calls it (only internal/gitcontext/branchfiles_test.go:338), so it is dead exported API, and it is not behaviourally equivalent to the function it duplicates: the reviewers version deliberately drops documentation paths and only honours a '+++ ' header inside a file header (taskdone.go:363 onward, addedSourceLines), while the gitcontext copy takes every '+' line from every file. It also decides 'this text is the untracked excerpt block' by string equality on the text itself (branchfiles.go:171, text == ctx.UntrackedExcerpts) rather than by which input it is iterating, so identical/empty inputs alias. The rubric blocks a change that duplicates an existing code path; either delete it or make the reviewers lints call it so there is one definition.",
+      "evidence": [
+        {"path": "internal/gitcontext/branchfiles.go", "line": 161, "note": "exported AddedLines with no production caller"},
+        {"path": "internal/gitcontext/branchfiles.go", "line": 171, "note": "untracked block detected by text equality, not by source"},
+        {"path": "internal/reviewers/taskdone.go", "line": 349, "note": "the real, doc-scoped lint input builder this duplicates"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Uncommitted edits to a branch-touched file disappear from the 'Local changes (not sharded)' disclosure. FileProfile.Source is forced to SourceBranch whenever the path appears in BranchFiles (internal/contextprofile/profile.go:188), and sourceOf checks git.ChangedFiles before StagedFiles/UntrackedFiles (profile.go:259-262), so a file that is both committed on the branch and dirty in the worktree/index classifies as 'branch'. internal/reviewmanifest/manifest.go:513 profilePaths partitions purely on that field, so the path lands in SourcePaths and never in LocalPaths, and manifest.go:273 only prints the 'Local changes (not sharded)' section from LocalPaths. Shard packs carry committed branch content only, so exactly this file's uncommitted bytes are the content nobody reviews and nobody is told about. The same line also overwrites rather than accumulates the byte count (profile.go:181, byPath[f.Path] = f.Bytes), which drops the staged/worktree bytes for that path even though FromGit adds them into the total at profile.go:79 - so the per-file table no longer sums to FilteredDiffBytes. No test covers a path that is both branch-changed and locally dirty (internal/reviewmanifest/manifest_test.go:327 covers local-only files).",
+      "evidence": [
+        {"path": "internal/contextprofile/profile.go", "line": 188, "note": "Source unconditionally overwritten to SourceBranch"},
+        {"path": "internal/contextprofile/profile.go", "line": 181, "note": "byPath assignment discards staged/worktree bytes for the same path"},
+        {"path": "internal/contextprofile/profile.go", "line": 79, "note": "FilteredDiffBytes still adds the local bytes the per-file table dropped"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 513, "note": "profilePaths splits branch vs local on Source alone"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "branchPaths relies on GIT_LITERAL_PATHSPECS being unset in the ambient environment. internal/gitcontext/branchfiles.go:68 calls run(root, nil, ...) and realGit only replaces the environment when env is non-empty (branchfiles.go:39-41), so the child inherits os.Environ(). If an operator or CI job exports GIT_LITERAL_PATHSPECS=1, the ':(exclude)...' pathspecs built at branchfiles.go:111 are taken literally, no exclusion is applied, and the measured branch diff silently includes generated files. The comment at branchfiles.go:92 asserts the opposite invariant without enforcing it; passing GIT_LITERAL_PATHSPECS=0 explicitly would.",
+      "evidence": [
+        {"path": "internal/gitcontext/branchfiles.go", "line": 68, "note": "nil env inherits a possibly hostile GIT_LITERAL_PATHSPECS"},
+        {"path": "internal/gitcontext/branchfiles.go", "line": 92, "note": "comment claims the invariant the code does not enforce"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 16 MiB DIFF_OVERSIZE bound is evaluated only after the whole branch diff has been materialised. collectBranchFiles retains each file's text in BranchFile.Diff and also concatenates the lot into a strings.Builder (internal/gitcontext/branchfiles.go:141-143), i.e. roughly two copies in memory, and only later does contextprofile compute branchDiffBytes and raise DIFF_OVERSIZE (internal/contextprofile/profile.go:137). measureBranchFiles exists precisely to avoid that peak allocation for the raw scan and carries a comment saying so (branchfiles.go:147-149), so the filtered path is inconsistent with its own stated rationale. measureBranchFiles and collectBranchFiles are also the same loop twice.",
+      "evidence": [
+        {"path": "internal/gitcontext/branchfiles.go", "line": 141, "note": "full text retained per file and concatenated before any size bound"},
+        {"path": "internal/contextprofile/profile.go", "line": 137, "note": "DIFF_OVERSIZE raised only after the text exists"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "ShardPlanMarkdown looks deleted in the diff but is not: it moved to internal/contextprofile/shards.go:264 with a packDir parameter and is still called from internal/prready/review.go:873 and internal/taskdone/review.go:497. No dangling reference; the packages vet and test clean.",
+      "evidence": [
+        {"path": "internal/contextprofile/shards.go", "line": 264, "note": "relocated definition, not a removal"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "The plugin.json version bump to 0.9.0 and the 'requires Go 1.26+' description both check out: go.mod declares go 1.26, README.md:85 says the same, and CHANGELOG.md has a 0.9.0 entry dated 2026-08-27. The new spec document under docs/specs is prose and is correctly outside the deterministic lints' scan scope, so its TODO-ish and eval-ish prose is not a marker finding.",
+      "evidence": [
+        {"path": "CHANGELOG.md", "line": 3, "note": "0.9.0 entry matches the plugin manifest bump"}
+      ]
+    }
+  ],
+  "blockingCount": 2
+}

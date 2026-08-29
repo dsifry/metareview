@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-11-2-review",
+  "kind": "shard",
+  "shardId": "shard-11-2",
+  "shardHash": "0c88add54f404fd7",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 208,
+      "note": "Parse: strict decode (KnownFields), name/version/state checks, then parseVars/parseCmds/parseNodes/parseTransitions/validateGraph/convergence/collectRefs. No eval, no shell-out, no TODO/FIXME markers anywhere in this shard's diff."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 477,
+      "note": "validateGraph checked line by line against spec 2.3 of docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md: failed_reserved, initial_terminal, terminal_with_node, outcome pairing, unreachable_state, loop_count, loop_not_cycle, loop_terminal, cycle_without_loop are all present with the documented semantics."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 165,
+      "note": "varRef regex verified against the spec's $NAME grammar: $$ matches the escape alternative first so $$JUDGE yields a literal $JUDGE, and ${X}/$1/trailing $ are left alone. refsIn/paramRefs walk model, effort, top-level string params and strings inside list params only, exactly as spec 2.2 states (nested maps not walked)."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 168,
+      "note": "reservedEnv and reservedPfx compared entry by entry with the spec's bad_env denylist (PATH HOME LANG TMPDIR, MRV_/LD_/DYLD_/GIT_ prefixes, BASH_ENV ENV SHELLOPTS PS4 IFS CDPATH GLOBIGNORE PROMPT_COMMAND, PYTHON*, NODE*, PERL*, RUBY*, JAVA_TOOL_OPTIONS): complete match, so workflow YAML cannot inject a loader or interpreter variable into a declared cmd."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow_test.go",
+      "line": 1,
+      "note": "Tests accompany the source change and pass: `go test ./internal/fsm/workflow/...` reports 100.0% statement coverage, satisfying the rubric's tests-for-source-changes rule."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 72,
+      "note": "collectWith is a pure wrapper over the pre-existing collect(); branch measurement runs only when ctx.DiffTruncated, so the non-sharded path is byte-for-byte unchanged. maxDiffBytes (gitcontext.go:15) is 120000, matching the documented sharding threshold, so the two triggers cannot disagree."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 305,
+      "note": "The `Invalid git base` to `invalid git base` error-string lowercasing was checked for consumers: a repo-wide grep outside .git finds no code, test, doc or skill matching the old capitalised string, so nothing depends on the old wording."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 356,
+      "note": "Removal of the limitedGit wrapper is safe: the only remaining references in the repository are inside historical docs/metareview context artifacts, and `go test ./internal/gitcontext/...` builds and passes (85.0% coverage, collectWith at 86.4%)."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 49,
+      "note": "BranchFiles / BranchFilteredDiffBytes / BranchDiffFull are all consumed downstream (contextprofile.PlanShards and PlanSourceHash take []gitcontext.BranchFile; prready branchOnlyGitContext prefers BranchFilteredDiffBytes; reviewers.addedLines uses BranchDiffFull), so no field added here is dead."
+    },
+    {
+      "path": "testdata/fsm/workflows/sdlc-loop-cmds.yaml",
+      "line": 1,
+      "note": "Both new fixtures are exercised, not orphaned: tests/go/test-fsm.sh copies the workflow at line 44 and drives it at lines 207-210 (ERR_CMDS_NOT_ALLOWED then --allow-custom-cmds), and scenarios/review-loop/clean is used at lines 153 and 194-197. Every $VAR in the fixture (REVIEWER, REV_EFFORT, JUDGE, JUDGE_EFFORT) is declared, and its convergence/on_overflow both reference the declared `notify` cmd, so it parses under the rules in this shard."
+    },
+    {
+      "path": "skills/review-task-done/SKILL.md",
+      "line": 13,
+      "note": "The documented --shard-result (repeatable) and --cross-shard-result (once) flags exist in cmd/metareview/main.go:195-199 and 264-268 for both task-done and pr-ready, so the doc change is not ahead of the implementation."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead exported constant plus a duplicated magic number. MaxTimeout is declared at workflow.go:44 and referenced nowhere else in the repository (verified by grep over cmd/ and internal/), while the cmd timeout bound is validated against the bare literals 1 and 3600 at workflow.go:289. The declared bound and the enforced bound can drift apart silently. Use MaxTimeout (and a MinTimeout, or 1*time.Second) in the check, or delete the constant.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 44,
+          "note": "MaxTimeout = 3600 * time.Second, no other reference in the repository"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 289,
+          "note": "if *rc.Timeout < 1 || *rc.Timeout > 3600 uses literals rather than the constant"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Mapping-form transitions accept an `on:` key that is parsed and then thrown away. strictNode allows \"on\" at workflow.go:429 and rawTransition.On is decoded at workflow.go:157, but addTransition never reads it and Transition has no such field. The only sanctioned user of `on:` per spec 2.2 is the `*-to-failed` row, which is skipped by the `from == \"*\"` continue at workflow.go:425 before strictNode ever runs. Net effect: `on: gate_error` written on a real edge is accepted and silently dropped instead of raising unknown_key. Either drop \"on\" from the allowed set for non-`*` keys or fold it into Gate.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 429,
+          "note": "strictNode(..., \"gate\", \"outcome\", \"loop\", \"on\") allows a key nothing consumes"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 425,
+          "note": "the from == \"*\" branch continues first, so the documented consumer of `on` never reaches the allow-list"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Non-deterministic error `at` fields. parseNodes deliberately sorts node names at workflow.go:343 so its first failure is reproducible, but collectRefs iterates the w.Nodes map at workflow.go:604 and the w.Cmds map at workflow.go:614 unsorted, and validateGraph iterates w.Nodes unsorted at workflow.go:479. With two nodes each referencing an undeclared $VAR (or two terminal states each carrying a node), the reason is stable but `at` varies run to run, which is awkward for a tool whose ERR_WORKFLOW_INVALID payload is user-facing and golden-tested. Sort those iterations the way parseNodes already does.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 604,
+          "note": "for s, n := range w.Nodes in collectRefs, unsorted, produces `at = nodes.<name>` for whichever node the map yields first"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 343,
+          "note": "parseNodes sorts names for exactly this reason, so the two paths are inconsistent"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Parse's first-failure order deviates from the documented table for doubly-invalid inputs. Spec 2.3 orders missing_convergence before cycle_without_loop, but cycle_without_loop is raised inside validateGraph at workflow.go:531 while missing_convergence is raised afterwards in Parse at workflow.go:219. A workflow that both declares a loop with no convergence: block and contains a non-loop cycle reports cycle_without_loop where the spec promises missing_convergence. Only observable when both defects are present, hence low, but the spec calls the order a contract.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 531,
+          "note": "hasCycleWithoutLoop is checked at the end of validateGraph, which Parse calls before the convergence block"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 219,
+          "note": "missing_convergence is raised after validateGraph returns, inverting the spec 2.3 table order"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The branch measurement introduced at gitcontext.go:84/95 shells out through collectBranchFiles/measureBranchFiles, which run `git diff --no-renames --text --no-textconv` (branchfiles.go:107 and :129) without --no-ext-diff. internal/fsm/gate/git.go:209 pairs --no-ext-diff with --no-textconv for the same reason, so this is an inconsistency inside the same codebase: a repo-local diff.external or GIT_EXTERNAL_DIFF replaces the diff text wholesale, which would corrupt BranchFile.Hash, the shard packs cut from those bytes, and the untruncated lint scan in reviewers.addedLines. Separately, --text renders binary blobs as added lines into that same lint corpus. Not a regression (the pre-existing collect() path passes neither flag), so non-blocking, but add --no-ext-diff.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 84,
+          "note": "collectBranchFiles call site; the underlying git invocation omits --no-ext-diff"
+        },
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 209,
+          "note": "the FSM gate's Git.Diff uses --no-ext-diff --no-textconv, establishing the convention this path does not follow"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Branch measurement failures are now fatal to context collection. collectWith returns Context{}, err at gitcontext.go:86 and :97, so once the branch diff is truncated the review aborts entirely if any of the N per-path `git diff` invocations fails, where previously a truncated diff simply degraded to the truncated view. This is exactly the large-branch case (one subprocess per changed path), so the failure surface grows with branch size. Consider degrading to the truncated context with a recorded warning instead of failing the run.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 86,
+          "note": "return Context{}, err on collectBranchFiles failure discards the otherwise-valid collected context"
+        },
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 97,
+          "note": "the raw re-measurement is likewise fatal, and it is a second full per-path scan of the branch"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

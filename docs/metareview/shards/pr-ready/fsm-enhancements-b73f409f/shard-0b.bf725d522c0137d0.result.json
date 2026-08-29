@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0b.bf725d522c0137d0",
+  "kind": "shard",
+  "shardId": "shard-0b",
+  "shardHash": "bf725d522c0137d0",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:15:00Z",
+  "evidence": [
+    {"path": ".github/workflows/test.yml", "line": 1, "note": "Read the whole workflow on disk and cross-read .github/workflows/gtg.yml: the two do not duplicate each other (gtg is merge-readiness and waits 22 minutes, which deliberately clears this job's timeout-minutes: 20), permissions are contents: read, and every action is pinned by commit SHA."},
+    {"path": "package.json", "line": 46, "note": "\"test\": \"bash tests/coverage.sh\" - the workflow's `npm test` step really does run the combined coverage gate; package.json declares no dependencies, so the absence of an `npm ci` step is correct, not an omission."},
+    {"path": "tests/coverage.sh", "line": 67, "note": "coverage.sh runs unit tests instrumented and then tests/run-all.sh under GOFLAGS=-cover, enforcing 100% for ./internal/fsm/... and ./workflows and a floor elsewhere - the workflow comment at test.yml:112-113 is accurate."},
+    {"path": ".golangci.yml", "line": 1, "note": "version: \"2\" with `default: standard` and no exclusions, consistent with the action's `version: v2.13.1` (golangci-lint-action v7 requires a v2 binary) and with the step comment claiming no baseline."},
+    {"path": "internal/epicready/review.go", "line": 500, "note": "Read contextMarkdown in full on disk: contextprofile is still used (contextprofile.Markdown at :499 and the Profile parameter), so removing the ShardPlanMarkdown call leaves no unused import or dead symbol; DefaultMaxBytesPerShard remains used by taskdone/review.go:105 and prready/review.go:107."},
+    {"path": "internal/epicready/review.go", "line": 676, "note": "The three builder.WriteString(fmt.Sprintf(...)) -> fmt.Fprintf(&builder, ...) rewrites are behaviour-preserving (strings.Builder.Write never errors, so the dropped error return is not a swallowed failure) and runChainMarkdown is directly exercised by internal/epicready/review_markdown_test.go:37."},
+    {"path": "internal/fsm/judge/testdata/prompts/adjudicate.plain.golden", "line": 1, "note": "Regenerated the prompt mentally against prompts.go TemplateAdjudicate and the fixture at judge_test.go:97: the golden is byte-correct for fence=false, including {{1}} and the {diff} slot name surviving verbatim inside the inserted value (format() never rescans slot values) and {{ }} unescaping to single braces in the JSON hint line."},
+    {"path": "internal/fsm/judge/judge_test.go", "line": 126, "note": "TestJ1Goldens compares this golden byte-for-byte and adds golden-independent authority checks (fenced values must be JSON-encoded inside nonce fences, calibration is never fenced, match is never fenced), so the fixture is not a self-fulfilling snapshot."},
+    {"path": "internal/fsm/judge/testdata/prompts/adjudicate.fenced.golden", "line": 7, "note": "Compared the plain golden against its fenced sibling: the same hostile input (a diff containing a literal <<<END-<nonce> line) is JSON-encoded onto one line when fenced, so the sentinel cannot start a line and the fence cannot be broken. The plain golden's raw passthrough is the documented meaning of fence=false, not a regression."},
+    {"path": "internal/fsm/run/golden_test.go", "line": 1, "note": "Read the new test on disk with fold_test.go (happyLog at :35, mustFold at :64) and types.go (MaxLine = 1<<20 at :47, marshalCanonical at :345); it compiles against real symbols and the golden files are committed with matching line counts (24 events / 24 snapshots)."},
+    {"note": "Ran `go test ./...` on the frozen branch: whole module passes in 12s, and `go test ./internal/fsm/run -run TestGoldenPrefixes -count=1` passes against the committed goldens without the FSM_RUN_UPDATE_GOLDEN escape hatch."},
+    {"note": "Confirmed gofmt -l . is clean at HEAD (so the new hard gofmt gate is green), there are 38 matching .sh files for the shellcheck step, and the shell suite sets git user.name/user.email in each temp repo (tests/go/test-epic-ready-review.sh:18-19), so it will not stall on an unconfigured CI runner identity."},
+    {"note": "No TODO/FIXME markers, no eval or other unsafe execution, and no truncated chunks in this shard: all four files are part 1/1."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Documentation and spec both say epic-ready renders the literal string \"not sharded\", but the shipped context pack renders a different sentence. INSTALL.md:128 and docs/quickstart.md:62 - corrected on this same branch - state 'epic-ready renders \"not sharded\"', and the 0.8.3 spec section 9 specifies that ShardPlanMarkdown (which emits \"## Context Shard Plan\\n\\nNot sharded.\", contextprofile/shards.go:266) does the rendering at epicready/review.go:500. The diff instead hard-codes \"Sharding is not applied to epic-ready reviews; see the child task-done and pr-ready packs.\" An operator or agent grepping an epic-ready pack for the documented phrase finds nothing, and hard-coding the section bypasses the shared renderer, so a future heading change in contextprofile silently diverges here. No test or shell test asserts either string (grep over *_test.go and tests/**.sh finds no assertion of the epic-ready shard-plan section), so nothing pins the wording either way.",
+      "evidence": [
+        {"path": "internal/epicready/review.go", "line": 500, "note": "hard-coded section text, not contextprofile.ShardPlanMarkdown"},
+        {"path": "internal/contextprofile/shards.go", "line": 266, "note": "ShardPlanMarkdown renders \"## Context Shard Plan\\n\\nNot sharded.\" for an empty plan"},
+        {"path": "INSTALL.md", "line": 128, "note": "advertises that epic-ready renders \"not sharded\""},
+        {"path": "docs/quickstart.md", "line": 62, "note": "same claim, updated on this branch"},
+        {"path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md", "line": 298, "note": "spec section 9 names ShardPlanMarkdown and the \"not sharded\" rendering at epicready/review.go:500"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The snapshot loop can panic instead of reporting drift, and scanner errors are silently ignored. TestGoldenPrefixes drives the index i from the lines of testdata/golden-snapshots.jsonl but slices stored, which comes from testdata/golden-log.jsonl: if the snapshots file ever holds more lines than the log (a hand edit, a partially written regeneration, or a log line above MaxLine that makes bufio.Scanner stop early), stored[:i+1] panics with index out of range before the trailing `i != len(stored)` check - which only catches the too-few direction - can report anything. Neither sc.Err() nor ws.Err() is checked, so a scanner error is indistinguishable from a short file. Test-only, and both goldens are consistent today (24 lines each), but the failure mode of a regression fixture should be a readable diff, not a panic.",
+      "evidence": [
+        {"path": "internal/fsm/run/golden_test.go", "line": 47, "note": "sc.Scan() loop over the log; sc.Err() never checked"},
+        {"path": "internal/fsm/run/golden_test.go", "line": 56, "note": "ws.Scan() loop indexes stored[:i+1] with i driven by the snapshots file; ws.Err() never checked"},
+        {"path": "internal/fsm/run/golden_test.go", "line": 63, "note": "the only length reconciliation runs after the loop and catches only i < len(stored)"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "shellcheck is the one tool in this workflow that is not pinned, in a repository whose own workflows argue for pinning. Every action is pinned by SHA and golangci-lint is pinned to v2.13.1, while gtg.yml:38-41 pins gtg with an explicit comment that an unpinned release 'could change what the gate means without a change in this repository'. `sudo apt-get install -y -qq shellcheck` takes whatever the runner image's apt index offers, so a distro bump can turn a green branch red with no repo change - the same failure the other pins exist to prevent. The install is also redundant: the ubuntu-latest image ships ShellCheck, so the step adds an apt round trip and a network failure mode for a binary that is already present.",
+      "evidence": [
+        {"path": ".github/workflows/test.yml", "line": 100, "note": "unpinned apt install of shellcheck"},
+        {"path": ".github/workflows/test.yml", "line": 106, "note": "golangci-lint action pinned by SHA and version v2.13.1 in the very next step"},
+        {"path": ".github/workflows/gtg.yml", "line": 38, "note": "sibling workflow pins gtg==0.10.0 with a comment justifying exactly this discipline"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The shellcheck invocation has no empty-input guard: `find ... -print0 | xargs -0 shellcheck -x` runs shellcheck with no file arguments when find matches nothing, and shellcheck then exits nonzero with a usage error, failing the gate for a reason that has nothing to do with the shell scripts. GNU xargs needs -r/--no-run-if-empty for this. Latent today (38 .sh files match), but it turns 'the suite moved under an excluded path' into a confusing red build rather than a no-op. Related: the pipeline's exit status is xargs's, so a find failure would be masked - only the xargs status reaches the step.",
+      "evidence": [
+        {"path": ".github/workflows/test.yml", "line": 101, "note": "xargs -0 shellcheck -x with no -r and no pipefail"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

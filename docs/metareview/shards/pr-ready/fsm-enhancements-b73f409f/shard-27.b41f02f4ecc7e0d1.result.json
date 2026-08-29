@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-27-b41f02f4ecc7e0d1",
+  "kind": "shard",
+  "shardId": "shard-27",
+  "shardHash": "b41f02f4ecc7e0d1",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T12:00:00-07:00",
+  "evidence": [
+    {
+      "path": "internal/setup/setup.go",
+      "line": 210,
+      "note": "Ran `go test -coverprofile` over ./internal/setup with the gitversion suite passing: coverage block 211.3,213.1 (the `v == \"\"` -> \"Could not parse the git version\" branch) is count=0, as is parseGitVersion's `return \"\"` (231.2,231.11) and atLeastVersion's `i >= len(hp)` (240.4,241.1). gitStatus reports 90.5%, parseGitVersion 80.0%, atLeastVersion 90.9%."
+    },
+    {
+      "path": "internal/setup/gitversion_test.go",
+      "line": 25,
+      "note": "Confirmed the six subtests all RUN and PASS (`go test -count=1 -v -run TestGitStatusReportsTheVersionAndTheMinimum`), including `unparseable`, while the unparseable branch stays at count=0 - conclusive that the case takes a different path than its name claims."
+    },
+    {
+      "path": "internal/reviewers/sharded_test.go",
+      "line": 54,
+      "note": "Verified the fixture guard is real: the filler line is 53 bytes x 3000 = 159,000 bytes, past gitcontext.maxDiffBytes = 120000 (internal/gitcontext/gitcontext.go:15), so TestContextRiskSatisfiedEmitsAdvisoryAndRunsLints genuinely proves the TODO lint reads BranchDiffFull rather than the 120 KB-truncated Diff (which the fixture sets to '+short visible diff')."
+    },
+    {
+      "path": "internal/reviewers/sharded_test.go",
+      "line": 20,
+      "note": "The assembled-marker trick works as its comment claims: lintable() returns true for a .go path (taskdone.go:431-455), so this file is linted, and neither `\"TO\" + \"DO\"` nor `\"eval\" + \"(\"` produces a contiguous match for todoPattern `(?i)\\b(TODO|FIXME)\\b` or evalPattern `\\beval\\s*\\(`. All ten tests RUN and PASS."
+    },
+    {
+      "path": "internal/reviewers/sharded_test.go",
+      "line": 358,
+      "note": "Checked every assertion for the cannot-fail class. taskA[0]/taskB[0] indexing is safe because Satisfies() is false so RunTaskDone early-returns exactly one finding (taskdone.go:100-112). The `blocking.Classification != \"blocking\"` and `a.Fingerprint != b.Fingerprint` forms are redundant-looking but each has a real failure mode (finding() -> advisory() regression; one-side-missing after a byFingerprint lookup). No tautological assertion found in this file."
+    },
+    {
+      "path": "docs/fsm/driving-a-workflow.md",
+      "line": 1,
+      "note": "Spot-verified the load-bearing claims against code: `lenses: 8` on discover (workflows/sdlc-loop.yaml:18), fix is agent-edit/inline and adjudicate+verify are fork judge kinds (:20-21), the init example's required vars JUDGE/JUDGE_EFFORT exist and REVIEWER/REV_EFFORT default (:3-7), MaxAttempts lineage cap of three (machine/fork.go:31), env set PATH/HOME/LANG/TMPDIR + MRV_RUN_ID (cmdexec/cmdexec.go:36-37), SchemaVersion=1 with the 'keys only ever added within 0.9.x' comment (cli/envelope.go:35), export default docs/metareview/fsm/<id> (export/export.go:122), and the workflow-name/state-kind fork invariant (machine/fork.go:365-389). Every ERR_* code cited exists."
+    },
+    {
+      "path": "docs/fsm/driving-a-workflow.md",
+      "line": 91,
+      "note": "Exit-code table checked against machine_test.go's pinned expectations: DONE(clean)=0 (:265), DONE(fixed)=0 (:347), DONE(reviewed)=1 (:290), GATE_FAILED=1 (:408), STOPPED=1 (:660), NEEDS_INPUT=3 (:236); the exit-2 refusal set in cli/envelope.go:52-62 includes ERR_CMDS_NOT_ALLOWED and ERR_RUN_ESCALATED as the doc says. 'metareview status lists the runs of the main worktree' is exactly right: rootOf() reads `git worktree list --porcelain` and returns the first block (cli/wiring.go:52-64)."
+    },
+    {
+      "path": "docs/fsm/driving-a-workflow.md",
+      "line": 106,
+      "note": "The git >= 2.31 prerequisite has a real rationale (docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:87: `--path-format=absolute`, used by gate.Git.CommonDir) and INSTALL.md:137 makes the matching promise that `setup --check` reports it. handleSetup prints the full JSON report (cmd/metareview/main.go:420-424), so Version/VersionOK/Action do reach the operator - the doc/comment claim holds."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The `unparseable` test case for the new git version check does not exercise the unparseable path, and the assertion it uses cannot tell the two paths apart. parseGitVersion scans for a field literally equal to \"version\" and returns the field after it (setup.go:224-232), so the fixture \"not a version banner\" yields fields [not, a, version, banner] -> returns \"banner\", not \"\". gitStatus therefore skips the `v == \"\"` branch, sets status.Version = \"banner\", and falls into the too-old branch, producing `Upgrade git: metareview fsm needs git >= 2.31, found banner.` The test only asserts strings.Contains(Action, \"2.31\"), which both branches satisfy, so the case passes while testing the wrong code. Proven empirically: with all six subtests running and passing, coverage block 211.3,213.1 (the \"Could not parse the git version\" body) is count=0 and parseGitVersion's `return \"\"` at 231.2,231.11 is count=0. Two consequences beyond the mislabel: (1) the only branch that emits the dedicated parse-failure message is untested new code, and (2) a git whose banner is odd but contains the word `version` is reported to the operator as `\"version\": \"banner\"` with an Upgrade instruction, rather than as unparseable. Fix: change the fixture to output that contains no `version` field (e.g. \"not a banner\") so the case matches its name, and add a separate case for a version-shaped-but-non-numeric field (e.g. \"git version banana\") to keep the Upgrade-branch coverage. atLeastVersion's `i >= len(hp)` early return (240.4,241.1) is also count=0 and would be covered by a \"git version 2\" case.",
+      "evidence": [
+        {
+          "path": "internal/setup/gitversion_test.go",
+          "line": 25
+        },
+        {
+          "path": "internal/setup/setup.go",
+          "line": 210
+        },
+        {
+          "path": "internal/setup/setup.go",
+          "line": 224
+        },
+        {
+          "path": "internal/setup/setup.go",
+          "line": 238
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new ToolStatus doc comment states a general rule the code does not follow: \"Version and VersionOK are reported for tools with a minimum this project actually depends on.\" Go has such a minimum - go.mod pins `go 1.26`, INSTALL.md:9 says \"Go 1.26+ when running from a source checkout\", and this same diff updates the Go action string from 1.22+ to 1.26+ - yet Go is still built with the bare commandStatus and reports neither Version nor VersionOK. Only git is version-checked. Either narrow the comment to git (\"reported for git, the one tool whose minimum INSTALL.md promises setup --check enforces\") or extend the check to Go. As written a maintainer would expect the fields to be populated for any tool with a stated floor.",
+      "evidence": [
+        {
+          "path": "internal/setup/setup.go",
+          "line": 46
+        },
+        {
+          "path": "internal/setup/setup.go",
+          "line": 89
+        },
+        {
+          "path": "go.mod",
+          "line": 3
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "VersionOK carries `json:\"versionOk,omitempty\"`, so a false value is omitted entirely from the `setup --check` JSON. A machine consumer cannot distinguish \"git is too old\" from \"this build does not perform a version check\" - both render as an absent key. The human-facing signal survives via Action, and the exit code is 0 either way, so this is cosmetic today, but a boolean whose false value is the interesting one is the wrong field to tag omitempty. Dropping omitempty on VersionOK (keeping it on Version) would make the negative explicit without changing any other output.",
+      "evidence": [
+        {
+          "path": "internal/setup/setup.go",
+          "line": 50
+        },
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 421
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Minor: the failure message in TestTruncatedDiffFindingAdvisoryOnSatisfiedPath is inverted relative to when it fires. `t.Fatal(\"the unsatisfied path still early-returns before the other findings\")` executes precisely when the truncated-diff finding IS present, i.e. when the early return did not happen. The invariant being asserted is right (Satisfies() is false with an empty manifest, so RunTaskDone returns at taskdone.go:101 before the truncation block at :173), but a reader debugging a failure is told the opposite of what went wrong. Reword to \"the unsatisfied path must early-return before the other findings\".",
+      "evidence": [
+        {
+          "path": "internal/reviewers/sharded_test.go",
+          "line": 99
+        },
+        {
+          "path": "internal/reviewers/taskdone.go",
+          "line": 101
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Coverage gap rather than a wrong claim: TestContextRiskFingerprintReasonIndependentAllScopes covers task-done, pr-ready and epic-ready, but TestCoveredFingerprintStable covers only task-done and pr-ready. epic-ready has no `epic:context-risk-covered` counterpart at all - RunEpicReady takes an EpicGitContext with no Manifest field, so the shard-satisfied path simply does not exist for epics. That may well be deliberate (the 0.8.3 spec scopes shard ingestion to task-done and pr-ready), but nothing in this test file or the shard-satisfied code says so, and the sibling test's \"AllScopes\" name invites the reader to assume epic parity. One line of comment naming epic-ready as deliberately out of scope would close the gap.",
+      "evidence": [
+        {
+          "path": "internal/reviewers/sharded_test.go",
+          "line": 152
+        },
+        {
+          "path": "internal/reviewers/epicready.go",
+          "line": 54
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

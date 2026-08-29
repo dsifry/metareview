@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0e-2-review",
+  "kind": "shard",
+  "shardId": "shard-0e-2",
+  "shardHash": "83fe8042195a4a96",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 1,
+      "note": "Full new-file diff reviewed: Init/Open/load, advance, runNode, transitions, fail/finish, overflow handler, Record, RecordLLMCall; no eval-like execution, no TODO/FIXME, diff not truncated."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 855,
+      "note": "transitions(): s.pred.Evaluate is only reached when TerminalFor is non-nil, which requires a loop edge; workflow.go:219 rejects a loop without convergence, so pred cannot be nil there."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 902,
+      "note": "failures[0] on the chosen==nil path is safe: workflow.go:488 requires an outcome into terminal states, so a state with no outgoing transitions already has Outcome set and advance returns at the terminal check."
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 1,
+      "note": "Tests accompany the new machine package (machine_test.go, fork_test.go, handoffs_test.go, harness_test.go)."
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 103,
+      "note": "Shard plan/pack wiring reviewed: pack write rollback runs on both the write error path and the later closure error path via errors.Join; prune/GC failures are intentionally non-fatal and GC is gated on a non-blocking result."
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 292,
+      "note": "result.Blocking is assigned inside the write closure (line 232) before the GC check at line 292, so the gate-passed condition reads the settled value."
+    },
+    {
+      "path": "internal/prready/shardwiring_test.go",
+      "line": 1,
+      "note": "New prready shard wiring and ingestion paths are covered by shardwiring_test.go and shardingestion_test.go; go vet is clean on both packages."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.template.jsonl",
+      "line": 1,
+      "note": "Test fixture only: three canonical audit events with @PREV@ placeholders, no executable content."
+    },
+    {
+      "path": "testdata/fsm/scenarios/sdlc-loop-cmds/overflow-handler/judge.yaml",
+      "line": 1,
+      "note": "Mock scenario fixture for the overflow handler path; declares canned judge calls and a notify cmd, no live execution."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

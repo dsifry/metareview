@@ -25,7 +25,7 @@ if (fs.existsSync(packagedBinary)) {
   console.error('No packaged metareview binary or Go source checkout found.');
   console.error(`Expected packaged binary: ${packagedBinary}`);
   console.error(`Expected Go source entrypoint: ${goEntrypoint}`);
-  console.error('Install a packaged metareview release or run from a source checkout with Go 1.22+ available.');
+  console.error('Install a packaged metareview release or run from a source checkout with Go 1.26+ available.');
   process.exit(1);
 }
 
@@ -33,7 +33,7 @@ const result = childProcess.spawnSync(command, commandArgs, options);
 
 if (result.error) {
   if (command === 'go' && result.error.code === 'ENOENT') {
-    console.error('Go runtime not found. Install Go 1.22+ or use a packaged metareview release with bin/metareview.');
+    console.error('Go runtime not found. Install Go 1.26+ or use a packaged metareview release with bin/metareview.');
   } else {
     console.error(result.error.message);
   }

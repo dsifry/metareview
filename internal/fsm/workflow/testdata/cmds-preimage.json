@@ -1,0 +1,1 @@
+[{"name":"notify","argv":["/bin/bash","./scripts/notify.sh","--model","gpt"],"file_hashes":{"/bin/bash":"hb","WORK/scripts/notify.sh":"hs"},"timeout_ms":2000,"env":["SLACK_WEBHOOK"]},{"name":"zeta","argv":["WORK/scripts/notify.sh","x"],"file_hashes":{"WORK/scripts/notify.sh":"hs"},"timeout_ms":60000}]

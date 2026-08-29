@@ -514,7 +514,12 @@ func profilePaths(profile contextprofile.Profile, branch bool) []string {
 	paths := make([]string, 0, len(profile.Files))
 	for _, file := range profile.Files {
 		isBranch := file.Source == "" || file.Source == contextprofile.SourceBranch
-		if isBranch == branch {
+		// A file can be both: committed on the branch and dirty in the working
+		// tree. Its committed bytes are in a shard pack and its uncommitted ones
+		// are in no pack at all, so it belongs in both lists. These are
+		// disclosures, not a partition, and treating them as a partition let the
+		// uncommitted half go unmentioned.
+		if isBranch == branch || (!branch && file.LocalBytes > 0) {
 			paths = append(paths, file.Path)
 		}
 	}
@@ -656,13 +661,22 @@ func dispositionCloses(value string) bool {
 	return value == DispositionFixed || value == DispositionFalsePositive
 }
 
+// hasValidEvidence enforces the rule the packs publish to every reviewer:
+// "each entry needs path AND line > 0, or a note of at least 12 characters; at
+// least one entry". It was an any(), so a result with one good entry and nine
+// empty ones passed while its own instructions said otherwise — and the test
+// named for checking this correspondence only ever built one-element slices,
+// the single shape in which the two rules cannot disagree.
 func hasValidEvidence(values []EvidenceRef) bool {
+	if len(values) == 0 {
+		return false
+	}
 	for _, value := range values {
-		if evidenceRefValid(value) {
-			return true
+		if !evidenceRefValid(value) {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func evidenceRefValid(value EvidenceRef) bool {
@@ -695,16 +709,26 @@ func firstNonEmpty(values ...string) string {
 
 // ingested sanitises a string that came out of a result file. Newlines and
 // control characters would break a table; an mrvf- token would be harvested by
-// reviewlog as one of the run's finding IDs, so its prefix is neutralised.
+// reviewlog as one of the run's finding IDs, so its prefix is neutralised; and a
+// pipe would forge cells. A result file is written by an agent and this table is
+// the durable record of what that agent said, so a reviewer name of
+// "evil | PASS | 0 | docs/fake.json" could otherwise rewrite its own blocking
+// count in the committed log.
 func ingested(value string) string {
-	return strings.ReplaceAll(markdown.PlainText(value), "mrvf-", "mrvf_")
+	return escapePipes(strings.ReplaceAll(markdown.PlainText(value), "mrvf-", "mrvf_"))
+}
+
+// escapePipes makes a value safe to place in a table cell. GFM splits a row on
+// pipes before it parses inline code, so backticks do not contain one.
+func escapePipes(value string) string {
+	return strings.ReplaceAll(value, "|", `\|`)
 }
 
 // ingestedCode is ingested for a value rendered as inline code. Result file
 // paths are named by the host, so they carry the same injection risk as the
 // strings inside a result.
 func ingestedCode(value string) string {
-	return strings.ReplaceAll(markdown.InlineCode(value), "mrvf-", "mrvf_")
+	return escapePipes(strings.ReplaceAll(markdown.InlineCode(value), "mrvf-", "mrvf_"))
 }
 
 // ShardedReviewMarkdown renders the review log's `## Sharded Review` section: the

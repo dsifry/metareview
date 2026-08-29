@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-01",
+  "kind": "shard",
+  "shardId": "shard-01",
+  "shardHash": "c88272003c3bae0a",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/contextprofile/plan_test.go",
+      "line": 252,
+      "note": "Shard planning is covered by 16 tests in plan_test.go (chunk/shard budget invariants, edit locality, bits-boundary re-cut); union coverage of internal/contextprofile/shards.go across the suite is 95.9% with only defensive branches uncovered."
+    },
+    {
+      "path": "internal/fsm/record/record_test.go",
+      "line": 1,
+      "note": "go test ./internal/fsm/record/... reports 100.0% statement coverage; torn-tail, id-conflict and flock-failure seams are exercised."
+    },
+    {
+      "path": "internal/learnsource/source_test.go",
+      "line": 167,
+      "note": "The new docs/metareview/shards exclusion in learnsource is covered by a test that plants a shard result and asserts it never reaches the collected context."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 112,
+      "note": "Verified BranchFile.Bytes == len(Diff), so totalBytes()/chunksOf() in shards.go measure the same bytes and the bucket-count estimate is not skewed."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 867,
+      "note": "Verified the exit-code table asserted in commands/fsm.md against the machine: DONE(reviewed) and STOPPED set ExitCode 1, DONE(fixed|clean) 0, NEEDS_INPUT 3, GATE_FAILED 1. The new command doc is accurate."
+    },
+    {
+      "path": "internal/contextprofile/shards.go",
+      "line": 1,
+      "note": "No eval or other unsafe execution, no TODO/FIXME markers, and no truncated diff context anywhere in this shard's nine chunks."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Lost/corrupted audit row: record.appendRow opens .metareview/runs.jsonl with os.O_CREATE|os.O_RDWR (no O_APPEND) and writes with Seek(0,2) followed by Write, relying on an advisory flock. Every other writer of the same file (internal/state.AppendJSONL, used by artifactreview, epicready, taskdone and prready) opens with O_APPEND and takes no lock, so the lock provides no mutual exclusion against them. If one of those processes appends between record's Seek and its Write, record writes at the now-stale offset and overwrites that row's bytes instead of appending after it — a silently corrupted line and a lost run record, in the file the gates read back for run-chain resolution. Opening with O_APPEND for the write (reopening for the truncate repair) makes the append atomic and matches the file's established contract.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 182,
+          "note": "os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0o644) — O_APPEND is absent."
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 221,
+          "note": "steps append Seek(0, 2) then Write: the offset is resolved before the write, not atomically with it."
+        },
+        {
+          "path": "internal/state/state.go",
+          "line": 32,
+          "note": "The pre-existing runs.jsonl writer uses os.O_CREATE|os.O_WRONLY|os.O_APPEND and never calls flock, so it does not cooperate with record's advisory lock."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Same non-cooperative-lock premise on the torn-tail repair: appendRow classifies the bytes after the last newline as a torn fragment from a snapshot read, then f.Truncate(t.offset) removes them. A complete row appended by a non-locking writer in that window is removed from runs.jsonl. It is quarantined under .metareview/runs/.torn rather than destroyed, so this is recoverable, but the row disappears from the log the gates read.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 218,
+          "note": "func() error { return f.Truncate(t.offset) } in the torn-tail repair steps."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Documentation states an invalidation rule the planner does not guarantee. All three docs in this shard say editing a file invalidates only its own shard's result and the rest can be left alone, unconditionally. PlanShards derives the bucket depth from total branch bytes (bits = bucketBits(needBuckets(total, budget))), so an edit that pushes the diff across a bucket-bits boundary re-buckets every path and changes every shard id and hash — the repository's own TestBitsBoundaryRecutsAll asserts exactly that. The failure mode is safe (unmatched results are ignored and the gate reports the uncovered shards), but a driver following the docs will burn a round. The docs need the boundary caveat, or the guidance should be to re-read plan.json after each fix round.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 200,
+          "note": "bits depends on total bytes, so shard identity is not stable across a bucket-count change."
+        },
+        {
+          "path": "internal/contextprofile/plan_test.go",
+          "line": 252,
+          "note": "TestBitsBoundaryRecutsAll: \"crossing the bits boundary must re-cut the plan\"."
+        },
+        {
+          "path": "docs/README.codex.md",
+          "line": 87,
+          "note": "\"Editing a file invalidates only its own shard's result ... leave the rest\" — stated without the boundary caveat; commands/review-task-done.md:32 repeats it."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Misleading public signature in the rewritten planner: PlanShards takes a Profile parameter that its body never reads, and its error result is nil on every return path, so the err checks at both call sites are dead. PlanSourceHash likewise takes an ignored Profile (_ Profile). Dropping the parameter and the error would make the content-hash-only contract explicit.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 188,
+          "note": "func PlanShards(profile Profile, branchFiles []gitcontext.BranchFile, options ShardOptions) (ShardPlan, error) — profile is unused; the three returns are all nil-error."
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 111,
+          "note": "if err != nil { return Result{}, err } on a call that cannot fail."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Fourth divergent copy of the 'metareview paths' knowledge: learnsource inlines []string{\"docs/metareview/shards\", \"docs/metareview/shards/**\"} instead of reusing a shared helper, while prready, taskdone and epicready each carry their own generatedMetareviewPathExcludes(). The pre-existing triplication is out of this shard's scope, but the new call site adds to it, and a future change to the exclude vocabulary now has four places to reach.",
+      "evidence": [
+        {
+          "path": "internal/learnsource/source.go",
+          "line": 31,
+          "note": "gitcontext.CollectWithExcludes(root, options.Base, []string{\"docs/metareview/shards\", \"docs/metareview/shards/**\"})"
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 828,
+          "note": "generatedMetareviewPathExcludes() returns the equivalent list; identical copies exist in taskdone/review.go:439 and epicready/review.go:446."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "record.Terminal checks ctx.Err() once and then calls appendRow, which takes a blocking syscall.Flock(LOCK_EX) with no deadline and no context awareness: a stale holder hangs the CLI with no diagnostic. The project's other flock user takes LOCK_EX|LOCK_NB and surfaces a typed CodeRunLocked error instead.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 189,
+          "note": "flock(int(f.Fd()), syscall.LOCK_EX) — blocking, after the only ctx check."
+        },
+        {
+          "path": "internal/fsm/run/store_jsonl.go",
+          "line": 351,
+          "note": "syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) with an EWOULDBLOCK to CodeRunLocked mapping."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead defensive branch: needBuckets normalizes budget <= 0 to DefaultMaxBytesPerShard, but its only caller already normalized budget four lines earlier, so that branch is unreachable and uncovered (it is one of the five zero-count blocks in shards.go). Duplicated defaulting also means the default could drift in one place and not the other.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 99,
+          "note": "if budget <= 0 { budget = DefaultMaxBytesPerShard } inside needBuckets."
+        },
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 196,
+          "note": "PlanShards performs the same defaulting before calling needBuckets at line 200."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.9.0 - 2026-08-27
+
+0.9.0 adds **FSM workflow runs**: `metareview fsm` drives `sdlc-loop` (discover → adjudicate → fix → verify) and
+`review-loop` as an event-sourced, hash-chained state machine. The host agent does the host nodes' work in its own warm
+session; judge calls (Anthropic, OpenAI-compatible, and `codex/` models judged through the Codex CLI on its own OAuth session) are auditable and swappable; resume is a fork; the results are
+not deterministic — the structure is.
+
+### Added
+
+- **Per-candidate judge evidence.** The adjudicate and still-present executors select the hunks of
+  each candidate's own file (and the other files its text names) instead of sharing one cut of the
+  whole branch diff. Selection parses only unified-diff structure, so it is language-agnostic.
+  A candidate whose file the diff does not carry is not judged at all: it is recorded
+  `unverified_no_evidence` and kept for a human rather than being asked of a judge that cannot see it.
+- **Two verdict values for outcomes that are not judgments**: `unverified_no_evidence` (no judge was
+  asked) and `checked_but_unverified` (a judge was asked and returned no usable answer, including an
+  unparseable reply). Both are confirmed-side with confidence 0. Previously either would have been
+  recorded as `hallucination`, which drops the finding.
+- **Escalation, on by default.** A candidate the judge rejected that names another changed file is
+  asked again with the changed files materialized at base and head in a directory outside the
+  repository, so a `codex/` judge can read both sides of a cross-file claim. `--no-escalate` turns it
+  off. On by default because unattended a false reject is silent - the finding is simply gone - while
+  a false confirm only costs a human a look; measured at roughly 2x judge tokens on a run where a
+  fifth of the rejections are cross-file. Only rejections are escalated, so a second opinion can
+  never delete a confirmation; a failed or unparseable escalation keeps the finding. Skipped for mock
+  runs and for judges that cannot read a tree, where it would re-ask the same question at twice the
+  cost.
+- **`internal/fsm/sandbox`** materializes the evidence an agentic judge may read - every changed path
+  at base and head, mode 0444, nothing else - and content-addresses it with a tree hash so a verdict
+  stays replayable when the prompt no longer carries the evidence.
+- `llm_call` records `evidence` (`excerpt`|`sandbox`) plus `tree_hash`/`base_sha`/`head_sha`;
+  `fsm diff` reports `evidence_mismatch` and per-row `evidence_same`, and never calls a
+  cross-evidence row `same`.
+- `metareview fsm init|state|advance|record|gate|judge|converge|diff|export|workflows|--agent-prompt` with one JSON
+  envelope per call (`schema_version: 1`), an exit table (`0`/`1`/`2`/`3`), `untrusted` marking of every externally
+  derived value, and a driver contract (`--agent-prompt`, pinned by `testdata/fsm/agent-prompt.golden`).
+- Fork/resume at any checkpoint (`advance --from <state> [--at-iter N]`), judge swap (`--var JUDGE=…`), `fsm diff`
+  (raw/effective decisions and confidence, never reasoning), `fsm export` (redacted evidence bundles under
+  `docs/metareview/fsm/`), and `.metareview/runs.jsonl` rows for terminal runs with per-lineage escalation.
+- Consent for workflow commands (`--allow-custom-cmds <sha256>` over exact argv + pinned file hashes), `MaxEvents`,
+  torn-tail repair (`advance --repair`), mock scenarios (`--mock-ai`) for tests, and the `/fsm` skill + `commands/fsm.md`
+  + `docs/fsm/`.
+- `tests/coverage.sh` enforces exactly 100% statement coverage on `internal/fsm/*` and `workflows/` (legacy packages
+  keep a recorded floor; the lift is a follow-up); `tests/go/test-fsm.sh` is the black-box suite; a `smoke`-tagged
+  real-provider judge test is vetted and listed by `tests/run-all.sh`.
+
+### Upgrade
+
+Additive: pre-0.9 `.metareview/` state is untouched — no rewrite of `runs.jsonl`/`findings.jsonl`; new FSM rows are
+ignored by 0.8.x readers (their scope/target never match a review gate); a complete but newline-less final row is kept
+as a row; only an undecodable fragment moves to `.metareview/runs/.torn/`. `.metareview/runs/` is created 0700 on the
+first `init` with a self-ignoring `.gitignore`; nothing new to ignore. Requires git ≥ 2.31.
+
 ## 0.8.3 - 2026-08-27
 
 0.8.3 makes a branch too large for the review context reviewable. metareview measures the real,
@@ -86,6 +139,24 @@ precision.
 
 ### Fixed
 
+- **The judge could not see the code it was judging.** Two stacked head-cuts: the machine fetched
+  the diff already capped at 1 MiB, and the kinds cut again to 30 KB and shared one cut across every
+  candidate. On this repository's own branch that left 13 of 538 files visible - plugin manifests and
+  a changelog, nothing under `internal/`. The cap is a memory valve (the text never enters the audit)
+  and is now 64 MiB; what a judge call receives is bounded by per-candidate selection instead.
+- An unparseable judge reply was recorded as `hallucination`, so a finding was denied because the
+  transport failed rather than because anything decided.
+- `internal/gitcontext` ran every `git diff` without `--no-ext-diff`, so a developer's own
+  `diff.external` (how difftastic is installed) or `GIT_EXTERNAL_DIFF` silently replaced the diff we
+  measure, chunk, hash and lint with the driver's output. `internal/fsm/gate` already passed it.
+- The Codex judge inherited metareview's working directory with read *and execute* access to the
+  whole repository, `.git` included; `judge.WithCodexWorkDir` confines it.
+- Codex token accounting added `cached_input_tokens` to `input_tokens` where the HTTP arm subtracts
+  it, so a codex-transported run billed its cached half twice into the convergence budget.
+- `validateCodex`'s empty-model guard compared against the literal lowercase prefix while routing
+  strips it case-insensitively, so `"Codex/"` validated and the CLI was spawned with an empty `-m`.
+- `machine.CallRow` declared an `Index` field that was never assigned and shipped as a constant `0`
+  in every `fsm diff` envelope; the unexported occurrence counter does that work. Removed.
 - `.claude-plugin/marketplace.json` plugin version had drifted to 0.6.0 while `package.json`
   advanced to 0.8.0; resynced to 0.8.2 (the manifest version-consistency test now passes).
 

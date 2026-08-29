@@ -1137,3 +1137,39 @@ func TestRelativeToAcceptsDotDotPrefixedNames(t *testing.T) {
 		t.Fatalf("the parent directory must stay verbatim, got %q", got)
 	}
 }
+
+// TestCrossShardPackStatesItsOwnContract pins that the cross-shard pack tells a
+// reviewer to write a cross-shard result, not a shard result. Reusing the shard
+// wording sent reviewers to a file name and kind the validator then ignored.
+func TestCrossShardPackStatesItsOwnContract(t *testing.T) {
+	root, plan, files := fixture(t)
+	if len(plan.Shards) < 2 {
+		t.Skip("fixture produced a single shard; no cross-shard pack")
+	}
+	if _, err := New(OSDeps()).Write(root, plan, header(), files); err != nil {
+		t.Fatal(err)
+	}
+	dir := Dir(root, "pr-ready", "feature", plan.PlanHash)
+
+	cross, err := os.ReadFile(filepath.Join(dir, "cross-shard.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(cross)
+	for _, want := range []string{"cross-shard.<planHash>.result.json", `kind "cross-shard"`, "must not\n  name a shard"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("cross-shard pack is missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "shard-<id>.<shardHash>.result.json") {
+		t.Fatal("cross-shard pack must not instruct a shard-shaped result")
+	}
+
+	shard, err := os.ReadFile(filepath.Join(dir, "shard-"+plan.Shards[0].ID+".md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(shard), "shard-<id>.<shardHash>.result.json") {
+		t.Fatal("shard pack must keep the shard result contract")
+	}
+}

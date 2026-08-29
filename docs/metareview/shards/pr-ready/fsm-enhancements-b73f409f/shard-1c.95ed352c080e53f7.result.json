@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1c-review",
+  "kind": "shard",
+  "shardId": "shard-1c",
+  "shardHash": "95ed352c080e53f7",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/run.go", "line": 37, "note": "Reviewed the full 983-line CLI dispatcher: subcommand routing, flag parsing, envelope/exit-code handling; no eval-style dynamic execution, no TODO/FIXME markers, diff context complete."},
+    {"path": "internal/fsm/cli/run.go", "line": 553, "note": "record tokens/event pass --data straight through as json.RawMessage; verified machine.Record validates shape/size (CodeRecordTokens, CodeRecordTooLarge) so this is not an injection or corruption path."},
+    {"path": "internal/fsm/cli/run.go", "line": 701, "note": "judge subcommand: flag preconditions, --context XOR match rule, mock-scenario bypass of Preflight, and LLM-call recording all consistent with the machine API."},
+    {"path": "internal/prready/shardwiring_test.go", "line": 100, "note": "Test coverage accompanying the change: pack write/prune/rollback wiring, plan-to-files invariant, and a real-writer end-to-end pack assertion; internal/fsm/cli/cli_test.go also exists for run.go."},
+    {"path": "internal/fsm/judge/testdata/prompts/adjudicate.calibration.golden", "line": 1, "note": "Golden prompt fixtures only; brace and fence sequences are deliberate template-escaping test data, not executable content."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead code: judge.KindStillPresent is the literal \"still-present\", so the second `if k == \"still-present\" { k = judge.KindStillPresent }` at line 740 can never change k (line 709 already ran, and both sides are the same string). Harmless but misleading.",
+      "evidence": [{"path": "internal/fsm/cli/run.go", "line": 740, "note": "duplicate no-op normalization of the still-present kind"}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "In gate(), the usage message interpolates err even on the second disjunct (invalid FixEntryHead SHA with a successful decode), so the user sees \"--input is not a snapshot: <nil>\" instead of a message naming the bad SHA.",
+      "evidence": [{"path": "internal/fsm/cli/run.go", "line": 674, "note": "fmt.Sprint(err) prints <nil> when only the ValidSHA check failed"}]
+    }
+  ],
+  "blockingCount": 0
+}

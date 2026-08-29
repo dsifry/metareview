@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-23.bc0f664928f960e3",
+  "kind": "shard",
+  "shardId": "shard-23",
+  "shardHash": "bc0f664928f960e3",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/judge/judge_test.go",
+      "line": 1,
+      "note": "Executed the whole shard: go test ./internal/fsm/judge/ -run 'TestJ1|TestJ2|TestJ3|TestJ4|TestJ5|TestJ6|TestJ7|TestJ9|TestPreflight' -v passes, all ten tests. go test ./internal/fsm/judge/ -coverprofile reports 100.0% statement coverage over judge.go, prompts.go and codex.go."
+    },
+    {
+      "path": "internal/fsm/judge/judge_test.go",
+      "line": 32,
+      "note": "TestJ1Provenance's sibling layer actually ran on this host: ~/Developer/harnesseval exists, so `git show 19ff9a8:harnesseval/{judge,adjudicate,sdlc_loop}.py` was executed and the vendored literals matched byte for byte. The provenance guarantee is real here, not skipped."
+    },
+    {
+      "path": "internal/fsm/judge/prompts.go",
+      "line": 67,
+      "note": "The product-vs-calibration claim at judge_test.go:65 is genuine: TemplateStillPresentCalibration differs from TemplateStillPresentProduct only in the JSON hint, and `true/false}}` occurs exactly once in the calibration constant, so the single-replacement equality is a real pin rather than a tautology."
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 314,
+      "note": "Every TestJ4RequestShapes cell was traced against prepare(): the calibration/capable/legacy branch order, the opus-4-5|sonnet-4-5 temperature=0 rule, the legacy thinking budgets 8192/32768 with max_tokens=maxTok+budget and temperature=1, the kimi medium|high->high and xhigh->max remap, the glm/kimi 16384 floor, and the maxTokensFor table (match 1024, adjudicate 2048, still-present 512 calibration / 1024 product). All 21 cells and all 6 max_tokens rows are consistent with the code."
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 495,
+      "note": "TestJ5Retry's sleep ladders were recomputed by hand against backoff() and classOf(): rate 10/30/90/120 (270s clamped to 120s), backoff 1/2/4/8, and the mixed row 10/2/90 correctly reflects that classOf reads the *previous* attempt's class field. classify() putting the overloaded_error check before the status>=500 case is what makes the 529 and 503 overloaded rows rate-classed; the 529 row with a non-JSON body ('busy') correctly falls through to classBackoff."
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 219,
+      "note": "TestJ6's URL table matches checkURL exactly, including that url.Parse does not case-fold the host so http://LOCALHOST is rejected with reason 'scheme'. The httptest redirect pair exercises NewHTTPClient's CheckRedirect for both same-host (/same -> /target) and cross-host targets, and the through-the-judge case confirms ERR_JUDGE_REDIRECT is terminal (1 attempt, 0 sleeps)."
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 647,
+      "note": "TestJ7Mock's call count was recomputed: 1 scripted + 1 error row + 1 still-present + 4 near-miss + 2 expect-mismatch = 9, and calls[1].Index == 6, so the 'Calls includes errored requests' claim is enforced. Near-miss keys vary each of Kind/Node/Iter/Index one at a time."
+    },
+    {
+      "path": "testdata/fsm/scenarios/review-loop/clean/judge.yaml",
+      "line": 1,
+      "note": "The fixture comment 'nothing found at discover; no judge call is made' was verified empirically: bash tests/go/test-fsm.sh prints 'test-fsm: ok', and its review-loop clean rows (tests/go/test-fsm.sh:194-197) record an empty discover output and reach DONE/outcome=clean. Any judge call under this scenario would surface ERR_MOCK_UNSCRIPTED from mockai/judge.MockJudge.Call, so `calls: []` is load-bearing, and internal/fsm/mockai/mockai.go:88 accepts an empty list without special-casing."
+    },
+    {
+      "path": "internal/fsm/judge/prompts.go",
+      "line": 137,
+      "note": "CutDiff's boundary rows were recomputed: 29999 and 30000 bytes are untruncated (30000 is not > MaxDiffBytes), 30001 truncates to the same 30000-byte prefix and therefore the same sha1 as the 30000 row - a genuine pin. The straddle row lands index 30000 on the continuation byte of 'e-acute' at offset 29999, so the scan backs up exactly one byte, matching the asserted len 29999."
+    },
+    {
+      "path": "internal/fsm/judge/judge_test.go",
+      "line": 556,
+      "note": "Finding 1 was proved by mutation rather than by reading: with `go test -overlay` replacing judge_test.go by a copy whose second scripted step ({200, oaiOK}) is deleted, TestJ5Retry still passes - the step is never consumed."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The comment at internal/fsm/judge/judge_test.go:556, 'tokens sum over attempts when earlier attempts carried usage (empty content then success)', asserts a property realJudge.Call cannot have. attempt() returns a non-zero TokenTotals on exactly two paths - the classDone success at judge.go:609 and the decode-error classFatal at judge.go:607 - and both terminate Call's loop immediately (judge.go:541-549). Every retried class (classRate, classBackoff, transport, body-read, too_large) returns run.TokenTotals{}. So v.Tokens.Add(tok) can never accumulate more than one non-zero contribution, and no test in the package exercises summation. The scripted second step {200, oaiOK, nil} at line 557 is dead: deleting it via a go test -overlay copy leaves TestJ5Retry passing. The inline failure message on line 559 ('empty content is fatal, tokens kept') is the accurate description; the comment above it should say that, and the unused step should go.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 556,
+          "note": "Comment claims tokens sum over attempts; the fixture below it scripts two steps."
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 541,
+          "note": "v.Tokens = v.Tokens.Add(tok) is followed by an unconditional return on classDone and on classFatal, and every retried class contributes zero tokens."
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 559,
+          "note": "The assertion actually made is !errs.Is(err, CodeJudgeResponse) || v.Tokens.Input != 5 - one attempt, no summation."
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Dead assertion at internal/fsm/judge/judge_test.go:139-141: `if strings.Contains(user, \"{{\") && kind == KindMatch && mode.name == \"plain\" && !strings.Contains(user, \"in {{loop}}\") { t.Fatal(\"values are inserted verbatim, never rescanned\") }`. The guard and the body condition are mutually exclusive. Every `{{` in the templates unescapes to a single `{` (prompts.go:213-247), so the only `{{` that can reach the rendered match/plain output is the verbatim golden value \"off-by-one in {{loop}}\" - confirmed by counting: testdata/prompts/match.plain.golden contains exactly one `{{`, on line 7, inside that value. Therefore strings.Contains(user, \"{{\") is true precisely when strings.Contains(user, \"in {{loop}}\") is also true, and the t.Fatal is unreachable. If format() ever did rescan inserted values the `{{` would disappear from the output, the guard would go false, and this check would pass silently. The property it names is genuinely covered elsewhere - the format(\"{{x}} {v} }}\", {\"v\": \"{v}\"}) case at line 165 and the pinned goldens - so the fix is to delete the dead check or replace it with a direct equality on the rendered slot.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 139,
+          "note": "The guard strings.Contains(user, \"{{\") is true only in the case the body condition rules out, so t.Fatal is unreachable."
+        },
+        {
+          "path": "internal/fsm/judge/testdata/prompts/match.plain.golden",
+          "line": 7,
+          "note": "grep -o '{{' match.plain.golden returns exactly one hit, the verbatim golden comment - no template-origin {{ survives rendering."
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 165,
+          "note": "format(\"{{x}} {v} }}\", {\"v\": \"{v}\"}) == \"{x} {v} }\" is the check that really pins no-rescan."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two fixtures are constructed and then discarded to silence the compiler. internal/fsm/judge/judge_test.go:579 rebuilds `d` for the body-read-error case but the call goes through `rd`/`jr`, so `d` is unused and line 586 is a bare `_ = d`. internal/fsm/judge/judge_test.go:650 builds `jr` against the srv URL with 127.0.0.1 rewritten to localhost - the one case that would exercise checkURL's localhost allowance against a live server - and line 652 throws it away with `_ = jr`; the assertion that follows uses jr2 and the unrewritten URL. Both look like assertions that were removed rather than deliberate placeholders.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 586,
+          "note": "_ = d discards the fakeDoer rebuilt at line 579."
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 652,
+          "note": "_ = jr discards the localhost-rewritten judge built at line 650."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 'no key material in fixtures' scan at internal/fsm/judge/judge_test.go:738-746 passes vacuously if the fixture directory ever moves or is renamed: filepath.Glob returns (nil, nil) for a pattern with no matches, the error is discarded, there is no len(files) > 0 assertion, and the per-file os.ReadFile error is discarded too (a file it cannot read is scanned as empty). A secret-scanning guard that silently finds nothing to scan is the failure mode worth closing here; asserting len(files) == 12 (or at least > 0) makes it fail loudly instead.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 739,
+          "note": "files, _ := filepath.Glob(\"testdata/prompts/*\") with no non-empty assertion on files."
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 741,
+          "note": "b, _ := os.ReadFile(f) - an unreadable fixture scans as empty and passes."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "FSM_JUDGE_UPDATE_GOLDEN=1 skips the checks that were written to be golden-independent. The update branch at internal/fsm/judge/judge_test.go:115-120 ends in `continue`, which jumps past the block introduced at line 127 as 'authority checks independent of the golden' (fenced values must be JSON-encoded, calibration is never fenced, match is never fenced, {{ }} unescapes). Regeneration is exactly the moment those invariants matter, since a drifted rendering is about to be written into the goldens and become the new baseline. Running them before the write - or writing first and falling through instead of continuing - would close the hole.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 119,
+          "note": "continue in the update branch skips the rest of the mode loop body."
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 127,
+          "note": "The comment 'authority checks independent of the golden' introduces checks that only run when not updating."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestJ1Provenance's sibling layer is non-hermetic in ways that can fail on state outside the repository. siblingSource stats $HOME/Developer/harnesseval by path only (internal/fsm/judge/judge_test.go:74) - any directory with that name qualifies - and then hard-fails, not skips, when `git show 19ff9a8:...` cannot read the pinned object (line 84), so a shallow clone, a fork without that commit, or an unrelated directory of the same name breaks the unit suite. os.UserHomeDir's error is dropped at line 71, which would make repo a relative path. And line 92 slices with strings.Index(rest, '\"\"\"') without checking for -1, so a literal whose closing delimiter moved panics instead of reporting drift. The sha256 header pin checked at line 61 already gives the provenance guarantee without any of this, so the sibling layer is additive; hardening it (or gating it behind an opt-in env var) costs nothing.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 74,
+          "note": "os.Stat on $HOME/Developer/harnesseval decides whether the layer runs, on path alone."
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 84,
+          "note": "t.Fatalf when the pinned object is unreadable, so an unrelated local repo state fails the suite."
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 92,
+          "note": "rest[:strings.Index(rest, `\\\"\\\"\\\"`)] panics on a missing closing delimiter."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two smaller readability snags in the same file. internal/fsm/judge/judge_test.go:80 builds the same three-entry map literal twice on one line to pull out [0] and [1] of the tuple, which is why that line is ~380 characters; a package-level table would read the same and allocate once. And internal/fsm/judge/judge_test.go:597 puts \"https://other.host\" - a URL that must be accepted - inside a map named `bad`, then special-cases it in the loop at line 600, so the table no longer means what its name says.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 80,
+          "note": "The file/opener tuple map is written out twice in a single statement."
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 597,
+          "note": "The `bad` URL table carries one entry that is expected to succeed, handled by an if inside the loop."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 2
+}

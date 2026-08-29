@@ -1,9 +1,9 @@
 package findings
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/dsifry/metareview/internal/jsonl"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,11 +12,11 @@ import (
 	"github.com/dsifry/metareview/internal/state"
 )
 
-// maxJSONLLineBytes is the JSONL line cap: 1 MiB, not bufio's 64 KiB default.
+// maxJSONLLineBytes is this package's name for the shared JSONL line cap.
 // bufio rejects a token equal to the buffer maximum, and ScanLines needs the
 // line terminator to fit alongside the token, so callers size the buffer two
 // bytes larger to admit a line of exactly this length ending in CRLF.
-const maxJSONLLineBytes = 1 << 20
+const maxJSONLLineBytes = jsonl.MaxLineBytes
 
 type Run struct {
 	ID       string `json:"id"`
@@ -126,9 +126,19 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			record.GitHead = firstNonEmpty(run.GitHead, record.GitHead)
 			record.UpdatedAt = now
 		}
+		// override-pending closes here too, not just open. A requested override
+		// that is then genuinely fixed had no way out: the fix transition matched
+		// only "open", so the record stayed pending, Blocks kept returning true,
+		// and `override list --pending` exited 1 forever with no command able to
+		// clear it — the CLI offers request|grant|list and no withdraw. A finding
+		// that is no longer found is fixed, and the pending request is moot.
+		//
+		// StatusOverridden is deliberately not included: a granted override is an
+		// acknowledged exception, never a fix, and its fixedInRunId stays empty so
+		// post-merge learning can tell the two apart.
 		if (previousRuns[record.RunID] || resetFinding(record, run, resetRuns)) &&
 			sameRunTarget(record, run) &&
-			record.Status == "open" &&
+			(record.Status == "open" || record.Status == StatusOverridePending) &&
 			record.Fingerprint != "" &&
 			!currentFingerprints[record.Fingerprint] {
 			record.Status = "fixed"
@@ -473,9 +483,7 @@ func readJSONL(path string) ([]Record, error) {
 	// Read-only path: there is nothing a Close error could tell the caller.
 	defer func() { _ = file.Close() }()
 	records := []Record{}
-	scanner := bufio.NewScanner(file)
-	// A run row can carry long ingested strings, so the 64 KiB default is not enough.
-	scanner.Buffer(make([]byte, 0, 64*1024), maxJSONLLineBytes+2)
+	scanner := jsonl.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {

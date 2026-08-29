@@ -645,3 +645,112 @@ func TestRenderersNeutraliseShardIDAndVerdict(t *testing.T) {
 		}
 	}
 }
+
+// A result file is written by an agent, and the `## Sharded Review` table is the
+// durable record of what that agent said. A pipe in any ingested string forges
+// extra cells: a reviewer name of "evil | PASS | 0 | docs/fake.json" shifts the
+// Verdict, Blocking and File columns, so a result can rewrite its own blocking
+// count in the committed log. GFM splits table rows on | before it parses inline
+// code, so wrapping a value in backticks does not contain it.
+func TestShardedReviewMarkdownCannotForgeTableCells(t *testing.T) {
+	manifest := manifestWithShard(t, "aaaaaaaaaaaaaaaa")
+	result := passingShardResult("shard-3a", "aaaaaaaaaaaaaaaa")
+	result.Reviewer = "evil | PASS | 0 | docs/fake.json"
+	result.Verdict = "NEEDS_REVISION | forged"
+	result.Path = "docs/real.json | docs/forged.json"
+	result.BlockingCount = 4
+	manifest.ShardResults = []ReviewResult{result}
+	aggregate := Aggregate(manifest)
+
+	rendered := ShardedReviewMarkdown(manifest, aggregate)
+
+	var row string
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.Contains(line, "shard-3a") && strings.HasPrefix(line, "|") {
+			row = line
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("no row for the shard:\n%s", rendered)
+	}
+	// Six columns means seven pipes. Every additional unescaped pipe is a cell
+	// the result file invented.
+	cells := 0
+	for i, r := range row {
+		if r == '|' && (i == 0 || row[i-1] != '\\') {
+			cells++
+		}
+	}
+	if cells != 7 {
+		t.Fatalf("result-supplied text forged %d extra cell boundaries:\n%s", cells-7, row)
+	}
+	// And the real blocking count must still be the one rendered.
+	if !strings.Contains(row, "| 4 |") {
+		t.Fatalf("the true blocking count is not in the row:\n%s", row)
+	}
+}
+
+// A file both committed on the branch and dirty locally must be disclosed as
+// local: its committed bytes are in a shard pack, its uncommitted ones are in no
+// pack at all. Classifying it purely as a branch file hid that second fact, so
+// unreviewed bytes never appeared in the manifest's local disclosure.
+func TestLocalPathsIncludeABranchFileWithUncommittedBytes(t *testing.T) {
+	profile := contextprofile.Profile{Files: []contextprofile.FileProfile{
+		{Path: "src/branch-only.go", Source: contextprofile.SourceBranch, DiffBytes: 100},
+		{Path: "src/both.go", Source: contextprofile.SourceBranch, DiffBytes: 400, LocalBytes: 40},
+		{Path: "src/worktree-only.go", Source: contextprofile.SourceWorktree, DiffBytes: 20},
+	}}
+
+	local := profilePaths(profile, false)
+	if !contains(local, "src/both.go") {
+		t.Fatalf("a branch file with uncommitted bytes must be disclosed as local: %v", local)
+	}
+	if !contains(local, "src/worktree-only.go") {
+		t.Fatalf("a purely local file must still be disclosed: %v", local)
+	}
+	if contains(local, "src/branch-only.go") {
+		t.Fatalf("a clean branch file is not local: %v", local)
+	}
+
+	branch := profilePaths(profile, true)
+	if !contains(branch, "src/both.go") || !contains(branch, "src/branch-only.go") {
+		t.Fatalf("branch files must still be listed as branch files: %v", branch)
+	}
+}
+
+func contains(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+// The rule the packs publish is "each entry", and the validator was an any().
+// TestEvidenceRuleMatchesValidator could not see the difference because it only
+// ever built one-element slices — the single shape where the two rules agree.
+// These are the multi-entry shapes that tell them apart.
+func TestEvidenceRuleAppliesToEveryEntry(t *testing.T) {
+	good := EvidenceRef{Path: "internal/a.go", Line: 12}
+	bad := EvidenceRef{Path: "internal/a.go"} // no line, no note
+	cases := []struct {
+		name string
+		refs []EvidenceRef
+		want bool
+	}{
+		{"none at all", nil, false},
+		{"one good", []EvidenceRef{good}, true},
+		{"one bad", []EvidenceRef{bad}, false},
+		{"all good", []EvidenceRef{good, good, good}, true},
+		{"good then bad", []EvidenceRef{good, bad}, false},
+		{"bad then good", []EvidenceRef{bad, good}, false},
+		{"one good among many bad", []EvidenceRef{bad, bad, good, bad}, false},
+	}
+	for _, c := range cases {
+		if got := hasValidEvidence(c.refs); got != c.want {
+			t.Fatalf("%s: hasValidEvidence = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

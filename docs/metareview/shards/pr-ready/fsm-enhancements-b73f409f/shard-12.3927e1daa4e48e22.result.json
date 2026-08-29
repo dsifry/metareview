@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-12.3927e1daa4e48e22",
+  "kind": "shard",
+  "shardId": "shard-12",
+  "shardHash": "3927e1daa4e48e22",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T14:13:45Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/fsm/judge/codex.go",
+      "line": 62,
+      "note": "New Codex CLI judge provider: read-only sandbox, prompt on stdin (never argv), same RenderPrompt/Parse path as the HTTP providers so verdicts stay comparable."
+    },
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 111,
+      "note": "Codex provider is covered: transport failure, non-zero exit, missing agent message, unknown effort, calibration pin, empty model, unknown kind, token retention on failure, and case-folded prefix routing."
+    },
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 58,
+      "note": "DiffRuns is exercised by TestF7DiffRuns and TestF7DiffSortAndPrefixEdges (internal/fsm/machine/fork_test.go:689 and :966), covering one-sided rows, nil-vs-false decisions, identical-error rows, sort order, loop iteration order, workflow incompatibility, fold errors and transition alignment."
+    },
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 82,
+      "note": "Checked the ignored json.Unmarshal errors: run.Fold(a.Events)/Fold(b.Events) run first and reject malformed event payloads, so unparsable LLMCallData/TransitionData cannot reach these call sites. Not a defect."
+    },
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 71,
+      "note": "The CallRow key deliberately omits Index so a re-run that reorders candidates still aligns by input hash; fork_test.go:800 pins that behaviour explicitly (A.Index 0 vs B.Index 4). Verified intentional, not a collision bug."
+    },
+    {
+      "path": "internal/contextprofile/profile_test.go",
+      "line": 153,
+      "note": "Regression test matches the fix at internal/contextprofile/profile.go:196-202 and the consumer at internal/reviewmanifest/manifest.go:522, where LocalPaths membership is derived from LocalBytes > 0."
+    },
+    {
+      "path": ".golangci.yml",
+      "line": 1,
+      "note": "Config is v2-shaped and is actually consumed: .github/workflows/test.yml:57 runs golangci-lint-action v7 pinned to v2.13.1 as a blocking step. `linters.default: standard` and the issues caps are valid v2 keys."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/still-present.plain.golden",
+      "line": 1,
+      "note": "Golden is consumed by internal/fsm/judge/judge_test.go:112 and swept for key material at judge_test.go:739; the brace/f-string payloads in it are deliberate escaping fixtures."
+    },
+    {
+      "path": "internal/fsm/workflow/testdata/cmds-preimage.json",
+      "line": 1,
+      "note": "Fixture is consumed by internal/fsm/workflow/workflow_test.go:474 together with testdata/cmds-preimage.sha256; no secrets, only a placeholder env name."
+    },
+    {
+      "path": "internal/fsm/machine/helpers_test.go",
+      "line": 1,
+      "note": "Every helper here (timeDuration, appendBytes, writeBytes, symlink, fileMode, chmod, fileOwnerCanChmod, mkdir, joinLines, badFile) has at least two references inside package machine; no dead test scaffolding."
+    },
+    {
+      "path": "README.md",
+      "line": 85,
+      "note": "Go 1.22+ -> Go 1.26+ matches go.mod line 3 (`go 1.26`), and docs/fsm/driving-a-workflow.md referenced by the new FSM bullet exists."
+    },
+    {
+      "note": "Verified locally on the frozen branch: `go vet ./internal/fsm/judge/ ./internal/fsm/machine/ ./internal/contextprofile/` is clean, and gofmt -l reports nothing for the four Go files in this shard. No TODO/FIXME markers, no eval-style execution beyond the audited read-only codex exec, no truncated diff context in this shard."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "codex.go:81 guards the empty model id with an exact `model == CodexPrefix` comparison, but route() lowercases before matching (judge.go:114-119) and wireModel() strips the prefix case-insensitively (judge.go:168-172). A model of \"CODEX/\" or \"Codex/\" therefore routes to the CLI provider, passes validateCodex, and reaches the process as `-m \"\"`, surfacing as CodeJudgeTransport instead of the intended CodeJudgeModel. This is the same case-fold hole that TestCodexPrefixStrippingMatchesRouting (codex_test.go:164) was written to close in wireModel; the validator half was not updated, and the \"empty model\" case at codex_test.go:123 only exercises the exact-case form.",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex.go", "line": 81, "note": "exact-case emptiness guard: `over || model == CodexPrefix`"},
+        {"path": "internal/fsm/judge/judge.go", "line": 115, "note": "route lowercases the model before prefix matching"},
+        {"path": "internal/fsm/judge/codex_test.go", "line": 123, "note": "empty-model case only covers the exact-case CodexPrefix"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "codex.go:141-155 hand-rolls itoa with the comment \"avoids pulling strconv in for two call sites\", but package judge already imports fmt (judge.go:11) and uses fmt.Sprint for exactly this purpose (judge.go:653), so nothing is avoided. The hand-rolled loop is also wrong for math.MinInt: `n = -n` overflows back to a negative value, the `for n > 0` loop never runs, and the function returns a bare \"-\". Unreachable today because the only inputs are process exit codes, but it is 20 lines of duplicated stdlib carrying a latent formatting bug.",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex.go", "line": 142, "note": "func itoa reimplements strconv.Itoa"},
+        {"path": "internal/fsm/judge/codex.go", "line": 147, "note": "n = -n overflows for math.MinInt, yielding \"-\""},
+        {"path": "internal/fsm/judge/judge.go", "line": 11, "note": "fmt is already an import of the same package"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The codex arm has no retry ladder while the HTTP arm does. realJudge.Call loops to MaxAttempts with classified backoff (judge.go:528-548), but codexJudge.Call sets v.Attempts = 1 unconditionally and turns any non-zero exit into a fatal CodeJudgeTransport (codex.go:45, 62-63). A transient CLI failure (rate limit on the ChatGPT session, a network blip inside codex) therefore aborts the node where the equivalent HTTP judge would recover. The asymmetry may be deliberate, but neither the code comments nor the provider doc comment records it, so a reader comparing the two providers cannot tell intent from omission.",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex.go", "line": 45, "note": "v.Attempts = 1, no retry loop"},
+        {"path": "internal/fsm/judge/judge.go", "line": 528, "note": "HTTP arm retries MaxAttempts with backoff"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "parseCodexEvents assigns rather than accumulates token totals on `turn.completed` (codex.go:321-329), so if a stream ever carries more than one completed turn only the last turn's usage is reported. The HTTP arm accumulates across attempts with v.Tokens.Add (judge.go:534). This is the same class of under-reporting that TestCodexJudgeReportsTokensEvenWhenTheCallFails (codex_test.go:143) exists to prevent, and its stated stake is the same: understated spend weakens the budget convergence check. Low because `codex exec` normally emits a single turn.",
+      "evidence": [
+        {"path": "internal/fsm/judge/codex.go", "line": 322, "note": "tokens = run.TokenTotals{...} overwrites instead of adding"},
+        {"path": "internal/fsm/judge/judge.go", "line": 534, "note": "v.Tokens = v.Tokens.Add(tok) in the HTTP arm"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "README release notes stop one version short of what the branch ships. The diff adds a \"What Changed In 0.8.3\" section describing sharded review, and the newest heading in the file after this change is still 0.8.3 (README.md:55), while package.json:3 declares version 0.9.0 and this branch adds the entire FSM workflow subsystem. The only 0.9.0 coverage in the README is the single Use Cases bullet at README.md:7; a reader of the changelog sections never learns that `metareview fsm` shipped.",
+      "evidence": [
+        {"path": "README.md", "line": 55, "note": "newest changelog heading is \"What Changed In 0.8.3\""},
+        {"path": "package.json", "line": 3, "note": "\"version\": \"0.9.0\""}
+      ]
+    }
+  ]
+}

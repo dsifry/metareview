@@ -17,6 +17,19 @@ type Source struct {
 	Path  string `json:"path,omitempty"`
 }
 
+// Seams for the defensive branches below. filepath.Abs fails only when the
+// working directory cannot be read, filepath.Rel only across Windows volumes,
+// and os.ReadFile only when a file readable a moment ago stops being readable —
+// none of which a test can arrange portably. Injecting them beats the
+// alternatives: a permission-based test quietly stops failing when the suite
+// runs as root, and deleting the error handling would trade a tested branch for
+// an untested assumption.
+var (
+	absPath  = filepath.Abs
+	relPath  = filepath.Rel
+	readFile = os.ReadFile
+)
+
 func Resolve(root, target string) (Source, error) {
 	if strings.TrimSpace(target) == "" {
 		return Source{}, fmt.Errorf("task target is required")
@@ -87,7 +100,7 @@ func resolveMarkdown(root, target string) (Source, error) {
 	if !info.Mode().IsRegular() {
 		return Source{}, fmt.Errorf("task path is not a regular file: %s", target)
 	}
-	bytes, err := os.ReadFile(path)
+	bytes, err := readFile(path)
 	if err != nil {
 		return Source{}, err
 	}
@@ -102,7 +115,7 @@ func resolveMarkdown(root, target string) (Source, error) {
 }
 
 func containedPath(root, target string) (string, string, error) {
-	rootAbs, err := filepath.Abs(root)
+	rootAbs, err := absPath(root)
 	if err != nil {
 		return "", "", err
 	}
@@ -112,7 +125,7 @@ func containedPath(root, target string) (string, string, error) {
 	} else {
 		candidate = filepath.Join(rootAbs, filepath.Clean(target))
 	}
-	candidateAbs, err := filepath.Abs(candidate)
+	candidateAbs, err := absPath(candidate)
 	if err != nil {
 		return "", "", err
 	}
@@ -126,7 +139,7 @@ func containedPath(root, target string) (string, string, error) {
 	realCandidate, err := filepath.EvalSymlinks(candidateAbs)
 	if err != nil {
 		if os.IsNotExist(err) {
-			rel, relErr := filepath.Rel(rootAbs, candidateAbs)
+			rel, relErr := relPath(rootAbs, candidateAbs)
 			if relErr != nil {
 				return "", "", relErr
 			}
@@ -137,7 +150,7 @@ func containedPath(root, target string) (string, string, error) {
 	if realCandidate != realRoot && !strings.HasPrefix(realCandidate, realRoot+string(filepath.Separator)) {
 		return "", "", fmt.Errorf("task path is outside repository root: %s", target)
 	}
-	rel, err := filepath.Rel(rootAbs, candidateAbs)
+	rel, err := relPath(rootAbs, candidateAbs)
 	if err != nil {
 		return "", "", err
 	}

@@ -1,0 +1,305 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-a3a4da37f641f1bc-claude-opus-5",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T12:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/learnsource/source.go",
+      "line": 31,
+      "note": "post-merge learning excludes docs/metareview/shards only"
+    },
+    {
+      "path": "docs/quickstart.md",
+      "line": 77,
+      "note": "commit list edited on this branch; docs/metareview/fsm/ absent"
+    },
+    {
+      "path": "internal/fsm/export/export.go",
+      "line": 122,
+      "note": "default export destination is docs/metareview/fsm/<runID>"
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 16,
+      "note": "Canonical doc comment contradicts marshalCanonical"
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 351,
+      "note": "U+2028/U+2029 escaped unconditionally by the encoder"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "line": 7,
+      "note": "0.9.0 judge providers enumerated as two, not three"
+    },
+    {
+      "path": "internal/fsm/judge/codex.go",
+      "line": 28,
+      "note": "codex effort vocabulary has seven values"
+    },
+    {
+      "path": ".agents/plugins/marketplace.json",
+      "line": 9,
+      "note": "Go 1.22+ claim left behind by the 1.26 correction"
+    },
+    {
+      "path": ".gitattributes",
+      "line": 2,
+      "note": "byte-pinned fixtures under internal/fsm/run/testdata unprotected"
+    },
+    {
+      "path": "README.md",
+      "line": 55,
+      "note": "release notes section still headed 0.8.3"
+    },
+    {
+      "note": "Verified go build ./... and go vet ./... clean at this cut; cross-file claims checked against the repository, not against shard prose."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The branch's own rule about what post-merge learning must not ingest was applied to one class of committed audit artifact and not to the class this same branch invented. internal/learnsource/source.go:31 switched from gitcontext.Collect to CollectWithExcludes with the comment 'Committed shard results are audit records of the review, not source under review: post-merge learning never reads them back', excluding docs/metareview/shards and docs/metareview/shards/**. The FSM export bundle is exactly the same kind of thing: internal/fsm/export/export.go:122 defaults the destination to docs/metareview/fsm/<runID>, and the bundle is machine-generated audit output (audit.redacted.jsonl, the whole hash-chained event log, plus snapshot.json, manifest.json). Every operator-facing surface edited on this branch tells the user to commit it \u2014 CLAUDE.md:69, AGENTS.md, README.md:242, INSTALL.md, skills/fsm/SKILL.md:86, docs/fsm/driving-a-workflow.md:101, commands/status.md:9, skills/status/SKILL.md:27. So the first PR that follows the documented workflow and commits an export bundle feeds the whole redacted event log to /learn-post-merge as source under review, which is the precise outcome the shards exclusion was added to prevent, and the one that pushes the learning diff toward truncation. Note the three review gates already get this right by excluding docs/metareview/** wholesale (internal/taskdone/review.go:440, internal/prready/review.go:829, internal/epicready/review.go:447); learnsource is the one collector with a narrow list, and the new durable directory was not added to it. No shard could see this: learnsource/source.go is in shard-01 and every file that declares docs/metareview/fsm/ durable is in a different shard. Fix by extending the exclude list to docs/metareview/fsm and docs/metareview/fsm/**.",
+      "evidence": [
+        {
+          "path": "internal/learnsource/source.go",
+          "line": 31,
+          "note": "excludes shards but not fsm export bundles"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 122,
+          "note": "bundles default into docs/metareview/fsm/<runID>"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 440,
+          "note": "gates exclude docs/metareview/** wholesale"
+        },
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 86,
+          "note": "export bundles documented as durable, commit them"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The commit/keep-local enumeration is the claim this branch has now corrected in eight places and left stale in the ninth, and the ninth is the onboarding document. docs/quickstart.md:74-80 'Commit:' lists reviews/, context/, learning/ and \u2014 added on this branch \u2014 shards/, but not docs/metareview/fsm/, while the 'Keep local:' list three lines down did gain '.metareview/runs/ (FSM runs; the directory ignores itself)' at :87 in the same commit. So the hunk was opened for the FSM release, the transient half was updated, and the durable half was not. Every other copy now names it: CLAUDE.md:69, AGENTS.md:77, README.md:242, INSTALL.md:137, docs/README.claude.md:52, docs/README.codex.md:59, commands/status.md:9, skills/status/SKILL.md:27. This is the third consecutive cross-shard pass in which the same enumeration has been the finding (cross-shard.ad4e2d5d0ca31e04 and cross-shard.daa5e2b77b4d0503 both raised it at medium over five and then four stale copies); the remedy has been applied copy by copy rather than to the pattern, so the last one survived. quickstart.md is the file a new user reads to decide their .gitignore, and it is shipped in package.json's files list, so the stale copy travels with the npm package. Either finish the sweep or, better, make one file the source of this list and have the others point at it.",
+      "evidence": [
+        {
+          "path": "docs/quickstart.md",
+          "line": 77,
+          "note": "commit list: shards added, fsm omitted"
+        },
+        {
+          "path": "docs/quickstart.md",
+          "line": 87,
+          "note": "keep-local list did gain .metareview/runs/"
+        },
+        {
+          "path": "skills/status/SKILL.md",
+          "line": 27,
+          "note": "the corrected copy of the same enumeration"
+        },
+        {
+          "path": "docs/README.claude.md",
+          "line": 52,
+          "note": "another corrected copy of the same enumeration"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The exported contract of the audit encoder is documented backwards in two places and correctly in a third, including twice within one file. internal/fsm/run/canonical.go:15-16 says Canonical produces bytes 'with HTML characters and U+2028/U+2029 left as literal UTF-8', and docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:122 repeats it. Canonical delegates to marshalCanonical (canonical.go:26), which since the cross-toolchain fix escapes both runes unconditionally (internal/fsm/run/types.go:351-352) with a long comment explaining why that is deliberate. canonical.go's own CapText doc at :107-109 and encodedRuneLen at :135 already state the true behaviour (six bytes each), so the file contradicts itself sixty lines apart. Only the HTML half of the sentence is still true. This matters more than ordinary comment drift because Canonical's output is what the chain hashes: a reader implementing an external verifier from the doc comment or the spec would produce non-matching bytes for any payload containing a line separator.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/canonical.go",
+          "line": 16,
+          "note": "doc says U+2028/9 left literal"
+        },
+        {
+          "path": "internal/fsm/run/canonical.go",
+          "line": 135,
+          "note": "encodedRuneLen bills them at six bytes"
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 351,
+          "note": "marshalCanonical escapes them unconditionally"
+        },
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 122,
+          "note": "spec repeats the wrong claim"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The Codex-CLI judge is a third provider that exists in code and in the driver prompt and nowhere else, and where the release does enumerate providers or efforts it now says something false. internal/fsm/judge/codex.go adds the codex/ model family, judged by shelling out to the codex CLI on a local OAuth session with no API key, and it accepts a wider effort vocabulary than the HTTP providers: seven values (none, minimal, low, medium, high, xhigh, max) at codex.go:28-30 against the four at judge.go:101. The only user-facing description is internal/fsm/cli/prompt.go:43-44 and therefore testdata/fsm/agent-prompt.golden:39-40. CHANGELOG.md:7 tells the reader 0.9.0's judge calls are '(Anthropic and OpenAI-compatible)'; docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md, the document that defines the judge contract, contains zero occurrences of 'codex' and states at :117 that the effort vocabulary is 'low | medium | high | xhigh; anything else -> ERR_JUDGE_EFFORT_UNSUPPORTED'; skills/fsm/SKILL.md:17 and docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:64 spell the same four-value enum into the flag documentation. An operator following the skill never learns that a codex/ model is available or that max and minimal are legal for it; a reader of the spec would conclude the implementation has an unspecified provider. Prior cross-shard passes flagged the CHANGELOG half of this at low; the spec-level absence is additional.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 28,
+          "note": "seven-value codex effort enum"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 101,
+          "note": "four-value HTTP effort enum"
+        },
+        {
+          "path": "CHANGELOG.md",
+          "line": 7,
+          "note": "0.9.0 names two providers"
+        },
+        {
+          "path": "skills/fsm/SKILL.md",
+          "line": 17,
+          "note": "init flag documents four efforts only"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Same repeated-claim pattern, second instance, partially corrected. The supported Go floor sentence appears in seven places. go.mod:3 requires go 1.26 and the branch corrected .claude-plugin/plugin.json:4 and .codex-plugin/plugin.json:25 from 'Go 1.22+' to 'Go 1.26+', joining INSTALL.md:9, README.md:85 and package.json:52. Two copies of the identical sentence were not corrected and both are shipped: .agents/plugins/marketplace.json:9 still advertises 'source checkout mode requires Go 1.22+', and cli/metareview.js:28,36 print 'Go 1.22+' as the runtime error a user sees at exactly the moment the fallback fails. Neither file is in this branch's diff, which is why no shard reports it, but the claim they carry was made wrong by the correction this branch did make: a user on Go 1.22-1.25 is told to install a toolchain that cannot build the module, and the npm CLI's own diagnostic points them at it.",
+      "evidence": [
+        {
+          "path": ".agents/plugins/marketplace.json",
+          "line": 9,
+          "note": "uncorrected Go 1.22+ copy"
+        },
+        {
+          "path": "cli/metareview.js",
+          "line": 36,
+          "note": "runtime error text says Go 1.22+"
+        },
+        {
+          "path": ".claude-plugin/plugin.json",
+          "line": 4,
+          "note": "corrected to Go 1.26+ on this branch"
+        },
+        {
+          "path": "go.mod",
+          "line": 3,
+          "note": "module requires go 1.26"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Line-ending protection reaches two of the four byte-pinned fixture trees. .gitattributes:1-2 declares 'internal/fsm/judge/testdata/prompts/* -text' and 'testdata/fsm/** -text'. Not declared: internal/fsm/run/testdata/, whose oracle.jsonl is hashed line by line against oracle.sha256 in internal/fsm/run/store_test.go and whose golden-log.jsonl / golden-snapshots.jsonl are compared with bytes.Equal in internal/fsm/run/golden_test.go; and internal/fsm/workflow/testdata/cmds-preimage.json, pinned by cmds-preimage.sha256 in internal/fsm/workflow/workflow_test.go. On a checkout with core.autocrlf=true the protected fixtures survive and these fail with a hash mismatch that names no cause. This has now been reported by three consecutive cross-shard passes (dd18c9f68eb9d5bd, 12b2842033a1731a, daa5e2b77b4d0503) and the file is two lines long; two more lines close it.",
+      "evidence": [
+        {
+          "path": ".gitattributes",
+          "line": 1,
+          "note": "only judge prompts and testdata/fsm are marked -text"
+        },
+        {
+          "path": "internal/fsm/run/testdata/oracle.sha256",
+          "line": 1,
+          "note": "per-line chain hashes over an unprotected fixture"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Version surfaces agree on 0.9.0 everywhere except the section of the README that exists to explain the release. internal/version/version.go:3, CHANGELOG.md:3, package.json:3, .claude-plugin/plugin.json:3, .claude-plugin/marketplace.json:11 and .codex-plugin/plugin.json:3 all read 0.9.0, and .claude-plugin/marketplace.json was bumped from 0.8.2 on this branch. README.md:55 is still headed 'What Changed In 0.8.3' and describes the sharded-review loop, with no FSM entry, while README.md was edited on this branch for the FSM release elsewhere in the file. Nothing asserts README currency, so no test catches it; a reader of the project's front page sees the previous release as the newest one.",
+      "evidence": [
+        {
+          "path": "README.md",
+          "line": 55,
+          "note": "release notes section headed 0.8.3"
+        },
+        {
+          "path": "internal/version/version.go",
+          "line": 3,
+          "note": "Version constant is 0.9.0"
+        },
+        {
+          "path": "CHANGELOG.md",
+          "line": 3,
+          "note": "0.9.0 entry present"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Cross-shard correction of shard-05's open medium, which no other reviewer was placed to check. shard-05 (result 9e12f69995d48f73) reports that the canonical encoder can emit invalid JSON, describing internal/fsm/run/types.go as replacing the six literal characters \\ufffd with the raw rune, so that a payload containing that escape text ends up with a lone backslash before U+FFFD and cannot be unmarshalled. The current cut does the opposite: types.go:363 is bytes.ReplaceAll(out, []byte(\"\\ufffd\"), []byte(`\\ufffd`)) \u2014 raw rune in, escape out \u2014 and the comment above it at :356-362 argues that direction explicitly ('Every pass here only ever ADDS an escape, which cannot change what the payload says'), naming the exact failure shard-05 describes as the reason the earlier direction was abandoned. Verified empirically rather than by reading: a scratch test in the package encoded three payloads through MarshalCanonical \u2014 a string of the six literal characters, a genuine U+FFFD rune, and an invalid UTF-8 byte \u2014 and all three produced valid JSON that json.Unmarshal accepted, with the six-literal-character payload round-tripping byte-identical ({\"k\":\"\\\\ufffd\"}). types.go is in shard-1a, not shard-05, which is why shard-05 was reviewing prose about a file it did not hold. The scratch test was deleted; no source file was modified.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 363,
+          "note": "replaces the raw rune with the escape, never the reverse"
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 356,
+          "note": "comment states escapes are only ever added"
+        },
+        {
+          "note": "scratch test in package run: all three U+FFFD-shaped payloads round-trip through json.Unmarshal"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Checked whether the new FSM subsystem escapes the coverage discipline: tests/coverage-floor.txt lists 28 packages and none of the twelve internal/fsm/* packages or workflows appears in it, which reads as a whole subsystem shipped without a floor. It is the opposite. tests/coverage.sh:84-88 branches on the package path and holds internal/fsm/* and workflows to exact 100% statement coverage ('FAIL (requires every statement covered)'), a strictly stronger rule than any floor line; :109-121 lists ./internal/fsm/... and ./workflows independently and fails if a required package is absent from the merged profile, and fails closed if go list itself returns nothing; and --update-floor filters those same paths out of the generated file (:139) so they can never acquire a weaker floor by regeneration. The floor file's omission is the design. .github/workflows/test.yml:64 runs npm test, which is tests/coverage.sh, so this is enforced in CI. Only internal/version is genuinely unenforced ('no floor'), and it is three lines of constant.",
+      "evidence": [
+        {
+          "path": "tests/coverage.sh",
+          "line": 86,
+          "note": "internal/fsm/* and workflows require every statement covered"
+        },
+        {
+          "path": "tests/coverage.sh",
+          "line": 109,
+          "note": "required package set listed independently and fails closed"
+        },
+        {
+          "path": "tests/coverage-floor.txt",
+          "line": 1,
+          "note": "floor file deliberately excludes the fsm tree"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Checked the two seams that blocked earlier passes of this plan lineage, to confirm the corrections are real and complete rather than applied to one copy. (1) The false precedence sentence \u2014 '--shard-result and --cross-shard-result take precedence over a file of the same identity in resultsDir' \u2014 is gone from all four operator documents; a repo-wide grep finds it only inside prior review artifacts under docs/metareview/. (2) The cross-shard prompt now states the contract the ingestion path accepts: internal/shardpack/shardpack.go:470-474 renders a separate crossShardContractBody naming cross-shard.<planHash>.result.json, kind 'cross-shard' and an empty shardId, matching internal/reviewmanifest/manifest.go, and the generated cross-shard.md for this plan carries that text. Also re-verified the \\ufffd replacement that shard-05 blocked on: internal/fsm/run/types.go:363 now replaces the raw rune with the escape (adding an escape, never removing one), which cannot produce invalid JSON, and the direction is argued in the comment above it. Separately, gitcontext.AddedLines, the dead duplicate that blocked cross-shard.daa5e2b77b4d0503, no longer exists anywhere in the module. Nothing in the residual set is a regression of these four.",
+      "evidence": [
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 472,
+          "note": "cross-shard contract now matches reviewmanifest"
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 363,
+          "note": "ufffd replacement now only ever adds an escape"
+        },
+        {
+          "note": "repo-wide grep for the precedence sentence and for AddedLines returns no source or doc hits"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 2
+}

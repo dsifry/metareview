@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-12-review",
+  "kind": "shard",
+  "shardId": "shard-12",
+  "shardHash": "a43598b690c98dc0",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "README.md",
+      "line": 52,
+      "note": "Docs-only additions: FSM use case, 0.8.3 changelog section, FSM exit-code handling, and .gitignore guidance; consistent with CLAUDE.md exit-code contract."
+    },
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 58,
+      "note": "DiffRuns: workflow mismatch returns CodeDiffIncompatible; Fold errors propagated; call rows keyed by (node,iter,kind,input_hash) then deterministically sorted; reasoning excluded from comparison as the spec comment states."
+    },
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 162,
+      "note": "commonPrefix compares Type/Node/At/Data and ignores Origin/Seq/Prev, matching its documented contract; boolEq handles nil pointers on both sides."
+    },
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 96,
+      "note": "json.Unmarshal errors on event payloads are intentionally ignored; events are already validated by run.Fold upstream and a partial decode yields an empty-keyed row rather than a crash."
+    },
+    {
+      "path": "internal/fsm/machine/helpers_test.go",
+      "line": 1,
+      "note": "Test-only helper file (package machine, _test.go); no production code paths, 0o600/0o700 permissions used for temp fixtures."
+    },
+    {
+      "path": "internal/fsm/workflow/testdata/cmds-preimage.json",
+      "line": 1,
+      "note": "Static testdata fixture for command-hash preimage; not executed, argv strings are fixture data only."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/still-present.plain.golden",
+      "line": 1,
+      "note": "Golden prompt fixture for the still-present judge; template placeholders are expected literal content of the golden."
+    },
+    {
+      "note": "Verified DiffRuns, commonPrefix and boolEq are exercised by existing tests (internal/fsm/machine/fork_test.go TestF7DiffRuns and neighbours) and consumed by internal/fsm/cli/run.go:901, so the new source is not untested or dead."
+    },
+    {
+      "note": "Rubric blocking checks swept across this shard: no eval or dynamic execution, no TODO/FIXME markers introduced, no truncated diff context, no duplicated service path, no untracked unsafe source."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

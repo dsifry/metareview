@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-1d-46d02304d97cc2b6",
+  "kind": "shard",
+  "shardId": "shard-1d",
+  "shardHash": "46d02304d97cc2b6",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T10:41:00-07:00",
+  "evidence": [
+    {
+      "path": "internal/fsm/judge/testdata/prompts/adjudicate.python.txt",
+      "line": 1,
+      "note": "Provenance header verified empirically, not assumed: sha256 over the file body after the first newline is 8b7b1897172f2ee101cb363e9d517205edb295b970c8975275b8c01fc64cc784, byte-identical to the pin in the header. The body ends at the Python literal's '}}' with no trailing newline, which is what internal/fsm/judge/judge_test.go:47 requires."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/adjudicate.python.txt",
+      "line": 1,
+      "note": "The 'harnesseval/adjudicate.py:21' claim is true: git -C ~/Developer/harnesseval show 19ff9a8:harnesseval/adjudicate.py puts ADJUDICATE_PROMPT on line 21. The sibling repo is present on this machine, so TestJ1Provenance's siblingSource layer (judge_test.go:70-90) actually ran rather than taking the t.Logf skip path, and it compared the vendored bytes to the pinned object. go test -count=1 -run TestJ1 ./internal/fsm/judge/ passes."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.template.jsonl",
+      "line": 1,
+      "note": "Reproduced the derived fixtures independently: copied only the template and oracle.sh into a scratch dir and ran oracle.sh; the generated oracle.jsonl and oracle.sha256 are byte-identical to the committed files (diff clean on both). The @PREV@ chaining in the template is therefore genuinely regenerable by an external sha256, never by Go."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.template.jsonl",
+      "line": 2,
+      "note": "Checked that the canonicalization assertion the template feeds is not vacuous: oracle.events.jsonl (the non-canonical source that store_test.go:834-848 re-encodes) really does contain a raw U+2028 byte sequence and pretty-print whitespace, while the derived oracle.jsonl contains the \\u2028 escape and none of the whitespace. So 'Canonical of a non-canonical input equals the stored form' compares two genuinely different byte strings and can fail. go test -count=1 ./internal/fsm/run/ passes."
+    },
+    {
+      "path": "docs/specs/2026-08-26-metareview-0.9.0-build-plan.md",
+      "line": 21,
+      "note": "Spot-checked the plan's checkable factual claims about the current tree and they hold: only external dependency is gopkg.in/yaml.v3 (go.mod); C1's legacy coverage figures corroborate against tests/coverage-floor.txt (contextpack 76.1 and learnsource 70.8 match exactly); the calibration pins JUDGE=gpt-5.2 / JUDGE_EFFORT=medium match internal/fsm/workflow/workflow.go:35-36; match=1024 and adjudicate=2048 max_tokens match internal/fsm/judge/prompts.go:101-102; and the M8 forbidden-phrase grep the plan promises exists at tests/go/test-fsm.sh:69-71 with a planted control."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The build plan's status banner is stale in a way that inverts its authority. Line 3 says 'REVISION 3 (2026-08-26) - re-review pending' and line 5 says 'This document locks the interfaces', but the review chain for this artifact ended ESCALATED and the plan was split into five successor specs that are the actual build baselines - docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:3 ('parent plan: 2026-08-26-metareview-0.9.0-build-plan.md, r3, escalated; Dave chose \"split the target\"'), and the four 2026-08-27 specs, each of which opens by claiming ownership of specific plan sections. The plan carries no superseded marker and no forward pointer to any of the five, while continuing to assert interface contracts the shipped code deliberately does not implement. Concretely: (a) line 150 declares a 'replay' event type and line 296 says the fork appends 'replay copies of P's events [2..seq]', but there is no TypeReplay in internal/fsm/run/event.go:30-45 and internal/fsm/machine/fork.go:224-230 copies events verbatim with an Origin stamp instead - grep for 'replay' across internal/fsm returns only an unrelated comment in codex_test.go; (b) line 297 requires IsAncestor(ch, HEAD) when the node at S is agent-edit, but fork.go:198-205 is an unconditional 'if head != ch' with the comment 'git precondition: HEAD == checkpoint head, every state'; (c) line 164's Fold(events []Event, kinds Decoder) and line 167's Create(runID, first) error do not match the shipped Fold(events) and Create(runID, st, first) (FoldState, error); (d) the §1.1 layout at lines 97-110 omits the shipped errs/, export/ and record/ packages, and the §1.2 event list omits the shipped 'tree' and 'fix_baseline' types that the oracle fixture in this same shard actually uses; (e) line 368 advertises 'fsm judge --no-fence', which the CLI does not accept (internal/fsm/cli/run.go:113); (f) the E1-E15 matrix at lines 441-455 names tests that do not exist under those ids in internal/fsm/machine. Every one of these deviations is deliberate and is already recorded in a successor spec's deviation ledger (docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:500 explicitly logs 'plan §3.1 --no-fence dropped'), so the code is right and only this document's status line is wrong. The repo's own convention is to record the outcome in the banner - the run spec's REVISION 4 header states its escalation and its build-baseline role - so this file is the one parent artifact that does not. A reader or agent opening docs/specs/ first would take a 48KB escalated draft as the locked contract. Fix is a two-line banner edit: mark r3 escalated/superseded and link the five successors.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-build-plan.md",
+          "line": 3,
+          "note": "'REVISION 3 (2026-08-26) - re-review pending' and line 5 'This document locks the interfaces'; the chain actually ended ESCALATED and was split, per the run spec's header."
+        },
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-build-plan.md",
+          "line": 150,
+          "note": "Declares a 'replay ReplayData{source_run, source_seq, event Event}' event type; internal/fsm/run/event.go:30-45 has no such type and internal/fsm/machine/fork.go:224-230 uses an Origin stamp on copied events instead."
+        },
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-build-plan.md",
+          "line": 297,
+          "note": "Requires IsAncestor(ch, HEAD) for agent-edit states; internal/fsm/machine/fork.go:198 is an unconditional exact-match check whose own comment reads 'HEAD == checkpoint head, every state'."
+        },
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-build-plan.md",
+          "line": 368,
+          "note": "Advertises 'fsm judge --no-fence'; internal/fsm/cli/run.go:113 does not list it, and docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:500 records it as dropped."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Same drift, smaller instance, recorded separately because it is a numeric claim rather than a structural one: the §2 judge table gives still-present a single max_tokens of 1024, while the shipped code splits it - MaxTokensStillPresentProduct = 1024 but MaxTokensStillPresentCalibration = 512 (internal/fsm/judge/prompts.go:103-104, selected at judge.go:257-262). The plan predates the calibration/product template split, so this is stale rather than wrong-at-the-time; it is covered by the same banner fix and needs no separate edit if the doc is marked superseded.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-build-plan.md",
+          "line": 336,
+          "note": "still-present row gives max_tokens 1024; internal/fsm/judge/prompts.go:104 uses 512 for the calibration template."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

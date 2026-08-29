@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-17-2-review",
+  "kind": "shard",
+  "shardId": "shard-17-2",
+  "shardHash": "3d693662c9d83f4d",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T22:23:10Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 122,
+      "note": "New() enforces the Mock/MockJudge invariant and allows a nil judge; executors guard with errNoJudge at lines 455 and 628."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 307,
+      "note": "validateLenses asserts params[\"lenses\"].(int); confirmed the workflow loader yields int (internal/fsm/workflow/workflow_test.go:132,383 compare Params[\"lenses\"] to 8), so the assertion is not a latent type mismatch."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 487,
+      "note": "The seen[] provisional-winner semantics match docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md:233 (candidate_matched set only for the provisional winner) - not a deviation."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 461,
+      "note": "Pre-flight bounds goldens+candidates and worst-case payload before any judge spend, and re-checks the union of bug ids against MaxDeltaList before returning."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 171,
+      "note": "All decoders use strictDecode with DisallowUnknownFields plus trailing-data rejection, cap checks, and checkPayload; no eval or dynamic execution anywhere in the shard."
+    },
+    {
+      "path": "internal/fsm/kind/kind_test.go",
+      "line": 1,
+      "note": "Relevant tests exist for the new source file (internal/fsm/kind/kind_test.go and decision_test.go), so the source change is not untested."
+    },
+    {
+      "path": "internal/fsm/run/types_test.go",
+      "line": 777,
+      "note": "Clone deep-copy test uses a reflect walk to fail if any new slice/map/pointer field of Snapshot is left unexercised - good drift protection."
+    },
+    {
+      "path": "internal/fsm/run/types_test.go",
+      "line": 845,
+      "note": "SnapshotEqualIgnoringSeq test iterates every struct field reflectively and fails on unhandled kinds, so new fields cannot silently escape comparison."
+    },
+    {
+      "path": "internal/learnsource/source_test.go",
+      "line": 967,
+      "note": "New test asserts committed docs/metareview/shards results are excluded from both ChangedFiles and the learning diff, with a positive control on lib/service.go."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 1,
+      "note": "Checked the whole shard for TODO/FIXME markers and truncated diff context: none present; all three chunks are part 1/1."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

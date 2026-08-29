@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-11-2-review",
+  "kind": "shard",
+  "shardId": "shard-11-2",
+  "shardHash": "307cee5c23c3dcff",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 210,
+      "note": "Parse: strict YAML decode, name/version/state validation, delegation to parseVars/parseCmds/parseNodes/parseTransitions/validateGraph/collectRefs; no eval, no TODO/FIXME, no shell-out"
+    },
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 521,
+      "note": "validateGraph: reserved `failed` state, terminal/outcome pairing, unreachable-state check, single-loop rule, loop-is-cycle check, and cycle-without-loop DFS all appear internally consistent"
+    },
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 326,
+      "note": "cmd declaration limits (argv 1..MaxArgv, timeout 1..3600s, MaxEnv, reserved env names and reserved prefixes MRV_/LD_/DYLD_/GIT_) block env-injection via workflow YAML"
+    },
+    {
+      "path": "internal/fsm/workflow/workflow_test.go",
+      "line": 1,
+      "note": "Tests exist for the new package (parse error table, resolve, ResolveCmds/VerifyCmds/FileSHA256 error codes), satisfying the rubric's tests-for-source-changes rule"
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 845,
+      "note": "collectWith only measures branch files when the context diff truncated; exceptions path recomputes exact excludes and the raw measurement is skipped when no excludes apply"
+    },
+    {
+      "path": "testdata/fsm/workflows/sdlc-loop-cmds.yaml",
+      "line": 1,
+      "note": "Fixture is exercised by tests/go/test-fsm.sh (copied at line 44, used for the consent-list and overflow-handler cases); review-loop/clean/judge.yaml is used by the review-loop clean scenario"
+    },
+    {
+      "path": "skills/review-task-done/SKILL.md",
+      "line": 895,
+      "note": "Documented --shard-result/--cross-shard-result flags and the sharded-review procedure are doc-only and consistent with the shard pack contract"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead constant plus duplicated magic number: MaxTimeout (workflow.go:44) is declared but referenced nowhere in the repo, while the cmd timeout bound is validated against the literals 1 and 3600 at workflow.go:338. The bound and the constant can drift independently. Non-blocking cleanup: use MaxTimeout in the check or drop the constant.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 44,
+          "note": "MaxTimeout = 3600 * time.Second declared; grep over *.go finds no other reference"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 338,
+          "note": "if *rc.Timeout < 1 || *rc.Timeout > 3600 uses literals rather than MaxTimeout"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Mapping-form transitions accept an `on` key (allowed at workflow.go:478 and decoded into rawTransition.On at workflow.go:206) that addTransition never reads. The `*` rule that uses `on` is skipped earlier at workflow.go:474, so the allowance is unreachable-by-design leftover; a stray `on:` on a real edge is silently dropped rather than rejected. Non-blocking: either drop `on` from the allowed set or map it to Gate.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 478,
+          "note": "strictNode allows \"on\" for mapping-form transitions but Transition never carries it"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 474,
+          "note": "the from == \"*\" branch continues before strictNode, so the only documented user of `on` never reaches that allow-list"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

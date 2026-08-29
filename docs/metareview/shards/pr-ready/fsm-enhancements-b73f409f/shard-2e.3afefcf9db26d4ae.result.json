@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2e.3afefcf9db26d4ae",
+  "kind": "shard",
+  "shardId": "shard-2e",
+  "shardHash": "3afefcf9db26d4ae",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:33:56Z",
+  "blockingCount": 2,
+  "evidence": [
+    {
+      "path": "0,",
+      "line": 1,
+      "note": "Tracked, zero-byte file at the repository root (git ls-files line 14). Added by commit cde8d0a 'fix: round-six blockers'; the name is the signature of a mistyped shell redirect. Nothing in the tree references it."
+    },
+    {
+      "path": "internal/fsm/run/types_test.go",
+      "line": 106,
+      "note": "Mutation-tested the Clone claim in a scratch copy of the tree (/private/tmp/.../scratchpad/mr, repo left untouched). Replacing the Status deep copy in types.go with 'c.Status = s.Status' leaves go test ./internal/fsm/... fully green; replacing 'c.AllFound = cloneBugs(s.AllFound)' with 'c.AllFound = s.AllFound' leaves the entire repo suite (go test ./...) green."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 250,
+      "note": "go tool cover -func on internal/fsm/run reports Clone at 100.0%: both surviving mutants are inside blocks the coverage profile counts as covered, which is why line coverage cannot see this gap."
+    },
+    {
+      "path": "internal/fsm/run/errors.go",
+      "line": 40,
+      "note": "errors.go declares 28 Reason constants (ReasonEmpty .. ReasonTokensTooLarge, counted by grep on the const block, excluding the FoldError.Reason struct field); the R13 table in types_test.go enumerates 26."
+    },
+    {
+      "path": "internal/fsm/run/types_test.go",
+      "line": 141,
+      "note": "TestSnapshotEqualIgnoringSeq is live and strong: adding 'a.Head, b.Head = \"\", \"\"' to SnapshotEqualIgnoringSeq makes it fail with 'difference in Head not detected'. Its default: t.Fatalf branch also fails on any new field kind."
+    },
+    {
+      "path": "internal/learnsource/source_test.go",
+      "line": 157,
+      "note": "TestCollectExcludesShardResults is live: removing the 'docs/metareview/shards' pathspec from source.go fails it with the committed result file listed in ChangedFiles. Removing the 'docs/metareview/fsm' pathspec instead leaves the whole repo suite green."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 371,
+      "note": "Probed ValidateRunID/RunID in the scratch copy: RunID stays inside the pattern for a 300-char workflow name, underscores, slashes, non-ASCII and the empty string, so the R9 construction claim holds; the error string is double-quoted (see finding)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "A stray, empty, tracked file named `0,` sits at the repository root and is part of this branch's diff. It was committed in cde8d0a alongside real fixes and is almost certainly the residue of a mistyped shell redirect (e.g. `2>0,`). It is referenced by nothing, is not ignored, and would ship to main with the PR. Delete it and, if useful, add a guard so a junk root-level path cannot ride along again.",
+      "evidence": [
+        {
+          "path": "0,",
+          "line": 1,
+          "note": "zero-byte tracked file at repo root, in this shard's chunk list"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestCloneIsDeep asserts a completeness property it does not have. The doc comment says Clone is verified 'through every slice element, map value, pointer target and RawMessage', and the reflect walk at line 106 is commented 'every slice/map/pointer/RawMessage field of Snapshot was exercised above' - but the walk only checks membership in a hand-written `exercised` map, it does not check that anything was exercised. Two of the fourteen names in that map are never actually exercised: `Status` is never mutated on the clone and never re-read on the original, and `AllFound` is only read (`*orig.AllFound[0].GoldenIdx != 1`), never mutated - and that read is satisfied by aliasing, because the fixture points Confirmed, AllFound and PrevUnfixed at the same `one` variable, so the assertion fires off the Confirmed mutation whether or not AllFound was deep-copied at all. Verified by mutation in a scratch copy: `c.Status = s.Status` keeps go test ./internal/fsm/... green, and `c.AllFound = s.AllFound` keeps the whole repo suite green. Coverage cannot catch this - Clone reports 100.0% per-function. Fix by mutating c.Status[0] and c.AllFound[0] (with an independent *int, not the shared `one`) and asserting the original, or by driving the deep-copy check off reflection instead of a hand-maintained name list.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types_test.go",
+          "line": 56,
+          "note": "comment claims deep copy through every slice element, map value, pointer target and RawMessage"
+        },
+        {
+          "path": "internal/fsm/run/types_test.go",
+          "line": 108,
+          "note": "exercised map lists Status and AllFound, neither of which is mutated on the clone"
+        },
+        {
+          "path": "internal/fsm/run/types_test.go",
+          "line": 66,
+          "note": "Confirmed, AllFound and PrevUnfixed all share the address of the single `one` variable, so the AllFound assertion is satisfied by the Confirmed mutation"
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 256,
+          "note": "c.AllFound = cloneBugs(s.AllFound) and the Status copy below it are both unprotected by any test"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestReasonCodeTable is titled 'R13: every reason maps to a code per the §2.4 table' and guards itself with `if len(want) != 26`, but internal/fsm/run/errors.go declares 28 Reason constants: ReasonTokensNegative and ReasonTokensTooLarge (added with the §9 token-budget amendment and raised from fold.go:158-170) are absent from the table. The `len(want) != 26` line reads as an exhaustiveness canary but is a literal count of the map immediately above it - Go already rejects duplicate constant keys at compile time, so it can only ever fail if someone edits the map, never when a new Reason constant appears. Behavioural risk today is small because CodeFor's default arm returns ERR_AUDIT_INVALID, so the two missing reasons map correctly by accident; the risk is that a future reason needing a distinct code is silently unverified. Note the spec's own §2.4 table (docs/specs/2026-08-26-...-fsm-run-persistence.md:145) is stale in the same way. Fix by deriving the expectation from a single enumerated list of reasons, or at minimum add the two rows and update the count.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types_test.go",
+          "line": 170,
+          "note": "comment claims every reason maps to a code"
+        },
+        {
+          "path": "internal/fsm/run/types_test.go",
+          "line": 183,
+          "note": "len(want) != 26 cannot fail for a newly added Reason constant"
+        },
+        {
+          "path": "internal/fsm/run/errors.go",
+          "line": 41,
+          "note": "ReasonTokensTooLarge and ReasonTokensNegative are not in the test table"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new TestCollectExcludesShardResults covers only half of the exclusion it accompanies. source.go adds four pathspecs and its comment argues specifically for docs/metareview/fsm/ ('otherwise a run's own redacted event log is ingested as code to learn from'), but no test exercises that half: deleting the 'docs/metareview/fsm' and 'docs/metareview/fsm/**' entries leaves the entire repository suite green (verified in a scratch copy). The shards half is genuinely covered - deleting it fails this test. Add an fsm-export path to the fixture (or a second case) so the justified behaviour is the tested behaviour.",
+      "evidence": [
+        {
+          "path": "internal/learnsource/source_test.go",
+          "line": 168,
+          "note": "fixture writes only a docs/metareview/shards path"
+        },
+        {
+          "path": "internal/learnsource/source.go",
+          "line": 36,
+          "note": "docs/metareview/fsm exclusion has a justification comment and no test"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "ValidateRunID double-quotes the offending id: fmt.Errorf(\"invalid run id %q\", strconv.Quote(id)) applies %q on top of strconv.Quote, so a bad id surfaces as `invalid run id \"\\\"bad id\\\"\"`. Confirmed by probe. TestRunIDs (this shard) only asserts err == nil / err != nil, so the covering test cannot see it; the message reaches users through the fsm CLI (internal/fsm/cli/run.go:898, wiring.go:222/228). Drop either the %q or the strconv.Quote.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 371,
+          "note": "fmt.Errorf with %q over strconv.Quote produces a doubly quoted id"
+        },
+        {
+          "path": "internal/fsm/run/types_test.go",
+          "line": 45,
+          "note": "the bad-id loop asserts only that an error is returned, never its text"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Out of shard scope but observed while validating this shard, and worth routing to whoever owns internal/fsm/machine: that package's tests are flaky under a full-suite run. In a pristine scratch copy of the branch, `go test ./...` failed in 3 of 4 runs, with a different test each time - TestM7Torn ('symlink read refused', twice), TestF7DiffSortAndPrefixEdges ('order: ' empty) and TestDiffRunsKeepsRepeatedCallsWithTheSameInput. The same package passes 5/5 when run alone in the real repository and 3/3 under -run TestM7Torn, so the failures only appear when the package runs concurrently with the rest of the suite. Given that this PR's stated round-six fix was a flaky judge test, a second flaky area deserves a look before merge. Reported as observation, not verified against the user's own checkout path.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1373,
+          "note": "t.Fatal(\"symlink read refused\") fired in 2 of 4 full-suite runs; passes in isolation"
+        }
+      ]
+    }
+  ]
+}

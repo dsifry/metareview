@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-18-3-review",
+  "kind": "shard",
+  "shardId": "shard-18-3",
+  "shardHash": "47ee2b824f2e6c26",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/machine/fork_test.go",
+      "line": 1,
+      "note": "New 1118-line test file for Machine.Fork, VerifyOrigin and DiffRuns; diff is complete (part 1/1, no truncation) and is pure test code, so the rubric's tests-for-source rule is satisfied by the file itself."
+    },
+    {
+      "path": "internal/fsm/machine/fork_test.go",
+      "line": 209,
+      "note": "Checked refusal paths: unknown_state, terminal_state, at_iter out of range, context cancellation and torn audit all assert typed error codes and fields rather than substring-only matching."
+    },
+    {
+      "path": "internal/fsm/machine/fork_test.go",
+      "line": 887,
+      "note": "Checked the failure-sweep test: every refusal asserts the parent log is byte-identical and no child run directory is created; seam failures (sidecar, create, lock, append, fork append, child load) are each covered with cleanup of the fault injection flags."
+    },
+    {
+      "path": "internal/fsm/machine/fork_test.go",
+      "line": 1151,
+      "note": "failingSidecar embeds the Sidecar interface and overrides Read with a counter; no shared mutable global state, so tests remain independent."
+    },
+    {
+      "path": "testdata/fsm/scenarios/sdlc-loop/happy/judge.yaml",
+      "line": 1,
+      "note": "Scenario fixture with three deterministic judge calls; pinned raw JSON, token counts and expect_model on the two workflow-driven calls. No executable content, no secrets."
+    },
+    {
+      "path": "internal/fsm/machine/fork_test.go",
+      "line": 46,
+      "note": "Scanned the whole shard for TODO/FIXME markers, eval or other unsafe execution, and duplicated helpers; none found (helpers sdlcDone/twoIterParent/decode are local to this file)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead code in tests: `bp` is declared at line 800 as a *bool helper and never used, discarded with `_ = bp` at line 841. Either use it in the byHash assertions or delete the declaration; the blank assignment only silences the compiler.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/fork_test.go",
+          "line": 800,
+          "note": "bp := func(v bool) *bool { return &v } is declared but only consumed by the blank assignment at line 841."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestF10ForkFailureSweeps ends with `_ = c` and `_ = adj` (lines 1022-1023). `adj` is computed by seqOfTransitionInto at line 931 and never asserted on, and the forked child `c` at line 1015 is only used to trigger the ordinal check. Both blank assignments hide unasserted values; drop the computation or assert on it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/fork_test.go",
+          "line": 931,
+          "note": "adj, _ := seqOfTransitionInto(t, pevs, \"adjudicate\", 0) is never compared to anything before being discarded at line 1023."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Fixture comment drift: the header comment says \"one finding, confirmed, fixed, verified gone\" but the file lists three calls, the third being a standalone `node: judge` row with no expect_model. Update the comment so the fixture's scope is self-describing.",
+      "evidence": [
+        {
+          "path": "testdata/fsm/scenarios/sdlc-loop/happy/judge.yaml",
+          "line": 1,
+          "note": "Comment describes a two-call happy path while the calls list has three entries including the judge-node row at line 5."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

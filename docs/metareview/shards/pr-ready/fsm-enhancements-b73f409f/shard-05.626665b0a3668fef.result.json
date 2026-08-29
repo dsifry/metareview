@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-05-626665b0a3668fef-claude-opus-5",
+  "kind": "shard",
+  "shardId": "shard-05",
+  "shardHash": "626665b0a3668fef",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 2,
+  "evidence": [
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 332,
+      "note": "prepare's effort-capable Anthropic branch sets output_config.effort and nothing else; no thinking key is ever added for that family"
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 330,
+      "note": "calibration branch sends thinking {type: disabled} for every Anthropic id, before the family switch is consulted"
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 131,
+      "note": "anthropicEffortCapable lists claude-fable-5 and claude-mythos-5 as supported ids"
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 295,
+      "note": "validate skips the family table entirely when calibration is set, so any Anthropic id at effort medium reaches the disabled-thinking body"
+    },
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 283,
+      "note": "the package's own standard: the effort table must match what the API accepts, or Preflight passes a request the provider 400s"
+    },
+    {
+      "path": "internal/fsm/judge/judge_test.go",
+      "line": 339,
+      "note": "J4 pins thinking:nil on the capable branch, so the missing adaptive-thinking parameter is asserted rather than caught"
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 343,
+      "note": "delete(body, temperature) immediately followed by body[temperature]=1 on the same map is a dead pair"
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 566,
+      "note": "http.NewRequestWithContext error discarded, hreq dereferenced on the next line"
+    },
+    {
+      "path": "internal/fsm/run/errors.go",
+      "line": 96,
+      "note": "StoreError.Error drops Detail whenever Cause is non-nil"
+    },
+    {
+      "note": "Verified the diff's own claims against the repo rather than the diff text: Verdict.Raw really is never persisted (run.LLMCallData carries only Parsed at internal/fsm/kind/kind.go:376 and internal/fsm/cli/run.go:786), MockJudge's unsynchronised calls slice is safe because no fsm package spawns goroutines, and http://LOCALHOST being refused by checkURL is deliberate and pinned at judge_test.go:606 - none of the three are defects."
+    },
+    {
+      "note": "Positives held up under check: go build ./... clean, go test ./internal/fsm/judge ./internal/fsm/run pass, go tool cover reports 100.0% statement coverage for the judge package with every function at 100%, no TODO/FIXME markers in any of the three chunks, and the anthropicNoXHigh table (opus-4-5, opus-4-6, sonnet-4-6) matches Anthropic's current effort documentation and is directly tested at codex_test.go:291."
+    },
+    {
+      "note": "Security surface of the new HTTP client reviewed and found sound: redirects refused at construction (judge.go:141), base URLs rejected for userinfo/path/query/fragment and non-localhost http (judge.go:219-241), response body capped at 4 MB with a LimitReader plus an explicit over-cap check, and no key material reaches any error Detail or Field."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The effort-capable Anthropic branch sends output_config.effort with no thinking parameter, so on Opus 4.6, Sonnet 4.6, Opus 4.7 and Opus 4.8 the judge runs with extended thinking OFF. On those four ids {type: \"adaptive\"} is the only on-mode and omitting thinking means the model does not think at all; effort then governs token spend and verbosity only, not reasoning depth. The failure is silent - a judge configured at high or xhigh returns a non-thinking answer with no error - and it affects four of the nine ids the code itself advertises at judge.go:131. Opus 5, Sonnet 5, Fable 5 and Mythos 5 are unaffected because thinking is on by default there, which is why the one capable-branch test that exists (claude-opus-4-7 at judge_test.go:340) still passes. judge_test.go:339 actively pins \"thinking\": nil for this branch, so the gap is asserted rather than detected. Fix is to add thinking {type: \"adaptive\"} alongside output_config for the 4.6-and-later capable ids.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 332,
+          "note": "case capable: only output_config.effort is set, thinking is never added"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 131,
+          "note": "anthropicEffortCapable covers opus-4-6, sonnet-4-6, opus-4-7, opus-4-8 - the four ids where omitting thinking disables it"
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 339,
+          "note": "J4 asserts thinking:nil on the capable branch, pinning the omission"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Calibration mode unconditionally sends thinking {\"type\": \"disabled\"} to every Anthropic model. On claude-fable-5 and claude-mythos-5 any explicit thinking configuration is rejected: both {type: \"disabled\"} and {type: \"enabled\", budget_tokens: N} return 400, because thinking is always on and the parameter must be omitted. Both ids are listed as supported at judge.go:131, and validate deliberately skips the family table under calibration (judge.go:295, pinned by the 'unknown family under calibration is accepted' case at judge_test.go:765), so nothing stops a calibration run on either id. The result is a guaranteed provider 400 that Preflight - whose entire stated purpose per codex_test.go:283-285 is to refuse a bad model/effort pair before any network traffic - lets through; it then surfaces through the 400 body sniff at judge.go:595 as a misleading ERR_JUDGE_EFFORT_UNSUPPORTED. This is the same class of table/API mismatch that TestAnthropicEffortTableMatchesTheAPI was written to prevent, one parameter over. No calibration test covers fable-5 or mythos-5. Fix is to omit thinking (rather than disable it) for the always-thinking ids, or refuse calibration on them in validate.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 330,
+          "note": "case r.Calibration: body[thinking] = {type: disabled} for every Anthropic id"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 295,
+          "note": "the !calibration guard means the unknown_family check never runs in calibration mode"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 595,
+          "note": "the resulting 400 is re-labelled ERR_JUDGE_EFFORT_UNSUPPORTED by the thinking/effort body sniff, hiding the real cause"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two hygiene issues in the same Anthropic body builder. (a) judge.go:343-344 calls delete(body, \"temperature\") and then immediately assigns body[\"temperature\"] = 1 on the same map - the delete is dead and reads as if it were guarding something. (b) judge.go:325 decides the temperature-0 rule with strings.Contains, while every other family decision in the file (anthropicFamily, supportsXHigh, route) uses prefix matching on the wire model; a substring match will fire on an id that merely contains opus-4-5/sonnet-4-5 anywhere. Neither misbehaves on any id in the current tables, so this is readability and future-proofing rather than a live defect.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 343,
+          "note": "delete immediately followed by a set of the same key"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 325,
+          "note": "strings.Contains used where the rest of the file prefix-matches"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "attempt discards the http.NewRequestWithContext error and dereferences the result on the very next line (hreq.Header.Set), so a construction failure is a nil-pointer panic rather than a coded error. It is unreachable today because checkURL validates the base at construction and the path suffix is a constant, but the panic is one edit to req.url away and the package otherwise routes every failure through a typed errs code.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 566,
+          "note": "hreq, _ := http.NewRequestWithContext(...) then hreq.Header.Set on line 567"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "StoreError.Error() returns only Code and Cause when Cause is non-nil, silently dropping Detail. Every current construction site sets one or the other (store.go:75 sets Detail, store.go:143/150/182/186 set Cause), so no message is lost today, but the struct permits both and the formatter discards half the context when they are. Appending Detail when present would make the type safe to use as declared.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/errors.go",
+          "line": 96,
+          "note": "Error() branches on Cause and never prints Detail in that branch"
+        }
+      ]
+    }
+  ]
+}

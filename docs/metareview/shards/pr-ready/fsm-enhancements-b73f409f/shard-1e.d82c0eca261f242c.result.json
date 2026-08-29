@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1e.d82c0eca261f242c",
+  "kind": "shard",
+  "shardId": "shard-1e",
+  "shardHash": "d82c0eca261f242c",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/run/builder.go", "line": 101, "note": "Read builder.go in full on disk, not only through the diff."},
+    {"path": "internal/fsm/run/canonical_test.go", "line": 133, "note": "Read canonical_test.go in full on disk."},
+    {"path": "internal/fsm/kind/decision_test.go", "line": 15, "note": "Read decision_test.go in full on disk."},
+    {"path": "CHANGELOG.md", "line": 3, "note": "0.9.0 section claims checked against the tree."},
+    {"note": "go vet ./internal/fsm/run/... ./internal/fsm/kind/... is clean; go test -cover reports 100.0% of statements for both packages, so builder.go (a non-test file) is fully exercised and the coverage.sh 100% gate for internal/fsm/* holds for this shard's packages."},
+    {"path": "internal/fsm/kind/kind.go", "line": 46, "note": "AdjudicateThreshold = 0.7, so decision_test.go's 0.7-effective-true / 0.6-and-absent-effective-false expectations are correct against internal/fsm/kind/decision.go:41-49."},
+    {"path": "internal/fsm/kind/kind.go", "line": 86, "note": "Only two judge-backed executors exist (MatchThenAdjudicate, StillPresent); TestNilJudgeExecutors covers both, so there is no missed no_judge path."},
+    {"path": "internal/fsm/run/fold.go", "line": 78, "note": "Apply requires the transition event to carry the FROM state and iter+1 only when Loop; Builder.stamp/Event (builder.go:80-99) reproduce exactly that, so builder-made logs match what the store would accept."},
+    {"path": "internal/fsm/run/store.go", "line": 154, "note": "The store writes marshalCanonical(ev) and derives Prev from LineHash of the previous line; Builder.record/head (builder.go:120-128) mirror it, so the builder is a faithful oracle for Seq/Prev."},
+    {"path": "internal/fsm/record/record.go", "line": 123, "note": "Checked the CHANGELOG Upgrade claim that a decodable newline-less final row is kept as a row and only an undecodable fragment moves to .metareview/runs/.torn/: record.go:121-147 and 207-216 implement exactly that. Claim is accurate."},
+    {"path": "internal/version/version.go", "line": 3, "note": "Version = 0.9.0 matches the new CHANGELOG heading; commands/fsm.md, testdata/fsm/agent-prompt.golden, docs/fsm/ and the git>=2.31 check (internal/setup/gitversion_test.go) all exist as the entry claims."},
+    {"note": "No TODO/FIXME markers, no eval or other unsafe execution, and no truncated chunks in this shard (all four files are part 1/1)."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Canonical's doc comment now contradicts the behaviour this shard's test pins. canonical.go:16 states the canonical form leaves \"HTML characters and U+2028/U+2029 left as literal UTF-8\", but marshalCanonical escapes both separators (types.go:351-352) and TestCanonicalIsToolchainIndependent asserts the escaped form is what the chain hashes. This is the one contract statement a maintainer would read before touching the encoder, and the new test's own comment explains that reverting to raw separators is what CI caught. The comment should say the separators are escaped.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 16, "note": "\"U+2028/U+2029 left as literal UTF-8\" - no longer true"},
+        {"path": "internal/fsm/run/types.go", "line": 351, "note": "marshalCanonical replaces U+2028/U+2029 with their escapes"},
+        {"path": "internal/fsm/run/canonical_test.go", "line": 246, "note": "test asserts no raw separator survives into the canonical bytes"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "CapText reports truncation when nothing was truncated. For max < 2 it returns (\"\", true) unconditionally (canonical.go:111-113), so CapText(\"\", 0) claims the empty string was truncated. The new TestCapText guards against spurious truncation only via canonLen(s) <= max, which is never satisfied at max < 2 (the empty string still encodes to 2 bytes), so the wart is invisible to the test and the length assertion at canonical_test.go:137 is explicitly gated on max >= 2. Callers that surface the flag as \"detail truncated\" would report a truncation that did not happen.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 111, "note": "if max < 2 { return \"\", true }"},
+        {"path": "internal/fsm/run/canonical_test.go", "line": 137, "note": "length invariant skipped for max < 2"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Builder.Copy is correct only for from == 2 and silently wrong otherwise. checkProvenance requires Origin.Seq to equal the CHILD event's own Seq (fold.go:432), but Copy renumbers copied events sequentially from 2 (builder.go:172) while setting Origin.Seq to the PARENT's Seq (builder.go:174). Those agree only when from == 2. All six call sites pass 2, so nothing is broken today, but the parameter invites a caller to build a log that fails ERR_AUDIT_INVALID{provenance} for a reason that looks like a product bug rather than a builder misuse. Either drop the parameter or renumber Origin.Seq consistently.",
+      "evidence": [
+        {"path": "internal/fsm/run/builder.go", "line": 174, "note": "Origin{Seq: ev.Seq} against a freshly renumbered c.Seq"},
+        {"path": "internal/fsm/run/fold.go", "line": 432, "note": "o.Seq != ev.Seq is a provenance failure"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Copy has two unguarded assumptions about its parent log. builder.go:154 discards the init decode error, so a parent whose first event is not a decodable init yields a zero-valued child InitData with no signal. builder.go:174 indexes pb.lines[ev.Seq-1], which panics with index out of range unless the parent's Seq values are contiguous from 1 - exactly the shape the Override API exists to violate (WithSeq, documented at builder.go:7-8 as being there \"so tests can build invalid logs\"). Indexing by the loop position instead of by Seq removes the panic.",
+      "evidence": [
+        {"path": "internal/fsm/run/builder.go", "line": 154, "note": "_ = json.Unmarshal(parent[0].Data, &pd)"},
+        {"path": "internal/fsm/run/builder.go", "line": 174, "note": "pb.lines[ev.Seq-1] assumes contiguous parent Seq"},
+        {"path": "internal/fsm/run/builder.go", "line": 8, "note": "Override doc invites building invalid logs"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Builder.Event's transition bookkeeping fails open. Both type assertions (builder.go:80 and builder.go:91) accept only a TransitionData value; a caller passing *TransitionData, a map, or a struct literal of another type gets no iter increment and no state advance, and the resulting log is rejected later by Apply's state/iter check with a message that points at the machine rather than at the test fixture. A t.Fatal-free helper cannot report this, but panicking or requiring a typed AddTransition method would.",
+      "evidence": [
+        {"path": "internal/fsm/run/builder.go", "line": 80, "note": "if td, ok := data.(TransitionData); ok - no else"},
+        {"path": "internal/fsm/run/builder.go", "line": 91, "note": "second silent assertion for the state/iter update"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Builder.stamp takes an Override slice it never uses (builder.go:101, signature parameter `_ []Override`). Init passes o to stamp and then applies the same overrides itself (builder.go:64-68); Event passes nil. The parameter is inert today, but it reads as though stamp applies overrides, and a maintainer wiring it up would double-apply them for Init.",
+      "evidence": [
+        {"path": "internal/fsm/run/builder.go", "line": 101, "note": "func (b *Builder) stamp(typ string, data any, _ []Override) Event"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "builder.go is test-only scaffolding living in a non-_test file of the production package `run`, so it compiles into the shipped binary and has to be carried by the exactly-100% coverage gate for internal/fsm/*. It is used across package boundaries (internal/fsm/machine/machine_test.go:1843), so export_test.go is not an option, but a sibling internal/fsm/runtest package would keep the fixture builder out of the product. Non-blocking: coverage is in fact 100% for the package today, so the gate is satisfied.",
+      "evidence": [
+        {"path": "internal/fsm/run/builder.go", "line": 1, "note": "package run - production file, no build tag, exported NewBuilder/Override API"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 1843, "note": "cross-package use of run.NewBuilder(...).Copy(...)"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

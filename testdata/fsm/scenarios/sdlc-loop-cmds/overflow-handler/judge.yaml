@@ -1,0 +1,6 @@
+# sdlc-loop-cmds overflow: the bug survives verify, max_iterations 1 stops the loop, the notify handler runs.
+calls:
+  - {kind: adjudicate, node: adjudicate, iter: 0, index: 0, raw: '{"reasoning":"real","is_real":true,"confidence":0.9}', tokens: {input: 100, output: 30}}
+  - {kind: still-present, node: verify, iter: 0, index: 0, raw: '{"reasoning":"still there","still_present":true,"confidence":0.9}', tokens: {input: 80, output: 20}}
+cmds:
+  - {name: notify, call: 0, stdout: '{"stop": false, "reason": ""}', stderr: "", exit: 0, repeat: true}

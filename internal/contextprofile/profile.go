@@ -48,6 +48,12 @@ type FileProfile struct {
 	DiffBytes int
 	Hash      string
 	Source    string
+	// LocalBytes are the staged, working-tree or untracked bytes for this path.
+	// A file can be both committed on the branch and dirty locally: the committed
+	// bytes reach a shard pack, the local ones reach no pack at all. Recording
+	// them separately is what lets the manifest disclose the difference, rather
+	// than the branch total silently replacing them.
+	LocalBytes int
 }
 
 type Profile struct {
@@ -175,6 +181,16 @@ func filesFromGit(git gitcontext.Context) []FileProfile {
 			byPath[path] += 0
 		}
 	}
+	// Local bytes are accumulated from the local passes alone. Reading them out
+	// of byPath does not work: byPath is seeded with git.Diff above, so every
+	// branch file would carry the branch diff as its "local" contribution and
+	// every clean committed file would be disclosed as locally modified — a
+	// disclosure that flags everything discloses nothing.
+	localOnly := map[string]int{}
+	addDiffProfiles(localOnly, git.StagedDiff)
+	addDiffProfiles(localOnly, git.WorkingTreeDiff)
+	addUntrackedProfiles(localOnly, git.UntrackedExcerpts)
+
 	branch := map[string]gitcontext.BranchFile{}
 	for _, f := range git.BranchFiles {
 		branch[f.Path] = f
@@ -186,6 +202,9 @@ func filesFromGit(git gitcontext.Context) []FileProfile {
 		if b, ok := branch[path]; ok {
 			file.Hash = b.Hash
 			file.Source = SourceBranch
+			file.LocalBytes = localOnly[path]
+		} else if file.Source != SourceBranch {
+			file.LocalBytes = localOnly[path]
 		}
 		files = append(files, file)
 	}

@@ -6,7 +6,7 @@ metareview installs as a local review harness for coding agents. It can run stan
 
 - Git repository checkout.
 - Node.js 18+ for the package launcher and manifest tests.
-- Go 1.22+ when running from a source checkout.
+- Go 1.26+ when running from a source checkout.
 - Optional: metaswarm, Superpowers, Beads (`bd`), and GitHub CLI (`gh`) for full lifecycle integration.
 
 ## npm Package
@@ -52,7 +52,7 @@ codex plugin marketplace add /path/to/metareview
 codex plugin list --marketplace metareview
 ```
 
-Then use the Codex skills with `$setup`, `$review-task-done`, `$review-epic-ready`, `$review-pr-ready`, `$review-artifact`, `$learn-post-merge`, and `$status`.
+Then use the Codex skills with `$setup`, `$review-task-done`, `$review-epic-ready`, `$review-pr-ready`, `$review-artifact`, `$learn-post-merge`, `$status`, and `$fsm`.
 
 ## Claude Code Plugin
 
@@ -70,7 +70,7 @@ claude plugin marketplace add /path/to/metareview
 claude plugin install metareview@metareview
 ```
 
-Then use `/setup`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/review-artifact`, `/learn-post-merge`, and `/status`.
+Then use `/setup`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/review-artifact`, `/learn-post-merge`, `/status`, and `/fsm`.
 
 ## Standalone Setup
 
@@ -134,7 +134,7 @@ Commit durable Markdown artifacts under `docs/metareview/`, including the shard 
 .metareview/runs.jsonl
 ```
 
-Do not ignore `docs/metareview/` or the whole `.metareview/` directory.
+Do not ignore `docs/metareview/` or the whole `.metareview/` directory. FSM runs (`.metareview/runs/`) ignore themselves; `docs/metareview/fsm/` export bundles are durable. `metareview fsm` needs git ≥ 2.31 (`metareview setup --check` reports it).
 
 ## Update
 

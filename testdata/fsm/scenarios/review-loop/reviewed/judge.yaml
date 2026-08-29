@@ -1,0 +1,3 @@
+# review-loop reviewed: one finding, confirmed real → DONE reviewed (exit 1).
+calls:
+  - {kind: adjudicate, node: adjudicate, iter: 0, index: 0, raw: '{"reasoning":"real","is_real":true,"confidence":0.95}', tokens: {input: 100, output: 30}, expect_model: gpt-5.2}

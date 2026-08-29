@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "id": "r-shard-10-3-b85efecee640656c",
+  "kind": "shard",
+  "shardId": "shard-10-3",
+  "shardHash": "b85efecee640656c",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/reviewmanifest/manifest_test.go",
+      "line": 98,
+      "note": "Reviewed the full rewrite of the manifest test suite against internal/reviewmanifest/manifest.go: the new hash-based freshness model (shardHash per shard, planHash for cross-shard), the result field-shape table, the evidence-rule boundary test and the four markdown-neutralisation tests all match the implementation. go test ./internal/reviewmanifest/ passes at 90.4% statement coverage unit-only; the combined floor for this package is 97.0 in tests/coverage-floor.txt and is met by the shell suite."
+    },
+    {
+      "path": "testdata/fsm/agent-prompt.golden",
+      "line": 1,
+      "note": "Verified the golden is live, not orphaned: tests/go/test-fsm.sh:59-60 runs `metareview fsm --agent-prompt` and cmp's it against this file, and tests/manifest/test-skills.sh:20 requires it to exist. Ran the binary and cmp'd against the golden: byte-identical."
+    },
+    {
+      "path": "tests/go/test-sharded-review.sh",
+      "line": 1,
+      "note": "Executed the new end-to-end script in full: exit 0, 'sharded review: ok'. It is wired into tests/run-all.sh:21 and exercises the plan/pack/result/fix-round/negative-flag/reproducibility paths for both pr-ready and task-done."
+    },
+    {
+      "path": "tests/manifest/test-manifests.sh",
+      "line": 119,
+      "note": "The rm -rf hardening is correct: TMPDIR is set by the script itself, and ${TMPDIR:?}/bin now aborts rather than expanding to /bin if the assignment is ever removed."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The Go floor was raised for package.json only, so the manifest gate now certifies an inconsistent repository. tests/manifest/test-manifests.sh:66 asserts package.json says Go 1.26, matching go.mod line 3 (go 1.26) and INSTALL.md:9 / README.md:85, but the same script validates three sibling manifests without pinning their Go floor, and all three still advertise Go 1.22+ — a version that cannot build the module at all. The underlying stale strings live outside this shard (.claude-plugin/plugin.json:4, .codex-plugin/plugin.json:25, .agents/plugins/marketplace.json:9, plus cli/metareview.js:28,36 and internal/setup/setup.go:89) and are reported at higher severity by the shards that own them; within this shard the defect is that the check which exists to prevent exactly this drift was extended to one file and not the others.",
+      "evidence": [
+        {"path": "tests/manifest/test-manifests.sh", "line": 66, "note": "asserts Go 1.26 for package.json only"},
+        {"path": ".claude-plugin/plugin.json", "line": 4, "note": "still advertises Go 1.22+ and is validated by the same script"},
+        {"path": ".agents/plugins/marketplace.json", "line": 9, "note": "still advertises Go 1.22+"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead scaffolding in the new shell test. write_results declares ONLY and SKIP_CROSS parameters (tests/go/test-sharded-review.sh:57-59) whose branches at lines 64 and 76 would write a subset of shard results or suppress the cross-shard result, but all three call sites (lines 147, 179, 246) pass exactly two arguments, so neither branch is ever taken. The partial-coverage and missing-cross-shard-after-a-fix paths the knobs exist to exercise are therefore untested, and the unreachable code reads as coverage that is not there.",
+      "evidence": [
+        {"path": "tests/go/test-sharded-review.sh", "line": 59, "note": "ONLY and SKIP_CROSS default to empty"},
+        {"path": "tests/go/test-sharded-review.sh", "line": 147, "note": "call site passes two arguments"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The two new manifest assertions are substring checks weak enough to survive the regression they are meant to catch. tests/manifest/test-manifests.sh:41-42 only require the stringified plugin manifests to contain 'workflow', which matches any incidental occurrence (prose, a path segment, the plural 'workflows') and would still pass if the fsm/workflow command entry were deleted. The sibling assertions immediately above them (lines 36-40) name concrete command identifiers such as 'epic-ready' and 'post-merge-learning', so the new lines are markedly weaker than the convention they were added to.",
+      "evidence": [
+        {"path": "tests/manifest/test-manifests.sh", "line": 41, "note": "codex plugin workflow assertion is a bare substring match"},
+        {"path": "tests/manifest/test-manifests.sh", "line": 42, "note": "claude plugin assertion has the same weakness"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestResultSchemaVersionDistinct's second half cannot demonstrate what its comment claims. The comment at manifest_test.go:109-111 says only a result carrying ResultSchemaVersion proves which constant the validator reads, but SchemaVersion and ResultSchemaVersion are both 1 (manifest.go:23 and manifest.go:27), so the two values are indistinguishable at runtime; the loop would pass identically if validation compared against the manifest's SchemaVersion. The test is a useful acceptance pin but the comment overstates it, and if the manifest schema is ever bumped the test will not detect a validator still reading the wrong constant.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 109, "note": "comment claims a distinction the equal constants cannot express"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 23, "note": "SchemaVersion = 1 and ResultSchemaVersion = 1 are equal today"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The blocking-severity boundary is pinned from one side only. TestWaivedMediumFindingBlocks (manifest_test.go:247) proves medium blocks under waived/accepted-risk/deferred/open and TestFixedAndFalsePositiveClose (line 263) proves the two closing dispositions clear a critical, but no test asserts that a low-severity finding with a non-closing disposition does NOT block. severityBlocks (manifest.go:641-642) could be widened to include SeverityLow and the whole suite would stay green, silently turning every advisory low finding a shard reviewer records into a gate blocker.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 247, "note": "only the blocking side of the boundary is asserted"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 641, "note": "severityBlocks excludes low with no test holding it there"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-2d-3-4bb707b6248be945",
+  "kind": "shard",
+  "shardId": "shard-2d-3",
+  "shardHash": "4bb707b6248be945",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T10:46:58-07:00",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/testdata/oracle.sha256",
+      "line": 1,
+      "note": "Verified externally, twice. (a) Recomputed each line of oracle.jsonl with shasum -a 256 (never Go) in a scratchpad: all three hashes match byte-for-byte, and line N+1's \"prev\" equals hash N, so the chain the fixture encodes is real. (b) Copied testdata to a scratchpad and ran oracle.sh there: both oracle.jsonl and oracle.sha256 regenerate identically, so the fixture is reproducible from oracle.template.jsonl and the committed hashes are not Go-derived. TestOracle (internal/fsm/run/store_test.go:799-856) consumes it correctly: length check, LineHash equality per line, prev linkage, Canonical idempotence, and a one-byte edit that must fail at seq 3."
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 1266,
+      "note": "Reachability sweep over every assertion in the shard's region: I flipped each of the 70 `if <cond> { t.Fatal... }` conditions in lines 1257-1891 one at a time (init clause preserved, condition wrapped in !(...)) against a pristine `git archive HEAD` copy and ran the five tests this shard owns. 69 of 70 were killed. The single survivor is line 1260 inside helper raw2, which is only called from TestM7Open (a different shard). No dead or unreachable assertion in this shard."
+    },
+    {
+      "path": "internal/fsm/machine/sidecar.go",
+      "line": 60,
+      "note": "Source-mutation battery against the pristine HEAD copy, 10 mutants, 9 killed by this shard's tests: FSSidecar.Read losing syscall.O_NOFOLLOW (killed at machine_test.go:1374), List dropping e.Type().IsRegular() (killed at 1385, list became big.bin,link.txt,workflow.yaml), Write perm 0600->0644 (killed at 1395), FSSidecar.Read MaxPayload cap, MemSidecar.Read MaxPayload cap, machine.go warn detail st.Seq->st.Seq+1 (killed by the literal '18 bytes dropped after seq 3' at 1296), m.torn -> false (killed at 1279), ev.Mock -> true (killed at 1463), run/store.go 'incomplete fork:' wording (killed at 1869). Only the Write O_NOFOLLOW mutant survived — see finding 2."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 356,
+      "note": "The comments that place store failures by call index are all accurate against loadWith: EventsWithLines is called at 334 (#1), after RepairTail at 343 (#2), and after the repair warn at 359 (#3), so failEvAt 2 / failEvAt 3 and appends-reset-to-0 + failAt 1 land exactly where machine_test.go:1320-1340 says. Deleting the ctx-cancellation guards is caught: overflowHandler's guard (machine.go:889-891) is killed at machine_test.go:1802, and the converge-atom guard (machine.go:755-757) is killed at machine_test.go:1825. Removing the CodeRunNotFound remap at 345-347 and the m.torn assignment are both killed too."
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 1863,
+      "note": "TestOpenIncompleteFork pins both halves of its claim. Moving the incompleteFork check (machine.go:372) to after the sidecar read (375) fails with 'expected ERR_FORK_INCOMPLETE, got ERR_SIDECAR: workflow.yaml is missing', and changing run/store.go:207's 'incomplete fork: run ' wording fails the List loop, so the `s.RunID == child` guard at 1868 is not vacuous (h.store.List() returns 2 rows including the child)."
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 1519,
+      "note": "The append sweeps are not vacuous. Instrumented totals on the pristine copy: review-loop 13; sweepScenarios overflow+handler+warn 28, enforcing 3, executor-fail 9, decode-fail 10, converge-error 24; TestM9Residue's sdlc loop 24. Every position is walked and each must return exactly 'appendfail'. The chmod-guarded branch at 1398 does execute here (fileOwnerCanChmod() == true)."
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 1487,
+      "note": "The two 'durable' claims were checked against the store rather than the view: adding `run.Fold(h.events(m))` next to machine_test.go:1487 and :1678 and asserting OutcomeClean / OutcomeFailed passes, so the property the messages assert genuinely holds; the assertions are merely weaker than their wording (finding 6)."
+    },
+    {
+      "path": "internal/fsm/machine/machine_test.go",
+      "line": 1880,
+      "note": "The `renamed` doc comment is accurate: machine.go:83-86 refuses a path workflow whose parsed.Name matches an embedded name with different bytes (ERR_WORKFLOW_INVALID, reason=reserved_name), and both shipped workflows carry `workflow: <name>` on line 1 so the single-replacement rewrite always hits the name key. gofmt reports nothing for internal/fsm/machine, go vet ./internal/fsm/... is clean, and the package tests report 100.0% of statements."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestM8Stamps does not assert the Node half of the stamp contract the spec assigns to it, and nothing else in the repo does either. docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:422 states 'M8 stamps: every event's At equals the injected clock sequence, State/Iter/Mock/Node per 5.4 tail (cmd_call has no Node), non-mock runs never carry Mock: true (MockTainted == false), mock runs carry it on every non-init event'. The delivered TestM8Stamps (machine_test.go:1446-1472) asserts At, ev.Mock, MockTainted and view==fold only; it drives sdlc-loop with no cmds, so the run it inspects contains no cmd_call event at all and the parenthesised clause is unreachable there by construction. Mutation proof: replacing `ev.Node = \"\"` with `ev.Node = \"XSTAMP\"` in the audit closure's else branch (machine.go:470-472) leaves `go test ./...` green across the entire repository — the normalisation that strips a Node from every non-llm_call audited event (cmd_call included) is completely untested. By contrast the same battery shows State and Iter ARE pinned (State+\"X\" and Iter+7 both fail TestM8Stamps), and ev.Mock is pinned (ev.Mock = true fails at line 1463), so Node is the one field of the four the spec names that has no test behind it. Add a cmd_call-producing run (the harness already builds one: sweepScenarios' 'converge-error' scenario at 1638-1646 wires a notify cmd through fakeRunner, whose audit event is TypeCmdCall) and assert every non-llm_call event has Node == \"\" while llm_call events carry the node name. This is the same claim-versus-code class as the other blockers on this branch: the spec row asserts a property of the test suite that the test suite does not have.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1446
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 470
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+          "line": 422
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The assertion labelled 'symlink write refused' (machine_test.go:1376-1378) does not test symlink refusal. Deleting `syscall.O_NOFOLLOW` from FSSidecar.Write's open flags (sidecar.go:64) leaves the whole repository suite green — verified with `go test ./...` on a pristine HEAD copy — whereas the same deletion on FSSidecar.Read (sidecar.go:87) is caught immediately at machine_test.go:1374. The reason is that O_CREATE|O_EXCL already returns EEXIST for an existing symlink whether or not O_NOFOLLOW is set, so 'exists' is returned either way and the test cannot distinguish the two. That makes both the test label and the FSSidecar.Write doc comment ('creates the file exclusively (0600, O_NOFOLLOW)', sidecar.go:58) assert a guard that is unobservable on this path. Either relabel the assertion to what it actually pins (an existing entry of any kind is refused with reason=exists) or drop the O_NOFOLLOW claim from the Write doc comment; the flag itself is harmless but currently reads as a tested defence.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1376
+        },
+        {
+          "path": "internal/fsm/machine/sidecar.go",
+          "line": 64
+        },
+        {
+          "path": "internal/fsm/machine/sidecar.go",
+          "line": 58
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Nine of the eleven `errs.As(err).Field(\"reason\") != ...` assertions in this shard are unguarded, and errs.As returns a nil *errs.Error for a nil or non-coded error while Field dereferences the receiver (errs.go:83, `return e.Fields[k]`). A regression that makes the sidecar return a nil error therefore panics instead of failing cleanly. Demonstrated: changing FSSidecar.Read's ErrNotExist branch to `return nil, nil` produces 'panic: runtime error: invalid memory address or nil pointer dereference ... errs.(*Error).Field ... machine_test.go:1362' — which aborts the whole test binary, so every later test in the package reports nothing. Lines 1356 and 1359 already get this right by short-circuiting on errs.Is first, and the harness ships wantCodeE (harness_test.go:449) for exactly this. Affected sites: 1362, 1365, 1368, 1376, 1380, 1401, 1409, 1436, 1831.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1362
+        },
+        {
+          "path": "internal/fsm/errs/errs.go",
+          "line": 83
+        },
+        {
+          "path": "internal/fsm/machine/harness_test.go",
+          "line": 449
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "machine_test.go:1764 (`_ = hj.deps.Sidecar.Write(\"mrv-crafted-invalid-torn\", SidecarWorkflow, raw)`) is dead setup and misleads about which code path the next assertion exercises. Deleting the line leaves TestM9Residue green, because in the repair branch FoldFull runs at machine.go:350 and returns the 'stamp' error before the sidecar read at machine.go:375 is ever reached. The adjacent crafted-log case at machine_test.go:1346-1352 writes no sidecar at all and passes for the same reason, so the two neighbouring fixtures disagree about whether the sidecar matters. (By contrast the sibling write at 1774 for 'mrv-crafted-bad-mock' IS load-bearing: the mock check sits after the sidecar read and workflow-hash comparison.) Drop the dead line or add a comment saying the repair path fails before the sidecar is consulted.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1764
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 350
+        },
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1346
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two comments state more than the assertions beneath them verify. (a) machine_test.go:1786, 'on_overflow interrupted by the parent context: nothing recorded, handler retried on resume' — the first clause is asserted (countType == 0 and !OverflowHandled at 1802), the second is not: mo is never resumed after the cancelled Advance, so 'retried on resume' is inferred, not tested. One more `ho.runner.err = nil; ho.advance(mo)` plus a countType == 1 check would close it, and would also pin the resume half of machine.go:889-891. (b) machine_test.go:1487 'transition durable despite Terminal error' and 1678 'failed transition durable' both read the in-memory m.View().Snapshot rather than re-folding the store. I confirmed the property does hold (folding h.events(m) at both sites yields OutcomeClean / OutcomeFailed), so these are under-verified rather than wrong, but a reader takes 'durable' to mean the store was consulted.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1786
+        },
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1487
+        },
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1678
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The three tests in this shard are monolithic grab-bags with no t.Run subtests, and their names do not describe what they cover. TestM7Torn is 178 lines and roughly 35 assertions: after the torn/repair material at 1266-1352 it silently becomes the FSSidecar and MemSidecar suite (name validation, mode bits, MaxPayload caps, injected file errors, List filtering) with nothing in the name to say so. TestM9ExitsAndStoreFailures and TestM9Residue do the same for Init git failures, terminal hooks, tree appends, cancellation and sidecar arg checks. Consequences seen while reviewing: an early failure hides every later assertion (each mutation I ran reported one line and stopped), and the shared countingStore knobs have to be hand-reset in sequence (failOp at 1315/1319, failAt at 1321/1325, failEvAt at 1328/1332/1336/1340, failType at 1697 and 1709 which is never reset and is only harmless because a fresh harness follows). Splitting into t.Run blocks with a per-block harness would remove the ordering coupling and let one failure report all the others.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1266
+        },
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1478
+        },
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1697
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two helper nits in the shard's tail. (a) renamed(body any) []byte (machine_test.go:1880-1887) type-switches on string and []byte with no default, so any other argument silently yields an empty workflow and a confusing downstream parse failure rather than a compile error; all 16 current callers pass string or []byte, so a concrete `renamed(body []byte)` plus []byte(...) at the string call sites would make the constraint enforceable. (b) raw2 (machine_test.go:1257-1264) has exactly one caller (line 1199) and a name that carries no meaning — it exists only because `raw` is used as a local variable by the inline `raw, _ := workflows.Read(...)` pattern repeated ~10 times in the same file. Naming it mustWorkflow (and using it at those sites, which currently discard the read error) would remove both the collision and the discarded errors.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1880
+        },
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 1257
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Cross-shard, same defect class as finding 1, spotted while checking whether the M8 mock clause was covered elsewhere: machine_test.go:159-161 asserts `if !h.events(m)[1].Mock { t.Fatal(\"mock runs stamp Mock on every later event\") }`. The message claims every later event, but the run m has been created and never advanced, so it holds exactly two events (init + tree) and the assertion inspects exactly one of them. The spec row at docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:422 asks for 'mock runs carry it on every non-init event'; the nearest thing to that is fork_test.go:458, which checks only the last event of a child. A loop over all non-init events of an advanced mock run would satisfy the spec and match the message.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/machine_test.go",
+          "line": 159
+        },
+        {
+          "path": "internal/fsm/machine/fork_test.go",
+          "line": 458
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+          "line": 422
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

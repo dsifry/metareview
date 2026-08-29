@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "id": "r-shard-10-3-6de53396ba80e58a",
+  "kind": "shard",
+  "shardId": "shard-10-3",
+  "shardHash": "6de53396ba80e58a",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/reviewmanifest/manifest_test.go",
+      "line": 1,
+      "note": "read the whole rewritten reviewmanifest unit-test file in the pack and cross-checked every assertion against internal/reviewmanifest/manifest.go rather than the diff alone"
+    },
+    {
+      "path": "testdata/fsm/agent-prompt.golden",
+      "line": 1,
+      "note": "built the binary and ran `metareview fsm --agent-prompt`; output is byte-identical to the new golden (diff empty), and tests/go/test-fsm.sh:60 pins it with cmp plus the anchors in tests/go/agent-prompt-anchors.txt"
+    },
+    {
+      "path": "tests/go/test-sharded-review.sh",
+      "line": 263,
+      "note": "executed the new end-to-end script; it completes green ('sharded review: ok') and is wired into tests/run-all.sh:21"
+    },
+    {
+      "path": "tests/manifest/test-manifests.sh",
+      "line": 71,
+      "note": "executed test-manifests.sh green; verified go.mod declares `go 1.26` and that package.json, both plugin manifests, INSTALL.md and README.md all state Go 1.26+, so the new drift check actually holds today"
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 374,
+      "note": "ran the package with -coverprofile: 90.4% statement coverage, and inspected each uncovered block to see which production branches the rewritten test file leaves unexercised"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two named blocker strings in the aggregator have no test anywhere in the repository. `shard <id> includes non-source path <p>` (internal/reviewmanifest/manifest.go:374) and `unknown path disposition for <p>` (internal/reviewmanifest/manifest.go:342) do not appear in any Go test or shell test — a grep for both strings hits only manifest.go. The rewritten test file covers the neighbouring assignment blockers (TestChunkAssignedToExactlyOneShard at manifest_test.go:332 covers duplicate-assignment and unassigned-path) but not these two, so a regression that silently stopped emitting them would keep the suite green. The package sits at 90.4% statement coverage and, unlike internal/shardpack and the override mechanism, has no dedicated 100% coverage gate. Not a regression introduced by this diff (both lines predate it and manifest.go is unchanged in this shard), hence low rather than blocking.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest.go", "line": 374, "note": "the non-source-path blocker: emitted but asserted by no test in the repo"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 342, "note": "the unknown-path-disposition blocker: emitted but asserted by no test in the repo"},
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 332, "note": "TestChunkAssignedToExactlyOneShard covers the sibling assignment blockers only"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestResultSchemaVersionDistinct's second half cannot prove what its comment claims. The comment (manifest_test.go:107-109) says validation must read ResultSchemaVersion rather than the manifest's own SchemaVersion, and that 'only a result carrying ResultSchemaVersion proves which constant the check uses'. But passingShardResult already sets SchemaVersion: ResultSchemaVersion (manifest_test.go:519), so `fresh.SchemaVersion = ResultSchemaVersion` at line 113 is a no-op assignment and the acceptance loop asserts nothing that TestFreshByShardHash does not already assert. Because SchemaVersion and ResultSchemaVersion are both 1, no test in this file can distinguish the two constants; the comment therefore documents a guarantee the code does not provide, which is worse than an acknowledged gap.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 113, "note": "no-op assignment: passingShardResult already sets this exact value"},
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 519, "note": "helper hardcodes SchemaVersion: ResultSchemaVersion, making the mutation vacuous"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead scaffolding in the new shell test. write_results documents and plumbs two knobs — ONLY (a shard-id CSV) and SKIP_CROSS — at tests/go/test-sharded-review.sh:57-59, and the Node body branches on them at lines 64 and 76. All three call sites (lines 147, 179, 246) pass exactly two arguments, so both branches are unreachable. The scenarios the knobs exist to exercise — a partially covered plan, and a re-cut plan whose cross-shard result was not refreshed — are consequently never driven end to end, while the code reads as if they were.",
+      "evidence": [
+        {"path": "tests/go/test-sharded-review.sh", "line": 59, "note": "ONLY and SKIP_CROSS default to empty and are never overridden"},
+        {"path": "tests/go/test-sharded-review.sh", "line": 64, "note": "the ONLY filter branch is unreachable from every call site"},
+        {"path": "tests/go/test-sharded-review.sh", "line": 76, "note": "the SKIP_CROSS suppression branch is unreachable from every call site"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new Go-floor drift check reads go.mod with /^go (\\d+\\.\\d+)$/m (tests/manifest/test-manifests.sh:71), which does not match a patch-qualified go directive. `go 1.26.0` has been legal since Go 1.21 and is what `go mod edit -go=` and some tooling will write, and go.mod's own comment (go.mod:5-14) shows the floor is expected to move. When that happens the check does not report a drift, it throws 'go.mod does not declare a go directive' (line 72) — a message that points the maintainer at a missing directive that is in fact present. Allowing an optional patch segment and comparing on the major.minor pair would fail loudly for the right reason.",
+      "evidence": [
+        {"path": "tests/manifest/test-manifests.sh", "line": 71, "note": "regex anchored to exactly two version components"},
+        {"path": "tests/manifest/test-manifests.sh", "line": 72, "note": "misleading error text on a patch-qualified go directive"},
+        {"path": "go.mod", "line": 3, "note": "current directive is `go 1.26`, which the comment block says is expected to move"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestOversizeResultIgnored (manifest_test.go:173) exercises only the over-limit side of the size guard: it builds MaxResultBytes+27 bytes and asserts a non-empty ignore reason. Nothing asserts that a payload at or just under MaxResultBytes still parses, so flipping ParseResult's `>` (internal/reviewmanifest/manifest.go:151) to `>=` — or an off-by-one in the constant — would silently start ignoring legitimate result files with no test failure. Note also that the fixture is not valid JSON (an unterminated string followed by NUL bytes), so the test only demonstrates that the size check runs before json.Unmarshal, not that a large-but-valid result is rejected on size grounds.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 173, "note": "only the over-limit direction of the boundary is asserted"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 151, "note": "the strict > comparison whose boundary no test pins"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Build's defensive copy of the cross-shard result (internal/reviewmanifest/manifest.go:223-226) is never executed by this package's tests — the coverage profile shows the block at line 224 uncovered, because every cross-shard test assigns manifest.CrossShardResult directly on an already-built manifest (manifest_test.go:215, 224, 457) instead of passing Input.CrossShardResult. The copy exists so a caller's ReviewResult cannot be aliased and mutated through the manifest; that invariant is currently unprotected by any test.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest.go", "line": 224, "note": "uncovered defensive copy of the caller's cross-shard result"},
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 215, "note": "cross-shard tests bypass Build's Input.CrossShardResult path entirely"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0c.1094cbb7736fef0e",
+  "kind": "shard",
+  "shardId": "shard-0c",
+  "shardHash": "1094cbb7736fef0e",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 25,
+      "note": "ManifestContext and Satisfies gate the context-risk downgrade; verified Verdict can only be PASS or NEEDS_REVISION at internal/reviewmanifest/manifest.go:246-248, so requiring \"PASS\" is not over-strict."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 186,
+      "note": "Truncated-diff blocker is downgraded via Classification=advisory; confirmed classForCount (internal/findings/findings.go:417-431) returns advisory for that class regardless of high severity, so the downgrade is effective rather than cosmetic."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 134,
+      "note": "StagedDiffTruncated/WorkingTreeDiffTruncated always add LOCAL_DIFF_TRUNCATED, which is absent from shardSatisfiableReasons, so sharded can never be true while local diffs are truncated - the advisory downgrade at taskdone.go:186 cannot mask uncovered local content."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 89,
+      "note": "BranchDiffFull is assigned only inside collectWith when DiffTruncated is set, and collectWith is the single production entry point, so the addedLines fallback to git.Diff is only taken on an untruncated diff."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 454,
+      "note": "untrackedExcerpt prefixes every content line with \"+\", so a file cannot emit a bare \"--- path\" record header - addedUntrackedLines' scope-spoofing defence holds as documented."
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 189,
+      "note": "Shard results are bound to the current plan hash and shard hash before ingestion, so Satisfies does not need its own staleness check."
+    },
+    {
+      "path": "internal/reviewers/lintscope_test.go",
+      "line": 136,
+      "note": "New lint-scope parser, lintable, diffHeaderPath and the docs/ exemption have direct unit tests, including the leading-space path and unreadable-path fail-open cases; sharded_test.go covers the manifest branch. Rubric's test-coverage requirement is met."
+    },
+    {
+      "path": ".github/workflows/gtg.yml",
+      "line": 56,
+      "note": "Dispatch input pr_number reaches the shell through env: bindings rather than direct ${{ }} interpolation in the script body, so the workflow is not script-injectable; actions/setup-python is SHA-pinned and gtg is version-pinned."
+    },
+    {
+      "path": ".github/workflows/gtg.yml",
+      "line": 90,
+      "note": "Wait loop guards the empty-RUNS case with TOTAL>0 before treating PENDING==0 as done, and an api-error line counts as non-completed, so both failure modes fail toward waiting rather than toward a premature pass."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "executableExts does not cover every extension that executes from the GitHub-Pages-published docs/ tree: .svg (can embed <script>), .xhtml, .mts and .cts fall through to the docs/ prose exemption and are silently dropped from the eval/work-marker lints. The comment directly above claims the executable carve-out closes the docs/ blind spot, so the residual gap is narrower than advertised. Not blocking: no such files exist in docs/ today.",
+      "evidence": [
+        {
+          "path": "internal/reviewers/taskdone.go",
+          "line": 431,
+          "note": "executableExts list omits .svg/.xhtml/.mts/.cts while lintable() exempts everything else under docs/."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The workflow requests statuses: read but never queries the commit-statuses API; the wait loop polls only /check-runs. A repository using legacy commit statuses (or an external integration that reports as a status rather than a check run) would not be waited on, and it is also not in the --exclude-checks list, so gtg could run against an unsettled status and report CI_FAILING. Either poll /commits/$SHA/status alongside check-runs or drop the unused permission.",
+      "evidence": [
+        {
+          "path": ".github/workflows/gtg.yml",
+          "line": 85,
+          "note": "Only check-runs is polled, while line 19 grants statuses: read that nothing consumes."
+        }
+      ]
+    }
+  ]
+}

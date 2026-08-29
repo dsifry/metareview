@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-00-52358dd2f964915c",
+  "kind": "shard",
+  "shardId": "shard-00",
+  "shardHash": "52358dd2f964915c",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T10:06:38-07:00",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/testdata/oracle.sh",
+      "line": 11,
+      "note": "Regenerated oracle.jsonl and oracle.sha256 from oracle.template.jsonl in a scratchpad copy; both reproduce the committed fixtures byte-for-byte (JSONL_MATCH, SHA_MATCH), so the external-sha256 oracle consumed by internal/fsm/run/store_test.go:797-854 is genuinely reproducible."
+    },
+    {
+      "path": ".shellcheckrc",
+      "line": 14,
+      "note": "Ran the CI command (find . -name '*.sh' | xargs shellcheck -x): clean with the rc, and 16 SC2016 hits with --norc and zero hits of any other code, so the rc suppresses exactly the one documented check and nothing else."
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 199,
+      "note": "Verified the legacy prefixes all end in ':' while every fingerprint the current reviewers emit does not (architecture:context-risk, architecture:context-risk-covered at internal/reviewers/taskdone.go:110,123 and epic:context-risk at internal/reviewers/epicready.go:64), so the alias pass cannot supersede a live finding."
+    },
+    {
+      "path": "internal/findings/findings_test.go",
+      "line": 372,
+      "note": "New behaviour is covered: TestLegacyContextRiskRowSuperseded (3 scopes, backup asserted), TestSupersedeLeavesUnrelatedRowsAlone, exact-maxJSONLLineBytes line tests at 506-574, TestReconcileKeepsOverrideWhenTheFindingRecurs and TestReconcileClosesAPendingOverrideThatWasActuallyFixed in override_test.go:158,493."
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 488,
+      "note": "go vet ./internal/findings passes, gofmt reports nothing, go test reports 92.8% which is exactly the tests/coverage-floor.txt:9 line for the package; scanner.Err() is returned so an over-long line surfaces as an error rather than a silent truncation."
+    },
+    {
+      "path": ".gitignore",
+      "line": 8,
+      "note": "The new .metareview/findings.jsonl.pre-0.8.3.bak backup written by backupOnce falls under the '.metareview/*' ignore rule and is not in the allowlisted exceptions, so the migration cannot leak ledger state into git."
+    },
+    {
+      "path": "skills/status/SKILL.md",
+      "line": 27,
+      "note": "The commit/keep-local lists now agree with CLAUDE.md's Durable Output section and with .gitignore; .metareview/runs/ self-ignoring is real (internal/fsm/run/store_jsonl.go:104-107) and .metareview/shards/ writes its own '*' .gitignore (internal/shardpack/shardpack.go:158)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The .shellcheckrc rationale is factually wrong about the sites it suppresses. It states 'Every hit is a backtick inside a single-quoted literal: a Markdown code span being grepped for in a review log ... or a sed script matching one'. Running shellcheck --norc over the suite gives 16 SC2016 hits, and at least two are not that case: tests/go/test-fsm.sh:186 is sed 's/effort: \\$REV_EFFORT/effort: high/' with no backtick anywhere on the line, and tests/manifest/test-manifests.sh:7 is a node -e '...' script whose trigger is the JavaScript template placeholder ${required} at line 60. Since this comment is the sole justification for a repo-wide disable rather than per-line 'shellcheck disable=SC2016' directives, a maintainer reading it would not expect $VAR-shaped literals to be unchecked repo-wide. Either widen the comment to cover escaped shell-variable names in sed scripts and JS template literals, or scope the disable to the sites that need it.",
+      "evidence": [
+        {
+          "path": ".shellcheckrc",
+          "line": 5
+        },
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 186
+        },
+        {
+          "path": "tests/manifest/test-manifests.sh",
+          "line": 7
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "activeExisting was widened from an allowlist to a denylist: 'record.Status == \"open\"' became 'record.Status != \"fixed\"'. Today the written vocabulary is exactly open/fixed/override-pending/overridden/superseded, so the behaviour is right, but any row with an empty or unrecognised status now suppresses creation of a matching current finding, which would drop a live blocker out of Result.Findings and OpenFindings with no trace. An allowlist (Blocks(status) || StatusOverridden || StatusSuperseded) keeps the same behaviour without the open-ended failure mode, and would not silently absorb a future status such as a withdrawal.",
+      "evidence": [
+        {
+          "path": "internal/findings/findings.go",
+          "line": 154
+        },
+        {
+          "path": "internal/findings/override.go",
+          "line": 53
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 11-line comment above the fix transition claims a pending override that was actually fixed 'had no way out' and that this closes it. The transition it guards still requires previousRuns[record.RunID] || resetFinding(...), so an unchained run (no --previous-run, no reset) leaves the override-pending row untouched and 'override list --pending' still exits 1. The fix is real but conditional; the comment reads as unconditional. Worth one clause saying the run must be chained to the run that recorded it.",
+      "evidence": [
+        {
+          "path": "internal/findings/findings.go",
+          "line": 138
+        },
+        {
+          "path": "internal/findings/findings.go",
+          "line": 141
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "readJSONL is now a near-exact copy of the generic reader it could call. internal/findings/findings.go:475-502 and internal/state/state.go:53-79 have the same open/NotExist branch, the same deferred close-with-discarded-error, the same scanner.Buffer(make([]byte, 0, 64*1024), maxJSONLLineBytes+2) line, the same trim/skip-blank/unmarshal loop and the same 'return records, scanner.Err()'. The only difference is []Record{} versus nil on a missing file. maxJSONLLineBytes = 1 << 20 is now declared four times (findings.go:19, state.go:21, runchain.go:17, reviewlog.go:21) with a comment that only findings.go carries in full. state.ReadJSONL[Record] plus one shared constant would remove three copies and keep the CRLF rationale in a single place.",
+      "evidence": [
+        {
+          "path": "internal/findings/findings.go",
+          "line": 480
+        },
+        {
+          "path": "internal/state/state.go",
+          "line": 53
+        },
+        {
+          "path": "internal/findings/findings.go",
+          "line": 19
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Cross-shard: the +2 rationale this shard documents is not applied to the fifth JSONL reader added by the same branch. internal/fsm/record/record.go:156 does sc.Buffer(make([]byte, 0, 1<<20), 1<<20) with maxTokenSize exactly 1<<20 and no +2, which is precisely the case findings.go:15-18 explains bufio rejects (bufio needs the line terminator to fit alongside the token). A run audit line of exactly 1 MiB is readable by findings/state/runchain/reviewlog and rejected by the record layer. Raise it to 1<<20 + 2, or better, share the constant.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 156
+        },
+        {
+          "path": "internal/findings/findings.go",
+          "line": 15
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "backupOnce is the least-covered new function in the package at 55.6% of statements, and the untested branch is the one its name promises: the os.Stat(backup) == nil early return that makes a second alias pass leave the first backup intact. Both new tests start from a ledger with no backup present. A third case that pre-creates the .pre-0.8.3.bak file with distinct content and asserts it is not overwritten would pin the idempotence the doc comment claims. Note tests/coverage-floor.txt:9 pins internal/findings at exactly 92.8, so there is no headroom for the next change to this package.",
+      "evidence": [
+        {
+          "path": "internal/findings/findings.go",
+          "line": 244
+        },
+        {
+          "path": "tests/coverage-floor.txt",
+          "line": 9
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "findings.PendingOverrides has no production caller. The CLI re-implements the same pending filter inline over ListOverrides in cmd/metareview/main.go:513-530 (count pending, print, exit 1). The helper carries the CI contract in its doc comment ('CI should refuse to pass while this is non-empty') while the code that actually enforces it lives elsewhere, so the two can drift. Either have handleOverride call PendingOverrides or delete it.",
+      "evidence": [
+        {
+          "path": "internal/findings/override.go",
+          "line": 137
+        },
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 513
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

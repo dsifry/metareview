@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1c.01db9b4c9183e7a8",
+  "kind": "shard",
+  "shardId": "shard-1c",
+  "shardHash": "01db9b4c9183e7a8",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {"path": "internal/fsm/cli/run.go", "line": 1, "note": "987-line new CLI entrypoint reviewed in full against the task-done rubric"},
+    {"path": "internal/fsm/cli/cli_test.go", "line": 347, "note": "go test ./internal/fsm/cli reports 100.0% of statements; gate/judge/record/export paths are exercised"},
+    {"path": "internal/tasksource/coverage_test.go", "line": 1, "note": "go test ./internal/tasksource reports 100.0% of statements"},
+    {"path": "internal/fsm/judge/judge_test.go", "line": 112, "note": "both new .calibration.golden fixtures are byte-compared by TestJ1Goldens, so neither is orphaned testdata"},
+    {"path": "internal/prready/shardwiring_test.go", "line": 1, "note": "go vet clean and go test ./internal/prready ./internal/taskdone pass"},
+    {"note": "No eval/exec-of-input, no TODO/FIXME markers, no truncated diff context, and no untracked-source hazard in this shard: grep over all six files returned nothing"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead kind normalization in judge(): `if k == \"still-present\" { k = judge.KindStillPresent }` appears twice, but judge.KindStillPresent is literally \"still-present\" (internal/fsm/judge/prompts.go:19), so both assignments are no-ops. The second one at run.go:744 also runs after judgeInput has already consumed k, so it reads as a wire-alias mapping that does not exist. Remove both, or introduce the alias the code implies.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 713},
+        {"path": "internal/fsm/cli/run.go", "line": 744},
+        {"path": "internal/fsm/judge/prompts.go", "line": 19}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "A judge call that succeeds and is then caught by context cancellation is reported as audited when it is not. The closure returns a zero run.LLMCallData when ctx.Err() != nil; machine.RecordLLMCall short-circuits on `data.Kind == \"\"` and returns (0, cerr) without appending, so with callErr == nil the CLI takes the `err == nil` branch and emits `seq: 0` and status OK for a call that never reached audit.jsonl. Distinguish the cancelled case rather than reporting seq 0 as a real sequence number.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 784},
+        {"path": "internal/fsm/cli/run.go", "line": 796},
+        {"path": "internal/fsm/machine/machine.go", "line": 1063}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "gate() binds git to a caller-supplied work dir and its usage guard is partly inert. With both --input and --run, snap still comes from --input (the `if !p.has(\"input\")` guard), so `git = o.md.Git(snap.WorkDir)` is rooted at the input file's work_dir; an input snapshot that omits work_dir yields gate.NewExec(\"\") and commit_exists then runs git in the process CWD while the envelope carries a run_id. Separately, the guard's message claims nothing_found/nothing_confirmed need the run's git/snapshot, but those two gates take `_ Git` and read only the snapshot, which --input supplies regardless of --run. Documented as unaudited, so impact is bounded to the escape hatch.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 669},
+        {"path": "internal/fsm/cli/run.go", "line": 690},
+        {"path": "internal/fsm/gate/gates.go", "line": 61},
+        {"path": "internal/fsm/gate/git.go", "line": 123}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "openRun discards peek's readability signal: `init, _ := c.peek(root, id)`. peek returns false for an unreadable, over-long, or non-init first line and a zero InitData, which scenarioFor reads as Mock == \"\" — so a run whose init line cannot be parsed silently degrades to a real-judge run instead of failing closed. The bool exists precisely to tell those apart.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 210},
+        {"path": "internal/fsm/cli/wiring.go", "line": 83},
+        {"path": "internal/fsm/cli/wiring.go", "line": 117}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The export default output path is computed in two places: run.go recomputes filepath.Join(root, \"docs\", \"metareview\", \"fsm\", runID) purely to report `out`, duplicating the default that export.Export already owns. They agree today (exportDeps sets RepoRoot to the same root), but the envelope's `out` will report a directory the exporter did not use if either moves. Have Export return the resolved path.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 943},
+        {"path": "internal/fsm/export/export.go", "line": 122},
+        {"path": "internal/fsm/cli/wiring.go", "line": 216}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead field in the prready test double: fakeWriter.rollback is declared and branched on in Write, but no test in the file ever assigns it, so the `if f.rollback != nil` arm is unreachable. The taskdone twin fake has no such field, which confirms it is vestigial. Drop it.",
+      "evidence": [
+        {"path": "internal/prready/shardwiring_test.go", "line": 24},
+        {"path": "internal/prready/shardwiring_test.go", "line": 48},
+        {"path": "internal/taskdone/shardwiring_test.go", "line": 20}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The two twin shard-wiring suites are asymmetric in ways that leave prready weaker. prready counts discovers and collections but asserts neither, while taskdone pins both (TestTaskDoneDiscoversShardResults and the gc case of TestTaskDoneHousekeepingFailuresDoNotDiscardTheRun); prready also has no gc-failure case. And prready's write-failure test asserts docs/metareview is absent where taskdone asserts only docs/metareview/reviews. Mirror the assertions so the two scopes are pinned to the same contract.",
+      "evidence": [
+        {"path": "internal/prready/shardwiring_test.go", "line": 31},
+        {"path": "internal/taskdone/shardwiring_test.go", "line": 208},
+        {"path": "internal/prready/review.go", "line": 293}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two rollback tests self-disable rather than fail. TestPackRollbackRunsWhenTheReviewFails and its taskdone twin make the review fail by chmod 0555 on a directory, which is a no-op for root, and then t.Skip when Create unexpectedly succeeds — so in any root container both tests pass while proving nothing. Additionally TestPackWriteErrorRunsRollback repeats TestPackWriteFailureFailsTheRun's exact setup and Create call, differing only in the assertion; fold them.",
+      "evidence": [
+        {"path": "internal/prready/shardwiring_test.go", "line": 168},
+        {"path": "internal/taskdone/shardwiring_test.go", "line": 168},
+        {"path": "internal/prready/shardwiring_test.go", "line": 188}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "StatusLines sorts only half its output: `sort.Strings(bad)` orders the unreadable runs but the `good` slice is emitted in whatever order Store.List() returned, so the `metareview status` FSM section is only partly deterministic. Sort both or neither.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 985}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-04-3-review",
+  "kind": "shard",
+  "shardId": "shard-04-3",
+  "shardHash": "01c4c1b7d5a230b6",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 60,
+      "note": "rootOf parses only the first porcelain block and refuses a bare main worktree; strings.Split never returns an empty slice, so lines[0] cannot panic even on empty output, and err/code != 0 is already mapped to ERR_NOT_A_REPO."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 118,
+      "note": "scenarioFor is path-bound (RepoRoot equality) and resolves the mock dir with filepath.Join(root, rel) before relInside; machine/machine.go:163 stores Mock as a repo-relative path, so the Join cannot be subverted by an absolute stored value."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 190,
+      "note": "Verified kind.New's only error (CodeMockMismatch at internal/fsm/kind/kind.go:76) is unreachable here: judge.NewMock returns *judge.MockJudge and Mock is derived from the same scenario != nil test, so the discarded error is genuinely dead."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 220,
+      "note": "resolveRun's flag -> MRV_RUN_ID -> newest-without-error precedence is sound: run.sortSummaries (internal/fsm/run/store.go:220) sorts CreatedAt descending, so the first non-error summary really is the newest, and both flag and env paths run ValidateRunID before use."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 262,
+      "note": "applyJudgeOverrideFor copies the caller's vars map before mutation and drops only the environment (never the flag) under --calibration, matching the documented rationale that a flag is a real conflict Resolve must report."
+    },
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 108,
+      "note": "TestCodexJudgeBuildsASafeInvocation pins the security-relevant argv: --sandbox read-only, --skip-git-repo-check, prompt on stdin via trailing '-', plus a negative assertion that the candidate text never reaches argv where the process table would expose it."
+    },
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 175,
+      "note": "TestCodexJudgeReportsTokensEvenWhenTheCallFails matches codex.go:64-70, which assigns v.Tokens from parseCodexEvents before the exec/exit-code error branches, so usage survives a failed turn."
+    },
+    {
+      "path": "internal/fsm/judge/codex_test.go",
+      "line": 188,
+      "note": "TestCodexPrefixStrippingMatchesRouting is a real regression test: route lowercases (judge.go:114) while wireModel now uses trimPrefixFold (judge.go:168-176), so mixed-case codex/ prefixes route and strip consistently."
+    },
+    {
+      "path": "internal/fsm/machine/handoffs_test.go",
+      "line": 63,
+      "note": "TestPreflightSeam asserts the no-side-effect contract in both directions: a refusing Preflight at init creates no run (store.List empty), and a refusing Preflight at advance appends no event (store.appends unchanged)."
+    },
+    {
+      "path": "internal/fsm/machine/handoffs_test.go",
+      "line": 176,
+      "note": "TestRecordLLMCall covers the append-on-error case, the append-nothing-on-cancel case, terminal and torn refusals, and Lock/append failure passthrough; index monotonicity is asserted rather than assumed."
+    },
+    {
+      "path": "internal/fsm/machine/handoffs_test.go",
+      "line": 16,
+      "note": "TestReadOnlyOpen pins that a read-only open ignores a held lock, a re-pinned binary hash and a missing mock scenario (loads == 0), while a full open still contends for the lock."
+    },
+    {
+      "note": "Validation run locally on the frozen branch: go test ./internal/fsm/cli/ ./internal/fsm/judge/ ./internal/fsm/machine/ passes, and go test -cover reports 100.0% of statements for all three packages. No TODO/FIXME markers, no eval-style dynamic execution, and no untracked source introduced by this shard."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Duplicated containment guard: relInside is byte-for-byte identical in internal/fsm/cli/wiring.go:103 and internal/fsm/machine/machine.go:228, and both copies enforce the same security-relevant rule that a mock scenario must live inside the repository. cli already imports machine, so one exported helper would do. Divergence risk only; today the two copies agree. Both copies are also purely lexical (filepath.Clean + prefix match, no EvalSymlinks), so a symlink inside the repo that points outside it satisfies containment in either package.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 103,
+          "note": "Identical to internal/fsm/machine/machine.go:228, including the '.' equal-path branch and the separator prefix test."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead production code: applyJudgeOverride has no non-test caller. The only production call site (internal/fsm/cli/run.go:307) uses applyJudgeOverrideFor with the explicit calibration flag; a repo-wide grep for applyJudgeOverride( finds only its definition and three references in judgeoverride_test.go. It is therefore an untested-in-anger wrapper that its own test keeps at 100% coverage.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 254,
+          "note": "Wrapper defined here; only internal/fsm/cli/judgeoverride_test.go:45,57,63 call it."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Discarded error: kinds, _ := kind.New(...) drops kind.New's CodeMockMismatch. I confirmed it cannot fire from this call site, but the blank identifier means a future change to the Mock/judge invariant would yield a nil *kind.Registry that is stored straight into machine.Deps.Kinds and nil-dereferenced later rather than surfacing an error code. The inline comment documents the invariant; propagating the error would cost one line.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 190,
+          "note": "kinds, _ := kind.New(kind.Deps{Judge: j, Mock: scenario != nil}) discards the returned error."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Misleading error text: resolveRun falls through to ERR_NO_RUNS with the message 'no FSM runs in this repository; run `metareview fsm init`' whenever every listed run carries a non-empty Error summary. The repository may hold many runs; the operator is told none exist and pointed at init instead of at --run or the failed runs.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 243,
+          "note": "The CodeNoRuns return is reached both when store.List() is empty and when every summary has s.Error != \"\"."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Comment contradicts behaviour on the 'max' effort. The new test's header comment (and internal/fsm/judge/judge.go:133-138) state that claude-opus-4-5/4-6 and claude-sonnet-4-6 'support max but predate xhigh', yet the HTTP effort vocabulary at internal/fsm/judge/judge.go:101 is {low, medium, high, xhigh}, so Preflight rejects max for every HTTP model. The test itself asserts the rejection, so the code is right and only the prose misleads a future reader into thinking max is accepted.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex_test.go",
+          "line": 249,
+          "note": "Doc comment says the listed models 'support max but predate xhigh' while efforts at judge.go:101 has no max entry."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Test gap in TestItoa: the negative branch is exercised only with -3. itoa negates in place (internal/fsm/judge/codex.go:147-149), so math.MinInt overflows back to itself, the for n > 0 loop never runs, and the function returns the bare string \"-\". Unreachable today because itoa's only call sites format a process exit code, but the table is the natural place to pin the boundary.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex_test.go",
+          "line": 237,
+          "note": "Table covers 0, 7, 42, -3, 1234567 but no MinInt boundary for the in-place negation."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

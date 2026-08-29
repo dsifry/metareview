@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-17-2.158c0318a60e994d",
+  "kind": "shard",
+  "shardId": "shard-17-2",
+  "shardHash": "158c0318a60e994d",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T21:05:00Z",
+  "evidence": [
+    {"path": "internal/fsm/kind/kind.go", "line": 571, "note": "still-present Decode skips checkPayload on an asserted invariant"},
+    {"path": "internal/fsm/kind/kind.go", "line": 450, "note": "match loop: greedy argmax with seen-marking, matches spec 4 s4.2"},
+    {"path": "internal/fsm/kind/kind.go", "line": 77, "note": "New's mock invariant vs spec 5 r4 nil-judge carve-out"},
+    {"path": "internal/fsm/kind/kind.go", "line": 276, "note": "lensCount type assertion on a YAML-decoded param"},
+    {"path": "internal/fsm/run/types_test.go", "line": 96, "note": "Clone deep-copy test walks every reference field reflectively"},
+    {"path": "internal/learnsource/source_test.go", "line": 157, "note": "new test asserts committed shard results are excluded from learning context"},
+    {"note": "go vet and go test ./internal/fsm/kind ./internal/fsm/run ./internal/learnsource all pass (count=1); kind_test.go (29 KB) covers the new kind.go, so the rubric's tests-present rule is satisfied"},
+    {"note": "no TODO/FIXME markers, no eval-style dynamic execution, and no truncated diff context in this shard's three files"},
+    {"path": "internal/fsm/judge/prompts.go", "line": 313, "note": "verified still-present parse failures fail closed (decision=true), so stillPresentExec ignoring ParseError is correct, not a defect"},
+    {"path": "internal/fsm/machine/machine.go", "line": 696, "note": "delta_applied append rejections are converted into a node_output gate failure, bounding the impact of kind-level validation gaps"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "stillPresentKind.Decode is the only kind Decode that skips checkPayload, on the comment 'MaxDeltaList statuses of MaxShort ids always fit the payload'. The arithmetic is false: 256 statuses whose ids are at the MaxShort cap (1024 B) canonicalize to roughly 256*1070 = 274 KB, over MaxPayload-envelopeMargin (262016 B). It is reachable: cmd nodes may contribute Confirmed bugs with ids up to MaxShort each, split across iterations so each individual delta stays under the payload cap while AllFound grows to the 256-bug cliff. stillPresentExec then emits an oversized statusOut that Decode accepts and the node_output append rejects at run/fold.go:43 (ReasonOversize), surfacing as a raw ERR_APPEND_REJECTED from machine.go rather than the intended ERR_TOO_MANY_BUGS / node-output-invalid gate. Contrived but the stated invariant is simply wrong; either cap ids tighter or call checkPayload here too.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 571, "note": "return o, nil with the 'always fit the payload' claim"},
+        {"path": "internal/fsm/kind/kind.go", "line": 594, "note": "statusOut is built from AllFound ids with no size bound"},
+        {"path": "internal/fsm/run/types.go", "line": 46, "note": "MaxShort 1 KB, MaxDeltaList 256, MaxPayload 256 KB - 256*1070 > MaxPayload-128"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "New applies the Mock invariant unconditionally: with Judge nil, isMock is false, so Deps{Judge: nil, Mock: true} is refused. Spec 5 r4 states the invariant 'still checks isMock != d.Mock only when a judge is present'. The divergence is on the safe side and no current caller hits it (cli/wiring.go:189 and cli/run.go:233 are consistent by construction), so this is a spec-wording/implementation mismatch to reconcile, not a behavioural bug.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 77, "note": "if isMock != d.Mock { return mock-mismatch }"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md", "line": 312, "note": "spec 5 r4 nil-judge carve-out wording"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "adjudicateExec's match phase issues one judge call per (golden, candidate) pair with no spend or call ceiling: with MaxGoldens 64 and up to 256 deduplicated candidates that is up to 16,384 billed calls in a single node, and nothing in machine or fold enforces a token/call budget. The pre-flight only bounds output size, not spend. This was already logged as an architecture advisory ('match O(g x c) unbounded') for the spec, and the implementation inherits it; recording it here so the advisory is not lost, not as a new blocker.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 444, "note": "inner candidate loop inside the golden loop, one judge.Call per pair"},
+        {"path": "docs/metareview/reviews/mrv-20260827-062655870118000-artifact-2026-08-27-metareview-0-9-0-fsm-judge-kinds-33d63bfb.md", "line": 45, "note": "prior architecture-lens advisory naming match O(g x c) unbounded"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "lensCount silently falls back to all 8 lenses whenever Params['lenses'] is not a Go int. Today YAML parsing yields int and validateLenses rejects anything else at parse time, so the fallback is unreachable through workflow.Parse - but only because Options.Kinds carries ValidateParams. Any loader that builds a Node without the kind registry's KindInfo (or a future JSON/var-substituted params path, where a number decodes as float64 or a substituted var becomes a string) would silently review with 8 lenses instead of erroring. A typed lookup that distinguishes 'absent' from 'wrong type' would remove the trap.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 276, "note": "n.Params[\"lenses\"].(int) with a silent default on failure"},
+        {"path": "internal/fsm/workflow/resolve.go", "line": 68, "note": "params are var-substituted after validation; strings are rewritten, non-strings passed through"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

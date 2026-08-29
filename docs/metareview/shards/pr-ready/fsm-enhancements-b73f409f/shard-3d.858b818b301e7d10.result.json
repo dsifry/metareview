@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3d.858b818b301e7d10",
+  "kind": "shard",
+  "shardId": "shard-3d",
+  "shardHash": "858b818b301e7d10",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T18:20:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/fsm/run/store_test.go",
+      "line": 1,
+      "note": "Reviewed CHANGELOG.md, internal/fsm/kind/decision_test.go, internal/fsm/run/builder.go, internal/fsm/run/store_test.go and tests/go/test-git-context.sh against rubrics/task-done-review-rubric.md, adversarially, with mutation testing against a scratchpad copy of the repo (branch left untouched)."
+    },
+    {
+      "path": "internal/fsm/run/store_jsonl.go",
+      "line": 176,
+      "note": "Mutation-proved TestReadRawSurfacesAMidFileReadFailure: reverting io.ReadAll to the hand-rolled break-on-error loop it replaced makes the test fail with 'a failed read was reported as success with 0 bytes'. The comment's claim about the old defect is accurate."
+    },
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 217,
+      "note": "Mutation-proved TestSummarizeIncompleteFork: dropping the second disjunct of incompleteFork (Seq == ForkedAtSeq+1 && StateKind == KindAgentEdit) fails the 'second disjunct: one past, agent-edit' case, and narrowing the first disjunct from <= to < fails the summarize-level assertion. The test comment's claim that the second disjunct was previously unexercised now holds no longer."
+    },
+    {
+      "path": "internal/fsm/run/store_test.go",
+      "line": 190,
+      "note": "Mutation-tested the new store_test.go against the code it covers: flipping the List tie-break, dropping TypeTree from countedType, changing Options.maxEvents' zero check, removing parseLines' Prev check, skipping the .gitignore re-ensure, widening the run dir mode to 0755, dropping O_NOFOLLOW, dropping TornFiles' audit.torn- prefix filter and skipping removeNeverCreated's .torn preservation each turn the package red. 15 of 16 attempted mutations across store.go, store_jsonl.go and builder.go were caught."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 46,
+      "note": "Verified decision_test.go's confidence table against AdjudicateThreshold = 0.7: 0.7 effective true, 0.6 and absent confidence effective false. Mutating >= to >, dropping the confidence term, defaulting absent confidence to 1.0, or extending the threshold rule to still-present all fail TestDecision. Removing either nil-judge guard in kind.go (adjudicateExec.Execute:407, stillPresentExec.Execute:580) fails TestNilJudgeExecutors."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 305,
+      "note": "tests/go/test-git-context.sh's lowered grep matches the actual strings at gitcontext.go:305, 319 and 327; all three copies of the message were lowercased together in the branch diff, and a repo-wide grep finds no remaining consumer of the old capitalised form outside prior review artifacts. Ran the script (exit 0) and mutated the grep pattern to a nonsense string to confirm the assertion is live (exit 1). shellcheck clean."
+    },
+    {
+      "path": "CHANGELOG.md",
+      "line": 3,
+      "note": "Spot-checked the 0.9.0 claims against the code: `metareview fsm` with no subcommand emits the exact subcommand list init|state|advance|record|gate|judge|converge|diff|export|workflows|--agent-prompt with schema_version 1 and an untrusted array, exit 2; every named flag (--from, --at-iter, --var, --allow-custom-cmds, --mock-ai, --repair, --judge-model/--judge-effort) exists in internal/fsm/cli/run.go:107-113 and prompt.go:22-40; testdata/fsm/agent-prompt.golden, commands/fsm.md, skills/fsm, docs/fsm/ and tests/go/test-fsm.sh all exist; tests/coverage.sh:88-91 does require every statement covered for internal/fsm/* and workflows; tests/run-all.sh:11-12 vets and lists the smoke-tagged judge test; MinGitVersion = 2.31 (internal/setup/setup.go:184) matches 'Requires git >= 2.31'; exports land under docs/metareview/fsm/ (export.go:122)."
+    },
+    {
+      "path": "internal/fsm/record/record.go",
+      "line": 128,
+      "note": "Checked the CHANGELOG Upgrade paragraph that reads as if it could be wrong: 'a complete but newline-less final row is kept as a row; only an undecodable fragment moves to .metareview/runs/.torn/'. It is about runs.jsonl, not the FSM audit log, and readRows (record.go:139-152) plus appendRow (record.go:216-224) implement exactly that. FSM Row.Scope is 'fsm-<workflow>' (record.go:85), so 0.8.x review-gate readers cannot match it. Not a false claim."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.jsonl",
+      "line": 2,
+      "note": "Verified TestOracle's comment that 'the oracle carries <>& and U+2028 in a payload': line 2's tree payload status is 'M a.go <>& x\\u2028y' with the angle brackets and ampersand as literal bytes and U+2028 as an escape, so the assertion is not vacuous. The three fixtures each hold 3 lines and oracle.sha256 holds 3 hashes, so the loop guard len(want) != len(lines) cannot pass over an empty set."
+    },
+    {
+      "path": "tests/coverage.sh",
+      "line": 88,
+      "note": "go test ./... is green; go vet and golangci-lint report 0 issues on internal/fsm/run and internal/fsm/kind; internal/fsm/run reports 100.0% of statements, so every Override constructor closure in builder.go is executed at least once."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 'unknown kind' row in the new TestDecision table is satisfiable by two of the three wrong implementations it appears to rule out. internal/fsm/kind/decision_test.go:32 uses the payload {\"match\":true} -- the same payload as the 'absent field' row directly above it at line 31 -- so it can only detect an unknown kind that falls through to v.Match. Proved by mutation: rewriting internal/fsm/kind/decision.go:34-35 from `case judge.KindStillPresent: raw = v.StillPresent` to `default: raw = v.StillPresent`, so that every unrecognised kind is read as still-present, leaves `go test ./internal/fsm/...` fully green. Decision's doc comment (decision.go:16-18) explicitly promises Raw is nil 'when ... the kind is unknown', and TestDecision is the only test of kind.Decision anywhere in the module -- it feeds machine.DiffRuns from internal/fsm/cli/run.go:905, so a silently-decided unknown kind would surface as a wrong decision in `fsm diff` output. Fix by giving the unknown-kind row a payload that carries all three decision fields, e.g. {\"match\":true,\"is_real\":true,\"still_present\":true} with kind \"other\" expecting nil/nil, which then fails under any fall-through.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/decision_test.go",
+          "line": 32
+        },
+        {
+          "path": "internal/fsm/kind/decision_test.go",
+          "line": 31
+        },
+        {
+          "path": "internal/fsm/kind/decision.go",
+          "line": 34
+        },
+        {
+          "path": "internal/fsm/kind/decision.go",
+          "line": 17
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead statement in Builder.Copy. internal/fsm/run/builder.go:184 sets `child.mock = cd.Mock != \"\"` after the copy loop, but child.Init(cd) at builder.go:166 already performed exactly that assignment (builder.go:64) and nothing between the two touches child.mock -- the copy loop only writes child.state and child.iter. Proved by deleting line 184 in a scratchpad copy: `go test ./internal/fsm/...` stays green. Because it is a statement rather than a branch, the exactly-100% gate that tests/coverage.sh:88-91 imposes on internal/fsm/* counts it as covered while nothing asserts it, so it reads as a deliberate re-derivation that is in fact a no-op. Delete it, or if the intent was to derive mock from the copied events rather than from the child init data, say so and derive it from them.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/builder.go",
+          "line": 184
+        },
+        {
+          "path": "internal/fsm/run/builder.go",
+          "line": 166
+        },
+        {
+          "path": "internal/fsm/run/builder.go",
+          "line": 64
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Misleading dead parameter on Builder.stamp. internal/fsm/run/builder.go:101 declares `stamp(typ string, data any, _ []Override)` and discards the third argument. Init passes its overrides into it at builder.go:65 as though stamp applied them, then applies the same slice itself in the loop at builder.go:69-71; Event passes nil at builder.go:78 and applies them at builder.go:86-88. A reader of Init has to open stamp to learn the argument is ignored, and a future 'fix' that honours it would apply every override twice. Drop the parameter and the argument at the call site.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/builder.go",
+          "line": 101
+        },
+        {
+          "path": "internal/fsm/run/builder.go",
+          "line": 65
+        },
+        {
+          "path": "internal/fsm/run/builder.go",
+          "line": 69
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Builder.Copy panics rather than failing readably on the malformed logs the Override API exists to construct. internal/fsm/run/builder.go:174 indexes pb.lines[ev.Seq-1], which assumes the parent's Seq values are exactly 1..n in order, and builder.go:154 dereferences parent[0] with no length check while discarding the Unmarshal error. WithSeq (builder.go:13) is provided precisely so tests can build logs with wrong Seq values, so forking such a log gives an index-out-of-range panic that takes down the whole test binary instead of a named failure. A bounds check with a t-visible error, or a documented precondition on Copy, would keep the failure diagnosable.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/builder.go",
+          "line": 174
+        },
+        {
+          "path": "internal/fsm/run/builder.go",
+          "line": 154
+        },
+        {
+          "path": "internal/fsm/run/builder.go",
+          "line": 13
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Unchecked type assertion inside a test assertion path. internal/fsm/run/store_test.go:190 writes se.Cause.(*FoldError).Reason != ReasonStamp without the comma-ok form. If Append ever returns ERR_APPEND_REJECTED with a differently typed cause, the test panics on the conversion instead of printing the actual cause -- the opposite of what the storeErrE helper introduced at store_test.go:29-37 was written to achieve, and the same class of problem the file's own header comment about discarded failures is guarding against. Use the comma-ok form and t.Fatalf with se.Cause.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store_test.go",
+          "line": 190
+        },
+        {
+          "path": "internal/fsm/run/store_test.go",
+          "line": 29
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Weak sidecar-permission assertion in TestJSONLTornTail. The loop at internal/fsm/run/store_test.go:488-492 already identifies this iteration's sidecar by content, but the mode check at store_test.go:496 stats matches[0] -- the lexicographically first name after sort.Strings, and sidecar names are audit.torn-<nextSeq>-<nanos>.bin where nextSeq is 3 for all three iterations, so matches[0] is always the oldest sidecar. Iterations 2 and 3 therefore re-assert the 0600 mode of iteration 1's file and never check the one just written. Stat the file the loop identified instead. The comment at store_test.go:488 ('the newest sidecar carries this iteration's tail') also describes an ordering the loop does not use: it takes any sidecar whose bytes match, which happens to be sound here only because each iteration's tail string is distinct.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store_test.go",
+          "line": 496
+        },
+        {
+          "path": "internal/fsm/run/store_test.go",
+          "line": 488
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "internal/fsm/run/builder.go is a 188-line test-fixture API (Builder, Override and eleven With* constructors, all exported) shipped in a non-test file, so it compiles into the production binary and its statements sit in the denominator of the exactly-100% gate that tests/coverage.sh:88-91 applies to internal/fsm/*. Verified there is no non-test caller anywhere in the module: every reference outside the file itself is in a _test.go. Accepted rather than blocked because cross-package tests in internal/fsm/machine legitimately need it and Go has no cross-package test-only visibility; a dedicated internal/fsm/runtest package would remove it from the shipped package and from the coverage denominator.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/builder.go",
+          "line": 28
+        },
+        {
+          "path": "tests/coverage.sh",
+          "line": 88
+        }
+      ]
+    }
+  ]
+}

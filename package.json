@@ -1,6 +1,6 @@
 {
   "name": "metareview",
-  "version": "0.8.3",
+  "version": "0.9.0",
   "description": "Go-based metaswarm-compatible internal review harness for plans, specs, decompositions, code, acceptance evidence, PR readiness, and post-merge learning",
   "bin": {
     "metareview": "cli/metareview.js"
@@ -25,7 +25,10 @@
     "CLAUDE.md",
     "LICENSE",
     ".codex-plugin/",
-    ".claude-plugin/"
+    ".claude-plugin/",
+    "workflows/",
+    "docs/fsm/",
+    "go.sum"
   ],
   "keywords": [
     "review",
@@ -46,11 +49,11 @@
     "node": ">=18"
   },
   "metareview": {
-    "runtime": "Packaged releases should provide bin/metareview. Source checkout mode requires Go 1.22+ and falls back to go run ./cmd/metareview."
+    "runtime": "Packaged releases should provide bin/metareview. Source checkout mode requires Go 1.26+ and falls back to go run ./cmd/metareview."
   },
   "scripts": {
     "build": "go build -o bin/metareview ./cmd/metareview",
     "prepack": "npm run build",
-    "test": "bash tests/run-all.sh"
+    "test": "bash tests/coverage.sh"
   }
 }

@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-04-3-review",
+  "kind": "shard",
+  "shardId": "shard-04-3",
+  "shardHash": "460074f2c29291c3",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 47,
+      "note": "New CLI wiring file read in full (221 added lines); no eval or other unsafe execution, no TODO/FIXME markers, diff context complete."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 160,
+      "note": "scenarioFor path containment: mock rel is joined then checked with relInside, so a '..' segment resolves outside root and is rejected with CodeMockInvalid."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 127,
+      "note": "peek bounds the audit line by run.MaxLine before Cut and treats every unmarshal failure as absent; advisory-only per its comment."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 244,
+      "note": "resolveRun precedence flag -> MRV_RUN_ID -> newest non-error run, with ValidateRunID on both untrusted inputs and a typed CodeNoRuns fallback."
+    },
+    {
+      "path": "internal/fsm/machine/handoffs_test.go",
+      "line": 297,
+      "note": "Tests cover read-only Open under a held lock, preflight seam ordering/refusal (nothing created or appended), workflow source and reserved-name refusal, and RecordLLMCall sequencing plus terminal/torn/lock/append failure paths."
+    },
+    {
+      "path": "internal/fsm/cli/cli_test.go",
+      "line": 1,
+      "note": "Test coverage for the cli package exists alongside the new wiring.go, so the source change is not untested."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "rootOf indexes lines[0] after splitting the first porcelain block; if `git worktree list --porcelain` ever exits 0 with empty stdout, this returns an empty root string rather than CodeNotARepo. Not reachable with real git, so advisory only.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 108,
+          "note": "return strings.TrimPrefix(lines[0], \"worktree \") with no non-empty guard on the first line"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

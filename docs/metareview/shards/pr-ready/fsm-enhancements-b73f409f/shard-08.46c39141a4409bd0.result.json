@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-08.46c39141a4409bd0",
+  "kind": "shard",
+  "shardId": "shard-08",
+  "shardHash": "46c39141a4409bd0",
+  "planHash": "014639e60cb3cab9",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 23,
+      "note": "Canonical() validates JSON, rejects duplicate keys at any depth, then re-encodes through marshalCanonical; verified idempotent and order-preserving because a json.RawMessage round-trips through compact without re-ordering keys."
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 36,
+      "note": "rejectDuplicateKeys token walk traced by hand for empty objects, objects nested in arrays, arrays nested in objects and repeated keys after a nested object; the '}' delimiter is only ever seen in key position, so the array-pop branch cannot underflow the stack."
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 115,
+      "note": "CapText's per-rune budget was checked against internal/fsm/run/types.go:345 marshalCanonical: quotes/backslash/\\n/\\r/\\t cost 2, control chars and U+2028/U+2029 cost 6, HTML chars stay verbatim under SetEscapeHTML(false), and both an invalid byte and a genuine U+FFFD cost 6 because marshalCanonical ReplaceAll-escapes the raw rune."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 345,
+      "note": "marshalCanonical is the encoder CapText and Canonical are specified against; its escape-only-adds direction is what makes the CapText budget an upper bound rather than an estimate."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 39,
+      "note": "Apply calls Canonical and returns ReasonBadPayload before any output hash is compared, which is the mitigation OutputHash's doc comment relies on; verified rather than assumed."
+    },
+    {
+      "path": "internal/fsm/run/canonical_test.go",
+      "line": 19,
+      "note": "Tests cover normal form, rejection cases, idempotence, hash pins, BugID/Key value pins, CapText boundaries and toolchain independence; go test ./internal/fsm/run/ reports 100.0% coverage and go tool cover -func shows every function in canonical.go at 100.0%."
+    },
+    {
+      "path": "testdata/fsm/scenarios/review-loop/reviewed/judge.yaml",
+      "line": 3,
+      "note": "expect_model gpt-5.2 matches --var JUDGE=gpt-5.2 in tests/go/test-fsm.sh:52, and the scenario is exercised at tests/go/test-fsm.sh:198-202 (DONE 1, outcome reviewed, counts.confirmed 1). bash tests/go/test-fsm.sh passes on this branch."
+    },
+    {
+      "path": "docs/tasks/pr-b-slice-3.md",
+      "line": 1,
+      "note": "Task doc only; no TODO/FIXME markers, no unsafe execution, and the acceptance gate it names (tests/go/test-shardpack-coverage.sh) exists and is wired into tests/run-all.sh."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Suspected fail-open: rejectDuplicateKeys swallows every json.Decoder error and returns nil, so a decode failure would silently report 'no duplicates'. Checked and dismissed: json.Valid and json.Decoder share the same scanner and nesting-depth limit, UseNumber removes the number-conversion failure mode, and json.Valid rejects trailing data, so io.EOF really is the only reachable error after the validity check.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 52, "note": "if err != nil { return nil } inside the token loop"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Suspected hash collision hazard: OutputHash maps every invalid or duplicate-key payload to sha256 of the empty string, so all malformed payloads share one hash. Checked and dismissed: run.Apply canonicalizes and rejects the event with ReasonBadPayload before any node-output hash is recorded or compared, and Canonical never returns empty bytes for valid JSON, so no valid payload can collide with the failure value.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 88, "note": "canon set to nil on Canonical error before sha256"},
+        {"path": "internal/fsm/run/fold.go", "line": 39, "note": "Apply rejects bad payloads ahead of any hash use"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "BugID truncates SHA-1 to 12 hex characters (48 bits). Two distinct finding texts that collide would be folded into one bug identity in the audit chain. The value is pinned by test and the space is far larger than any plausible per-run finding count, so this is a documented identity choice rather than a defect; noted because it is an unbounded-input hash used as a primary key.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 103, "note": "hex.EncodeToString(sha1 sum)[:12] as the finding's stable identity"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "CapText returns (\"\", true) whenever max < 2, including for an already-empty input, so a caller with a sub-2 budget records a truncation that did not occur. No production caller passes a budget below run.MaxDetail, so this is only reachable from tests; flagged as a contract wrinkle, not a live bug.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 116, "note": "if max < 2 { return \"\", true } short-circuits before inspecting s"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stale comment: 'Encoding a valid RawMessage cannot fail, so the error is discarded' sits above a call to marshalCanonical, which has no error return at all — the discard it describes happens one level down in types.go. Harmless, but it points a reader at a signature that does not exist.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 30, "note": "comment describes an error return marshalCanonical does not have"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-07-review",
+  "kind": "shard",
+  "shardId": "shard-07",
+  "shardHash": "54464dd4aa3a38bf",
+  "planHash": "a3a4da37f641f1bc",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": ".claude-plugin/plugin.json",
+      "line": 3,
+      "note": "Version 0.9.0 matches internal/version/version.go:3 (const Version = \"0.9.0\") and CHANGELOG.md:3; the Go 1.26+ claim matches go.mod line 3 (go 1.26) and README.md:85. Missing trailing newline fixed."
+    },
+    {
+      "path": "commands/status.md",
+      "line": 9,
+      "note": "Doc text matches the CLAUDE.md durable-output contract: .metareview/shards/ and .metareview/runs/ transient, docs/metareview/shards/ and docs/metareview/fsm/ committed. No behavioural claim to falsify."
+    },
+    {
+      "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-enhancements.md",
+      "line": 89,
+      "note": "Spec contract 'fsm init REQUIRES --var JUDGE, fails with ERR_JUDGE_UNSET, no hardcoded judge default' verified against internal/fsm/cli/envelope.go:23 (CodeJudgeUnset) and workflows/sdlc-loop.yaml:5 / workflows/review-loop.yaml:5 ({required: true}); no default model literal ships. Documentation only, no executable content, no TODO/FIXME/eval in the shard."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 141,
+      "note": "riskReasons split verified: DIFF_TRUNCATED is now branch-only, LOCAL_DIFF_TRUNCATED covers staged/worktree, DIFF_OVERSIZE is gated on branchDiffBytes > maxBranchDiffBytes (profile.go:143). All three reasons are consumed downstream: internal/contextprofile/shards.go:193 refuses to plan over the bound, internal/reviewers/sharded_test.go:176 pins the non-shard-satisfiable reason set. Tests exist at internal/contextprofile/plan_test.go:285-318."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 132,
+      "note": "The removal of ShardPlanMarkdown here is a move, not a deletion: internal/contextprofile/shards.go:264 defines the two-argument form and internal/taskdone/review.go:497 and internal/prready/review.go:873 call it. go vet and go test pass for internal/contextprofile (80.2% stmt) and internal/gitcontext (85.1% stmt)."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 141,
+      "note": "fileHash/HashFields verified as the single definition of the v4 length-prefixed preimage encoding: internal/contextprofile/shards.go:66 delegates to gitcontext.HashFields rather than duplicating it, so file/chunk/shard/plan hashes cannot drift. Per-path measurement flags (--no-renames --text --no-textconv, GIT_LITERAL_PATHSPECS=1) match docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md:54-56."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 44,
+      "note": "realGit captures stderr and wraps it into the error, so a failing measurement names the git invocation instead of surfacing a bare exit status; branchPaths/collectBranchFiles/pathspecArgs/fileHash/HashFields are at 100% statement coverage, realGit at 75% and measureBranchFiles at 80% (error paths)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "LocalBytes is contaminated by the branch diff for every branch file. In filesFromGit, byPath is seeded by addDiffProfiles(byPath, git.Diff) (profile.go:175) — the branch diff — before local[f.Path] = byPath[f.Path] (profile.go:194) captures what the comment calls 'the uncommitted contribution'. Because BranchFiles is only populated when the branch diff was truncated (internal/gitcontext/gitcontext.go:77-88), git.Diff is always present in production, so a file with zero local edits gets LocalBytes > 0. Reproduced by copying internal/contextprofile into a scratch module and calling filesFromGit with Diff set to a 109-byte branch hunk for src/clean.go, DiffTruncated true, BranchFiles [{src/clean.go, 999}] and no staged/worktree content: result {Path:src/clean.go DiffBytes:999 Source:branch LocalBytes:109} where LocalBytes must be 0. Consequence: internal/reviewmanifest/manifest.go:522 uses file.LocalBytes > 0 to add branch files to LocalPaths, which manifest.go:273 renders as 'Local changes (not sharded)'. Every committed file that landed in the first 120,000 bytes of the truncated branch diff is falsely listed there, so the one disclosure that separates reviewed (in a shard pack) from unreviewed (in no pack) bytes cannot be trusted to identify the genuinely dirty files. The regression test at internal/contextprofile/profile_test.go:99 misses it because its fixture leaves git.Diff empty. Fix: compute the local contribution from the staged/worktree/untracked passes only, rather than from a byPath map that already includes git.Diff.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 194,
+          "note": "local[f.Path] = byPath[f.Path] captures branch-diff bytes, not just uncommitted bytes."
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 522,
+          "note": "if isBranch == branch || (!branch && file.LocalBytes > 0) — the contaminated field decides LocalPaths membership."
+        },
+        {
+          "path": "internal/contextprofile/profile_test.go",
+          "line": 99,
+          "note": "TestBranchFileWithLocalEditsKeepsItsLocalBytes sets no git.Diff, so the contaminating input is absent from the only test of this path."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "FromGit replaces accurate untruncated local measurements with truncated string lengths. gitcontext.go:136 computes filteredDiffBytes from stagedFilteredDiffBytes + workingTreeFilteredDiffBytes (the pre-truncation byte counts returned by limitedGitMeasured), but profile.go:84 recomputes local as len(git.StagedDiff) + len(git.WorkingTreeDiff) + len(git.UntrackedExcerpts), which are capped at maxDiffBytes = 120000 each. When a staged or worktree diff is truncated, the reported FilteredDiffBytes understates the real total. It is disclosed indirectly by the new LOCAL_DIFF_TRUNCATED reason, which is why this is low rather than medium, but the accurate numbers exist and are simply not carried on Context per source.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 84,
+          "note": "local := len(git.StagedDiff) + len(git.WorkingTreeDiff) + len(git.UntrackedExcerpts) — truncated strings."
+        },
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 136,
+          "note": "filteredDiffBytes sums the untruncated per-source measurements that FromGit then discards."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "sourceOf does a linear scan of ChangedFiles, StagedFiles and UntrackedFiles per path and is called once per path inside filesFromGit's loop, so classification is O(files x changed-paths) on exactly the large branches this feature targets; the same lists are already walked in filesFromGit and could seed a set. It also defaults to SourceWorktree for a path in none of the lists, which mislabels rather than reporting unknown, and it sits at 60% statement coverage — only the branch and worktree arms are exercised, the staged and untracked arms are untested.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 273,
+          "note": "sourceOf's three sequential slice scans, invoked per path from the loop at profile.go:198."
+        },
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 287,
+          "note": "return SourceWorktree is the catch-all for a path present in no list; go tool cover reports sourceOf at 60.0%."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new spec is committed in the same branch that implements it while still reading as a pre-build draft: its header says 'Status: DRAFT for review ... Build nothing until the schema and interfaces below are reviewed and locked' and section 15 is titled 'Open questions to resolve before build', yet 0.9.0 ships in this branch and the questions are in fact answered (state under .metareview/runs/<run-id>/, fsm --agent-prompt, Go built-in kinds). The later specs docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md and docs/specs/2026-08-26-metareview-0.9.0-build-plan.md supersede it, but this file carries no superseded-by pointer, so a reader can take a stale draft for the shipped contract.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-enhancements.md",
+          "line": 3,
+          "note": "'Status: DRAFT for review ... Build nothing until the schema and interfaces below are reviewed and locked' in a branch that ships the implementation."
+        },
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-enhancements.md",
+          "line": 479,
+          "note": "Section 15 'Open questions to resolve before build' lists decisions already made in the shipped code."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "collectBranchFiles and measureBranchFiles look like copy-paste duplicates, but the split is deliberate and documented at branchfiles.go:118-120: the raw (unfiltered) scan needs only a byte total and materialising the excluded content would be the peak allocation. Retaining the text in one and not the other is the whole point, so this is not a duplication defect.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 121,
+          "note": "measureBranchFiles totals bytes without retaining diff text, unlike collectBranchFiles at branchfiles.go:98."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

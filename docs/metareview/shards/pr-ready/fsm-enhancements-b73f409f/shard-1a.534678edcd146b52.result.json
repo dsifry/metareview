@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1a-review",
+  "kind": "shard",
+  "shardId": "shard-1a",
+  "shardHash": "534678edcd146b52",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 347,
+      "note": "ValidateRunID error formatting: %q applied to strconv.Quote(id) double-quotes the id"
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 113,
+      "note": "Checked Clone deep-copy completeness (slices, maps, RawMessage, *int), Time UTC-Z marshal contract, canonical encoder (SetEscapeHTML false, no trailing newline), and TokenTotals overflow/negative guards"
+    },
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 1,
+      "note": "Checked parseLines chain/seq verification, splitLines torn-tail handling, prepareAppend CAS + canonicalization + MaxEvents cap, prepareCreate init validation, incompleteFork rule and summary sorting"
+    },
+    {
+      "path": "internal/fsm/gate/gate_test.go",
+      "line": 1,
+      "note": "Table-driven builtin gate coverage, commit_exists FixEntryHead keying, per-call-site git failure injection, real-git integration incl. rune-boundary truncation, scratch-index isolation, --end-of-options and scrubEnv assertions"
+    },
+    {
+      "path": "internal/fsm/gate/gate_test.go",
+      "line": 596,
+      "note": "Independently recomputed the TreeHash pin: sha256 of 'abc\\ndef' is d53d6b91af7caf8fe3d8021f116270137c0079d579a1e16965da80c2ed138ffb, matching the asserted constant"
+    },
+    {
+      "path": "tests/go/test-shardpack-coverage.sh",
+      "line": 22,
+      "note": "Coverprofile field indices verified: NR>1 skips the mode line, $3 is the hit count, so uncovered-block detection is correct"
+    },
+    {
+      "path": "docs/index.html",
+      "line": 742,
+      "note": "New paragraph is emitted after </footer>, outside every styled container; referenced docs/fsm/driving-a-workflow.md exists"
+    },
+    {
+      "path": "docs/0.8.0-candidates.md",
+      "line": 1,
+      "note": "Documentation-only candidate register; TODO/eval appear as prose naming gate classes, not as source markers, so the rubric's TODO/eval blocking rules do not fire"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Double-quoted run id in the validation error: fmt.Errorf(\"invalid run id %q\", strconv.Quote(id)) escapes an already-quoted string, so a bad id renders as invalid run id \"\\\"bad id\\\"\". Use %q with id, or %s with strconv.Quote(id). Verified by running the exact expression. No test asserts the message text (internal/fsm/run/types_test.go:43-53 only checks nil/non-nil), so nothing pins the current output.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 347,
+          "note": "return fmt.Errorf(\"invalid run id %q\", strconv.Quote(id))"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stray paragraph placed after </footer> in the landing page, so the new metareview fsm blurb renders as unstyled body text below the footer instead of inside a content section. It should live in a section/footer container with the surrounding copy.",
+      "evidence": [
+        {
+          "path": "docs/index.html",
+          "line": 742,
+          "note": "<p><code>metareview fsm</code> ...</p> sits between </footer> and </body>"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two doc comments are detached from what they document: 'Add returns the field-wise sum.' sits immediately above const MaxTokenCounter rather than func Add, and 'Bug is a confirmed bug (the fix/verify unit).' sits above the Verdict* const block rather than type Bug (which then carries a second, different doc comment). godoc will attribute both comments to the wrong declarations.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 113,
+          "note": "// Add returns the field-wise sum. directly precedes const MaxTokenCounter"
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 78,
+          "note": "// Bug is a confirmed bug (the fix/verify unit). directly precedes the Verdict* const block"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-14.97759b5def35dccd",
+  "kind": "shard",
+  "shardId": "shard-14",
+  "shardHash": "97759b5def35dccd",
+  "planHash": "5946b89296b16369",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 1,
+  "evidence": [
+    {
+      "path": "internal/fsm/run/fold_test.go",
+      "line": 118,
+      "note": "Verified empirically: the happy-path snapshot marshals with exactly one null, \"prev_unfixed\":null, so the second Contains is always true and the negated conjunct makes the whole nil-free guard unreachable."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 113,
+      "note": "Read the Apply implementation end to end to confirm the delta/output/status/provenance/cap rules the new test file asserts against; Canonical(p.Output) error is now returned as bad_payload."
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 22,
+      "note": "Canonical leaves HTML characters literal, which is what makes the TestFoldCaps esc() one-byte-per-rune assumption correct."
+    },
+    {
+      "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+      "line": 322,
+      "note": "Spec section 8 test table rows R2 and R4 checked against the delivered tests; R2 requires {Code, Reason, Seq, Type} per Reason and R4 requires a delete/duplicate/swap mutation table across 16 event types."
+    },
+    {
+      "path": "internal/fsm/run/fold_test.go",
+      "line": 413,
+      "note": "Ran go test ./internal/fsm/run/... -cover -count=1 and go vet: tests pass, vet is clean, statement coverage is 100.0%."
+    },
+    {
+      "path": "docs/quickstart.md",
+      "line": 100,
+      "note": "Verified docs/fsm/driving-a-workflow.md exists and that docs/metareview/shards and docs/metareview/fsm are the real durable-output directories the new commit/keep-local lists name."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Dead assertion: the nil-free-JSON check in TestFoldHappyPath can never fire. The snapshot always serializes PrevUnfixed as \"prev_unfixed\":null (types.go:225 has no omitempty, and line 192 of the same test asserts PrevUnfixed is nil on the happy path), so strings.Contains(js, `\"prev_unfixed\":null`) is always true and the negated second conjunct forces the condition to false unconditionally. I confirmed this by folding happyLog() and counting nulls in the canonical encoding: exactly one, prev_unfixed. The intent is 'no nulls other than prev_unfixed'; the code implements 'no nulls unless prev_unfixed is null'. The follow-up loop only pins lineage, goldens, warnings and vars, so a regression that let findings, confirmed, all_found, status, nodes_run, node_outputs, applied or allowed_cmds serialize as null would pass this test silently -- precisely the nil-free-container invariant this package exists to hold. Fix: strip the prev_unfixed key first, then assert the remainder contains no \"null\".",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 118,
+          "note": "if strings.Contains(string(js), \"null\") && !strings.Contains(string(js), `\"prev_unfixed\":null`)"
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 225,
+          "note": "PrevUnfixed *int `json:\"prev_unfixed\"` -- no omitempty, so a nil pointer always emits null."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead fixture in TestFoldFixBaseline: the mk closure declared at the top of the function is never called, and the compiler error is suppressed with a bare `_ = mk` at the end of the function. It builds a run whose init has no ParentRunID yet stamps an Origin on the transition, which would fail provenance -- i.e. it is leftover scaffolding for a case the test no longer exercises. Delete the closure and the `_ = mk` line, or restore the case it was meant to cover.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 413,
+          "note": "`_ = mk` suppressing an unused-variable error for a fixture the test never invokes."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestFoldRefusesANodeOutputWithNoOutput asserts only that Fold returns a non-nil error, not that the error is a *FoldError with Reason bad_payload. Every other negative case in this file goes through expectReason, which pins {Code, Reason, Seq, Type}. Because the test mutates evs[last].Data in place without re-chaining, a future change that (for example) started verifying Prev in Apply would make this test pass for an entirely unrelated reason while the regression it documents in its own 8-line comment went unguarded. Use expectReason(t, evs, ReasonBadPayload, int64(len(evs)), TypeNodeOutput).",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 1144,
+          "note": "t.Fatal(\"a node_output whose payload omits output was accepted\") guarded only by `if _, err := Fold(evs); err == nil`."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Spec section 8 row R2 requires one row per Reason asserting {Code, Reason, Seq, Type}. Three reasons are asserted on Reason alone: oversize (TestFoldCaps and TestFoldCapsPerField compare only fe.Reason), tokens_negative and tokens_too_large (TestFoldTokensNegativeAndNextIndex compares only err.(*FoldError).Reason). A wrong Code mapping in errors.go CodeFor for these three would not be caught by this package. Note the type assertions there are also unchecked (err.(*FoldError).Reason), which turns a wrong error type into a panic rather than a test failure; they are safe today only because Fold provably returns *FoldError.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 840,
+          "note": "oversize at-cap/over-cap rows compare fe.Reason only, never fe.Code, fe.Seq or fe.Type."
+        },
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 1058,
+          "note": "tokens_negative and tokens_too_large rows use err.(*FoldError).Reason without an ok check and without Code/Seq/Type."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Spec section 8 row R4 calls for a mutation table of {delete, duplicate, swap} across 16 event types with enumerated outcomes. TestFoldPrefixesAndMutations delivers the delete class across every index of the happy log (all collapsing to the single outcome seq_gap), plus exactly one re-chained delete, two duplicates and one swap. The per-type enumeration the spec asks for is not present, so type-specific mutation outcomes -- for instance duplicating a delta_applied (second_delta) or swapping a node_output with its delta (delta_without_output) -- rest on other tests rather than on this table. Statement coverage is 100%, so this is a thoroughness gap against the stated test contract rather than an uncovered code path.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 953,
+          "note": "// R4: per-prefix composition and mutation classes -- the function implements four mutation rows, not a per-type table."
+        },
+        {
+          "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md",
+          "line": 325,
+          "note": "R4 row: mutation table {delete, duplicate, swap} x 16 types with enumerated outcomes."
+        }
+      ]
+    }
+  ]
+}

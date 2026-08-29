@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-03-review",
+  "kind": "shard",
+  "shardId": "shard-03",
+  "shardHash": "2f80f7762386e777",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": ".claude-plugin/marketplace.json",
+      "line": 11,
+      "note": "Plugin version bumped 0.8.2 -> 0.9.0, consistent with the 0.9.0 FSM spec set added on this branch; no other manifest fields changed."
+    },
+    {
+      "path": "INSTALL.md",
+      "line": 128,
+      "note": "Docs-only rewording of context-pack/sharding guidance; new claims (durable docs/metareview/shards, self-ignoring .metareview/shards prompt packs, self-ignoring .metareview/runs, git >= 2.31 checked by setup --check) match the CLAUDE.md durable-output contract."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+      "line": 1,
+      "note": "New spec document (313 added lines). Checked for unsafe execution guidance, TODO/FIXME markers, and truncated diff context: none present. Spec explicitly forbids shell use in the exec runner and pins argv, so it does not introduce an eval-style path."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+      "line": 291,
+      "note": "Section 8 defines per-package 100% coverage test tables (cmdexec X1-X2, judge J0-J9, kind K1-K7, mockai S1-S3), so the specified work carries explicit validation requirements."
+    },
+    {
+      "path": "docs/tasks/m8-cli-suite-docs.md",
+      "line": 10,
+      "note": "New task file states its done criteria as exactly 100% statement coverage for internal/fsm/* plus a green tests/run-all.sh and clean go vet; no source code changes in this shard require accompanying tests."
+    },
+    {
+      "path": "internal/fsm/workflow/testdata/cmds-preimage.sha256",
+      "line": 1,
+      "note": "New testdata file holds a single 64-hex-character sha256 digest with no executable content; it is a test fixture, not source, so the missing-tests rule does not apply."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Ordered-list numbering in section 4.2 is out of sequence: the pre-flight item is written as '0.' but appears after item '1.' in source order. Markdown renderers renumber ordered lists sequentially, so the rendered spec will show pre-flight as the second step, contradicting its own 'before any call' / 'with no spend' requirement. Documentation clarity only; move the pre-flight item above item 1.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md",
+          "line": 238,
+          "note": "Line 238 begins '0. Pre-flight (before any call)' while line 232 begins '1. If goldens:' and line 241 begins '2. Every candidate never seen'."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

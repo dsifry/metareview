@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-19-rereview",
+  "kind": "shard",
+  "shardId": "shard-19",
+  "shardHash": "ff57b87eaa8c70e9",
+  "planHash": "dd18c9f68eb9d5bd",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T22:53:22Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cli/envelope.go",
+      "line": 118,
+      "note": "exitFor exit-code table: phaseNone always 2, per-code phase/repairMoved branches, exit2 fallthrough; no unsafe execution, no TODO/FIXME"
+    },
+    {
+      "path": "internal/fsm/cli/envelope.go",
+      "line": 192,
+      "note": "checked every env[\"untrusted\"] assignment across internal/fsm/cli (envelope.go and run.go:430,502,697,799,803,941) is []string, so the unchecked type assertion in finish cannot panic"
+    },
+    {
+      "path": "internal/fsm/cli/cli_test.go",
+      "line": 191,
+      "note": "envelope keys (warnings, untrusted, error object, exit codes) are exercised by existing cli package tests, so the new source has test coverage"
+    },
+    {
+      "path": "internal/fsm/record/clock.go",
+      "line": 5,
+      "note": "nowNanos is not dead code: bound at internal/fsm/record/record.go:234 (var nanos = nowNanos) and called directly at record_test.go:295"
+    },
+    {
+      "path": "internal/fsm/machine/harness_test.go",
+      "line": 666,
+      "note": "test-only harness (fakes for registry, git, store, runner, clock, nonce); adds validation infrastructure rather than production code"
+    },
+    {
+      "path": "tests/coverage.sh",
+      "line": 964,
+      "note": "re-cut fix verified: unit-test and shell-suite output is captured to COVDIR logs and echoed to stderr with exit 1 on failure, instead of being discarded"
+    },
+    {
+      "path": "tests/coverage.sh",
+      "line": 1021,
+      "note": "gate cannot become a no-op: empty REQUIRED aborts when internal/fsm or workflows exist, and floor-file packages absent from the profile are counted as failures"
+    },
+    {
+      "path": "tests/run-all.sh",
+      "line": 12,
+      "note": "run-all.sh runs under set -euo pipefail, so the added smoke go vet and the `go test -list | grep` pipeline fail the suite rather than being swallowed"
+    },
+    {
+      "path": "tests/run-all.sh",
+      "line": 46,
+      "note": "verified every newly guarded script exists in tests/go (test-shardpack-coverage.sh, test-sharded-review.sh, test-override.sh, test-override-coverage.sh, test-fsm.sh), so no silently skipped suite"
+    },
+    {
+      "note": "Ran `go vet ./internal/fsm/cli/ ./internal/fsm/record/ ./internal/fsm/machine/` (clean) and `bash -n` on both shell scripts (clean). All chunks in the pack are part 1/1 with no truncated diff context; no eval, no TODO/FIXME markers, no untracked unsafe source files in this shard."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0a.7a5eb2a59bc04675",
+  "kind": "shard",
+  "shardId": "shard-0a",
+  "shardHash": "7a5eb2a59bc04675",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/gate/git.go",
+      "line": 61,
+      "note": "Validation evidence: go test ./internal/fsm/gate/... ./internal/fsm/workflow/... ./internal/fsm/judge/... -count=1 -cover passes with coverage 100.0% of statements in all three packages, so every chunk in this shard is exercised."
+    },
+    {
+      "path": "internal/fsm/gate/gate_test.go",
+      "line": 184,
+      "note": "git.go is covered by TestG2RealGit (a real temp repo), TestG2ExecErrorBranches (fake Exec error/exit-code branches), TestG3TreeHashPin and TestG4FakeContract; scrubEnv, Cut, RealExec's spawn-failure branch and every Git method have direct assertions."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow_test.go",
+      "line": 141,
+      "note": "TestW2Reasons is a ~65-case reason/at table over every ERR_WORKFLOW_INVALID branch, plus reserved-env, boundary-acceptance, resolve, cmd-resolution and accessor tests; the workflow package reaches 100% statement coverage from this file alone."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/match.fenced.golden",
+      "line": 7,
+      "note": "Golden is byte-identical to match.plain.golden (diff reports no differences), which is exactly what judge_test.go:147-151 asserts (\"match fenced must equal unfenced\"); the fixture also pins that the single-pass format() never rescans substituted values - {{loop}}, {candidate} and }} from the inputs survive verbatim."
+    },
+    {
+      "path": "internal/fsm/gate/git.go",
+      "line": 56,
+      "note": "Reproduced the global-config leak: running the exact arg list from git.go:60-61 (-c core.fsmonitor=false -c diff.external= -c core.excludesFile= -c core.attributesFile= --no-pager diff --no-ext-diff --no-textconv --end-of-options A..B) with GIT_CONFIG_NOSYSTEM=1 and HOME pointed at a dir whose .gitconfig sets [diff] noprefix=true produced 'diff --git a.txt a.txt' / '--- a.txt' instead of the a/ b/ prefixed form."
+    },
+    {
+      "path": "internal/fsm/gate/git.go",
+      "line": 248,
+      "note": "Reproduced the ODB writes: in a scratch repo with a 200 KB untracked file, GIT_INDEX_FILE=$(mktemp -d)/index git add -A -- raised .git/objects from 3 to 4 files and git count-objects -v reported size 208 (KiB) - the blob lands in the repository's own object database, not in the temp dir."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow_test.go",
+      "line": 84,
+      "note": "TestW1Shipped's assertions were checked against the shipped YAML: workflows/sdlc-loop.yaml declares REVIEWER/JUDGE/REV_EFFORT/JUDGE_EFFORT and 7 transitions with the loop on verify->discover, matching the Refs, TerminalFor and LoopTransition expectations."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "RealExec's doc comment claims git runs with \"prompts, external diff drivers, and config injection disabled\", but only the SYSTEM config is disabled. GIT_CONFIG_NOSYSTEM=1 blocks /etc/gitconfig, and scrubEnv strips a caller-supplied GIT_CONFIG_GLOBAL - which guarantees git falls back to $HOME/.gitconfig, since HOME is never scrubbed. I reproduced this: with a .gitconfig setting [diff] noprefix=true, the exact argument list built at git.go:60-61 still emits prefix-less diff headers. diff.context, diff.algorithm, diff.renames, core.abbrev and core.quotePath are equally live. This matters beyond cosmetics: machine.go:647 feeds Diff output straight into judge.CutDiff, which derives diff_context_hash and the adjudicate/still-present prompts, so the FSM's review input, its recorded hash and therefore its verdicts become a function of the developer's dotfiles rather than of (base, head) alone - in code that otherwise goes out of its way to pin core.excludesFile, core.attributesFile and diff.external for exactly this reason. Fix is one line: append GIT_CONFIG_GLOBAL=/dev/null (and, for symmetry, GIT_CONFIG_SYSTEM=/dev/null) next to GIT_CONFIG_NOSYSTEM=1, or drop the \"config injection disabled\" claim from the doc comment.",
+      "evidence": [
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 61,
+          "note": "cmd.Env = append(scrubEnv(cmd.Environ()), \"GIT_TERMINAL_PROMPT=0\", \"LC_ALL=C\", \"GIT_EXTERNAL_DIFF=\", \"GIT_CONFIG_NOSYSTEM=1\") - no GIT_CONFIG_GLOBAL, and HOME survives scrubEnv (git.go:76-85, which only drops GIT_* keys)."
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 647,
+          "note": "s.git.Diff(s.ctx, snap.BaseSHA, head, MaxDiffBytes) is the sole producer of the diff that reaches judge.CutDiff/diff_context_hash, so global-config-shaped output propagates into the judged prompt and the audit hash."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The Git interface is documented as \"the read-only view of a work tree the gates need\" (git.go:28) and WorkTree's comment discloses only that \"The scratch index lives in the OS temp dir and is removed afterwards\" (git.go:245-247). Both understate the side effect: git add -A hashes and WRITES every changed and untracked file as a loose blob into the caller's repository object database, and write-tree adds tree objects there too; only the index is redirected to $TMPDIR. I verified this in a scratch repo (loose object count 3 -> 4, +208 KB for one 200 KB untracked file). machine.go:592 calls WorkTree on every advance, so a long sdlc-loop with sizeable uncommitted or untracked content steadily deposits unreachable objects that only git gc --prune reclaims. The mechanism is what docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:191 prescribes, so this is a disclosure/doc-accuracy issue rather than a call to change the algorithm: say that WorkTree writes objects into the repository, and drop or qualify \"read-only\".",
+      "evidence": [
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 28,
+          "note": "\"Git is the read-only view of a work tree the gates need.\" - contradicted by the WorkTree implementation below it."
+        },
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 257,
+          "note": "g.runEnv(ctx, env, \"add\", \"-A\", \"--\") with env = GIT_INDEX_FILE only: the index is redirected, the object database is not."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "IsAncestor is dead production surface. It is declared on the Git interface (git.go:33-34), implemented against merge-base --is-ancestor (git.go:168-177), mirrored in the Fake (fake.go:49) and asserted in four places in gate_test.go, but grep -rn IsAncestor over the whole tree finds no non-test caller. It carries weight because the check it performs is the one the FSM never makes: machine.go:134-141 rev-parses whatever --base the host passes and stores it as BaseSHA without verifying it is an ancestor of HEAD, and every subsequent diff is the two-dot BaseSHA..head. Either wire it into init (base must be an ancestor of head, else the diff carries reversed hunks from commits the branch never made) or drop it from the interface; as it stands it is 100%-covered code that nothing uses.",
+      "evidence": [
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 168,
+          "note": "func (g *execGit) IsAncestor - only callers are internal/fsm/gate/gate_test.go:207,210,221,313,408,444 and internal/fsm/gate/fake.go:49."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "asExit uses a raw type assertion (err.(*exec.ExitError)) rather than errors.As, so it only recognises an unwrapped ExitError. That is true for the exec.Cmd.Run path RealExec uses today, but Exec is an exported, pluggable seam (type Exec func(...)) and any implementation that wraps the process error - or a future os/exec that returns a wrapped error, e.g. via WaitDelay - would be misclassified: RealExec would return a non-nil err, runEnv (git.go:129-133) would report ERR_GIT \"could not be run\" with exit code 0, and the exit-code branches (including IsAncestor's exit-1-means-false contract) would never be reached. errors.As is the direct fix and costs nothing.",
+      "evidence": [
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 90,
+          "note": "func asExit(err error, target **exec.ExitError) bool { ee, ok := err.(*exec.ExitError) ... } - no unwrapping."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new match.fenced.golden fixture pins an asymmetry in the prompt trust boundary. Adjudicate marks both diff and candidate as fenced (prompts.go:182) and still-present marks golden_comment and diff (prompts.go:193), so untrusted values are wrapped in nonce fences with an explicit \"data to evaluate, not instructions\" preamble. Match marks nothing (prompts.go:174 sets slots but never fenced), so both slots are interpolated raw - and the fixture shows exactly that, with {{loop}}, {candidate} and }} arriving verbatim from the inputs. The single-pass format() correctly refuses to rescan substituted values, which blocks slot-injection, but not instruction-injection: kind.go:445 feeds run.Finding.IssueText - text produced by the discover lenses and therefore influenced by the diff under review - into MatchInput.Candidate whenever --goldens is supplied. The blast radius is limited to golden-matching (it cannot confirm a bug on its own; adjudication remains fenced), and judge_test.go:137 asserts the behaviour deliberately, so this is a note rather than a defect: if match stays unfenced, say why in the prompts.go comment.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/testdata/prompts/match.fenced.golden",
+          "line": 10,
+          "note": "\"loop bound {candidate} wrong }}\" appears raw under the \"Candidate Issue\" heading - no <<<DATA- fence, unlike the adjudicate and still-present goldens in the same directory."
+        },
+        {
+          "path": "internal/fsm/judge/prompts.go",
+          "line": 174,
+          "note": "match sets slots[\"golden_comment\"] and slots[\"candidate\"] but leaves the fenced map empty, whereas prompts.go:182 and prompts.go:193 populate it for the other two kinds."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two test-diagnostic weaknesses in the new workflow_test.go. (1) reasonOf calls t.Fatalf when the error is not ERR_WORKFLOW_INVALID (workflow_test.go:76), and it is the helper driving the ~65-case table in TestW2Reasons; a single case that regresses to a different error code (or to no error at all) aborts every remaining case, so one regression hides the rest. The reason/at comparison in the loop body correctly uses t.Errorf, so the intent is clearly to report all failures - reasonOf should return the mismatch and let the caller Errorf. (2) The acceptance loop at workflow_test.go:313 binds w := mustParse(t, ok) and then discards it with _ = w, asserting only \"does not error\" for the timeout:1, timeout:3600, 32-char-state and 16-env cases; three of the four are re-asserted properly just below, but the 32-char state and 16-env boundaries are only ever checked for non-failure.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow_test.go",
+          "line": 76,
+          "note": "t.Fatalf(\"expected ERR_WORKFLOW_INVALID, got %v\", err) inside the helper used by the TestW2Reasons table."
+        },
+        {
+          "path": "internal/fsm/workflow/workflow_test.go",
+          "line": 313,
+          "note": "for _, ok := range []string{...} { w := mustParse(t, ok); _ = w } - parses four boundary documents and asserts nothing about them."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The max parameter on Diff/WorkingDiff is a post-hoc trim, not a bound on resource use. RealExec accumulates the child's entire stdout into a strings.Builder (git.go:63-64) before Cut (git.go:216, 228) discards everything past max, so a branch touching a large vendored or binary file materialises the whole diff in memory even though only MaxDiffBytes is ever used. Same shape as the pre-existing internal/gitcontext path (gitcontext.go:356 limitedGitMeasured also reads the full output before truncate), so this is not a regression and it deliberately supports the byte-accounting that path needs; noting it because git.go is new code that could have streamed with an io.LimitedReader over cmd.StdoutPipe and capped the cost instead of inheriting it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 63,
+          "note": "var out, errb strings.Builder - unbounded accumulation; Cut runs only after cmd.Run() has returned the complete output."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Considered flagging Diff's two-dot range (git.go:209, from+\"..\"+to) as the wrong range for branch review - three-dot / merge-base is normally what you want when the base ref has advanced past the branch point, otherwise the reviewed diff carries reversed hunks for commits the branch never made. Withdrawn: this matches the established product convention rather than departing from it. internal/gitcontext/gitcontext.go:140 also diffs base+\"..HEAD\", and resolveBase (gitcontext.go:298-307) rev-parses an explicitly supplied --base directly, reserving merge-base for the default-base fallback only. The FSM does the same at machine.go:134-141. Consistent behaviour, so not a defect of this change (see the separate IsAncestor finding for the ancestor check that is missing in both).",
+      "evidence": [
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 209,
+          "note": "g.run(ctx, \"diff\", \"--no-ext-diff\", \"--no-textconv\", \"--end-of-options\", from+\"..\"+to) mirrors gitcontext.go:140's base+\"..HEAD\"."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0a.45050a879ef4ae6a",
+  "kind": "shard",
+  "shardId": "shard-0a",
+  "shardHash": "45050a879ef4ae6a",
+  "planHash": "12b2842033a1731a",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "note": "Rubric blocking sweep for this shard: no eval or other unsafe execution, no TODO/FIXME markers (grep over all four chunk files is empty), every chunk is part 1/1 so no diff context is truncated, and no duplicated inventoried service."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 107,
+      "note": "Verified empirically with a throwaway in-package probe test (since removed): Apply accepts a node_output event whose data is {} — NodeOutputs[\"n@0\"] is stored as a nil json.RawMessage, NodesRun records the node, and OutputHash of that nil is the sha256 of the empty string, so a matching delta_applied also passes."
+    },
+    {
+      "path": "internal/runchain/runchain.go",
+      "line": 132,
+      "note": "scanner.Err() is still returned after the loop, so the raised Buffer cap surfaces bufio.ErrTooLong rather than silently truncating the run chain; the +2 sizing is correct because bufio grows to maxTokenSize and ScanLines needs the CRLF terminator to fit alongside the token."
+    },
+    {
+      "path": "internal/fsm/machine/types.go",
+      "line": 277,
+      "note": "MaxWorkflowBytes (256<<10) equals run.MaxPayload (internal/fsm/run/types.go:46), so the sidecar Write path (machine.go:204, fork.go:263) can never store a workflow that FSSidecar.Read would later reject as too_large — checked because Write applies no size cap of its own."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 733,
+      "note": "decodePayload's default arm silently treats any unlisted type as ForkData; cross-checked run.EventTypes (internal/fsm/run/event.go:49) and all 16 types have an explicit case, so the arm is only reachable for TypeFork today."
+    },
+    {
+      "note": "Validation run locally: go build ./... clean, go vet ./internal/fsm/... ./internal/runchain/... clean, gofmt -l over the three changed Go files empty, go test ./internal/fsm/machine/... ./internal/fsm/run/... reports 100.0% statement coverage for both new files, and bash tests/go/test-override.sh passes (it is wired into tests/run-all.sh:25)."
+    },
+    {
+      "path": "tests/go/test-override.sh",
+      "line": 62,
+      "note": "The `grep -q '\"fixedInRunId\"' ... && fail` line is safe under set -e (a failing command before the final && is exempt from errexit, confirmed by running the idiom), and findings.Record tags FixedInRunID with omitempty (internal/findings/findings.go:76), so the absent-field assertion is meaningful rather than vacuous."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "fold.go:103-111 — a node_output event whose payload omits the required \"output\" field is accepted by Apply. decodePayload uses DisallowUnknownFields but enforces no required fields, so p.Output is nil; Canonical(nil) fails and its error is discarded by `out, _ := Canonical(p.Output)`, whose trailing comment (\"p.Output is a sub-document of canon, hence valid\") is false for the omitted case. The fold then records NodeOutputs[node@iter] = nil — a key that is present but holds invalid JSON — and appends the node to NodesRun. Because OutputHash(nil) is the sha256 of the empty byte string, a subsequent delta_applied carrying that hash also passes, so the whole log folds without a FoldError. The corruption only surfaces downstream: machine.go:646 treats the key as present and machine.go:689 then calls kind.Decode on a nil document, and Snapshot marshals node_outputs as {\"node@0\": null}. Apply is the validation boundary for a replayed or forked audit.jsonl (it already checks version, seq continuity, caps, provenance and output hashes), so a missing required field should be a ReasonBadPayload rejection, not a silently-nil state. Confirmed by direct probe, not inferred from the diff.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 107,
+          "note": "out, _ := Canonical(p.Output) — error discarded, comment asserts validity that does not hold when \"output\" is absent"
+        },
+        {
+          "path": "internal/fsm/run/event.go",
+          "line": 86,
+          "note": "NodeOutputData.Output is json.RawMessage `json:\"output\"` with no required-field enforcement in decodePayload"
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 689,
+          "note": "kind.Decode(snap.NodeOutputs[k]) runs on the nil document the fold accepted"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "fold.go:250-253 — the doc comment written for cow (\"cow returns a state whose containers are fresh ... RawMessage values (node outputs) are shared\") now sits directly above the exported NextIndex method, with NextIndex's own one-line comment appended to it. godoc therefore documents NextIndex with cow's contract, and cow itself is left undocumented. Move the two-line comment back above func (st FoldState) cow().",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 250,
+          "note": "cow's doc comment block immediately precedes func (st FoldState) NextIndex"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "sidecar.go:112-114 — FSSidecar.List maps every os.ReadDir failure to reason \"missing\". A permission error, an ENOTDIR, or an I/O error is reported to the caller as if the run directory simply did not exist, which is the one reason a caller is most likely to act on by creating or forking a run. Read and Write both distinguish \"missing\"/\"exists\" from the generic \"path\" reason; List should do the same (errors.Is(err, fs.ErrNotExist) → \"missing\", otherwise \"path\").",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/sidecar.go",
+          "line": 113,
+          "note": "return nil, sidecarErr(\"missing\", err.Error()) for any ReadDir error"
+        },
+        {
+          "path": "internal/fsm/machine/sidecar.go",
+          "line": 90,
+          "note": "Read distinguishes fs.ErrNotExist from the generic path reason, so the two implementations of the same interface report differently"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "sidecar.go:173-188 — MemSidecar.List returns every key under the run prefix, while FSSidecar.List filters entries through ValidSidecarName so audit.* and lock are never listed. Since MemSidecar.Put (sidecar.go:197) bypasses checkSidecarArgs, a test can seed a reserved or malformed name and see it listed, which the real store would never produce. The fake should apply the same ValidSidecarName filter so tests cannot pass against behaviour FSSidecar does not have.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/sidecar.go",
+          "line": 178,
+          "note": "MemSidecar.List uses only strings.HasPrefix(k, runID+\"/\") with no ValidSidecarName filter"
+        },
+        {
+          "path": "internal/fsm/machine/sidecar.go",
+          "line": 117,
+          "note": "FSSidecar.List filters on e.Type().IsRegular() && ValidSidecarName(e.Name())"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "runchain.go:13-17 — maxJSONLLineBytes, its four-line comment and the scanner.Buffer(make([]byte, 0, 64*1024), max+2) idiom are duplicated verbatim in four packages (internal/runchain, internal/findings, internal/state, internal/reviewlog); a shared helper beside state.ReadJSONL would keep the cap and its rationale in one place. Related: the constant is named as \"the JSONL line cap\" but is enforced only on read — state.AppendJSONL (internal/state/state.go:28-51) writes an arbitrarily long row, so a record above 1 MiB becomes an unrecoverable bufio.ErrTooLong on every subsequent read rather than being refused at write time. The change raises the ceiling from 64 KiB and is a clear improvement; the write-side asymmetry is pre-existing and noted rather than introduced here.",
+      "evidence": [
+        {
+          "path": "internal/runchain/runchain.go",
+          "line": 17,
+          "note": "const maxJSONLLineBytes = 1 << 20, one of four identical copies (findings.go:19, state.go:21, reviewlog.go:21)"
+        },
+        {
+          "path": "internal/state/state.go",
+          "line": 48,
+          "note": "AppendJSONL writes the marshalled record with no length check against the read-side cap"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

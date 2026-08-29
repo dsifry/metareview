@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1d-review",
+  "kind": "shard",
+  "shardId": "shard-1d",
+  "shardHash": "8e5b4e2e08a8ec48",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T22:24:23Z",
+  "evidence": [
+    {
+      "path": ".codex-plugin/plugin.json",
+      "line": 3,
+      "note": "0.8.2 to 0.9.0 bump matches .claude-plugin/plugin.json, package.json and internal/version/version.go; description/keywords/capabilities additions are consistent with the fsm feature"
+    },
+    {
+      "path": "internal/findings/override.go",
+      "line": 53,
+      "note": "Blocks() covers open and override-pending; confirmed every consumer (internal/findings/findings.go:358,431 and internal/reviewlog/reviewlog.go:306) routes through it rather than comparing to \"open\" directly"
+    },
+    {
+      "path": "internal/findings/override.go",
+      "line": 105,
+      "note": "GrantOverride refuses a self-grant via EqualFold against OverrideRequestedBy, validates actor, reason length and timestamp; comments are explicit that By is audit metadata and not authentication"
+    },
+    {
+      "path": "internal/findings/override.go",
+      "line": 1,
+      "note": "New source file is covered by internal/findings/override_test.go (request, grant, self-grant refusal, missing finding, list/pending, load and save failure seams); gofmt and go vet are clean"
+    },
+    {
+      "path": "internal/prready/shardingestion_test.go",
+      "line": 62,
+      "note": "Test asserts an ingested mrvf- shaped reviewer token never reaches the log verbatim and never contaminates parsed finding IDs, plus stale-plan results are listed and not blocking"
+    },
+    {
+      "path": "tests/go/test-fsm.sh",
+      "line": 1,
+      "note": "bash -n is clean; the suite is wired into tests/run-all.sh:46 and asserts exit codes, untrusted markers, state-untouched refusals, torn-audit repair, consent list and injection containment"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestGCOnlyRunsAfterAPassingGate only asserts the negative half of its name: it checks collections == 0 while the gate blocks, but nothing in the package asserts that collection actually runs once the gate passes (grep for `collections` finds only this assertion plus the fakeWriter counter). The name overclaims the coverage.",
+      "evidence": [
+        {
+          "path": "internal/prready/shardingestion_test.go",
+          "line": 132,
+          "note": "test name promises the passing-gate case; body only exercises the blocking case"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The section-ordering assertion is vacuous if the heading disappears: strings.Index returns -1 when \"## Verdict\" is absent, and shardedAt is always >= 0 because the Contains check above already passed, so `shardedAt < verdictAt` can never fire on a log that lost its Verdict heading. Asserting verdictAt >= 0 first would make the check real.",
+      "evidence": [
+        {
+          "path": "internal/prready/shardingestion_test.go",
+          "line": 101,
+          "note": "verdictAt may be -1 and is used unchecked in the ordering comparison on the next line"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

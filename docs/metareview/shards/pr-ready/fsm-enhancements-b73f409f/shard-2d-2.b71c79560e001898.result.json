@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2d-2.b71c79560e001898",
+  "kind": "shard",
+  "shardId": "shard-2d-2",
+  "shardHash": "b71c79560e001898",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5 (sharded pr-ready subagent)",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 3,
+  "evidence": [
+    {"path": "internal/fsm/machine/machine_test.go", "line": 1, "note": "reviewed lines 1-1255 (TestM1Init through TestM7Open + mustErr), the whole of chunk part 1/2"},
+    {"path": "internal/fsm/machine/machine_test.go", "line": 74, "note": "ran the package green (go test ./internal/fsm/machine/ -count=1 -> ok, 100.0% of statements, also green under -shuffle=on)"},
+    {"path": "internal/fsm/machine/machine.go", "line": 493, "note": "read the production behaviour behind each asserted claim (warn/CapText, converge atom cap, repo_mode gate, Record) in a scratchpad copy"},
+    {"path": "internal/fsm/run/fold.go", "line": 198, "note": "Snapshot.Warnings is folded from p.Code only, so the warning atom text never reaches the value the test inspects"},
+    {"path": "internal/fsm/machine/machine_test.go", "line": 1020, "note": "reachability sweep: instrumented every if-statement in lines 22-1254 with a t.Logf marker; 158 of 159 markers fired, so no assertion in this chunk is dead code (the one miss is the /bin/bash restore stub closure at line 1209, never re-invoked)"},
+    {"path": "internal/fsm/machine/machine.go", "line": 775, "note": "mutation: deleting the run.CapText(r.Atom, run.MaxShort) cap makes TestM4Convergence fail via ERR_APPEND_REJECTED oversize, not via the length assertion at line 823"}
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Dead sub-assertion, verified by mutation. machine_test.go:74 joins two negated predicates with && where || was meant: `if !strings.HasPrefix(w, \"WORKFLOW_WARNING\") && !strings.Contains(w, \"loop_without_clean_exit\")`. It can only fail when BOTH are false, so once the prefix matches the atom substring is never checked. Rewriting it to || fails immediately with `warnings: [WORKFLOW_WARNING]` -- the Snapshot.Warnings entry is exactly the code string, because run/fold.go:198 folds only p.Code into Snapshot.Warnings. So the test asserts a property (the warning names loop_without_clean_exit) that the value it inspects can never carry, and the machine could propagate any WORKFLOW_WARNING body undetected. The atom text is only asserted in internal/fsm/workflow/workflow_test.go:355, never on the machine's propagation path.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 74, "note": "if !strings.HasPrefix(...\"WORKFLOW_WARNING\") && !strings.Contains(...\"loop_without_clean_exit\")"},
+        {"path": "internal/fsm/run/fold.go", "line": 198, "note": "next.Warnings = append(next.Warnings, p.Code) -- code only, no detail"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Comment asserts behaviour the code does not have, verified empirically. machine_test.go:1020 reads `// enforcing: gate + no tree; a second advance re-detects`, but the block performs exactly one Advance and no second advance exists anywhere in TestM5Tree. Adding the second advance in a scratchpad copy fails with `advance: ERR_RUN_TERMINAL: run is terminal (outcome=failed)`: the enforcing repo_mode gate failure drives the run to `failed`, which is terminal, so a second Advance cannot re-detect anything. The claim is both untested and false.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 1020, "note": "// enforcing: gate + no tree; a second advance re-detects"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 1024, "note": "the only Advance in the block; the next statement is the unrelated `// agent-edit state is exempt` setup"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Assertion reads a stale snapshot, so the property its own preceding comment claims is unverified. machine_test.go:402 does `h.advance(m) // needs input at discover@1` and then machine_test.go:403 counts needs_input events in `evs`, a slice captured at line 391 BEFORE that advance. Probe: countType(evs, needs_input) == 2 while countType(h.events(m), needs_input) == 3. The just-performed discover@1 needs_input emission -- the thing the comment names -- is never observed; the assertion merely restates pre-advance state from a position that reads as a post-advance check.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 402, "note": "h.advance(m) // needs input at discover@1"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 403, "note": "if got := countType(evs, run.TypeNeedsInput); got != 2 -- evs is the pre-advance slice from line 391 (stale=2, fresh=3)"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "False claim in an inline comment about core FSM semantics. machine_test.go:285 reads `// discover -> adjudicate (fork executes on the next advance? no: the node runs when entering the state)`. Probe after that advance: types == `init,tree,needs_input,node_output,delta_applied,gate,gate,transition` -- no llm_call yet. The adjudicate node's execution happens on the FOLLOWING Advance, i.e. the question the comment dismisses is the correct answer. A reader takes away the wrong execution model from the canonical test for it.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 285, "note": "r = h.advance(m2) // ... no: the node runs when entering the state"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Bound assertion that can never fire. machine_test.go:799 claims `an all of 32 long-named cmd atoms yields a >1 KB name; it is capped, never a store rejection`, but the check at line 823 is `len(r.StopReason) > run.MaxShort+run.MaxText+8` == 5128, while the observed StopReason is 1118 and the fully uncapped value would still only be ~1250. Mutation confirms the safety net is elsewhere: removing run.CapText(r.Atom, run.MaxShort) at machine.go:775 fails the test with ERR_APPEND_REJECTED / ERR_AUDIT_INVALID (oversize) -- i.e. precisely the store rejection the comment says will not happen -- never via this length bound. The assertion should pin the atom at MaxShort.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 823, "note": "len(r.StopReason) > run.MaxShort+run.MaxText+8 (5128) vs observed 1118"},
+        {"path": "internal/fsm/machine/machine.go", "line": 775, "note": "atom, _ := run.CapText(r.Atom, run.MaxShort) -- the cap actually under test"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Half of a stated claim is unasserted. machine_test.go:826 says `emitter cap: 5 KB cmd reason capped in converge event and StopReason`, but only StopReason is checked (line 844, len 4106 <= MaxText+20 == 4116, meaningful). The converge event's own Reason field is never unmarshalled or measured in this block, and the earlier converge assertion at line 390 only checks cd.Stop and cd.Atom.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 826, "note": "// emitter cap: 5 KB cmd reason capped in converge event and StopReason"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 844, "note": "only r.StopReason is measured"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The test locks in a mislabeled error code. machine_test.go:1110 asserts that record data `nope` (invalid JSON, not oversized) returns CodeRecordTooLarge; machine.go:1010 indeed returns errs.E(CodeRecordTooLarge, \"record data must be valid JSON\") -- an error whose code contradicts its own message. docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:388 ties ERR_RECORD_TOO_LARGE to `Data <= MaxPayload - 128` only, so nothing in the spec sanctions reusing it for a parse failure. Either the spec should name this case or the code needs a distinct one; the test currently freezes the ambiguity.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 1110, "note": "wantCode(t, rec(... Data: `nope`), CodeRecordTooLarge)"},
+        {"path": "internal/fsm/machine/machine.go", "line": 1010, "note": "errs.E(CodeRecordTooLarge, \"record data must be valid JSON\", ...)"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Orphaned / contradicted narration comments left in the committed test. machine_test.go:433 is a stream-of-consciousness note (`review-loop with findings present? no: both fail when... use sdlc discover with...`) describing an approach the code does not take -- the code builds a custom review-loop fixture instead. machine_test.go:1197 announces `simulate with a sidecar whose vars differ`, but no such code follows it; the stored-vars case appears ~40 lines later and works by hand-crafting an init event with empty Vars, not by editing a sidecar.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 433, "note": "// two failing gates at discover (review-loop with findings present? no: both fail when... use sdlc discover ...)"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 1197, "note": "// stored vars no longer resolve (... simulate with a sidecar whose vars differ) -- followed by unrelated ERR_CMD_CHANGED setup"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Production package global mutated without a deferred restore. machine_test.go:245 sets MaxDiffBytes = 2 and line 249 restores it, but the assertion at line 246-248 is a t.Fatalf between the two. A failure there leaves the package-level MaxDiffBytes at 2 for every subsequent test in the package, turning one real failure into a cascade of misleading ones. `defer func(v int) { MaxDiffBytes = v }(MaxDiffBytes)` would make the fixture failure-safe.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine_test.go", "line": 245, "note": "MaxDiffBytes = 2"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 249, "note": "MaxDiffBytes = 1 << 20 -- restore is unreachable if the intervening t.Fatalf fires"}
+      ]
+    }
+  ]
+}

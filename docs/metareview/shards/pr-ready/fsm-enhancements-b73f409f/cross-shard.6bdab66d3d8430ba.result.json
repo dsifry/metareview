@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-6bdab66d3d8430ba",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5 cross-shard reviewer",
+  "reviewedAt": "2026-08-28T17:52:00Z",
+  "blockingCount": 13,
+  "evidence": [
+    {"note": "Branch is frozen; no file in the repository was created, edited or deleted except this result JSON. All binaries were built into the session scratchpad, never into the tree."},
+    {"path": "tests/coverage-floor.txt", "line": 1, "note": "Ran read-only gates over the whole tree: `go test ./...` all green (42 packages), `gofmt -l .` empty, `go vet ./...` clean, `shellcheck -x` over all 37 .sh files clean. Compared `go list ./...` against tests/coverage-floor.txt: every non-fsm package has a floor line except internal/version, which is a const-only package with zero statements and therefore never appears in the profile. Not a finding."},
+    {"path": "internal/fsm/run/testdata/oracle.sha256", "line": 1, "note": "Cross-shard fixture chains verified by regenerating them outside Go. oracle.template.jsonl (shard-1d) + oracle.sh (shard-00) reproduce oracle.jsonl (shard-1a) and oracle.sha256 (shard-2d-3) byte-for-byte through shasum. Independently recomputed internal/fsm/workflow/testdata/cmds-preimage.sha256 (shard-06) from cmds-preimage.json (shard-24) with WORK->/w: 76d37fa8... matches. Both chains clean."},
+    {"path": "internal/prready/review.go", "line": 740, "note": "Byte-diffed the triplicated generated-artifact filter family (filterGeneratedGitContext, filterGeneratedFiles, filterGeneratedUntrackedExcerpts, filterGeneratedDiff, isGeneratedDiffSection, generatedMetareviewPathExcludes) across internal/prready/review.go, internal/epicready/review.go and internal/taskdone/review.go: all three copies are identical to the byte. generatedTargetExceptions is legitimately absent from prready, which has no target path. Clean; the divergences are elsewhere (findings 4 and 11)."},
+    {"path": "internal/reviewlog/reviewlog.go", "line": 110, "note": "Writer/parser seam verified: all four review-log writers emit '# metareview: <kind> review' matching reviewlog.reviewKind, and 'Run ID:', 'Target:', '## Verdict' as parseMarkdown expects. Post-merge learning writes to docs/metareview/learning/, not docs/metareview/reviews/, so it is not mis-parsed as an unresolved review. Clean."},
+    {"path": "tests/run-all.sh", "line": 12, "note": "Suite inventory cross-checked: all 33 scripts in tests/go/ and both in tests/manifest/ are invoked by tests/run-all.sh, and all 5 mock scenarios under testdata/fsm/scenarios/ are referenced by tests/go/test-fsm.sh. The 'behavioral suite is 35 shell scripts' comment in .github/workflows/test.yml is accurate. Clean."},
+    {"path": "internal/gitcontext/branchfiles.go", "line": 107, "note": "Finding 3 was proved empirically, not inferred: built a throwaway git repo in the scratchpad and ran the exact argv branchfiles.go uses. With `git config diff.external` set, the diff output was replaced wholesale by the driver's text; with GIT_EXTERNAL_DIFF exported, the same. Adding --no-ext-diff (what internal/fsm/gate/git.go does) restored the real diff."}
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "A `cmd` node makes any workflow un-initializable with a real judge, and the error names a knob the operator never set. internal/fsm/kind/kind.go:609-610 registers the `cmd` kind with DefaultExec \"fork\", AllowedExec [\"fork\"] and ValidateParams: noParams, so a cmd node carries no model and no effort. internal/fsm/machine/machine.go:99-107 (Init) and :626-629 (Advance) call deps.Preflight for EVERY node whose Exec == \"fork\", with no kind discrimination. internal/fsm/cli/wiring.go:207-211 installs that Preflight as judge.Preflight(n.Model, n.Effort, ...) whenever `scenario == nil && mode == judgeReal`, and internal/fsm/judge/judge.go:267-269 rejects an empty model with ERR_JUDGE_MODEL{reason: length}. So `fsm init` on a workflow containing a cmd node fails before the --allow-custom-cmds consent gate is even reached, on every non-mock run. Meanwhile docs/fsm/driving-a-workflow.md:37 tells the operator that \"`cmd` nodes run inside `advance`\" under exec fork, docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md:233 declares `cmd {fork, [fork]}` with no model in its contract, and workflows/sdlc-loop.yaml:25-28 advertises the cmds/on_overflow escape hatch in a commented block. The documented escape hatch is unusable outside --mock-ai, and the operator is pointed at a judge model rather than at the real cause. No test drives a cmd node through Init or Advance (internal/fsm/kind/kind_test.go:631 exercises the executor directly), which is why every shard reads as internally consistent: the kind is in shard-2f-2, the preflight loop in shard-1c, the wiring in shard-09, the validator in shard-05, and the docs in shard-27 and shard-01.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 609, "note": "cmdKind.Info(): DefaultExec fork, AllowedExec [fork], ValidateParams noParams - no model, no effort"},
+        {"path": "internal/fsm/machine/machine.go", "line": 101, "note": "Init preflights every node with Exec == \"fork\", no kind discrimination"},
+        {"path": "internal/fsm/machine/machine.go", "line": 626, "note": "Advance does the same before running the node"},
+        {"path": "internal/fsm/cli/wiring.go", "line": 209, "note": "Preflight is judge.Preflight(n.Model, n.Effort, ...), installed only for real-judge runs"},
+        {"path": "internal/fsm/judge/judge.go", "line": 267, "note": "validate rejects an empty model with ERR_JUDGE_MODEL before any network traffic"},
+        {"path": "docs/fsm/driving-a-workflow.md", "line": 37, "note": "documents cmd nodes as running under exec fork inside advance"},
+        {"path": "workflows/sdlc-loop.yaml", "line": 25, "note": "advertises the cmds/on_overflow escape hatch in a commented block"}
+      ]
+    },
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "Four user-facing docs changed on this branch tell an agent to run FIVE artifact-review lenses; the shipped code requires EIGHT and the gate that reads the resulting log fails until all eight are present. internal/artifactreview/review.go:132 writes \"Artifact review defaults to parallel subagents for the eight required lenses\" into every scaffold and enumerates all eight at :134-141 (Feasibility, Completeness, Scope and alignment, Architecture, Intent preservation, Security, Testing-quality, Data-migration); skills/review-artifact/SKILL.md:15 lists the same eight; rubrics/artifact-review-rubric.md has eight lens subsections. Decisively, internal/reviewlog/reviewlog.go:170-179 hard-codes all eight names in `required` and artifactReviewComplete returns false unless every one has a complete verdict, which sets HasUnresolvedBlockers and blocks the downstream pr-ready/epic-ready gates. Against that, README.md:201, docs/quickstart.md:51, docs/README.claude.md:47 and docs/README.codex.md:54 - all four touched by this diff - plus commands/review-artifact.md:5, the file that IS the agent's instruction, all say \"the five required lenses\". An agent that follows the command file dispatches five subagents, silently skips Security, Testing-quality and Data-migration (the three lenses 0.7.0 and 0.8.0 were released to add), fills five rows, and the review log then never satisfies the eight-name gate. tests/manifest/test-skills.sh:93 greps only the five-name PREFIX of the eight-lens sentence, so it passes either way and never inspects the doc copies at all. No single shard can see this: the code side (shard-16) and the five prose copies (shards 24, 28, 36, 03 and an unchanged command file) each read as consistent.",
+      "evidence": [
+        {"path": "internal/reviewlog/reviewlog.go", "line": 170, "note": "artifactReviewComplete requires all eight lens names, including security, testingquality and datamigration"},
+        {"path": "internal/artifactreview/review.go", "line": 132, "note": "the scaffold the same run writes says \"eight required lenses\" and lists all eight at 134-141"},
+        {"path": "skills/review-artifact/SKILL.md", "line": 15, "note": "skill lists all eight lenses with their rubrics"},
+        {"path": "README.md", "line": 201, "note": "\"Artifact review runs the five required lenses as parallel subagents by default\" - changed file, wrong number"},
+        {"path": "docs/quickstart.md", "line": 51, "note": "same false \"five required lenses\" sentence"},
+        {"path": "docs/README.claude.md", "line": 47, "note": "same false \"five required lenses\" sentence"},
+        {"path": "docs/README.codex.md", "line": 54, "note": "same false \"five required lenses\" sentence"},
+        {"path": "commands/review-artifact.md", "line": 5, "note": "the agent-facing command file, also says five"},
+        {"path": "tests/manifest/test-skills.sh", "line": 93, "note": "pins only the five-name prefix, so it cannot catch the drift"}
+      ]
+    },
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "The git hardening that internal/fsm/gate/git.go established is absent from internal/gitcontext, which is the package that measures and cuts the diff every review actually reads. gate/git.go:209 and :221 pass --no-ext-diff (and --no-textconv) on both diff calls. Nothing in internal/gitcontext does: `--no-ext-diff` appears nowhere else in the tree. internal/gitcontext/branchfiles.go:107 and :129 run `git diff --no-renames --text --no-textconv <base>..HEAD -- <path>` - the invocation whose bytes become BranchFile.Diff, the shard chunks, the shard hashes and the byte budget - and branchfiles.go:37-41 sets cmd.Env only when extra entries are supplied, so the child inherits the full environment. internal/gitcontext/gitcontext.go:117, :121, :125, :140, :144 and :148 are worse: no --no-ext-diff, no --no-textconv, and git() at :332-334 sets no env at all. I proved the consequence rather than inferring it: in a scratch repo, `git config diff.external <script>` and, separately, `GIT_EXTERNAL_DIFF=<script>` each replaced the entire diff output of that exact argv with the driver's text, while the gate/git.go form with --no-ext-diff returned the real diff. A user with difftastic configured the documented way (`git config --global diff.external difft`) therefore gets shard packs containing difftastic output, deterministic lints scanning difftastic output, a byte budget measured from difftastic output, and a PASS over source nobody saw - silently, with no warning anywhere. The two wrappers are in different shards (gate/git.go in shard-0a, branchfiles.go in shard-0f, gitcontext.go in shard-22), so no per-shard reviewer sees that one of them was hardened and the other was not. Secondary inconsistency in the same seam: branchfiles.go passes --text while gitcontext.go does not, so the two byte measurements of the same repository can disagree by the full size of any binary file.",
+      "evidence": [
+        {"path": "internal/fsm/gate/git.go", "line": 209, "note": "Diff passes --no-ext-diff --no-textconv; :221 does the same for WorkingDiff. The only two --no-ext-diff uses in the tree."},
+        {"path": "internal/gitcontext/branchfiles.go", "line": 107, "note": "the branch-file measurement git diff, no --no-ext-diff; its bytes become the shard chunks and hashes"},
+        {"path": "internal/gitcontext/branchfiles.go", "line": 40, "note": "cmd.Env set only when extra entries exist, so GIT_EXTERNAL_DIFF is inherited"},
+        {"path": "internal/gitcontext/gitcontext.go", "line": 117, "note": "the review context diff: no --no-ext-diff and no --no-textconv"},
+        {"path": "internal/gitcontext/gitcontext.go", "line": 333, "note": "git() sets no cmd.Env at all - full inherited environment"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Further instance of the confirmed 'guard updated in some copies but not all' pattern, and a live one: isGeneratedMetareviewPath has a FOURTH copy that never learned about the two directories this release added. internal/taskdone/review.go:426, internal/prready/review.go:822 and internal/epicready/review.go:440 are byte-identical (.metareview/ OR == \".metareview\" OR docs/metareview/). internal/learning/render.go:48 uses its own prefix list: .metareview/, docs/metareview/context/, docs/metareview/learning/, docs/metareview/reviews/ - it does not match docs/metareview/fsm/ (the FSM export bundles this branch introduces), docs/metareview/shards/ (the committed shard results this branch introduces), docs/metareview/FINDINGS.md, or the bare \".metareview\". Both missing directories are contractual durable output per CLAUDE.md:79 and :95. Its consumer, nonGeneratedChangedFiles (render.go:34), feeds a list hard-capped at maxLearningChangedFiles = 12 (render.go:10), so on any sharded PR - this one has 60-plus committed shard-*.result.json files - the post-merge learning 'changed files' list fills with review artifacts and pushes the real source files out. The seam is visible only across shards: internal/learnsource/source.go (shard-02) was updated on this branch to exclude docs/metareview/shards and docs/metareview/fsm by pathspec, and its sibling filter in internal/learning/render.go (shard-37) was not. No test pins the four copies equal.",
+      "evidence": [
+        {"path": "internal/learning/render.go", "line": 48, "note": "fourth copy: prefix list omits docs/metareview/fsm/, docs/metareview/shards/, docs/metareview/FINDINGS.md and bare .metareview"},
+        {"path": "internal/learning/render.go", "line": 10, "note": "maxLearningChangedFiles = 12, the budget the unfiltered shard results consume"},
+        {"path": "internal/taskdone/review.go", "line": 426, "note": "canonical copy, matches all of docs/metareview/"},
+        {"path": "internal/prready/review.go", "line": 822, "note": "identical canonical copy"},
+        {"path": "internal/epicready/review.go", "line": 440, "note": "identical canonical copy"},
+        {"path": "internal/learnsource/source.go", "line": 1, "note": "the sibling exclusion in learnsource WAS updated on this branch for docs/metareview/shards and docs/metareview/fsm; render.go was not"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The prompt pack's result contract omits a rule the ingester blocks on, so a reviewer who follows the contract exactly can be sent back for another attempt. internal/shardpack/shardpack.go:488-496 (shard body) and :477-486 (cross-shard body) state 'at least one entry' for the top-level evidence[] only, and describe findings[] merely as '(severity ..., disposition ..., note, evidence[])'. docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md:193 says the same, ' >= 1 per result'. The struct field is even tagged optional: internal/reviewmanifest/manifest.go:135 `json:\"evidence,omitempty\"`. But internal/reviewmanifest/manifest.go:506-508 raises a blocker for every finding whose evidence fails hasValidEvidence (manifest.go:670-680, which rejects an empty slice). A reviewing agent that writes a finding with no evidence array - which the pack and the spec both permit - gets 'shard result shard-XX finding missing evidence' and the shard has to be re-reviewed, consuming an attempt from --max-attempts. Compounding it, the same spec at :193-195 claims the pack's contract text is 'generated from those constants, not hand-copied', while shardpack.go:477-496 hard-codes '12 characters' and every enum as Go string literals despite already importing reviewmanifest at shardpack.go:21 - so nothing links the reviewer-facing contract to the validator and any change to EvidenceNoteMinLength or an enum silently makes every pack lie. Writer (shard-06), validator (shard-2c) and spec (shard-3f) are three different shards.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest.go", "line": 506, "note": "every finding with empty evidence becomes a blocker"},
+        {"path": "internal/shardpack/shardpack.go", "line": 494, "note": "pack contract describes findings[] evidence without saying it is required"},
+        {"path": "internal/shardpack/shardpack.go", "line": 483, "note": "cross-shard contract body, same omission"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 135, "note": "Findings[].Evidence is tagged omitempty, reinforcing the false impression that it is optional"},
+        {"path": "docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md", "line": 193, "note": "spec says '>= 1 per result' and claims the pack text is generated from the validator's constants"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The escalation rule stated to agents is not the predicate the code computes, and the owning spec agrees with the code rather than with the docs. internal/fsm/machine/fork.go:41-43 defines Escalated as `Attempt(snap) >= MaxAttempts && snap.Outcome != \"\" && !PassOutcome(snap.Outcome)` with Attempt = len(Lineage)+1 (fork.go:38) and MaxAttempts = 3 (fork.go:32); internal/fsm/record/record.go:70-74 stamps the runs.jsonl verdict on the same condition. The ancestors' outcomes are never consulted: the rule is 'lineage depth >= 3 AND this leaf is non-PASS', not 'three non-PASS attempts'. skills/fsm/SKILL.md:50 and docs/fsm/driving-a-workflow.md:78 both say 'three non-PASS attempts on one fork lineage', and fork.go:31's own comment repeats the wrong phrasing. docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:313 states the real rule and mandates a test row for 'an attempt-4 non-PASS leaf (child of a PASS attempt-3 leaf)', confirming PASS runs are forkable and still count toward the depth. Judge-swap forking is an explicitly documented non-failure workflow (SKILL.md:47), so root -> judge-swap fork -> judge-swap fork reaches attempt 3, and if that third run ends non-PASS it is stamped ESCALATED and refused for further forking after exactly ONE failed attempt. An agent following SKILL.md treats that as impossible and will not relay the human stop the CLI is demanding. Independently: tests/go/test-fsm.sh contains no ERR_RUN_ESCALATED assertion anywhere, although docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:315-316 mandates that black-box row - which is why the mismatch survived. Code in shard-1e, record in shard-02, SKILL in shard-32, doc in shard-27, spec in shard-20, suite in shard-3b.",
+      "evidence": [
+        {"path": "internal/fsm/machine/fork.go", "line": 41, "note": "Escalated ignores ancestor outcomes; it is depth >= 3 AND this leaf non-PASS"},
+        {"path": "internal/fsm/machine/fork.go", "line": 31, "note": "the code's own comment repeats the wrong 'third non-PASS attempt' phrasing"},
+        {"path": "skills/fsm/SKILL.md", "line": 50, "note": "'three non-PASS attempts on one fork lineage'"},
+        {"path": "docs/fsm/driving-a-workflow.md", "line": 78, "note": "same wrong sentence"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md", "line": 313, "note": "spec mandates an attempt-4 leaf that is the child of a PASS attempt-3 leaf, agreeing with the code"},
+        {"path": "tests/go/test-fsm.sh", "line": 1, "note": "no ERR_RUN_ESCALATED assertion, though the CLI spec mandates that black-box row"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Two packages read the same file, .metareview/runs.jsonl, with two different line-length ceilings, and five more JSONL readers never got the 1 MiB fix at all - further instances of the confirmed maxJSONLLineBytes pattern. internal/state/state.go:14-21 documents why the buffer must be maxJSONLLineBytes+2 (bufio rejects a token equal to the maximum and ScanLines needs room for the terminator), and internal/state/state.go:66, internal/runchain/runchain.go:114, internal/findings/findings.go:488 and internal/reviewlog/reviewlog.go:290 all use maxJSONLLineBytes+2 = 1048578. internal/fsm/record/record.go:156 uses `sc.Buffer(make([]byte, 0, 1<<20), 1<<20)` = 1048576 - two bytes tighter, as a bare literal - on the file record.go:62 resolves to .metareview/runs.jsonl, which internal/runchain/runchain.go:101 reads with the wider cap. A row of exactly 1 MiB is therefore accepted by the review gate and rejected by the FSM recorder. Separately, five readers still run on bufio's 64 KiB default with no Buffer call at all: internal/tasksource/tasksource.go:63 and internal/epicsource/epicsource.go:86 (both on .beads/issues.jsonl), internal/knowledge/knowledge.go:73, internal/sessionhistory/sessionhistory.go:226 and internal/evidence/receipt.go:77 - each aborts the entire read on one long line. No test pins any of the six numbers to each other. Aggravating: internal/state/state.go:52 already exposes a correct generic ReadJSONL, and findings.go:488, reviewlog.go:290 and runchain.go:114 each re-implement it with a private copy of the constant. record.go is in shard-02, runchain.go in shard-15, state.go in shard-26, findings.go in shard-00, reviewlog.go in shard-16.",
+      "evidence": [
+        {"path": "internal/fsm/record/record.go", "line": 156, "note": "1<<20 as a bare literal, two bytes tighter than every other reader"},
+        {"path": "internal/fsm/record/record.go", "line": 62, "note": "the file being read is .metareview/runs.jsonl"},
+        {"path": "internal/runchain/runchain.go", "line": 114, "note": "same file, maxJSONLLineBytes+2"},
+        {"path": "internal/state/state.go", "line": 17, "note": "the comment explaining why the +2 is required"},
+        {"path": "internal/tasksource/tasksource.go", "line": 63, "note": "bufio.NewScanner with no Buffer call - 64 KiB default"},
+        {"path": "internal/epicsource/epicsource.go", "line": 86, "note": "same file as tasksource, also unbuffered"},
+        {"path": "internal/sessionhistory/sessionhistory.go", "line": 226, "note": "unbuffered"},
+        {"path": "internal/knowledge/knowledge.go", "line": 73, "note": "unbuffered"},
+        {"path": "internal/evidence/receipt.go", "line": 77, "note": "unbuffered"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "`metareview fsm state` - the documented recovery path when a driver does not know where a run is - fails for mock runs whose scenario directory has moved or been deleted, contradicting two explicit claims in its own spec. internal/fsm/cli/run.go:210-214 makes openRun call c.peek then c.scenarioFor and bail on error BEFORE machine.Open is reached at :219, and openRun is the entry point for state (run.go:396), gate --run (:682), converge --run (:853) and export (:923), all with readOnly = true. internal/fsm/cli/wiring.go:120-121 raises ERR_REPO_ROOT_MISMATCH there and :128 calls MockLoad. docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:130-131 says 'ERR_REPO_ROOT_MISMATCH applies only to commands that need the scenario (advance, record, judge --run)', and :199-201 says state opens with OpenOptions{ReadOnly: true} 'so a concurrent fork advance, a re-pinned binary, or a removed scenario dir cannot make it fail'. The spec's reasoning is about the machine's load path; the CLI performs its own scenario read in front of it. For any run created with --mock-ai - every run the black-box suite drives - moving the checkout or deleting the scenario makes `fsm state` exit 2 with ERR_MOCK_INVALID / ERR_REPO_ROOT_MISMATCH instead of reporting where the run is, and internal/fsm/cli/prompt.go:7 is precisely the instruction that sends a driver there. Product runs are unaffected (wiring.go:117-118 returns early). CLI in shard-38, wiring in shard-09, spec in shard-08.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 211, "note": "scenarioFor runs before machine.Open, for read-only commands too"},
+        {"path": "internal/fsm/cli/run.go", "line": 396, "note": "state goes through openRun with readOnly = true"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md", "line": 130, "note": "spec scopes ERR_REPO_ROOT_MISMATCH to advance, record and judge --run only"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md", "line": 199, "note": "spec says a removed scenario dir cannot make state fail"},
+        {"path": "internal/fsm/cli/prompt.go", "line": 7, "note": "the shipped driver contract sends a lost driver to fsm state"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The spec's 'closed set of env names the binary reads' - the artifact a security reviewer audits the trust boundary from - under-declares it by the two variables that silently retarget the judge. docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:356-358 enumerates ANTHROPIC_API_KEY, OPENAI_API_KEY, ANTHROPIC_BASE_URL, OPENAI_BASE_URL, MOCK_AI, MRV_RUN_ID, HOME plus the test-only golden variables, and no spec under docs/specs/ mentions METAREVIEW_JUDGE_MODEL or METAREVIEW_JUDGE_EFFORT anywhere. internal/fsm/cli/wiring.go:31-32 declares both and wiring.go:159 reads them via judgeOverride, folding the result into the run's vars at run.go:307. Every human-facing surface already knows: skills/fsm/SKILL.md:82, docs/fsm/driving-a-workflow.md:90, internal/fsm/cli/prompt.go:40 and testdata/fsm/agent-prompt.golden all list them, and the SKILL classes them as guardrail-weakening knobs. An operator who exported METAREVIEW_JUDGE_MODEL once would, per the spec, believe no environment variable can influence which model judges a run. This is the same closed-list-omission pattern already reported for TMPDIR, in a different list and a different pair of shards (spec in shard-08, wiring in shard-09).",
+      "evidence": [
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md", "line": 356, "note": "the closed env-name set, omitting both METAREVIEW_JUDGE_* variables"},
+        {"path": "internal/fsm/cli/wiring.go", "line": 31, "note": "EnvJudgeModel and EnvJudgeEffort declared"},
+        {"path": "internal/fsm/cli/wiring.go", "line": 159, "note": "read through judgeOverride and folded into the run's vars"},
+        {"path": "skills/fsm/SKILL.md", "line": 82, "note": "the SKILL's env list does include them, so the two documents disagree"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "A relative --shard-result / --cross-shard-result path is accepted by the CLI and then silently thrown away by the ingester, producing a misleading 'missing shard result' failure. cmd/metareview/main.go:619-633 (mustResultFile) validates with os.Stat - which succeeds for a CWD-relative path - parses the JSON, and returns the path VERBATIM; it is stored at main.go:196/199 (task-done) and :265/268 (pr-ready), while the repo root handed to the review package is absolute (mustCwd()). internal/shardpack/shardpack.go:308-320 then resolves each explicit path with filepath.EvalSymlinks, which returns a relative path unchanged, and requires underRoot (shardpack.go:422-424: strings.HasPrefix(path, root+\"/\") against the absolute root). The file is filed as IgnoredResult{Reason: \"result file is outside the repository\"} and internal/reviewmanifest/manifest.go:424-428 then emits 'missing shard result for shard-XX'. Nothing says absolute paths are required: skills/review-task-done/SKILL.md:49-50 and skills/review-pr-ready/SKILL.md:51-52 say only 'pass a file in from elsewhere', and CHANGELOG.md:68 promises 'an invalid path exits 2 with nothing written' - but a relative path is not invalid to mustResultFile, so the run proceeds and fails for the wrong reason, burning an attempt. tests/go/test-sharded-review.sh:201 and :210 only ever pass \"$repo/...\" absolute paths, so the branch is untested. main.go is in shard-01, shardpack.go in shard-06, manifest.go in shard-2c, the skills in shard-22 and shard-0e.",
+      "evidence": [
+        {"path": "cmd/metareview/main.go", "line": 619, "note": "mustResultFile stats the path and returns it verbatim - a relative path passes"},
+        {"path": "internal/shardpack/shardpack.go", "line": 309, "note": "EvalSymlinks leaves a relative path relative"},
+        {"path": "internal/shardpack/shardpack.go", "line": 422, "note": "underRoot compares with HasPrefix against the absolute root, so it can never match"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 424, "note": "the shard is then reported missing rather than ignored-as-relative"},
+        {"path": "tests/go/test-sharded-review.sh", "line": 201, "note": "only absolute paths are exercised"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The quoted-path fix for `diff --git` headers landed in one of five copies of the same parser, and one of the unfixed copies feeds the shard manifest. internal/reviewers/taskdone.go:456-468 carries the fixed version with a comment naming the bug: it locates the post-image half with strings.LastIndex(rest, ' \\\"b/') / ' b/' and unquotes it via postImagePath, precisely because git quotes paths containing spaces and strings.Fields loses them. Four sibling copies still split on whitespace: internal/contextprofile/profile.go:237-243 takes fields[3], so for `diff --git \\\"a/my file.go\\\" \\\"b/my file.go\\\"` the FileProfile.Path fed into the review manifest becomes `file.go\\\"`; internal/taskdone/review.go:417, internal/prready/review.go:813 and internal/epicready/review.go:431 (isGeneratedDiffSection) take fields[2] and trim `a/`, so a generated docs/metareview/ path containing a space is not recognised and that content leaks back into the reviewed diff - defeating the exclusion the three packages exist to apply. All five are in different shards (reviewers/taskdone.go in shard-19, contextprofile/profile.go in shard-0e, taskdone/review.go in shard-2a, prready/review.go in shard-1c, epicready/review.go in shard-0b), and no test pins them equal.",
+      "evidence": [
+        {"path": "internal/reviewers/taskdone.go", "line": 456, "note": "the fixed parser, with the comment explaining that splitting on whitespace loses a quoted path"},
+        {"path": "internal/contextprofile/profile.go", "line": 237, "note": "strings.Fields(line)[3] - garbage path into the review manifest"},
+        {"path": "internal/taskdone/review.go", "line": 417, "note": "fields[2], generated-path exclusion misses quoted paths"},
+        {"path": "internal/prready/review.go", "line": 813, "note": "identical unfixed copy"},
+        {"path": "internal/epicready/review.go", "line": 431, "note": "identical unfixed copy"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Two specs give opposite answers about what an export bundle redacts, and the one that is wrong is the one that promises scrubbing. docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:383 (the §12 ownership ledger, row 3) says export must 'redact Vars, cmd_call/overflow_handler streams, llm_call.Verdict, record.data, node_output, tree.status'. internal/fsm/export/export.go:377-435 has redaction cases for TypeInit, TypeGate, TypeCmdCall/TypeOverflowHandler, TypeConverge, TypeWarn, TypeNodeOutput and TypeTree, and NONE for run.TypeLLMCall or run.TypeRecord, so export.go:436-438 emits those source lines byte-for-byte. docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:216 and :223 agree with the code ('llm_call.verdict | kept (typed JSON incl. reasoning)' and 'record.data | kept verbatim ... unredacted'), as does skills/fsm/SKILL.md:94. The default export destination is <repo>/docs/metareview/fsm/<id>/ (export.go:122) and every doc tells the user to COMMIT those bundles, so a reader who trusts the run spec's ledger commits judge reasoning text and host-supplied record.data believing both were scrubbed. Run-persistence spec in shard-31, fork spec in shard-20, export.go in shard-1f - three shards, none of which can see the contradiction alone.",
+      "evidence": [
+        {"path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md", "line": 383, "note": "ledger row 3 lists llm_call.Verdict and record.data among the redacted fields"},
+        {"path": "internal/fsm/export/export.go", "line": 377, "note": "the redaction switch has no case for TypeLLMCall or TypeRecord"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md", "line": 216, "note": "'llm_call.verdict | kept (typed JSON incl. reasoning)' - agrees with the code"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md", "line": 223, "note": "'record.data | kept verbatim ... unredacted' - agrees with the code"},
+        {"path": "internal/fsm/export/export.go", "line": 122, "note": "the default destination is the committed docs/metareview/fsm/<id>/ bundle"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The npm launcher's go-run fallback silently reviews the wrong repository. cli/metareview.js:15 sets `options = { cwd: process.cwd(), stdio: 'inherit' }` and the packaged-binary branch at :17-19 keeps it, but the fallback branch at :20-23 overwrites it with `{ cwd: root, stdio: 'inherit' }` where root = path.resolve(__dirname, '..'), the installed package directory. The user's working directory is never passed through. INSTALL.md:19 and :31-35, README.md:85-89, package.json:52 and cli/metareview.js:28's own error text all present the fallback as an equivalent runtime for a source checkout. A global install whose bin/metareview is missing - build skipped, prepack not run, a cross-platform tarball - therefore does not fail: `metareview review task-done`, `pr-ready` or `status` runs against the metareview package directory and reports a verdict about the wrong tree. tests/go/test-npm-wrapper-cwd.sh:10-17 builds a real bin/metareview first, so it exercises only the branch that works. cli/metareview.js is in shard-06; INSTALL.md is in the same shard but package.json is in shard-1f and README.md in shard-24, and the defect is the disagreement between the launcher's two branches and what all of them promise.",
+      "evidence": [
+        {"path": "cli/metareview.js", "line": 23, "note": "the go-run fallback replaces cwd with the package root"},
+        {"path": "cli/metareview.js", "line": 15, "note": "the default, used by the packaged-binary branch, is process.cwd()"},
+        {"path": "INSTALL.md", "line": 31, "note": "presents the fallback as the development runtime"},
+        {"path": "tests/go/test-npm-wrapper-cwd.sh", "line": 10, "note": "builds a real binary first, so only the working branch is covered"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The anchor fixture that guards the driver contract does not pin its single most load-bearing sentence. docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:229-230 requires, as one of the hand-maintained anchors, 'the loop skeleton: advance -> exit 3: do the node's work -> record node-output -> advance'. tests/go/agent-prompt-anchors.txt has no line containing 'exit 3'; it pins exit 2 (line 2), exit 1/GATE_FAILED (line 3) and exit 1/ERR_* (line 4), but not testdata/fsm/agent-prompt.golden:5. Since the golden is regenerable with FSM_UPDATE_GOLDEN=1 (internal/fsm/cli/prompt.go:3-4), the anchor list is the only thing standing between a careless regeneration and a silently changed contract. Lines 18-28 of the anchor file pin bare command prefixes that would still match if every flag were deleted from the prompt - they would not catch a regression that dropped --judge-model/--judge-effort from the init line. Anchors in shard-12, golden in shard-21, spec in shard-08.",
+      "evidence": [
+        {"path": "tests/go/agent-prompt-anchors.txt", "line": 2, "note": "the anchor list jumps from the state/next_action line straight to exit 2; no exit-3 anchor exists"},
+        {"path": "testdata/fsm/agent-prompt.golden", "line": 5, "note": "the loop-skeleton line the spec requires to be anchored"},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md", "line": 229, "note": "spec names the loop skeleton as a required anchor"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The same 512 KiB cap on the same input is declared twice under near-anagram names, in two packages, with two different error codes and no test pinning them. internal/fsm/cli/run.go:30 declares GoldensMaxBytes = 512 << 10 and caps the --goldens read at run.go:300 with ERR_INPUT_TOO_LARGE; internal/fsm/machine/types.go:278 declares MaxGoldensBytes = 512 << 10 and machine.go:267 rejects the same bytes with CodeGoldensInvalid. The adjacent workflow cap is single-sourced correctly - cli/run.go:586 and :846 import machine.MaxWorkflowBytes - so the 'import the machine constant' pattern was applied to one input and not its neighbour. cli_test.go:413 and machine_test.go:96 exercise the two independently, so a divergence would silently flip which error code the driver sees rather than failing a test. cli/run.go is in shard-38, machine/types.go in shard-2a.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 30, "note": "GoldensMaxBytes = 512 << 10, enforced with ERR_INPUT_TOO_LARGE"},
+        {"path": "internal/fsm/machine/types.go", "line": 278, "note": "MaxGoldensBytes = 512 << 10, enforced with CodeGoldensInvalid"},
+        {"path": "internal/fsm/cli/run.go", "line": 586, "note": "the sibling workflow cap IS imported from machine, showing the intended pattern"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "One rendering of the changed-files list escapes its values and three do not. internal/reviewmanifest/manifest.go:689-696 builds each bullet as '- ' + markdown.PlainText(value) and has an injection test (manifest_test.go:576-581). internal/taskdone/review.go:694-711, internal/prready/review.go:1085 and internal/epicready/review.go:714 build '- ' + value raw, and all three are called on the git-derived changed-files list (taskdone/review.go:499, prready/review.go:875, epicready/review.go:501). A fourth rendering of the same data, internal/learning/render.go:26, uses a third convention, markdown.InlineCode. Four packages, three escaping policies, one value type. Risk is bounded because git quotes paths containing control characters, but the branch deliberately hardened the manifest path against forged table cells and left the three sibling renderers on the old convention. The four sites are in shard-2c, shard-2a, shard-1c and shard-0b.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest.go", "line": 695, "note": "'- ' + markdown.PlainText(value), with an injection test"},
+        {"path": "internal/taskdone/review.go", "line": 705, "note": "'- ' + value, raw"},
+        {"path": "internal/prready/review.go", "line": 1085, "note": "identical raw copy"},
+        {"path": "internal/epicready/review.go", "line": 714, "note": "identical raw copy"},
+        {"path": "internal/learning/render.go", "line": 26, "note": "a third convention, markdown.InlineCode, for the same value type"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The public landing page still headlines a release three versions old, and this branch touched the file without noticing. docs/index.html:474-475 reads '<h2>0.6.0 adds evidence receipts, context profiles, and review manifests.</h2>' and 'The 0.4.0 to 0.6.0 work...', while package.json:3, internal/version/version.go:3, both plugin manifests, .claude-plugin/marketplace.json:11 and CHANGELOG.md:3 all say 0.9.0. This diff edited docs/index.html (the footer line at :740, which correctly mentions metareview fsm) and left the banner stale. Related and in a different shard: README.md's newest 'What Changed' section is 0.8.3 (README.md:55, added by this PR) and the string 0.9.0 appears nowhere in README.md, so a reader following the release narrative never sees the release they installed. docs/index.html is in shard-35, README.md in shard-24, the version manifests in shard-1f and shard-07 - each internally consistent.",
+      "evidence": [
+        {"path": "docs/index.html", "line": 474, "note": "headline still advertises 0.6.0"},
+        {"path": "docs/index.html", "line": 740, "note": "the footer line this PR did update, mentioning metareview fsm"},
+        {"path": "internal/version/version.go", "line": 3, "note": "const Version = \"0.9.0\""},
+        {"path": "README.md", "line": 55, "note": "newest What Changed section is 0.8.3; 0.9.0 appears nowhere in the file"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "docs/fsm/sdlc-loop-example.md claims to be a real transcript and shows sequence numbers the machine cannot produce. The file states at :3-5 that it is 'exactly as the black-box suite drives it', then shows {\"status\":\"OK\",\"seq\":5,\"type\":\"node_output\",\"key\":\"discover@0\"} at :26 and forked_at_seq 9 / copied 8 at :54. The machine's actual order is init(1) at internal/fsm/machine/machine.go:199, tree(2) at :214, needs_input(3) at :679, node_output(4) at :984 - pinned as a literal sequence in internal/fsm/machine/machine_test.go:293 - and the CLI's runs.jsonl warning is envelope-only, not an event (internal/fsm/cli/run.go:329-332), so nothing can occupy the missing slot. discover@0's node_output is seq 4. Likewise the transition into fix cannot be at seq 9: discover alone consumes seqs 1-8 because nothing_found is evaluated and appended before findings_nonempty (workflows/sdlc-loop.yaml:10-11, machine.go:731-744), and adjudicate then adds llm_call, node_output, delta_applied, two gates and a transition. A driver that treats the example as ground truth will mis-read its own audit log. Example in shard-09, machine in shard-1c, the test that pins the real order in shard-2d-2.",
+      "evidence": [
+        {"path": "docs/fsm/sdlc-loop-example.md", "line": 26, "note": "shows discover@0 node_output at seq 5"},
+        {"path": "internal/fsm/machine/machine.go", "line": 199, "note": "init is seq 1, tree seq 2, needs_input seq 3, node_output seq 4"},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 293, "note": "pins the real event order init,tree,needs_input,node_output,delta_applied,gate,gate,transition"},
+        {"path": "workflows/sdlc-loop.yaml", "line": 10, "note": "two gate events per discover iteration, which the example's seq arithmetic does not account for"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two small spec/code mismatches in the export bundle and the milestone docs. (a) docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:189 defines Manifest.Bytes as 'sum of all written files' and :241 says MaxBytes 'is checked before the first write', but internal/fsm/export/export.go:167-173 sums and enforces the limit and only then adds files[\"manifest.json\"] - the code comment at export.go:80 concedes it ('every written file except manifest.json itself'), so the manifest under-reports the bundle and a bundle can exceed --max-bytes by the manifest's own length. (b) docs/tasks/m8-cli-suite-docs.md:3 says it implements 'spec 4 (docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md)', but that file's own header at :1 reads 'spec 5', and spec 4 is the judge-kinds document that docs/tasks/m1-m6-fsm-packages.md:4 already claims - two milestone docs assign the same number to different specs. Files sit in shard-20, shard-1f, shard-06 and shard-31.",
+      "evidence": [
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md", "line": 189, "note": "Manifest.Bytes documented as the sum of all written files"},
+        {"path": "internal/fsm/export/export.go", "line": 80, "note": "code comment concedes 'every written file except manifest.json itself'"},
+        {"path": "internal/fsm/export/export.go", "line": 167, "note": "MaxBytes enforced before manifest.json is added to files"},
+        {"path": "docs/tasks/m8-cli-suite-docs.md", "line": 3, "note": "calls the CLI spec 'spec 4'; the spec's own header says spec 5"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Considered and rejected as a cross-shard finding: the stray zero-byte tracked file named `0,` at the repository root (git ls-files entry 14, added by commit cde8d0a, and visible as a planned chunk at shard-2e of this plan). It is a real defect and it should be removed before merge, but it is fully contained in one shard and the shard-2e result already reports it at medium/open with the same evidence, so re-reporting it here would double-count a blocker rather than add cross-shard information.",
+      "evidence": [
+        {"path": "docs/metareview/shards/pr-ready/fsm-enhancements-b73f409f/shard-2e.3afefcf9db26d4ae.result.json", "line": 1, "note": "shard-2e already files the stray `0,` file as a medium/open finding with the same commit attribution"}
+      ]
+    }
+  ]
+}

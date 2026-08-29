@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-11-2.a72c3befbc1be7ff",
+  "kind": "shard",
+  "shardId": "shard-11-2",
+  "shardHash": "a72c3befbc1be7ff",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T06:36:44Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 209,
+      "note": "Reviewed all five chunks (workflow.go, gitcontext.go, skills/review-task-done/SKILL.md, testdata/fsm/scenarios/review-loop/clean/judge.yaml, testdata/fsm/workflows/sdlc-loop-cmds.yaml) against rubrics/task-done-review-rubric.md, reading the real repo files rather than the diff alone."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow_test.go",
+      "line": 140,
+      "note": "Test coverage verified by running the suites: go test ./internal/fsm/workflow/... reports 100.0% of statements and ./internal/gitcontext/... reports 85.0%, with branchPaths/pathspecArgs/collectBranchFiles/exactExcludesExcept/CollectWith all at 100% per go tool cover -func. The rubric's 'source changes lack relevant tests' blocker does not apply."
+    },
+    {
+      "path": "internal/fsm/workflow/resolve.go",
+      "line": 60,
+      "note": "Cross-checked workflow.go's static $VAR collection (collectRefs/refsIn/paramRefs) against resolve.go's substitution: both walk exactly string and []any, so the validator and the resolver agree on which params carry vars — no unresolved-var-at-runtime class of bug beyond the nested-map limit reported below."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 305,
+      "note": "The 'Invalid git base' -> 'invalid git base' lowercasing has no stale consumer: the only match repo-wide outside .git is tests/go/test-git-context.sh:58, which already greps the new lowercase string."
+    },
+    {
+      "path": "testdata/fsm/workflows/sdlc-loop-cmds.yaml",
+      "line": 10,
+      "note": "Every gate named by the new fixture (nothing_found, findings_nonempty, nothing_confirmed, confirmed_nonempty, commit_exists, all_fixed, bugs_remain) is a registered builtin in internal/fsm/gate/gates.go, and the fixture satisfies validateGraph's loop rules: the single loop edge verify->discover has exactly one outcome-bearing terminal sibling (verify->done, outcome fixed), a convergence predicate is present, and repo_mode/on_overflow resolve to declared values."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 98,
+      "note": "go build ./... and go vet ./internal/gitcontext/... ./internal/fsm/workflow/... are clean; the removed limitedGit helper has no remaining caller (grep 'limitedGit(' across internal/ finds none). No TODO/FIXME markers, no eval or other unsafe execution, and no untracked source files are introduced by this shard."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "parseTransitions' mapping-form branch drops EVERY wildcard-source key, not just the documented *-to-failed declaration. internal/fsm/workflow/workflow.go:425 does `if from == \"*\" { continue }` before strictNode is ever called, so `\"*\\u2192done\": {gate: bogus, whatever: 1}` parses successfully and the edge is silently discarded: no unknown-key error, no unknown-gate error, no transition recorded. Every other key in this package is validated strictly (Parse sets dec.KnownFields(true), strictNode rejects unknown fields, unknown gates/states/kinds/execs all error), so this is the one hole in a package whose doc comment promises 'Every rule is static'. Impact is a hand-authored workflow that reads as declaring an edge the engine will never take; likelihood is low because the spec only ever defines *-to-failed. Suggested fix: require `to == string(FailedState)` before continuing, and error otherwise.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 425,
+          "note": "from == \"*\" continues without checking that the target is `failed` and without running strictNode on the value node."
+        },
+        {
+          "path": "internal/fsm/workflow/workflow_test.go",
+          "line": 303,
+          "note": "mappingDoc covers only the legitimate \"*\\u2192failed\" case; no test exercises a wildcard key with a non-failed target, so the gap is untested as well as unguarded."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "rawTransition.On (internal/fsm/workflow/workflow.go:157) is decoded and then never read. strictNode admits \"on\" on every mapping-form transition (workflow.go:429), but addTransition builds its Transition from From/To/Gate/Outcome/Loop only, so `discover\\u2192adjudicate: {gate: findings_nonempty, on: gate_error}` is accepted and the `on:` is a silent no-op. The key is only meaningful on the *-to-failed line the parser skips entirely, which means the field exists solely to make a key legal that is never consulted. Either restrict \"on\" to the wildcard line or drop the field; as written it is an accepted-but-ignored key in an otherwise strict validator.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 157,
+          "note": "On string `yaml:\"on\"` is declared on rawTransition but has no reader anywhere in the package (grep rt.On returns nothing)."
+        },
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 429,
+          "note": "strictNode's allowed list includes \"on\" for all mapping-form transitions, not only the skipped wildcard entry."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "$VAR references nested inside map-valued or list-of-map node params are neither validated nor substituted. paramRefs (workflow.go:638) switches on string and []any-of-string only, and Resolve's param loop (resolve.go:66-81) has the same two cases with a `default:` that copies the value through untouched. A node param such as `budget: {model: $REVIEWER}` therefore passes Parse (no unknown_var error, because the ref is never seen) and reaches the kind payload as the literal text \"$REVIEWER\". The two halves agree, so nothing crashes, but the failure mode is a silently unsubstituted variable in a node's parameters rather than an ERR_VAR_UNKNOWN at parse time. Worth either recursing into nested containers in both functions or rejecting non-scalar/non-flat-list params at parse time.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 638,
+          "note": "paramRefs handles case string and case []any; a map[string]any param falls through with no refs collected."
+        },
+        {
+          "path": "internal/fsm/workflow/resolve.go",
+          "line": 78,
+          "note": "Resolve's matching default: branch copies the value verbatim, so the unvalidated nested $VAR is also unsubstituted."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The exclude pathspecs built for the branch measurement keep git's default glob magic even though exactExcludesExcept supplies exact paths. pathspecArgs (internal/gitcontext/branchfiles.go:82) emits `:(exclude)<path>` with no :(literal) prefix, and branchPaths deliberately runs without GIT_LITERAL_PATHSPECS so that :(exclude) is honoured at all. collectWith (gitcontext.go:81-83) feeds it the output of exactExcludesExcept, which is a list of concrete repository paths. A tracked path containing a glob metacharacter (*, ?, [ or a backslash) is then matched as a pattern rather than as itself, so it can fail to be excluded from BranchFiles/BranchFilteredDiffBytes and leak into the shard packs that this list exists to keep out. Narrow in practice (such filenames are rare) but the mismatch between a function named 'exact' and glob-magic consumption is real; escaping the metacharacters in pathspecArgs would close it.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 82,
+          "note": "pathspecArgs concatenates :(exclude) with the raw string; no :(literal) magic and no metacharacter escaping."
+        },
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 81,
+          "note": "collectWith passes exactExcludesExcept's exact-path list straight into collectBranchFiles, which forwards it to pathspecArgs via branchPaths."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The branch measurement spawns one git process per changed path, and twice over when excludes are configured. collectBranchFiles loops `git diff base..HEAD -- <path>` per file (branchfiles.go:104-111) and collectWith then calls measureBranchFiles with a nil exclude list (gitcontext.go:93), which repeats the same per-path loop over the unfiltered set purely to obtain BranchRawDiffBytes. On the branch that motivated this work that is on the order of 2N subprocess spawns on every truncated-diff collection. The comment at branchfiles.go:117-119 justifies not retaining the raw text, which is a different concern from not re-walking it; a single `git diff --numstat`-style pass, or deriving the raw total from one full-diff invocation, would avoid the second sweep.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/branchfiles.go",
+          "line": 104,
+          "note": "One run() invocation per path inside collectBranchFiles' loop."
+        },
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 93,
+          "note": "measureBranchFiles(root, ctx.BaseSHA, nil, ...) repeats the whole per-path sweep unfiltered whenever effectiveExcludes is non-empty."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two nondeterminism/asymmetry nits in the new validator. (a) validateGraph's terminal_with_node check ranges over the w.Nodes map (workflow.go:479-483), so when more than one terminal state carries a node the reported `at` path is whichever key Go's randomized map order yields first; the sibling loops over w.Transitions and w.States are deterministic, and parseNodes already sorts its names for exactly this reason. (b) Resolve length-checks only the substituted model/effort against run.MaxShort (resolve.go:63) and leaves resolved params and cmd argv unbounded, so an oversized caller-supplied var surfaces later as a fold-time rejection in internal/fsm/run rather than as a clean ERR_VAR_* at resolve time. Neither is a behavioural bug; both cost reproducibility of error messages.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 479,
+          "note": "for s, n := range w.Nodes { if w.IsTerminal(s) { ... } } — map iteration order decides which node name appears in the error."
+        },
+        {
+          "path": "internal/fsm/workflow/resolve.go",
+          "line": 63,
+          "note": "run.CapText(v, run.MaxShort) is applied to nn.Model and nn.Effort only, not to the substituted Params or Cmds argv."
+        }
+      ]
+    }
+  ]
+}

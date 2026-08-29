@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "r-shard-10-3-6244a4424166f07f",
+  "kind": "shard",
+  "shardId": "shard-10-3",
+  "shardHash": "6244a4424166f07f",
+  "planHash": "5946b89296b16369",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {"note": "Executed `go test ./internal/reviewmanifest/ -cover`: ok, 90.4% of statements; tests/coverage-floor.txt line 21 sets the enforced combined floor for this package at 97.0, which the shell suite tops up."},
+    {"note": "Executed `bash tests/manifest/test-manifests.sh`: exit 0. The new derived Go-floor scan holds today: go.mod:3 declares `go 1.26` and every tracked prose copy (INSTALL.md:9, README.md:85, package.json:52, .agents/plugins/marketplace.json:9, internal/setup/setup.go:89) states Go 1.26+, so the previously reported 1.22/1.26 drift is genuinely closed rather than asserted around."},
+    {"note": "Executed `bash tests/go/test-sharded-review.sh` end to end: `sharded review: ok`, exit 0. It is wired into the suite at tests/run-all.sh:21, so the new script is not dead weight."},
+    {"note": "Diffed the new golden against live output: `go run ./cmd/metareview fsm --agent-prompt` is byte-identical to testdata/fsm/agent-prompt.golden, and tests/go/test-fsm.sh:60 cmp's it with a separate anchor list at line 66 that the golden updater never touches."},
+    {"path": "internal/reviewmanifest/manifest.go", "line": 150, "note": "ParseResult checks len(data) > MaxResultBytes at line 151 before decoding, which is what TestOversizeResultIgnored relies on when it feeds deliberately truncated JSON."},
+    {"path": "internal/reviewmanifest/manifest.go", "line": 61, "note": "shardIDPattern and resultNamePattern accept the shard-3a / shard-3a-2 forms the rewritten helpers use, so the renamed fixtures exercise the real validators."},
+    {"path": "internal/reviewmanifest/manifest_test.go", "line": 655, "note": "The rewritten table-forgery test counts unescaped pipes on the rendered row and asserts exactly seven, which is a real containment assertion rather than a substring check."},
+    {"path": "tests/manifest/test-manifests.sh", "line": 79, "note": "The scan skips docs/metareview/, which is load-bearing: tracked shard result files under that prefix quote the old Go 1.22+ string and would otherwise fail the gate."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestResultSchemaVersionDistinct's second half is vacuous, and its comment claims otherwise. The comment (manifest_test.go:109-111) says \"Validation must read ResultSchemaVersion, not the manifest's own SchemaVersion. The two are equal today, so only a result carrying ResultSchemaVersion proves which constant the check uses.\" But SchemaVersion = 1 and ResultSchemaVersion = 1 (manifest.go:23 and :27), so a result whose SchemaVersion field is 1 is literally indistinguishable under the two constants: the accepting half passes identically whether validateResult compares against ResultSchemaVersion or SchemaVersion. The test cannot detect the drift it was written to pin, and it reads as if it can. Pinning it would need a compile-time assertion that the constants may diverge, or a build-tag fixture where they do.",
+      "evidence": [
+        {"path": "internal/reviewmanifest/manifest_test.go", "line": 109, "note": "comment claims the accepting case proves which constant is read"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 23, "note": "SchemaVersion = 1"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 27, "note": "ResultSchemaVersion = 1, so the two are indistinguishable"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The write_results helper in the new shell test takes two parameters that no call site ever passes. ONLY (argument 3, consumed as the `only` shard filter in the embedded node script) and SKIP_CROSS (argument 4) are both defaulted to empty, and all four invocations in the file pass exactly two arguments, so the partial-results and no-cross-shard branches of the helper are never executed. That is untested code inside the test harness itself: if either branch is wrong, nothing notices, and a future reviewer will reasonably assume they work. Either drop them or add the negative case they were clearly written for (a plan with one shard result missing already has coverage in the Go tests, but not end to end).",
+      "evidence": [
+        {"path": "tests/go/test-sharded-review.sh", "line": 59, "note": "write_results declares ONLY and SKIP_CROSS"},
+        {"path": "tests/go/test-sharded-review.sh", "line": 147, "note": "every call site passes only repo and plan"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The Go-floor scan's try/catch comment is wrong about what it guards. `fs.readFileSync(file, \"utf8\")` does not throw on binary content — it decodes lossily, substituting U+FFFD — so the catch never fires for the \"binary\" case the comment names; it only fires for a genuinely unreadable path, such as a tracked file deleted from the worktree. The practical consequence is that every tracked binary is regex-scanned, and any byte sequence decoding to `Go 1.NN+` inside one would fail the manifest gate with the message \"<binary file> advertises Go 1.NN+ but go.mod requires 1.26\" — a claim about prose, pointed at a file that has none. The repo has no such binary today, so this is latent rather than live. A cheap fix is to read as a Buffer and skip anything containing a NUL byte.",
+      "evidence": [
+        {"path": "tests/manifest/test-manifests.sh", "line": 84, "note": "catch comment claims binary files are skipped"},
+        {"path": "tests/manifest/test-manifests.sh", "line": 83, "note": "readFileSync with utf8 encoding does not throw on binary input"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "The rubric blocks on the diff introducing unsafe execution such as eval, and the new shell test does contain the token. It is a deliberately assembled fixture, not executed code: `printf 'value := %s(untrusted)\\n' eval > \"$repo/src/staged.txt\"` writes the string into a throwaway git repo under mktemp so the deterministic lint has something to fire on, and the file's own comment says the pattern is assembled so this file does not carry it literally. Nothing is evaluated; the fixture repo is removed by the EXIT trap.",
+      "evidence": [
+        {"path": "tests/go/test-sharded-review.sh", "line": 238, "note": "printf assembles the lint pattern into a fixture file rather than executing it"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

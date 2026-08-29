@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-15",
+  "kind": "shard",
+  "shardId": "shard-15",
+  "shardHash": "71126490156db467",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cli/cli_test.go",
+      "line": 1,
+      "note": "Reviewed the full 851-line new CLI test file against rubrics/task-done-review-rubric.md; it is the test evidence for the internal/fsm/cli package."
+    },
+    {
+      "path": "internal/fsm/cli/cli_test.go",
+      "line": 100,
+      "note": "Harness verified against the real seams in deps.go/wiring.go: fake Getenv/Environ/Now/After and an injected http Doer, so no test touches the network, the ambient environment, or the wall clock."
+    },
+    {
+      "note": "go vet ./internal/fsm/cli/ is clean and go test -race -count=2 ./internal/fsm/cli/ passes (21s), so the suite is race-free and not order- or repetition-dependent."
+    },
+    {
+      "note": "go test ./internal/fsm/cli/ -coverprofile reports 100.0% of statements covered, satisfying the repository's coverage bar for the source this shard tests."
+    },
+    {
+      "note": "No TODO/FIXME markers, no eval-style unsafe execution, and no truncated diff context in this shard; the only subprocesses are git and a committed bash handler script under the temp repo root."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 78,
+      "note": "Checked the crafted-event append in TestOpenFailuresAndCraftedRuns for wall-clock flakiness: fold only rejects a zero timestamp, never a non-monotonic one, so mixing the fake clock with time.Now() there is safe."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Misleading comment claiming coverage that does not exist: the comment says 'escalation over three failed forks of the parent lineage is refused with the human-only code', but the assertion beneath it is h.mustErr(\"ERR_CHECKPOINT_NOT_FOUND\", 2, \"advance\", \"--run\", id, \"--from\", \"nope\"), which exercises an unknown checkpoint name, not escalation. ERR_RUN_ESCALATED (machine/fork.go:82) is never driven through the CLI in this file; it is only covered at the machine layer (internal/fsm/machine/fork_test.go:600). The CLI-level contract documented in prompt.go:38 and CLAUDE.md (escalation refuses with exit 2 and waits for a human) is therefore asserted nowhere end to end. Behaviour is correct by inspection (the code lands in the exit2 map in envelope.go:55), so this is a comment/coverage-claim defect, not a functional one.",
+      "evidence": [
+        {"path": "internal/fsm/cli/cli_test.go", "line": 296, "note": "comment claims escalation is exercised; the assertion below it is ERR_CHECKPOINT_NOT_FOUND"},
+        {"path": "internal/fsm/machine/fork.go", "line": 82, "note": "the only producer of ERR_RUN_ESCALATED, reached only from machine-layer tests"},
+        {"path": "internal/fsm/cli/envelope.go", "line": 55, "note": "ERR_RUN_ESCALATED sits in the exit2 map, so the exit code is right but untested at CLI level"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The panic assertion tests less than its failure message claims. t.Fatal(\"rand failure panics into ERR_INTERNAL\") implies a crypto/rand failure surfaces as the ERR_INTERNAL JSON envelope, but the test calls (&ctxDeps{deps: h.deps}).nonce() directly and only asserts that a panic occurs. A grep for recover() across the CLI package finds exactly one hit and it is this test: wiring.go:170 is the only panic site in internal/fsm/cli, internal/fsm/machine and internal/fsm/run, and nothing recovers it, so in the real binary a crypto/rand failure aborts with a Go stack trace instead of the single-JSON-object stdout plus exit code every other path guarantees to the agent driver. Practically unreachable (crypto/rand does not fail on the supported platforms), so it is worth a comment fix or a recover in Run rather than blocking.",
+      "evidence": [
+        {"path": "internal/fsm/cli/cli_test.go", "line": 627, "note": "message asserts ERR_INTERNAL while the test only observes a raw panic from nonce()"},
+        {"path": "internal/fsm/cli/wiring.go", "line": 170, "note": "the sole panic site in the CLI/machine/run packages, with no recover anywhere in the package"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two harness assertions can panic instead of failing cleanly, which would turn a future regression into an index-out-of-range crash rather than a readable test failure. h.run indexes args[0] when the stdout envelope fails to unmarshal, and h.run() is called with zero args from TestUsageAndPrompt (h.mustErr(CodeUsage, 2)); today the empty-args path does emit JSON so the short-circuit saves it, but the guard is one regression away from panicking. Likewise the agent-prompt assertion slices h.out.String()[:80] on the failure branch, which panics whenever the failing output is shorter than 80 bytes — exactly the case where the prompt was not written.",
+      "evidence": [
+        {"path": "internal/fsm/cli/cli_test.go", "line": 108, "note": "args[0] is read when unmarshal fails, and h.run() is legitimately called with no args"},
+        {"path": "internal/fsm/cli/cli_test.go", "line": 171, "note": "h.out.String()[:80] panics on short output in the failure path"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

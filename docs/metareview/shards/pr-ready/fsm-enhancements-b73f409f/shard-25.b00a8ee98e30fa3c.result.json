@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-25-b00a8ee98e30fa3c-claude-opus-5",
+  "kind": "shard",
+  "shardId": "shard-25",
+  "shardHash": "b00a8ee98e30fa3c",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:20:00Z",
+  "blockingCount": 3,
+  "evidence": [
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 31,
+      "note": "CallRow.Index ships as report.calls[].index and is never assigned anywhere in the package"
+    },
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 105,
+      "note": "row construction sets Node/Iter/Kind/InputHash/occurrence; Index is left zero"
+    },
+    {
+      "path": "internal/fsm/cli/run.go",
+      "line": 918,
+      "note": "the report struct is emitted verbatim in the fsm diff JSON envelope"
+    },
+    {
+      "path": "internal/fsm/judge/codex.go",
+      "line": 111,
+      "note": "empty-model guard compares model to CodexPrefix case-sensitively"
+    },
+    {
+      "path": "internal/fsm/judge/codex.go",
+      "line": 160,
+      "note": "input_tokens copied straight into TokenTotals.Input alongside cached in CacheRead"
+    },
+    {
+      "path": "internal/fsm/judge/judge.go",
+      "line": 460,
+      "note": "the HTTP arm subtracts cached from prompt and reasoning from completion, and clamps"
+    },
+    {
+      "path": "internal/fsm/converge/converge.go",
+      "line": 247,
+      "note": "the budget convergence gate sums all five counters via Tokens.Total()"
+    },
+    {
+      "path": "internal/fsm/machine/diff.go",
+      "line": 181,
+      "note": "commonPrefix doc enumerates the ignored fields as Origin, Seq and Prev only"
+    },
+    {
+      "path": ".golangci.yml",
+      "line": 11,
+      "note": "comment states the default cap is three issues per linter"
+    },
+    {
+      "path": "internal/fsm/machine/helpers_test.go",
+      "line": 1,
+      "note": "every helper in the file is used at least once by machine_test.go; nothing dead, nothing vacuous"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "CallRow.Index is a shipped-but-dead field whose doc comment asserts a behaviour the code does not have. diff.go:28-31 says 'Index distinguishes several calls of one kind in the same node@iter with the same input - the same question put to two models. Without it the rows collided and the earlier call vanished from the report.' Index is never assigned: the only row construction is diff.go:105 (`&CallRow{Node, Iter, Kind, InputHash, occurrence}`) and grep over the package shows the sole `.Index` writes are CallSide.Index at diff.go:109. What actually does the disambiguation is the unexported `occurrence` (diff.go:38-39, 89, 101, 142), and the test that pins the fix agrees: TestDiffRunsKeepsRepeatedCallsWithTheSameInput (fork_test.go:1126-1129) attributes the collision to keying on (node, iter, kind, input_hash) alone, and never looks at CallRow.Index. Consequence beyond the false comment: the struct is marshalled straight into the CLI envelope (cli/run.go:918 emits `\"report\": rep`), so every `fsm diff --json` row carries `\"index\": 0`, sitting next to the two real per-side `a.index`/`b.index` values, inviting a consumer to read it as the call index of the row. Spec 3 §4 (docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:163) declares CallRow without any top-level Index and the deviation table at line 342 records only 'per-side Index'. 100% statement coverage does not catch it because an unwritten field is not a statement. Fix: either drop the field and correct the comment to name `occurrence`, or export the occurrence value into it (`Index: k.occurrence`) and say so.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/diff.go",
+          "line": 28,
+          "note": "comment claims Index prevents row collisions"
+        },
+        {
+          "path": "internal/fsm/machine/diff.go",
+          "line": 105,
+          "note": "only CallRow construction; Index never set"
+        },
+        {
+          "path": "internal/fsm/machine/diff.go",
+          "line": 101,
+          "note": "occurrence is what actually keys repeats"
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 918,
+          "note": "the always-zero field ships in the diff JSON"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The codex provider accounts tokens differently from the HTTP provider for the same underlying OpenAI usage numbers, and the difference feeds a gate. parseCodexEvents (codex.go:157-165) maps the turn.completed usage field-for-field: Input = input_tokens, CacheRead = cached_input_tokens, Output = output_tokens, Reasoning = reasoning_output_tokens. In the Codex CLI's usage payload (as in the OpenAI API it wraps) cached_input_tokens is a subset of input_tokens and reasoning_output_tokens a subset of output_tokens - which is exactly why the HTTP arm of this same package subtracts them: judge.go:460 computes `Input: clampTok(r.Usage.Prompt - cached)` and `Output: clampTok(r.Usage.Completion - reasoning)`, pinned by judge_test.go:457 (prompt 10 / cached 20 -> Input 0, CacheRead 20). So one codex turn reporting input 100 / cached 40 records 140 input-side tokens where the identical model over HTTP records 100. That is not cosmetic: run.TokenTotals.Total() sums all five counters and drives the `budget` convergence gate (converge/converge.go:245-248), so a codex-transported run trips its token budget earlier than an HTTP-transported one doing the same work, and the recorded per-call totals are not comparable across transports. codex_test.go:73-76 pins the double-counted mapping as expected output (want Input:100, CacheRead:40 from a fixture whose input_tokens is 100 with cached 40), so the test enshrines it rather than catching it. Second, smaller half of the same finding: the codex arm applies no clampTok, so a negative or >MaxTokenCounter counter in the stream passes into run.LLMCallData and is rejected downstream at fold (run/fold.go:157-161, ReasonTokensNegative / ReasonTokensTooLarge) instead of being clamped as the HTTP arm clamps. Fix: subtract cached from input and reasoning from output (or document why codex is deliberately accounted differently), and clamp.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 158,
+          "note": "turn.completed usage mapped without subtraction or clamp"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 460,
+          "note": "HTTP arm subtracts cached and reasoning, and clamps"
+        },
+        {
+          "path": "internal/fsm/converge/converge.go",
+          "line": 247,
+          "note": "budget gate sums the inflated totals"
+        },
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 157,
+          "note": "unclamped counters are a fold rejection, not a clamp"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "validateCodex's empty-model guard is case-sensitive while everything around it is case-insensitive, so a model id that resolves to an empty wire id passes validation with the error message still claiming 'model id is empty or exceeds MaxShort'. codex.go:111 tests `model == CodexPrefix`, i.e. the literal lowercase \"codex/\", but route() lowercases before matching the prefix (judge.go:113-115) and wireModel strips it case-insensitively via trimPrefixFold (judge.go:168-172). Verified empirically on a scratch copy of the tree (repo untouched): `validate(\"codex/\") -> ERR_JUDGE_MODEL`, `validate(\"\") -> ERR_JUDGE_MODEL`, but `validate(\"CODEX/\") -> nil` and `validate(\"Codex/\") -> nil`, and a Call with Model \"CODEX/\" through NewWithCodex reaches the exec seam with args `[exec --json --sandbox read-only --skip-git-repo-check --color never -m  -c model_reasoning_effort=medium -]` - an empty value for -m. Preflight (judge.go:307) shares the hole, so the CLI's pre-flight check passes too. Impact: either five wasted CLI invocations with a real 15s backoff ladder, or - if the Codex CLI treats an empty -m as unset and falls back to its configured default - a verdict recorded under a model id that did not answer it, in a tool whose whole point is an auditable per-call model attribution. This branch already fixed exactly this class one layer over (TestCodexPrefixStrippingMatchesRouting, codex_test.go:208-220, whose comment explains that route lowercases while wireModel stripped case-sensitively) and the guard was left behind. Fix: compare against the stripped id, e.g. `wireModel(model) == \"\"`.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 111,
+          "note": "case-sensitive comparison against the lowercase prefix"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 113,
+          "note": "route lowercases the model before matching codex/"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 168,
+          "note": "wireModel strips the prefix case-insensitively, yielding \"\""
+        },
+        {
+          "path": "internal/fsm/judge/codex_test.go",
+          "line": 210,
+          "note": "the branch's own fix for this class covers wireModel but not the guard"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "commonPrefix's doc comment (diff.go:181-182) enumerates the ignored fields as 'Origin, Seq and Prev', which reads as a closed list; the comparison at diff.go:187 also ignores SchemaVersion, State, Iter and Mock (run/event.go:6-18). The reachable case is Mock: a mock run and a real run whose events otherwise match (identical Type/Node/Data, and identical At under an injected clock, which is how the harness runs) are reported as sharing a prefix even though `mock` flips on every event - and a mock row is precisely what CLAUDE.md says can never satisfy a gate. The clause is inherited verbatim from spec 3 §4 (docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:174-176), so either the comparison should include the stamps or both texts should say the ignore list is everything outside (Type, Node, At, Data).",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/diff.go",
+          "line": 181,
+          "note": "doc names three ignored fields"
+        },
+        {
+          "path": "internal/fsm/machine/diff.go",
+          "line": 187,
+          "note": "comparison also skips SchemaVersion, State, Iter, Mock"
+        },
+        {
+          "path": "internal/fsm/run/event.go",
+          "line": 6,
+          "note": "Event carries State, Iter and Mock as well"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two of the three claims in the new .golangci.yml's comments do not match the tool. Line 11 says 'The defaults cap output at three issues per linter': golangci-lint 2.13.1's own help gives `--max-issues-per-linter ... (default 50)` and `--max-same-issues ... (default 3)`, so 3 is the same-text cap, not the per-linter cap - the setting on line 13 is justified by a number that belongs to line 14. Line 5's 'No linter is disabled' is true only within the standard set: `default: standard` leaves ~100 linters disabled (golangci-lint linters prints them under 'Disabled by your configuration'). Line 11's 'Report everything' also overstates: `uniq-by-line` defaults to true, so two issues on one line are still collapsed. The config itself is fine and correct - I ran `golangci-lint run ./...` at this head and it reports `0 issues`, and the enabled set is exactly errcheck, govet, ineffassign, staticcheck, unused as line 3 claims - this is purely the comment asserting properties the tool does not have.",
+      "evidence": [
+        {
+          "path": ".golangci.yml",
+          "line": 11,
+          "note": "'three issues per linter' is the max-same-issues default, not max-issues-per-linter (50)"
+        },
+        {
+          "path": ".golangci.yml",
+          "line": 5,
+          "note": "'No linter is disabled' holds only inside the standard set"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The codex retry ladder has no fatal class. codex.go:70-95 retries every non-success outcome up to MaxAttempts, whereas the HTTP arm returns immediately when classify() says classFatal (judge.go:544-547) - a 400, a refused redirect, an oversized body. A permanent codex failure (unknown model id, a flag this CLI build does not accept, a missing binary: `execErr != nil` at codex.go:75) therefore costs five process spawns and 1+2+4+8s of real backoff before the same error surfaces. The block comment at codex.go:62-68 promises parity only on 'attempt ceiling, per-attempt deadline and backoff', so it is not false, but the parity is partial in the direction that costs time; a not-found binary in particular can never succeed on retry.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 70,
+          "note": "loop retries execErr and any nonzero exit MaxAttempts times"
+        },
+        {
+          "path": "internal/fsm/judge/judge.go",
+          "line": 544,
+          "note": "HTTP arm returns on classFatal instead of retrying"
+        }
+      ]
+    }
+  ]
+}

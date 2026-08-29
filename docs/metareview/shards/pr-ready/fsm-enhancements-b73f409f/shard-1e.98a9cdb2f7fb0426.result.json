@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1e-98a9cdb2f7fb0426",
+  "kind": "shard",
+  "shardId": "shard-1e",
+  "shardHash": "98a9cdb2f7fb0426",
+  "planHash": "ad4e2d5d0ca31e04",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/store_test.go",
+      "line": 924,
+      "note": "Reviewed all five chunks (CHANGELOG.md, internal/fsm/kind/decision_test.go, internal/fsm/run/builder.go, internal/fsm/run/canonical_test.go, internal/fsm/run/store_test.go) against rubrics/task-done-review-rubric.md."
+    },
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 217,
+      "note": "Verified the shard's claims against the real repo files rather than the diff alone: store.go summarize/incompleteFork, canonical.go CapText/Canonical/BugID, types.go marshalCanonical, fold.go stamp checks, and internal/fsm/run/testdata (oracle.jsonl, oracle.sha256, oracle.events.jsonl all present)."
+    },
+    {
+      "path": "internal/fsm/run/builder.go",
+      "line": 101,
+      "note": "No eval or other unsafe execution, no TODO/FIXME markers, no truncated diff context, no untracked source files in this shard. Test coverage for the changed source file (builder.go) is dense and behavioural."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestSummarizeIncompleteFork's helper takes `kind Kind` and `extra ...string`, then discards both (`_ = kind`; `extra` is never read) and every call site passes the zero Kind. The result is that only the first disjunct of incompleteFork (Seq <= ForkedAtSeq) is exercised; the second, `snap.Seq == snap.ForkedAtSeq+1 && snap.StateKind == KindAgentEdit` at internal/fsm/run/store.go:217, is not reached by any test in package run (grep for incompleteFork/KindAgentEdit shows no other summarize/List test constructing an agent-edit fork at ForkedAtSeq+1). The discarded parameter is direct evidence the case was meant to be covered and was dropped. A statement-coverage gate cannot see this because both disjuncts live on one return statement, so the 100%-coverage claim in the CHANGELOG does not protect it. This is the predicate that surfaces a half-written fork to the operator via List, so an unexercised branch here is a real gap, not style.",
+      "evidence": [
+        {"path": "internal/fsm/run/store_test.go", "line": 924, "note": "mk := func(to int64, kind Kind, extra ...string) Log"},
+        {"path": "internal/fsm/run/store_test.go", "line": 927, "note": "_ = kind discards the only parameter that would select the second branch"},
+        {"path": "internal/fsm/run/store.go", "line": 217, "note": "return snap.Seq <= snap.ForkedAtSeq || (snap.Seq == snap.ForkedAtSeq+1 && snap.StateKind == KindAgentEdit)"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Builder.stamp declares its third parameter as `_ []Override` and never uses it, but Init calls `b.stamp(TypeInit, d, o)` passing the real override slice. A reader reasonably concludes the overrides are applied inside stamp; they are silently dropped there and applied by the explicit loop below, after the Init-specific State/Iter/Mock resets. Event passes nil for the same parameter. Either drop the parameter or apply the overrides in one place, so the ordering contract is expressed once.",
+      "evidence": [
+        {"path": "internal/fsm/run/builder.go", "line": 101, "note": "func (b *Builder) stamp(typ string, data any, _ []Override) Event"},
+        {"path": "internal/fsm/run/builder.go", "line": 65, "note": "ev := b.stamp(TypeInit, d, o) - o is ignored by stamp"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Builder.Copy indexes parent[0].Data and pb.lines[ev.Seq-1] with no guard, so an empty parent log panics and a parent whose Seq values are not 1-based contiguous (exactly what the Override constructors WithSeq exist to produce, per the file's own comment that 'every field is overridable so tests can build invalid logs') indexes out of range. The unmarshal error on parent[0].Data is also discarded, so a malformed parent init silently yields a child derived from a zero InitData. A panic inside a test helper reports as a crash rather than a named assertion failure.",
+      "evidence": [
+        {"path": "internal/fsm/run/builder.go", "line": 154, "note": "_ = json.Unmarshal(parent[0].Data, &pd) with no length or error guard"},
+        {"path": "internal/fsm/run/builder.go", "line": 147, "note": "Copy signature; Origin hash uses pb.lines[ev.Seq-1], assuming contiguous 1-based Seq"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Several assertions in store_test.go convert a would-be clean failure into a panic or a silently weakened check: se.Cause.(*FoldError) is an unchecked type assertion (panics if the cause is any other error type instead of failing with a message); `unlock, _ := s.Lock(runA)` discards the lock error, so a Lock failure makes the later unlock() a nil-func panic; and `fi, _ := os.Stat(matches[0])` dereferences fi immediately, so a Stat failure panics. In the torn-tail loop the mode assertion also inspects matches[0] after sort.Strings, i.e. the oldest sidecar, while the bytes assertion above it deliberately searches for the newest - so the permission check is not necessarily checking the sidecar this iteration wrote.",
+      "evidence": [
+        {"path": "internal/fsm/run/store_test.go", "line": 190, "note": "se.Cause.(*FoldError).Reason - unchecked type assertion"},
+        {"path": "internal/fsm/run/store_test.go", "line": 460, "note": "unlock, _ := s.Lock(runA) - discarded error, later unlock() would panic"},
+        {"path": "internal/fsm/run/store_test.go", "line": 496, "note": "fi, _ := os.Stat(matches[0]) then fi.Mode(); matches[0] is the oldest sidecar after sort"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The doc comment on Canonical still states the pre-0.9 contract, 'with HTML characters and U+2028/U+2029 left as literal UTF-8', which is now false for U+2028/U+2029: marshalCanonical escapes them unconditionally and this shard's own tests (TestCanonicalNormalForm 'unicode-line-seps-escaped' and TestCanonicalIsToolchainIndependent) pin the escaped form. Since Canonical's output is what the audit chain hashes over, a stale statement of its normal form is the kind of doc that gets trusted. canonical.go itself belongs to another shard's chunk set, so this is raised as context, not owned here.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 15, "note": "comment says U+2028/U+2029 are left literal; marshalCanonical in types.go escapes them"},
+        {"path": "internal/fsm/run/canonical_test.go", "line": 26, "note": "test pins {\"s\":\"x\\u2028y\\u2029z\"}, the escaped form"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "incompleteFork is duplicated verbatim in two packages - internal/fsm/run/store.go:213 and internal/fsm/machine/machine.go:1036 - with the same body and two different spec citations in their comments ('spec 3 r5 SS2 step 8' vs 'spec 3 SS2 step 8'). machine already imports run, so one exported helper would do. Two copies of a fork-integrity predicate can drift, and only one of them is reachable from List. Neither file is a chunk of this shard, so it is recorded for the cross-shard review rather than owned here.",
+      "evidence": [
+        {"path": "internal/fsm/run/store.go", "line": 213, "note": "func incompleteFork(snap Snapshot) bool"},
+        {"path": "internal/fsm/machine/machine.go", "line": 1036, "note": "identical predicate, duplicated across the package boundary"}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-28-2-review",
+  "kind": "shard",
+  "shardId": "shard-28-2",
+  "shardHash": "ca8a23d537e3da89",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/testdata/golden-snapshots.jsonl",
+      "line": 1,
+      "note": "24 JSONL lines, one per prefix of the 24-event happyLog fixture; seq strictly 1..24, every line valid JSON, LF-terminated, no CR, no trailing whitespace, 24588 bytes."
+    },
+    {
+      "path": "internal/fsm/run/golden_test.go",
+      "line": 34,
+      "note": "Sole consumer. Compares each committed snapshot line byte-for-byte against marshalCanonical(Fold(storedEvents[:i+1])) where the events are re-parsed from the committed golden-log.jsonl, so the fixture is exercised through a JSON round trip, not just recomputed in memory."
+    },
+    {
+      "path": "internal/fsm/run/testdata/golden-snapshots.jsonl",
+      "line": 1,
+      "note": "Empirically verified with a scratchpad copy of the repo: `go test -count=1 ./internal/fsm/run -run TestGoldenPrefixes` passes against the committed file, and deleting the file and regenerating with FSM_RUN_UPDATE_GOLDEN=1 reproduces it byte-identically (diff clean), so the fixture is machine-derived, not hand-edited."
+    },
+    {
+      "path": "internal/fsm/run/testdata/golden-snapshots.jsonl",
+      "line": 10,
+      "note": "Mutation testing proves every line is load-bearing: one-field edit on line 10 (unfixed 1->2) fails at golden_test.go:58 'prefix 10 snapshot drifted'; edit of line 24 (outcome fixed->escalated) fails at prefix 24; deleting line 5 fails at prefix 5; duplicating line 12 fails at prefix 13; swapping lines 5/6 (identical but for seq) fails at prefix 5; truncating the last line fails at golden_test.go:63 with the count check. No mutation was silently absorbed."
+    },
+    {
+      "path": "internal/fsm/run/testdata/golden-snapshots.jsonl",
+      "line": 6,
+      "note": "Content checked against spec §4 in docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md, not only against the code. §4.7 gate{Passed:true} no-op holds (line 6 == line 5 except seq; same for 11 vs 10, 13 vs 12, 17 vs 16, 23 vs 22 for needs_input/gate/tree no-ops). §4.6 agent-edit transition sets fix_entry_head=head0000 at line 12. §4.3 Unfixed formula: 1 at line 10 (all_found=[b1], status empty), 0 at line 21 once status b1 still_present=false lands. §4.4 token accumulation 10 -> 13 at lines 8/19. §4.2 nodes_run appends in first-output order discover,adjudicate,fix,verify. Map keys (node_outputs, applied) are emitted sorted."
+    },
+    {
+      "path": "internal/fsm/run/testdata/golden-snapshots.jsonl",
+      "line": 1,
+      "note": "The fixture run id mrv-20260826-000000000000000-fsm-sdlc-loop-sdlc-loop-aaaaaaaa is realistic, not arbitrary: run.RunID (internal/fsm/run/types.go:377) delegates to state.RunID(\"fsm-\"+workflow, workflow, at) (internal/state/state.go:100), which yields exactly the mrv-<15-digit stamp>-fsm-sdlc-loop-sdlc-loop-<8 hex> shape, and it matches runIDPattern at internal/fsm/run/types.go:366."
+    },
+    {
+      "path": "internal/fsm/run/golden_test.go",
+      "line": 22,
+      "note": "The FSM_RUN_UPDATE_GOLDEN=1 regeneration escape hatch is not set anywhere in the repo (grep over the tree excluding .git/.metareview finds only the test itself, the spec R4 row and prior review artifacts), so CI never runs the golden check vacuously."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "Narrow field coverage: the 24 golden lines only ever exercise the happy path, so seven Snapshot fields (parent_run_id, forked_at_seq, workflow_source, mock, cmds_sha256, tree_status, last_error) never appear at all and about ten more are pinned at their zero form (lineage [], vars {}, calibration false, mock_tainted false, goldens [], prev_unfixed null, warnings [], overflow_handled false, iteration 0). A regression in fork provenance, mock tainting, loop iteration/prev_unfixed, gate-failure last_error or warning accumulation would not move a single byte of this file. This is a declared limit rather than an oversight: spec R4 (docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:328) and the header comment at internal/fsm/run/golden_test.go:11 both say the goldens are regression-only and that authority for fold semantics rests with R1/R2b/R13, and those tables do cover the missing fields. Recorded so the fixture is not later mistaken for a full snapshot-schema lock.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/testdata/golden-snapshots.jsonl",
+          "line": 1,
+          "note": "No line in the file contains parent_run_id, forked_at_seq, workflow_source, mock, cmds_sha256, tree_status or last_error."
+        },
+        {
+          "path": "internal/fsm/run/golden_test.go",
+          "line": 11,
+          "note": "Header comment scopes the goldens to regression only, with authority delegated to R1/R2b/R13."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Consumer robustness, not a defect in the fixture data itself: golden_test.go guards the 'too few snapshots' case (line 62-64, reachable and correct - truncating the last golden line reports 'golden has 23 snapshots for 24 events') but has no guard for 'too many'. With a 25th line appended the loop evaluates stored[:i+1] at i=24 against a 24-element slice; it only avoided a panic because append over-allocated capacity, and it then folds a zero-value Event and reports the misleading 'fold: ERR_AUDIT_VERSION (version) at seq 0 type' instead of the intended count message. Empirically reproduced in a scratchpad copy. The mutation is still caught, so this is a diagnostics/robustness nit; hoisting the count check above the compare loop (or bounding it with i < len(stored)) would make it deterministic.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/golden_test.go",
+          "line": 56,
+          "note": "got := marshalCanonical(mustFold(t, stored[:i+1])) is unbounded by len(stored) inside the golden-driven loop."
+        },
+        {
+          "path": "internal/fsm/run/golden_test.go",
+          "line": 62,
+          "note": "The i != len(stored) count check runs only after the loop, so it can only ever report the too-few case."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

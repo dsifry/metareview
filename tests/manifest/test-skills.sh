@@ -8,7 +8,8 @@ for file in \
   skills/review-epic-ready/SKILL.md \
   skills/review-pr-ready/SKILL.md \
   skills/learn-post-merge/SKILL.md \
-  skills/status/SKILL.md
+  skills/status/SKILL.md \
+  skills/fsm/SKILL.md
 do
   test -f "$file"
   grep -q '^---$' "$file"
@@ -16,7 +17,7 @@ do
   grep -q '^description:' "$file"
 done
 
-for file in README.md docs/quickstart.md commands/setup.md commands/review-artifact.md commands/review-task-done.md commands/review-epic-ready.md commands/review-pr-ready.md commands/learn-post-merge.md commands/status.md rubrics/task-done-review-rubric.md rubrics/epic-ready-review-rubric.md rubrics/pr-ready-review-rubric.md rubrics/learning-review-rubric.md templates/SERVICE-INVENTORY.md
+for file in README.md docs/quickstart.md commands/setup.md commands/review-artifact.md commands/review-task-done.md commands/review-epic-ready.md commands/review-pr-ready.md commands/learn-post-merge.md commands/status.md commands/fsm.md docs/fsm/driving-a-workflow.md docs/fsm/sdlc-loop-example.md workflows/sdlc-loop.yaml workflows/review-loop.yaml testdata/fsm/agent-prompt.golden tests/go/agent-prompt-anchors.txt rubrics/task-done-review-rubric.md rubrics/epic-ready-review-rubric.md rubrics/pr-ready-review-rubric.md rubrics/learning-review-rubric.md templates/SERVICE-INVENTORY.md
 do
   test -f "$file"
 done
@@ -89,7 +90,22 @@ grep -q -- '--scaffold-only' skills/review-artifact/SKILL.md
 grep -q 'parallel subagents by default' skills/review-artifact/SKILL.md
 grep -q 'explicit authorization' skills/review-artifact/SKILL.md
 grep -q 'not independently adversarial' skills/review-artifact/SKILL.md
-grep -q 'Feasibility, Completeness, Scope and alignment, Architecture, Intent preservation' skills/review-artifact/SKILL.md
+# All EIGHT lens names, not the five-name prefix: the prefix matched whether the document
+# listed five or eight, so the assertion could not fail and the docs drifted to "five" while
+# reviewlog.artifactReviewComplete required eight. Eight passing artifact reviews were left
+# permanently unresolvable as a result.
+for lens in 'Feasibility' 'Completeness' 'Scope and alignment' 'Architecture' \
+            'Intent preservation' 'Security' 'Testing-quality' 'Data-migration'; do
+  grep -q "$lens" skills/review-artifact/SKILL.md || {
+    echo "FAIL: skills/review-artifact/SKILL.md is missing the $lens lens"; exit 1; }
+done
+
+# and no user-facing document may claim a different count than the gate enforces
+for doc in README.md docs/quickstart.md docs/README.claude.md docs/README.codex.md commands/review-artifact.md; do
+  if grep -q 'five required' "$doc"; then
+    echo "FAIL: $doc says 'five required' but artifactReviewComplete requires eight lenses"; exit 1
+  fi
+done
 grep -q 'return the actual artifact-review verdict' skills/review-artifact/SKILL.md
 grep -q 'parallel subagents by default' docs/quickstart.md
 grep -q 'in-session-emulated' docs/quickstart.md
@@ -120,3 +136,10 @@ grep -q 'Critical, high, and spec-contract findings block' rubrics/task-done-rev
 grep -q 'Critical and high findings block epic readiness' rubrics/epic-ready-review-rubric.md
 grep -q 'Critical and high findings block PR readiness' rubrics/pr-ready-review-rubric.md
 grep -q 'changes future reviewer behavior' rubrics/learning-review-rubric.md
+
+grep -q 'metareview fsm --agent-prompt' skills/fsm/SKILL.md
+grep -q 'Fork first, then commit' skills/fsm/SKILL.md
+grep -q 'never satisfies a gate' skills/fsm/SKILL.md
+grep -q 'docs/fsm/driving-a-workflow.md' README.md
+grep -q 'metareview fsm' CLAUDE.md
+grep -q 'metareview fsm' AGENTS.md

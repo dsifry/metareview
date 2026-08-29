@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-11-review",
+  "kind": "shard",
+  "shardId": "shard-11",
+  "shardHash": "4423a1f6ebc2e5f1",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/gate/fake.go",
+      "line": 58,
+      "note": "Scripted Git fake: all ten interface methods present, Err short-circuits before Cut in Diff/WorkingDiff, RevParse falls back to a typed CodeGit error; Cut is defined at internal/fsm/gate/git.go:272 so the helper compiles against real code."
+    },
+    {
+      "path": "internal/fsm/judge/judge_test.go",
+      "line": 1,
+      "note": "781-line test file covering J1 prompt provenance/goldens, J2 fence stripping, J3 parsing incl. MaxDetail and fail-closed still-present, J4 per-model request shapes and token accounting, J5 retry/backoff/cancel, J6 URL validation and redirect refusal, J7 mock scripting, J9 hash pins and CutDiff boundaries; validation evidence for the source in this branch."
+    },
+    {
+      "path": "internal/fsm/judge/judge_test.go",
+      "line": 586,
+      "note": "Dead test scaffolding: `_ = d` discards a doer that the preceding readErrDoer block replaced."
+    },
+    {
+      "path": "internal/fsm/judge/judge_test.go",
+      "line": 651,
+      "note": "Second dead binding: judge `jr` is constructed with a localhost-rewritten server URL and immediately discarded via `_ = jr` on line 652; the assertion that follows uses jr2."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead test scaffolding left in TestJ5Retry/TestJ6URLsRoutingRedirect: `_ = d` (line 586) and the unused judge `jr` built at line 651 and silenced by `_ = jr` (line 652). Both are blank-identifier discards that exist only to satisfy the compiler; they add no coverage and hide the fact that the localhost URL variant is never exercised. Non-blocking cleanup.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 586,
+          "note": "`_ = d` discards a fakeDoer superseded by readErrDoer."
+        },
+        {
+          "path": "internal/fsm/judge/judge_test.go",
+          "line": 652,
+          "note": "`_ = jr` discards a judge constructed one line earlier and never called."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

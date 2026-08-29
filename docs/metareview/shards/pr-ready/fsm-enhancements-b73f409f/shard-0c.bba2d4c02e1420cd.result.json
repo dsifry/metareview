@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-0c-bba2d4c02e1420cd",
+  "kind": "shard",
+  "shardId": "shard-0c",
+  "shardHash": "bba2d4c02e1420cd",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:10:08Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cmdexec/cmdexec_test.go",
+      "line": 1,
+      "note": "New 372-line test file reviewed in full against rubrics/task-done-review-rubric.md; covers the real exec runner, the Guarded consent layer, and the capping writer."
+    },
+    {
+      "path": "internal/findings/findings_test.go",
+      "line": 372,
+      "note": "Reviewed the four appended tests (supersede, unrelated-rows, 1 MiB line, exact-max line, exact-max CRLF line) against the supersede implementation in internal/findings/findings.go:191-257."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 145,
+      "note": "Verified the Guarded.exec error classification the new tests assert against, rather than inferring behaviour from the diff alone."
+    },
+    {
+      "path": "internal/fsm/cli/envelope.go",
+      "line": 123,
+      "note": "Traced how the guarded runner's error reaches the host envelope: failure() matches errs.As before the context.Canceled branch at line 140."
+    },
+    {
+      "note": "Ran `go test ./internal/findings/ ./internal/fsm/cmdexec/ -cover`: both pass. internal/fsm/cmdexec is 100.0% (the tests/coverage.sh gate requires 100% for internal/fsm/...); internal/findings is 92.8%, exactly its line in tests/coverage-floor.txt, so the coverage gate is satisfied."
+    },
+    {
+      "note": "Ran `go test ./internal/fsm/cmdexec/ -run TestX1RealRunner -count=15`: 15/15 passes, 0.64-0.67s each. The 300 ms TimeoutMS on the sleep-grandchild row and the process-group kill assertions were stable, so no flake finding is raised for them."
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 244,
+      "note": "backupOnce reports 55.6% of statements in the coverage profile; the already-backed-up early return and the IsNotExist path are not reached by the new tests."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The new parent-cancellation assertion pins the weakest possible property and lets a real misclassification through. cmdexec_test.go:208-212 checks only `errors.Is(err, context.Canceled)`. In cmdexec.go:145-152 a context.Canceled returned by execRunner (cmdexec.go:246-248) carries no errs code, so errs.Code(err) == \"\" and Guarded.exec rewrites it as errs.E(CodeCmdFailed, ..., \"reason\", \"spawn\") and audits the cmd_call with Error=ERR_CMD_FAILED. errors.Is still succeeds through errs.Wrap, so the assertion passes. The consequence is visible at the host boundary: cli/envelope.go:123 matches `errs.As(err) != nil` before the `errors.Is(err, context.Canceled)` branch at line 140, so an interrupt during a consented command is reported to the driver as ERR_CMD_FAILED{reason: spawn} and CodeInterrupted is unreachable for that path. Per CLAUDE.md's exit handling, the ERR_* code is what tells the host what happened, so a deliberately interrupted command reads as a failed spawn a driver may retry, and the audit ledger records the same wrong label. The same rewrite is confirmed by the sibling assertion at cmdexec_test.go:606, which asserts exactly CodeCmdFailed/reason=spawn for a codeless runner error. The test should assert errs.Code(err) and the audited cmd_call's Error for the cancellation row; the fix itself belongs in cmdexec.go (a different shard).",
+      "evidence": [
+        {"path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 211, "note": "Assertion checks only errors.Is(err, context.Canceled); no audit-row assertion follows."},
+        {"path": "internal/fsm/cmdexec/cmdexec.go", "line": 149, "note": "if data.Error == \"\" { data.Error = CodeCmdFailed; err = errs.Wrap(errs.E(CodeCmdFailed, ..., \"reason\", \"spawn\"), err) } rewrites context.Canceled as a spawn failure."},
+        {"path": "internal/fsm/cli/envelope.go", "line": 140, "note": "The CodeInterrupted branch sits after the errs.As branch, so it never fires for a cancellation wrapped by Guarded.exec."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead scaffolding shaped to slip past linters. cmdexec_test.go:236-241 defines `func sha(s string) string { h := run.OutputHash; _ = h; sum := sha256Sum([]byte(s)); return sum }`. The `h := run.OutputHash; _ = h` pair reads and discards a function value for no purpose; the explicit blank assignment is what stops ineffassign/staticcheck from flagging it. run.OutputHash (internal/fsm/run/canonical.go:87) canonicalises JSON before hashing and is genuinely not what InputHash uses (cmdexec.go:138 hashes the raw stdin), so this is leftover exploration, not a deliberate reference. `sha` itself adds nothing over sha256Sum and is called once (cmdexec_test.go:438), while the equivalent assertion in TestX2Guarded calls sha256Sum directly (cmdexec_test.go:571) - two spellings of one assertion in one file.",
+      "evidence": [
+        {"path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 237, "note": "h := run.OutputHash followed by _ = h: a read-and-discard that exists only to silence the unused-variable check."},
+        {"path": "internal/fsm/run/canonical.go", "line": 87, "note": "OutputHash hashes Canonical(raw), not the raw bytes, so it is not interchangeable with the InputHash computation under test."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "cmdexec_test.go:122 calls t.Setenv(\"SECRET_TOKEN\", \"parent-secret\") immediately before the environment-scrubbing assertions, which reads as evidence that a real parent-process secret is kept out of the child. It is inert: Guarded.env (cmdexec.go:93-102) consults only g.Environ, and g.Environ here is a fixed closure returning a literal list (cmdexec_test.go:117-119). The scrub is only ever tested against synthetic input; os.Environ() is never on the path. The line also forces the test to be non-parallel for no benefit. Either drop it or leave Environ nil for one row so the real-environment path is actually exercised.",
+      "evidence": [
+        {"path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 122, "note": "t.Setenv(\"SECRET_TOKEN\", \"parent-secret\") has no effect on any assertion in this test."},
+        {"path": "internal/fsm/cmdexec/cmdexec.go", "line": 95, "note": "Guarded.env reads g.Environ() only; when the seam is injected, the process environment is never consulted."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "cmdexec_test.go:69-79 hand-rolls readAll over a 4096-byte buffer, duplicating io.ReadAll, and returns `out, nil` on every exit, so a genuine read error on the helper's stdin is discarded. The only caller (cmdexec_test.go:73 in the \"echo\" mode) ignores the error return anyway, so a truncated or failed stdin read surfaces as an unexplained `t.Fatal(\"stdin\")` at cmdexec_test.go:432 instead of naming the real cause. io.ReadAll(os.Stdin) is the drop-in replacement.",
+      "evidence": [
+        {"path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 75, "note": "if err != nil { return out, nil } discards every read error, including a real I/O failure."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestX3CappingWriter (cmdexec_test.go:361-371) also asserts that Executable() is non-empty and absolute, an unrelated concern bolted onto the capping-writer test; a failure in either half is reported under the capping-writer name. The failure message at cmdexec_test.go:370 states the invariant rather than the violation (\"Executable is absolute\" prints when it is not), so the log line reads as the opposite of what happened.",
+      "evidence": [
+        {"path": "internal/fsm/cmdexec/cmdexec_test.go", "line": 370, "note": "t.Fatal(\"Executable is absolute\") fires precisely when Executable() is empty or relative."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestReadersAcceptOneMiBLines (findings_test.go:475-499) is named for a 1 MiB line but its fixture is strings.Repeat(\"x\", 300_000), roughly 300 KB, and the only size assertion is len(data) > 64*1024. The failure message at findings_test.go:497 claims \"a 1 MiB line must be readable\". What it actually pins is \"larger than bufio's 64 KiB default\", which the guard at findings_test.go:488 already states correctly. The true 1 MiB boundary is covered by TestReadJSONLAcceptsExactlyMaxLine, so no coverage is lost, but the name and message overstate this row and would mislead anyone tuning maxJSONLLineBytes (findings.go:19).",
+      "evidence": [
+        {"path": "internal/findings/findings_test.go", "line": 483, "note": "Found: strings.Repeat(\"x\", 300_000) is under a third of the 1 MiB the test name and failure message claim."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The \"epic-ready escalated\" case at findings_test.go:381 passes Options{ResetRunIDs: []string{\"mrv-escalated\"}} to exercise supersede on an escalated chain, per the source comment at findings.go:205-207. The option is inert: resetFinding requires staleForCurrentHead (findings.go:263-267), which is false because both the fixture Record and the Run leave GitHead empty, so the reset path never runs and the row behaves identically to the two unchained rows. The subtest still earns its place by covering the third legacy prefix (\"epic:context-risk:\"), but the escalation dimension its name advertises is untested; a future change gating supersede on chain state would not be caught here.",
+      "evidence": [
+        {"path": "internal/findings/findings_test.go", "line": 381, "note": "ResetRunIDs is supplied but no GitHead is set on the fixture or the run, so resetFinding can never return true."},
+        {"path": "internal/findings/findings.go", "line": 266, "note": "staleForCurrentHead returns false whenever either head is empty, short-circuiting the reset path the subtest name implies."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "backupOnce's own contract is untested. findings.go:204-207 documents supersedeLegacyContextRisk as idempotent and backupOnce (findings.go:244-257) guards the pre-0.8.3 snapshot with an early return when the backup already exists, plus an IsNotExist tolerance. No test reconciles twice over a legacy row, so neither branch is reached: the function measures 55.6% of statements. The guard matters - a second pass without it would overwrite the original ledger snapshot with the already-superseded content, destroying the only record of the pre-upgrade state. The two new tests cover the backup-taken (findings_test.go:426) and no-backup-taken (findings_test.go:470) cases but not the backup-preserved case. Not a gate failure: internal/findings sits at 92.8%, exactly its tests/coverage-floor.txt line, and the 100% requirement applies only to internal/fsm/... and workflows.",
+      "evidence": [
+        {"path": "internal/findings/findings.go", "line": 246, "note": "if _, err := os.Stat(backup); err == nil { return nil } is the data-preserving branch and is never exercised."},
+        {"path": "internal/findings/findings_test.go", "line": 426, "note": "Each subtest reconciles once against a fresh t.TempDir(), so the second-pass path is unreachable from this suite."}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

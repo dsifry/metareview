@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-14-review",
+  "kind": "shard",
+  "shardId": "shard-14",
+  "shardHash": "b90b9a0c924b1635",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {"path": "docs/quickstart.md", "line": 60, "note": "Docs update aligns exit-handling and sharding text with the FSM CLI contract; new commit/ignore rows for docs/metareview/shards and .metareview/runs match CLAUDE.md durable-output policy"},
+    {"path": "internal/fsm/run/fold_test.go", "line": 1, "note": "New 1121-line table/builder-driven test suite for Fold/Apply/FoldFull covering happy path, stamps, caps, provenance, mock taint, determinism and prefix composition; no eval, no TODO/FIXME, no truncated context"},
+    {"path": "internal/fsm/run/fold_test.go", "line": 921, "note": "Cap tests assert both at-cap acceptance and one-over rejection on canonical bytes, so limits are pinned in both directions"},
+    {"path": "internal/fsm/run/fold_test.go", "line": 1055, "note": "Verified locally: go vet ./internal/fsm/run passes clean and go test ./internal/fsm/run -count=1 is ok (0.872s)"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead helper: the mk closure declared in TestFoldFixBaseline is never called and is silenced with `_ = mk`, leaving unused test scaffolding in the file.",
+      "evidence": [
+        {"path": "internal/fsm/run/fold_test.go", "line": 365, "note": "mk := func() *Builder { ... } declared in TestFoldFixBaseline"},
+        {"path": "internal/fsm/run/fold_test.go", "line": 413, "note": "`_ = mk` suppresses the unused-variable error instead of removing the helper"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead assignment in TestFoldNoOps: `before` is folded from the full happy log and then immediately overwritten by the truncated-event fold, so the first Fold call is wasted work.",
+      "evidence": [
+        {"path": "internal/fsm/run/fold_test.go", "line": 507, "note": "before := mustFold(t, b.Events()) result is never read"},
+        {"path": "internal/fsm/run/fold_test.go", "line": 510, "note": "before = mustFold(t, evs) overwrites it two lines later"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

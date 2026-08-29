@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-1c-f107ad49c4fc013d",
+  "kind": "shard",
+  "shardId": "shard-1c",
+  "shardHash": "f107ad49c4fc013d",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:30:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 1,
+      "note": "Read the whole 1071-line new file against rubrics/task-done-review-rubric.md, then checked every doc comment's claim against the code it sits on and against docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md §5.3, §5.3b, §5.4, §5.5, §5.7 and §8."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 1008,
+      "note": "Empirically reproduced against the built binary in a throwaway git repo: `fsm record note --data 'nope'` and `fsm record note --data '{\"a\":1,\"a\":2}'` both return code ERR_RECORD_TOO_LARGE with detail 'record data must be valid JSON', exit 2. See finding 1."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 1036,
+      "note": "Verified incompleteFork's arithmetic against fork.go's child construction rather than trusting the comment: copied = log.Events[1:seq] (fork.go:129) is seq-1 events, so a complete child's Seq is ForkedAtSeq+1 (+2 with the agent-edit fix_baseline at fork.go:240). Both branches of the predicate line up exactly with 'no rebaseline tree' and 'agent-edit checkpoint without fix_baseline'."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 807,
+      "note": "Checked the `failures[0]` index for a panic on an empty slice. It cannot be reached: workflow.validateGraph (workflow.go:472-495) forbids a node on a terminal state, requires an outcome on every transition into one, and requires an outgoing transition from the initial state, so transitions() is only ever entered from a state with at least one outgoing edge. Likewise s.pred is non-nil wherever it is dereferenced, because TerminalFor is non-nil only when a loop exists (workflow.go:727-741) and workflow.go:218 rejects a loop without a convergence block."
+    },
+    {
+      "path": "tests/go/test-epic-ready-review.sh",
+      "line": 222,
+      "note": "The one-line change is a genuine fix for an assertion that could not fail. Demonstrated in a scratch script under `set -euo pipefail`: `! grep -q <present-pattern> file` does NOT abort (bash exempts !-inverted pipelines from set -e), while `grep -q <present-pattern> file && exit 1` does. The old line was a no-op guard. No other !-prefixed assertion remains in the file."
+    },
+    {
+      "path": "tests/go/test-epic-ready-review.sh",
+      "line": 1,
+      "note": "Ran the whole suite: `bash tests/go/test-epic-ready-review.sh` exits 0, so the now-live assertion passes and the generated-path exclusion it guards is genuinely in place."
+    },
+    {
+      "path": "testdata/fsm/scenarios/sdlc-loop-cmds/overflow-handler/judge.yaml",
+      "line": 1,
+      "note": "All three claims in the header comment verified rather than assumed. Ran `bash tests/go/test-fsm.sh` (exit 0): tests/go/test-fsm.sh:213-220 drives this scenario to STOPPED with handler.name=notify and '\"outcome\":\"overflow\"' in runs.jsonl, matching `convergence: any: [{max_iterations: 1}]` and `on_overflow: notify` in testdata/fsm/workflows/sdlc-loop-cmds.yaml. still-present raw is `{\"still_present\":true}`, so 'the bug survives verify' holds."
+    },
+    {
+      "path": "internal/contextprofile/shards_test.go",
+      "line": 1,
+      "note": "The deletion is a legitimate replacement, not lost coverage. PlanShards changed signature (shards.go:188 now takes []gitcontext.BranchFile) and ShardOptions no longer has GroupBy (shards.go:20-24), so the deleted domain-grouping test covered a removed feature. internal/contextprofile/plan_test.go adds 16 tests over the new hash-bucket cutting; `go test ./internal/contextprofile/` passes and the package stays at/above its 96.3 line in tests/coverage-floor.txt."
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 920,
+      "note": "Checked the claim in the new comment at review.go:909-910 that the sharded section keeps reviewlog's verdict parse intact: reviewlog.go:120-121 matches the '## Verdict' heading and takes nextNonEmpty(i+1), and the section is concatenated after `verdict + \"\\n\\n\"`. The claim holds."
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 698,
+      "note": "Checked the new comment 'never recompute from the truncated text' in branchOnlyGitContext. It holds: gitcontext only populates BranchFiles/BranchDiffFull/BranchFilteredDiffBytes when the branch diff is truncated (asserted by branchfiles_test.go:129-147), so the `len(git.Diff)` fallback runs only on an untruncated diff."
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 292,
+      "note": "Checked 'Superseded result files are collected only once the gate has passed': the guard is `!result.Blocking`, and verdictForCounts (review.go:894-908) sets blocking true only for NEEDS_REVISION/ESCALATED, so the claim is accurate. tests/go/test-sharded-review.sh:180-196 exercises the GC path on a PASS_ADVISORY run, so it is not dead."
+    },
+    {
+      "note": "Ran `go test ./internal/prready/... ./internal/fsm/machine/... ./internal/contextprofile/...` (all pass) plus the two shell suites in scope. internal/fsm/machine reports 100.0% of statements from unit tests alone, satisfying tests/coverage.sh's 100% requirement for internal/fsm/... . internal/prready Create is 84.6% from unit tests; the uncovered arms are the errors.Join rollback branch (review.go:281) and the no-op rollback closure body (review.go:189), both non-behavioural."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "`Record`'s event path reports two distinct payload rejections under an error code and a detail string that both misdescribe them. machine.go:1008-1011 calls run.Canonical and, on any error, returns errs.E(CodeRecordTooLarge, \"record data must be valid JSON\"). run.Canonical (run/canonical.go:23-32) fails for exactly two reasons, neither of them size: invalid JSON, and a duplicate object key at any depth (rejectDuplicateKeys, canonical.go:36). Reproduced end-to-end against bin/metareview in a scratch repo: `fsm record note --data 'nope'` and `fsm record note --data '{\"a\":1,\"a\":2}'` (13 bytes, valid JSON) BOTH emit {\"code\":\"ERR_RECORD_TOO_LARGE\",\"detail\":\"record data must be valid JSON\"} at exit 2. So for the duplicate-key case the machine-readable code and the human detail are each wrong, and for the syntax case the code is wrong. This is not cosmetic under this project's own contract: CLAUDE.md tells the driving host that on exit 1/2 the ERR_* `code` is the signal and `detail` is data, and the agent prompt advertises `record <event> --data '<json>'` as a driver-facing command, so an automated host is told to shrink a 13-byte payload rather than fix its syntax or its duplicate key. docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:388 assigns ERR_RECORD_TOO_LARGE only to `Data <= MaxPayload - 128` and specifies no code for a malformed payload; duplicate-key rejection for record data is not specified at all. machine_test.go:1110 pins the wrong code (`Data: json.RawMessage(\"nope\")` -> CodeRecordTooLarge) instead of catching it, which is why 100% statement coverage did not surface this. Fix: give the canonicalisation failure its own code (or ERR_RECORD_NAME-style {reason: syntax|duplicate_key}) with a detail that names the actual cause, note duplicate-key rejection in §5.5, and update the test to assert the new code.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine.go", "line": 1010, "note": "errs.E(CodeRecordTooLarge, \"record data must be valid JSON\", \"name\", o.Name) is returned for every run.Canonical failure, none of which is a size condition."},
+        {"path": "internal/fsm/run/canonical.go", "line": 24, "note": "Canonical fails on !json.Valid(raw) and on rejectDuplicateKeys; a small, valid-JSON duplicate-key payload therefore reports TOO_LARGE and 'must be valid JSON' simultaneously."},
+        {"path": "internal/fsm/machine/machine_test.go", "line": 1110, "note": "wantCode(..., CodeRecordTooLarge) for Data 'nope' asserts the mislabelled behaviour rather than the intended one."},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md", "line": 388, "note": "Spec §5.5 assigns ERR_RECORD_TOO_LARGE only to the MaxPayload-128 cap and defines no malformed-payload code."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Spec-vs-code signature drift on the API this file introduces. docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:451 (spec 2 §8, the handoff row that owns this surface) documents `Machine.RecordLLMCall(ctx, key string, call func(ctx, Stamp) (run.LLMCallData, error)) (int64, error)`, and docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:512 repeats it as `RecordLLMCall(ctx, key, closure)`. The implementation at machine.go:1047 takes no `key` parameter: the key is hardcoded as run.Key(JudgeNode, snap.Iteration). The hardcoding is the better design (the spec's own prose in the same sentence pins Node: \"judge\" and Index = NextIndex(\"judge@<iter>\")), so the spec line is what is stale. Everything else the same spec sentence claims was checked and does hold: Node stamp, Index, Fence = !Calibration, terminal refusal with ERR_RUN_TERMINAL, and 'the machine imports no judge'. Fix the two spec lines to match, since both specs ship in this PR.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine.go", "line": 1047, "note": "func (m *Machine) RecordLLMCall(ctx context.Context, call func(context.Context, Stamp) (run.LLMCallData, error)) (int64, error) - no key parameter."},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md", "line": 451, "note": "Documents the signature with `key string` between ctx and the closure."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "loadWith dereferences log.Torn.Bytes (machine.go:342) inside `if repair {` with no local nil check. It is safe today only because both Store implementations refuse to repair a clean log first: store_jsonl.go:254-255 returns ERR_AUDIT_NOT_TORN when splitLines finds no torn tail, and store_mem.go:112 returns it unconditionally ('memory store is never torn'). Nothing in the machine package states or tests that invariant, so a Store implementation that made RepairTail a tolerant no-op on a clean log would turn `Open(--repair)` into a nil-pointer panic rather than an error. The surrounding code is otherwise careful to keep its invariants local (see the fold/validate guards at machine.go:372 and 400-413). A one-line guard, or a comment naming the RepairTail contract it relies on, would close it.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine.go", "line": 342, "note": "dropped := len(log.Torn.Bytes) runs before the log is reloaded and is guarded only by RepairTail having returned nil."},
+        {"path": "internal/fsm/run/store_jsonl.go", "line": 254, "note": "The only thing preventing the deref: `if torn == nil { return storeErrf(CodeAuditNotTorn, ...) }`."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two doc comments in the overflow/finish path overstate slightly. (a) machine.go:890 says 'interrupted: nothing recorded, the handler is retried on resume'. The overflow_handler event is indeed not recorded, but the runner's own cmd_call may already have been appended through the audit closure before cancellation - which the spec acknowledges two lines later as 'at-least-once: a crash between the runner's cmd_call and this append re-runs the command' (fsm-core.md:377-378). As written the comment reads as a stronger atomicity guarantee than the code gives. (b) machine.go:836-837 describes finish as 'runs the overflow handler, calls Terminal, and maps the outcome', but the code maps the outcome (machine.go:862-870) before calling Terminal (machine.go:871-875). The two are independent so nothing breaks; the comment just lists them in the wrong order. Retried-on-resume itself was verified: the transition is appended before overflowHandler, so a failed handler leaves Outcome=overflow with OverflowHandled false and machine.go:575 re-enters the handler on the next Advance.",
+      "evidence": [
+        {"path": "internal/fsm/machine/machine.go", "line": 890, "note": "'interrupted: nothing recorded' - the runner's cmd_call can already be durable at this point."},
+        {"path": "internal/fsm/machine/machine.go", "line": 836, "note": "Comment orders Terminal before outcome mapping; the body at 862-875 does the reverse."}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-08-review",
+  "kind": "shard",
+  "shardId": "shard-08",
+  "shardHash": "cad51e50c09495e6",
+  "planHash": "2ee4294a41b3ad7b",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 30,
+      "note": "rejectDuplicateKeys token walk: verified frame push/pop for objects and arrays, empty-object '}' handled in the expectKey branch so the generic pop only sees ']', and the tok.(string) key assertion is unreachable for non-strings given json.Valid ran first"
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 113,
+      "note": "CapText boundary math checked against MaxDetail (64KiB): 2 quote bytes plus per-rune encoded length, cut advances only on accepted runes, so CapDetail(strings.Repeat(\"x\", MaxDetail)) yields MaxDetail-2 as asserted in canonical_test.go:168; encodedRuneLen agrees with the real encoder (probe: U+2028 emits \\u2028, 6 bytes)"
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 72,
+      "note": "OutputHash invalid-JSON fallback hashes nil (empty-string sha256), deterministic and distinct from any valid canonical output; covered by canonical_test.go:79"
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 1,
+      "note": "Tests present and passing for every symbol in this file (canonical_test.go, fold_test.go, golden_test.go); go test ./internal/fsm/run/ and go vet both clean; no TODO/FIXME markers, no eval or unsafe execution, no duplicated helper (marshalCanonical/MaxDetail already live in types.go and are reused)"
+    },
+    {
+      "path": "docs/tasks/pr-b-slice-3.md",
+      "line": 1,
+      "note": "Docs-only task file describing the 0.8.3 sharded gate slice with an explicit acceptance section (go test, go vet, tests/run-all.sh, shardpack coverage); no code impact"
+    },
+    {
+      "path": "testdata/fsm/scenarios/review-loop/reviewed/judge.yaml",
+      "line": 3,
+      "note": "Mock judge fixture for the review-loop reviewed scenario; single adjudicate call with deterministic raw payload and token counts, consumed by the scenario runner exercised in tests/go/test-fsm.sh"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Doc comment contradicts actual canonical form: canonical.go says HTML characters and U+2028/U+2029 are \"left as literal UTF-8\", but marshalCanonical only disables HTML escaping — Go's encoder still escapes the line separators. Empirically Canonical(\"{\\\"a\\\":\\\"\\u2028<\\\"}\") returns {\"a\":\"\\u2028<\"}, and canonical_test.go:22 asserts exactly that escaped form. The implementation and its tests agree; only the docstring (and the same sentence in docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:122) is wrong. Non-blocking, but it would mislead any reimplementation of the hash contract, and encodedRuneLen's 6-byte case already encodes the true behavior.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/canonical.go",
+          "line": 16,
+          "note": "\"with HTML characters and U+2028/U+2029 left as literal UTF-8\" — U+2028/U+2029 are in fact escaped to \\u2028/\\u2029 by the shared marshalCanonical encoder"
+        },
+        {
+          "path": "internal/fsm/run/canonical.go",
+          "line": 135,
+          "note": "encodedRuneLen counts U+2028/U+2029 as 6 bytes, i.e. escaped — directly contradicting the file's own Canonical doc comment"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

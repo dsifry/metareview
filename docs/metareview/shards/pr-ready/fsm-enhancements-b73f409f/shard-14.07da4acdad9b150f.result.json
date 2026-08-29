@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-14-07da4acdad9b150f-claude-opus-5",
+  "kind": "shard",
+  "shardId": "shard-14",
+  "shardHash": "07da4acdad9b150f",
+  "planHash": "014639e60cb3cab9",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/fold_test.go",
+      "line": 1146,
+      "note": "Whole shard is docs/quickstart.md plus a new test file; no production behaviour changes in this shard, so the rubric's unsafe-execution, duplication and untracked-source clauses do not fire."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 22,
+      "note": "Ran `go test ./internal/fsm/run/ -count=1`: ok in 0.86s. Ran with -coverprofile and `go tool cover -func`: every function in fold.go, and the package total, report 100.0% statement coverage."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 113,
+      "note": "Verified TestFoldRefusesANodeOutputWithNoOutput exercises the real guard: a node_output payload of {} decodes to NodeOutputData{Output: nil}, Canonical(nil) fails json.Valid, and Apply returns ReasonBadPayload rather than storing an empty document."
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 26,
+      "note": "Confirmed the duplicate-\"vars\"-key raw init row in TestFoldSequenceInvariants really reaches ReasonBadPayload via rejectDuplicateKeys, not via encoding/json's last-key-wins."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 49,
+      "note": "Checked the count-cap rows in TestFoldCaps against the real constants: MaxVars=64 and MaxFileHashes=64 generate keys at most 64 bytes, well under MaxShort=1024, so the at-cap rows are accepted for the intended reason and not shadowed by a per-key oversize."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 33,
+      "note": "Fold verifies Seq contiguity but never re-hashes Prev, which is why the rechain/fresh helpers and the in-place Data mutation in the final test are accepted; noted as latent coupling rather than a defect."
+    },
+    {
+      "path": "docs/quickstart.md",
+      "line": 50,
+      "note": "Verified docs/fsm/driving-a-workflow.md exists, and that .metareview/runs/.gitignore and .metareview/shards/.gitignore both contain `*`, matching the new quickstart bullets."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The \"nil-free JSON\" assertion in TestFoldHappyPath can never fail. The guard is `strings.Contains(js, \"null\") && !strings.Contains(js, \"\\\"prev_unfixed\\\":null\")`, but on the happy path PrevUnfixed is always nil and Snapshot.PrevUnfixed carries `json:\"prev_unfixed\"` with no omitempty, so `\"prev_unfixed\":null` is always present and the second conjunct is always false. Verified by executing a probe over the same fold: the marshalled snapshot contains exactly one \"null\", and it is prev_unfixed. Any future nullable field that regresses to null would go undetected. A `strings.Count(js, \"null\") != 1` check (or a replace-then-Contains) would express the intended invariant.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 206,
+          "note": "Vacuous conjunction: the negated prev_unfixed clause is always false on this fixture."
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 225,
+          "note": "PrevUnfixed *int `json:\"prev_unfixed\"` — no omitempty, so the key is always emitted as null when nil."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead fixture in TestFoldFixBaseline: the `mk` closure is constructed and then discarded with `_ = mk`, which exists only to silence the unused-variable error. It builds a non-forked init carrying an Origin-stamped transition — a case the following block deliberately replaced with a ParentRunID-bearing init so provenance passes. The leftover should be deleted, or the case it was written for asserted.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 453,
+          "note": "mk closure declared here and never invoked."
+        },
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 501,
+          "note": "`_ = mk` blank-assignment suppressing the compiler error."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two negative tests assert only `err != nil` where the rest of the file consistently pins the exact reason through expectReason/CodeFor. TestFoldRefusesANodeOutputWithNoOutput would still pass if the fold started rejecting the event for an unrelated reason (seq, stamp, oversize), and TestWorkflowSourceFolds' over-cap row would pass on any error rather than ReasonOversize. Both currently fail for the right reason (verified: the first reaches ReasonBadPayload via Canonical(nil), the second ReasonOversize via shortOK on WorkflowSource), but the assertions do not hold that.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 1231,
+          "note": "`if _, err := Fold(evs); err == nil` — reason not asserted."
+        },
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 1205,
+          "note": "over-cap workflow_source row asserts only that some error occurred."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The rewritten quickstart sentence misdescribes epic-ready twice. (a) It says task-done and PR-ready \"add a Context Shard Plan\", implying epic-ready has none, but epic-ready renders its own \"## Context Shard Plan\" section reading \"Sharding is not applied to epic-ready reviews; see the child task-done and pr-ready packs.\" (b) It says \"epic-ready renders 'not sharded'\", but that literal string is the Review Manifest's Source-manifest-hash placeholder for any unsharded review, and epic-ready never renders a Review Manifest at all — its pack builder does not call reviewmanifest.Markdown. A reader grepping an epic-ready pack for \"not sharded\" will not find it.",
+      "evidence": [
+        {
+          "path": "docs/quickstart.md",
+          "line": 53,
+          "note": "\"...epic-ready renders \\\"not sharded\\\".\""
+        },
+        {
+          "path": "internal/epicready/review.go",
+          "line": 500,
+          "note": "epic-ready emits its own Context Shard Plan section and no Review Manifest section."
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 313,
+          "note": "manifestHashText returns \"not sharded\" for an empty source manifest hash — the Review Manifest path, which epic-ready does not use."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

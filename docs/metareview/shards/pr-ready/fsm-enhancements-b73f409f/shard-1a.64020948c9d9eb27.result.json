@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1a.64020948c9d9eb27",
+  "kind": "shard",
+  "shardId": "shard-1a",
+  "shardHash": "64020948c9d9eb27",
+  "planHash": "daa5e2b77b4d0503",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 1,
+  "evidence": [
+    {
+      "path": "docs/index.html",
+      "line": 742,
+      "note": "New paragraph sits between </footer> and </body>, outside every .wrap container on the page."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 371,
+      "note": "ValidateRunID formats an already-quoted string with %q."
+    },
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 157,
+      "note": "prepareAppend rescans and json-probes every prior line on each Append."
+    },
+    {
+      "path": "internal/fsm/run/store.go",
+      "line": 94,
+      "note": "parseLines decodes one JSON value per line and never checks for trailing bytes."
+    },
+    {
+      "path": "internal/fsm/gate/gate_test.go",
+      "line": 173,
+      "note": "Real-git tests init a temp repo without neutralising the ambient global git config."
+    },
+    {
+      "path": "tests/go/test-shardpack-coverage.sh",
+      "line": 11,
+      "note": "go test stdout is sent to /dev/null, so a failing run reports no diagnostics."
+    },
+    {
+      "note": "Verified against the working tree, not the diff alone: TreeHash pin d53d6b91... matches sha256(\"abc\\ndef\") computed independently; docs/fsm/driving-a-workflow.md exists; testdata/fsm/scenarios/sdlc-loop/injection/judge.yaml is consumed by tests/go/test-fsm.sh:225; tests/go/test-shardpack-coverage.sh is invoked from tests/run-all.sh:20; go test ./internal/fsm/gate/ ./internal/fsm/run/ ./internal/reviewers/ all pass."
+    },
+    {
+      "note": "Rubric blocking checks cleared: no literal eval( or TODO/FIXME markers are introduced (internal/reviewers/lintscope_test.go assembles both at run time from split string literals), no diff context is truncated in this shard, all changed source is accompanied by tests, and no untracked source is involved."
+    },
+    {
+      "note": "Schema-version drift was checked and is a non-issue: parseLines hardcodes Log.Version=1 but internal/fsm/run/fold.go:23 rejects any event whose SchemaVersion is not 1, so a foreign-version log cannot fold silently."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "docs/index.html: the new sentence about `metareview fsm` is appended after </footer>, directly before </body>, so it is the only content block on the published landing page that is not inside a .wrap container. body sets margin:0 (docs/index.html:31-37) and .wrap supplies the page's max-width:1120px and padding:0 24px (docs/index.html:41-45), so this paragraph renders full-bleed and flush against the left viewport edge, below the footer band, on the live GitHub Pages site. It also breaks the footer's own link convention: every sibling reference in that footer is an <a> with a site-relative href (quickstart.md, README.claude.md), while this one is a repo-relative path inside <code> that a site visitor cannot follow. Move the sentence into the footer's .wrap paragraph (or a section) and make the doc reference a link.",
+      "evidence": [
+        {"path": "docs/index.html", "line": 742, "note": "Stray <p> after </footer>, outside all layout containers."},
+        {"path": "docs/index.html", "line": 41, "note": ".wrap is the layout container every other content block uses."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/types.go:371 double-quotes the run id: fmt.Errorf(\"invalid run id %q\", strconv.Quote(id)). strconv.Quote already returns a quoted, escaped literal and %q quotes and escapes it a second time, so an id containing a quote surfaces to the user as \\\"a\\\\\\\"b\\\" instead of \"a\\\"b\". ValidateRunID's error text reaches operators through internal/fsm/cli/wiring.go:222-228 and internal/fsm/export/export.go:89, so this is user-visible. Use %s with strconv.Quote, or %q with the bare id.",
+      "evidence": [
+        {"path": "internal/fsm/run/types.go", "line": 371, "note": "strconv.Quote result passed to a %q verb."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/store.go:154-163: on every Append, prepareAppend walks all previously stored lines and runs json.Unmarshal on each one via lineType (store.go:171-177) purely to recount counted events. With DefaultMaxEvents at 100_000 (types.go), this makes the counted-event check quadratic in run length on top of the store's existing full-file re-read. The count is derivable incrementally from FoldState, which the caller already carries across the CAS. Not urgent at realistic run lengths, but the cap it enforces is the one that makes long runs possible in the first place.",
+      "evidence": [
+        {"path": "internal/fsm/run/store.go", "line": 157, "note": "Per-append loop over every prior line, each json-probed."},
+        {"path": "internal/fsm/run/store.go", "line": 171, "note": "lineType json.Unmarshals each line and discards the error."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/store.go:92-99: parseLines decodes exactly one JSON value per stored line and never calls dec.More(), so any bytes after the closing brace on a line are silently dropped, while LineHash(line) at store.go:105 hashes the whole line. The decoded Event can therefore diverge from the bytes the audit chain attests to, and the same read path accepts duplicate object keys that Canonical (internal/fsm/run/canonical.go:22) refuses on write - the write-side canonicality invariant is not re-checked on read. This is bounded (an actor who can rewrite the file can rewrite the chain too, since no head is anchored outside the file), but for a package whose stated job is a tamper-evident audit log it is a gap worth closing with a dec.More() check.",
+      "evidence": [
+        {"path": "internal/fsm/run/store.go", "line": 94, "note": "json.NewDecoder(...).Decode with no trailing-token check."},
+        {"path": "internal/fsm/run/store.go", "line": 105, "note": "prevHash = LineHash(line) hashes bytes the decoder may have partly ignored."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/gate/gate_test.go:170-183: repo() runs git init/commit in a t.TempDir with only author/committer identity pinned via env. The ambient global git config still applies, so a developer or CI image with commit.gpgsign=true, init.templateDir, or a core.hooksPath pointing at a hook that rejects commits will fail these tests for reasons unrelated to the code under test. The production seam is careful here (internal/fsm/gate/git.go:57 documents config-injection hardening, and scrubEnv strips GIT_* overrides), so the test helper is the weaker half. Passing -c commit.gpgsign=false -c core.hooksPath=/dev/null (and GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM=/dev/null) to the helper would make the fixture hermetic.",
+      "evidence": [
+        {"path": "internal/fsm/gate/gate_test.go", "line": 173, "note": "git init in a temp dir with ambient global config still in effect."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "tests/go/test-shardpack-coverage.sh:11 sends go test stdout to /dev/null, and go test writes test failures and panics to stdout, so the failure branch prints only 'shardpack coverage: go test failed' with every diagnostic discarded - the operator has to re-run the command by hand to learn anything. Capture the output to a variable or a temp file and echo it on the failure path. Relatedly, tests/run-all.sh:20 guards the invocation with 'if [ -f ... ]', so if this script is ever moved or deleted the 100%-coverage gate stops running silently rather than failing.",
+      "evidence": [
+        {"path": "tests/go/test-shardpack-coverage.sh", "line": 11, "note": "Redirects go test stdout to /dev/null before the failure message."},
+        {"path": "tests/run-all.sh", "line": 20, "note": "Existence guard makes a missing coverage gate a silent skip."}
+      ]
+    }
+  ]
+}

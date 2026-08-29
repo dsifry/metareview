@@ -1,0 +1,50 @@
+
+> metareview@0.8.2 prepack
+> npm run build
+
+
+> metareview@0.8.2 build
+> go build -o bin/metareview ./cmd/metareview
+
+cmd/metareview                                      80.4%  ok
+internal/artifactreview                             80.4%  ok
+internal/contextpack                                76.1%  ok
+internal/contextprofile                             84.6%  ok
+internal/epicready                                  81.6%  ok
+internal/epicsource                                 83.1%  ok
+internal/evidence                                   85.2%  ok
+internal/findings                                   90.5%  ok
+internal/fsm/cmdexec                               100.0%  ok
+internal/fsm/converge                              100.0%  ok
+internal/fsm/errs                                  100.0%  ok
+internal/fsm/export                                100.0%  ok
+internal/fsm/gate                                  100.0%  ok
+internal/fsm/judge                                 100.0%  ok
+internal/fsm/kind                                  100.0%  ok
+internal/fsm/machine                               100.0%  ok
+internal/fsm/mockai                                100.0%  ok
+internal/fsm/record                                100.0%  ok
+internal/fsm/run                                   100.0%  ok
+internal/fsm/workflow                              100.0%  ok
+internal/gitcontext                                 83.7%  ok
+internal/githubcontext                              95.9%  ok
+internal/integration                               100.0%  ok
+internal/knowledge                                  77.8%  ok
+internal/learning                                   88.0%  ok
+internal/learnsource                                70.8%  ok
+internal/markdown                                   70.0%  ok
+internal/prready                                    85.7%  ok
+internal/repo                                       87.9%  ok
+internal/reviewers                                  97.2%  ok
+internal/reviewlog                                  90.2%  ok
+internal/reviewmanifest                             90.5%  ok
+internal/reviewstate                                92.1%  ok
+internal/runchain                                   90.1%  ok
+internal/sessionhistory                             86.2%  ok
+internal/setup                                      88.5%  ok
+internal/state                                      81.6%  ok
+internal/taskdone                                   87.0%  ok
+internal/tasksource                                 79.2%  ok
+workflows                                          100.0%  ok
+coverage gate passed
+coverage exit=0

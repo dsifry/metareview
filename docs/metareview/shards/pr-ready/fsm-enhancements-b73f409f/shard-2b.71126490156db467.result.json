@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2b.71126490156db467",
+  "kind": "shard",
+  "shardId": "shard-2b",
+  "shardHash": "71126490156db467",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:37:54Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cli/cli_test.go",
+      "line": 1,
+      "note": "Whole shard is the new 851-line internal/fsm/cli/cli_test.go. Validation: `go test ./internal/fsm/cli/ -count=1 -coverprofile=...` passes at 100.0% of statements (7.6s). No TODO/FIXME markers, no eval or shell-out beyond `git` and the workflow's own declared `bash ./n.sh` handler, no untracked source added."
+    },
+    {
+      "path": "internal/fsm/cli/cli_test.go",
+      "line": 434,
+      "note": "Verified empirically that every strings.Replace target used to derive test workflows really matches workflows/sdlc-loop.yaml (counted occurrences of all five needles: the two removed transitions, the convergence line, `repo_mode: advisory`, `effort: $REV_EFFORT` — each exactly 1). No silently no-op mutation of the fixture workflow."
+    },
+    {
+      "path": "internal/fsm/cli/cli_test.go",
+      "line": 390,
+      "note": "The reserved_name expectation is real: machine.go:85 refuses a path workflow reusing an embedded name with different bytes, which is why the byte-identical same.yaml at line 385 is accepted as workflow_source=path and fake.yaml is refused."
+    },
+    {
+      "path": "internal/fsm/cli/cli_test.go",
+      "line": 620,
+      "note": "Mutation check (in a scratchpad copy, not the repo): deleting `t.Proxy = nil` from deps.go:84 makes TestExitTableAndHelpers fail with \"proxy must be off\" — that assertion is live."
+    },
+    {
+      "path": "internal/fsm/cli/cli_test.go",
+      "line": 255,
+      "note": "Instrumented the harness in a scratchpad copy to dump every envelope: `copied` is 13 and `common_prefix_seq` is 11 on the asserted runs, and the self-diff untrusted list really is [report.calls[0].a.error, report.calls[0].b.error], so those assertions are non-vacuous."
+    },
+    {
+      "path": "internal/fsm/cli/cli_test.go",
+      "line": 437,
+      "note": "Dump confirms the noclean init envelope lists WORKFLOW_WARNING first and RUNS_JSONL_NOT_IGNORED second, so the `w[0].code == WarnWorkflow` assertion is order-sensitive but currently correct."
+    },
+    {
+      "path": "internal/fsm/cli/envelope.go",
+      "line": 55,
+      "note": "Mutation check: removing `\"ERR_RUN_ESCALATED\": true` from exit2 leaves the ENTIRE repo suite green (`go test ./...`), proving the escalation exit mapping is untested anywhere. Control mutation (deleting the warnings[].detail append in finish()) does fail the suite, so the suite is mutation-sensitive in general."
+    },
+    {
+      "path": "internal/fsm/cli/run.go",
+      "line": 471,
+      "note": "Mutation check: hard-coding repairMoved to false at BOTH wiring sites (run.go:221 `moved := repair && errs.Is(err, run.CodeRunNotFound)` and run.go:471 `in.fail(env, err, phaseAdvance, moved)`) leaves the whole repo suite green."
+    },
+    {
+      "path": "internal/fsm/cli/envelope.go",
+      "line": 166,
+      "note": "Mutation check: dropping `|| s.MockTainted` from viewKeys (envelope.go:166) and from StatusLines (run.go:980) both survive `go test ./internal/fsm/cli/`; the same drop in record.go:88 IS killed by internal/fsm/record tests."
+    },
+    {
+      "path": "internal/fsm/cli/cli_test.go",
+      "line": 215,
+      "note": "Instrumented the audit file around the 'idempotent at NEEDS_INPUT' step: the audit really stays at 3 lines across the repeated advance, so the behaviour is correct even though the test does not assert it."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "False test comment + a documented refusal path with zero CLI coverage. cli_test.go:296 says \"escalation over three failed forks of the parent lineage is refused with the human-only code\", but the line under it asserts ERR_CHECKPOINT_NOT_FOUND for `advance --run <id> --from nope` — a non-existent checkpoint name on a run that has been forked exactly once (attempt 1). Nothing in the test builds a three-deep failed lineage and no CLI test anywhere exercises ERR_RUN_ESCALATED, even though the CLI ships it in AgentPrompt (prompt.go:38) and maps it to exit 2 in exit2 (envelope.go:55). Proven by mutation: deleting the ERR_RUN_ESCALATED entry from exit2 — which would silently turn the human-only refusal into exit 1, contradicting the driver contract \"exit 2: nothing was recorded … unless the code is a consent or escalation code\" — leaves the entire repo suite green. Fix: either drive a real escalation through the CLI (machine/fork_test.go:599-623 shows how the lineage is built) or correct the comment and add the exit-mapping row to the exitFor table.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 296,
+          "note": "Comment claims escalation-over-three-forks; the assertion on line 297 is ERR_CHECKPOINT_NOT_FOUND for --from nope."
+        },
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 55,
+          "note": "exit2 contains ERR_RUN_ESCALATED; removing it breaks no test in the repository."
+        },
+        {
+          "path": "internal/fsm/machine/fork.go",
+          "line": 82,
+          "note": "CodeRunEscalated is only ever asserted at the machine layer (fork_test.go:600, :623), never through the CLI envelope/exit code."
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The exit-code table gives the appearance of covering repair_moved while the wiring that produces it is untested. cli_test.go:583-590 asserts exitFor(\"ERR_RUN_NOT_FOUND\", phaseOpen, true) == 1 and exitFor(\"ERR_JUDGE_KEY\", phaseAdvance, true) == 1, but exitFor is a pure function called with a literal `true`; no end-to-end row ever produces repairMoved == true together with an error. TestTornRepairAndForkErrors (cli_test.go:553-557) does run `advance --repair`, but that call succeeds (NEEDS_INPUT), so in.fail(..., moved) is never reached with moved set. Mutation confirms it: hard-coding both wiring sites (run.go:221 and run.go:471) to false leaves `go test ./...` green. Spec 5 §8 explicitly lists \"the `--repair` + pre-flight → exit 1 case\" as a required CLI-suite row, and spec 5 §3 lists \"ERR_RUN_NOT_FOUND from --repair at offset 0 (bytes moved)\" as an exit-1 row; both are asserted only against the pure helper.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 583,
+          "note": "repairMoved=true cases are passed as literals to exitFor, never produced by a command run."
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 459,
+          "note": "moved is computed at run.go:459-464 and consumed at run.go:471; both can be replaced with false with no test failing."
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 489,
+          "note": "\"and the `--repair` + pre-flight → exit 1 case\" is named as a required suite row in §8."
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "A test whose failure message asserts a mapping the code does not have. cli_test.go:623-631 makes Deps.Rand fail and asserts a panic, with the message \"rand failure panics into ERR_INTERNAL\". The panic is never turned into ERR_INTERNAL: wiring.go:167-172 panics with errs.E(CodeInternal, …) and there is no recover() anywhere in non-test code in this repository (grep 'recover()' over all non-test .go files: zero hits), and cmd/metareview/main.go:100 calls fsmcli.Run directly inside os.Exit. So this path produces a Go stack trace on stderr and NOTHING on stdout — no envelope, no `code`, no mapped exit — which contradicts spec 5 §8 (\"`Rand` failure → `ERR_INTERNAL`\") and spec 5 §136 (\"One JSON object on stdout for every subcommand except --agent-prompt\"). Practical impact is low (crypto/rand.Read does not return errors in modern Go, so the seam exists only for this test), so the cheapest correct fix may be a recover-to-envelope in Run, or correcting the spec row and the test message — but as written the test enshrines behaviour the spec forbids while claiming the opposite.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 628,
+          "note": "t.Fatal message \"rand failure panics into ERR_INTERNAL\"; the test only asserts recover() != nil."
+        },
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 169,
+          "note": "panic(errs.E(CodeInternal, \"crypto/rand failed: \"+err.Error())) with no recover on the path to cmd/metareview/main.go:100."
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 136,
+          "note": "\"One JSON object on stdout for every subcommand except --agent-prompt (text)\" — violated by an escaping panic."
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The mock-taint integrity signal is unverified in the CLI despite the package's 100% statement coverage. `mock` in every envelope (envelope.go:166) and in the status line (run.go:980) is `s.Mock != \"\" || s.MockTainted`; MockTainted is set by run/fold.go:89 when a product run (Mock == \"\") ingests a mock-stamped event — precisely the \"a mock: true FSM row never satisfies a gate\" guarantee the driver relies on. cli_test.go only ever exercises runs that are mock from init (mockInit) or pure product runs, never a tainted one, so dropping the `|| s.MockTainted` term at either CLI site survives the suite; the identical term in record.go:88 IS killed by internal/fsm/record tests. A refactor of viewKeys could therefore report mock:false to the driving agent for a run whose evidence is mock-contaminated while runs.jsonl still says mock:true, with no test noticing. Add one row that folds a mock-stamped event into a product run and asserts env[\"mock\"] == true and the \"  mock\" status suffix.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 166,
+          "note": "env[\"mock\"] = s.Mock != \"\" || s.MockTainted — dropping the second term survives go test ./internal/fsm/cli/."
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 980,
+          "note": "StatusLines repeats the same expression; dropping the term there also survives."
+        },
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 89,
+          "note": "next.MockTainted = true when st.Mock == \"\" && ev.Mock — the state cli_test.go never constructs."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Four more comments overclaim relative to their assertions (same defect class, lower stakes). (a) cli_test.go:275 \"the child passed, the parent failed\" — the check is only substring containment of the child id, \"\\\"verdict\\\":\\\"PASS\\\"\" and \"\\\"mock\\\":true\"; the parent row is never inspected (it is in fact NEEDS_REVISION, confirmed by dumping runs.jsonl), and the PASS substring would also match PASS_ADVISORY. (b) cli_test.go:527 \"index continues; terminal run refused\" — the assertion is index == 0 on a run with no prior calls (nothing \"continues\"), and the following line asserts ERR_MOCK_UNSCRIPTED on a non-terminal run; no terminal-run refusal happens in this test. (c) cli_test.go:793 \"judge on a terminal run\" — no judge call on a terminal run appears anywhere in TestOpenFailuresAndCraftedRuns (that case lives at line 274). (d) cli_test.go:214 \"idempotent at NEEDS_INPUT\" — only status/exit are re-checked; I verified separately that the audit really stays at 3 lines, but a regression that appended a duplicate node_request each time would not fail this test. Non-blocking, but these are the comments a future reader will trust.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 275,
+          "note": "\"runs.jsonl rows: the child passed, the parent failed\" — parent row never asserted."
+        },
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 527,
+          "note": "\"index continues; terminal run refused\" — index is 0 and no terminal run is used here."
+        },
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 793,
+          "note": "\"judge on a terminal run\" — absent from the lines that follow (794-810)."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two brittleness nits in the harness, neither currently failing. (1) harness.run (cli_test.go:108) indexes args[0] inside the JSON guard; `h.mustErr(CodeUsage, 2)` at line 164 calls it with zero args, so a change that made the no-arg path print non-JSON would turn a clean assertion failure into an index-out-of-range panic. Guard with len(args) > 0. (2) The empty-repository loop at cli_test.go:731-735 asserts only `code != 2`, so a future typo in one of the seven arg vectors would still pass as ERR_USAGE instead of the intended ERR_NO_RUNS/ERR_RUN_NOT_FOUND (I dumped the actual codes: three are ERR_NO_RUNS, four ERR_RUN_NOT_FOUND — all currently correct). Asserting the code, not just the exit, would pin the claim in the comment.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 108,
+          "note": "`if err := json.Unmarshal(...); err != nil && args[0] != \"--agent-prompt\"` — args may be empty."
+        },
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 732,
+          "note": "loop asserts only exit 2, not the refusal code the comment names."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Considered flagging the `--mock-ai .` case (cli_test.go:782) whose comment claims it exercises the relInside \"equal branch\", and the strings.Replace-derived workflow fixtures, as unverified claims. Both check out: filepath.Join(root, \".\") == root hits wiring.go:105-106, and all five Replace needles occur exactly once in workflows/sdlc-loop.yaml, so no fixture is a silent no-op. Also considered the non-hermetic git invocation (os.Environ() inherited, so a global commit.gpgsign or hooksPath could break the harness) — it matches the existing convention at internal/fsm/gate/gate_test.go:152, so it is not a new defect in this diff.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 105,
+          "note": "relInside returns (\".\", true) when dirC == rootC — the branch the --mock-ai . row reaches before MockLoad fails on the missing judge.yaml."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 4
+}

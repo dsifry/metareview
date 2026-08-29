@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1b.6891a021d48c70a2",
+  "kind": "shard",
+  "shardId": "shard-1b",
+  "shardHash": "6891a021d48c70a2",
+  "planHash": "12b2842033a1731a",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-27T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/gate/gates.go",
+      "line": 1,
+      "note": "New gate package: builtin gates map, commit_exists git-backed gate, Names/Builtin accessors. Covered by internal/fsm/gate/gate_test.go and fake.go; `go test ./internal/fsm/...` reports 100.0% of statements for internal/fsm/gate."
+    },
+    {
+      "path": "internal/fsm/judge/prompts.go",
+      "line": 1,
+      "note": "New prompt rendering/parsing. Verified the str.format emulation against the checked-in goldens under internal/fsm/judge/testdata/prompts/ (plain, fenced, calibration for all three kinds); package reports 100.0% statement coverage."
+    },
+    {
+      "path": "internal/fsm/run/store_mem.go",
+      "line": 1,
+      "note": "MemStore contract compared line by line with internal/fsm/run/store_jsonl.go: Append/RepairTail both require the lock, both call prepareAppend with the same CAS arguments, List uses the same summarize+sortSummaries path. No behavioural divergence found."
+    },
+    {
+      "path": "workflows/review-loop.yaml",
+      "line": 1,
+      "note": "Parsed and shape-asserted by internal/fsm/workflow/workflow_test.go:116 and exercised end to end by internal/fsm/machine/machine_test.go and internal/fsm/cli/cli_test.go:376; every gate it names exists in the new gates.go builtin map."
+    },
+    {
+      "path": "tests/coverage.sh",
+      "line": 84,
+      "note": "internal/fsm/* and workflows are gated at exactly 100% of statements (not via tests/coverage-floor.txt), so the absence of floor lines for the new packages is by design, not an escaped gate."
+    },
+    {
+      "path": "internal/learning/review.go",
+      "line": 278,
+      "note": "markdownList deletion is dead-code removal only: the remaining callers (taskdone, epicready, prready, reviewmanifest) each define their own copy, and `strings` is still used at review.go:156/193/228/230, so the package still builds."
+    },
+    {
+      "path": "internal/runchain/runchain_test.go",
+      "line": 249,
+      "note": "TestReadersAcceptOneMiBLines sizes its fixture from maxJSONLLineBytes (runchain.go:17, 1<<20) and asserts exact length; runchain.go:114 sets scanner.Buffer to maxJSONLLineBytes+2, so the 1 MiB line plus newline fits. Verified the constant and the scanner cap in the real files."
+    },
+    {
+      "path": "tests/go/test-task-done-review.sh",
+      "line": 99,
+      "note": "The rewrite from `! grep -q ...` to `grep -q ... && exit 1` is a genuine fix, not a style change: under `set -euo pipefail` (line 2) bash exempts a `!`-prefixed pipeline from errexit, so the old negated assertion could never fail the script. The new form matches the repo idiom used throughout tests/go/test-pr-ready-review.sh."
+    },
+    {
+      "path": "internal/fsm/judge/smoke_test.go",
+      "line": 1,
+      "note": "Build-tagged `smoke` and skipped without OPENAI_API_KEY; `go vet -tags smoke ./internal/fsm/judge/` is clean, so the tagged file still compiles against the current judge API."
+    },
+    {
+      "note": "Toolchain checks run over the whole tree: `go build ./...` clean, `go vet -tags smoke` clean, `golangci-lint run` over internal/fsm/..., internal/runchain/..., internal/learning/... reports 0 issues, and `go test -cover` reports 100.0% for every internal/fsm package. No TODO/FIXME markers and no eval-style dynamic execution anywhere in this shard's diff."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Misleading comment on a write path. internal/runchain/runchain_test.go:241 reads \"Read-only path: there is nothing a Close error could tell the caller\", but appendLine opens the file with os.O_CREATE|os.O_WRONLY|os.O_APPEND (line 237) and then WriteStrings to it (line 243). The swallowed Close error is harmless in practice (os.File writes are unbuffered syscalls, and this is a test helper), but the justification given is factually wrong and would mislead anyone reusing the pattern on a path where Close does report errors.",
+      "evidence": [
+        {"path": "internal/runchain/runchain_test.go", "line": 241, "note": "comment claims a read-only path"},
+        {"path": "internal/runchain/runchain_test.go", "line": 237, "note": "os.OpenFile with O_WRONLY|O_APPEND, i.e. a write path"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "RenderPrompt discards format's error: `user, _ := format(template, values)` at internal/fsm/judge/prompts.go:208. The declared ERR_PROMPT_TEMPLATE contract (spec docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md:123) can therefore never surface a template defect: a future edit that introduces an unknown slot or a stray brace would return an empty user prompt with a nil error rather than an error. Today the templates are package constants and every slot is golden-tested, so this is latent only.",
+      "evidence": [
+        {"path": "internal/fsm/judge/prompts.go", "line": 208, "note": "format error assigned to blank identifier"},
+        {"path": "internal/fsm/judge/prompts.go", "line": 226, "note": "format returns ERR_PROMPT_TEMPLATE errors that no caller can observe"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Parse routes unknown kinds into the still-present branch. internal/fsm/judge/prompts.go:336 uses `default:` rather than `case KindStillPresent:`, so Parse(\"typo-kind\", raw) silently parses the text as a still-present verdict instead of reporting an unsupported kind. It is unreachable through Judge.Call today because RenderPrompt (prompts.go:194) rejects unknown kinds first, but Parse is exported and the two functions disagree on strictness. A related wrinkle: the fail closure at prompts.go:311 returns `kind == KindStillPresent` as the decision, so an unknown kind parsed as still-present would fail *open* (decision false) rather than closed.",
+      "evidence": [
+        {"path": "internal/fsm/judge/prompts.go", "line": 336, "note": "default branch handles still-present and every unknown kind"},
+        {"path": "internal/fsm/judge/prompts.go", "line": 194, "note": "RenderPrompt errors on an unknown kind, so the two entry points disagree"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The all_fixed gate's failure detail is misleading when nothing was ever found. converge.AllFixed (internal/fsm/converge/converge.go:26) deliberately treats an empty AllFound as NOT fixed, so the gate at internal/fsm/gate/gates.go:84 reports \"0 of 0 bugs unfixed\" for the empty case, which reads as a contradiction in the audit log instead of naming the actual reason (no bugs were ever recorded). Message-only; the gate decision itself is correct and intentional.",
+      "evidence": [
+        {"path": "internal/fsm/gate/gates.go", "line": 84, "note": "detail formats %d of %d, both zero when AllFound is empty"},
+        {"path": "internal/fsm/converge/converge.go", "line": 26, "note": "AllFixed requires len(AllFound) > 0 by design"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "docs/README.claude.md:52 lists the transient paths as findings.jsonl, runs.jsonl and .metareview/shards/ only, while the new \"Workflow runs\" section immediately below introduces `metareview fsm`, whose run logs live under .metareview/runs/ and whose durable export bundles live under docs/metareview/fsm/. CLAUDE.md's Durable Output section names both. An agent following README.claude.md alone gets an incomplete commit/ignore contract for exactly the feature this diff adds.",
+      "evidence": [
+        {"path": "docs/README.claude.md", "line": 52, "note": "transient list omits .metareview/runs/ and durable docs/metareview/fsm/"},
+        {"path": "docs/README.claude.md", "line": 58, "note": "the fsm section added directly below does not restate the storage contract"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Investigated and dismissed: the match prompt is not fenced. RenderPrompt (internal/fsm/judge/prompts.go:172) populates `fenced` only for adjudicate and still-present, so match's golden_comment and candidate slots are injected raw even in product mode, and testdata/prompts/match.fenced.golden is byte-identical to match.calibration.golden. This looked like an untrusted-content injection gap, but it is the documented design: \"`match` is never fenced\" in docs/specs/2026-08-26-metareview-0.9.0-build-plan.md:53 (change C25) and docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md:125. The identical goldens are the intended, tested outcome, and match compares a golden comment to a candidate string rather than raw diff text.",
+      "evidence": [
+        {"path": "internal/fsm/judge/prompts.go", "line": 172, "note": "match sets no fenced slots"},
+        {"path": "docs/specs/2026-08-26-metareview-0.9.0-build-plan.md", "line": 53, "note": "C25 states match is never fenced"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}
