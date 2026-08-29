@@ -9,6 +9,24 @@ not deterministic — the structure is.
 
 ### Added
 
+- **Per-candidate judge evidence.** The adjudicate and still-present executors select the hunks of
+  each candidate's own file (and the other files its text names) instead of sharing one cut of the
+  whole branch diff. Selection parses only unified-diff structure, so it is language-agnostic.
+  A candidate whose file the diff does not carry is not judged at all: it is recorded
+  `unverified_no_evidence` and kept for a human rather than being asked of a judge that cannot see it.
+- **Two verdict values for outcomes that are not judgments**: `unverified_no_evidence` (no judge was
+  asked) and `checked_but_unverified` (a judge was asked and returned no usable answer, including an
+  unparseable reply). Both are confirmed-side with confidence 0. Previously either would have been
+  recorded as `hallucination`, which drops the finding.
+- **Escalation.** `kind.Deps.Escalate` (optional, injected) gives a rejected cross-file candidate a
+  second opinion from a judge with wider evidence access. Only rejections are escalated, so it cannot
+  turn a confirmation into a rejection; a failed or unparseable escalation keeps the finding.
+- **`internal/fsm/sandbox`** materializes the evidence an agentic judge may read - every changed path
+  at base and head, mode 0444, nothing else - and content-addresses it with a tree hash so a verdict
+  stays replayable when the prompt no longer carries the evidence.
+- `llm_call` records `evidence` (`excerpt`|`sandbox`) plus `tree_hash`/`base_sha`/`head_sha`;
+  `fsm diff` reports `evidence_mismatch` and per-row `evidence_same`, and never calls a
+  cross-evidence row `same`.
 - `metareview fsm init|state|advance|record|gate|judge|converge|diff|export|workflows|--agent-prompt` with one JSON
   envelope per call (`schema_version: 1`), an exit table (`0`/`1`/`2`/`3`), `untrusted` marking of every externally
   derived value, and a driver contract (`--agent-prompt`, pinned by `testdata/fsm/agent-prompt.golden`).
@@ -115,6 +133,24 @@ precision.
 
 ### Fixed
 
+- **The judge could not see the code it was judging.** Two stacked head-cuts: the machine fetched
+  the diff already capped at 1 MiB, and the kinds cut again to 30 KB and shared one cut across every
+  candidate. On this repository's own branch that left 13 of 538 files visible - plugin manifests and
+  a changelog, nothing under `internal/`. The cap is a memory valve (the text never enters the audit)
+  and is now 64 MiB; what a judge call receives is bounded by per-candidate selection instead.
+- An unparseable judge reply was recorded as `hallucination`, so a finding was denied because the
+  transport failed rather than because anything decided.
+- `internal/gitcontext` ran every `git diff` without `--no-ext-diff`, so a developer's own
+  `diff.external` (how difftastic is installed) or `GIT_EXTERNAL_DIFF` silently replaced the diff we
+  measure, chunk, hash and lint with the driver's output. `internal/fsm/gate` already passed it.
+- The Codex judge inherited metareview's working directory with read *and execute* access to the
+  whole repository, `.git` included; `judge.WithCodexWorkDir` confines it.
+- Codex token accounting added `cached_input_tokens` to `input_tokens` where the HTTP arm subtracts
+  it, so a codex-transported run billed its cached half twice into the convergence budget.
+- `validateCodex`'s empty-model guard compared against the literal lowercase prefix while routing
+  strips it case-insensitively, so `"Codex/"` validated and the CLI was spawned with an empty `-m`.
+- `machine.CallRow` declared an `Index` field that was never assigned and shipped as a constant `0`
+  in every `fsm diff` envelope; the unexported occurrence counter does that work. Removed.
 - `.claude-plugin/marketplace.json` plugin version had drifted to 0.6.0 while `package.json`
   advanced to 0.8.0; resynced to 0.8.2 (the manifest version-consistency test now passes).
 

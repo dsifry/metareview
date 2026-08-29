@@ -1228,3 +1228,82 @@ repo_mode: advisory
 		t.Fatalf("a node removed from a copied state must be incompatible, got %v", err)
 	}
 }
+
+// A verdict reached by browsing a materialized tree and one reached from excerpts in the
+// prompt are answers to different questions. DiffRuns must say so rather than report them as
+// agreeing or disagreeing, which would read as a model difference.
+func TestReportCompareFlagsCrossEvidenceRows(t *testing.T) {
+	yes, no := true, false
+	side := func(evidence string, real *bool) *CallSide {
+		return &CallSide{Model: "m", Raw: real, Effective: real, Confidence: 0.9, Evidence: evidence}
+	}
+	t.Run("same evidence compares normally", func(t *testing.T) {
+		r := &Report{}
+		row := &CallRow{A: side(run.EvidenceExcerpt, &yes), B: side(run.EvidenceExcerpt, &yes)}
+		r.compare(row)
+		if !row.EvidenceSame || !row.Same || r.EvidenceMismatch != 0 {
+			t.Fatalf("row=%+v mismatch=%d", row, r.EvidenceMismatch)
+		}
+	})
+	t.Run("empty evidence means excerpt", func(t *testing.T) {
+		r := &Report{}
+		row := &CallRow{A: side("", &yes), B: side(run.EvidenceExcerpt, &yes)}
+		r.compare(row)
+		if !row.EvidenceSame || r.EvidenceMismatch != 0 {
+			t.Fatal("a pre-field row must still compare against an explicit excerpt row")
+		}
+	})
+	t.Run("different evidence is never Same, even on equal verdicts", func(t *testing.T) {
+		r := &Report{}
+		row := &CallRow{A: side(run.EvidenceExcerpt, &yes), B: side(run.EvidenceSandbox, &yes)}
+		r.compare(row)
+		if row.EvidenceSame {
+			t.Error("EvidenceSame must be false")
+		}
+		if row.Same {
+			t.Error("equal verdicts from unequal evidence are not agreement")
+		}
+		if !row.DecisionSame {
+			t.Error("the underlying decision comparison must still be reported")
+		}
+		if r.EvidenceMismatch != 1 {
+			t.Errorf("EvidenceMismatch = %d, want 1", r.EvidenceMismatch)
+		}
+	})
+	t.Run("disagreeing verdicts on the same evidence", func(t *testing.T) {
+		r := &Report{}
+		row := &CallRow{A: side(run.EvidenceSandbox, &yes), B: side(run.EvidenceSandbox, &no)}
+		r.compare(row)
+		if row.Same || !row.EvidenceSame || r.EvidenceMismatch != 0 {
+			t.Fatalf("row=%+v mismatch=%d", row, r.EvidenceMismatch)
+		}
+	})
+	t.Run("a one-sided row is left alone", func(t *testing.T) {
+		r := &Report{}
+		row := &CallRow{A: side(run.EvidenceSandbox, &yes)}
+		r.compare(row)
+		if row.Same || row.EvidenceSame || r.EvidenceMismatch != 0 {
+			t.Fatalf("row=%+v mismatch=%d", row, r.EvidenceMismatch)
+		}
+	})
+}
+
+// CallRow.Index shipped as a constant 0 in every fsm diff envelope while its doc comment
+// claimed it distinguished repeated calls. The unexported occurrence counter does that.
+func TestCallRowCarriesNoDeadIndexField(t *testing.T) {
+	b, err := json.Marshal(CallRow{Node: "n", Kind: "adjudicate", A: &CallSide{Index: 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := m["index"]; present {
+		t.Errorf("CallRow still ships a row-level index: %s", b)
+	}
+	side := m["a"].(map[string]any)
+	if side["index"] != float64(3) {
+		t.Errorf("the per-side index must survive: %v", side["index"])
+	}
+}

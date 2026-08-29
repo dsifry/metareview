@@ -97,6 +97,19 @@ type MatchInput struct { Golden run.Golden `json:"golden"`; Candidate run.Findin
 type AdjudicateInput struct { Diff string `json:"diff"`; DiffTruncated bool `json:"diff_truncated"`; DiffContextHash string `json:"diff_context_hash"`; Candidate run.Finding `json:"candidate"` }
 type StillPresentInput struct { Bug run.Bug `json:"bug"`; Diff string `json:"diff"`; DiffTruncated bool `json:"diff_truncated"`; DiffContextHash string `json:"diff_context_hash"` }
 func CutDiff(diff string, alreadyTruncated bool) (cut string, truncated bool, sha1hex string)   // 30000-byte rune-boundary cut
+func SelectDiff(diff, path string, line, budget int) (out string, ok bool, sha1hex string)      // that file's hunks, nearest to line first
+func DiffHasFile(diff, path string) bool                                                        // the pre-condition: can this candidate be judged at all
+func ReferencedPaths(diff, own, text string) []string                                           // other files the finding's prose names, capped
+func ContextForClaim(diff string, truncated bool, file string, line int, text string, budget int) (string, bool, string)
+
+// The executors call ContextForClaim PER CANDIDATE, not CutDiff once per node. One shared cut is
+// the first budget bytes of the whole branch diff: on a 538-file branch that is the
+// alphabetically first dozen files and nothing the candidate refers to, and the judge answers
+// from it anyway - measured at 0.94-0.99 confidence on 100 candidates whose files were all
+// absent. Selection is language-agnostic: it parses only "diff --git" blocks and "@@" hunk
+// headers, never file contents, and deliberately avoids git --function-context and the section
+// heading after @@, which come from xfuncname regexes that exist only for some languages.
+// A candidate whose file is absent from the diff is NOT asked (see unverified_no_evidence).
 func New(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock) (Judge, error)   // ERR_JUDGE_URL checked here
 func NewHTTPClient(timeout time.Duration) *http.Client                      // CheckRedirect refuses ALL redirects → ERR_JUDGE_REDIRECT (terminal, never retried)
 type Script struct { Calls map[ScriptKey]ScriptRow }  // ScriptKey{Kind, Node string; Iter, Index int}; ScriptRow{Raw string /* run through the real parser */; Tokens run.TokenTotals; ExpectModel, ExpectInputHash string; Error string /* ERR_* to return instead */}
@@ -227,7 +240,15 @@ Executors `Audit` immediately after each `Judge.Call` returns; a non-parse error
 ```go
 type Deps struct { Judge judge.Judge; Mock bool }   // no runner here: the cmd kind uses ExecInput.Runner (converge.Caller — Run + Call), the session's single guarded runner
 func New(d Deps) (*Registry, error)   // Registry.Mock() == d.Mock; New refuses Mock:true with a non-*judge.MockJudge and Mock:false with one (ERR_MOCK_MISMATCH)
-// Bug.Verdict constants: run.VerdictMatched = "matched", run.VerdictRealButUngold = "real_but_ungold", run.VerdictHallucination = "hallucination" (typed in run; Decode validates the set for every kind incl. cmd)
+// Bug.Verdict constants: run.VerdictMatched = "matched", run.VerdictRealButUngold = "real_but_ungold",
+// run.VerdictHallucination = "hallucination", run.VerdictUnverifiedNoEvidence = "unverified_no_evidence",
+// run.VerdictCheckedButUnverified = "checked_but_unverified" (typed in run; Decode validates the set for every kind incl. cmd).
+// The last two are confirmed-side and carry Confidence 0. A judge's schema is one boolean, so an
+// outcome that is not a judgment would otherwise be recorded as one - and hallucination drops the
+// finding. unverified_no_evidence: no judge was asked, because the diff carries no hunks for the
+// candidate's file. checked_but_unverified: a judge WAS asked and returned no usable answer (a reply
+// that did not parse, or a failed escalation). The two are distinct because a human triaging them
+// takes different actions: "no one could look" is not "a judge looked and was unsure".
 // Registry.Executor(name) for host-only kinds returns (nil, false).
 ```
 `Info()`: `review-lenses {subagent, [inline subagent], ValidateParams: lenses absent (→ 8) or an integer 1..8}`, `match-then-adjudicate {fork, [fork]}`,

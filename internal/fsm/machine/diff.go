@@ -17,26 +17,57 @@ type Report struct {
 	Outcomes        [2]string  `json:"outcomes"`
 	Calls           []CallRow  `json:"calls"`
 	Transitions     []TransRow `json:"transitions"`
+	// EvidenceMismatch counts rows whose two sides saw different evidence (see
+	// run.LLMCallData.Evidence). Those rows are not a model comparison: a judge that read a
+	// materialized tree and one handed excerpts were asked different questions, so a
+	// consumer must be able to notice rather than read the difference as disagreement.
+	EvidenceMismatch int `json:"evidence_mismatch"`
 }
 
 // CallRow aligns one judge call across the two runs by (node, iter, kind, input_hash).
 type CallRow struct {
-	Node      string `json:"node"`
-	Iter      int    `json:"iter"`
-	Kind      string `json:"kind"`
-	InputHash string `json:"input_hash"`
-	// Index distinguishes several calls of one kind in the same node@iter with
-	// the same input — the same question put to two models. Without it the rows
-	// collided and the earlier call vanished from the report.
-	Index          int       `json:"index"`
+	Node           string    `json:"node"`
+	Iter           int       `json:"iter"`
+	Kind           string    `json:"kind"`
+	InputHash      string    `json:"input_hash"`
 	A              *CallSide `json:"a"`
 	B              *CallSide `json:"b"`
 	RawSame        bool      `json:"raw_same"`
 	DecisionSame   bool      `json:"decision_same"`
 	ConfidenceSame bool      `json:"confidence_same"`
-	Same           bool      `json:"same"`
+	// EvidenceSame reports whether both sides saw the same KIND of evidence. When it is
+	// false Same is forced false: equal verdicts from unequal evidence are not agreement.
+	EvidenceSame bool `json:"evidence_same"`
+	Same         bool `json:"same"`
 	// occurrence is the within-side repeat index; it orders rows and never ships.
 	occurrence int
+}
+
+// compare fills in one row's agreement flags and counts a cross-evidence pair on the report.
+// It is separate from DiffRuns so the comparison rules can be exercised directly, without
+// having to hand-build a log that satisfies every fold invariant.
+func (r *Report) compare(row *CallRow) {
+	if row.A == nil || row.B == nil {
+		return // one-sided: nothing to compare
+	}
+	row.RawSame = boolEq(row.A.Raw, row.B.Raw)
+	row.DecisionSame = boolEq(row.A.Effective, row.B.Effective)
+	row.ConfidenceSame = row.A.Confidence == row.B.Confidence
+	row.EvidenceSame = evidenceOf(row.A.Evidence) == evidenceOf(row.B.Evidence)
+	// Equal verdicts from unequal evidence are not agreement: the two judges were asked
+	// different questions, so Same is forced false and the report carries a count.
+	row.Same = row.EvidenceSame && row.DecisionSame && row.ConfidenceSame && row.A.Error == "" && row.B.Error == ""
+	if !row.EvidenceSame {
+		r.EvidenceMismatch++
+	}
+}
+
+// evidenceOf normalises the empty value, which predates the field and means excerpt.
+func evidenceOf(s string) string {
+	if s == "" {
+		return run.EvidenceExcerpt
+	}
+	return s
 }
 
 // CallSide is one run's side of a CallRow.
@@ -48,6 +79,9 @@ type CallSide struct {
 	Effective  *bool   `json:"effective"`
 	Confidence float64 `json:"confidence"`
 	Error      string  `json:"error,omitempty"`
+	// Evidence is how this side's judge saw the code (run.EvidenceExcerpt or
+	// run.EvidenceSandbox). Empty means excerpt, so older rows keep their meaning.
+	Evidence string `json:"evidence,omitempty"`
 }
 
 // TransRow aligns transitions by ordinal.
@@ -106,7 +140,7 @@ func DiffRuns(a, b run.Log, decide func(kind string, verdict json.RawMessage) De
 				rows[k] = row
 			}
 			dec := decide(d.Kind, d.Verdict)
-			cs := &CallSide{Index: d.Index, Model: d.Model, Effort: d.Effort, Raw: dec.Raw, Effective: dec.Effective, Confidence: d.Confidence, Error: d.Error}
+			cs := &CallSide{Index: d.Index, Model: d.Model, Effort: d.Effort, Raw: dec.Raw, Effective: dec.Effective, Confidence: d.Confidence, Error: d.Error, Evidence: d.Evidence}
 			if side == 0 {
 				row.A = cs
 			} else {
@@ -117,12 +151,7 @@ func DiffRuns(a, b run.Log, decide func(kind string, verdict json.RawMessage) De
 	collect(a.Events, 0)
 	collect(b.Events, 1)
 	for _, row := range rows {
-		if row.A != nil && row.B != nil {
-			row.RawSame = boolEq(row.A.Raw, row.B.Raw)
-			row.DecisionSame = boolEq(row.A.Effective, row.B.Effective)
-			row.ConfidenceSame = row.A.Confidence == row.B.Confidence
-			row.Same = row.DecisionSame && row.ConfidenceSame && row.A.Error == "" && row.B.Error == ""
-		}
+		r.compare(row)
 		r.Calls = append(r.Calls, *row)
 	}
 	sort.Slice(r.Calls, func(i, j int) bool {

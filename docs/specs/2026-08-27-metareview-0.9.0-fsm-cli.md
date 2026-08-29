@@ -120,6 +120,9 @@ Rules:
   `gate.detail` is listed under `untrusted` (git output).
 - `fsm record tokens --data` keys are `run.TokenTotals`'s (`input, cache_read, cache_create, output, reasoning`; unknown
   or negative → `ERR_RECORD_TOKENS`).
+- `fsm diff` reports `evidence_mismatch` and per-row `evidence_same`. A row whose two sides saw
+  different evidence (`llm_call.evidence`: `excerpt` vs `sandbox`) is never `same`, because the two
+  judges were asked different questions and the difference must not read as model disagreement.
 - `fsm diff --a <run> --b <run>` (two named flags; `--run` is single-valued everywhere else); `Diff` receives
   `kind.Decision` (it returns `machine.Decision`, spec 3 r5).
 - `fsm export`: `--include-vars` requires an explicit `--out` (spec 3 `ERR_EXPORT_DEST{include_vars_default}`); the

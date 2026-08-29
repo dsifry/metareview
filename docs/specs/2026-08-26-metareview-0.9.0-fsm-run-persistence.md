@@ -179,7 +179,7 @@ fresh `Origin` naming the immediate parent.
 | `needs_input` | `{}` | yes | |
 | `node_output` | `NodeOutputData{Output json.RawMessage}` | yes | |
 | `delta_applied` | `DeltaAppliedData{Delta; OutputHash string}` | yes | |
-| `llm_call` | `LLMCallData{Kind, Model, Effort string; Index int; InputHash string; Verdict json.RawMessage; Confidence float64; Tokens TokenTotals; DurationMS int64; Error string}` | yes | |
+| `llm_call` | `LLMCallData{Kind, Model, Effort string; Index int; InputHash string; Verdict json.RawMessage; Confidence float64; Tokens TokenTotals; DurationMS int64; Error string; Evidence, TreeHash, BaseSHA, HeadSHA string}` | yes | `Evidence` is `excerpt` (empty means the same) or `sandbox`; the three hashes content-address what a sandbox judge could read, so a verdict stays replayable once the prompt no longer carries the evidence |
 | `cmd_call` | `CmdCallData{Name string; Argv []string; InputHash, Stdout, Stderr string; StdoutTruncated, StderrTruncated bool; ExitCode int; DurationMS int64; Error string}` | no | `Name ∈ AllowedCmds` |
 | `gate` | `GateData{Name string; Passed bool; Error *GateError}` | no | `Passed:false` requires `Error` |
 | `converge` | `ConvergeData{Atom string; Class Outcome; Stop bool; Reason string}` | no | |

@@ -160,8 +160,14 @@ this order: `parent_missing` (`ERR_RUN_NOT_FOUND`) | `parent_unreadable` (any ot
 ```go
 type Decision struct { Raw, Effective *bool }   // declared in machine; produced by kind.Decision
 func DiffRuns(a, b run.Log, decide func(kind string, verdict json.RawMessage) Decision) (Report, error)   // named DiffRuns: machine.Diff is the git-diff input type; the CLI passes kind.Decision
-type Report struct { A, B string; SameWorkflow bool /* WorkflowHash equal */; CommonPrefixSeq int64; Outcomes [2]run.Outcome; Calls []CallRow; Transitions []TransRow }
-type CallRow struct { Node string; Iter int; Kind, InputHash string; A, B *CallSide; RawSame, DecisionSame, ConfidenceSame, Same bool }
+type Report struct { A, B string; SameWorkflow bool /* WorkflowHash equal */; CommonPrefixSeq int64; Outcomes [2]run.Outcome; Calls []CallRow; Transitions []TransRow; EvidenceMismatch int }
+type CallRow struct { Node string; Iter int; Kind, InputHash string; A, B *CallSide; RawSame, DecisionSame, ConfidenceSame, EvidenceSame, Same bool }
+// CallSide carries Evidence (empty == excerpt). Rows are aligned by (node, iter, kind, input_hash)
+// plus an unexported per-side occurrence counter; there is NO row-level Index field — an earlier
+// draft declared one, it was never assigned, and it shipped as a constant 0 in every envelope.
+// EvidenceSame false forces Same false: equal verdicts from unequal evidence are not agreement,
+// and EvidenceMismatch counts those rows so a consumer cannot read the difference as a model
+// disagreement.
 type CallSide struct { Index int; Model, Effort string; Raw, Effective *bool; Confidence float64; Error string }
 type TransRow struct { SeqA, SeqB int64; To run.State; Gate string; Outcome run.Outcome; Same bool }
 ```
