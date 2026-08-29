@@ -18,7 +18,9 @@
   escalation still holds and the feature is not withdrawn, but a guardrail that can lose findings is
   worse than none, so it must now be asked for while those are repaired. `--no-escalate` is retired:
   it is rejected rather than ignored, so a driver still passing it fails loudly instead of believing
-  it had disabled something.
+  it had disabled something. This is a temporary demotion, not a withdrawal:
+  `docs/fsm/escalation-reenable.md` records the defect-by-defect bar for returning it to
+  default-on, each item requiring a failing test and a recorded mutation kill.
 
 ## 0.9.0 - 2026-08-27
 

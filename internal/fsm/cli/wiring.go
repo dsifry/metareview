@@ -184,7 +184,8 @@ func (c *ctxDeps) nonce() string {
 // contents are whitespace-trimmed so line numbers shift, and a git failure is reported as
 // "escalation unavailable", which records the finding as a hallucination. A guardrail that
 // silently converts real findings into hallucinations is worse than none, so it is opt-in until
-// those are fixed. Also off for mock and unaudited runs, whose verdicts are fixtures.
+// those are fixed. The intent is to return it to default-on; docs/fsm/escalation-reenable.md is
+// the checklist for that. Also off for mock and unaudited runs, whose verdicts are fixtures.
 func (c *ctxDeps) escalation(root string, scenario *mockai.Scenario, mode judgeMode) kind.EscalateFunc {
 	if !c.escalate || scenario != nil || mode != judgeReal {
 		return nil
