@@ -987,3 +987,40 @@ func TestStillPresentSelectsEachBugsOwnFile(t *testing.T) {
 		t.Errorf("bug 1 received another file's content:\n%.300s", rec.diffs[1])
 	}
 }
+
+// NeedsJudge is what the machine's pre-flight gates on, so an LLM-calling kind that reports
+// false is never validated: a bad model id or an unsupported effort reaches the run instead of
+// failing at init. The machine's own pre-flight tests build a fake registry, so nothing
+// exercised these assignments - setting stillPresentKind's NeedsJudge to false left the whole
+// of `go test ./...` green. Asserted here, where the real values are declared, and for every
+// kind at once so a new one cannot be added without deciding.
+func TestKindInfoDeclaresWhichKindsCallAJudge(t *testing.T) {
+	r := mustNew(t, &recordingJudge{}, false)
+	want := map[string]bool{
+		// The two kinds that call a judge in-process, both exec: fork.
+		MatchThenAdjudicate: true,
+		StillPresent:        true,
+		// Host-executed kinds carry no model of their own - review-lenses allows only inline and
+		// subagent, so the host agent does the work in its own session - and cmd runs a command.
+		// There is nothing for judge pre-flight to validate.
+		ReviewLenses: false,
+		AgentEdit:    false,
+		Cmd:          false,
+	}
+	info := r.Info()
+	for name, needs := range want {
+		got, ok := info[name]
+		if !ok {
+			t.Errorf("kind %q is not registered", name)
+			continue
+		}
+		if got.NeedsJudge != needs {
+			t.Errorf("kind %q: NeedsJudge = %v, want %v", name, got.NeedsJudge, needs)
+		}
+	}
+	for name := range info {
+		if _, covered := want[name]; !covered {
+			t.Errorf("kind %q is registered but this test does not say whether it calls a judge", name)
+		}
+	}
+}
