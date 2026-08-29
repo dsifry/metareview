@@ -375,3 +375,51 @@ func TestReadFindingsAcceptsAnExactlyMaxLengthLine(t *testing.T) {
 		t.Fatalf("got %d records %+v, want both", len(got), got)
 	}
 }
+
+// Grandfathering: a completed artifact review must be judged against the lens set that was
+// required when it ran, not the set required today. Three lenses were added after the earliest
+// reviews in this repository (security in 0.7.0, testing-quality and data-migration in 0.8.0);
+// without this, every historical artifact review turns into a permanent blocker the moment
+// somebody edits the file it reviewed, clearable only by a standing override.
+//
+// The grandfather is bounded, which is the point of the cutoff: a log written today cannot get
+// the easier legacy rubric by simply omitting the marker, because "no marker" only means "legacy"
+// for run IDs that predate the marker itself.
+func TestArtifactLensSetIsGrandfathered(t *testing.T) {
+	rows := func(names ...string) string {
+		out := "## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n"
+		for _, n := range names {
+			out += "| " + n + " | PASS | 0 | ok |\n"
+		}
+		return out
+	}
+	five := []string{"Feasibility", "Completeness", "Scope and alignment", "Architecture", "Intent preservation"}
+	eight := append(append([]string{}, five...), "Security", "Testing-quality", "Data-migration")
+	log := func(runID, declared, table string) string {
+		s := "# metareview: artifact review\n\nRun ID: `" + runID + "`\n\nTarget: `A.md`\n\n"
+		if declared != "" {
+			s += "Required lenses: `" + declared + "`\n\n"
+		}
+		return s + "## Verdict\n\nPASS\n\n" + table
+	}
+	all := "feasibility, completeness, scope-and-alignment, architecture, intent-preservation, security, testing-quality, data-migration"
+
+	for _, tc := range []struct {
+		name     string
+		text     string
+		blocking bool
+	}{
+		{"legacy log, five lenses, no marker", log("mrv-20260705-1-artifact-a-1", "", rows(five...)), false},
+		{"legacy log missing an original lens still blocks", log("mrv-20260705-1-artifact-a-1", "", rows(five[:4]...)), true},
+		{"post-cutoff log with only five lenses blocks", log("mrv-20260829-1-artifact-a-1", "", rows(five...)), true},
+		{"post-cutoff log with eight lenses passes", log("mrv-20260829-1-artifact-a-1", all, rows(eight...)), false},
+		{"declared set is what counts, not the cutoff", log("mrv-20260705-1-artifact-a-1", all, rows(five...)), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseMarkdown("docs/metareview/reviews/x.md", tc.text).HasUnresolvedBlockers
+			if got != tc.blocking {
+				t.Errorf("HasUnresolvedBlockers = %v, want %v", got, tc.blocking)
+			}
+		})
+	}
+}

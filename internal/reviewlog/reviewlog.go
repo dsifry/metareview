@@ -103,6 +103,7 @@ func ForTarget(root, target string) ([]Summary, error) {
 
 func parseMarkdown(rel, text string) Summary {
 	summary := Summary{Path: rel}
+	var declaredLenses []string
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		switch {
@@ -116,6 +117,8 @@ func parseMarkdown(rel, text string) Summary {
 			summary.PreviousRunID = previousRunID(firstInlineCode(line))
 		case strings.HasPrefix(line, "Context pack:"):
 			summary.ContextRel = firstInlineCode(line)
+		case strings.HasPrefix(line, "Required lenses:"):
+			declaredLenses = splitLenses(firstInlineCode(line))
 		case strings.TrimSpace(line) == "## Verdict":
 			summary.Verdict = nextNonEmpty(lines, i+1)
 		}
@@ -126,7 +129,7 @@ func parseMarkdown(rel, text string) Summary {
 	if verdictIsUnresolved(summary.Verdict) {
 		summary.HasUnresolvedBlockers = true
 	}
-	if summary.Kind == "artifact" && !artifactReviewComplete(lines) {
+	if summary.Kind == "artifact" && !artifactReviewComplete(lines, declaredLenses, summary.RunID) {
 		summary.HasUnresolvedBlockers = true
 	}
 	return summary
@@ -165,16 +168,67 @@ func verdictIsUnresolved(verdict string) bool {
 	}
 }
 
-func artifactReviewComplete(lines []string) bool {
-	required := map[string]bool{
-		"feasibility":        false,
-		"completeness":       false,
-		"scopeandalignment":  false,
-		"architecture":       false,
-		"intentpreservation": false,
-		"security":           false,
-		"testingquality":     false,
-		"datamigration":      false,
+// currentLenses is the set an artifact review must cover today. legacyLenses is the set that was
+// required before security (0.7.0) and testing-quality / data-migration (0.8.0) were added.
+var currentLenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation", "security", "testingquality", "datamigration"}
+var legacyLenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation"}
+
+// lensEraCutoff is the date the eight-lens rule landed: security (0.7.0) and testing-quality /
+// data-migration (0.8.0) both shipped on 2026-08-24. A log from before it predates those lenses
+// and is judged against the five that were required then; a log from that day onward is judged
+// against the full current set whether or not it declares one, so the legacy rubric cannot be
+// obtained by leaving the marker out.
+const lensEraCutoff = "20260824"
+
+// requiredLenses answers which lenses this particular log had to cover.
+//
+// A completed review is evidence about the artifact as the rubric stood when it ran. Judging an
+// old log against lenses invented afterwards marks work incomplete that was complete, and since
+// an artifact log only reaches a gate once someone edits the file it reviewed, the result is a
+// blocker that can never be resolved by fixing anything - only by a standing override. So the log
+// declares its own set, and one written before the marker existed falls back to the set of its era.
+func requiredLenses(declared []string, runID string) []string {
+	if len(declared) > 0 {
+		return declared
+	}
+	if date := runDate(runID); date != "" && date < lensEraCutoff {
+		return legacyLenses
+	}
+	return currentLenses
+}
+
+// runDate extracts the YYYYMMDD segment of a run ID (mrv-20260705-...), or "" when there is none.
+// A log whose age cannot be established is judged against the current set, not the legacy one:
+// the grandfather is an allowance for provenance we can verify, and treating unknown provenance as
+// old would let any log claim it by carrying a malformed ID.
+func runDate(runID string) string {
+	parts := strings.Split(runID, "-")
+	if len(parts) < 2 || len(parts[1]) < 8 {
+		return ""
+	}
+	date := parts[1][:8]
+	for _, r := range date {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return date
+}
+
+func splitLenses(value string) []string {
+	var out []string
+	for _, part := range strings.Split(value, ",") {
+		if name := normalizedReviewer(part); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func artifactReviewComplete(lines []string, declared []string, runID string) bool {
+	required := map[string]bool{}
+	for _, name := range requiredLenses(declared, runID) {
+		required[name] = false
 	}
 	for _, line := range lines {
 		columns := markdownTableColumns(line)

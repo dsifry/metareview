@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dsifry/metareview/internal/contextpack"
@@ -128,6 +129,11 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
 		"Context pack: " + markdown.InlineCode(ctx.ContextRel) + "\n\n" +
 		"Execution mode: `pending-parallel-subagents`\n\n" +
 		"Previous run: " + markdown.InlineCode(prevDisplay) + "\n\n" +
+		// The lens set is recorded in the log itself so a completed review stays judged against the
+		// rubric that was required when it ran. Without it, adding a lens retroactively marks every
+		// earlier review incomplete, and reviewlog.requiredLenses has nothing to fall back on but
+		// the era default. See internal/reviewlog.
+		"Required lenses: " + markdown.InlineCode(strings.Join(record.Reviewers, ", ")) + "\n\n" +
 		"## Verdict\n\nNOT_REVIEWED\n\n" +
 		"## Completion Requirements\n\nThis scaffold is not a completed review. Artifact review defaults to parallel subagents for the eight required lenses. The artifact-review workflow is explicit authorization to delegate those lenses. Only use `in-session-emulated` when subagents are unavailable or the human explicitly requested no delegation; if used, state that the review is not independently adversarial and treat it as weaker evidence. Completion requires every required reviewer row to be populated, each reviewer to have a verdict, blocking findings to be fixed and re-reviewed or explicitly human-accepted, and the aggregate verdict to be the actual artifact-review verdict returned by the reviewer set rather than a fixed example result.\n\n" +
 		"## Reviewer Prompts\n\nUse `rubrics/artifact-review-rubric.md` and the context pack above. Run these lenses as parallel subagents by default before aggregation:\n\n" +
