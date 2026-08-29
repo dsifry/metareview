@@ -184,26 +184,35 @@ func TestEscalationForSurfacesJudgeConstructionFailure(t *testing.T) {
 	}
 }
 
-// The provider has to actually reach the registry. Building the whole feature and never
-// connecting it is the failure this pins: every other escalation test would still pass.
-func TestEscalationIsWiredOnByDefault(t *testing.T) {
+// Escalation is OFF unless asked for. It shipped default-on and a nine-reviewer pass found it
+// inert and harmful: the escalated judge received the identical prompt (nothing tells it the
+// sandbox exists), the materialized evidence was whitespace-trimmed so line numbers shifted, a
+// git failure returned (nil, nil) which the caller read as "no escalation available" and
+// recorded the finding as a hallucination, and a duplicate destination hit the tree's own 0444
+// mode and killed escalation for the whole run via the cached sync.Once. Until those are fixed
+// a feature that silently converts real findings into hallucinations is worse than none.
+func TestEscalationIsOffUnlessRequested(t *testing.T) {
 	h, c, _, _ := escalationHarness(t)
-	if c.escalation(h.root, nil, judgeReal) == nil {
-		t.Error("escalation must be ON by default for a real judged run")
+	if c.escalation(h.root, nil, judgeReal) != nil {
+		t.Error("escalation must be OFF by default")
 	}
-	t.Run("--no-escalate turns it off", func(t *testing.T) {
-		c.noEscalate = true
-		defer func() { c.noEscalate = false }()
-		if c.escalation(h.root, nil, judgeReal) != nil {
-			t.Error("--no-escalate must disable it")
+	t.Run("--escalate turns it on", func(t *testing.T) {
+		c.escalate = true
+		defer func() { c.escalate = false }()
+		if c.escalation(h.root, nil, judgeReal) == nil {
+			t.Error("--escalate must enable it")
 		}
 	})
 	t.Run("mock runs never escalate", func(t *testing.T) {
+		c.escalate = true
+		defer func() { c.escalate = false }()
 		if c.escalation(h.root, &mockai.Scenario{}, judgeReal) != nil {
 			t.Error("a mock run's verdicts are fixtures; a second opinion is meaningless")
 		}
 	})
 	t.Run("unjudged runs never escalate", func(t *testing.T) {
+		c.escalate = true
+		defer func() { c.escalate = false }()
 		for _, m := range []judgeMode{judgeNone} {
 			if c.escalation(h.root, nil, m) != nil {
 				t.Errorf("mode %v must not escalate", m)
@@ -247,5 +256,29 @@ func TestReferencedByFindingsSkipsAlreadyChangedPaths(t *testing.T) {
 	got := c.referencedByFindings(snap, []string{"f.go", "notes.md"})
 	if len(got) != 0 {
 		t.Errorf("got %v, want none: both paths are already in the changed set", got)
+	}
+}
+
+// The flag has to survive a mutation to boolFlags and to the wiring line in run: a knob that
+// nothing pins is a knob that can be deleted silently, which is the defect class this whole
+// change is responding to. It also pins that the retired --no-escalate is not quietly accepted,
+// since a driver that keeps passing it would otherwise believe it had disabled something.
+func TestEscalateFlagIsPinned(t *testing.T) {
+	p, err := parseArgs([]string{"state", "--escalate"})
+	if err != nil {
+		t.Fatalf("--escalate must parse as a bool flag: %v", err)
+	}
+	if !p.bools["escalate"] {
+		t.Error("--escalate must set bools[escalate]")
+	}
+	if p2, err := parseArgs([]string{"state"}); err != nil || p2.bools["escalate"] {
+		t.Errorf("escalate must default false, got %v (%v)", p2.bools["escalate"], err)
+	}
+	if _, err := parseArgs([]string{"state", "--no-escalate"}); err == nil {
+		t.Error("--no-escalate was retired; accepting it would let a driver think it disabled escalation")
+	}
+	// The agent contract has to name the knob it now requires.
+	if !strings.Contains(AgentPrompt, "--escalate") || strings.Contains(AgentPrompt, "--no-escalate") {
+		t.Error("the agent prompt must document --escalate and must not still document --no-escalate")
 	}
 }

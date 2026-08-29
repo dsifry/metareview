@@ -14,9 +14,10 @@ import (
 // escalationFor builds the second opinion a rejected cross-file candidate gets: the same judge
 // the run declared, confined to a materialized tree of the changed files at base and head.
 //
-// It is on by default. Unattended, a false reject is the dangerous direction - it drops a real
-// finding and nothing says so - while a false confirm only costs a human a look. --no-escalate
-// turns it off.
+// It is off unless --escalate. Unattended, a false reject is the dangerous direction - it drops
+// a real finding and nothing says so - while a false confirm only costs a human a look, which is
+// why it exists. It is opt-in rather than default because the implementation has known defects
+// that make it drop findings; see escalation in wiring.go.
 //
 // It returns (nil, nil), meaning "escalation unavailable, the rejection stands", when the run's
 // judge is not agentic. An HTTP judge cannot read a tree, so escalating to it would re-ask the

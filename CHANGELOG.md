@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Escalation is now opt-in (`--escalate`); it was on by default in 0.9.0.** A nine-reviewer pass
+  over 0.9.0's own additions found the feature both inert and harmful. The escalated judge is handed
+  the *identical* prompt as the first pass — nothing tells it a materialized tree exists, so the
+  second opinion re-asks the same question of the same model on the same evidence. The tree it is
+  offered is corrupt: file bodies are fetched through a helper that trims surrounding whitespace, so
+  every line number below a trimmed leading blank shifts. And a `git` failure while collecting the
+  changed paths is returned as "escalation unavailable", which the caller records as a
+  `hallucination` — silently converting a real finding into a rejected one, the exact failure the
+  feature was built to prevent. Two further defects make it unreliable at run scope: a duplicate
+  destination path hits the tree's own `0o444` mode and, through the cached `sync.Once`, disables
+  escalation for the rest of the run; and the trees are never removed. The asymmetry that motivates
+  escalation still holds and the feature is not withdrawn, but a guardrail that can lose findings is
+  worse than none, so it must now be asked for while those are repaired. `--no-escalate` is retired:
+  it is rejected rather than ignored, so a driver still passing it fails loudly instead of believing
+  it had disabled something.
+
 ## 0.9.0 - 2026-08-27
 
 0.9.0 adds **FSM workflow runs**: `metareview fsm` drives `sdlc-loop` (discover → adjudicate → fix → verify) and

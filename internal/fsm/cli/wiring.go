@@ -45,8 +45,9 @@ type ctxDeps struct {
 	ctx  context.Context
 	deps Deps
 	cwd  string
-	// noEscalate turns off the sandbox second opinion for rejected cross-file candidates.
-	noEscalate bool
+	// escalate opts in to the sandbox second opinion for rejected cross-file candidates.
+	// It is off by default; see escalation for why.
+	escalate bool
 }
 
 // rootOf resolves the main worktree of cwd (spec 5 §2): the first `worktree` line of `git worktree list --porcelain`;
@@ -176,11 +177,16 @@ func (c *ctxDeps) nonce() string {
 
 // escalation returns the second-opinion provider for this run, or nil to disable it.
 //
-// On by default: unattended, a false reject drops a real finding and nothing says so, while a
-// false confirm only costs a human a look. Off for --no-escalate, and off for mock and
-// unaudited runs, whose verdicts are fixtures rather than judgments.
+// Off unless --escalate. The asymmetry that motivates it is real - unattended, a false reject
+// drops a real finding and nothing says so, while a false confirm only costs a human a look -
+// but the implementation shipped default-on and a review found it both inert and harmful: the
+// escalated judge is handed the identical prompt (nothing tells it a tree exists), the tree's
+// contents are whitespace-trimmed so line numbers shift, and a git failure is reported as
+// "escalation unavailable", which records the finding as a hallucination. A guardrail that
+// silently converts real findings into hallucinations is worse than none, so it is opt-in until
+// those are fixed. Also off for mock and unaudited runs, whose verdicts are fixtures.
 func (c *ctxDeps) escalation(root string, scenario *mockai.Scenario, mode judgeMode) kind.EscalateFunc {
-	if c.noEscalate || scenario != nil || mode != judgeReal {
+	if !c.escalate || scenario != nil || mode != judgeReal {
 		return nil
 	}
 	return c.escalationFor(root)

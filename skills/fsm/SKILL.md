@@ -36,13 +36,14 @@ metareview fsm advance --run <id>        # repeat until DONE / STOPPED / GATE_FA
 | 2 | usage, or a refusal before anything was recorded: fix the input and retry — unless the code is a consent (`ERR_CMDS_NOT_ALLOWED`) or escalation (`ERR_RUN_ESCALATED`) code, which waits for a human |
 | 1 | `DONE(reviewed)`, `STOPPED`, `GATE_FAILED` (run the `resume_hint` command — it forks a child; use the returned `run_id`), a gate that did not pass, or an `ERR_*` raised after the run was mutated (`ERR_AUDIT_TORN` → `advance --repair`) |
 
-**Escalation (on by default).** A candidate the judge rejected that names another changed file is
+**Escalation (off by default; `--escalate` opts in).** A candidate the judge rejected that names another changed file is
 asked again, with the changed files materialized at base and head in a directory outside the
 repository, so a `codex/` judge can read both sides of the claim. That verdict is recorded with
 `evidence=sandbox` and its own tree hash, and `fsm diff` never calls a cross-evidence row `same`.
-`--no-escalate` turns it off. It is on because unattended a false reject is silent - the finding
-is simply gone - while a false confirm only costs a human a look. Roughly 2x the judge tokens on a
-run where a fifth of the rejections are cross-file. A candidate whose file is not in the diff is
+The asymmetry argues for it - unattended a false reject is silent, the finding is simply gone,
+while a false confirm only costs a human a look - but it is opt-in because the implementation has
+known defects that drop findings, so it is not yet a guardrail you should rely on. Roughly 2x the
+judge tokens on a run where a fifth of the rejections are cross-file. A candidate whose file is not in the diff is
 never judged: it is kept as `unverified_no_evidence`.
 
 `DONE(reviewed)`: the confirmed list is `snapshot.json` in `fsm export --run <id>`. `STOPPED`/`DONE` are terminal.
