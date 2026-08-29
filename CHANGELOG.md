@@ -1,9 +1,50 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 - 2026-08-29
+
+0.10.0 is a repair release. A nine-reviewer sharded review of 0.9.0's own additions returned **72
+open findings — 12 high, 29 medium, 31 low**, and all 72 are fixed here. Every fix was written
+test-first with the mutation independently re-run in an isolated copy: 31 mutations, each
+reddening the test named beside it.
+
+Nine of the twelve highs were in the escalation feature, which shipped **on by default** in 0.9.0
+and was both inert and silently dropping findings. Two of the remaining highs were not
+escalation-specific and affected every review.
 
 ### Fixed
 
+- **`diff.noprefix=true` silently emptied the evidence of every review.** An ordinary, documented
+  gitconfig setting survived `--no-ext-diff` and `--no-textconv` and turned each header into
+  `diff --git f.go f.go`. Every consumer finds the post-image path by its `b/` prefix, so
+  `ChangedPaths` returned empty, `DiffHasFile` was false for every file, and each candidate was
+  judged with no evidence at all. `hardenDiff` now pins `--src-prefix=a/` and `--dst-prefix=b/`.
+- **`metareview learn --post-merge` aborted on any real Claude Code transcript.** `internal/jsonl`
+  exists because bufio's 64 KiB default silently truncates real data, and its doc claimed to cover
+  "every reader" while covering five of nine. Session-history discovery was one of the four it
+  missed, and it propagated `bufio.Scanner: token too long` up to a command that fails outright.
+  All readers now use the shared scanner, and a test fails if a bare one reappears anywhere in
+  `internal/`.
+- **Escalation's evidence is now the code it claims to be.** Materialized files were fetched
+  through a helper that trims surrounding whitespace — written for SHAs and ref names — so every
+  file lost its trailing newline and any leading blank lines, shifting every line number below
+  them while the judge was pointed at a line taken from the diff's own numbering.
+- **A failure no longer reads as a verdict.** `gate.RealExec` reports git failures as `(code, nil)`,
+  so a nonzero exit returned `(nil, nil)`, which the caller read as "escalation deliberately
+  unavailable" and recorded as a `hallucination` — deleting a real finding through an outage. A
+  nonzero `git show` was also indistinguishable from "absent at that revision", so an unreadable
+  object produced an empty tree carrying a well-formed `TreeHash`.
+- **One duplicated path no longer disables escalation for a whole run.** `changedPaths` yields
+  `internal/x.go` while judge prose yields `./internal/x.go`: two keys, one destination. The second
+  write hit the tree's own `0o444` mode, and the cached `sync.Once` turned that into every
+  cross-file rejection in the run becoming `checked_but_unverified`.
+- **The escalated judge is told the tree exists.** It previously received the identical prompt as
+  the first pass — same model, same effort, same excerpt — differing only in the subprocess working
+  directory, so the "second opinion" re-asked the first one.
+- **Evidence trees are deleted.** One machine accumulated 1015 of them, 37MB, in a day.
+- **The containment claim is gone from all four places that made it.** A judge given a working
+  directory is not confined to it, and codex's `--sandbox read-only` bounds writes and network, not
+  reads. `TreeHash` addresses what the judge was *offered*, not the limit of what it could reach.
+- **An artifact review is judged against the lens set of its own era.**
 - **An artifact review is judged against the lens set of its own era.** `artifactReviewComplete`
   required all eight lenses of every log it read, but security arrived in 0.7.0 and
   testing-quality and data-migration in 0.8.0 (both 2026-08-24), so any review completed earlier
@@ -11,9 +52,20 @@
   Because an artifact log only reaches a gate once its reviewed file is edited, that blocker
   appeared the moment you touched the file and could not be cleared by fixing anything — only by a
   standing override. Twenty-five of twenty-nine artifact logs in this repository carried the flag.
-  A log now records the lens set it was written under and is judged against it; a log without the
-  marker is judged by its run date, and one whose date cannot be parsed is judged against the
-  current set rather than the legacy one.
+  A log now records the lens set it was written under and is judged against a date-keyed era table:
+  adding a lens appends an era rather than making every completed review incomplete. A declaration
+  may only strengthen what a log is held to, never reduce it, and one whose date cannot be parsed
+  is judged against the current set.
+- **Guards that could not fail.** A recurring class, repaired across the release: the artifact lens
+  assertion (which matched prose elsewhere on the page), the status report's `must_clear` and its
+  empty-array wire contract, `TreeHash` as a content address, the audit store's admission check,
+  `KindInfo.NeedsJudge`, the severity policy's medium case, the `--escalate` flag's own wiring, the
+  `--no-textconv` half of the diff hardening, and the fsm gate itself — which reused a stale
+  `bin/metareview` and could certify a binary older than the tree.
+- **Smaller correctness fixes:** a hunk consisting only of its `@@` header was emitted twice;
+  path predicates compared raw strings, so `./internal/x.go` was judged to have no evidence for a
+  file the diff plainly carried; the context handed to `EscalateFunc` governed none of the ~1,000
+  git subprocesses it starts; and NUL-delimited path output was read through a trimming helper.
 
 ### Changed
 
@@ -33,7 +85,26 @@
   it is rejected rather than ignored, so a driver still passing it fails loudly instead of believing
   it had disabled something. This is a temporary demotion, not a withdrawal:
   `docs/fsm/escalation-reenable.md` records the defect-by-defect bar for returning it to
-  default-on, each item requiring a failing test and a recorded mutation kill.
+  default-on, each item requiring a failing test and a recorded mutation kill. All nine of those
+  gates are closed in this release; two items remain before the default flips back — persisting
+  `--escalate` across a resumed `advance --run`, and a run on a real branch where escalation
+  changes a verdict for a reason a human agrees with.
+- **`status --json` is documented.** It shipped in 0.9.0 as "the contract a host hook branches on"
+  and was absent from `--help`, `commands/status.md` and the status skill.
+
+### Known limits
+
+Three defects are recorded rather than fixed, in `docs/0.10.0-candidates.md`, because fixing them
+properly needs a decision this release should not make quietly:
+
+- `DiffTruncated` — the only signal telling a judge it is not seeing the whole story — rests on a
+  length comparison that is unsound in both directions. A claim carried in FULL can produce more
+  bytes than the diff it came from, because each selection re-emits its file header. Correcting it
+  needs `SelectDiff`'s budget contract settled first: a smaller budget can return more bytes.
+- Validation receipts do not bind to a source revision, so a receipt proves a command succeeded
+  *somewhere*, not that it succeeded on the code under review, and no gate compares the two.
+- Sharded review results are written only as committed JSON and never enter the findings store, so
+  no gate can surface them and nothing notices if they are silently dropped.
 
 ## 0.9.0 - 2026-08-27
 
