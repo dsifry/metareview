@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed
+
+- **An artifact review is judged against the lens set of its own era.** `artifactReviewComplete`
+  required all eight lenses of every log it read, but security arrived in 0.7.0 and
+  testing-quality and data-migration in 0.8.0 (both 2026-08-24), so any review completed earlier
+  was reported as having unresolved blockers while carrying a PASS verdict and zero findings.
+  Because an artifact log only reaches a gate once its reviewed file is edited, that blocker
+  appeared the moment you touched the file and could not be cleared by fixing anything — only by a
+  standing override. Twenty-five of twenty-nine artifact logs in this repository carried the flag.
+  A log now records the lens set it was written under and is judged against it; a log without the
+  marker is judged by its run date, and one whose date cannot be parsed is judged against the
+  current set rather than the legacy one.
+
 ### Changed
 
 - **Escalation is now opt-in (`--escalate`); it was on by default in 0.9.0.** A nine-reviewer pass
