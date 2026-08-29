@@ -396,8 +396,12 @@ func TestParseCodexEventsClampsInconsistentUsage(t *testing.T) {
 	if tok.CacheRead != 99 || tok.Reasoning != 50 {
 		t.Errorf("subset counters not preserved: %+v", tok)
 	}
-	if tok.Total() < 0 {
-		t.Errorf("Total() = %d, must never be negative", tok.Total())
+	// Total() = Input + CacheRead + CacheCreate + Output + Reasoning, so the subset counters add
+	// back exactly what an unclamped Input/Output subtracted: it can never be negative and
+	// "Total() < 0" was an assertion with no failing case. Asserting the VALUE does discriminate -
+	// clamped it is 0+99+0+0+50 = 149, unclamped it would be -89+99+0-47+50 = 13.
+	if got := tok.Total(); got != 149 {
+		t.Errorf("Total() = %d, want 149 (unclamped would be 13)", got)
 	}
 }
 

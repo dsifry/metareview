@@ -1,7 +1,6 @@
 package evidence
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -9,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/dsifry/metareview/internal/jsonl"
 )
 
 type Kind string
@@ -74,7 +75,7 @@ func Parse(data []byte) (Bundle, error) {
 }
 
 func ParseWithOptions(data []byte, options ParseOptions) (Bundle, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner := jsonl.NewScanner(bytes.NewReader(data))
 	var receipts []Receipt
 	receiptLines := 0
 	for scanner.Scan() {
