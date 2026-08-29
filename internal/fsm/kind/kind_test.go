@@ -815,7 +815,7 @@ func runEscalation(t *testing.T, primary, esc judge.Judge) adjudicateOut {
 	t.Helper()
 	var e EscalateFunc
 	if esc != nil {
-		e = func(context.Context, run.Snapshot) (*Escalation, error) {
+		e = func(context.Context, run.Snapshot, *workflow.Node) (*Escalation, error) {
 			return &Escalation{Judge: esc, Model: "codex/x", Effort: "medium", Evidence: run.EvidenceSandbox}, nil
 		}
 	}

@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1a-2432d6462098086c-claude-opus-5",
+  "kind": "shard",
+  "shardId": "shard-1a",
+  "shardHash": "2432d6462098086c",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:23:37Z",
+  "blockingCount": 4,
+  "evidence": [
+    {
+      "path": "internal/fsm/record/record_test.go",
+      "line": 225,
+      "note": "comment claims the planted row differs by head; both rows carry the same head constant"
+    },
+    {
+      "path": "internal/fsm/record/record_test.go",
+      "line": 157,
+      "note": "legacy row is built with headSha = the same `head` const that view() puts in Snapshot.Head"
+    },
+    {
+      "path": "internal/fsm/record/record.go",
+      "line": 208,
+      "note": "the two-disjunct conflict test whose head half is never exercised"
+    },
+    {
+      "path": "internal/fsm/record/record_test.go",
+      "line": 298,
+      "note": "if nowNanos() == 0 { t.Fatal } — time.Now().UnixNano() can never be 0"
+    },
+    {
+      "path": "internal/fsm/record/record_test.go",
+      "line": 160,
+      "note": "nanos is replaced with a constant stub and never restored, so the real clock is otherwise unreached"
+    },
+    {
+      "path": "internal/fsm/record/clock.go",
+      "line": 5,
+      "note": "the single statement the vacuous assertion exists to cover"
+    },
+    {
+      "path": "internal/fsm/kind/kind_test.go",
+      "line": 228,
+      "note": "20000-element fatSt slice built and then discarded with _ = fatSt"
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 571,
+      "note": "comment asserts MaxDeltaList statuses of MaxShort ids always fit the payload"
+    },
+    {
+      "path": "internal/fsm/record/record_test.go",
+      "line": 310,
+      "note": "TestRunsJSONLSurvivesInterleavedWriters exercises only the clean-append path"
+    },
+    {
+      "path": "internal/fsm/record/record.go",
+      "line": 225,
+      "note": "f.Truncate(t.offset) on the torn-tail path, computed from an unsynchronised os.ReadFile"
+    },
+    {
+      "path": "internal/fsm/kind/kind_test.go",
+      "line": 203,
+      "note": "comment states the 63/64 payload cliff; the positive case tests 60"
+    },
+    {
+      "path": "internal/fsm/kind/kind_test.go",
+      "line": 540,
+      "note": "comment states 256 ok, 257 refused; only 257 and 1 are executed"
+    },
+    {
+      "path": "internal/fsm/kind/kind_test.go",
+      "line": 148,
+      "note": "failure message says every kind; three of five are checked and one checks the opposite property"
+    },
+    {
+      "path": "internal/fsm/record/record_test.go",
+      "line": 45,
+      "note": "assertKeys comment claims an exact key set; it only checks presence of a listed subset"
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.jsonl",
+      "line": 1,
+      "note": "verified independently: shasum -a 256 over each line reproduces both the next line's prev and every entry of oracle.sha256, so the fixture is a genuine external oracle"
+    },
+    {
+      "note": "go test ./internal/fsm/kind/... ./internal/fsm/record/... ./internal/fsm/run/... -count=1 passes; both packages report 100.0% statement coverage; TestRunsJSONLSurvivesInterleavedWriters survives -race -count=400 and -shuffle=on"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The only test of the id_conflict branch does not test what its comment says, and the branch half it names is never exercised anywhere in the repository. record.go:208 refuses a re-append when `r.HeadSHA != row.HeadSHA || r.WorkflowHash != row.WorkflowHash`. record_test.go:225 comments the case as 'a planted row with the id but a different head', but `planted` is derived from `legacy` (record_test.go:157) by replacing only the id, and `legacy` sets `\"headSha\":\"` + head + `\"` — the same package constant that `view()` (record_test.go:31) puts in Snapshot.Head and that RowFor copies to Row.HeadSHA. The two heads are byte-identical; the error is raised solely by the second disjunct, because `legacy` has no workflowHash key (decodes to \"\") while the view's row carries \"wh\". grep for id_conflict across internal/ and cmd/ returns only record.go:209 and this one assertion, so a regression that dropped `r.HeadSHA != row.HeadSHA` from the condition — silently accepting a same-id row recorded against a different head, exactly the corruption this guard exists to catch — would leave every test green at 100% statement coverage. Split the case in two: one planted row differing only in headSha, one differing only in workflowHash, and correct the comment.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record_test.go",
+          "line": 225,
+          "note": "comment names the head; the fixture varies the workflow hash"
+        },
+        {
+          "path": "internal/fsm/record/record_test.go",
+          "line": 157,
+          "note": "legacy carries headSha == head, identical to the view under test"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 208,
+          "note": "head disjunct untested; only the workflowHash disjunct fires"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "record_test.go:298 is an assertion that cannot fail. `nowNanos()` is `time.Now().UnixNano()` (clock.go:5); it is 0 only at the Unix epoch, so `if nowNanos() == 0 { t.Fatal(\"clock\") }` can never report anything. It is not incidental: `nanos` (record.go:243) is the only production reference to nowNanos, it is a package var initialised at load time rather than by executing the body, and record_test.go:160 replaces it with `func() int64 { return 42 }` and never restores it. Under the file's declaration order the stub is installed before TestWriteErrors runs, so the real clock is never invoked by any production path in the suite and this line is the sole reason clock.go appears in the package's reported 100.0% coverage. The repository gates on 100% coverage, so a vacuous call standing in for a test converts that gate into a statement it cannot enforce. Two problems to fix together: assert something real about the clock (or drop clock.go's indirection), and restore `nanos` with a defer the way `flock` is restored at record_test.go:283-288 — leaving a package-level seam stubbed for the remainder of the run makes coverage of the real function order-dependent under -shuffle.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record_test.go",
+          "line": 298,
+          "note": "nowNanos() == 0 is unreachable"
+        },
+        {
+          "path": "internal/fsm/record/record_test.go",
+          "line": 160,
+          "note": "nanos stubbed to 42 and never restored, unlike flock at :283"
+        },
+        {
+          "path": "internal/fsm/record/clock.go",
+          "line": 5,
+          "note": "time.Now().UnixNano(), the statement the vacuous call covers"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Dead test scaffolding in TestK1Decode, and the property it was written to check is false. kind_test.go:228-232 builds a 20000-element []run.BugStatus and discards it with `_ = fatSt`; every sibling block in the same function (fat257 at :217, fatAdj at :223, fatBugs at :293) ends in a `bad(...)` assertion, so this is an abandoned still-present payload-cap case, not a deliberate omission — it costs 20000 allocations per run and asserts nothing. The gap it leaves is real: stillPresentKind.Decode (kind.go:563-572) is the one Decode with no checkPayload call, justified by the comment at kind.go:571 that '≤ MaxDeltaList statuses of ≤ MaxShort ids always fit the payload'. That does not hold. checkStatus admits ids up to MaxShort = 1024 canonical bytes (kind.go:189), and a BugStatus with a 1022-byte id encodes to about 1068 bytes; 256 of them is roughly 273 KB against the 262016-byte budget (MaxPayload - envelopeMargin, kind.go:43,201). The margin only survives today because ids reaching AllFound are 12-hex BugIDs (canonical.go:103) or come through cmdKind.Decode, which does bound the whole delta — an incidental property, not the one the comment states. Either finish the case (assert the cap, which will fail) or add checkPayload to stillPresentKind.Decode and correct kind.go:571; do not leave a 20000-iteration loop feeding `_`.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/kind_test.go",
+          "line": 228,
+          "note": "fatSt built over 20000 iterations, then discarded"
+        },
+        {
+          "path": "internal/fsm/kind/kind_test.go",
+          "line": 232,
+          "note": "_ = fatSt — no assertion, unlike every neighbouring block"
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 571,
+          "note": "'always fit the payload' — 256 x 1022-byte ids is ~273 KB against a 262016-byte cap"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestRunsJSONLSurvivesInterleavedWriters (record_test.go:310) claims more than the code delivers. Its 12-line header explains the O_APPEND fix and the test drives 40 concurrent writers, 20 through appendRow and 20 through state.AppendJSONL, then asserts all 40 rows survive and parse — but every one of those writes takes the clean-append path. The path that is still unsafe against the unlocked second writer is untested: when readRows reports a torn tail, appendRow runs `f.Truncate(t.offset)` (record.go:225) with an offset computed by a separate, unsynchronised `os.ReadFile` (record.go:132). state.AppendJSONL (state/state.go:32-49) takes no flock, so a row it appends between that ReadFile and the Truncate lands past t.offset and is deleted — the same class of silent row loss the commit set out to remove, in the one branch that still rewinds the file. I confirmed the added test is not itself flaky (`-race -count=400` and `-shuffle=on` both pass), which is precisely why the name reads as a general guarantee: nothing in the suite plants a torn fragment while a concurrent writer is running. Either narrow the name and comment to the append path, or seed a torn tail in the concurrent case and make Truncate safe under it (re-read under the lock through the same fd, or repair without shortening the file).",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record_test.go",
+          "line": 310,
+          "note": "40 concurrent writers, all on the clean-append path"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 225,
+          "note": "f.Truncate(t.offset) can discard a row appended after readRows sampled the file"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 132,
+          "note": "readRows uses an independent os.ReadFile, not the locked fd"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two comments in kind_test.go state exact boundaries that the assertions beside them do not pin. kind_test.go:203 says 'canonical payload cap: 63 x MaxText fits, 64 does not'; the negative case uses 64, but the positive case is `fat[:60]`. The claim is arithmetically true (a Finding carrying a 4094-byte issue_text encodes to 4111 bytes, so 63 of them plus the 15-byte findings wrapper and 62 commas is 259070 against the 262016-byte budget, and 64 is 263182), which makes the untested three-element gap the whole problem: roughly 12 KB of the cap could be lost to a regression and only the comment would notice. kind_test.go:540 has the same shape — '256 ok, 257 refused before any call' — where only 257 (refused) and 1 are executed, so the accepting side of `len(AllFound) > run.MaxDeltaList` (kind.go:584) is never demonstrated at the boundary. Move both positive cases onto the stated cliff.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/kind_test.go",
+          "line": 203,
+          "note": "comment says 63 fits; ok() is given 60"
+        },
+        {
+          "path": "internal/fsm/kind/kind_test.go",
+          "line": 540,
+          "note": "comment says 256 ok; 256 is never executed"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "kind_test.go:147-149 fails with 'unknown params refused on every kind' but does not check every kind, and one third of the condition checks the opposite property. The three clauses are: reviewLenses rejects {\"zzz\"}, agentEdit rejects {\"modle\"}, and cmd *accepts* an empty map. MatchThenAdjudicate and StillPresent — the two remaining entries of the `want` table three lines above — are never passed an unknown param, so the message overstates coverage even though all four kinds share noParams (kind.go:325). Reword to what is asserted, or loop the rejection over all five names from the same table the test already builds.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/kind_test.go",
+          "line": 148,
+          "note": "'every kind' — three of five, and the cmd clause asserts acceptance"
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 325,
+          "note": "noParams, shared by the two kinds the assertion skips"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "record_test.go:45 comments assertKeys as pinning the section-6 key set — 'DisallowUnknownFields rejects extras and the presence check rejects omissions' — but the function pins neither direction against schema drift. DisallowUnknownFields rejects keys absent from the Row struct, not keys absent from `exactKeys`, and the loop only asserts that each listed key is present; a field added to Row (record.go:26-50) would be emitted, decode cleanly, and pass both halves without appearing in exactKeys. The exact key set is in fact held by the golden string comparison at record_test.go:74-78, which assertKeys then re-checks more weakly. Either compare len(m) against len(exactKeys)+the previousRunId flag, or say that assertKeys checks the required keys are present and let the golden own exactness.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/record_test.go",
+          "line": 45,
+          "note": "claims an exact key set; only presence of a listed subset is checked"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 26,
+          "note": "adding a Row field would silently satisfy assertKeys"
+        }
+      ]
+    }
+  ]
+}

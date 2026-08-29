@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-17.b47ae806bcd3df50",
+  "kind": "shard",
+  "shardId": "shard-17",
+  "shardHash": "b47ae806bcd3df50",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/mockai/mockai.go",
+      "line": 153,
+      "note": "LoadHash's doc claims it is the machine.Deps.MockLoad adapter; `grep -rn LoadHash .` over the whole tree finds only this definition, its own package test, and historical docs. The live adapter is an identical inline closure at internal/fsm/cli/wiring.go:197-203."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 197,
+      "note": "machineDeps builds MockLoad as its own closure over *mockai.Scenario (d.MockLoad then s.Hash()), duplicating mockai.LoadHash line for line; cli/deps.go:72 binds Deps.MockLoad to mockai.Load, never LoadHash."
+    },
+    {
+      "path": "internal/fsm/mockai/mockai.go",
+      "line": 241,
+      "note": "MaxFileBytes comment and spec 5 §8 (docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:440) / spec 4 §9 (fsm-judge-kinds.md:336) say the judge.yaml read is capped at 512 KB, but Load does an unbounded os.ReadFile at line 246 and only then compares len(raw); sibling caps use io.LimitReader (machine/sidecar.go:96, cli/run.go:169)."
+    },
+    {
+      "path": "internal/fsm/mockai/mockai.go",
+      "line": 245,
+      "note": "\"Load reads <dir>/judge.yaml strictly\": a single dec.Decode consumes only the first YAML document. Reproduced with gopkg.in/yaml.v3 v3.0.1 and the same struct/KnownFields(true) setup: input with a `---` separator decoded document 1 and silently dropped the second document's calls and cmds with err=nil, while Hash() still covers the whole file. An empty or comment-only file fails with detail \"EOF\"."
+    },
+    {
+      "path": "internal/fsm/mockai/mockai.go",
+      "line": 298,
+      "note": "fakeRunner.Run ignores its context (`_ context.Context`), while the cmdexec.Runner interface doc (internal/fsm/cmdexec/cmdexec.go:60-64) states a parent context cancellation is returned as ctx.Err(). Guarded.exec (cmdexec.go:139) delegates cancellation entirely to the Runner; mitigated by the machine-level checks at machine/machine.go:656,889."
+    },
+    {
+      "path": "internal/fsm/mockai/mockai.go",
+      "line": 294,
+      "note": "Runner() doc (\"first call == Ordinal, else the first repeat row with call <= Ordinal\") matches the code: the exact-ordinal return happens inside the loop, so a later exact row still beats an earlier repeat row. Verified by TestS3Runner (mockai_test.go:83-113), which covers ordinal hit, repeat fallthrough, unscripted, and the Spec.Name-not-argv keying."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/still-present.python.txt",
+      "line": 1,
+      "note": "Provenance verified independently: sha256 of the body after the header line is 562691a1f484fc034a0e6a9734c3c9621909a2e70a2309755502f7b496763feb, exactly what the header pins; body ends at `}}` with no trailing newline. TestJ1Provenance (judge_test.go:36-68) enforces the header pin plus the `{repo and _diff(repo, base_ref)[:30000]}` -> `{diff}` rewrite equalling TemplateStillPresentCalibration, and prompts.go:23 describes that rewrite accurately. .gitattributes marks the file -text (git check-attr: text unset), so the byte-exact hash survives checkout."
+    },
+    {
+      "path": "internal/fsm/errs/errs_test.go",
+      "line": 76,
+      "note": "Every assertion checked against errs.go and is genuinely falsifiable: the four Error() format rows exercise the empty-detail, sorted-fields and odd-trailing-key branches (errs.go:26-33, 51-73); Fields != nil catches an unconditional map alloc; As(outer) != wrapped is pointer identity on the Wrap copy; the mutate-then-compare at line 116-119 really proves copyFields; Wrap(base, nil) != base and copyFields(nil) staying nil are both real branches. No dead or vacuous assertion found."
+    },
+    {
+      "path": "go.sum",
+      "line": 1,
+      "note": "`GOPROXY=off go mod verify` reports \"all modules verified\" and `go mod tidy -diff` is clean (exit 0, no diff), so the four lines match go.mod's single require of gopkg.in/yaml.v3 v3.0.1 plus its go.mod-only check.v1 dependency."
+    },
+    {
+      "path": "internal/fsm/mockai/mockai_test.go",
+      "line": 36,
+      "note": "go test ./internal/fsm/errs/... ./internal/fsm/mockai/... ./internal/fsm/judge/... -cover: all ok at 100.0% of statements. Note that mockai's 100% includes LoadHash, which no production path calls."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "internal/fsm/mockai/mockai.go:153 — `// LoadHash is the machine.Deps.MockLoad adapter.` asserts a wiring role the function does not fill. No caller outside the package exists (repo-wide grep for LoadHash hits only this file, mockai_test.go, and historical review docs); the CLI instead re-implements the same three lines inline at internal/fsm/cli/wiring.go:197-203 while binding cli.Deps.MockLoad to mockai.Load (cli/deps.go:72). So this is dead exported production code, a duplicated code path (rubric: \"the change appears to duplicate an inventoried service or code path\"), and a false claim about the system's wiring. It is also the one function in the package whose 100%-statement coverage comes purely from a test of code the product never runs (mockai_test.go:46,52,80). Fix by deleting LoadHash and its assertions, or by having wiring.go call it instead of duplicating it — and correcting the comment either way.",
+      "evidence": [
+        {"path": "internal/fsm/mockai/mockai.go", "line": 153, "note": "Doc comment claims the adapter role; function has no non-test caller in the tree."},
+        {"path": "internal/fsm/cli/wiring.go", "line": 197, "note": "The real machine.Deps.MockLoad adapter, duplicating LoadHash's body."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/mockai/mockai.go:241-252 — the 512 KB cap is enforced after the whole file is already in memory. The comment (\"caps judge.yaml … the peek reads it before the run is verified\") and both specs (fsm-cli.md:440 \"judge.yaml read capped at 512 KB\", fsm-judge-kinds.md:336 \"caps the judge.yaml read at 512 KB\") describe a capped read; os.ReadFile at line 246 is unbounded, so a multi-gigabyte judge.yaml under --mock-ai is fully read before ERR_MOCK_INVALID{too_large} can fire. An io.LimitReader(fh, MaxFileBytes+1) would make the code match the claim, as machine/sidecar.go:96 and cli/run.go:169 already do. Partly mitigating: the goldens cap (machine/machine.go:267) uses the same post-hoc pattern, so this is an existing repo idiom rather than a new regression, and the path requires an operator-supplied in-repo scenario dir.",
+      "evidence": [
+        {"path": "internal/fsm/mockai/mockai.go", "line": 246, "note": "os.ReadFile is unbounded; the len(raw) > MaxFileBytes check at line 250 runs only afterwards."},
+        {"path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md", "line": 440, "note": "spec 5 §8 states the judge.yaml read is capped at 512 KB."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/mockai/mockai.go:245-258 — \"Load reads <dir>/judge.yaml strictly\" overstates the strictness. dec.KnownFields(true) plus one Decode rejects unknown and duplicate keys but reads only the FIRST YAML document; everything after a `---` separator is discarded with no error. Reproduced against gopkg.in/yaml.v3 v3.0.1 with this exact struct and decoder configuration: a two-document input returned only document 1's calls and no cmds, err=nil. Because Hash() covers all the bytes, a scenario can hash as pinned while half of it is silently inert, surfacing later as ERR_MOCK_UNSCRIPTED with no pointer to the cause. A trailing `dec.Decode(&extra)` that requires io.EOF would close it. Related nit on the same call: an empty or comment-only judge.yaml is rejected with detail \"EOF\", which is opaque next to the other ERR_MOCK_INVALID details.",
+      "evidence": [
+        {"path": "internal/fsm/mockai/mockai.go", "line": 254, "note": "Single Decode over a yaml.Decoder; subsequent documents never read."},
+        {"path": "internal/fsm/mockai/mockai.go", "line": 245, "note": "Doc comment claims a strict read of the file."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/mockai/mockai.go:298 — fakeRunner.Run discards the context, so a scenario-driven run never honours cancellation at the command boundary, contrary to the cmdexec.Runner interface contract at internal/fsm/cmdexec/cmdexec.go:60-64 (\"a parent context cancellation is returned as ctx.Err()\"); Guarded.exec (cmdexec.go:139) does no ctx check of its own. Impact is limited to mock/rehearsal runs and is largely absorbed by the machine-level ctx checks (machine/machine.go:656,889), so advisory: a leading `if err := ctx.Err(); err != nil { return cmdexec.Result{ExitCode: -1}, err }` would make the fake honour the interface it implements.",
+      "evidence": [
+        {"path": "internal/fsm/mockai/mockai.go", "line": 298, "note": "Run(_ context.Context, sp cmdexec.Spec) — context ignored entirely."},
+        {"path": "internal/fsm/cmdexec/cmdexec.go", "line": 62, "note": "Runner interface doc requires ctx.Err() on parent cancellation."}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

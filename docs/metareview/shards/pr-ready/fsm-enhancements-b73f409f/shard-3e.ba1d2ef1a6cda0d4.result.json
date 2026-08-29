@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3e.ba1d2ef1a6cda0d4",
+  "kind": "shard",
+  "shardId": "shard-3e",
+  "shardHash": "ba1d2ef1a6cda0d4",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/sessionhistory/sessionhistory.go",
+      "line": 225,
+      "note": "Mutation test: reverted the hunk to `defer file.Close()` in a scratchpad copy of the tree and ran golangci-lint run ./internal/sessionhistory/... -- it goes red with `internal/sessionhistory/sessionhistory.go:224:18: Error return value of file.Close is not checked (errcheck)`. Restoring the branch version lints clean (0 issues). The change is a real fix for a real finding, not decoration."
+    },
+    {
+      "path": "internal/sessionhistory/sessionhistory.go",
+      "line": 224,
+      "note": "Claim check on the new comment (\"Read-only path: there is nothing a Close error could tell the caller\"): the handle comes from os.Open at line 220, which is O_RDONLY, and it is the only file open in the whole file. No writes are buffered behind this descriptor, so a Close error cannot signal lost data; every read error is already surfaced through scanner.Err() at line 236. The comment asserts a property the code actually has."
+    },
+    {
+      "path": "internal/sessionhistory/sessionhistory.go",
+      "line": 225,
+      "note": "Behavioural equivalence verified: `file` is assigned once at line 220 and never reassigned, so wrapping the call in a closure (late binding) cannot select a different receiver than the old `defer file.Close()` (early binding). The early `return` inside the scan loop at line 232 still runs the deferred close. No leak, no semantic change."
+    },
+    {
+      "path": "internal/sessionhistory/sessionhistory.go",
+      "line": 225,
+      "note": "Coverage: go test ./internal/sessionhistory/... -coverprofile shows block 225.17,225.35 (the new closure body) with hit count 1, and readJSONLSignal at 87.5%. The added statement is executed by the existing suite, so the closure does not introduce an uncovered statement or move the package coverage floor down. Package tests pass (ok, 0.285s)."
+    },
+    {
+      "path": ".golangci.yml",
+      "line": 4,
+      "note": "The lint config claims \"nothing is excluded: the noisy cases were fixed at the source instead\". This hunk is consistent with that claim -- errcheck is left enabled and the call site is corrected, rather than the rule being disabled or the function added to an exclude list."
+    },
+    {
+      "path": "internal/epicsource/epicsource.go",
+      "line": 84,
+      "note": "Consistency check across the duplicated pattern: the identical `// Read-only path...` comment plus `defer func() { _ = file.Close() }()` appears at epicsource.go:84, state.go:62, runchain.go:110, reviewlog.go:286, findings.go:484 and tasksource.go:61 -- and every one of those is an os.Open (O_RDONLY) site. The rationale is not misapplied to any write handle, and no read-only close site in the tree was left with the old bare form (grep for `defer <x>.Close()` in non-test Go code returns zero hits)."
+    },
+    {
+      "path": "internal/fsm/record/record.go",
+      "line": 193,
+      "note": "Counter-check on the write paths: record.go:189 (O_RDWR|O_APPEND) and machine/sidecar.go:95 do NOT carry the read-only rationale; record.go instead documents that the append ends in f.Sync so the row is durable before Close runs. The distinction between read and write justifications is drawn correctly, so the read-only wording in this shard is not a blanket excuse pasted over sites where a Close error would matter."
+    }
+  ],
+  "findings": []
+}

@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-26-b605b2136771bc3a",
+  "kind": "shard",
+  "shardId": "shard-26",
+  "shardHash": "b605b2136771bc3a",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T10:23:24-07:00",
+  "evidence": [
+    {
+      "path": "internal/state/state.go",
+      "line": 19,
+      "note": "Verified the +2 buffer claim empirically rather than by reading. A standalone program replicating scanner.Buffer(make([]byte, 0, 64*1024), max) over a line of exactly 1<<20 bytes gives: LF terminator needs max >= N+1, CRLF terminator needs max >= N+2, and a bare token of exactly N with no terminator also needs N+1. So both halves of the comment ('bufio rejects a token equal to the buffer maximum' and 'two bytes larger to admit a line of exactly this length ending in CRLF') are true as written."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 1,
+      "note": "Every property the package doc claims is present in the code and exercised: argv-only exec at 231 (exec.CommandContext, no shell), absolute argv[0] refusal at 124, hash re-verification via workflow.VerifyCmds at 127, exact env allow-list at 93-116, Setpgid + SIGKILL to the negative pid at 237-238, output cap at 153 and 214, DisallowUnknownFields decode at 191, one audit per execution at 176 (Run) and 197 (Call). TestX1RealRunner asserts the child's own sorted os.Environ() equals exactly {HOME,LANG,MRV_RUN_ID,PATH,TOKEN}, so the env allow-list is verified from inside the child, not just at the Spec boundary."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 267,
+      "note": "go vet ./internal/fsm/cmdexec ./internal/state is clean; go test ./internal/fsm/cmdexec -count=1 -race passes in 8.1s and reports 100.0% of statements, which is the level tests/coverage.sh enforces for ./internal/fsm/... . The timing-sensitive rows (300 ms group timeout, 200 ms slow-ok, parent cancel at 100 ms) survive -race."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 45,
+      "note": "The Spec.Ordinal doc claim ('the fake runner keys on it') is real: internal/fsm/mockai/mockai.go:136-146 selects a scripted row by sp.Ordinal (exact call match, else the first repeat row with call <= Ordinal) and errors ERR_MOCK_UNSCRIPTED with the ordinal in a field. The 'exec runner ignores it' half is also true - execRunner.Run never reads s.Name or s.Ordinal."
+    },
+    {
+      "path": "internal/fsm/cmdexec/cmdexec.go",
+      "line": 141,
+      "note": "Checked the audit-payload caps against the fold validator rather than assuming. run.CapText caps by canonical JSON-encoded length (canonical.go:115-135, escaping counted rune by rune), and fold.go:563 validates canonLenStr(d.Stdout) <= MaxDetail / canonLenStr(d.Stderr) <= MaxStderr, so CapText(.., MaxDetail) and CapText(.., MaxStderr) cannot emit a cmd_call that its own validator rejects. No off-by-one between the two."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 117,
+      "note": "The env duplication I looked for in Guarded.env (a cmd whose Env list names PATH/HOME/LANG/TMPDIR or MRV_RUN_ID would append a second, later-winning KEY=VALUE) is closed upstream, not in cmdexec: reservedEnv covers PATH/HOME/LANG/TMPDIR plus the loader variables, and reservedPfx blocks MRV_/LD_/DYLD_/GIT_, so a workflow cannot declare one. Not a finding, but note the guarantee lives in the workflow parser, not in this package."
+    },
+    {
+      "path": "tests/coverage-floor.txt",
+      "line": 27,
+      "note": "internal/state is floor-gated at 86.2 combined (unit + shell suite), not at 100 - tests/coverage.sh:10-12 requires 100.0% only for ./internal/fsm/... and ./workflows. Unit-only coverage of internal/state is 19.3% with ReadJSONL at 0.0%, so the changed scanner.Buffer line is executed only through other packages' integration paths and asserted nowhere."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The new comment names maxJSONLLineBytes 'the JSONL line cap', but nothing in the file caps anything on write - it is purely a read tolerance. AppendJSONL (state.go:28-50) marshals a record of any size and writes it, reporting success. Once a line longer than 1 MiB lands, ReadJSONL returns (nil, bufio.Scanner: token too long) for the WHOLE file on every later call, so a single oversized row permanently bricks .metareview/findings.jsonl and .metareview/runs.jsonl - state.ReadJSONL is what internal/learning/review.go:73 uses to read findings.jsonl. There is no upstream cap on the text that gets there: findings.Record.Found and Record.Evidence (internal/findings/findings.go:68-69) are free reviewer-supplied strings with no length check anywhere in internal/findings or internal/reviewers. The write path and the read path disagree, and the writer is the silent one. This is a strict improvement on the previous 64 KiB behaviour, so the cheap resolutions are both acceptable: either enforce the cap where it is claimed (have AppendJSONL refuse or truncate a marshalled record over maxJSONLLineBytes, which turns an unreadable ledger into a loud failure at the offending append), or reword the comment to say it is a read tolerance and not a cap.",
+      "evidence": [
+        {
+          "path": "internal/state/state.go",
+          "line": 17
+        },
+        {
+          "path": "internal/state/state.go",
+          "line": 49
+        },
+        {
+          "path": "internal/state/state.go",
+          "line": 66
+        },
+        {
+          "path": "internal/findings/findings.go",
+          "line": 68
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The closeFile seam's stated justification is factually wrong for this repository. state.go:23-25 says a permission- or descriptor-based test 'would be the alternative, and those stop failing when the suite runs as root, which is the normal case in CI'. This repo's CI is .github/workflows/test.yml:19 runs-on: ubuntu-latest with no container: block, which executes as the unprivileged 'runner' user, not root. The seam is still the right choice (it is deterministic and needs no filesystem trickery), but the reason given for it does not hold, and a maintainer could reasonably delete the seam on the strength of a rationale that is not true here. Either drop the CI claim or replace it with the real reason (a Close error cannot be provoked portably without root or fd surgery).",
+      "evidence": [
+        {
+          "path": "internal/state/state.go",
+          "line": 25
+        },
+        {
+          "path": ".github/workflows/test.yml",
+          "line": 19
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The buffer-sizing behaviour is asserted nowhere for this package, unlike its two siblings in the same PR. internal/findings/findings_test.go:507-543 (TestReadJSONLAcceptsExactlyMaxLine) and internal/runchain/runchain_test.go:254-256 each build a fixture of exactly maxJSONLLineBytes and prove it is readable; internal/state got the identical const + scanner.Buffer line and no such test. state_test.go only covers the closeFile seam, and ReadJSONL sits at 0.0% in the package's own profile. I verified the arithmetic empirically (see evidence) so the code is correct today, but the boundary that the comment spends four lines explaining is unpinned here and would regress silently if someone 'simplified' the +2 away. Three lines mirroring the findings test would close it. Related: the constant is now declared four times (state.go:21, findings.go:19, runchain.go:17, reviewlog.go:21) - shard-00 already raised the duplication and a fifth reader at record.go:156 that lacks the +2 entirely.",
+      "evidence": [
+        {
+          "path": "internal/state/state.go",
+          "line": 66
+        },
+        {
+          "path": "internal/findings/findings_test.go",
+          "line": 507
+        },
+        {
+          "path": "internal/runchain/runchain_test.go",
+          "line": 254
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Guarded.Clock is dead configuration. The field is declared at cmdexec.go:77 and never read anywhere in the package (grep for Clock in internal/fsm/cmdexec matches only the declaration), yet internal/fsm/cli/deps.go:90 wires a real clock into it. The struct therefore advertises a time seam that cmdexec does not use - cmd_call timestamps are stamped by the caller instead, at internal/fsm/machine/machine.go:466 (ev.At = s.m.deps.Clock()). A reader wiring a new Guarded would reasonably assume the audit rows carry cmdexec's clock. This is exactly the kind of gap 100%-of-statements coverage cannot flag, since a never-read field contains no statement. Delete the field and the deps.go argument, or use it for the Event.At the audit payload currently leaves zero.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cmdexec/cmdexec.go",
+          "line": 77
+        },
+        {
+          "path": "internal/fsm/cli/deps.go",
+          "line": 90
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 466
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "data.Name == \"\" is overloaded as the 'pre-exec refusal, never audited' sentinel (cmdexec.go:173 in Run, 186 in Call), but it is equally true after a SUCCESSFUL execution of a consented command whose Name is the empty string: exec() sets data.Name = name at line 141, so an empty name runs the process and then discards both the result (Run returns a zero converge.CmdResult) and the audit row, which contradicts the package doc's 'one audited cmd_call per execution'. A YAML workflow cannot reach this - cmdPattern at internal/fsm/workflow/workflow.go:114 is ^[a-z][a-z0-9_-]{0,31}$ - but the Allowed list also arrives from a folded init event, and the fold validator only checks shortOK(c.Name) (internal/fsm/run/fold.go:529), which accepts \"\". run.sanctioned (fold.go:360) would match it too. Defence-in-depth only, hence low: a separate bool or an explicit found/refused return from exec would remove the coupling between a sentinel and a legal field value.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cmdexec/cmdexec.go",
+          "line": 173
+        },
+        {
+          "path": "internal/fsm/cmdexec/cmdexec.go",
+          "line": 141
+        },
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 529
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The const block at cmdexec.go:28-40 is headed '// Error codes.' but six of its ten members are not error codes: DefaultTimeout, WaitDelay, baseEnvNames, EnvRunID, MaxOutput and unknownExit. Trivially cosmetic, but the four exported error-code constants are the package's public contract and burying the tuning knobs under that heading makes the contract harder to read at a glance. Split into two blocks.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cmdexec/cmdexec.go",
+          "line": 28
+        },
+        {
+          "path": "internal/fsm/cmdexec/cmdexec.go",
+          "line": 34
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

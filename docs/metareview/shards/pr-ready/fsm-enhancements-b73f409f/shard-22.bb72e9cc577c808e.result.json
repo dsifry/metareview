@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-22.bb72e9cc577c808e",
+  "kind": "shard",
+  "shardId": "shard-22",
+  "shardHash": "bb72e9cc577c808e",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:05:00Z",
+  "blockingCount": 4,
+  "evidence": [
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 3,
+      "note": "Reviewed all five chunks (internal/fsm/gate/fake.go, internal/fsm/workflow/workflow.go, internal/gitcontext/gitcontext.go, skills/review-task-done/SKILL.md, testdata/fsm/workflows/sdlc-loop-cmds.yaml) against rubrics/task-done-review-rubric.md, reading the real working-tree files and their callers rather than the diff text alone."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 117,
+      "note": "Empirically verified the reserved-env denylist is really enforced, not just declared: a scratchpad -overlay mutant reducing reservedEnv to {PATH} and reservedPfx to {MRV_, LD_} fails TestW2Reasons and TestW2ReservedEnvAndBoundaries. workflow_test.go:307 asserts all 22 names plus DYLD_/GIT_ prefixes. No finding here."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 830,
+      "note": "Verified the warn() message's factual claim rather than trusting it: 'all_fixed needs a non-empty AllFound' matches converge.AllFixed at internal/fsm/converge/converge.go:27 (len(s.AllFound) > 0 && s.Unfixed == 0), and internal/fsm/gate/gates.go:80 routes all_fixed through it. The warning text is accurate."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 791,
+      "note": "paramRefs walks only string and []any and does not recurse into nested map params; resolve.go:66-83 has exactly the same shape, so validator and resolver agree, and workflow_test.go:333 pins the behaviour explicitly ('nested maps not walked', asserting Params[\"deep\"][\"model\"] stays \"$JUDGE\"). Deliberate and documented, not a defect."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 305,
+      "note": "The 'Invalid git base' -> 'invalid git base' lowercasing has no stale consumer: the only assertion repo-wide is tests/go/test-git-context.sh:58, which already greps the lowercase form. Removal of the now-unused limitedGit helper is clean dead-code deletion."
+    },
+    {
+      "path": "testdata/fsm/workflows/sdlc-loop-cmds.yaml",
+      "line": 1,
+      "note": "Fixture is wired, not dead: tests/go/test-fsm.sh:44 copies it and lines 207-221 drive ERR_CMDS_NOT_ALLOWED, --allow-custom-cmds consent, converge --check and the STOPPED overflow handler against it. Every gate name it uses (nothing_found, findings_nonempty, nothing_confirmed, confirmed_nonempty, commit_exists, all_fixed, bugs_remain) resolves in internal/fsm/gate/gates.go:34-91, and every node kind resolves in internal/fsm/kind/kind.go:27-31 with lenses: 8 == len(kind.Lenses)."
+    },
+    {
+      "path": "internal/fsm/gate/fake.go",
+      "line": 12,
+      "note": "gate.Fake lives in a non-test file for a real reason, not by accident: internal/fsm/machine/{harness,fork,machine}_test.go construct &gate.Fake{} across the package boundary, which a _test.go file could not export. Package internal/fsm/gate reports 100.0% of statements."
+    },
+    {
+      "path": "skills/review-task-done/SKILL.md",
+      "line": 49,
+      "note": "Verified the flag semantics the doc asserts: cmd/metareview/main.go:602-609 (appendCrossShardResult) really does keep --cross-shard-result single-valued and replace, and internal/reviewmanifest/manifest.go:414 really does emit the 'duplicate shard result <id>' blocker when an explicit --shard-result collides with a committed one. Steps 1-4 of the sharded-review section are accurate."
+    },
+    {
+      "path": "internal/gitcontext/gitcontext.go",
+      "line": 46,
+      "note": "No TODO/FIXME markers, no eval, no unsafe execution introduced in any of the five chunks; all five chunks are part 1/1 so no chunk-level truncation. The json:\"-\" tags on the four Branch* fields are real: branchfiles_test.go:317-330 marshals a populated Context and asserts the payload shape is unchanged."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Mapping-form transitions have two silent-acceptance holes in an otherwise strict validator (workflow.go:3 claims 'Every rule is static'). (a) workflow.go:425-426 does `if from == \"*\" { continue } // the implicit *->failed rule` BEFORE strictNode, so the whole value mapping of any `*->X` key is never validated and the target is never checked. (b) workflow.go:157 declares rawTransition.On and workflow.go:429 admits \"on\" on EVERY mapping-form key, but addTransition (workflow.go:452) builds the Transition from From/To/Gate/Outcome/Loop only, so `on:` outside the wildcard line is decoded and dropped. Verified empirically with a scratchpad -overlay probe test (no repo file touched): a document containing `\"discover -> adjudicate\": {gate: findings_nonempty, on: gate_error}`, `\"*->done\": {on: gate_error}` and `\"*->nowhere-at-all\": {on: nonsense, gate: not_a_gate}` parses with err == nil and yields exactly 3 transitions -- an undeclared target, an unknown gate and a bogus `on` value all pass silently. A user who writes `*->failedd` or believes they redirected gate errors elsewhere gets no error, while machine.go:824 hardcodes workflow.FailedState regardless. Fix: validate the `*` line's target is `failed` and its body against {on}, and restrict \"on\" to that line (or drop the field).",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 425,
+          "note": "wildcard key skipped before strictNode; body and target never validated"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 157,
+          "note": "rawTransition.On decoded at 157, admitted at 429, never read by addTransition at 452"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The raw (unfiltered) branch measurement at gitcontext.go:93-99 is production logic that no test verifies. Mutation-proven: with `ctx.BranchRawDiffBytes = raw` replaced by `_ = raw` via a scratchpad -overlay (repo untouched), `go test ./...` passes across the ENTIRE module. The only two mentions of BranchRawDiffBytes in any _test.go are branchfiles_test.go:321-322, which merely marshal a hand-built Context to assert the JSON shape -- they never exercise the measureBranchFiles path. TestBranchFilesExcludeGenerated (branchfiles_test.go:261-288) is the one test that reaches the `len(effectiveExcludes) > 0` branch, and it asserts only the BranchFiles paths and the filtered sum, never that raw exceeds filtered. This matters because internal/contextprofile/profile.go:87-88 uses BranchRawDiffBytes as the profile's reported rawDiffBytes, and internal/prready/review.go:700-702 overwrites git.RawDiffBytes with it. Also uncovered on the same function: the Exceptions branch at gitcontext.go:81-83 (go tool cover -func puts collectWith at 86.4%; the uncovered blocks are 75.3, 82.3 and 97.4), so CollectWithExcludesExcept's new branch-measurement path is exercised by nothing. Add an assertion that BranchRawDiffBytes > BranchFilteredDiffBytes when excludes hide content, and one collectWith case with Exceptions.",
+      "evidence": [
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 93,
+          "note": "raw re-measurement; deleting the assignment leaves the whole module's tests green"
+        },
+        {
+          "path": "internal/gitcontext/gitcontext.go",
+          "line": 81,
+          "note": "Exceptions branch of collectWith is uncovered (block 82.3 count 0 in the coverage profile)"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "SKILL.md:56-57 states unconditionally: 'After a fix round only the edited file's shard and the cross-shard result go ignored: re-review those two and leave the rest.' That holds only while the plan's bucket count is unchanged, and the doc omits the precondition. internal/contextprofile/shards.go:201 computes `bits := bucketBits(needBuckets(total, budget))` from the TOTAL branch-diff bytes, and shardIDForPath (shards.go:122-134) derives each path's bucket as `value >> (64 - bits)`. needBuckets is ceil(total/budget) and bucketBits rounds up to the next power of two, so a fix round that moves `total` across a power-of-two multiple of the 60,000-byte budget re-buckets EVERY path: all shard ids and all shard hashes change and every committed result is invalidated at once. This plan uses two-hex-digit ids spanning 00..3f, i.e. 6 bits / 64 buckets, which means total currently sits in (1.92 MB, 3.84 MB] -- a fix round shedding enough bytes to cross 1.92 MB drops it to 5 bits and reflows everything. An orchestrator that follows the sentence literally re-reviews two shards, re-runs, and burns an attempt from the --max-attempts budget on a wall of 'missing shard result for shard-XX' blockers. State the precondition (results survive only while plan bucketing is unchanged; compare the new plan.json's planHash/shard ids before reusing results).",
+      "evidence": [
+        {
+          "path": "skills/review-task-done/SKILL.md",
+          "line": 56,
+          "note": "unconditional claim that only the edited file's shard is invalidated"
+        },
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 201,
+          "note": "bucket count derives from total bytes, so shard ids are not stable across a size change that crosses a power-of-two boundary"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The sdlc-loop-cmds fixture does not carry the properties the spec that introduces it asserts. docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:257-258 says: 'user workflow testdata/fsm/workflows/sdlc-loop-cmds.yaml (declares cmds: + on_overflow + a `cmd` convergence atom; scenarios {cmd-guardrails, overflow-handler, custom-outcome})'. Checked against the tree: the fixture's convergence is `any: [{max_iterations: 1}]` (sdlc-loop-cmds.yaml:23-24) with NO cmd atom -- test-fsm.sh:213 has to write its own fixtures/cmd.yaml to get one; and `ls testdata/fsm/scenarios/sdlc-loop-cmds/` returns only `overflow-handler`, so cmd-guardrails and custom-outcome do not exist. The same spec section's outcome map claims `custom` is asserted by a custom-outcome scenario in the 'every outcome' row, but no workflow or fixture in the repo declares `outcome: custom`, so run.OutcomeCustom (internal/fsm/run/types.go:29) and its acceptance by workflow.go:690 validOutcome are never exercised end to end. The same gap is repo-wide in that spec's §5 inventory (sdlc-loop names 10 scenarios, 2 exist: happy, injection; review-loop names 7, 2 exist: clean, reviewed). Either add the fixture's cmd convergence atom and the missing scenarios, or amend the spec inventory to the scenarios that ship.",
+      "evidence": [
+        {
+          "path": "testdata/fsm/workflows/sdlc-loop-cmds.yaml",
+          "line": 23,
+          "note": "convergence is `any: [{max_iterations: 1}]` -- no cmd atom, contradicting fsm-cli spec line 257"
+        },
+        {
+          "path": "testdata/fsm/workflows/sdlc-loop-cmds.yaml",
+          "line": 26,
+          "note": "cmds/on_overflow are present, but only the overflow-handler scenario dir exists; cmd-guardrails and custom-outcome are absent"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "workflow.go:44 declares `MaxTimeout = 3600 * time.Second` and nothing in the module ever reads it (grep over all *.go finds only the declaration). The bound it names is hard-coded twice as a bare literal instead, at workflow.go:301 (`*rc.Timeout < 1 || *rc.Timeout > 3600`) and in the error text at workflow.go:302. Its sibling DefaultTimeout on the line above IS used (workflow.go:292). Either use MaxTimeout in the guard or delete it -- a named constant that the check does not consult is exactly the kind of drift where a bound gets changed in one place only.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 44,
+          "note": "MaxTimeout declared but never referenced; parseCmds hard-codes 3600 instead"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "fake.go:9-10 documents the fake as 'Unset answers return zero values', but RevParse is the one method that does not: for a ref absent from Refs (and not literally \"HEAD\") it returns an errs.E(CodeGit, \"unknown ref\") rather than the zero string (fake.go:44). The behaviour is the more useful one -- a test that forgets to script a ref gets a loud ERR_GIT instead of a silent empty SHA -- so the code is right and the sentence is wrong. Amend the comment to say unset answers return zero values except RevParse, which errors on an unscripted ref.",
+      "evidence": [
+        {
+          "path": "internal/fsm/gate/fake.go",
+          "line": 9,
+          "note": "doc comment 'Unset answers return zero values'"
+        },
+        {
+          "path": "internal/fsm/gate/fake.go",
+          "line": 44,
+          "note": "RevParse returns errs.E(CodeGit, \"unknown ref\") for an unset ref, contradicting the comment"
+        }
+      ]
+    }
+  ]
+}

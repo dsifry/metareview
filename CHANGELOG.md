@@ -18,9 +18,15 @@ not deterministic — the structure is.
   asked) and `checked_but_unverified` (a judge was asked and returned no usable answer, including an
   unparseable reply). Both are confirmed-side with confidence 0. Previously either would have been
   recorded as `hallucination`, which drops the finding.
-- **Escalation.** `kind.Deps.Escalate` (optional, injected) gives a rejected cross-file candidate a
-  second opinion from a judge with wider evidence access. Only rejections are escalated, so it cannot
-  turn a confirmation into a rejection; a failed or unparseable escalation keeps the finding.
+- **Escalation, on by default.** A candidate the judge rejected that names another changed file is
+  asked again with the changed files materialized at base and head in a directory outside the
+  repository, so a `codex/` judge can read both sides of a cross-file claim. `--no-escalate` turns it
+  off. On by default because unattended a false reject is silent - the finding is simply gone - while
+  a false confirm only costs a human a look; measured at roughly 2x judge tokens on a run where a
+  fifth of the rejections are cross-file. Only rejections are escalated, so a second opinion can
+  never delete a confirmation; a failed or unparseable escalation keeps the finding. Skipped for mock
+  runs and for judges that cannot read a tree, where it would re-ask the same question at twice the
+  cost.
 - **`internal/fsm/sandbox`** materializes the evidence an agentic judge may read - every changed path
   at base and head, mode 0444, nothing else - and content-addresses it with a tree hash so a verdict
   stays replayable when the prompt no longer carries the evidence.

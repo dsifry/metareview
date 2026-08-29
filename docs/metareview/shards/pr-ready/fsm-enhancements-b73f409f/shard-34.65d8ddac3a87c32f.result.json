@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-34-65d8ddac3a87c32f-claude-opus-5",
+  "kind": "shard",
+  "shardId": "shard-34",
+  "shardHash": "65d8ddac3a87c32f",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T18:05:00Z",
+  "blockingCount": 1,
+  "evidence": [
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 349,
+      "note": "marshalCanonical discards the encoder error under a comment asserting encoding cannot fail; falsified by mutation (replace the discard with a panic and TestFoldSequenceInvariants panics)"
+    },
+    {
+      "path": "internal/fsm/run/fold_test.go",
+      "line": 588,
+      "note": "WithRawData(`not json`) reaches builder.go:126 -> marshalCanonical(ev), which returns zero bytes instead of erroring"
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 371,
+      "note": "fmt.Errorf(\"invalid run id %q\", strconv.Quote(id)) double-quotes; reproduced end-to-end against a scratchpad-built binary"
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 39,
+      "note": "\"Caps (2.3), all measured on canonical bytes\" is false for 9 of the 16 constants it documents"
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 113,
+      "note": "\"Add returns the field-wise sum.\" is attached to const MaxTokenCounter, not to the Add method"
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 78,
+      "note": "\"Bug is a confirmed bug (the fix/verify unit).\" is attached to the Verdict const block, not to type Bug"
+    },
+    {
+      "path": "internal/fsm/gate/gate_test.go",
+      "line": 201,
+      "note": "ValidRef bad-ref table has no invalid-UTF-8 case; deleting !utf8.ValidString(ref) from git.go:106 leaves ./internal/fsm/... fully green at 100% statement coverage"
+    },
+    {
+      "path": "internal/fsm/gate/gate_test.go",
+      "line": 289,
+      "note": "TreeHash sha256 pin verified by hand: printf 'abc\\ndef' | shasum -a 256 == d53d6b91af7caf8fe3d8021f116270137c0079d579a1e16965da80c2ed138ffb"
+    },
+    {
+      "path": "tests/go/test-shardpack-coverage.sh",
+      "line": 17,
+      "note": "ran it directly and under the CI env (GOFLAGS=-cover -covermode=atomic, GOCOVERDIR set): 'shardpack coverage: 100% (178 blocks)', exit 0; shellcheck -x clean; empty-profile and go-test-failure guards are real, not vacuous"
+    },
+    {
+      "path": "internal/fsm/gate/gates.go",
+      "line": 106,
+      "note": "mutation battery on the code this shard's tests cover: BaseSHA-for-FixEntryHead, dropping && clean, dropping the FixEntryHead inapplicable guard, dropping the AllFound guard in nothing_found, removing --end-of-options, removing --untracked-files=all, removing the scratch GIT_INDEX_FILE, removing the Cut rune-boundary loop, removing the TreeHash separator, no-op scrubEnv — all ten killed"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "internal/fsm/run/types.go:349 — `_ = enc.Encode(v) // the types in this package never fail to encode` is a false claim that talks the reader out of handling an error that demonstrably occurs, in the one function whose whole purpose is to produce the exact bytes the audit chain hashes over. Falsified empirically: with the discard replaced by `if err := enc.Encode(v); err != nil { panic(err) }` (via go test -overlay, repo untouched), `go test ./internal/fsm/...` panics in TestFoldSequenceInvariants with `json: error calling MarshalJSON for type *jsontext.Value: invalid character 'o' in literal null`, through internal/fsm/run/builder.go:126 from fold_test.go:588 (`WithRawData(`not json`)`). Two problems compound. (1) The stated justification does not match the function's signature: MarshalCanonical is exported as `func(v any) []byte` and is called from eight packages (record.go:213, cmdexec.go:167, converge.go:289, kind.go:201/388/483/596/654, judge.go:349/372, prompts.go:152/157, fork.go:193/224/235, machine.go:117/199/444, export.go:173/452/468/497) — \"the types in this package\" is not the set of values it receives. kind.go:377 in particular assigns `data.Verdict = v.Parsed`, a json.RawMessage that originates outside the package. (2) The failure is silent and returns a *valid-looking* value: bytes.TrimSuffix over an empty buffer yields a zero-length slice, so an unencodable value becomes empty canonical bytes that then flow into LineHash (store.go:154 path), OutputHash, and SnapshotEqualIgnoringSeq — where types.go:326 would report two different unencodable snapshots as EQUAL. In the Builder path today that empty slice is already appended to b.lines and hashed into the next event's Prev. Production callers happen to be guarded (prepareAppend runs Canonical(ev.Data) first at store.go:141; converge.go:284 nils NodeOutputs; fold.go:113 Canonicalizes node output before storing), which is why the blast radius is currently small — but the comment asserts the guard is unnecessary, which is exactly backwards, and the next caller who believes it gets silent corruption rather than an error. Fix: either return the error (and let callers handle it), or panic on it, or at minimum replace the comment with the true invariant (\"callers must have validated v; an encode failure yields empty bytes\") so the discard is not read as a proof.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 349,
+          "note": "the discarded error and the false comment"
+        },
+        {
+          "path": "internal/fsm/run/builder.go",
+          "line": 126,
+          "note": "marshalCanonical(ev) with no prior validation; the empty line is hashed into the chain"
+        },
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 588,
+          "note": "existing test that drives the encode failure today"
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 326,
+          "note": "SnapshotEqualIgnoringSeq returns true when both sides fail to encode"
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 377,
+          "note": "data.Verdict = v.Parsed puts an out-of-package RawMessage into a value passed to MarshalCanonical"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/types.go:371 — `fmt.Errorf(\"invalid run id %q\", strconv.Quote(id))` quotes twice: %q already quotes, and strconv.Quote has quoted it first. Reproduced end-to-end with a binary built into the scratchpad (repo untouched): `mrv fsm state --run 'bad id'` in a throwaway git repo emits `{\"code\":\"ERR_RUN_NOT_FOUND\",\"error\":{...,\"detail\":\"invalid run id \\\"\\\\\\\"bad id\\\\\\\"\\\"\"}}`. It reaches users through internal/fsm/cli/wiring.go:222 and :228 (--run and MRV_RUN_ID), cli/run.go:898, machine/sidecar.go:31/108/174, store_mem.go:37/48, store_jsonl.go:98 and export.go:89. No test asserts the message, which is why it has gone unnoticed; govet's printf check does not flag %q on a string. Fix: `fmt.Errorf(\"invalid run id %q\", id)`.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 371,
+          "note": "%q applied to strconv.Quote(id)"
+        },
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 222,
+          "note": "the message is wrapped verbatim into the user-facing ERR_RUN_NOT_FOUND envelope"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/types.go:39 — the block comment `// Caps (2.3), all measured on canonical bytes.` documents 16 constants, and is false for 9 of them. MaxShort/MaxText/MaxDesc/MaxDetail/MaxStderr/MaxPayload/MaxLine are byte caps as described, but MaxVars, MaxGoldens, MaxAllowedCmds, MaxArgv, MaxFileHashes, MaxEnv, MaxDeltaList, MaxWarnings and DefaultMaxEvents are element counts, verified at their use sites: fold.go:516 `len(d.Vars) > MaxVars`, fold.go:530 `len(c.FileHashes) > MaxFileHashes` / `len(c.Env) > MaxEnv`, fold.go:195 `len(st.Warnings) >= MaxWarnings`, kind.go:149 `len(fs) > MaxDeltaList`, workflow.go:238/277/294, store.go:162 `n+1 > maxEvents`. A reader sizing a payload against MaxVars as if it were a byte budget is misled. Fix: split the const block, or drop \"all measured on canonical bytes\" from the group comment and put it on the byte-cap group only.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 39,
+          "note": "\"all measured on canonical bytes\" over a block that is half element counts"
+        },
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 516,
+          "note": "len(d.Vars) > MaxVars — a count, not bytes"
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 149,
+          "note": "len(fs) > MaxDeltaList — a count, not bytes"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/types.go:78 and :113 — two doc comments are attached to the wrong declaration, so godoc publishes them as documentation for something they do not describe. (a) Line 78 `// Bug is a confirmed bug (the fix/verify unit).` sits immediately above the `const ( VerdictMatched ... )` block, so those three exported constants are documented as \"Bug\"; the real type Bug at line 86 carries its own, different one-liner (\"a confirmed (or rejected) finding\"). (b) Line 113 `// Add returns the field-wise sum.` sits immediately above `const MaxTokenCounter`, so MaxTokenCounter's godoc opens with a sentence about a method, and the actual Add method at line 128 is left undocumented — the only method on TokenTotals without a doc comment, next to Negative and TooLarge which have one. Both read as leftovers from moving declarations. golangci-lint's standard set does not include revive/stylecheck, so nothing catches an exported comment that does not start with the identifier's name.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 78,
+          "note": "Bug's doc on the Verdict const block; type Bug at line 86 has its own"
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 113,
+          "note": "Add's doc on const MaxTokenCounter; func Add at line 128 is undocumented"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/gate/gate_test.go:201 — the bad-ref table `{\"\", \"-bad\", \"a b\", \"a\\x00b\", \"a\\nb\", \"x\\x7f\"}` is presented as the coverage of ref validation, but every entry is caught by a different clause than the UTF-8 one, so `!utf8.ValidString(ref)` in git.go:106 is untested. Verified by mutation via go test -overlay (repo untouched): deleting `|| !utf8.ValidString(ref)` leaves `go test ./internal/fsm/...` entirely green. Statement coverage cannot see this — the guard is a sub-expression of a single `if`, so the package still reports 100.0% of statements with it gone (confirmed: `go test -covermode=count ./internal/fsm/gate/` = 100.0%, every function 100%). It is not exploitable today (the range loop below it maps an invalid byte to U+FFFD, which passes the control/space checks, but --end-of-options at git.go:148 already blocks option injection and git will reject the ref), so this is a missing negative case rather than a live bug. Fix: add one invalid-UTF-8 ref, e.g. `string([]byte{'a', 0xff, 'b'})`, to the table. For contrast, ten other mutations against the code these tests cover were all killed — the rest of the file is a strong suite.",
+      "evidence": [
+        {
+          "path": "internal/fsm/gate/gate_test.go",
+          "line": 201,
+          "note": "bad-ref table with no invalid-UTF-8 entry"
+        },
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 106,
+          "note": "!utf8.ValidString(ref) survives deletion with the whole fsm suite green"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/types.go:114 — `MaxTokenCounter bounds every counter in one record so sums can never wrap` states an unconditional guarantee that actually depends on a second, unmentioned cap. Per-record counters are bounded at 2^40 (enforced at fold.go:160/169, machine.go:992, mockai.go:97) and TokenTotals.Add accumulates into int64, so no-wrap holds only while the number of contributing records stays under 2^63/2^40 = 8.4M. That is comfortably true under DefaultMaxEvents (100_000, giving ~1.1e17 vs. int64's 9.2e18, an 84x margin), but run.Options.MaxEvents is caller-settable to any positive int (store.go:47/51) and the store enforces exactly what the caller asked for (store.go:162). No caller in the tree sets it above the default, so this is a latent unstated precondition rather than a reachable overflow. Fix: say \"so sums cannot wrap within MaxEvents records\", or clamp Options.MaxEvents.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 114,
+          "note": "\"so sums can never wrap\" — unconditional"
+        },
+        {
+          "path": "internal/fsm/run/store.go",
+          "line": 51,
+          "note": "Options.MaxEvents accepts any positive int; only zero falls back to DefaultMaxEvents"
+        }
+      ]
+    }
+  ]
+}

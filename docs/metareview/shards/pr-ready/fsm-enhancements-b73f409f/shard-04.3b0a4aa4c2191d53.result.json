@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-04-review",
+  "kind": "shard",
+  "shardId": "shard-04",
+  "shardHash": "3b0a4aa4c2191d53",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/workflow/resolve.go",
+      "line": 18,
+      "note": "Read the whole file in the repo rather than the diff alone. Resolve's $VAR substitution is safe because workflow.Parse already refuses any $REF that is not a declared var (internal/fsm/workflow/workflow.go:603-624 collectRefs), so the effective[m[1:]] lookup at resolve.go:54 can never silently yield an empty value for an undeclared name. The $$ escape is handled symmetrically in sub (resolve.go:51) and in refsIn (workflow.go:626-636)."
+    },
+    {
+      "path": "internal/fsm/workflow/resolve.go",
+      "line": 107,
+      "note": "ResolveCmds indexes argv[0] without a length guard, but parseCmds refuses an empty or over-cap argv before a Workflow can exist (internal/fsm/workflow/workflow.go:277-287 enforces 1..MaxArgv non-empty string elements), so the index is unreachable-out-of-range for any parsed workflow. Not a defect."
+    },
+    {
+      "path": "internal/fsm/workflow/resolve.go",
+      "line": 139,
+      "note": "CmdsSHA256 determinism checked end to end: MarshalCanonical (internal/fsm/run/types.go:331-352) delegates to encoding/json, which emits map keys in sorted order, so the FileHashes map cannot make the consent digest vary between runs; the explicit sort.Slice by Name covers callers that do not come from ResolveCmds (whose cmdNames() is already sorted)."
+    },
+    {
+      "path": "internal/fsm/workflow/resolve.go",
+      "line": 154,
+      "note": "VerifyCmds pin/appear symmetry verified: ResolveCmds keys FileHashes by candidatePath(workDir, a) (resolve.go:124-128) and VerifyCmds recomputes the identical key (resolve.go:165-167), so an argv element pinned at consent time is never re-reported as 'appeared'. argv[0] is rewritten to an absolute path before hashing (resolve.go:122), so candidatePath returns it unchanged at verify time."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow_test.go",
+      "line": 360,
+      "note": "Validation evidence for the new source file: `go test ./internal/fsm/workflow/` passes and `go tool cover -func` reports 100.0% of statements for every function in resolve.go (Resolve, ResolveCmds, CmdsSHA256, candidatePath, VerifyCmds, FileSHA256, containsStr). TestW3Resolve/TestW4ResolveCmds cover the calibration pins, ERR_VAR_UNSET, ERR_VAR_UNKNOWN, ERR_CALIBRATION_PINNED, the MaxShort cap, argv substitution and the mismatch/missing/appeared arms. `go vet ./internal/fsm/workflow/ ./internal/version/` is clean; no TODO/FIXME markers in the shard."
+    },
+    {
+      "path": "internal/version/version.go",
+      "line": 3,
+      "note": "Version 0.8.2 -> 0.9.0 cross-checked against package.json:3, .claude-plugin/plugin.json, .codex-plugin/plugin.json, .claude-plugin/marketplace.json and CHANGELOG.md:3 ('## 0.9.0 - 2026-08-27'); all agree."
+    },
+    {
+      "path": "docs/tasks/pr-a-sharded-measurement.md",
+      "line": 12,
+      "note": "Every factual claim in the task doc verified against the tree: gitcontext.CollectWith(root, Options{...}) exists (internal/gitcontext/gitcontext.go:60), ShardOptions.GroupBy is gone (zero matches repo-wide), the split risk reasons DIFF_TRUNCATED/LOCAL_DIFF_TRUNCATED/DIFF_OVERSIZE are all defined (internal/contextprofile/profile.go:16-18), internal/shardpack exists and `go test ./internal/shardpack/` reports 100.0% coverage, and tests/go/test-shardpack-coverage.sh is present. Doc-only chunk; no source in it."
+    },
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 143,
+      "note": "Adversarial cross-check of the doc's risk-reason split against the ingest side: internal/reviewers/taskdone.go:37 lists only DIFF_TRUNCATED and LARGE_DIFF as shard-satisfiable. Suspected a stale constant, but DIFF_OVERSIZE fires only above the 16 MiB maxBranchDiffBytes ceiling (profile.go:26, 141-143) and LOCAL_DIFF_TRUNCATED covers bytes that reach no pack at all, so both are correctly non-satisfiable. No finding."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "`required: true` is satisfied by an explicitly empty value. In Resolve the presence test `if v, ok := vars[name]; ok` (internal/fsm/workflow/resolve.go:40) runs before the `if spec.Required` test (resolve.go:44), and a Go map lookup of a key whose value is \"\" returns ok == true. `metareview fsm init --var JUDGE=` parses cleanly (internal/fsm/cli/run.go:108-111 only rejects a missing '=' or an empty key), so effective[\"JUDGE\"] becomes \"\" and ERR_VAR_UNSET never fires for a var the workflow declared required. For the two shipped workflows the empty judge is still caught, but by the wrong contract: judge.Preflight runs only for exec: fork nodes (internal/fsm/machine/machine.go:98-107) and reports ERR_JUDGE_MODEL 'model id is empty' (internal/fsm/judge/judge.go:269) instead of the ERR_VAR_UNSET the CLI maps to the helpful ERR_JUDGE_UNSET 'pass --var JUDGE=<value>' (internal/fsm/cli/run.go:317, spec docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:177). A required var referenced only from a `cmd:` argv or from a non-fork node's model has no downstream check at all and resolves to an empty argv element. Low, not blocking: the resolved argv is printed verbatim in the ERR_CMDS_NOT_ALLOWED consent list before the operator approves the sha, so the empty element is disclosed rather than hidden. Ordering the Required test before the presence test (or refusing an empty value for a required var) would make `required` mean what it says.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/resolve.go",
+          "line": 40,
+          "note": "`if v, ok := vars[name]; ok { effective[name] = v; continue }` precedes the spec.Required check four lines below."
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 108,
+          "note": "strings.Cut(\"JUDGE=\", \"=\") yields k=\"JUDGE\", val=\"\", ok=true; only `!ok || k == \"\"` is refused, so an empty value reaches p.vars."
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 100,
+          "note": "Preflight is invoked only for nodes whose Exec == \"fork\", so a required var used by an inline/subagent node or a cmd argv is never re-validated."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Documentation currency surfaced by the version bump in this shard. internal/version/version.go:3 is now 0.9.0 and CHANGELOG.md:3 carries a full 0.9.0 FSM entry, but README.md:55 still heads its release section '## What Changed In 0.8.3' and describes the sharded-review loop, with no mention of `metareview fsm`. README.md was otherwise edited on this branch, and no test asserts README currency (tests/manifest/test-manifests.sh checks only the four manifests plus version.go), so nothing fails; a reader landing on the project front page sees the previous release as the newest one. Cosmetic and non-blocking, and already noted by other shards in this plan; recorded here because version.go is this shard's own chunk.",
+      "evidence": [
+        {
+          "path": "README.md",
+          "line": 55,
+          "note": "Heading reads 'What Changed In 0.8.3' while internal/version/version.go:3 is 0.9.0."
+        },
+        {
+          "path": "internal/version/version.go",
+          "line": 3,
+          "note": "const Version = \"0.9.0\""
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Investigated and dismissed: nested-map node params are silently left unsubstituted. Resolve's params loop (internal/fsm/workflow/resolve.go:68-84) handles only `string` and `[]any`, sending a `map[string]any` through the `default` branch unchanged, and paramRefs (internal/fsm/workflow/workflow.go:638-653) is deliberately blind to the same shape, so a `$VAR` inside an object-valued param would be neither ref-validated by collectRefs nor substituted, and would reach the node as the literal text `$JUDGE`. This looked like a silent-failure gap, but it is the specified and asserted behaviour: the W3 acceptance row in docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:421 requires 'list params substituted, non-string list elements and nested maps untouched (literal asserts)'. It is also unreachable today, because every registered kind rejects params outside a small allow-list of scalars (internal/fsm/kind/kind.go:260-273 accepts only an integer `lenses`; kind.go:325-330 noParams rejects every param), so no workflow can declare an object-valued param at all. No change warranted.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/resolve.go",
+          "line": 82,
+          "note": "the `default:` arm copies non-string, non-list param values through verbatim"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+          "line": 421,
+          "note": "W3 row requires nested maps to be left untouched, with literal asserts"
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 325,
+          "note": "noParams rejects any param key, so four of the five kinds accept none"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Investigated and dismissed: VerifyCmds's 'appeared' rule can permanently poison a declared command that writes a file named in its own argv. The rule at internal/fsm/workflow/resolve.go:165-172 refuses any unpinned argv element that now resolves to a hashable regular file, and ResolveCmds only pins elements that already exist at consent time (resolve.go:126 swallows the hash error). So `cmds: {report: {argv: [bash, ./run.sh, out.json]}}` where out.json does not yet exist pins nothing for out.json, and after the first run creates it every subsequent Open fails with ERR_CMD_CHANGED reason 'appeared'. This is the documented design, not a defect: docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:179 specifies exactly 'without a FileHashes entry -> ERR_CMD_CHANGED{path, reason: appeared}', the conservative direction is what stops an attacker planting a file at a path the consented command will now read, and the shipped escape-hatch example (workflows/sdlc-loop.yaml:26) declares no output-path argument. Recording it so the trade-off is visible rather than as a change request.",
+      "evidence": [
+        {
+          "path": "internal/fsm/workflow/resolve.go",
+          "line": 170,
+          "note": "an unpinned argv element that now hashes returns ERR_CMD_CHANGED reason 'appeared'"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md",
+          "line": 179,
+          "note": "spec states the appeared rule verbatim, so the behaviour is intended"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

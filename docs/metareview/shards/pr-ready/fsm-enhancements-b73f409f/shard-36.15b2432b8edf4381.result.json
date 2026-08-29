@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-36.15b2432b8edf4381",
+  "kind": "shard",
+  "shardId": "shard-36",
+  "shardHash": "15b2432b8edf4381",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T18:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/store_mem.go",
+      "line": 18,
+      "note": "The \"same contract as the JSONL store\" claim was tested rather than read. Built a differential probe in a scratchpad copy of the tree that drives NewMemStore and NewJSONLStore through the same 19-step script (Events/Lock/TornFiles/RepairTail/Append on a missing run; Create; Append unlocked; Lock; double Lock; RepairTail on a healthy locked run; Append locked; stale-CAS Append; TornFiles; RepairTail after unlock; Events; List; List row fields; Root; MaxEvents) and compares the observable results. 18 of 19 are byte-identical, including every error code (ERR_RUN_NOT_FOUND, ERR_RUN_LOCKED, ERR_AUDIT_CAS, ERR_AUDIT_NOT_TORN, ERR_STORE_PATH) and the List row's RunID/State/Sidecars/Error. Root() is the single divergence. The probe file was deleted; no repository file was modified."
+    },
+    {
+      "path": "internal/fsm/run/store_mem.go",
+      "line": 64,
+      "note": "Mutation-tested every guard in the new file against `go test ./internal/fsm/run/... ./internal/fsm/machine/... ./internal/fsm/export/...` in a scratchpad copy. Killed: deleting Append's `!r.locked` check (TestStoreAppendContract), deleting RepairTail's `!r.locked` check (TestJSONLTornTail), deleting TornFiles' existence check (TestTornFiles), deleting Lock's already-held check (TestStoreAppendContract + TestReadOnlyOpen), MaxEvents() ignoring Options (TestCountedAndMaxEvents), Append passing DefaultMaxEvents instead of s.opts.maxEvents() (TestStoreAppendContract + TestM9ExitsAndStoreFailures), and making the unlock closure a no-op (8 fork tests). Survived: the Seq value on mem's ERR_AUDIT_NOT_TORN, the defensive line copy in EventsWithLines, and Root()'s empty return."
+    },
+    {
+      "path": "internal/fsm/run/store_mem.go",
+      "line": 93,
+      "note": "Checked the \"lines came through Create/Append, so this cannot fail\" comment against the encoder it depends on. internal/fsm/run/types.go:344-364 marshalCanonical now only ever ADDS escapes (raw U+2028/U+2029/U+FFFD runes -> their six-character escapes), so it cannot emit a lone backslash before a raw rune and cannot produce an undecodable line; seq/prev are assigned by prepareAppend under a CAS check, so parseLines' three failure modes are all unreachable for the memory store. The comment is accurate, and the function still returns the error rather than discarding it. `go test ./internal/fsm/run/...` reports 100.0% of statements; `go test -race ./internal/fsm/run/... ./internal/fsm/machine/... ./workflows/...` is clean."
+    },
+    {
+      "path": "workflows/review-loop.yaml",
+      "line": 1,
+      "note": "Drove the shipped workflow end to end rather than reading it. Built the CLI into the scratchpad from the frozen tree, created a throwaway git repo there, and ran both fixtures from testdata/fsm/scenarios/review-loop. reviewed path: init OK (state discover) -> advance exit 3 NEEDS_INPUT at discover with model claude-opus-5 and effort low (the REVIEWER/REV_EFFORT defaults) -> record node-output with one finding -> advance ADVANCED to adjudicate (findings_nonempty) -> advance DONE outcome `reviewed` exit 1. clean path: empty findings -> DONE outcome `clean` exit 0. Both match docs/specs/2026-08-26-metareview-0.9.0-build-plan.md:280-281. `metareview fsm workflows` lists review-loop as embedded with states [discover adjudicate done failed]."
+    },
+    {
+      "path": "workflows/review-loop.yaml",
+      "line": 7,
+      "note": "The two claims in the JUDGE_EFFORT comment both hold. `--calibration` is a real flag (internal/fsm/cli/run.go:87) and internal/fsm/workflow/resolve.go:30-38 pins JUDGE_EFFORT to workflow.CalibrationEffort, which is the literal \"medium\" (internal/fsm/workflow/workflow.go:36), refusing a caller-supplied value with ERR_CALIBRATION_PINNED. `required: true` here diverges from the older build plan's `{default: medium}` (docs/specs/2026-08-26-metareview-0.9.0-build-plan.md:512), but that is a documented, deliberate change: docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:442 records it explicitly. Confirmed live: omitting --var JUDGE_EFFORT yields ERR_JUDGE_UNSET{JUDGE_EFFORT}."
+    },
+    {
+      "path": "workflows/review-loop.yaml",
+      "line": 8,
+      "note": "All four gates named by the new workflow are registered in internal/fsm/gate/gates.go (findings_empty:40, findings_nonempty:34, confirmed_empty:52, confirmed_nonempty:46) and are in the closed list asserted by internal/fsm/gate/gate_test.go:69. The `reviewed` outcome is in run.Outcomes (internal/fsm/run/types.go:26,34) and internal/fsm/machine/machine.go:866 maps it to StatusDone with exit code 1. `failed` is declared with no transition of its own because the machine synthesises the transition into it; internal/fsm/machine/machine_test.go:436-449 exercises that path through this very file and asserts the gate name, so the strings.Replace there is not a silently non-matching (vacuous) rewrite."
+    },
+    {
+      "path": ".agents/plugins/marketplace.json",
+      "line": 9,
+      "note": "The Go floor bump is correct and, unlike earlier rounds of this PR, complete. go.mod declares `go 1.26`. `git grep -n \"1\\.22\" -- ':!docs/metareview'` returns nothing, and every other copy of the claim now reads 1.26+: .claude-plugin/plugin.json:4, .codex-plugin/plugin.json:25, INSTALL.md:9, README.md:85, cli/metareview.js:28 and :36, internal/setup/setup.go:89, package.json:52. This closes the duplicated-guard gap that cross-shard.12b2842033a1731a and shard-10-3 had reported."
+    },
+    {
+      "path": "docs/README.claude.md",
+      "line": 72,
+      "note": "Every falsifiable claim in the doc addition was checked against the code. /fsm exists as commands/fsm.md; `metareview fsm --agent-prompt` is a real subcommand (internal/fsm/cli/run.go:40); docs/fsm/driving-a-workflow.md exists and its init example passes both required vars. The 120,000-byte and 4,000-byte thresholds are internal/gitcontext/gitcontext.go:15 and :17, and the untracked comparison at :426 is `> maxUntrackedFileBytes`, so \"over 4,000 bytes\" is exact; UNTRACKED_TRUNCATED is internal/contextprofile/profile.go:21. \"Set --max-attempts on the first run of the chain; mid-chain it is ignored\" matches internal/runchain/runchain.go:84-88, where a resolved chain takes MaxAttempts from chain[0] and only falls back to the option when the root run recorded zero."
+    },
+    {
+      "path": "docs/README.claude.md",
+      "line": 81,
+      "note": "The durable/transient split in the rewritten line is accurate. `.metareview/runs/` self-ignores: internal/fsm/run/store_jsonl.go:105-118 writes `*\\n` into .metareview/runs/.gitignore, and in the throwaway repo `git check-ignore -v .metareview/runs/x` resolved to `.metareview/runs/.gitignore:1:*`. `.metareview/shards/` gets the same treatment (internal/shardpack/shardpack_test.go:88). docs/metareview/fsm/ is the real export destination (internal/fsm/export tests) and is excluded from learning ingestion at internal/learnsource/source.go:36. The result path shape in step 3 matches the sibling files actually written into this directory. workflows/ is listed in package.json's `files`, so the `//go:embed *.yaml` in workflows/embed.go still builds for an npm source checkout."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/run/store_mem.go:5 and :18 overstate the parity: \"MemStore behaves exactly like the JSONL store over them\" and \"an in-memory store with the same contract as the JSONL store\". The differential probe found the claim true for 18 of 19 observable behaviours but false for one: memStore.Root() returns \"\" while jsonlStore.Root() returns the repository root. RunStore.Root() is documented at store.go:66 with no caveat (the neighbouring TornFiles line at store.go:67 does carry its \"empty for the memory store\" caveat, which makes the omission read as deliberate parity rather than an exception). Impact is latent, not live: `grep -rn \"\\.Root()\"` finds no non-test caller today, so nothing currently joins a path against it. But the comment is the kind of claim that talks a reader out of checking, and a future caller doing filepath.Join(store.Root(), \".metareview\", ...) against a mem store silently gets a cwd-relative path instead of an absolute one. Mutating Root() to return \"/bogus\" does not fail any test in run, machine or export, so no test pins the intended value either. Two smaller inaccuracies in the same sentence: \"MemStore\" names no identifier in the package (the type is memStore, the constructor NewMemStore), and the sentence is attached to memRun, which is the per-run line holder rather than the store. Fix is a comment edit plus, if the empty root is intentional, one clause on store.go:66 saying so.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store_mem.go",
+          "line": 5,
+          "note": "\"MemStore behaves exactly like the JSONL store over them\" - attached to memRun, and not exactly true."
+        },
+        {
+          "path": "internal/fsm/run/store_mem.go",
+          "line": 23,
+          "note": "func (s *memStore) Root() string { return \"\" } - the one probed behaviour that diverges from jsonlStore.Root()."
+        },
+        {
+          "path": "internal/fsm/run/store.go",
+          "line": 66,
+          "note": "The RunStore interface documents the TornFiles divergence on the next line but says nothing about Root."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two surviving mutants in store_mem.go mark behaviour that is correct as written but unpinned by any test, despite the package reporting 100.0% of statements (statement coverage is not the same as behavioural coverage here). (a) internal/fsm/run/store_mem.go:82-95 makes a defensive per-line copy before returning lines to the caller; replacing the copy loop with `lines := r.lines` - which hands callers a slice aliasing the store's internal log - leaves the run, machine and export suites green. That is the one place a caller could corrupt an append-only audit log through a read API, and nothing would catch a future refactor that drops the copy. (b) internal/fsm/run/store_mem.go:112 carries int64(len(r.lines)) as the Seq of its ERR_AUDIT_NOT_TORN; changing it to 0 also leaves everything green, so the value is unasserted (jsonlStore.RepairTail's equivalent at store_jsonl.go:255 is the parity target). Neither is a defect in shipped behaviour; both are test gaps worth one assertion each.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store_mem.go",
+          "line": 89,
+          "note": "Defensive copy of r.lines; mutating it to alias the internal slice keeps run+machine+export green."
+        },
+        {
+          "path": "internal/fsm/run/store_mem.go",
+          "line": 112,
+          "note": "ERR_AUDIT_NOT_TORN carries len(r.lines) as Seq; mutating it to 0 keeps the suite green."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

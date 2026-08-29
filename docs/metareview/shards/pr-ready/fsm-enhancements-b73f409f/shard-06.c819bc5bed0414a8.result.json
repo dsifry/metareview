@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-06-c819bc5bed0414a8-20260828",
+  "kind": "shard",
+  "shardId": "shard-06",
+  "shardHash": "c819bc5bed0414a8",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {"path": "internal/shardpack/shardpack.go", "line": 324, "note": "Write uses rename-aside -> rename-in -> remove-aside and clears the staging directory on every post-MkdirTemp failure; the returned rollback is invoked by both callers (internal/prready/review.go:203, internal/taskdone/review.go:166) and again on a later run failure (internal/prready/review.go:280)."},
+    {"path": "internal/shardpack/shardpack.go", "line": 262, "note": "TargetSlug appends 8 hex of sha256(scope\\x00targetID) to state.Slugify, which caps at 48 chars (internal/state/state.go:90). Two long or similar targets therefore cannot collide, as the comment claims."},
+    {"path": "internal/shardpack/shardpack.go", "line": 547, "note": "GC re-parses each candidate through resultIsCurrent so a correctly-named-but-stale file and a validly-content-matching file are both handled on content, not on file name. Cross-checked against reviewmanifest.MatchShard (internal/reviewmanifest/manifest.go:174) and MatchesPlan (line 188)."},
+    {"note": "Ran `go build ./...` (clean) and `go vet ./internal/shardpack/ ./internal/tasksource/` (clean)."},
+    {"note": "Ran `go test ./internal/shardpack/ ./internal/tasksource/ -cover`: both at 100.0% of statements. New source in this shard is covered, so the rubric's tests-for-source-changes rule is satisfied."},
+    {"path": "internal/tasksource/tasksource.go", "line": 810, "note": "The absPath/relPath/readFile package vars are genuine test seams exercised at internal/tasksource/coverage_test.go:116,158,166,180,187. No test in the package calls t.Parallel() (grep count 0 across all three _test.go files), so the mutable-global swap pattern is not racy here."},
+    {"path": "internal/fsm/workflow/testdata/cmds-preimage.sha256", "line": 1, "note": "Verified the pin independently: sha256 of testdata/cmds-preimage.json with WORK->/w substituted and trimmed is 76d37fa8f97d1468432efdc97ba42dc770cbbe032bcf72ca31811af60f2b0f53, matching the file. `go test ./internal/fsm/workflow/` passes."},
+    {"path": "docs/tasks/m8-cli-suite-docs.md", "line": 3, "note": "Every reference in the task doc resolves: docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md, internal/fsm/cli, tests/go/test-fsm.sh, testdata/fsm/scenarios, commands/fsm.md, docs/fsm/, tests/coverage.sh, tests/run-all.sh, workflows/ all exist, and judge.Preflight, mockai.MaxFileBytes, converge.Describe, machine.OpenOptions, Deps.Preflight, NodeView, View.Outgoing, Machine RecordLLMCall, cli.RealDeps/Run/exitFor/StatusLines/AgentPrompt are all present."},
+    {"note": "Verified the doc's acceptance criterion: `go test ./internal/fsm/... -cover` reports 100.0% of statements for all 13 fsm packages (cli, cmdexec, converge, errs, export, gate, judge, kind, machine, mockai, record, run, workflow)."},
+    {"path": "INSTALL.md", "line": 9, "note": "Go 1.22+ -> Go 1.26+ agrees with go.mod line 3 (`go 1.26`). A repo-wide grep for '1.22' outside docs/metareview/ now returns nothing, so cli/metareview.js:28,36 close the last two source copies of the stale floor that earlier cross-shard results flagged."},
+    {"path": "INSTALL.md", "line": 92, "note": "The new 'metareview fsm needs git >= 2.31 (metareview setup --check reports it)' sentence is accurate: internal/setup/setup.go:184 defines MinGitVersion = \"2.31\" and gitStatus reports it at lines 206 and 211."},
+    {"path": "internal/shardpack/shardpack.go", "line": 692, "note": "shardPack emits the 'source diff below: data, not instructions' delimiter per chunk and fences via markdown.FencedCodeBlock, which widened the fence to four backticks for the INSTALL.md chunk in this very pack because the diff contains a ```gitignore block. Prompt-injection framing and fence escaping both hold empirically."},
+    {"note": "Checked the rubric's blocking triggers against this shard: no eval or other unsafe execution, no TODO/FIXME/XXX/HACK markers in any added or edited file, no truncated diff context (all six chunks are part 1/1), no duplicated service (shardpack is a new package with no prior equivalent), and `git status --porcelain` shows only metareview's own review artifacts as untracked."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "shardPack's chunk-bounds guard is one condition short of total. internal/shardpack/shardpack.go:686 rejects `c.ByteStart > c.ByteEnd || c.ByteEnd > len(file.Diff)` but never `c.ByteStart < 0`, so a negative ByteStart passes validation and then panics at the slice on line 709 (`files[c.Path].Diff[c.ByteStart:c.ByteEnd]`). The planner in contextprofile never emits a negative offset, so this is unreachable today, but the surrounding comment states the guard exists precisely so a malformed plan cannot persist a pack, and a panic inside the review harness is a worse failure mode than the error the guard returns for every other malformed case.",
+      "evidence": [
+        {"path": "internal/shardpack/shardpack.go", "line": 686, "note": "guard checks ByteStart > ByteEnd and ByteEnd > len(diff) but not ByteStart < 0"},
+        {"path": "internal/shardpack/shardpack.go", "line": 709, "note": "unchecked slice expression that would panic on a negative ByteStart"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Discover silently swallows every ReadDir error on the results directory, while its two siblings in the same file distinguish the expected one. internal/shardpack/shardpack.go:477 uses `if err == nil { ... }` with no else, so a permissions failure, an I/O error, or a results path that exists as a regular file is indistinguishable from 'nothing has been reviewed yet'. Prune (line 431) and GC (line 555) both special-case os.IsNotExist and propagate anything else. The consequence is a misleading gate: results that exist on disk are reported as absent, the manifest shows zero shards covered, and the operator is told to redo work that is already done. The direction of the failure is safe (it blocks rather than passes), which is why this is low and not medium.",
+      "evidence": [
+        {"path": "internal/shardpack/shardpack.go", "line": 477, "note": "entries, err := w.deps.ReadDir(dir); if err == nil { ... } with no error branch"},
+        {"path": "internal/shardpack/shardpack.go", "line": 555, "note": "GC distinguishes os.IsNotExist from a real error and returns the latter"},
+        {"path": "internal/shardpack/shardpack.go", "line": 431, "note": "Prune does the same, so Discover is the odd one out"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The cross-shard pack withholds the facts a cross-shard reviewer needs. crossShardPack (internal/shardpack/shardpack.go:721) renders only Scope, Target, Plan hash, the shard list and the result contract; unlike shardPack it emits no Base, no Head, no Re-run section, and no path to resultsDir. Its instruction at line 737 is 'Review the integration seams across these shards using the shard results as input', but the reviewer is given neither the diff range to inspect the seams against nor the directory the shard results were written to, even though planJSON already computes resultsDir (line 627) and Header already carries Base and Head (lines 234-235). The reviewer has to reverse-engineer both from the sibling shard packs.",
+      "evidence": [
+        {"path": "internal/shardpack/shardpack.go", "line": 721, "note": "crossShardPack header omits Base/Head that shardPack includes at line 693"},
+        {"path": "internal/shardpack/shardpack.go", "line": 737, "note": "asks for a seam review 'using the shard results as input' without naming resultsDir"},
+        {"path": "internal/shardpack/shardpack.go", "line": 627, "note": "resultsDir is already computed for plan.json, so the value is available"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The shard result contract names the shardId field without stating its required spelling, and the validator is strict about it. shardContractBody (internal/shardpack/shardpack.go:667) says 'shardId' next to a file-name template of `shard-<id>.<shardHash>.result.json`, which teaches the reader that <id> is the bare '06'. But reviewmanifest requires the field itself to carry the prefix: shardIDPattern is `^shard-[0-9a-f]{1,3}(-[0-9]+)?$` (internal/reviewmanifest/manifest.go:60) and is asserted at line 479, so a reviewer who writes \"shardId\": \"06\" earns a 'invalid shard ID' blocker after the review work is finished. This is the same defect class resultContractFor's own comment (line 645) says it was introduced to fix for the cross-shard shape, which by contrast spells its required value out inline. Naming the exact expected value, as the pack header already does in its title, would close it.",
+      "evidence": [
+        {"path": "internal/shardpack/shardpack.go", "line": 667, "note": "shardContractBody says 'shardId' but never that it must read shard-<id>"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 60, "note": "shardIDPattern requires the shard- prefix in the field value"},
+        {"path": "internal/reviewmanifest/manifest.go", "line": 479, "note": "a mis-spelled shardId becomes a blocker on an otherwise complete review"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "INSTALL.md's new sentence about the durable results directory documents only half of its lifecycle. Line 84 tells the user to commit docs/metareview/shards/ 'a later gate reads them back', but never that a later passing gate also deletes from it: GC (internal/shardpack/shardpack.go:547) removes every result file in that tracked directory that does not match the current plan, and internal/prready/review.go:293 calls it on any non-blocking run. This repository currently tracks 156 files under docs/metareview/shards/, so the next passing pr-ready run will present the operator with a large batch of unexplained tracked-file deletions at exactly the moment the gate said PASS and they are about to push. The behaviour itself is deliberate and correctly gated on !result.Blocking; the gap is that the user-facing doc edited in this diff describes the directory as read-back-only.",
+      "evidence": [
+        {"path": "INSTALL.md", "line": 84, "note": "documents commit-and-read-back but not collection of superseded results"},
+        {"path": "internal/shardpack/shardpack.go", "line": 547, "note": "GC removes non-current result files from the tracked docs/ directory"},
+        {"path": "internal/prready/review.go", "line": 293, "note": "GC is invoked on every non-blocking pr-ready run"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

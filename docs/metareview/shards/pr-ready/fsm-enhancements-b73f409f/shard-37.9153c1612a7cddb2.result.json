@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-37-review",
+  "kind": "shard",
+  "shardId": "shard-37",
+  "shardHash": "9153c1612a7cddb2",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:42:46Z",
+  "evidence": [
+    {
+      "path": "tests/go/test-task-done-review.sh",
+      "line": 99,
+      "note": "Mutation-verified the one changed line. In a scratchpad copy of the repo the script exits 0 as shipped; repointing the same assertion at a string that IS in the context pack (\"Generated Review\") makes it exit 1, and I confirmed separately under bash -euo pipefail that the old `! grep -q ...` form returns 0 even when the forbidden string is present (set -e exempts a pipeline whose value is inverted with !). The rewrite is a real fix, not a cosmetic one, and `grep ... && exit 1` is safe under errexit because a failure before the final && of an AND-list is exempt. Swept the whole repo for the same dead form: zero remaining bare `!` assertions in any .sh."
+    },
+    {
+      "path": "internal/fsm/gate/gates.go",
+      "line": 113,
+      "note": "All nine gates match the spec table at docs/specs/2026-08-27-metareview-0.9.0-fsm-core.md:200-206 field for field, including the nothing_found/nothing_confirmed predicate (len(AllFound)==0 && len(Findings|Confirmed)==0), the ERR_GATE_INAPPLICABLE precondition on commit_exists, and its Detail = count + porcelain + WorkingDiff(MaxDetail) through CapDetail. Every declared code constant is used in this file; Names() is pinned by gate_test.go:70. Package coverage is 100.0% of statements and the gate table in gate_test.go:38-50 kills the obvious mutants (n>0 -> n>=0, Confirmed/Findings swap, dropping the AllFound guard each flip a pinned case)."
+    },
+    {
+      "path": "internal/fsm/judge/prompts.go",
+      "line": 234,
+      "note": "Provenance verified end to end, not just self-consistently: the sibling repo IS present at ~/Developer/harnesseval on this machine, so TestJ1Provenance's strict layer actually runs, and I independently confirmed the vendored testdata/prompts/*.python.txt bodies are byte-identical to harnesseval@19ff9a8 judge.py:22, adjudicate.py:21 and sdlc_loop.py:321. TemplateStillPresentProduct is exactly the calibration template plus the confidence line (judge_test.go:133)."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/match.calibration.golden",
+      "line": 6,
+      "note": "The golden encodes the two properties that matter for format(): the value \"off-by-one in {{loop}}\" and the candidate \"loop bound {candidate} wrong }}\" are inserted verbatim (values are never rescanned), while the template's own {{ }} unescape to single braces in the JSON hint on the last line. match.plain.golden, match.fenced.golden and match.calibration.golden are byte-identical (md5 3f6c78b0b24ea1b35ca4e48a19ce8323), which is correct: RenderPrompt registers no fenced slots for the match kind, so fence and calibration cannot change its output. Unfenced match is the documented design decision C25, not an oversight."
+    },
+    {
+      "path": "internal/fsm/run/testdata/golden-log.jsonl",
+      "line": 1,
+      "note": "Independently validated the fixture rather than trusting the golden test that regenerates it: all 24 lines have seq 1..24 with no gaps, every prev equals the sha256 of the exact preceding line's bytes (line 1 hashes to 8d7d83be...c07c, which is line 2's prev), and the three delta_applied output_hash values match sha256 over the canonical JSON of the matching node_output payload (b71feb6d..., 0f67853d..., fffdd0ea..., 49178933...). The confidence 0.8 on the verify delta versus 0 on the verify llm_call is deliberate in fold_test.go:55-57, not fixture drift."
+    },
+    {
+      "path": "internal/fsm/judge/smoke_test.go",
+      "line": 15,
+      "note": "Every claim in the smoke test's doc comment checks out: `go vet -tags smoke ./internal/fsm/judge/` is clean, the test skips cleanly with OPENAI_API_KEY unset, and tests/run-all.sh:11-12 does exactly what the comment says (vet plus `go test -tags smoke -list TestSmoke`, never a run). The request it builds is valid against the router: route(\"gpt-5.2\") is provOpenAI, effort \"low\" is in the effort vocabulary, URLs{} falls back to DefaultURLs in NewWithCodex, and the 16-char nonce satisfies FenceBlock."
+    },
+    {
+      "path": "internal/learning/review.go",
+      "line": 278,
+      "note": "The markdownList deletion is a clean dead-code removal, not a lost feature: no other file in package learning referenced it (the four live copies are in reviewmanifest, epicready, taskdone and prready, each with its own definition), the branch touches nothing else in internal/learning, and the package builds and tests green after the removal."
+    },
+    {
+      "note": "Repository-level verification on the frozen branch: go test ./internal/fsm/... ./internal/runchain/... ./internal/learning/... all pass; internal/fsm/gate and internal/fsm/judge are both at 100.0% statement coverage; internal/runchain is 89.7% (pre-existing). No eval, no TODO/FIXME markers added, no truncated diff context, no duplicated service path in this shard. Nothing was written to the repository except this result file; the mutation experiments ran in a scratchpad copy."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "False justification comment on a write path. internal/runchain/runchain_test.go:241 says \"Read-only path: there is nothing a Close error could tell the caller\", but appendLine opens the file O_CREATE|O_WRONLY|O_APPEND (line 239) and WriteStrings to it (line 243). The comment is copied from internal/runchain/runchain.go:109, where it is true (os.Open, read only). Behaviour is unchanged from the previous `defer file.Close()` and the swallowed error is harmless here (unbuffered os.File writes in a test helper), so this is a doc defect only - but it is exactly the class this PR is hunting: a comment that talks a reader out of a check on a path where the stated reason does not hold. Either drop the comment or say why a write-path Close is being ignored. Note this was already reported against an earlier plan (shard-1b, plan 12b2842033a1731a) and is still present at HEAD 334e752.",
+      "evidence": [
+        {
+          "path": "internal/runchain/runchain_test.go",
+          "line": 241,
+          "note": "\"Read-only path\" comment sits above a defer on a file opened O_WRONLY|O_APPEND and written to at line 243"
+        },
+        {
+          "path": "internal/runchain/runchain.go",
+          "line": 109,
+          "note": "the same sentence, where it is accurate: this file is opened with os.Open"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead assertion inside an otherwise live test. internal/runchain/runchain_test.go:258 fails the test if the fixture is <= 64 KiB, but line 255 has already fataled unless len(long) == maxJSONLLineBytes, i.e. exactly 1048576, so the second check cannot fire for any input - it is unreachable by construction, and deleting it changes nothing. The comment above it (\"so the test exercises the documented 1 MiB boundary rather than merely exceeding bufio's 64 KiB default\") is satisfied entirely by the first check. For contrast, the rest of the test is genuinely live: I reverted internal/runchain/runchain.go:114 from maxJSONLLineBytes+2 to maxJSONLLineBytes in a scratch copy and the test failed with \"bufio.Scanner: token too long\", so the +2 is properly pinned.",
+      "evidence": [
+        {
+          "path": "internal/runchain/runchain_test.go",
+          "line": 258,
+          "note": "if len(long) <= 64*1024 is unreachable after the exact-length fatal at line 255"
+        },
+        {
+          "path": "internal/runchain/runchain_test.go",
+          "line": 255,
+          "note": "len(long) != maxJSONLLineBytes fatal already fixes the length at 1048576"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new test's plural name overstates its coverage, and the reader it does not cover reads the same file with a two-byte-smaller cap. TestReadersAcceptOneMiBLines exercises only runchain.ReadRuns; internal/fsm/record/record.go:156 reads the very same <root>/.metareview/runs.jsonl (record.go:62) with sc.Buffer(make([]byte,0,1<<20), 1<<20) - no +2 - which is precisely the case the duplicated comment at runchain.go:13-16 explains bufio rejects. I demonstrated it empirically in a scratch copy: writing the exact fixture shape this test writes (a row of exactly 1048576 bytes plus LF) and calling record.Exists returns \"bufio.Scanner: token too long\", so a row that runchain, state, findings and reviewlog all accept makes both record.Exists and record's terminal append fail permanently, with no repair path. This is a known cross-shard item (shard-00 and shard-0a raised it against earlier plans) and is still unfixed at HEAD; recording it here because runchain_test.go is this shard's chunk. Fix: share one constant and one scanner helper across the five readers, or rename the test to the single reader it covers.",
+      "evidence": [
+        {
+          "path": "internal/runchain/runchain_test.go",
+          "line": 235,
+          "note": "TestReadersAcceptOneMiBLines (plural) calls only ReadRuns at line 262"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 156,
+          "note": "sc.Buffer(make([]byte, 0, 1<<20), 1<<20): the one reader of runs.jsonl without the documented +2"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 62,
+          "note": "path(root) is filepath.Join(root, \".metareview\", \"runs.jsonl\") - the same file runchain.ReadRuns opens"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Gate detail that misdescribes its own failure. internal/fsm/gate/gates.go:136 reports ERR_BUGS_REMAIN with Detail \"0 of 0 bugs unfixed\" when all_fixed is evaluated on a snapshot where nothing was ever found, because converge.AllFixed is false for an empty AllFound by design. An operator reading that line in the audit sees a self-contradictory sentence: the gate says bugs remain and the count says none do. The real reason is \"no bugs were ever found, so 'all fixed' cannot be true\". gate_test.go:45 pins the code but only asserts Detail != \"\", so the wording is unconstrained. Not reachable in the shipped sdlc-loop (verify is only entered through confirmed_nonempty, and the spec notes this at fsm-core.md:35), which is why this is low rather than medium, but it is reachable in any user workflow that gates on all_fixed earlier. Suggest a distinct sentence for the len(AllFound)==0 case.",
+      "evidence": [
+        {
+          "path": "internal/fsm/gate/gates.go",
+          "line": 136,
+          "note": "fmt.Sprintf(\"%d of %d bugs unfixed\", s.Unfixed, len(s.AllFound)) renders \"0 of 0 bugs unfixed\" on an empty snapshot"
+        },
+        {
+          "path": "internal/fsm/converge/converge.go",
+          "line": 27,
+          "note": "AllFixed = len(s.AllFound) > 0 && s.Unfixed == 0, so nothing-found is deliberately not 'fixed'"
+        },
+        {
+          "path": "internal/fsm/gate/gate_test.go",
+          "line": 45,
+          "note": "{\"all_fixed\", run.Snapshot{}, CodeBugsRemain} pins the code; Detail is only checked for non-emptiness at line 63"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Provenance comment names the wrong one of the reference's two _strip_fences implementations. internal/fsm/judge/prompts.go:455 says stripFences \"is the reference's _strip_fences (no pre-trim, model_router path)\", but harnesseval@19ff9a8 has two: model_router.py:23 returns s.strip() unconditionally (outside the fence branch), while judge.py:42 strips only inside the branch. The Go body matches judge.py, not model_router; what it takes from the model_router path is only the absence of a caller pre-trim. I checked both against the sibling repo. There is no behavioural consequence - encoding/json skips leading and trailing whitespace, so an unfenced verdict with surrounding whitespace decodes identically either way, and the spec's J2 case (leading whitespace before a fence -> parse error) holds for all three implementations - so this is a documentation accuracy issue only, on a comment whose whole purpose is to name the source being mirrored.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/prompts.go",
+          "line": 455,
+          "note": "comment claims the model_router variant; the TrimSpace is inside the HasPrefix branch, which is judge.py's shape"
+        },
+        {
+          "path": "internal/fsm/judge/prompts.go",
+          "line": 513,
+          "note": "Parse calls stripFences(raw) with no pre-trim, which is the model_router caller discipline the comment's parenthetical is about"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

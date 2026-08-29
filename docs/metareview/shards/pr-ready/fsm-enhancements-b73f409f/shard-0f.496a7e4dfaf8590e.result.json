@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0f.496a7e4dfaf8590e",
+  "kind": "shard",
+  "shardId": "shard-0f",
+  "shardHash": "496a7e4dfaf8590e",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "tests/go/test-pr-ready-review.sh",
+      "line": 146,
+      "note": "The `! grep -q X f` -> `grep -q X f && exit 1` rewrite (10 sites) is a real bug fix, not churn. Verified empirically on this host (GNU bash 3.2.57, the /bin/bash the shebang `#!/usr/bin/env bash` resolves to): under `set -euo pipefail` a top-level `! cmd` is exempt from set -e (bash manual: \"...or if the command's return value is being inverted with !\"), so `! grep -q \"Unresolved review blockers\" f` returned 1 and the script continued -- the assertion was vacuous and could never fail. Reproduced both forms against a file containing the string: old form printed its follow-on echo and exited 0; new form exited 1. All ten negative assertions in this file were previously dead."
+    },
+    {
+      "path": "tests/go/test-pr-ready-review.sh",
+      "line": 1,
+      "note": "Ran `bash tests/go/test-pr-ready-review.sh` end to end: EXIT=0. The ten newly-live assertions all genuinely hold, so the rewrite did not merely re-arm dead checks onto a failing product. Also confirmed the fix is complete suite-wide: `grep -rn '^\\s*! ' tests/ --include=*.sh` now returns nothing, and no `grep ... && exit 1` is the final command of the script (tail is the `$TMP/failure` scenario), so the pattern cannot leak a false nonzero script exit."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 98,
+      "note": "Read the whole file plus its caller (internal/gitcontext/gitcontext.go:71-101) and internal/gitcontext/branchfiles_test.go (367 lines, 8 tests). The exotic-path, rename/delete/mode/binary, gitattributes `-diff` defeat, exclude and truncation-gating cases are all covered and assert against a whole-branch-diff byte oracle. `--` + GIT_LITERAL_PATHSPECS=1 on the per-file diff and pathspec-magic (no literal) on the name-only listing is the correct pairing; the `BranchFile` doc claim \"never reaches the context-diff JSON payload\" is accurate (gitcontext.go:49-52 carry `json:\"-\"`). `realGit` setting cmd.Stderr before cmd.Output() is legal -- Output() only rejects a pre-set Stdout."
+    },
+    {
+      "path": "internal/gitcontext/branchfiles.go",
+      "line": 121,
+      "note": "`go test -count=1 ./internal/gitcontext` passes; `go tool cover -func` gives branchfiles.go: realGit 75.0%, measureBranchFiles 80.0%, everything else 100.0% (package 85.1% unit-only). Not a gate failure: tests/coverage.sh:92-98 requires every-statement coverage only for internal/fsm/* and workflows, and holds internal/gitcontext to the 86.8 floor in tests/coverage-floor.txt:10 measured over the merged unit + shell profile."
+    },
+    {
+      "path": ".claude-plugin/plugin.json",
+      "line": 3,
+      "note": "Version bump verified consistent across .claude-plugin/plugin.json, .claude-plugin/marketplace.json, .codex-plugin/plugin.json, package.json and internal/version/version.go -- all 0.9.0, no stale 0.8.2 outside CHANGELOG history. `bash tests/manifest/test-manifests.sh` exits 0. The \"Go 1.26+\" claim matches go.mod's `go 1.26` directive."
+    },
+    {
+      "path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-enhancements.md",
+      "line": 57,
+      "note": "Spec cross-checked against the shipped implementation rather than read in isolation. Substantively accurate: the subcommand set in §4 matches internal/fsm/cli/run.go:37 (init|state|advance|record|gate|judge|converge|diff|export|workflows|--agent-prompt); §5's states/transitions/vars match workflows/sdlc-loop.yaml including `JUDGE: {required: true}` and ERR_JUDGE_UNSET (internal/fsm/cli/envelope.go:54); §10's `.metareview/runs/<run-id>/` matches internal/fsm/record/record.go:88; `advance --from` exists (run.go:57). The inaccuracies are confined to the status banner, the command name, and the coverage claim (see findings)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The spec lands with a status banner that contradicts the branch it lands on: \"Status: DRAFT for review... It is a design plan, not an implementation. Build nothing until the schema and interfaces below are reviewed and locked\" -- while the same branch ships internal/fsm/**, workflows/sdlc-loop.yaml, the `metareview fsm` subcommand tree and the 0.9.0 version bump. §15 \"Open questions to resolve before build\" is likewise already answered by shipped code: §15.2 asks to \"Confirm we ship a `mrv fsm --agent-prompt`\" (internal/fsm/cli/run.go:40 ships it), §15.3 asks where state lives (internal/fsm/record/record.go:88 fixes it at .metareview/runs/<run-id>/). A reader hitting docs/specs/ later cannot tell this is a record of a decision already executed.",
+      "evidence": [
+        {"path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-enhancements.md", "line": 3},
+        {"path": "internal/fsm/cli/run.go", "line": 40}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Every CLI example in the spec invokes `mrv`, a command that does not exist. The binary is `metareview` (package.json:6 maps the only npm bin to cli/metareview.js; cmd/metareview is the only main package) and there is no `mrv` alias anywhere in the tree -- `mrv-` appears only as a run-id prefix (internal/state/state.go:104). Roughly fourteen call sites are affected (§4 lines 57-65, §7 line 180, §10.1 line 271, §12 line 312, §15.2 line 385, §17 lines 472-473), so no example in the document is copy-pasteable, and the shipped agent prompt correctly says `metareview fsm` (internal/fsm/cli/prompt.go:23), leaving the two docs disagreeing on the command name.",
+      "evidence": [
+        {"path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-enhancements.md", "line": 57},
+        {"path": "internal/fsm/cli/prompt.go", "line": 23}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "§18 asserts a repo-wide quality standard that does not exist, and repeats it three times as the justification for its merge policy: \"The metareview Go binary already has 100% test coverage as a hard quality gate\", \"New FSM code that drops coverage below 100% does not merge\", \"100% coverage maintained as the hard merge gate (existing binary standard)\". tests/coverage.sh:91-99 applies the every-statement rule only to `internal/fsm/*|workflows`; every other package is checked against a per-package floor in tests/coverage-floor.txt, where the values run from 76.1 (internal/contextpack) through 81.2 (cmd/metareview) to 96.3 (internal/contextprofile), with internal/gitcontext at 86.8. The conclusion (hold new FSM code to 100%) is what the gate does enforce, so the practical effect is nil, but the premise will mislead anyone who reads it as a description of the existing binary.",
+      "evidence": [
+        {"path": "docs/specs/2026-08-26-metareview-0.9.0-fsm-enhancements.md", "line": 565},
+        {"path": "tests/coverage-floor.txt", "line": 10}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The exclude-pathspec encoding is now defined twice inside package gitcontext: pathspecArgs (branchfiles.go:82-94) and withPathspec (gitcontext.go:283-296) independently build the same `--`, `.`, `:(exclude)<trimmed>` sequence with the same trim-and-skip-empty rule. They must stay byte-identical: withPathspec drives the truncation-detecting diff that decides whether branch measurement runs at all, and pathspecArgs drives the file list that becomes the shard plan, so a divergence would silently make the set of files sharded differ from the set of files the truncation gate measured. This is the duplicated-code-path case the rubric calls out, at the smallest scale.",
+      "evidence": [
+        {"path": "internal/gitcontext/branchfiles.go", "line": 82},
+        {"path": "internal/gitcontext/gitcontext.go", "line": 283}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "branchPaths documents that it depends on GIT_LITERAL_PATHSPECS being unset (\"no GIT_LITERAL_PATHSPECS, so :(exclude) is honoured\"), but realGit never clears the ambient environment -- it leaves cmd.Env nil when the caller passes no additions, so the child inherits os.Environ() wholesale. If the invoking process already exports GIT_LITERAL_PATHSPECS=1 (or GIT_NOGLOB_PATHSPECS/GIT_ICASE_PATHSPECS), `:(exclude)<path>` is taken as a literal filename, the exclude filter matches nothing, and the branch measurement silently includes generated files with no error and no warning -- the failure mode is a wrong shard plan, not a crash. Inherited GIT_DIR/GIT_WORK_TREE would likewise override cmd.Dir = root. Passing an explicit sanitising env (or `GIT_LITERAL_PATHSPECS=0` on the name-only call) would make the documented precondition enforced rather than assumed.",
+      "evidence": [
+        {"path": "internal/gitcontext/branchfiles.go", "line": 39},
+        {"path": "internal/gitcontext/branchfiles.go", "line": 63}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "measureBranchFiles re-executes the identical per-path `git diff --no-renames --text --no-textconv <base>..HEAD -- <path>` that collectBranchFiles has already run moments earlier, so whenever excludes are configured (the normal path for pr-ready, internal/prready/review.go:95) the entire branch diff is generated twice: once retained at gitcontext.go:84, once discarded for a byte total at gitcontext.go:95. Cost is one git subprocess per changed path per pass, on exactly the oversized branches that triggered branch measurement in the first place. The unfiltered pass could instead reuse the filtered results and diff only the excluded paths, or run a single `git diff --numstat`-style pass. Related: the loop's error branch (lines 130-132) is the only uncovered statement group in the function (80.0% per `go tool cover -func`).",
+      "evidence": [
+        {"path": "internal/gitcontext/branchfiles.go", "line": 128},
+        {"path": "internal/gitcontext/gitcontext.go", "line": 95}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new plugin description appends the FSM clause to the wrong sentence: \"...Packaged releases use bin/metareview; source checkout mode requires Go 1.26+, plus FSM workflow runs (metareview fsm).\" reads as though FSM runs are a property of source-checkout mode rather than a capability of the harness. .codex-plugin/plugin.json:4 attaches the identical clause correctly, after \"post-merge learning\", so the two manifests describe the same release differently. Marketplace listings surface this string verbatim.",
+      "evidence": [
+        {"path": ".claude-plugin/plugin.json", "line": 4},
+        {"path": ".codex-plugin/plugin.json", "line": 4}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

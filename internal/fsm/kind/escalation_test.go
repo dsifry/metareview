@@ -12,6 +12,7 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/machine"
 	"github.com/dsifry/metareview/internal/fsm/run"
 	"github.com/dsifry/metareview/internal/fsm/sandbox"
+	"github.com/dsifry/metareview/internal/fsm/workflow"
 )
 
 // End to end with every service real and only the outermost seams faked: a real materialized
@@ -48,7 +49,7 @@ func TestEscalationEndToEndWithMocks(t *testing.T) {
 	// 3. the registry, with escalation injected
 	reg, err := New(Deps{
 		Judge: &scriptedJudge{real: false}, // the cheap arm rejects
-		Escalate: func(context.Context, run.Snapshot) (*Escalation, error) {
+		Escalate: func(context.Context, run.Snapshot, *workflow.Node) (*Escalation, error) {
 			return &Escalation{
 				Judge: confined, Model: "codex/gpt-5.6-sol", Effort: "medium",
 				Evidence: run.EvidenceSandbox, TreeHash: tree.TreeHash,
@@ -114,7 +115,7 @@ func TestEscalationIsResolvedLazilyAndOnce(t *testing.T) {
 		calls := new(int)
 		return calls, Deps{
 			Judge: &scriptedJudge{real: real},
-			Escalate: func(context.Context, run.Snapshot) (*Escalation, error) {
+			Escalate: func(context.Context, run.Snapshot, *workflow.Node) (*Escalation, error) {
 				*calls++
 				return &Escalation{Judge: &scriptedJudge{real: true}, Model: "codex/x", Effort: "medium", Evidence: run.EvidenceSandbox}, nil
 			},
@@ -156,8 +157,10 @@ func TestEscalationIsResolvedLazilyAndOnce(t *testing.T) {
 // what happens for any escalation that cannot produce an answer.
 func TestEscalationProviderErrorKeepsTheFinding(t *testing.T) {
 	reg, err := New(Deps{
-		Judge:    &scriptedJudge{real: false},
-		Escalate: func(context.Context, run.Snapshot) (*Escalation, error) { return nil, errSandboxUnavailable },
+		Judge: &scriptedJudge{real: false},
+		Escalate: func(context.Context, run.Snapshot, *workflow.Node) (*Escalation, error) {
+			return nil, errSandboxUnavailable
+		},
 	})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
@@ -190,7 +193,7 @@ var errSandboxUnavailable = errors.New("sandbox unavailable")
 func TestEscalationProviderReturningNilLeavesTheRejection(t *testing.T) {
 	reg, err := New(Deps{
 		Judge:    &scriptedJudge{real: false},
-		Escalate: func(context.Context, run.Snapshot) (*Escalation, error) { return nil, nil },
+		Escalate: func(context.Context, run.Snapshot, *workflow.Node) (*Escalation, error) { return nil, nil },
 	})
 	if err != nil {
 		t.Fatalf("registry: %v", err)

@@ -72,7 +72,7 @@ type Deps struct {
 // executor invocation, on the first cross-file rejection - because materializing an evidence
 // tree costs real time and a run that confirms everything must not pay it. Returning a nil
 // Escalation, or an error, leaves the finding unresolved rather than rejected.
-type EscalateFunc func(ctx context.Context, snap run.Snapshot) (*Escalation, error)
+type EscalateFunc func(ctx context.Context, snap run.Snapshot, node *workflow.Node) (*Escalation, error)
 
 // Escalation is the second opinion and everything the audit needs to describe it. The judge
 // carries its own model and effort because it is a different judge, not the node's; and the
@@ -559,8 +559,8 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 // resolve builds the escalation at most once per executor invocation and remembers the
 // outcome, error included: a sandbox that could not be materialized will not be retried for
 // every remaining candidate.
-func (e *adjudicateExec) resolve(ctx context.Context, snap run.Snapshot) (*Escalation, error) {
-	e.once.Do(func() { e.resolved, e.resolveErr = e.escalate(ctx, snap) })
+func (e *adjudicateExec) resolve(ctx context.Context, snap run.Snapshot, node *workflow.Node) (*Escalation, error) {
+	e.once.Do(func() { e.resolved, e.resolveErr = e.escalate(ctx, snap, node) })
 	return e.resolved, e.resolveErr
 }
 
@@ -572,7 +572,7 @@ func (e *adjudicateExec) secondOpinion(ctx context.Context, in machine.ExecInput
 		return run.Bug{}, false
 	}
 	desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
-	esc, err := e.resolve(ctx, in.Snap)
+	esc, err := e.resolve(ctx, in.Snap, in.Node)
 	if err != nil || esc == nil || esc.Judge == nil {
 		if err == nil {
 			return run.Bug{}, false // escalation deliberately unavailable: the rejection stands

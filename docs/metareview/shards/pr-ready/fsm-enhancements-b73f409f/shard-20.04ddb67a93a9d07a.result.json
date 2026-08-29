@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-20-review",
+  "kind": "shard",
+  "shardId": "shard-20",
+  "shardHash": "04ddb67a93a9d07a",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+      "line": 163,
+      "note": "Read the whole 352-line spec 3 (fork/diff/export/runs.jsonl) and cross-checked its normative shapes against the implementation in internal/fsm/machine/fork.go, internal/fsm/machine/diff.go, internal/fsm/kind/decision.go, internal/fsm/export/export.go and internal/fsm/record/record.go. Most of it holds: Fork steps 0-10, the escalation rule (machine.Escalated / MaxAttempts=3), kind.Decision's Raw/Effective rules incl. Effective==Raw for match, the runs.jsonl Row key set and verdict map, checkDest/MkdirAll(0700)/OpenFile O_EXCL|O_NOFOLLOW all match. Four claims do not."
+    },
+    {
+      "path": "internal/fsm/cli/judgeoverride_test.go",
+      "line": 1,
+      "note": "Ran the four new tests with -count=1 -v: all pass. Verified judgeOverride/applyJudgeOverrideFor precedence and trimming against internal/fsm/cli/wiring.go:154-176 and 266-290, and the calibration-pin claim against internal/fsm/workflow/resolve.go:30-38 (Resolve does refuse a supplied JUDGE/JUDGE_EFFORT under --calibration). realCodexExec's three exit paths (internal/fsm/cli/deps.go:101-115) behave as the subtests assert."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/match.python.txt",
+      "line": 1,
+      "note": "Provenance is genuinely verified, not merely asserted. TestJ1Provenance (internal/fsm/judge/judge_test.go:36-69) recomputes sha256 over the body and requires the header to end with it, and the sibling repo ~/Developer/harnesseval is present here, so the layer that compares the vendored literal to `git show 19ff9a8:harnesseval/judge.py` actually ran and passed (no skip log under -v). The header's `judge.py:22` line number is also correct: JUDGE_PROMPT is at line 22 of that object."
+    },
+    {
+      "path": "internal/reviewers/prready.go",
+      "line": 133,
+      "note": "The Manifest wiring is real, not decorative: PRReadyContext.Manifest is populated by internal/prready/review.go:185 via manifestContext(manifest, aggregate) and reaches branchDiffFindings' TaskDoneContext, and internal/reviewers/sharded_test.go:227 exercises RunPRReady with satisfiedManifest() over a truncated git context. Before this change pr-ready's branch-diff pass received a zero ManifestContext and its context-risk blocker could never be cleared by shard results."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "Shipped `fsm diff` JSON carries a dead field whose doc comment asserts a property it does not have, and the spec's CallRow contract does not declare it. machine.CallRow.Index (internal/fsm/machine/diff.go:29-33) is exported with `json:\"index\"` and documented as \"Index distinguishes several calls of one kind in the same node@iter with the same input - the same question put to two models. Without it the rows collided and the earlier call vanished from the report.\" It is never assigned anywhere in the package (the only `.Index` writes are CallSide.Index at diff.go:109 and machine.go:1066); the real disambiguator is the unexported `occurrence` field (diff.go:38, 101-105, 141). So every row of the report serialises `\"index\":0`, and the report is emitted verbatim to the CLI envelope at internal/fsm/cli/run.go:918, i.e. a consumer that reads the documented field to group repeated calls gets a constant. The spec's own CallRow declaration (docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md:164) lists no Index on CallRow, and the ledger row at line 342 records only a \"per-side Index\", so spec and code disagree about the output contract. Either set the field from `occurrence` (and add it to the spec's CallRow) or delete it.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 164,
+          "note": "spec CallRow has no Index field; ledger line 342 records only per-side Index"
+        },
+        {
+          "path": "internal/fsm/machine/diff.go",
+          "line": 32,
+          "note": "exported json:\"index\" field, documented as the repeat disambiguator, never assigned; occurrence at line 38 does the work"
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 918,
+          "note": "the Report is shipped as-is in the fsm diff envelope, so \"index\":0 reaches consumers"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The spec's r5 change header names a torn-tail file the code never writes, and contradicts the same document's own body. Line 24 says the torn tail is \"preserved to `runs.jsonl.torn-<ts>`\"; section 6 at line 251 says `.metareview/runs/.torn/runs.jsonl-<unixnano>`, the F9 test row at line 317 says `runs/.torn/runs.jsonl-*`, and internal/fsm/record/record.go:219-223 actually writes filepath.Join(root, \".metareview\", \"runs\", \".torn\", fmt.Sprintf(\"runs.jsonl-%d\", nanos())). The header is the part an operator reads when recovering a torn append, so it points at a filename that will never exist.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 24,
+          "note": "r5 header: torn tail preserved to `runs.jsonl.torn-<ts>`"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 251,
+          "note": "section 6 of the same doc: `.metareview/runs/.torn/runs.jsonl-<unixnano>`"
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 219,
+          "note": "the implementation writes .metareview/runs/.torn/runs.jsonl-<nanos>"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Manifest.Bytes is specified as one thing and implemented as another, and MaxBytes is enforced against the smaller number. The spec (line 189) declares `Bytes int64 /* sum of all written files */` and section 5 states the bundle \"is built in memory and MaxBytes is checked before the first write\". In internal/fsm/export/export.go the field's own comment (line 80) says \"every written file except manifest.json itself\", and the accumulation loop at lines 167-169 runs before `files[\"manifest.json\"]` is inserted at line 173. So (a) the documented meaning of a manifest field is wrong, and (b) an export whose payload sits just under MaxBytes writes more than MaxBytes bytes to disk - the cap systematically undercounts by the manifest's own size. Pick one meaning and make the spec, the field comment and the MaxBytes check agree.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 189,
+          "note": "spec Manifest: Bytes = sum of all written files"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 167,
+          "note": "m.Bytes accumulated over files before manifest.json is added at line 173; MaxBytes compared at line 170"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The new test file's headline test covers a wrapper with no production caller, so it gives assurance about a path that never runs. ctxDeps.applyJudgeOverride (internal/fsm/cli/wiring.go:250-256, a file added whole by this PR) is called only from internal/fsm/cli/judgeoverride_test.go:45, 57 and 63; the shipped path is applyJudgeOverrideFor, invoked once at internal/fsm/cli/run.go:307 with the calibration bool. Grepping the whole tree for `applyJudgeOverride(` returns exactly those three test call sites plus the definition. Because tests/coverage.sh gates every internal/fsm/* package at exactly 100.0% of statements (tests/coverage.sh header, lines 10-12), this dead wrapper is kept green solely by the test written for it - the failure mode that gate exists to prevent. Either delete the wrapper and retarget TestApplyJudgeOverrideCopiesAndOverlays at applyJudgeOverrideFor(..., false), or give it a real caller.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/judgeoverride_test.go",
+          "line": 45,
+          "note": "the only callers of applyJudgeOverride are this test's lines 45, 57 and 63"
+        },
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 254,
+          "note": "applyJudgeOverride delegates to applyJudgeOverrideFor(..., false) and has no non-test caller"
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 307,
+          "note": "the production path calls applyJudgeOverrideFor directly with p.bools[\"calibration\"]"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Both change-header lines describing CommonPrefixSeq are stale and mutually inconsistent with section 4 and with the code. Line 22 (r4) says the comparison is over `(Type, Node, Data)` - omitting At, which is precisely the field that stops a child's fresh `tree` from extending the prefix. Line 30 (r5) says the \"tuple includes `Origin` presence\". Section 4 (line 174 onward) says `(Type, Node, At, Data)` with Origin, Seq and Prev ignored, and commonPrefix in internal/fsm/machine/diff.go:186-196 implements exactly section 4. The body is right; the two header claims are wrong.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 22,
+          "note": "r4 header omits At from the tuple"
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 30,
+          "note": "r5 header claims the tuple includes Origin presence; section 4 line 174 says Origin is ignored"
+        },
+        {
+          "path": "internal/fsm/machine/diff.go",
+          "line": 188,
+          "note": "commonPrefix compares Type, Node, At and Data only"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two spec type declarations name shapes the code does not have. Line 187-188 declare `type ExportOptions struct` and `Export(ctx, deps Deps, runID string, opts ExportOptions)`, but the implementation is `export.Options` (internal/fsm/export/export.go:56-61) and `Export(ctx, deps, runID, opts Options)` (line 85), which is what the CLI constructs at internal/fsm/cli/run.go:929. Line 163 declares `Outcomes [2]run.Outcome`, but machine.Report.Outcomes is `[2]string` (internal/fsm/machine/diff.go:18). Cosmetic, but this spec is the reference for spec 5's wiring.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+          "line": 187,
+          "note": "spec names ExportOptions; code has export.Options"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 56,
+          "note": "type Options struct { Out; IncludeVars; MaxBytes }"
+        },
+        {
+          "path": "internal/fsm/machine/diff.go",
+          "line": 18,
+          "note": "Outcomes [2]string, not [2]run.Outcome"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "An assertion that cannot test the property its comment claims. judgeoverride_test.go:62-66 comments \"With nothing set the same map comes back: no copy, no change\" but then asserts only `len(same) != len(vars) || same[JudgeVar] != \"gpt-5.2\"`. An implementation that copied the map and returned the copy would satisfy both clauses identically, so the \"no copy\" half of the claim is untested. If identity is the contract, assert it with a reflect.ValueOf(...).Pointer() comparison or by mutating `same` and observing `vars`; otherwise drop the claim from the comment.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/judgeoverride_test.go",
+          "line": 63,
+          "note": "comment claims no copy; the length+value assertion cannot distinguish the original map from a copy"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 4
+}

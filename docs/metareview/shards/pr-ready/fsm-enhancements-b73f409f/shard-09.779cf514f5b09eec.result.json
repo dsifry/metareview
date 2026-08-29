@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-09.779cf514f5b09eec",
+  "kind": "shard",
+  "shardId": "shard-09",
+  "shardHash": "779cf514f5b09eec",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:08:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 276,
+      "note": "applyJudgeOverrideFor unconditionally injects JUDGE/JUDGE_EFFORT into the run's vars whenever the flag or env is set; workflow.Resolve (internal/fsm/workflow/resolve.go:19-22) rejects any var the workflow does not declare with ERR_VAR_UNKNOWN. Reproduced end to end against a built binary."
+    },
+    {
+      "path": "internal/fsm/cli/run.go",
+      "line": 307,
+      "note": "The only production caller: vars := c.applyJudgeOverrideFor(p.vars, p.flags[\"judge-model\"], p.flags[\"judge-effort\"], p.bools[\"calibration\"]) feeds machine.InitOptions.Vars, which reaches parsed.Resolve at internal/fsm/machine/machine.go:95."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 264,
+      "note": "judgeOverride precedence (flag then env, both trimmed) matches its doc comment and TestJudgeOverridePrecedence in internal/fsm/cli/judgeoverride_test.go; no defect in the precedence rule itself."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 189,
+      "note": "The discarded error from kind.New is genuinely unreachable: kind.New only errors when Mock disagrees with the judge's concrete type (internal/fsm/kind/kind.go:75-79), and the switch above sets a *judge.MockJudge exactly when scenario != nil. Not a finding."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 128,
+      "note": "scenarioFor cannot be walked out of the repo: filepath.Join cleans a ../ prefix before relInside compares the cleaned paths, and an absolute rel is re-rooted under root. Checked deliberately; no traversal defect."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 224,
+      "note": "resolveRun's \"newest run without an Error summary\" is correct: run.sortSummaries (internal/fsm/run/store.go:219-226) sorts CreatedAt descending with a RunID tiebreak, and both jsonlStore.List and memStore.List call it before returning."
+    },
+    {
+      "path": "docs/fsm/sdlc-loop-example.md",
+      "line": 8,
+      "note": "Running the documented init command verbatim from the repo root returns ERR_MOCK_INVALID: open <root>/scenarios/sdlc-loop/happy/judge.yaml: no such file or directory. --mock-ai resolves relative paths against the repo root (internal/fsm/cli/run.go:268-272)."
+    },
+    {
+      "path": "docs/fsm/sdlc-loop-example.md",
+      "line": 41,
+      "note": "The rest of the transcript checks out against the code: gate names nothing_found/findings_nonempty/confirmed_nonempty/commit_exists exist in workflows/sdlc-loop.yaml and internal/fsm/gate/gates.go; ERR_NO_COMMIT at gates.go:18; FORKED/resume_hint/forked_at_seq/copied/parent_run_id at internal/fsm/cli/run.go:414-615; counts keys all_found/unfixed/confirmed at run.go:446; needs-revision at internal/fsm/record/record.go:58; discover's model/effort match the REVIEWER/REV_EFFORT defaults."
+    },
+    {
+      "path": "internal/fsm/machine/handoffs_test.go",
+      "line": 108,
+      "note": "TestInitWorkflowSourceAndReservedName is a real guard, not a smoke test: it asserts the reserved-name refusal creates no run by comparing store.List length before and after, and decodes cmds_json to check the structured consent payload."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 1063,
+      "note": "RecordLLMCall's append-skip is keyed on data.Kind == \"\", not on the error; TestRecordLLMCall pins both halves (http 500 with a Kind still appends, empty Kind on cancel does not). Behaviour matches the test's comments."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 170,
+      "note": "Validation evidence: go build ./... and go vet on internal/fsm/cli and internal/fsm/machine are clean, and go test reports 100.0% statement coverage for both packages, so every new function in wiring.go and handoffs_test.go is exercised."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "An exported METAREVIEW_JUDGE_MODEL or METAREVIEW_JUDGE_EFFORT breaks `fsm init` for any workflow that does not declare a JUDGE / JUDGE_EFFORT var. applyJudgeOverrideFor (internal/fsm/cli/wiring.go:276-289) writes out[JudgeVar]/out[JudgeEffortVar] whenever the override is non-empty, with no check that the target workflow declares those vars, and workflow.Resolve refuses any undeclared var. Reproduced with the built binary in a scratch repo against a custom path workflow declaring only REVIEWER and REV_EFFORT: with no env the init succeeds (status OK, workflow_source path); with METAREVIEW_JUDGE_MODEL=gpt-5.2 exported the same command fails ERR_VAR_UNKNOWN {\"name\":\"JUDGE\"} (\"unknown var JUDGE\"), and METAREVIEW_JUDGE_EFFORT alone fails the same way on JUDGE_EFFORT. This is exactly the failure class the sibling calibration rule at wiring.go:258-266 was written to prevent (\"exporting METAREVIEW_JUDGE_MODEL once would otherwise make every later calibration run fail ... naming a flag the operator never passed\"), and the error names a var the operator never passed, giving no hint that an ambient environment variable caused it. Both shipped workflows declare JUDGE, so only `--workflow <path>` workflows are affected — hence medium, not high. Suggested fix: apply the env-sourced override only to vars the resolved workflow declares (an explicit --judge-model/--judge-effort flag should still reach Resolve so a real conflict is reported), mirroring the calibration carve-out. The unit test at internal/fsm/cli/judgeoverride_test.go:113-117 asserts the injecting behaviour on a vars map with no JUDGE key, so it pins the defect rather than catching it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 283,
+          "note": "if o.Model != \"\" { out[JudgeVar] = o.Model } — no check that the workflow declares JUDGE."
+        },
+        {
+          "path": "internal/fsm/workflow/resolve.go",
+          "line": 20,
+          "note": "for name := range vars { if _, ok := w.Vars[name]; !ok { return ... CodeVarUnknown } } — any injected var the workflow does not declare is a hard init failure."
+        },
+        {
+          "path": "internal/fsm/cli/judgeoverride_test.go",
+          "line": 115,
+          "note": "\"outside calibration the environment applies as before\" asserts got[JudgeVar] is set on vars={REVIEWER:...} with no JUDGE key, i.e. the test locks in the injection into a workflow that may not declare it."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "docs/fsm/sdlc-loop-example.md contradicts itself on the scenario path and the headline command does not run. Line 3 names the scenario `testdata/fsm/scenarios/sdlc-loop/happy`, but line 8 passes `--mock-ai scenarios/sdlc-loop/happy`. --mock-ai joins a relative path against the repo root (internal/fsm/cli/run.go:268-272), so copy-pasting the documented command from the repo root fails immediately with ERR_MOCK_INVALID (verified against the built binary: \"open <root>/scenarios/sdlc-loop/happy/judge.yaml: no such file or directory\"). Since the document's whole claim is that it shows the suite's own invocation, the first line a reader tries should work. Fix: `--mock-ai testdata/fsm/scenarios/sdlc-loop/happy`.",
+      "evidence": [
+        {
+          "path": "docs/fsm/sdlc-loop-example.md",
+          "line": 8,
+          "note": "$ metareview fsm init --workflow sdlc-loop ... --mock-ai scenarios/sdlc-loop/happy — missing the testdata/fsm/ prefix its own line 3 gives."
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 270,
+          "note": "if !filepath.IsAbs(dir) { dir = filepath.Join(root, dir) } — relative --mock-ai is rooted at the repo root, not at testdata."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The doc comment on applyJudgeOverride states an invariant the code does not always hold: \"The map is copied: the caller's parsed vars are not a place to leave side effects.\" When neither the flag nor the env is set, applyJudgeOverrideFor returns the caller's own map by reference (wiring.go:276-278). Nothing mutates the result today (workflow.Resolve builds a fresh `effective` map and machine.Init only reads o.Vars), so this is not a live bug, but a caller trusting the comment and mutating the returned map would corrupt the parsed flags. Either copy unconditionally or narrow the comment to \"copied when an override applies\" — the existing test at judgeoverride_test.go:66-70 already asserts the no-copy path.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 252,
+          "note": "\"The map is copied: the caller's parsed vars are not a place to leave side effects.\" vs the early `return vars` at wiring.go:277."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "ctxDeps.nonce panics on a Rand failure with an errs.E(CodeInternal) value, but nothing recovers it: grep for `recover()` across the repo hits only internal/fsm/cli/cli_test.go:626, and cmd/metareview/main.go has no recover. So the one code path that builds a structured ERR_INTERNAL error can never emit it as an envelope — the process dies with a Go panic and a stack trace on stderr, breaking the \"every failure is a JSON envelope\" contract the rest of the CLI keeps. Practically unreachable (crypto/rand does not fail on the supported platforms) and the seam is only injectable in tests, hence low. If the panic is deliberate, a top-level recover in main that renders the errs.E as an ERROR envelope would close the gap.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 170,
+          "note": "panic(errs.E(CodeInternal, \"crypto/rand failed: \"+err.Error())) with no recover anywhere in cmd/metareview/main.go."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two small test-hygiene gaps in the new internal/fsm/machine/handoffs_test.go. (1) Line 42 does `unlock2, _ := h.store.Lock(m.runID)` and calls unlock2() at line 46 — if Lock ever returned an error, unlock2 is nil and the test panics with a nil func call instead of reporting the real failure; the sibling Lock at line 22 is checked, so this is an inconsistency, not a style preference. (2) The comment at line 194 (\"the machine's own work continues: the next index for judge@0 is 3\") asserts nothing about the index: the following check is only `r.Seq == 0`. Either assert the index the comment names or drop the claim, otherwise the comment documents behaviour no test protects.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/handoffs_test.go",
+          "line": 42,
+          "note": "unlock2, _ := h.store.Lock(m.runID) — the error is dropped, unlike the checked Lock at line 22."
+        },
+        {
+          "path": "internal/fsm/machine/handoffs_test.go",
+          "line": 194,
+          "note": "Comment claims the next judge@0 index is 3; the assertion below it only checks r.Seq != 0."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Considered flagging ctxDeps.rootOf for returning a silently empty root when `git worktree list --porcelain` exits 0 with empty stdout (lines[0] would be \"\" and strings.TrimPrefix yields \"\", which would then be used as the store root). Checked and dismissed: git always prints at least one `worktree <path>` block for any non-bare repository, the bare case is explicitly refused, and a non-zero exit or exec error is already ERR_NOT_A_REPO. Not a reachable defect.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 64,
+          "note": "return strings.TrimPrefix(lines[0], \"worktree \"), nil — only reachable with a well-formed porcelain first block."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-19.1094cbb7736fef0e",
+  "kind": "shard",
+  "shardId": "shard-19",
+  "shardHash": "1094cbb7736fef0e",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 475,
+      "note": "Empirically reproduced against real git output in a throwaway repo: `git diff` C-quotes only non-ASCII/control paths (\"a/docs/caf\\303\\251.md\"), while a path containing a space is emitted UNQUOTED and the ---/+++ header lines carry a trailing TAB (od -c confirms `+++ b/docs/design notes.md\\t`). postImagePath strips only \\r, so the tab survives into lintable()."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 386,
+      "note": "Ran a probe test against the real package (copy of the tree in a scratch dir, repo untouched): addedLines on a diff for `docs/tools/build script.sh` with the real trailing-tab headers returns nil — the eval call is never seen by the lints. diffHeaderPath got the path right; the +++ re-decision at line 386 overrode it with the tab-suffixed form."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 36,
+      "note": "Satisfies() reason gating verified against the real constants in internal/contextprofile/profile.go:16-21: DIFF_TRUNCATED and LARGE_DIFF are the exact emitted codes, and LOCAL_DIFF_TRUNCATED / DIFF_OVERSIZE / UNTRACKED_OMITTED / UNTRACKED_TRUNCATED correctly fall outside the satisfiable set, matching CLAUDE.md's contract."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 186,
+      "note": "Advisory downgrade traced end to end: findings.classForCount (internal/findings/findings.go:418) and reviewlog.isOpenBlocker (internal/reviewlog/reviewlog.go:305) both key off classification, so a high-severity finding stamped \"advisory\" genuinely stops blocking. The claim in CLAUDE.md that the context-risk blocker becomes advisory holds."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 353,
+      "note": "BranchDiffFull substitution is sound: gitcontext.collectWith (internal/gitcontext/gitcontext.go:73-89) populates it only when ctx.DiffTruncated, from per-file `git diff --no-renames base..HEAD` output, so it is the untruncated superset of git.Diff and each file still carries its own `diff --git` header."
+    },
+    {
+      "path": ".github/workflows/gtg.yml",
+      "line": 22,
+      "note": "Supply-chain and semantics claims verified live: PyPI `gtg` 0.10.0 resolves to project_urls Homepage github.com/dsifry/goodtogo (summary 'Deterministic PR readiness detection for AI coding agents'); the goodtogo README's semantic-code table is exactly 0=READY 1=ACTION_REQUIRED 2=UNRESOLVED 3=CI_FAILING 4=ERROR; --repo/--format/--exclude-checks (repeatable, exact match) all exist; actions/setup-python SHA a26af69 is a real commit in that repo. The workflow's comments are accurate."
+    },
+    {
+      "path": ".github/workflows/gtg.yml",
+      "line": 71,
+      "note": "Wait loop reasoning checked: 132*10s = 1320s = 22min, which does clear test.yml's timeout-minutes: 20 (.github/workflows/test.yml:22) and fits under this job's own 30-minute ceiling. Empty RUNS yields TOTAL=0/PENDING=1 under `grep -c .` / `grep -vc completed`, so 'no checks yet' correctly reads as not-ready, as the comment claims. Uses pull_request (not _target) with read-only permissions and env-indirected interpolation — no injection surface."
+    },
+    {
+      "path": "internal/reviewers/sharded_test.go",
+      "line": 1,
+      "note": "go vet and gofmt -l clean; go test ./internal/reviewers passes at 97.0% statement coverage. go tool cover -func shows boolString at 66.7% and contextRiskFound at 80.0% as the new-code gaps."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "The docs/ lint exemption is bypassable by a filename containing a space, which is the exact blind spot the change claims to have closed. Real git emits `+++ b/<path>\\t` (trailing TAB) whenever the path contains a space; postImagePath strips only \\r, so lintable() receives \"docs/tools/build script.sh\\t\": every executableExts HasSuffix check misses (the tab is the last byte), the .md check misses, and the docs/ prefix check fires — returning false and switching scanning OFF for the whole file. Reproduced: addedLines on a real-shaped diff for `docs/tools/build script.sh` containing an eval call returns nil. This directly contradicts the executableExts comment ('the docs/ exemption never covers them'), the lintable comment ('Executable content is never prose, wherever it lives'), and TestExecutableContentUnderDocsStaysLintable, which only ever passes clean paths. The inverse also misfires: `specs/design notes.md` becomes lintable, so prose is scanned as source and can raise a spurious blocking finding. Note that diffHeaderPath already derived the correct path from the `diff --git` line — the +++ branch at line 386 overrides a correct decision with a worse one. Fix: strip a trailing tab (and anything after it) in postImagePath, or drop the +++ re-decision entirely since `git diff` always emits a `diff --git` header first.",
+      "evidence": [
+        {"path": "internal/reviewers/taskdone.go", "line": 475},
+        {"path": "internal/reviewers/taskdone.go", "line": 386},
+        {"path": "internal/reviewers/taskdone.go", "line": 446},
+        {"path": "internal/reviewers/lintscope_test.go", "line": 258}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "False claim in a doc comment, with a regression test that pins the fictional case instead of the real one. postImagePath's comment says 'git renders a path with spaces or non-ASCII bytes as a C-quoted string (\"b/docs/design notes.md\")' and diffHeaderPath's says 'git quotes exactly those'. Verified false against git in a scratch repo: only non-ASCII/control bytes are C-quoted; `docs/design notes.md` comes out as a bare `diff --git a/docs/design notes.md b/docs/design notes.md` with unquoted spaces. TestQuotedDocumentationPathIsStillRecognizedAsProse (lintscope_test.go:144) therefore feeds the parser a header git never produces, and its comment ('git C-quotes a path containing spaces') repeats the same wrong premise. Because the fabricated input is what is tested, the real unquoted+trailing-tab form is untested — and that untested form is exactly the bypass above. The quoting branch is still genuinely needed for non-ASCII paths, so the fix is to correct the comments and add a fixture matching real git output for a space-containing path.",
+      "evidence": [
+        {"path": "internal/reviewers/taskdone.go", "line": 471},
+        {"path": "internal/reviewers/taskdone.go", "line": 460},
+        {"path": "internal/reviewers/lintscope_test.go", "line": 144}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "diffHeaderPath's LastIndex(\" b/\") heuristic picks the wrong split when the path itself contains a \" b/\" segment. Confirmed: diffHeaderPath(\"diff --git a/x b/file.go b/x b/file.go\") returns \"file.go\" rather than \"x b/file.go\". Harmless here because both resolve to lintable, but it is a silent mis-scoping and combines with the trailing-tab defect above. A count-based split (the post-image half starts halfway, or parse from the --- / +++ pair once those are tab-stripped) would be exact.",
+      "evidence": [
+        {"path": "internal/reviewers/taskdone.go", "line": 462}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The single-shard satisfied path is untested. Satisfies() waives the cross-shard requirement when ShardCount == 1 (`m.ShardCount == 1 || m.CrossShard`), but no test constructs a satisfied manifest with ShardCount 1 and CrossShard false — go tool cover reports boolString at 66.7%, i.e. its `return \"no\"` branch never executes, which is precisely the fingerprint of that gap. sharded_test.go's satisfiedManifest() is always {2,2,CrossShard:true}, and the ShardCount==1 cases in TestContextRiskNotSatisfiedWithMissingShard all fail on Verdict or Present instead. The one configuration where the cross-shard gate is deliberately relaxed is the one with no coverage.",
+      "evidence": [
+        {"path": "internal/reviewers/taskdone.go", "line": 45},
+        {"path": "internal/reviewers/taskdone.go", "line": 221},
+        {"path": "internal/reviewers/sharded_test.go", "line": 9}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "gtg exit code 1 (ACTION_REQUIRED — actionable review comments) is mapped to ::warning:: rather than a failure, so the required 'Merge Ready (gtg)' check goes green on a PR that still has actionable comments. The inline comment states the rationale (gtg counts dismissed bot review summaries as actionable), so this is a documented policy choice, not an oversight — recorded because the check's name promises more than it enforces, and because the workaround will silently outlive the gtg behaviour that motivated it.",
+      "evidence": [
+        {"path": ".github/workflows/gtg.yml", "line": 131}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Wait-loop robustness nits, both non-blocking: (a) `RUNS=\"$(gh api ... || echo api-error)\"` only detects an API failure when gh wrote nothing to stdout first — a paginated call that emits some pages and then fails yields \"<statuses>\\napi-error\", which fails the `[ \"$RUNS\" = \"api-error\" ]` equality test and is then counted as a pending check rather than retried as an error; (b) with no checks yet the progress line reads \"1 of 0 check(s) still running\" because the empty RUNS produces one blank line for grep -vc. Behaviour is still correct (the loop waits), only the diagnostics mislead.",
+      "evidence": [
+        {"path": ".github/workflows/gtg.yml", "line": 85},
+        {"path": ".github/workflows/gtg.yml", "line": 91}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Suspected dead branch: manifestFound() early-returns when ShardCount == 0, which would make its `if !manifest.Present` arm unreachable if Present were derived from the shard count. Refuted by reading the producers: ManifestContext.Present is len(manifest.ShardResults) > 0 || CrossShardResult != nil (internal/taskdone/review.go:305, internal/prready/review.go:328) while ShardCount is len(plan.Shards), so a generated plan with no results submitted yet gives ShardCount > 0 with Present false. The 'no shard review results were ingested' line is reachable and is covered by the 'no results ingested' case in TestContextRiskNotSatisfiedWithMissingShard.",
+      "evidence": [
+        {"path": "internal/reviewers/taskdone.go", "line": 196},
+        {"path": "internal/taskdone/review.go", "line": 305}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Suspected regression: addedLines now drops git.Diff entirely whenever BranchDiffFull is non-empty, which would create a lint blind spot if the two were filtered differently. Refuted: gitcontext.collectWith sets BranchDiffFull only on the DiffTruncated path, from the same base..HEAD range under the same effective excludes, with --no-renames so every file still carries its own `diff --git` header — it is the untruncated superset of the truncated git.Diff. When the branch diff fits, BranchDiffFull is empty (asserted by internal/gitcontext/branchfiles_test.go:145) and the fallback restores the old behaviour.",
+      "evidence": [
+        {"path": "internal/reviewers/taskdone.go", "line": 353},
+        {"path": "internal/gitcontext/gitcontext.go", "line": 73}
+      ]
+    }
+  ],
+  "blockingCount": 2
+}

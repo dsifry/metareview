@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-30.bcba6ef063b5ddf7",
+  "kind": "shard",
+  "shardId": "shard-30",
+  "shardHash": "bcba6ef063b5ddf7",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "shard-reviewer",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/findings/override_test.go",
+      "line": 493,
+      "note": "Mutation-tested the whole shard. Reverting internal/findings/findings.go:141 to `(record.Status == \"open\")` fails TestReconcileClosesAPendingOverrideThatWasActuallyFixed at override_test.go:526 — the described bug is real and the test genuinely catches it."
+    },
+    {
+      "path": "internal/findings/override.go",
+      "line": 108,
+      "note": "Mutation: strings.EqualFold -> == fails TestTheRequesterCannotGrantItsOwnOverride; removing TrimSpace on request.Now fails TestOverrideRequiresATimestamp and TestOverrideTimestampsAreTrimmed; reversing the ListOverrides sort fails TestOverridesAreOrderedNewestFirst; forcing the requester clause or the escalation clause on fails TestTheIndexRendersADirectGrantWithoutARequester; replacing !Blocks(status) with status != \"open\" in unresolvedBlockingFrom fails TestRequestOverrideMarksPendingAndKeepsBlocking. All the load-bearing assertions in this shard's test file are live."
+    },
+    {
+      "path": "internal/findings/override.go",
+      "line": 1,
+      "note": "go test ./internal/findings/... ./internal/fsm/errs/... -count=1: PASS, coverage 92.8% (findings; override.go itself 100% per go tool cover -func) and 100.0% (errs). go vet clean, gofmt clean, go build ./... OK. tests/go/test-override.sh passes end-to-end (builds into a temp dir, does not touch the repo)."
+    },
+    {
+      "path": "AGENTS.md",
+      "line": 95,
+      "note": "Verified the new AGENTS.md claims empirically: 120000 == internal/gitcontext/gitcontext.go:15 maxDiffBytes and internal/contextprofile/profile.go:23 DefaultLargeDiffBytes; 4000 == gitcontext.go:17 maxUntrackedFileBytes; UNTRACKED_TRUNCATED == profile.go:21; .metareview/runs/ self-ignores at internal/fsm/run/store_jsonl.go:104-107 with .torn/ at store_jsonl.go:278; .metareview/shards/ self-ignores at internal/shardpack/shardpack.go:158; docs/metareview/fsm/ is the export dir at internal/fsm/export/export.go:122; --max-attempts is root-pinned mid-chain at internal/runchain/runchain.go:88-91; `override list --pending` exits 1 at cmd/metareview/main.go:527-530. The FSM exit-code paragraph matches internal/fsm/cli/prompt.go:9-11 and exitFor() in envelope.go:67-107, and is identical to the CLAUDE.md copy (no doc drift between the two)."
+    },
+    {
+      "path": "internal/fsm/errs/errs.go",
+      "line": 1,
+      "note": "errs.go itself is correct and fully covered; every documented behaviour of E/Wrap/Error/Is/Code/As/Field was checked against errs_test.go and holds (odd trailing key -> empty value, nil kv -> nil Fields, Wrap(nil) returns e, Wrap copies Fields, sorted field rendering). The defect is in the package doc, not the code."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Package doc asserts a property the package does not have. internal/fsm/errs/errs.go:1-4 says errs is \"the one error type shared by every internal/fsm package\" and that \"Every failure a caller can act on is an *Error carrying an ERR_* Code\". internal/fsm/run defines three other caller-actionable error types that carry ERR_* codes and are consumed across package boundaries: FoldError (internal/fsm/run/errors.go:73), StoreError (errors.go:89) and GateError (internal/fsm/run/types.go:138). None is an *errs.Error, so errs.Is/errs.Code/errs.As silently return false/\"\"/nil for them. The codebase already pays for this: internal/fsm/machine/machine.go:432 hand-rolls isStoreCode(err, code) with its own errors.As(&*run.StoreError) because errs.Is(err, run.CodeRunNotFound) would be false there (used at machine.go:345 and fork.go:473), and internal/fsm/cli/envelope.go:120-136 needs three separate errors.As branches to build one envelope. A maintainer following the doc would write errs.Is(err, run.CodeAuditChain) and get a silent false. Fix the two sentences to say errs is the shared coded-error type for the fsm packages and that internal/fsm/run additionally returns typed StoreError/FoldError/GateError that must be matched with errors.As (or make those wrap *errs.Error).",
+      "evidence": [
+        { "path": "internal/fsm/errs/errs.go", "line": 1 },
+        { "path": "internal/fsm/run/errors.go", "line": 89 },
+        { "path": "internal/fsm/machine/machine.go", "line": 432 },
+        { "path": "internal/fsm/cli/envelope.go", "line": 124 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "An assertion that cannot fail for the reason its message states. internal/findings/override_test.go:313-315 asserts \"RequestOverride must surface an unreadable findings file\", but the temp root contains no valid record with id mrvf-1, so RequestOverride returns \"finding mrvf-1 not found\" whether or not the read error surfaces — err is never nil on this path. Proved by mutation: changing readJSONL's json.Unmarshal failure from `return nil, err` to `continue` (internal/findings/findings.go:496) still fails the test, but at the ListOverrides assertion on line 308, never on line 313. RequestOverride's own read-error path is only covered incidentally, via mutateFinding from TestOverrideLoadErrorSurfacesThroughTheSeam's GrantOverride case. Either assert on the error text, or seed a valid mrvf-1 record plus a second malformed line so the read failure is the only thing that can produce an error.",
+      "evidence": [
+        { "path": "internal/findings/override_test.go", "line": 313 },
+        { "path": "internal/findings/findings.go", "line": 496 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stale guard left at another layer. This PR introduced findings.Blocks (internal/findings/override.go:53) so that override-pending counts as blocking, and updated internal/reviewlog/reviewlog.go:307 and internal/findings/findings.go:368,441 to use it — but internal/learning/candidates.go:216 isBlocking still hardcodes `if record.Status != \"open\" { return false }` and was not touched by this PR. repeatedBlockerThemes (candidates.go:86) therefore silently drops override-pending findings, i.e. post-merge learning under-counts live blocker themes exactly when a workflow exception is in force — the case AGENTS.md:36-48 (this shard) singles out as still blocking. Replace the literal with findings.Blocks(record.Status).",
+      "evidence": [
+        { "path": "internal/learning/candidates.go", "line": 216 },
+        { "path": "internal/reviewlog/reviewlog.go", "line": 307 },
+        { "path": "AGENTS.md", "line": 37 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Test comment overstates the bug it documents. internal/findings/override_test.go:487-492 claims that once RequestOverride moved a finding to override-pending, \"nothing could move it again\" and `override list --pending` \"exited 1 forever with no command able to clear it. The CLI offers request|grant|list and no withdraw\". GrantOverride explicitly accepts StatusOverridePending (internal/findings/override.go:104) and moves it to overridden, which clears pending — TestListOverrides (override_test.go:277-296) asserts exactly that. So `metareview override grant` always could clear it; what was genuinely impossible was recording a real fix as fixed. The substantive claim is correct and the test does catch the regression (verified by mutation), but the comment as written would mislead someone reasoning about the CLI surface.",
+      "evidence": [
+        { "path": "internal/findings/override_test.go", "line": 490 },
+        { "path": "internal/findings/override.go", "line": 104 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "AGENTS.md:39-41 states \"A reviewing agent never grants an override on findings it produced\" in the same sentence as the enforced rule \"the actor that requested one is refused if it also tries to grant it\". Only the second is enforced (internal/findings/override.go:105-107 compares grant.By to record.OverrideRequestedBy). Nothing compares grant.By to record.Reviewer, and a direct grant on an open finding by any actor is accepted (override.go:104, TestGrantWithoutRequestIsAllowed at override_test.go:246) — so `metareview override grant <id> --by architecture-reviewer` on a finding that reviewer produced succeeds today. The following \"--by is audit metadata, not authentication\" sentence mitigates this, but the two clauses read as equally enforced; mark the first explicitly as a norm rather than a check.",
+      "evidence": [
+        { "path": "AGENTS.md", "line": 39 },
+        { "path": "internal/findings/override.go", "line": 105 },
+        { "path": "internal/findings/override_test.go", "line": 246 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Observability gap (no false claim, but worth noting alongside the AGENTS.md override section). No gate output surfaces overrides: grep for \"Override\" across internal/reviewlog, internal/prready and internal/taskdone returns nothing. Once an override is granted, Reconcile's activeExisting map (internal/findings/findings.go:150-155) suppresses a new record for the recurring fingerprint and Result.Findings only collects status==\"open\" rows (findings.go:176), so the run reports PASS with zero blockers and the review log gives no indication that a blocker is being suppressed by a standing exception. Only docs/metareview/FINDINGS.md and `metareview override list` show it. Consider echoing the count of in-force overrides into the review log summary.",
+      "evidence": [
+        { "path": "internal/findings/findings.go", "line": 150 },
+        { "path": "AGENTS.md", "line": 45 }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

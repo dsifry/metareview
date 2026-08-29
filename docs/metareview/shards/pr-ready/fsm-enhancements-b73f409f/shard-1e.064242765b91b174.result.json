@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1e.064242765b91b174",
+  "kind": "shard",
+  "shardId": "shard-1e",
+  "shardHash": "064242765b91b174",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T18:30:00Z",
+  "blockingCount": 1,
+  "evidence": [
+    {
+      "path": "internal/fsm/machine/fork.go",
+      "line": 387,
+      "note": "compatible() dereferences pn (pw.NodeFor(s)) on the strength of an inline claim that copied states always carry a node. Reproduced a nil-pointer panic both as a direct unit call and end-to-end through Machine.Fork on a scratchpad copy of the tree (no repo file touched)."
+    },
+    {
+      "path": "internal/fsm/workflow/workflow.go",
+      "line": 481,
+      "note": "validateGraph forbids a node on a TERMINAL state but never requires one on a non-terminal state, so 'non-terminal' does not imply 'node-bearing'; workflow.Parse accepts such a workflow (verified)."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 597,
+      "note": "the machine itself treats a nodeless state as supported (node := w.NodeFor(snap.State) guarded by node == nil here and at machine.go:101, 187, 471, 524, 815, 962), confirming the shape fork.go assumes away"
+    },
+    {
+      "path": "internal/fsm/machine/fork.go",
+      "line": 377,
+      "note": "claim 'overflow handlers run post-terminal and are never in a copied prefix' verified true: machine.go:851 runs overflowHandler only after the transition carrying OutcomeOverflow is appended, and a copied prefix ends at a transition into a NON-terminal state, so the spec's cmd_call/overflow_handler pair collapses to cmd_call correctly"
+    },
+    {
+      "path": "internal/fsm/machine/fork.go",
+      "line": 40,
+      "note": "Escalated() substitutes snap.Outcome != \"\" for the spec's 'P terminal' conjunct; verified equivalent - fold.go:215 is the only writer of Snapshot.Outcome and validateGraph (workflow.go:486) permits an outcome only on a transition into a terminal state"
+    },
+    {
+      "path": "internal/fsm/machine/fork.go",
+      "line": 250,
+      "note": "claim 'present: Parse validated every kind against the registry' verified: kind.go:105 builds Info() from the same r.kinds map that Kind() reads, so the discarded ok from Kinds.Kind cannot hide a nil"
+    },
+    {
+      "path": "internal/tasksource/containedpath_test.go",
+      "line": 62,
+      "note": "mutation-tested the symlink case: deleting the post-EvalSymlinks containment check in tasksource.go:148 makes the subtest fail ('a symlink escaping the root was accepted: <nil>'), so the assertion is live, not decorative. The 'each way out is pinned' claim holds at package level - coverage_test.go:133 TestContainedPathDefensiveBranches covers the injected-seam returns; package coverage is 100.0%."
+    },
+    {
+      "path": "workflows/embed_test.go",
+      "line": 8,
+      "note": "every assertion checked against the real embedded tree: Names() sorts to exactly [review-loop sdlc-loop]; both YAMLs really begin 'workflow: <name>\\n'; and each of the four rejected names is rejected for a real reason (embed.go:29 ContainsAny \"/\\\\.\" for ../sdlc-loop, sdlc-loop.yaml and a/b, ReadFile miss for missing). Package coverage 100.0%."
+    },
+    {
+      "path": "internal/taskdone/review_markdown_test.go",
+      "line": 120,
+      "note": "the three touched tests are mechanical signature updates for the new contextMarkdown/reviewMarkdown parameters and still pass (go test ./internal/taskdone -run 'TestContextMarkdown|TestReviewMarkdown' green); go build ./... and go vet ./... are clean and all internal/fsm packages report 100.0% statement coverage"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "BLOCKING - nil-pointer panic in Fork's fail-closed workflow-compatibility guard, guarded only by a comment that asserts a property the code does not have. internal/fsm/machine/fork.go:387 reads `pn, n := pw.NodeFor(s), w.NodeFor(s) // pn != nil: copied states and From are non-terminal in pw` and then dereferences pn at :388 (`pn.Kind != n.Kind`). Non-terminal does NOT imply node-bearing: workflow.go:481 only forbids a node on a terminal state, and nothing requires one on a non-terminal state - machine.go guards `NodeFor(...) != nil` in seven places (:101, :187, :471, :524, :597, :815, :962), so a nodeless non-terminal state is a supported shape, not an impossible one. Events ARE stamped at such a state: machine.go:467 sets ev.State = snap.State for every append, so the transition OUT of the nodeless state carries State=<nodeless state> and lands in the copied prefix, putting it into `states` at fork.go:373. When the replacement workflow adds a node at that state, `!hasState(w,s)` is false and `n == nil` is false, so evaluation reaches pn.Kind and panics instead of returning the intended ERR_WORKFLOW_INCOMPATIBLE{reason: state}. Reproduced empirically on a scratchpad copy of the tree (the branch itself was not modified): (a) a direct call to compatible(pw, w, []run.Event{{Seq:2, Type:run.TypeTree, State:\"b\"}}, \"a\") panics with 'runtime error: invalid memory address or nil pointer dereference'; (b) end-to-end, a real harness run over a path workflow states:[a,b,c,done,failed] with nodes only on a and c produces events at seq 9 (gate, State=b) and seq 10 (transition, State=b), and m.Fork(ctx, ForkOptions{From:\"c\", WorkflowBytes:<same workflow plus a node on b>, AcceptWorkflowChange:true}) panics inside Fork. The path is CLI-reachable: cli/run.go:573-599 wires --accept-workflow-change plus --workflow <path> straight into ForkOptions.WorkflowBytes, and Init already accepts arbitrary path workflows (machine.go:64). There is no recover() anywhere in internal/, cmd/ or cli/, so the process dies with a Go stack trace instead of emitting the structured error envelope the FSM driver contract depends on - a guard whose whole job is to fail closed instead fails by crashing. Fix is one line: test pn == nil in the :388 condition (it belongs there anyway, since a state that lost its node in the new workflow is exactly as incompatible as one that gained one) and drop the comment.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/fork.go",
+          "line": 387,
+          "note": "the false claim and the unguarded pn"
+        },
+        {
+          "path": "internal/fsm/machine/fork.go",
+          "line": 388,
+          "note": "pn.Kind dereferenced after short-circuiting only on hasState and n == nil"
+        },
+        {
+          "path": "internal/fsm/workflow/workflow.go",
+          "line": 481,
+          "note": "only terminal states are forbidden a node; a nodeless non-terminal state parses"
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 467,
+          "note": "every appended event is stamped ev.State = snap.State, so a nodeless state reaches the copied prefix"
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 599,
+          "note": "fo.WorkflowBytes = raw - the panic is reachable from metareview fsm fork --accept-workflow-change --workflow <path>"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Doc comment overstates the lock discipline. internal/fsm/machine/fork.go:65 says 'The parent's lock is held for steps 0-9', but the lock is released by `defer sess.unlock()` at :72, i.e. only when Fork returns - so it is still held across step 10, where child.load(ctx, false) at :284 acquires the CHILD's lock. Spec 3 section 2 step 10 states the opposite ('Opened - P's lock released, the child's re-taken by load'). No deadlock in practice (locks are always taken parent-then-child on a freshly created child id), so this is documentation/spec drift rather than a defect, but it is the same claim-vs-code class as the blocker and the inline note at :282 ('P's lock is released by the deferred unlock before the caller advances it') is the accurate one.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/fork.go",
+          "line": 65,
+          "note": "'held for steps 0-9'"
+        },
+        {
+          "path": "internal/fsm/machine/fork.go",
+          "line": 72,
+          "note": "defer sess.unlock() - released at return, i.e. after step 10"
+        },
+        {
+          "path": "internal/fsm/machine/fork.go",
+          "line": 284,
+          "note": "child.load takes the child's lock while P's is still held"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "VerifyOrigin accepts a ctx it never reads. internal/fsm/machine/fork.go:445 declares `VerifyOrigin(ctx context.Context, store run.RunStore, child run.Log)` and the body never touches ctx, while the loop at :453-467 can issue an unbounded number of EventsWithLines reads (one per distinct parent run id in the child's lineage) with no cancellation check. The signature therefore advertises cancellability the function does not implement. Either honour it (check ctx.Err() before each store read and surface a reason) or drop the parameter; the spec's section 3 signature is the only thing keeping it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/fork.go",
+          "line": 445,
+          "note": "ctx parameter declared"
+        },
+        {
+          "path": "internal/fsm/machine/fork.go",
+          "line": 456,
+          "note": "per-parent store.EventsWithLines read inside the loop, no ctx check anywhere in the function"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Test helper comment claims more fidelity than it has. internal/taskdone/review_markdown_test.go:120 says 'manifestArgs builds the manifest the review now passes into contextMarkdown', but production builds it at internal/taskdone/review.go:288 with Target, ShardPlan, ShardResults, CrossShardResult, IgnoredResults and UnreadableResults in addition to Scope/Profile/PathDispositions; the helper supplies only the last three. That is adequate for these two rendering assertions (both run with an empty ShardPlan), but the comment reads as a fidelity guarantee the helper does not provide, so a divergence in how the review wires reviewmanifest.Build would not be caught here. Trimming the comment to what it does - 'builds a minimal manifest for the rendering assertions below' - costs nothing.",
+      "evidence": [
+        {
+          "path": "internal/taskdone/review_markdown_test.go",
+          "line": 120,
+          "note": "the claim"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 288,
+          "note": "production Build input carries six fields the helper omits"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "false-positive",
+      "note": "Considered and cleared after empirical checks, listed so the next reviewer does not repeat them. (1) fork.go:312 'Every check the fold makes is already guaranteed by construction ... this is defence in depth' - traced every FoldError reason reachable for a fork child: copied events are byte-verbatim so stamps, output_hash and post-terminal cannot trip; checkProvenance (fold.go:423) demands Origin.Seq == ev.Seq, which holds because copied events start at child seq 2 and the parent prefix starts at parent seq 2; ReasonUnsanctionedCmd matches by NAME only (fold.go:174) and compatible() already refuses a workflow that dropped a copied cmd, so a changed work dir or re-resolved argv cannot trip it. Claim holds. (2) fork.go:249 'non-nil: the compatibility invariant (or the unchanged workflow) guarantees it' - node_output is only emitted at node-bearing states and compatible() rejects a state whose node vanished, so w.NodeFor is non-nil here; this one is genuinely guaranteed (it is the sibling comment at :387 that is not). (3) fork.go:86 - the `NodeFor(From) == nil && !IsTerminal(From)` clause is not dead: it is the guard that keeps the nodeless-state shape out of the From position (which is why the panic in finding 1 only fires on a COPIED state, never on From). (4) Calibration parents: deleting JUDGE/JUDGE_EFFORT at fork.go:145-148 and then overlaying o.Vars still yields ERR_CALIBRATION_PINNED, because resolve.go:33 refuses any caller-supplied value for a pinned name. (5) checkpoint() at fork.go:339 takes the LAST matching transition and only falls back to the seq-1 restart when nothing matches, matching spec 3 section 2 step 1 including the --from <initial> --at-iter 0 case (a loop re-entry always carries Iter >= 1, per machine.go:844). (6) originReason indexes plog.Events[o.Seq-1] after bounds-checking len(lines), which is safe: parseLines (store.go:88) returns an error whenever it cannot decode every line, and that error is caught by the perr branch first, so Events and lines are always the same length on the path that indexes.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 423,
+          "note": "checkProvenance's Origin.Seq == ev.Seq requirement, satisfied by construction"
+        },
+        {
+          "path": "internal/fsm/workflow/resolve.go",
+          "line": 33,
+          "note": "ERR_CALIBRATION_PINNED still fires for an overridden JUDGE on a calibration parent"
+        },
+        {
+          "path": "internal/fsm/run/store.go",
+          "line": 88,
+          "note": "parseLines errors out unless every line decodes, so len(Events) == len(lines) on the non-error path"
+        }
+      ]
+    }
+  ]
+}

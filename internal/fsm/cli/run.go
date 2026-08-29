@@ -46,6 +46,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return inv.usage(err.Error())
 	}
 	inv.p = p
+	c.noEscalate = p.bools["no-escalate"] // default off means escalation is ON
 	switch cmd {
 	case "workflows":
 		return inv.workflows()
@@ -84,7 +85,7 @@ type parsed struct {
 	pos   []string
 }
 
-var boolFlags = map[string]bool{"--calibration": true, "--repair": true, "--replace": true, "--accept-workflow-change": true, "--include-vars": true}
+var boolFlags = map[string]bool{"--calibration": true, "--repair": true, "--replace": true, "--accept-workflow-change": true, "--include-vars": true, "--no-escalate": true}
 
 func parseArgs(args []string) (*parsed, error) {
 	p := &parsed{flags: map[string]string{}, bools: map[string]bool{}, vars: map[string]string{}}

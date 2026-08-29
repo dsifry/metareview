@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1b.db08f6eebc7f6acc",
+  "kind": "shard",
+  "shardId": "shard-1b",
+  "shardHash": "db08f6eebc7f6acc",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/export/redaction_test.go", "line": 78, "note": "reflect.VisibleFields(reflect.TypeOf(run.Snapshot{})) enumerates only direct fields of Snapshot; nothing walks nested struct types"},
+    {"path": "internal/fsm/export/export.go", "line": 466, "note": "redactor.snapshot() read line by line against all eight transformed entries: vars hashed unless includeVars, allowedCmds rewritten, repo_root/work_dir via rootPath, tree_status via statusPaths, last_error detail blanked, stop_reason blanked on cmd: prefix, node_outputs emptied for unknown kinds - all eight claims are accurate"},
+    {"path": "internal/fsm/run/types.go", "line": 190, "note": "every Snapshot field carries a json tag, so the tag == \"\" fallback branch at redaction_test.go:88 is currently unreachable defensive code, not a live path"},
+    {"path": "internal/fsm/run/types.go", "line": 138, "note": "GateError is the nested type whose Detail is blanked because it can carry command output; adding RawStdout to it leaves the whole repo suite green"},
+    {"note": "Mutation test A: added SecretLeak string `json:\"secret_leak\"` to run.Snapshot in a scratchpad copy -> TestEverySnapshotFieldIsClassifiedForExport FAILs at redaction_test.go:107 naming secret_leak. The guard is a real assertion, not one that cannot fail."},
+    {"note": "Mutation test B: same field with no json tag -> FAILs naming SecretLeak, confirming the tag == \"\" fallback classifies under the Go name as the comment claims."},
+    {"note": "Mutation test E: changed overflow_handled's tag to json:\"-\" -> FAILs at redaction_test.go:118 with the stale-entry message, so the reverse direction is reachable too."},
+    {"note": "Mutation test G: deleted le[\"detail\"] = \"\" from redactor.snapshot() -> internal/fsm/export TestF8Refusals FAILs, so the transformed map's rules are separately pinned by the pre-existing snapshot golden; the new test is not the only thing holding them."},
+    {"note": "Mutation test F: added RawStdout string `json:\"raw_stdout,omitempty\"` to run.GateError -> go test ./... over the whole repo is fully GREEN, and a probe of redactor.snapshot() emits \"last_error\":{\"code\":\"X\",\"detail\":\"\",\"gate\":\"g\",\"raw_stdout\":\"SECRET-STDOUT\"} - detail correctly blanked, the new nested field exported verbatim."},
+    {"note": "CLAUDE.md numeric and behavioural claims verified against code: 120000 (internal/gitcontext/gitcontext.go:15, internal/contextprofile/profile.go:23), 4000 (gitcontext.go:17), UNTRACKED_TRUNCATED (profile.go:21), --agent-prompt (internal/fsm/cli/run.go:40)."},
+    {"path": "internal/findings/override.go", "line": 107, "note": "GrantOverride refuses a grant from the actor recorded in OverrideRequestedBy, matching the CLAUDE.md claim that the requester cannot also grant"},
+    {"path": "cmd/metareview/main.go", "line": 528, "note": "override list --pending exits 1 while any override is unacknowledged, matching the 'CI stays red' claim; findings.go:318 renders the '## Process Overrides' section and override.go never sets FixedInRunID"},
+    {"path": "internal/runchain/runchain.go", "line": 88, "note": "mid-chain the root run's MaxAttempts wins unless it is 0, matching the sharded-review paragraph's '--max-attempts on the first run of the chain; mid-chain it is ignored'"},
+    {"path": "internal/fsm/cli/prompt.go", "line": 9, "note": "the CLAUDE.md FSM exit-handling sentence (3 / 2 / 1+GATE_FAILED+resume_hint forks a child / 1+ERR_* / STOPPED and DONE terminal) matches AgentPrompt clause for clause"},
+    {"note": ".metareview/runs/.gitignore and .metareview/shards/.gitignore both exist, so the 'self-ignoring' claim in the Durable Output paragraph holds; commands/fsm.md exists so the new /fsm bullet is not dangling."}
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The new export guard is fail-open one level below the top, while its header presents itself as the enforcement of Spec 3 section 5's fail-closed export. reflect.VisibleFields(reflect.TypeOf(run.Snapshot{})) enumerates only Snapshot's own fields, so a field added to any type Snapshot reaches through - GateError, Finding, Bug, Golden, AllowedCmd, BugStatus, TokenTotals - is never classified and is exported verbatim. Demonstrated empirically: adding RawStdout string `json:\"raw_stdout,omitempty\"` to run.GateError (internal/fsm/run/types.go:138) leaves go test ./... over the entire repository green, and driving redactor.snapshot() with that field set produces \"last_error\":{\"code\":\"X\",\"detail\":\"\",\"gate\":\"g\",\"raw_stdout\":\"SECRET-STDOUT\"} - the hand-written if-chain blanks only detail and passes every sibling key through. GateError is exactly the type whose Detail is blanked because it can carry cmd stdout/stderr, and the export's default destination is <RepoRoot>/docs/metareview/fsm/<run-id>/, which CLAUDE.md instructs the operator to commit. The same gap applies to the event() path, which likewise blanks only error.detail. Either walk nested struct types (recursing on struct/pointer-to-struct/slice-of-struct fields reachable from Snapshot) or narrow the header comment so it does not claim more than the assertion delivers.",
+      "evidence": [
+        {"path": "internal/fsm/export/redaction_test.go", "line": 78, "note": "VisibleFields over reflect.TypeOf(run.Snapshot{}) only; no recursion into f.Type"},
+        {"path": "internal/fsm/export/redaction_test.go", "line": 19, "note": "\"This test is that enforcement\" - the stated scope is Spec 3 section 5 fail-closed export, which the assertion only achieves at depth 1"},
+        {"path": "internal/fsm/export/export.go", "line": 495, "note": "snapshot() blanks le[\"detail\"] and nothing else on the last_error object; every other key survives into the bundle"},
+        {"path": "internal/fsm/run/types.go", "line": 138, "note": "GateError{Code, Gate, Detail, DetailTruncated} - a new field here is unguarded by the new test and by every other test in the repo"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The header's justification overstates the prior state. It asserts that before this test 'a new field would export verbatim with the whole suite green and the coverage gate satisfied'. The coverage half is true; the suite half is not. With redaction_test.go removed and SecretLeak string `json:\"secret_leak\"` added to run.Snapshot, internal/fsm/run TestGoldenPrefixes and internal/fsm/kind TestK6Cmd both fail on snapshot drift, and those are hand-written literal expectations that FSM_UPDATE_GOLDEN=1 does not regenerate. The new test's real contribution is a targeted, actionable failure that names the export-safety question rather than a golden diff in two unrelated packages - a genuine improvement, but not first-ever detection. The sentence should say what the test actually adds.",
+      "evidence": [
+        {"path": "internal/fsm/export/redaction_test.go", "line": 15, "note": "'a new field would export verbatim with the whole suite green and the coverage gate satisfied'"},
+        {"note": "Verified in a scratchpad clone of HEAD: redaction_test.go moved aside, secret_leak added to run.Snapshot, go test ./... -> FAIL internal/fsm/run (TestGoldenPrefixes) and FAIL internal/fsm/kind (TestK6Cmd); FSM_UPDATE_GOLDEN=1 does not clear either."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "One classification note in the verbatim map misdescribes its own field. \"mock\": \"flag\" is wrong: run.Snapshot.Mock is a string, not a bool, and it holds \"<repo-relative mock dir>#<sha256[:16]>\" (internal/fsm/machine/machine.go:175). Exporting it verbatim is still the right call - the fork spec section 5 explicitly notes 'init.mock is already repo-relative' - but the map is precisely the decision record this test exists to force an author to write, so a note that gets the value's shape wrong defeats its purpose for the next reader deciding whether the neighbouring path-shaped fields need the same treatment. \"flag\" is correct for calibration and mock_tainted, which are real bools.",
+      "evidence": [
+        {"path": "internal/fsm/export/redaction_test.go", "line": 50, "note": "\"mock\": \"flag\""},
+        {"path": "internal/fsm/run/types.go", "line": 203, "note": "Mock string `json:\"mock,omitempty\"` - a string, not a flag"},
+        {"path": "internal/fsm/machine/machine.go", "line": 175, "note": "mock = rel + \"#\" + h[:16] - a repo-relative path plus a scenario hash"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "CLAUDE.md's new Durable Output sentence 'A `mock: true` FSM row never satisfies a gate.' reads as an enforced invariant but no code enforces it. grep across internal/epicready, internal/prready, internal/taskdone, internal/artifactreview, internal/state and internal/runchain finds no reference to mock at all; record.Row.Mock (internal/fsm/record/record.go:44) is written and never read by any gate, and runchain.Resolve matches on scope and target only. It holds today only because FSM rows carry scope \"fsm-<workflow>\" and target type \"fsm\", so they structurally never match a task-done/epic-ready/pr-ready chain - not because anything checks the flag. The fsm-cli spec itself lists this beside 'never pass a secret via --var' as a documented caveat and internal/fsm/cli/prompt.go:46 states it as operator guidance, so the surrounding intent is policy. Phrasing it in CLAUDE.md as a property invites a reader to rely on an enforcement that is not there; either word it as policy or add the check.",
+      "evidence": [
+        {"path": "CLAUDE.md", "line": 69, "note": "'A `mock: true` FSM row never satisfies a gate.' stated as a property of the system"},
+        {"path": "internal/fsm/record/record.go", "line": 44, "note": "Row.Mock is written by RowFor and read by no gate"},
+        {"path": "internal/fsm/cli/prompt.go", "line": 46, "note": "the same sentence appears in AgentPrompt as operator guidance, alongside 'fsm judge without --run is unaudited'"},
+        {"path": "internal/runchain/runchain.go", "line": 166, "note": "chain resolution matches on Scope and Target only; Mock is not consulted"}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

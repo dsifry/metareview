@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-08.eeb202eaae1a8bf5",
+  "kind": "shard",
+  "shardId": "shard-08",
+  "shardHash": "eeb202eaae1a8bf5",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:05:12Z",
+  "evidence": [
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+      "line": 1,
+      "note": "Shard is one new file, 522 lines, spec 5 of the 0.9.0 FSM split (CLI, black-box suite, docs, milestones). Reviewed in full against rubrics/task-done-review-rubric.md."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+      "line": 55,
+      "note": "Section 2 declares itself the final command grammar (plan 3.1, final); every subcommand line was cross-checked against the implemented parser in internal/fsm/cli/run.go."
+    },
+    {
+      "path": "internal/fsm/cli/run.go",
+      "line": 113,
+      "note": "Implemented flag set on this branch parsed here; used as the oracle for the spec's command grammar."
+    },
+    {
+      "path": "internal/fsm/cli/deps.go",
+      "line": 30,
+      "note": "Implemented Deps struct compared field-by-field with the spec's section 8 Go block."
+    },
+    {
+      "path": "internal/fsm/cli/envelope.go",
+      "line": 67,
+      "note": "Implemented exitFor compared with the spec's section 3 exit-code authority statement."
+    },
+    {
+      "path": "skills/fsm/SKILL.md",
+      "line": 81,
+      "note": "Shipped M8 doc that the spec's section 6 specifies; used to confirm the shipped text is correct and the spec is the stale side."
+    },
+    {
+      "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+      "line": 522,
+      "note": "No TODO/FIXME markers, no eval or unsafe execution, no duplicated inventoried code path; diff is complete (part 1/1, 59527 of 60000 bytes) so the rubric's truncation and unsafe-execution blockers do not fire."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Spec 5 omits the judge-override knobs that ship on this branch, including in its security-critical closed env-name set. internal/fsm/cli/wiring.go:31-32 defines EnvJudgeModel=METAREVIEW_JUDGE_MODEL and EnvJudgeEffort=METAREVIEW_JUDGE_EFFORT, and internal/fsm/cli/run.go:113 parses --judge-model/--judge-effort. The spec's section 6 (lines 356-358) states 'the closed set of env names the binary reads' and lists only ANTHROPIC_API_KEY, OPENAI_API_KEY, ANTHROPIC_BASE_URL, OPENAI_BASE_URL, MOCK_AI, MRV_RUN_ID, HOME plus test-only names; both METAREVIEW_JUDGE_* are missing, so the closed-set claim is false against the code it specifies. The same omission runs through section 2's 'final' grammar (lines 55-56, 60: init/advance carry no --judge-model/--judge-effort) and section 4's required --agent-prompt content (lines 242-244), even though the shipped golden testdata/fsm/agent-prompt.golden:36 and skills/fsm/SKILL.md:81-82 both name them. The shipped docs are correct; the spec that is supposed to be their authority is stale, which is exactly the class of defect the head commit (334e752, 'the claims that disagreed with the code') was addressing. Fix by adding the flags to section 2, the knob sentence to section 4, and the two env names to section 6's closed set.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 356,
+          "note": "Closed env-name set omits METAREVIEW_JUDGE_MODEL and METAREVIEW_JUDGE_EFFORT."
+        },
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 31,
+          "note": "EnvJudgeModel = \"METAREVIEW_JUDGE_MODEL\"; EnvJudgeEffort = \"METAREVIEW_JUDGE_EFFORT\" are read by the binary."
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 55,
+          "note": "Section 2 'final' init/advance grammar has no --judge-model/--judge-effort."
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 242,
+          "note": "Section 4's required agent-prompt knob list omits them while the golden includes them."
+        },
+        {
+          "path": "testdata/fsm/agent-prompt.golden",
+          "line": 36,
+          "note": "Shipped golden names --judge-model / --judge-effort and METAREVIEW_JUDGE_MODEL / METAREVIEW_JUDGE_EFFORT as agent-satisfiable knobs."
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The Codex CLI judge provider is missing from spec 5's seams and its proxy claim does not hold for it. Section 2 line 64 already assumes codex models ('a codex/ model also takes none|minimal|max'), but section 8's Deps block (lines 430-446) has neither the CodexExec seam nor the After seam that internal/fsm/cli/deps.go:34 and :40 actually declare, and section 8's wiring sentence (line 449) names judge.New(HTTP, Keys, URLs, nonce, Clock) where internal/fsm/cli/wiring.go:144-146 calls judge.NewWithCodex(..., c.deps.CodexExec). Section 8 claims 'tested at 100% with fakes for every seam', which cannot be verified against a Deps list that is missing two seams. More materially, section 6 line 359 asserts 'no proxy variables - RealDeps clones http.DefaultTransport with Proxy = nil'; that justification covers only the HTTP arm. internal/fsm/cli/deps.go:97-107 (realCodexExec) sets no cmd.Env, so a codex/ judge inherits the entire parent environment - HTTPS_PROXY/HTTP_PROXY and both API keys included - into a third-party binary, and section 6's own child-env containment rule at line 354 ({PATH,HOME,LANG,TMPDIR} intersect the declared set) is written as if cmd children were the only spawns. skills/fsm/SKILL.md:76-80 documents the codex spawn and that it sits outside the allowed_cmds consent gate; spec 5 records none of it, and section 5's black-box inventory has no codex or judge-override row (tests/go/test-fsm.sh has zero matches for judge-model). Fix by adding CodexExec/After to the Deps block, correcting the wiring call, qualifying the proxy sentence for the inherited-env subprocess, and adding the codex arm to the section 5 inventory.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 430,
+          "note": "Section 8 Deps block omits CodexExec and After."
+        },
+        {
+          "path": "internal/fsm/cli/deps.go",
+          "line": 40,
+          "note": "CodexExec judge.CodexExec is a real Deps field bound by RealDeps."
+        },
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 144,
+          "note": "judge.NewWithCodex(..., c.deps.CodexExec) is the actual constructor, not judge.New."
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 359,
+          "note": "'no proxy variables' justified only by the cloned HTTP transport."
+        },
+        {
+          "path": "internal/fsm/cli/deps.go",
+          "line": 101,
+          "note": "realCodexExec never sets cmd.Env, so the codex subprocess inherits proxy vars and API keys."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Section 3's exit-code authority misdescribes the function it names. Lines 166-168 declare 'cli.exitFor(command, phase, code) with phase in open|advance|fork|record|judge'; the implementation at internal/fsm/cli/envelope.go:67 is exitFor(code string, ph phase, repairMoved bool) - no command parameter at all - and its phase vocabulary at envelope.go:46-48 includes two phases the spec never lists, phaseInit and phaseNone, both of which carry real routing (ERR_STORE_PATH and ERR_RUNS_JSONL branch on init; phaseNone returns 2 unconditionally for run-less commands and judge without --run). Since the spec calls this table 'the sole authority', its phase set has to be the complete one, and a table keyed on a command argument the function does not receive cannot be implemented as written. The same signature is repeated in the ledger at line 502.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 166,
+          "note": "Declares exitFor(command, phase, code) with a five-value phase set."
+        },
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 67,
+          "note": "func exitFor(code string, ph phase, repairMoved bool) int - no command argument."
+        },
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 46,
+          "note": "phaseInit and phaseNone exist and change the result; neither appears in the spec's phase set."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The spec's CLI-owned code vocabulary is incomplete: ERR_USAGE is missing. internal/fsm/cli/envelope.go:18 defines CodeUsage = \"ERR_USAGE\" and envelope.go:52 puts it in the exit-2 set, and section 5 line 219 requires the usage row to emit 'one JSON object with code' - so ERR_USAGE is part of the shipped vocabulary. It appears in neither the section 3 list (line 183) nor the section 9 ledger row 'CLI-owned new codes' (line 516). Section 3 line 163 also commits to '0.9.x rule: envelope keys and status/code vocabularies are only added, never renamed or removed', which makes a complete authoritative list load-bearing for the version contract.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 183,
+          "note": "CLI-owned codes list starts at ERR_NOT_A_REPO and never names ERR_USAGE."
+        },
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 18,
+          "note": "CodeUsage = \"ERR_USAGE\" is a CLI-owned code emitted on every usage refusal."
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 516,
+          "note": "Ledger row 'CLI-owned new codes' repeats the same incomplete list."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Internal contradiction in the test-coverage commitment for the exit table. Section 3 line 168 and section 5 line 317 both require 'one row per (command, phase, code) triple'; section 8's Tests paragraph at line 480 requires 'one row per (command, code) pair of the exit table'. The two are different obligations - the pair form drops the phase distinction that the table's whole design rests on (ERR_GIT, ERR_CMD_CHANGED, ERR_RUN_TERMINAL, ERR_RUN_LOCKED and ERR_STORE_PATH all split 2-vs-1 by phase) - so an implementer following section 8 would under-test exactly the rows the table exists to pin. Pick the triple form in all three places.",
+      "evidence": [
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 480,
+          "note": "Section 8: 'one row per (command, code) pair of the exit table'."
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 317,
+          "note": "Section 5: 'one row per (command, phase, code) triple of the exit table'."
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 168,
+          "note": "Section 3 also says triple, making section 8 the odd one out."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 2
+}

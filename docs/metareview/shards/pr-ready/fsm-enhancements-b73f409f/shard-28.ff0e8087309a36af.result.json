@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-28-ff0e8087309a36af",
+  "kind": "shard",
+  "shardId": "shard-28",
+  "shardHash": "ff0e8087309a36af",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T10:33:43-07:00",
+  "evidence": [
+    {
+      "path": "internal/fsm/run/fold_test.go",
+      "line": 1,
+      "note": "Ran `go test -count=1 -coverprofile` over ./internal/fsm/run: PASS at 100.0% of statements, with every function in fold.go (Apply, Fold, FoldFull, cow, applyInit, checkStatus, countUnfixed, checkProvenance, decodePayload, withinCaps, shortOK/textOK/argvOK) at 100.0%. Statement coverage alone proves nothing about assertion strength, so the file was mutation-tested (see the rows below)."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 96,
+      "note": "Mutation battery against a scratchpad copy of the tree (the branch itself was never modified; verified with `git status`/`git diff --stat` afterwards). 18 targeted mutations of fold.go, each run against the full package: ALL were killed. Killed: node_output Canonical error discarded (kills TestFoldRefusesANodeOutputWithNoOutput at :1158); `Key(node, iter)` -> node-only keying (TestFoldNodeIterKeying); status_duplicate -> no error (TestFoldStatusRules :236); fix-entry-head ignoring ev.Origin (TestFoldFixBaseline :395); applyInit ignoring ParentRunID (TestFoldInitDerivations :167); countUnfixed counting only statused bugs (TestFoldUnfixedFailClosed :200); fix_baseline order check removed (:413); the EmptyData/RecordData/ForkData no-op arm made non-no-op (TestFoldNoOps :541); loop-transition iter stamp not incremented (:214); provenance Origin.Seq check dropped (TestFoldProvenance :665); mock_stamp origin exemption dropped (:700); MockTainted removed (:708); passing gate clearing LastError (TestFoldTerminalAndMisc :485); tree removed from postTerminalAllowed (:449); NodesRun dedupe removed (:278); cow() returning st (aliasing) (TestFoldPrefixesAndMutations :982); Warnings/Lineage left nil at init (TestFoldHappyPath :127 and TestGoldenPrefixes); OverflowHandled not set (:451); second_delta check removed (:310); Goldens defaulted non-empty (:137). No surviving mutant."
+    },
+    {
+      "path": "internal/fsm/run/fold_test.go",
+      "line": 543,
+      "note": "Empirically proved the `needs_input must not touch NodesRun` assertion is unreachable: mutated Apply so needs_input appends to NodesRun only late in the log (`st.Seq > 20`, so TestFoldHappyPath stays green) and ran `go test -run TestFoldNoOps`. The failure reported is `fold_test.go:541: needs_input must be a no-op (seq 25)` - the SnapshotEqualIgnoringSeq check at :540 fires first and calls t.Fatalf, so :543 can never execute."
+    },
+    {
+      "path": "internal/fsm/run/errors.go",
+      "line": 14,
+      "note": "Checked R2's `one row per Reason` claim mechanically: extracted all 28 ReasonX constants from errors.go and diffed against the identifiers used in fold_test.go. The difference is empty in both directions - every declared reason has at least one row. CodeFor's reason->code table is separately pinned in types_test.go:173."
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 23,
+      "note": "Verified the comment block above TestFoldRefusesANodeOutputWithNoOutput (fold_test.go:1135-1141) is factually right rather than plausible-sounding: Canonical(nil) fails because json.Valid(nil) is false (canonical.go:24), and OutputHash discards that error and hashes nil, i.e. sha256 of the empty string (canonical.go:87-93). So a payload with no `output` key really would have folded to a present-but-invalid document and passed the matching delta_applied's hash comparison. The guard at fold.go:113-116 is load-bearing."
+    },
+    {
+      "path": "internal/fsm/run/fold_test.go",
+      "line": 812,
+      "note": "TestFoldCaps genuinely pins boundaries rather than asserting a one-sided property: each row builds at `r.max` (must be accepted) and at `r.max + 1` (must be ReasonOversize), so an understated cap constant would fail the over-row. Checked the canonical-byte arithmetic by hand for the two escaping regimes: marshalCanonical sets SetEscapeHTML(false) (types.go:348), so `<` costs 1 byte (MaxText-2 rows) while `\\n` costs 2 (the (MaxText-2)/2 row), and the Payload row's MaxPayload - len(`{\"name\":\"r\",\"data\":\"\"}`) = MaxPayload - 22 matches the canonical key-sorted form `{\"data\":\"...\",\"name\":\"r\"}`."
+    },
+    {
+      "path": "docs/quickstart.md",
+      "line": 60,
+      "note": "Verified every other new quickstart claim against code: docs/fsm/driving-a-workflow.md exists; the exit contract (`3` = do the node's work, `1` + GATE_FAILED = run resume_hint) matches internal/fsm/cli/prompt.go:9-11 and machine/types.go:132; `.metareview/runs/.gitignore` is written and re-ensured by the run store (store_test.go:309-329) and `.metareview/shards/.gitignore` by shardpack (shardpack_test.go:88), so both `ignores itself` claims hold; FSM exports default to docs/metareview/fsm/<id> (cli/run.go:943); shard results are read back from docs/metareview/shards/<scope>/<slug> (shardpack.go:111,448); `$fsm` is listed in docs/README.codex.md:34 and `/fsm` exists as commands/fsm.md. The Review Manifest field list matches reviewmanifest.Markdown (manifest.go:262-306)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead assertion: `if e.Type == TypeNeedsInput && !reflect.DeepEqual(after.NodesRun, before.NodesRun)` at fold_test.go:543 can never execute. The preceding check at :540 is `!SnapshotEqualIgnoringSeq(before, after)`, which compares the canonical encoding of the whole snapshot - NodesRun included (types.go:229, 324-327) - and calls t.Fatalf. Any NodesRun difference therefore aborts the test at :541 before :543 is reached. Proved empirically: with Apply mutated so needs_input appends to NodesRun only for seq > 20 (keeping TestFoldHappyPath green), `go test -run TestFoldNoOps` fails with `fold_test.go:541: needs_input must be a no-op (seq 25)`, never with the :544 message. The underlying property is genuinely covered by :540, so this is a dead line rather than a coverage hole - but it reads as an extra guarantee that does not exist. Either delete :543-545 or move the NodesRun check ahead of the snapshot comparison so it can report the more specific diagnosis.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 543
+        },
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 540
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 324
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead code kept alive by a blank assignment: the `mk` closure at fold_test.go:379-384 builds a Builder that is never used, and `_ = mk` at :427 exists only to silence Go's declared-and-not-used error. It is a stale earlier version of the fixture that :386-392 replaced (mk omits the ParentRunID/Lineage/ForkedAtSeq init that makes the WithOrigin transition pass the provenance check at fold.go:424-435, so it could not have been used as written). Deleting :379-384 and :427 removes six lines and one misleading `_ =` idiom; a reader currently has to work out why a helper is constructed and discarded. Note this is confined to the test file - nothing in fold.go depends on it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 379
+        },
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 427
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "docs/quickstart.md:62 quotes a rendering that does not exist. The rewritten sentence ends `; epic-ready renders \"not sharded\"`, but the epic-ready context pack renders `## Context Shard Plan\\n\\nSharding is not applied to epic-ready reviews; see the child task-done and pr-ready packs.` (internal/epicready/review.go:500). The literal string `not sharded` is produced only by reviewmanifest.manifestHashText (manifest.go:310-316) as the `Source manifest hash:` value, and epic-ready emits no Review Manifest at all - `grep -n 'reviewmanifest\\|Review Manifest' internal/epicready/review.go` returns nothing, which the same doc sentence correctly says. The near-miss `Not sharded.` (capital N) at contextprofile/shards.go:266 is the task-done/pr-ready unsharded case, not epic-ready's. Second, smaller inaccuracy in the same sentence: `Task-done and PR-ready add a Context Shard Plan` implies epic-ready has no such section, but epic-ready does emit the `## Context Shard Plan` heading (with the not-applied body). Suggested wording: `...and manifest blockers; epic-ready's shard-plan section states that sharding is not applied to epic-ready reviews.`",
+      "evidence": [
+        {
+          "path": "docs/quickstart.md",
+          "line": 62
+        },
+        {
+          "path": "internal/epicready/review.go",
+          "line": 500
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 313
+        },
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 266
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Comment overstates what the block below it tests. fold_test.go:1004 reads `duplicating a post-terminal-legal event after the terminal transition is fine; a node event is not`, but :1005-1009 only exercises the second clause (a duplicated needs_input after the terminal transition -> ReasonPostTerminal). Nothing here duplicates a post-terminal-legal event; that acceptance path lives in TestFoldTerminalAndMisc's `allowed` loop (:436-458), so there is no coverage gap - just a comment that credits this block with a row it does not contain. Also cosmetic in the same statement: :1005 calls rechain() and :1007 calls rechain() again on the same slice after mutating State, so the first rechain is discarded work (the Prev hashes it computes are invalidated by the :1006 assignment). Drop the outer rechain at :1005 and trim the comment to the clause that is actually tested.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 1004
+        },
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 1005
+        },
+        {
+          "path": "internal/fsm/run/fold_test.go",
+          "line": 436
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

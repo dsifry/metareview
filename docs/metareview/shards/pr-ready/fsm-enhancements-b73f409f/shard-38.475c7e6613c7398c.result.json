@@ -1,0 +1,226 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-38.475c7e6613c7398c",
+  "kind": "shard",
+  "shardId": "shard-38",
+  "shardHash": "475c7e6613c7398c",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "blockingCount": 6,
+  "evidence": [
+    {
+      "note": "Ran `go test ./internal/fsm/cli/ ./internal/taskdone/ ./internal/fsm/judge/ -count=1`: all green. `go tool cover -func` reports 100.0% of statements for every function in internal/fsm/cli/run.go."
+    },
+    {
+      "note": "Mutation-tested each new guard by copying the tree to a scratchpad (rsync, repo untouched), deleting or inverting the line, and running `go test ./...`. Ten mutations survived the full suite; each survivor is reported below with its file:line."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/still-present.calibration.golden",
+      "line": 1,
+      "note": "Golden regenerated from TemplateStillPresentCalibration and pinned by TestJ1Goldens (judge_test.go:99-160), which additionally asserts, independently of the golden, that calibration is never fenced and that the product template equals calibration plus the confidence line. No finding."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Spec-contract test row unimplemented: `--replace` on `record node-output` is wired but pinned by nothing. spec 5 \u00a77 (docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:296) requires \"ERR_NODE_OUTPUT_EXISTS then --replace succeeds\". The string \"--replace\" occurs nowhere in internal/fsm/cli/cli_test.go (0 hits), ERR_NODE_OUTPUT_EXISTS is never asserted in the package, and replacing `Replace: p.bools[\"replace\"]` with `Replace: false` at run.go:638 passes `go test ./...` cleanly. The flag is advertised in AgentPrompt (prompt.go) and in the spec's CLI grammar, so a regression that drops it is invisible.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 638
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 296
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Spec-contract test row unimplemented: the `fsm export` value oracle. spec 5 \u00a77 (fsm-cli.md:310-312) requires `init --var SECRET=sekret-value` -> default export contains the value in no byte and `manifest.redacted` is non-empty, and `--include-vars --out d` -> present. cli_test.go:286-295 exercises only the default export and the two ERR_EXPORT_DEST refusals; no test ever passes `--include-vars` together with `--out`. Replacing `IncludeVars: p.bools[\"include-vars\"]` with `IncludeVars: false` at run.go:927 passes `go test ./...`. This is the one knob the docs describe as un-redacting run vars (\"weakens a guardrail\", driving-a-workflow.md:88-92), so its CLI wiring being unpinned is the wrong place for a gap.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 927
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 311
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Duplicated guard, tested in one copy only: the init-side refusal of a mock scenario outside the repository is unpinned. Deleting run.go:273-275 (`if _, inside := relInside(root, dir); !inside { ... CodeMockInvalid ... \"outside\" }`) passes `go test ./...`. The two cli_test.go rows that look like they cover it (line 394 `--mock-ai /elsewhere`, line 395 `--mock-ai nodir`) are both satisfied by the fake MockLoad failing on a directory that does not exist, so neither distinguishes \"outside the repo\" from \"missing\". The identical guard in the second copy, wiring.go:125-127 (scenarioFor), IS pinned: deleting that one makes the suite fail. A real scenario directory that exists outside the repository is accepted at init today with no test noticing.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 273
+        },
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 125
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "A landed fix with no regression test: the ctx-cancellation guard in `judge --run`. run.go:784-786 returns a zero `run.LLMCallData` when `ctx.Err() != nil`, and machine.go:1063 (`if data.Kind == \"\" { return 0, cerr }`) is what turns that into \"append nothing\". Without the guard the closure returns `d` with `d.Kind = k` non-empty, so an interrupted call is written into audit.jsonl as a completed `llm_call` with a zero verdict. Deleting the three-line guard passes `go test ./...`. Commit cde8d0a is titled \"fix: round-six blockers - cancellation, ...\"; the fix is here, the test that would keep it here is not.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 784
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 1063
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "shardwiring_test.go asserts a property it does not check, and its sibling file does: the fakeWriter's Write comment (shardwiring_test.go:67-70) states \"Write can fail after the pack set is already in place, so it returns a usable rollback alongside the error; the caller must run it\" \u2014 but TestTaskDonePackWriteFailureFailsTheRun (line 174) never reads `writer.rollbacks`. Deleting `if packRollback != nil { _ = packRollback() }` from internal/taskdone/review.go:165-168 leaves the whole taskdone package green. internal/prready/shardwiring_test.go:180-190 has exactly the missing test (`TestPackWriteErrorRunsRollback`, \"rollbacks = %d, want 1: a failed pack write must be rolled back\"), so the assertion was written for one of the two identical wirings only.",
+      "evidence": [
+        {
+          "path": "internal/taskdone/shardwiring_test.go",
+          "line": 174
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 166
+        },
+        {
+          "path": "internal/prready/shardwiring_test.go",
+          "line": 182
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The new housekeeping test pins the positive direction of the GC gate but not the negative one it exists for. review.go:267-271 comments \"Superseded result files are collected only once the gate has passed, so a failing run never destroys the record it was judged on\" and guards GC with `if !result.Blocking`. Removing that guard (calling GC unconditionally) passes `go test ./...`. TestTaskDoneHousekeepingFailuresDoNotDiscardTheRun's \"gc\" case proves GC IS reached when the gate passes (shardwiring_test.go:240-245), and TestTaskDonePackRollbackRunsWhenTheReviewFails' `collections != 0` check (line 206) is on the early-return error path, before the housekeeping block, so it never reaches the guard. The fix is one line: the same table's \"prune\" case is already a blocking run, so asserting `tc.writer.collections == 0` there would pin it.",
+      "evidence": [
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 269
+        },
+        {
+          "path": "internal/taskdone/shardwiring_test.go",
+          "line": 206
+        },
+        {
+          "path": "internal/taskdone/shardwiring_test.go",
+          "line": 223
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Dead code that reads as an alias mapping which does not exist. `judge.KindStillPresent` is the literal \"still-present\" (internal/fsm/judge/prompts.go:19), so both `if k == \"still-present\" { k = judge.KindStillPresent }` blocks in `judge()` \u2014 run.go:713-715 and again at run.go:744-746 after judgeInput \u2014 are no-ops. Deleting either (verified independently) passes `go test ./...`. The duplication in particular suggests someone believed the wire name and the constant differed.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 714
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 745
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "`--judge-model`/`--judge-effort` and METAREVIEW_JUDGE_MODEL/METAREVIEW_JUDGE_EFFORT are accepted on the fork path and silently discarded. parseArgs (run.go:113) accepts them for every subcommand; `init()` folds them into the run's vars via applyJudgeOverrideFor (run.go:307), but `fork()` builds `machine.ForkOptions{... Vars: p.vars ...}` at run.go:573 with no override, so `advance --run X --from Y --judge-model m` parses cleanly, exits 0, and the child keeps the parent's judge. Three documents state these \"retarget the judge exactly as --var JUDGE does\" (prompt.go AgentPrompt, docs/fsm/driving-a-workflow.md:89-91, skills/fsm/SKILL.md:57-58) \u2014 and `--var JUDGE=` genuinely does work on a fork (SKILL.md:47 documents it as the judge-swap recipe), so the two are not equivalent exactly where the docs say they are. Also note `applyJudgeOverride` (wiring.go:254, the 3-arg wrapper) has no production caller at all: only judgeoverride_test.go:45/57/63 invoke it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 573
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 307
+        },
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 254
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "A doc comment that talks the reader out of a check the code does not make. run.go:341-342: \"events reads a run's log ... (nil when the store cannot read it; the envelope then omits the derived key rather than failing a command that already succeeded)\". No caller omits anything. `lastTransitionGate` and `handler` return a nil `any` that marshals to JSON `null` (present, not omitted), and `failedFrom` returning `(\"\", 0)` feeds `resumeHint` at run.go:414 and run.go:502, producing `metareview fsm advance --run <id> --from  --at-iter 0` \u2014 a malformed command emitted under the `resume_hint` key that the AgentPrompt instructs the agent to run verbatim on GATE_FAILED. If the intent is genuinely \"omit\", the keys should be conditional; if the intent is \"this cannot happen after a successful Open\", the comment should say that instead.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 341
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 414
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "`gate --input` misreports its own SHA validation and the check is unpinned. run.go:677 is `if err := dec.Decode(&snap); err != nil || snap.FixEntryHead != \"\" && !gate.ValidSHA(snap.FixEntryHead)`, and the branch reports `in.usage(\"--input is not a snapshot: \" + fmt.Sprint(err))`. On the ValidSHA half `err` is nil, so the operator is told `--input is not a snapshot: <nil>` with no mention of the malformed fix_entry_head that actually caused it. Deleting the `|| snap.FixEntryHead != \"\" && !gate.ValidSHA(...)` clause passes `go test ./...`; `fix_entry_head` appears nowhere in cli_test.go.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 677
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Doc-comment attached to the wrong declaration: run.go:182 \"// openRun resolves --run, peeks the init line for the mock scenario, builds the wiring, and opens the run.\" sits immediately above `type opened struct` (run.go:183), not above `func (in *invocation) openRun` (run.go:191). godoc renders openRun's description as the documentation for the `opened` type, and openRun itself is undocumented.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 182
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Error-code remapping by prose match. `converge()` at run.go:869 re-codes ERR_BAD_CONVERGENCE to ERR_CMD_NOT_ALLOWED when the detail `strings.Contains(..., \"unknown cmd\")`, and `cmdNameIn` (run.go:878-883) recovers the command name by taking the substring after the last space and trimming quotes. The contract is therefore the exact wording of internal/fsm/converge/converge.go:169 (`\"line %d: unknown cmd %q\"`); rewording that message silently downgrades the CLI's code and corrupts the `name` field, with no test pinning the pair. A typed field on the converge error would remove the coupling.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 869
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 878
+        },
+        {
+          "path": "internal/fsm/converge/converge.go",
+          "line": 169
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestTaskDonePackRollbackRunsWhenTheReviewFails (shardwiring_test.go:186-211) makes itself pass by construction when the environment defeats its setup: it chmods the review directory to 0555 and calls `t.Skip(\"the review body unexpectedly succeeded; nothing proved\")` if Create returns nil. Under any uid for which 0555 is not a write barrier (root, some CI containers, some filesystems) the test silently proves nothing while still reporting a non-failure. A skip is more honest than a green pass, but the rollback invariant then has no coverage at all in this package \u2014 see the medium finding above, which it shares a cause with.",
+      "evidence": [
+        {
+          "path": "internal/taskdone/shardwiring_test.go",
+          "line": 201
+        }
+      ]
+    }
+  ]
+}

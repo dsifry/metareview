@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0d.553b443a9fe6ffbe",
+  "kind": "shard",
+  "shardId": "shard-0d",
+  "shardHash": "553b443a9fe6ffbe",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:05:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "tests/manifest/test-skills.sh",
+      "line": 12,
+      "note": "skills/fsm/SKILL.md added to the frontmatter loop; file exists and has ---, name:, description:"
+    },
+    {
+      "path": "tests/manifest/test-skills.sh",
+      "line": 20,
+      "note": "existence loop extended with commands/fsm.md, both docs/fsm pages, both workflow YAMLs and two fsm test fixtures; all 21 paths verified present in the worktree"
+    },
+    {
+      "path": "tests/manifest/test-skills.sh",
+      "line": 125,
+      "note": "all six new grep assertions verified against the real files: three in skills/fsm/SKILL.md, one in README.md, one each in CLAUDE.md and AGENTS.md; every one matches"
+    },
+    {
+      "path": "tests/run-all.sh",
+      "line": 8,
+      "note": "run-all.sh cds to repo root before invoking this script, so the relative paths in the new list resolve correctly"
+    },
+    {
+      "path": "tests/go/test-fsm.sh",
+      "line": 66,
+      "note": "tests/go/agent-prompt-anchors.txt is genuinely consumed here, and testdata/fsm/agent-prompt.golden is byte-compared in the same suite, so the two newly pinned fixtures are not dead files"
+    },
+    {
+      "path": "workflows/embed_test.go",
+      "line": 10,
+      "note": "the two newly pinned workflow YAMLs are also asserted by name in the embed test and by fsm workflows in test-fsm.sh:57, so existence-only pinning here is not the sole guard on them"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "commands/fsm.md is the only shipped command file pinned by existence alone. Every other command file in this script has a paired content assertion tying it to the CLI it documents: tests/manifest/test-skills.sh:107 (commands/review-task-done.md / 'metareview review task-done'), :109 (epic-ready), :111 (pr-ready), :113 (learn-post-merge), :115 ('strict mode'), :116 (setup --bootstrap-prereqs --dry-run), :118 ('commit' in commands/status.md). The fsm change adds commands/fsm.md to the test -f list at :20 and adds three content greps for skills/fsm/SKILL.md at :125-127, but adds none for commands/fsm.md. commands/fsm.md carries the exit-code table users act on (0/3/2/1, the resume_hint fork note, 'A mock: true run never satisfies a gate'), and that prose could be emptied or contradicted without any test failing. The cheapest closure is the same shape as its siblings — grep -q 'metareview fsm' commands/fsm.md — plus one grep for the mock: true sentence, which the script already asserts for the SKILL.md at :127.",
+      "evidence": [
+        {
+          "path": "tests/manifest/test-skills.sh",
+          "line": 20,
+          "note": "commands/fsm.md pinned by existence only"
+        },
+        {
+          "path": "tests/manifest/test-skills.sh",
+          "line": 107,
+          "note": "the paired-content pattern every other command file follows"
+        },
+        {
+          "path": "commands/fsm.md",
+          "line": 16,
+          "note": "unguarded exit-code and mock-gate prose"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The change pins the FSM test fixture but not the FSM test that reads it, and the suite runner treats that test as optional. tests/manifest/test-skills.sh:20 now asserts tests/go/agent-prompt-anchors.txt and testdata/fsm/agent-prompt.golden exist, but tests/go/test-fsm.sh — the only consumer of both (test-fsm.sh:66) and the entire 239-line FSM suite added by this branch — is not pinned anywhere, and tests/run-all.sh:46 invokes it as 'if [ -f tests/go/test-fsm.sh ]; then ...'. Deleting or renaming that file therefore removes all FSM coverage while run-all.sh exits 0 and this manifest test still passes on the orphaned fixtures. The if-guard is a pre-existing pattern applied to all 30-odd suites in run-all.sh and is not introduced by this shard, so this is advisory rather than blocking; but this shard is where the FSM manifest contract is being written, and pinning the fixture without its consumer is the asymmetry that makes the hole reachable. Adding tests/go/test-fsm.sh to the :20 list closes it for the new suite at no cost.",
+      "evidence": [
+        {
+          "path": "tests/manifest/test-skills.sh",
+          "line": 20,
+          "note": "fixture pinned, consuming suite not pinned"
+        },
+        {
+          "path": "tests/run-all.sh",
+          "line": 46,
+          "note": "if [ -f ... ] guard makes a deleted FSM suite a silent green"
+        },
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 66,
+          "note": "the only reader of the newly pinned anchors fixture"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Considered and rejected: that workflows/sdlc-loop.yaml and workflows/review-loop.yaml are pinned by test -f only, with nothing asserting they parse or that their ids match the names the docs promise. Verified against the repo and this is covered elsewhere — workflows/embed_test.go:10 asserts the embedded set is exactly ['review-loop','sdlc-loop'], and tests/go/test-fsm.sh:57 asserts 'fsm workflows' lists sdlc-loop with a non-empty hash, with test-fsm.sh:186-190 exercising invalid and renamed variants. Existence pinning here is complementary, not the only guard. Also checked and clean: the script runs green end to end (exit 0), all 21 paths in the :20 list resolve, all six new greps at :125-130 match their targets, CLAUDE.md and AGENTS.md are grepped without a prior test -f but grep reports its own error and set -e aborts, and no eval, TODO or FIXME is introduced.",
+      "evidence": [
+        {
+          "path": "workflows/embed_test.go",
+          "line": 10,
+          "note": "embedded workflow names asserted exactly"
+        },
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 57,
+          "note": "fsm workflows output asserted to list sdlc-loop"
+        }
+      ]
+    }
+  ]
+}

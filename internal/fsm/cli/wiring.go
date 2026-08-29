@@ -45,6 +45,8 @@ type ctxDeps struct {
 	ctx  context.Context
 	deps Deps
 	cwd  string
+	// noEscalate turns off the sandbox second opinion for rejected cross-file candidates.
+	noEscalate bool
 }
 
 // rootOf resolves the main worktree of cwd (spec 5 §2): the first `worktree` line of `git worktree list --porcelain`;
@@ -172,6 +174,18 @@ func (c *ctxDeps) nonce() string {
 	return hex.EncodeToString(b[:])
 }
 
+// escalation returns the second-opinion provider for this run, or nil to disable it.
+//
+// On by default: unattended, a false reject drops a real finding and nothing says so, while a
+// false confirm only costs a human a look. Off for --no-escalate, and off for mock and
+// unaudited runs, whose verdicts are fixtures rather than judgments.
+func (c *ctxDeps) escalation(root string, scenario *mockai.Scenario, mode judgeMode) kind.EscalateFunc {
+	if c.noEscalate || scenario != nil || mode != judgeReal {
+		return nil
+	}
+	return c.escalationFor(root)
+}
+
 // machineDeps builds the per-run machine wiring (spec 5 §8).
 func (c *ctxDeps) machineDeps(root string, scenario *mockai.Scenario, mode judgeMode) (machine.Deps, error) {
 	var j judge.Judge
@@ -186,7 +200,7 @@ func (c *ctxDeps) machineDeps(root string, scenario *mockai.Scenario, mode judge
 			return machine.Deps{}, err
 		}
 	}
-	kinds, _ := kind.New(kind.Deps{Judge: j, Mock: scenario != nil}) // consistent by construction: a mock judge iff a scenario
+	kinds, _ := kind.New(kind.Deps{Judge: j, Mock: scenario != nil, Escalate: c.escalation(root, scenario, mode)}) // consistent by construction: a mock judge iff a scenario
 	d := c.deps
 	md := machine.Deps{
 		Store: d.Store(root), Sidecar: d.Sidecar(root), Kinds: kinds,

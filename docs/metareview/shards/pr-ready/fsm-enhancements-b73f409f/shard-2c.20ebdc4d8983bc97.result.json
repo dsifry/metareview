@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-2c-20ebdc4d8983bc97",
+  "kind": "shard",
+  "shardId": "shard-2c",
+  "shardHash": "20ebdc4d8983bc97",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5",
+  "reviewedAt": "2026-08-28T18:05:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cli/deps.go",
+      "line": 56
+    },
+    {
+      "path": "internal/fsm/cli/judgeoverride_test.go",
+      "line": 69
+    },
+    {
+      "path": "internal/reviewmanifest/manifest.go",
+      "line": 361
+    },
+    {
+      "path": "internal/reviewmanifest/manifest_test.go",
+      "line": 735
+    },
+    {
+      "note": "Empirical: go test ./internal/reviewmanifest/ ./internal/fsm/cli/ passes; internal/fsm/cli reports 100.0% of statements (the coverage gate's hard requirement for internal/fsm/*), internal/reviewmanifest 97.1% against a floor of 97.0 in tests/coverage-floor.txt. go vet and golangci-lint v2 report 0 issues for both packages."
+    },
+    {
+      "note": "Mutation testing on a scratchpad copy of the tree (the branch itself was never modified; git status confirmed clean afterwards). 18 mutants injected into internal/reviewmanifest/manifest.go. Killed: escapePipes made identity, ingested/ingestedCode dropping the mrvf- neutralisation, hasValidEvidence reverted to any(), manifestHashText always InlineCode, profilePaths dropping the LocalBytes clause, dispositionCloses accepting waived, the filename-match check removed, the ParseResult size guard removed, the shardIDPattern check removed, the cross-shard must-not-name-a-shard check removed, the duplicate-shard-result blocker removed. The security and evidence-rule tests are therefore real, not decorative."
+    },
+    {
+      "note": "Verified deps.go claims empirically rather than by reading. realCodexExec's three exit paths (stdout/stdin round-trip via `cat`, non-zero exit via `sh -c 'printf partial; exit 3'`, missing binary) are each exercised by named subtests in judgeoverride_test.go:69-102, and each subtest has a t.Fatalf that can actually fire. RealDeps assigns all 19 Deps fields, so the 'binds every seam' comment is accurate. newHTTPClient replacing Transport is safe because judge.NewHTTPClient (internal/fsm/judge/judge.go:94) sets only Timeout and CheckRedirect on the Client, never a Transport, so nothing is silently discarded."
+    },
+    {
+      "note": "Verified the historical claims embedded in the new doc comments. The hasValidEvidence comment says the prior validator was an any() and that TestEvidenceRuleMatchesValidator only ever built one-element slices: the shard diff shows the old any() body, and manifest_test.go:299 assigns []EvidenceRef{testCase.ref} — a one-element slice — so both halves of the claim are true. The ingested comment says reviewlog harvests mrvf- tokens from the review log: internal/reviewlog/reviewlog.go:53 defines findingIDPattern = mrvf-[A-Za-z0-9._@/-]+, confirming the stated attack."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "sourceAssignmentBlockers' doc comment (internal/reviewmanifest/manifest.go:361-362) claims it checks that 'every branch path is chunked and every chunk lands in exactly one shard'. The code checks strictly less: it counts occurrences of each '<path> part <n>' key and blocks only when a key appears more than once (at most one shard), and separately blocks a source path that no chunk mentions at all. It never uses chunk.Parts, so it cannot see a chunk that is missing from the plan entirely. Verified empirically on a scratchpad copy: a plan whose only shard holds part 1 and part 3 of a 3-part file, with part 2 absent, produces zero assignment blockers (the only blocker returned was the unrelated 'missing shard result for shard-3a'). This is the same defect class the rest of this PR is being audited for — a comment asserting a property the code does not have — and it sits on the one function whose job is to establish that every byte of the branch diff reached a shard pack, which is the premise on which the context-risk blocker is downgraded to advisory. The information needed for the real check is already on the struct: for each path, the set of Part values should be exactly 1..Parts. Fix is either to add that check or to narrow the comment to what is actually enforced.",
+      "evidence": [
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 361
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 378
+        },
+        {
+          "note": "Probe test on a scratchpad copy: Build+Aggregate over a ShardPlan whose shard 3a holds chunks {Part:1,Parts:3} and {Part:3,Parts:3} for internal/a.go returned Blockers = [\"missing shard result for shard-3a\"] only — no completeness blocker for the absent part 2."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "ShardedReviewMarkdown renders the plan hash as markdown.InlineCode(manifest.SourceManifestHash) (internal/reviewmanifest/manifest.go:745) instead of going through manifestHashText, so with no plan it emits the literal '- Plan hash: ``' — exactly the empty-value rendering that manifestHashText exists to prevent and that TestManifestHashOmittedWithoutAPlan (manifest_test.go:613) pins for the sibling renderer Markdown. It also emits a results table containing only its header and separator rows. Reachable: taskdone/prready ingestShardResults runs discovery when len(plan.Shards) > 0 OR explicit --shard-result paths were passed, so an unsharded review given an explicit result path produces Ignored entries with an empty plan hash. Confirmed by rendering that manifest on a scratchpad copy.",
+      "evidence": [
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 745
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 311
+        },
+        {
+          "note": "Probe output on a scratchpad copy for Build(Input{Scope:\"task-done\", IgnoredResults:[...]}) with no ShardPlan: the section begins '- Plan hash: ``' followed by '- Shards covered: 0 of 0' and a table with no data rows."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Four guards added or kept by this diff survive mutation against the whole Go test suite, i.e. no Go test distinguishes them from their absence. (1) chunkedFileLines' 'if chunk.Parts <= 1 { continue }' skip (manifest.go:788) and (2) appendUnique's dedup (manifest.go:810) — appendUnique reports 0.0% coverage even with -coverpkg across every package in the repo, so the entire 'Files reviewed as chunks' loop body is unexercised by Go tests; only tests/go/test-sharded-review.sh touches it, and it merely greps for the section header, so neither the single-part skip nor the shard-id dedup is actually asserted. (3) MatchesPlan's empty-PlanHash guard (manifest.go:189): without it, an unsharded review (plan.PlanHash == \"\") would accept a cross-shard result whose planHash is also empty as fresh — shardpack.Discover calls MatchesPlan directly at shardpack.go:345, so this guard is load-bearing, not decorative. (4) MatchShard's empty-ShardHash guard (manifest.go:175-178). (5) sourceAssignmentBlockers' empty-plan early return (manifest.go:364) also survives: without it every unsharded review would emit 'X is not assigned to a shard' for every source path.",
+      "evidence": [
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 810
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 189
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 364
+        },
+        {
+          "note": "go tool cover -func over a profile built with go test ./... -coverpkg=./internal/reviewmanifest/... reports appendUnique 0.0% and chunkedFileLines 66.7%; the five listed mutants each leave go test ./... green."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "realCodexExec (internal/fsm/cli/deps.go:147-161) never sets cmd.Stderr, so the Codex CLI's stderr is discarded. The doc comment above it explains the stdin and inherited-environment choices deliberately but is silent about this one. Consequence downstream: internal/fsm/judge/codex.go:96-97 turns a non-zero exit into the bare error 'codex exited N' with no diagnostic text, and because exec.ExitError.ExitCode() returns -1 for a signal-killed process, an AttemptTimeout kill and a genuine CLI error are indistinguishable to the operator ('codex exited -1'). Capturing stderr into the returned bytes or into the error would make judge transport failures diagnosable.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/deps.go",
+          "line": 147
+        },
+        {
+          "path": "internal/fsm/judge/codex.go",
+          "line": 96
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "shardIDPattern (internal/reviewmanifest/manifest.go:60) and resultNamePattern (manifest.go:62) hardcode a shard id of 1 to 3 hex digits. That width is not this package's to choose: contextprofile.shardIDForPath emits ceil(bits/4) digits where bits comes from bucketBits, capped by maxBucketBits = 12 (internal/contextprofile/shards.go:18). The two are consistent today, but nothing ties them — no shared constant, no test, not even a comment. Raising maxBucketBits to 16 would silently make every shard result fail 'invalid shard ID' and 'does not match its file name', an unfixable gate, since the reviewer cannot name its own shard any other way. A reference to maxBucketBits in the regex comment, or a test asserting the pattern accepts shardIDForPath's widest output, would close it.",
+      "evidence": [
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 60
+        },
+        {
+          "path": "internal/contextprofile/shards.go",
+          "line": 18
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "ingestedCode's escapePipes step is justified by a table-specific argument ('GFM splits a row on pipes before it parses inline code', manifest.go:721-725), but ingestedCode and ingested are also used outside any table: Markdown's '### Ignored Result Files' bullets (manifest.go:301), resultLine's '### Shard Results' bullets (manifest.go:321-323), and ShardedReviewMarkdown's ignored/unreadable bullet lists (manifest.go:767, 773). In those contexts a pipe in a reviewer name or result path renders as a visible backslash-pipe rather than a pipe. Purely cosmetic — the security property is unaffected and the over-escaping is the safe direction — but the comment's rationale does not cover the call sites it is applied to.",
+      "evidence": [
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 721
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 301
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

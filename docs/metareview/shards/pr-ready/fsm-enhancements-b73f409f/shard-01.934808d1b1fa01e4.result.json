@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-01-934808d1b1fa01e4",
+  "kind": "shard",
+  "shardId": "shard-01",
+  "shardHash": "934808d1b1fa01e4",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:04:41Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 99,
+      "note": "fsm dispatch added before status/override; verified metareview fsm with no subcommand emits ERR_USAGE and exits 2, matching the driver contract in CLAUDE.md"
+    },
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 495,
+      "note": "handleOverride request/grant/list matches the documented separation of duties; internal/findings/override.go:58 and :91 enforce non-empty actor, minimum reason length, open-or-pending status, and the self-grant refusal"
+    },
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 615,
+      "note": "mustResultFile validates --shard-result and --cross-shard-result at parse time; verified a missing path exits 2 with nothing written (tests/go/test-sharded-review.sh:198-202)"
+    },
+    {
+      "path": "workflows/sdlc-loop.yaml",
+      "line": 12,
+      "note": "every gate named (nothing_found, findings_nonempty, nothing_confirmed, confirmed_nonempty, commit_exists, all_fixed, bugs_remain) exists in internal/fsm/gate/gates.go builtin map; every node kind exists in internal/fsm/kind/kind.go:27-30"
+    },
+    {
+      "path": "workflows/embed_test.go",
+      "line": 9,
+      "note": "sdlc-loop.yaml is embedded and covered; verified end to end by running metareview fsm workflows, which parses and hashes it (6 states) without a validation error"
+    },
+    {
+      "path": "docs/tasks/pr-b-shard-ingestion.md",
+      "line": 68,
+      "note": "cross-references verified to exist on disk: docs/specs/2026-08-27-metareview-0.8.3-sharded-review-results.md, docs/tasks/pr-b-slices-1-2.md, docs/tasks/pr-b-slice-3.md"
+    },
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 8,
+      "note": "go build ./... , go vet ./... and gofmt -l cmd/ internal/ all clean at head 334e752fda7ab5077090c61e1f8dc357b483545b"
+    },
+    {
+      "path": "tests/go/test-override.sh",
+      "line": 26,
+      "note": "the new override CLI surface has behavioural coverage: refused unattributed request, pending-blocks-CI, unknown-option rejection, self-grant refusal, FINDINGS.md rendering, plus a 100% statement gate in tests/go/test-override-coverage.sh"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "mustResultFile discards ParseResult's ignore-reason return value, so its stated contract ('a bad path exits 2 with nothing written', main.go:613-614) does not hold for an oversized result. ParseResult returns (zero value, reason, nil error) for a file over MaxResultBytes (256 KiB) at internal/reviewmanifest/manifest.go:151-153, and main.go:630 tests only err. Reproduced against a built binary in a scratch repo: metareview review pr-ready --base HEAD --shard-result <400 KB valid result JSON> exited 1, not 2, and wrote a run row plus a review log. Not blocking because shardpack Discover (internal/shardpack/shardpack.go:332-336) re-parses the same bytes and the file surfaces in the review log under 'Ignored result files: result file exceeds 262144 bytes', so the operator is not left guessing; the coverage blocker still fires. Fix is to capture the reason and reject on it: if _, reason, err := ParseResult(data); err != nil || reason != \"\".",
+      "evidence": [
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 630,
+          "note": "if _, _, err := reviewmanifest.ParseResult(data); err != nil — the middle (ignore reason) return value is dropped"
+        },
+        {
+          "path": "internal/reviewmanifest/manifest.go",
+          "line": 151,
+          "note": "oversized result returns a non-empty reason with a nil error, which is exactly the case mustResultFile cannot see"
+        },
+        {
+          "path": "internal/shardpack/shardpack.go",
+          "line": 338,
+          "note": "Discover turns the same non-empty reason into an IgnoredResult, which is why this stays advisory rather than silent"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "handleOverride hand-rolls flag parsing instead of using the file's own flagValue helper, and silently tolerates a missing value. flagValue (main.go:467-473) exits 2 on both a missing value and a value that starts with '--'; the override loop (main.go:536-556) does neither, it just leaves the variable empty. The consequential case is a trailing --by: 'override request <id> --reason \"...\" --by' leaves by empty, main.go:559-561 then silently substitutes defaultActor() (the git user.email), and an audit record is written attributing the exception to an actor the caller did not name. Given that CLAUDE.md documents --by as the audit trail for who claims to have acted, a silent substitution on a truncated flag is the wrong default; exiting 2 the way every other flag in this file does would be correct. Adjacent cases (--reason with no value, a flag consuming the next flag as its value) currently fall through to the unknown-option branch or to override.go's own reason/actor validation, so they surface as errors, but with exit 1 rather than the exit 2 the rest of the CLI uses for usage errors.",
+      "evidence": [
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 543,
+          "note": "case \"--by\": if i+1 < len(args) { by = args[i+1]; i++ } — a trailing --by is a no-op, no error"
+        },
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 559,
+          "note": "if by == \"\" { by = defaultActor() } silently attributes the override to the git identity"
+        },
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 467,
+          "note": "flagValue, the helper every other option in this file uses, exits 2 on a missing or flag-shaped value"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The fsmcli import is placed inside the standard-library group rather than the third-party group at cmd/metareview/main.go:8, between \"fmt\" and \"os\". gofmt -l is clean because the group happens to stay path-sorted, so nothing in CI catches it, but it breaks the grouping every other import block in the file and the repository follows and reads as an unreviewed auto-import. Cosmetic only, no behavioural effect.",
+      "evidence": [
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 8,
+          "note": "fsmcli \"github.com/dsifry/metareview/internal/fsm/cli\" sits between fmt and os in the stdlib block, while the other twelve internal imports are correctly grouped below"
+        }
+      ]
+    }
+  ]
+}

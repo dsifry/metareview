@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-33-371103b57de6e380",
+  "kind": "shard",
+  "shardId": "shard-33",
+  "shardHash": "371103b57de6e380",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T10:45:21-07:00",
+  "evidence": [
+    {
+      "path": "tests/coverage.sh",
+      "line": 92,
+      "note": "Ran the real gate end-to-end in a scratchpad copy of HEAD (git archive HEAD, git init so the shell suite has a repo): 'bash tests/coverage.sh' exits 0 and prints 100.0% ok for all thirteen internal/fsm packages plus workflows, with every legacy package at or above its tests/coverage-floor.txt line. The script's central claim is empirically true on this branch."
+    },
+    {
+      "path": "internal/fsm/cli/envelope.go",
+      "line": 67,
+      "note": "Instrumented exitFor in a scratchpad copy to log every (code, phase, repair_moved) triple the cli test suite reaches: 69 distinct triples. Every phase-dependent switch arm is exercised in both directions, and each one was separately mutation-tested (collapsing the phase/repairMoved branch to a single return) -- all seven mutations were killed, most by TestExitTableAndHelpers at cli_test.go:576. The switch half of the exit table is genuinely pinned and agrees row-for-row with docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:173-178."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/still-present.fenced.golden",
+      "line": 7,
+      "note": "go test ./internal/fsm/judge/ passes at 100.0%, so this golden is byte-for-byte what RenderPrompt emits for the fixture at judge_test.go:94-98. The golden demonstrates the property that matters: the untrusted value '+fixed {diff}' is JSON-encoded inside the nonce fence and its literal {diff} is not rescanned as a template slot, and the adjudicate sibling's embedded '<<<END-0123456789abcdef' is neutralised by the same JSON encoding (asserted at judge_test.go:128)."
+    },
+    {
+      "path": "internal/fsm/machine/harness_test.go",
+      "line": 213,
+      "note": "Every knob countingStore, failingGit, gitFakes and fakeRunner expose is actually driven by a test: mutating failOp's \"Create\", \"Lock\", \"Events\" and \"Repair\" literals and the maxEvents override all fail the machine package, and the failingGit 'at' values Head/RevParse/Status/WorkTree/Diff/CommonDir are each driven by the loops at machine_test.go:166, machine_test.go:553 and fork_test.go:437. No dead harness configuration."
+    },
+    {
+      "path": "internal/fsm/cli/envelope.go",
+      "line": 166,
+      "note": "Deleting '|| s.MockTainted' here and at the identical guard in internal/fsm/cli/run.go:980 leaves the entire repository green: go test ./... exits 0 and bash tests/run-all.sh exits 0 in the mutated scratchpad copy. Verified end to end, not by reading."
+    },
+    {
+      "path": "tests/coverage.sh",
+      "line": 145,
+      "note": "Reproduced the --update-floor floor-line deletion by extracting lines 131-168 verbatim into a standalone script with a synthetic PCTS and floor file: the run reports 'internal/vanished absent FAIL (floor 77.0 but package not in profile)', then rewrites the floor file without that line, then exits 1. The next run has nothing left to fail on."
+    },
+    {
+      "path": "internal/fsm/record/clock.go",
+      "line": 5,
+      "note": "Replacing the body with 'return 1' leaves go test ./internal/fsm/record/ passing at 100.0% of statements; the sole caller in tests is the tautology at record_test.go:298."
+    },
+    {
+      "path": "tests/coverage.sh",
+      "line": 1,
+      "note": "shellcheck -x tests/coverage.sh is clean (the CI job at .github/workflows/test.yml:47-53 runs shellcheck -x over every .sh and is blocking), and the GOTOOLCHAIN pin at lines 20-25 matches go.mod's 'toolchain go1.27.0' line, so the comment's claim about the toolchain directive only ever upgrading is both accurate and actually enforced here."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The envelope's mock flag ORs in Snapshot.MockTainted, and nothing tests that half. Deleting '|| s.MockTainted' from internal/fsm/cli/envelope.go:166 AND from the identical guard at internal/fsm/cli/run.go:980 leaves go test ./... green (exit 0) and bash tests/run-all.sh green (exit 0) -- verified by mutation in a scratchpad copy of HEAD. The third copy of the same OR, internal/fsm/record/record.go:88, is the only one pinned (record_test.go:139 sets MockTainted and asserts r.Mock, then flips to Mock!=\"\" and asserts again). Everything that exercises 'mock' through the CLI uses a real --mock-ai run (tests/go/test-fsm.sh:78 asserts field mock == true, :130 asserts r.mock === true on the runs.jsonl rows, :143 greps the status listing for 'mock'), i.e. the Mock != \"\" half only. Taint is not cosmetic: internal/fsm/run/fold.go:88-90 sets it when a mock-stamped event lands in a run that was not started as mock, which is exactly the case CLAUDE.md's 'a mock: true FSM row never satisfies a gate' rule exists for. If the envelope under-reports it, a driving agent is told a tainted run is real. Note the package reports 100.0% of statements, so the coverage gate gives no signal here -- the OR is one statement. Add a CLI-level row that folds a mock-stamped event into a non-mock run and asserts both the state/advance envelope's mock key and the 'fsm runs' listing.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 166
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 980
+        },
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 89
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 88
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "tests/coverage.sh defeats its own 'must not silently escape its floor' guard when --update-floor is passed. Lines 131-141 fail the gate for any package that has a floor line but is absent from the merged profile. Lines 145-163 then run BEFORE the 'if failures -gt 0' exit at 164, and new_floor is built only from packages present in PCTS, so the absent package's line is dropped. The 'lowered' refusal at 147-156 only compares packages present in BOTH sets ('$1 in old'), so it never sees a deletion. Reproduced verbatim in a scratchpad harness: the run prints 'internal/vanished absent FAIL (floor 77.0 but package not in profile)', writes a floor file without that line, and exits 1; the very next run has no line left to fail on and the package is silently unenforced forever. This contradicts the comment at lines 131-132 and the header claim at line 5 that --update-floor 'never lowers a line' -- deleting a line lowers enforcement to nothing. Two-line fix: move the --update-floor block after the failures check (or gate it on failures -eq 0), and treat a floor line whose package left the profile as a refusal alongside 'lowered'.",
+      "evidence": [
+        {
+          "path": "tests/coverage.sh",
+          "line": 145
+        },
+        {
+          "path": "tests/coverage.sh",
+          "line": 131
+        },
+        {
+          "path": "tests/coverage.sh",
+          "line": 5
+        },
+        {
+          "path": "tests/coverage.sh",
+          "line": 164
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/fsm/record/clock.go exists solely so nowNanos can be a package-level seam (record.go:243 'var nanos = nowNanos'), and its only test is a tautology: record_test.go:298 asserts 'nowNanos() != 0', which no clock after 1970-01-01T00:00:00Z can fail. Replacing the body with 'return 1' keeps go test ./internal/fsm/record/ green at 100.0% of statements -- verified by mutation. The property the production caller depends on is uniqueness, not non-zero-ness: record.go:223 names torn fragments 'runs.jsonl-<nanos()>', so a constant or coarse clock makes two fragments in the same run collide and the second os.WriteFile silently overwrites the first, losing quarantined audit bytes. An assertion that two successive nowNanos() calls differ (or that the value is above a recent epoch floor) would pin something; the current one is a coverage tick.",
+      "evidence": [
+        {
+          "path": "internal/fsm/record/clock.go",
+          "line": 5
+        },
+        {
+          "path": "internal/fsm/record/record.go",
+          "line": 223
+        },
+        {
+          "path": "internal/fsm/record/record_test.go",
+          "line": 298
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The exit2 map is verified by inspection only, for 17 of its 42 entries. Instrumenting exitFor and running the cli suite shows these codes never reach it from any test at any layer: ERR_CALIBRATION_PINNED, ERR_COPY_INVALID, ERR_EVENT_TOO_LARGE, ERR_GATE_INAPPLICABLE, ERR_GOLDENS_INVALID, ERR_MOCK_MISMATCH, ERR_NODE_NOT_HOST, ERR_NODE_OUTPUT_APPLIED, ERR_NODE_OUTPUT_EXISTS, ERR_RECORD_TOO_LARGE, ERR_RUN_ESCALATED, ERR_TREE_NOT_AT_CHECKPOINT, ERR_VAR_FROZEN, ERR_VAR_UNKNOWN, ERR_VAR_UNSET, ERR_WORKDIR_FOREIGN, ERR_WORKFLOW_INCOMPATIBLE; the switch aliases ERR_GIT_REF and ERR_CMD_NOT_FOUND are likewise never reached (their case-mates ERR_GIT and ERR_CMD_CHANGED are). None of them appear in internal/fsm/cli/*_test.go or under tests/. I checked all 42 entries against the exit-2 row of docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md:176 and the table and the map agree exactly today, so this is a regression exposure rather than a live bug -- dropping any one entry silently turns a documented 'retry after fixing the input' exit 2 into the exit 1 that CLAUDE.md tells a driving agent means something was recorded. It also makes the spec's line 168 claim that 'the suite has one row per (command, phase, code) triple that the table names' read as broader than it is. Cheapest fix: extend the table at cli_test.go:583-587 with one row per exit2 key.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 53
+        },
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 576
+        },
+        {
+          "path": "docs/specs/2026-08-27-metareview-0.9.0-fsm-cli.md",
+          "line": 168
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The cmds_json suppression in failure() is untested: changing the literal 'cmds_json' to any other string at internal/fsm/cli/envelope.go:128 leaves go test ./internal/fsm/cli/ green. Its job is real -- run.go:364-391 decodes Fields[\"cmds_json\"] into the structured 'cmds' key, and without the skip the same blob is also dumped into error.fields.cmds_json (capped at MaxShort = 1 KiB, so silently truncated with no truncation flag, since only detail gets one) and added to the untrusted list. The existing assertion at cli_test.go:424 checks what the envelope contains but never what it must not contain. One '_, dup := e[\"error\"].(map[string]any)[\"fields\"].(map[string]any)[\"cmds_json\"]' check on that same envelope closes it.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/envelope.go",
+          "line": 128
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 368
+        },
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 424
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The still-present prompt never tells the model the diff was cut. This golden is rendered from a fixture with DiffTruncated: true (judge_test.go:94-98) and the output contains no truncation notice anywhere -- diff_truncated reaches InputHash and the persisted llm_call and nothing else. The machine hands kinds up to MaxDiffBytes = 1 MiB (internal/fsm/machine/types.go:32) and judge.CutDiff then cuts to MaxDiffBytes = 30000 (prompts.go:97,134), so for any branch bigger than 30 KB -- this PR's own diff is over 2 MB -- the judge is asked 'does this bug STILL EXIST' while seeing only the first 30 KB, and the natural answer for a bug outside that window is 'fixed or no longer applies'. still_present false is what closes the sdlc-loop as DONE(fixed), so the truncation bias is fail-open, while the documented fail-closed rule (spec 2026-08-27-...-judge-kinds.md:112) covers only parse errors. I am filing this low rather than blocking because the 30000-byte cut is an explicitly ledgered port of the reference implementation, not an accident; but a single templated line such as 'the diff below was truncated' when diff_truncated is set would remove the bias, and the calibration mode could keep the unfenced reference text.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/testdata/prompts/still-present.fenced.golden",
+          "line": 11
+        },
+        {
+          "path": "internal/fsm/judge/prompts.go",
+          "line": 130
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 590
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Two of countingStore's injection knobs are narrower than their names and comments say. The 'torn' field is documented as 'report a torn tail on every read' and failOp accepts the value \"Events\", but both are implemented only inside EventsWithLines (harness_test.go:265-280); RunStore.Events is a separate interface method that countingStore does not override, so it is delegated straight to the embedded MemStore. machine.go:521 does call deps.Store.Events, so that call site can be neither torn nor failed from the harness. It happens not to matter today because that site discards the error ('if log, err := ...; err == nil'), which is itself invisible to the 100% statement gate. Either override Events to route through the same injection, or narrow the comment to 'every EventsWithLines read'.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/harness_test.go",
+          "line": 227
+        },
+        {
+          "path": "internal/fsm/machine/harness_test.go",
+          "line": 270
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 521
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 100%-required set and the 100%-enforcing case pattern disagree by one package. REQUIRED comes from 'go list ./internal/fsm/... ./workflows' (tests/coverage.sh:116), which includes a package at internal/fsm itself if one ever exists; check_pkg's case arm is 'internal/fsm/*|workflows' (tests/coverage.sh:92), which does not match the bare 'internal/fsm'. Such a package would be required to appear in the profile but would then fall through to the legacy arm, get 'no floor', and be exempt from the every-statement rule that the header advertises for it. Latent today (there are no .go files directly under internal/fsm), one character to fix: 'internal/fsm|internal/fsm/*|workflows'.",
+      "evidence": [
+        {
+          "path": "tests/coverage.sh",
+          "line": 92
+        },
+        {
+          "path": "tests/coverage.sh",
+          "line": 116
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Out of shard, flagged for the aggregator only, not counted as a blocker here because plan.json assigns it to shard-2e: an empty file literally named '0,' is tracked at the repository root, committed in cde8d0a on this branch ('git ls-files -- 0,' returns it). It is a shell-redirect typo artifact, not source.",
+      "evidence": [
+        {
+          "path": "0,",
+          "note": "Empty tracked file at the repo root, added by commit cde8d0a; owned by shard-2e in plan.json."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 2
+}

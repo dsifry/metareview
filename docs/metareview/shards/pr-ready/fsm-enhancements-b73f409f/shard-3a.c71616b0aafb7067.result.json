@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3a.c71616b0aafb7067",
+  "kind": "shard",
+  "shardId": "shard-3a",
+  "shardHash": "c71616b0aafb7067",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:40:00Z",
+  "evidence": [
+    {
+      "path": "internal/findings/override.go",
+      "line": 54,
+      "note": "Blocks(\"override-pending\") == true verified end to end: findings.go:441 openForRun feeds prready/review.go:228 CountByClass -> verdictForCounts, so a pending override yields NEEDS_REVISION, and tests/go/test-override.sh asserts `override list --pending` exits nonzero. Ran the script: 'test-override: ok'."
+    },
+    {
+      "path": "internal/findings/override.go",
+      "line": 54,
+      "note": "Mutation battery on a scratchpad copy (repo untouched, verified by cmp against the working tree). Killed by go test ./internal/findings/: Blocks dropping StatusOverridePending; Blocks adding StatusOverridden; disabling the self-grant refusal; EqualFold -> case-sensitive ==; minOverrideReason 12 -> 1; sort ascending; withEscalation never appending; overrideLines always rendering the requester; dropping TrimSpace on either Now; dropping UpdatedAt on grant; dropping the escalation capture; PendingOverrides including granted rows; ListOverrides dropping pending rows; ignoring the saveRecords error."
+    },
+    {
+      "path": "internal/findings/override.go",
+      "line": 107,
+      "note": "The 'requester cannot grant' boundary is real and case/space insensitive: override_test.go:403 grants as ' Orchestrator ' against a stored 'orchestrator' and is refused; tests/go/test-override.sh repeats it through the CLI. The doc comment correctly scopes it as an accidental-case guard, not authentication."
+    },
+    {
+      "path": "internal/findings/override.go",
+      "line": 76,
+      "note": "'An override is never a fix' holds: FixedInRunID is never assigned in override.go, the field is `json:\"fixedInRunId,omitempty\"` (findings.go:75) so it is absent from the JSONL, and the shell test's negative grep therefore behaves as written (confirmed set -e does not abort on the short-circuited `grep -q && fail` idiom)."
+    },
+    {
+      "path": "internal/findings/override.go",
+      "line": 133,
+      "note": "Package coverage: go tool cover -func reports 100.0% for every function in override.go (Blocks, RequestOverride, GrantOverride, ListOverrides, PendingOverrides, mutateFinding, overrideLines, withEscalation). Statement coverage is complete; the surviving mutants below show where it is not behaviour coverage."
+    },
+    {
+      "path": "internal/learning/candidates.go",
+      "line": 217,
+      "note": "Empirical probe (temporary test in the scratchpad copy, removed after running): repeatedBlockerThemes returns 1 theme for a pair of duplicate 'open' blockers and 0 themes for the same pair in 'override-pending', while findings.Blocks reports blocking=true for that status."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The new Blocks() predicate was applied to one copy of the duplicated blocking guard and not the other. internal/reviewlog/reviewlog.go:305 was migrated in this PR from `record.Status != \"open\"` to `!findings.Blocks(record.Status)` with the comment 'A pending override still blocks; a granted one does not.' The structurally identical predicate in internal/learning/candidates.go:216-222 (same spec-contract / blocking+high|critical shape) still reads `record.Status != \"open\"` and was not touched by this PR. Consequence: post-merge learning silently drops every override-pending record from repeatedBlockerThemes, so a blocker that recurred and was escalated out of the workflow -- exactly the case this feature exists to make visible -- never becomes a 'repeated-blocker-theme' knowledge candidate. Confirmed empirically: an identical pair of records produces 1 theme when status is 'open' and 0 when status is 'override-pending', while findings.Blocks says that status is still blocking. This also undercuts the claim in override.go's package docs and CLAUDE.md that 'post-merge learning can analyse exceptions separately from resolutions': learning's only status-aware blocking predicate cannot see them at all. candidates.go is unchanged on this branch, so it is in no shard and no other reviewer will see it. Fix: call findings.Blocks from isBlocking (or hoist the shared predicate), and add a learning test that pins the override-pending case.",
+      "evidence": [
+        {
+          "path": "internal/learning/candidates.go",
+          "line": 217,
+          "note": "`if record.Status != \"open\" { return false }` -- the un-migrated copy of the guard."
+        },
+        {
+          "path": "internal/reviewlog/reviewlog.go",
+          "line": 305,
+          "note": "The migrated copy: `// A pending override still blocks; a granted one does not.` then `if !findings.Blocks(record.Status)`."
+        },
+        {
+          "path": "internal/findings/override.go",
+          "line": 53,
+          "note": "Blocks is the new single source of truth this PR introduces; candidates.go never adopts it."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "GrantOverride's closed-status guard is untested for the 'fixed' (and 'superseded') case. Replacing `if record.Status != \"open\" && record.Status != StatusOverridePending` with `if record.Status == StatusOverridden` leaves the whole internal/findings suite green: TestGrantOnAnAlreadyOverriddenFindingIsRefused only pins the overridden branch, and TestOverrideUnknownOrClosedFinding exercises RequestOverride, not GrantOverride, against a fixed record. Under that regression a grant would flip a genuinely fixed finding to 'overridden' and clear it from the fixed-review-defect learning path (candidates.go:68 requires status 'fixed'), erasing a real resolution and re-labelling it an exception. Add a test that grants against a fixed finding and asserts refusal.",
+      "evidence": [
+        {
+          "path": "internal/findings/override.go",
+          "line": 104,
+          "note": "Guard whose fixed/superseded branch no test pins; mutation survived go test -count=1 ./internal/findings/."
+        },
+        {
+          "path": "internal/findings/override_test.go",
+          "line": 261,
+          "note": "TestGrantOnAnAlreadyOverriddenFindingIsRefused covers only StatusOverridden, which the surviving mutant preserved."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "RequestOverride's 'must be open' guard is untested for the already-pending case. Relaxing it to `if record.Status != \"open\" && record.Status != StatusOverridePending` (i.e. allowing a second request on a pending record) leaves the suite green. Under that regression a re-request would overwrite OverrideRequestedBy, OverrideRequestReason, OverrideEscalation and OverrideRequestedAt in place -- destroying the original audit trail the OverrideRequest doc comment exists to guarantee, and (since the self-grant check compares against the stored requester) letting the original requester rewrite the requester field and then grant its own escalation. The shipped code refuses this, but nothing pins it. Add a test that requests twice and asserts the second is refused with the provenance intact.",
+      "evidence": [
+        {
+          "path": "internal/findings/override.go",
+          "line": 70,
+          "note": "`if record.Status != \"open\"` -- only the 'fixed' branch is covered (override_test.go:151); the override-pending branch is not."
+        },
+        {
+          "path": "internal/findings/override.go",
+          "line": 107,
+          "note": "The self-grant refusal reads record.OverrideRequestedBy, which a permitted re-request would be able to rewrite."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 'Storage seam' comment overstates what the seam covers, and the write it omits is the one with no Go-level behaviour coverage. mutateFinding does a third write -- RenderIndexWithRecords -> os.MkdirAll + os.WriteFile of docs/metareview/FINDINGS.md -- outside loadRecords/saveRecords. Replacing `return RenderIndexWithRecords(root, records)` with `return nil` leaves every test in internal/findings green (both index tests re-render explicitly rather than relying on the mutation doing it); only the shell test tests/go/test-override.sh kills it. So the 100%-coverage figure for mutateFinding does not mean the index is kept in sync by anything in the Go suite. Either route the index write through the seam too, or assert in override_test.go that RequestOverride/GrantOverride alone leave FINDINGS.md updated.",
+      "evidence": [
+        {
+          "path": "internal/findings/override.go",
+          "line": 22,
+          "note": "'The override commands read and write findings through these' -- true for the ledger, not for the FINDINGS.md write at line 173."
+        },
+        {
+          "path": "internal/findings/override_test.go",
+          "line": 198,
+          "note": "TestOverridesAreRenderedInTheIndex calls RenderIndexWithRecords itself, so it cannot detect mutateFinding dropping the render."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Doc claim contradicted by the code: the status block says 'A finding is either open, fixed, or has left the normal workflow'. There is a fourth status in the same package -- StatusSuperseded (findings.go:194), set by supersedeLegacyContextRisk -- which is neither open, nor fixed, nor an override. A reader taking the enumeration at face value would conclude the two override statuses cover every non-open, non-fixed row, which is what the two untested guards above assume. One clause naming superseded fixes it.",
+      "evidence": [
+        {
+          "path": "internal/findings/override.go",
+          "line": 9,
+          "note": "'A finding is either open, fixed, or has left the normal workflow'."
+        },
+        {
+          "path": "internal/findings/findings.go",
+          "line": 194,
+          "note": "const StatusSuperseded = \"superseded\" -- the fourth state the enumeration omits."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Considered flagging ListOverrides' lexicographic sort on UpdatedAt as unsound for 'newest first'. Verified it is not: the only producer is cmd/metareview/main.go:564, which uses time.Now().UTC().Format(time.RFC3339), so every override timestamp is Zulu with a fixed width and byte order matches chronological order. Also considered flagging the missing trim of the stored request reason (a mutant dropping strings.TrimSpace on OverrideRequestReason survives); it is cosmetic only -- no doc or test claims reasons are normalised, unlike timestamps, and nothing sorts or compares on the reason.",
+      "evidence": [
+        {
+          "path": "cmd/metareview/main.go",
+          "line": 564,
+          "note": "now := time.Now().UTC().Format(time.RFC3339) -- always Z-suffixed, so string order equals time order."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

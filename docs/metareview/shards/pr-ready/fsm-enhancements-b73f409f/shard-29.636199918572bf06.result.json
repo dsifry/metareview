@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-29-636199918572bf06",
+  "kind": "shard",
+  "shardId": "shard-29",
+  "shardHash": "636199918572bf06",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:34:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/fsm/run/testdata/oracle.events.jsonl",
+      "line": 2,
+      "note": "The file is the non-canonical source half of R2b (docs/specs/2026-08-26-metareview-0.9.0-fsm-run-persistence.md:326). Its only consumer is internal/fsm/run/store_test.go:834-849, which unmarshals each line into an Event, re-stamps Seq/Prev, runs Canonical over the raw Data and asserts marshalCanonical(ev) reproduces the corresponding oracle.jsonl line byte for byte."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.events.jsonl",
+      "line": 2,
+      "note": "Confirmed with xxd that line 2 carries a genuine raw U+2028 (bytes e2 80 a8 at offset 0x26e) and literal <, > and & (3c 3e 26 at 0x268), matching what the test comment at store_test.go:833 and the spec claim. This is not a decorative fixture: the claimed characters are physically present in the bytes."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.events.jsonl",
+      "line": 2,
+      "note": "Mutation, raw U+2028 replaced with an ASCII Q in a scratch copy of the tree: TestOracle FAILS at store_test.go:847 with the expected diff (xQy vs x\\u2028y). The raw separator is load-bearing, so the fixture really does verify that canonicalization escapes it rather than merely tolerating an already-escaped input."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.events.jsonl",
+      "line": 2,
+      "note": "Mutation, enc.SetEscapeHTML(false) flipped to true in internal/fsm/run/types.go:348 with the oracle-line fixed-point check at store_test.go:825-828 neutralised so the source loop is reached: TestOracle FAILS at store_test.go:843 showing \\u003c\\u003e\\u0026 against the oracle's literal <>&. The literal HTML characters in this fixture are therefore load-bearing for the source re-encode path as well, not merely duplicated coverage from oracle.jsonl."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.events.jsonl",
+      "line": 1,
+      "note": "The inter-token whitespace on all three lines (spaces after { : and , inside data) is real non-canonical input: Event.Data is json.RawMessage (internal/fsm/run/event.go:17), so json.Unmarshal preserves it verbatim and Canonical must compact it before the comparison can succeed. Line 3 additionally exercises nested object and array whitespace."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.events.jsonl",
+      "line": 1,
+      "note": "The run_id in the init payload equals the runA constant at internal/fsm/run/fold_test.go:13, so the fixture is consistent with the run directory the test writes it beside. Payload field ordering matches oracle.jsonl exactly, which is required because Canonical preserves key order rather than sorting (internal/fsm/run/canonical.go:15-17)."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.events.jsonl",
+      "line": 3,
+      "note": "Baseline verified green before any mutation: go test ./internal/fsm/run/ -run TestOracle -count=1 passes at head 334e752fda7ab5077090c61e1f8dc357b483545b, and the full internal/fsm/run package passes. All mutations were run against a git-archive copy in the scratchpad; the repository working tree was left untouched (git status confirms no modification to any tracked file)."
+    },
+    {
+      "path": "internal/fsm/run/testdata/oracle.sh",
+      "line": 16,
+      "note": "oracle.sh regenerates oracle.jsonl and oracle.sha256 from oracle.template.jsonl only. oracle.events.jsonl is not produced or checked by the generator, so its correspondence to the template is maintained by hand."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The fixture is a hand-maintained mirror of oracle.template.jsonl with nothing binding the two together, and a line missing from it is silently unverified rather than caught. TestOracle's source loop iterates srcLines (store_test.go:836) and indexes lines[i], so it only ever checks as many oracle lines as this file happens to contain; there is no len(srcLines) == len(lines) assertion. Proven by mutation in a scratch copy: truncating oracle.events.jsonl to its first two lines leaves go test ./internal/fsm/run/ -run TestOracle -count=1 green, i.e. the record event's non-canonical round-trip stops being checked with no signal at all. Since oracle.sh regenerates oracle.jsonl and oracle.sha256 from the template and never touches this file, the realistic failure is adding a fourth event to oracle.template.jsonl, regenerating, and forgetting this file: the new event's canonicalization would go untested and the suite would stay green. Non-blocking because the fixture is currently in sync (3 lines against 3 oracle lines, all three verified above) and a surplus line would panic rather than pass silently. The fix is one line in the test, if len(srcLines) != len(lines) { t.Fatalf(...) }, not a change to this fixture.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/store_test.go",
+          "line": 836,
+          "note": "for i, sl := range srcLines — the loop is driven by the source file's length, and no assertion ties it to len(lines) from oracle.jsonl"
+        },
+        {
+          "path": "internal/fsm/run/testdata/oracle.sh",
+          "line": 16,
+          "note": "done < oracle.template.jsonl — the generator reads only the template, so oracle.events.jsonl can drift out of sync without any tooling noticing"
+        },
+        {
+          "path": "internal/fsm/run/testdata/oracle.events.jsonl",
+          "line": 3,
+          "note": "the record line whose coverage disappears silently when the file is truncated; empirically confirmed the package still reports ok"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "This PR's .gitattributes pins two byte-sensitive fixture trees against end-of-line normalization but leaves internal/fsm/run/testdata out, even though these are the repository's most byte-exact fixtures. git check-attr text -- internal/fsm/run/testdata/oracle.events.jsonl reports 'unspecified', while internal/fsm/judge/testdata/prompts/* and testdata/fsm/** report 'unset' via the -text entries. oracle.jsonl and oracle.sha256 sit in the same directory and are hashed over their exact line bytes, so a checkout with core.autocrlf=true or core.eol=crlf would append a CR to every stored line and break the audit chain verification the R2b test exists to prove. This fixture itself is the more forgiving of the group (a trailing CR lands outside the data payload and json.Unmarshal tolerates it), which is precisely why the gap is worth pinning rather than relying on: the directory is the byte-exact one and only some of its neighbours would fail loudly. Non-blocking: every CI job runs on ubuntu-latest (.github/workflows/test.yml:19, gtg.yml:28), so no current runner normalizes anything. Fix is one line, internal/fsm/run/testdata/** -text, alongside the two entries the PR already added.",
+      "evidence": [
+        {
+          "path": ".gitattributes",
+          "line": 1,
+          "note": "internal/fsm/judge/testdata/prompts/* -text and testdata/fsm/** -text are pinned; internal/fsm/run/testdata is absent despite holding the sha256-pinned oracle fixtures"
+        },
+        {
+          "path": "internal/fsm/run/testdata/oracle.events.jsonl",
+          "line": 2,
+          "note": "the line carrying the raw U+2028 and the LF-terminated framing the test's strings.Split(strings.TrimSuffix(src, \"\\n\"), \"\\n\") depends on"
+        },
+        {
+          "path": "internal/fsm/run/store_test.go",
+          "line": 819,
+          "note": "LineHash(l) != want[i] — sibling fixtures in the same unpinned directory are compared as exact bytes, which is what makes the missing -text entry matter"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Cross-shard observation surfaced while validating this fixture, recorded here because this shard's file is the only committed input that exercises the code path. The U+2028 pass in marshalCanonical is not mutation-detectable on the pinned toolchain: deleting internal/fsm/run/types.go:351 (out = bytes.ReplaceAll(out, []byte(\"\\u2028\"), []byte(`\\u2028`))) in a scratch copy leaves the entire internal/fsm/run package green, TestOracle and TestCanonicalIsToolchainIndependent included, under go1.27.0 darwin/arm64. That is consistent with the doc comment at types.go:335-341, which states 1.27 escapes these runes itself, so the pass is deliberate insurance against a toolchain that does not. Flagging it only so the belt-and-braces status is explicit rather than mistaken for tested behaviour: the comment's claim is honest, but no committed test can currently fail if the pass is removed. If the intent is to keep it enforced, a test asserting the bytes after a stdlib-independent path (or a bytes.Contains check on a raw-separator input fed through compact) would close the gap. No action required on this shard's file.",
+      "evidence": [
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 351,
+          "note": "out = bytes.ReplaceAll(out, []byte(\"\\u2028\"), []byte(`\\u2028`)) — deleting this line leaves go test ./internal/fsm/run/ -count=1 reporting ok"
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 337,
+          "note": "the comment stating encoding/json changed treatment between 1.26 and 1.27 and that 1.27 escapes them, which explains why the pass is a no-op on the pinned toolchain"
+        },
+        {
+          "path": "internal/fsm/run/testdata/oracle.events.jsonl",
+          "line": 2,
+          "note": "the raw U+2028 that would exercise the pass on a 1.26 toolchain; it is load-bearing for the escaping outcome but not for this specific line of code today"
+        }
+      ]
+    }
+  ]
+}

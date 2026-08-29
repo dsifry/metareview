@@ -28,14 +28,17 @@ import (
 
 // Deps are the seams (spec 5 §8). RealDeps binds them; tests inject fakes.
 type Deps struct {
-	Getenv    func(string) string
-	Environ   func() []string
-	Now       func() time.Time
-	After     func(time.Duration) <-chan time.Time // the judge retry ladder's timer
-	Rand      func([]byte) (int, error)
-	LookPath  func(string) (string, error)
-	FileHash  func(string) (string, error)
-	ReadFile  func(string) ([]byte, error)
+	Getenv   func(string) string
+	Environ  func() []string
+	Now      func() time.Time
+	After    func(time.Duration) <-chan time.Time // the judge retry ladder's timer
+	Rand     func([]byte) (int, error)
+	LookPath func(string) (string, error)
+	FileHash func(string) (string, error)
+	ReadFile func(string) ([]byte, error)
+	// TempDir makes the evidence sandbox root. It is outside the repository on purpose: a
+	// judge confined to it cannot read .git or anything else the working tree holds.
+	TempDir   func(pattern string) (string, error)
 	Exec      gate.Exec
 	CodexExec judge.CodexExec
 	HTTP      judge.Doer
@@ -63,6 +66,7 @@ func RealDeps() Deps {
 		LookPath:  exec.LookPath,
 		FileHash:  workflow.FileSHA256,
 		ReadFile:  os.ReadFile,
+		TempDir:   func(pattern string) (string, error) { return os.MkdirTemp("", pattern) },
 		Exec:      gate.RealExec,
 		CodexExec: realCodexExec,
 		HTTP:      newHTTPClient(),

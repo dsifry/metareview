@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-24.e17562cb3ad4d8f2",
+  "kind": "shard",
+  "shardId": "shard-24",
+  "shardHash": "e17562cb3ad4d8f2",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:22:55Z",
+  "evidence": [
+    {
+      "path": "internal/contextprofile/profile.go",
+      "line": 189,
+      "note": "The localOnly map is a real fix, verified by mutation in a scratch copy of the package: re-seeding it with addDiffProfiles(localOnly, git.Diff) makes TestCleanBranchFileHasNoLocalBytes fail with LocalBytes=133 for a clean committed file, and deleting the branch-arm assignment at profile.go:205 makes both new tests fail. Both new assertions are live."
+    },
+    {
+      "path": "internal/contextprofile/profile_test.go",
+      "line": 122,
+      "note": "go test ./internal/contextprofile/... ./internal/fsm/judge/... ./internal/fsm/workflow/... all pass on the frozen tree; no source file was modified for this review."
+    },
+    {
+      "path": "internal/fsm/workflow/testdata/cmds-preimage.json",
+      "line": 1,
+      "note": "Independently recomputed the pinned digest: sha256 of the fixture with WORK->/w is 76d37fa8f97d1468432efdc97ba42dc770cbbe032bcf72ca31811af60f2b0f53, matching testdata/cmds-preimage.sha256 and the CmdsSHA256(allowedW) cross-check in workflow_test.go:485. The unsorted object keys are correct because run.Canonical (internal/fsm/run/canonical.go:17) documents that it preserves key order."
+    },
+    {
+      "path": "internal/fsm/judge/testdata/prompts/still-present.plain.golden",
+      "line": 6,
+      "note": "The golden pins the property TestJ1Goldens claims: the untrusted values 'the {{bug}}' and '+fixed {diff}' are inserted verbatim and never rescanned by format(), while the template's own {{ }} unescape to single braces in the JSON hint on the last line."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Comment claim that the code does not have: profile_test.go:97-98 says the old behaviour meant 'the per-file table stopped summing to FilteredDiffBytes', implying the fix restores that invariant. It does not hold in either direction, and nothing pins it. Measured in a scratch copy of the package with one branch-and-dirty file (400 branch bytes, 102 local) plus one worktree-only file (126 bytes): FilteredDiffBytes=628, sum(DiffBytes)=526 (the branch file's DiffBytes is overwritten with the branch total at profile.go:197, so its local bytes are missing), sum(DiffBytes)+sum(LocalBytes)=754 (the worktree-only file's bytes are counted twice, because for a non-branch path DiffBytes already contains the local contribution). There is also no per-file byte table anywhere: Markdown(profile) (profile.go:112-133) prints only totals, reviewmanifest renders path lists only (manifest.go:262-306), and PlanShards packs from branchFiles rather than profile.Files (shards.go:188-203). The tested half of the comment (LocalBytes disclosure) is accurate and effective; only the summing rationale is false.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/profile_test.go",
+          "line": 97,
+          "note": "'the per-file table stopped summing to FilteredDiffBytes' - an invariant no code establishes and no test asserts."
+        },
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 85,
+          "note": "filteredDiffBytes = branch + len(StagedDiff)+len(WorkingTreeDiff)+len(UntrackedExcerpts), i.e. whole-text lengths, while the per-file numbers are per-path parses - the two accountings cannot agree."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Assertion that cannot fail: profile_test.go:119 ('a branch-committed file is still a branch file') is satisfied by two independent paths for this fixture. sourceOf (profile.go:277-281) already returns SourceBranch because 'src/both.go' is in ChangedFiles, and the branch arm then forces file.Source = SourceBranch unconditionally (profile.go:204). Verified by mutation in a scratch copy: deleting profile.go:204 entirely leaves the whole internal/contextprofile suite green. The assertion therefore pins nothing about the behaviour the comment above it describes; the property that actually decides the disclosure is LocalBytes > 0 at internal/reviewmanifest/manifest.go:522, covered only by manifest_test.go:698.",
+      "evidence": [
+        {
+          "path": "internal/contextprofile/profile_test.go",
+          "line": 119,
+          "note": "if profile.Source != SourceBranch - true for this fixture regardless of what the branch arm does."
+        },
+        {
+          "path": "internal/contextprofile/profile.go",
+          "line": 204,
+          "note": "file.Source = SourceBranch is unconditional inside the branch arm; removing it breaks no test."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "README claim that no code produces: README.md:60 says '(`epic-ready` renders \"not sharded\": ingestion there is a follow-up.)'. epic-ready never renders that string. The only producer of 'not sharded' is reviewmanifest.manifestHashText (internal/reviewmanifest/manifest.go:313), and internal/epicready does not import reviewmanifest at all (its import block is internal/epicready/review.go:1-22); the epic-ready log instead renders '## Context Shard Plan\\n\\nSharding is not applied to epic-ready reviews; see the child task-done and pr-ready packs.' (internal/epicready/review.go:500). The substance (epic-ready is not sharded, ingestion is a follow-up) is correct; the quoted rendering is not.",
+      "evidence": [
+        {
+          "path": "README.md",
+          "line": 60,
+          "note": "quotes a rendered string that epic-ready output never contains."
+        },
+        {
+          "path": "internal/epicready/review.go",
+          "line": 500,
+          "note": "the string epic-ready actually renders: 'Sharding is not applied to epic-ready reviews'."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "README structure: the new FSM bullet is inserted at README.md:7, above the sentence at README.md:9 that introduces the Use Cases list ('metareview is for any moment where a human or coding agent needs a second, structured pass before moving work forward:'). The bullet is orphaned from the list it belongs to, so the section renders as heading / bullet / lead-in / bullets. It also breaks the sibling pattern: every other item is '**<X> review:**' with a colon, this one is '**Workflow runs.**' with a period. Moving it below the lead-in sentence fixes both.",
+      "evidence": [
+        {
+          "path": "README.md",
+          "line": 7,
+          "note": "bullet precedes its introducing sentence at README.md:9."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Version-narrative gap: the branch ships 0.9.0 (package.json:3, .claude-plugin/plugin.json:3, CHANGELOG.md:3) and this diff adds a 'What Changed In 0.8.3' section (README.md:55) but no 0.9.0 section, and the string '0.9.0' appears nowhere in README.md. The largest change in the release - the FSM - is documented only as a Use Cases bullet, so a reader following the README's 0.6.0 -> 0.8.3 release narrative sees the sharding release but not the release actually being installed. The 0.8.3 bullets themselves check out (sharded packs exist and are the mechanism this review is running through; the Go 1.26+ line at README.md:85 matches go.mod; the .metareview/runs self-ignore and the runs.jsonl init warning are real - internal/fsm/run/store_jsonl.go:104 and internal/fsm/cli/wiring.go:77; docs/fsm/driving-a-workflow.md and the --agent-prompt subcommand both exist).",
+      "evidence": [
+        {
+          "path": "README.md",
+          "line": 55,
+          "note": "'What Changed In 0.8.3' is the newest release section; no 0.9.0 section accompanies the 0.9.0 version bump."
+        },
+        {
+          "path": "CHANGELOG.md",
+          "line": 3,
+          "note": "CHANGELOG has a 0.9.0 entry that the README never reflects."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Truncation is invisible to the judge, and the golden is the proof. fixedInputs[KindStillPresent] (judge_test.go:96) sets DiffTruncated: true, yet the rendered prompt in this golden carries no truncation notice anywhere: the diff fence is introduced as 'Current diff (base..HEAD, after fixes were applied)' and the model is asked whether the bug STILL EXISTS. RenderPrompt (internal/fsm/judge/prompts.go:186-196) never reads si.DiffTruncated, so a still-present call whose evidence fell past the 30,000-byte CutDiff boundary asks a complete-looking question over an incomplete diff, and stillPresentExec (internal/fsm/kind/kind.go:587-595) records only StillPresent/Confidence per bug - the truncation flag survives only in the input hash and the CLI env (internal/fsm/cli/run.go:801). The omission is defensible: TestJ1Provenance pins the templates byte-for-byte to harnesseval@19ff9a8, so adding a line would break provenance. Raised as a risk to track rather than a change to make on this branch.",
+      "evidence": [
+        {
+          "path": "internal/fsm/judge/testdata/prompts/still-present.plain.golden",
+          "line": 8,
+          "note": "'Current diff (base..HEAD, after fixes were applied)' - rendered from an input with DiffTruncated: true, with no indication the diff was cut."
+        },
+        {
+          "path": "internal/fsm/judge/prompts.go",
+          "line": 193,
+          "note": "still-present fills only golden_comment and diff; DiffTruncated is carried in the struct but never reaches the prompt."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

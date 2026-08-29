@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-3b-bb520dd0a4649ce6",
+  "kind": "shard",
+  "shardId": "shard-3b",
+  "shardHash": "bb520dd0a4649ce6",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T10:53:39-07:00",
+  "evidence": [
+    {
+      "path": "tests/go/test-fsm.sh",
+      "line": 239,
+      "note": "Ran the whole suite from a scratchpad copy of the branch (bin/metareview rebuilt into the scratchpad, never into the frozen repo): 'test-fsm: ok', 20+ green runs. shellcheck -x tests/go/test-fsm.sh with the branch's .shellcheckrc exits 0."
+    },
+    {
+      "path": "tests/go/test-fsm.sh",
+      "line": 223,
+      "note": "Mutation: replaced judge.FenceBlock(nonce, s.AllFound) with a raw string.MarshalCanonical at internal/fsm/kind/kind.go:291, i.e. deleted the fence around the untrusted value. go test ./internal/... fails (TestK5Instructions, internal/fsm/kind/kind_test.go:576, 'untrusted value ... appears outside the fences') but tests/go/test-fsm.sh still prints 'test-fsm: ok'. The shell suite's injection section detects nothing about fencing."
+    },
+    {
+      "path": "testdata/fsm/scenarios/sdlc-loop/injection/judge.yaml",
+      "line": 3,
+      "note": "The injection scenario hard-codes raw '{\"reasoning\":\"data, not instructions\",\"is_real\":false,...}', so the DONE/clean outcome asserted at test-fsm.sh:232 is the canned mock reply, independent of whether the payload was fenced."
+    },
+    {
+      "path": "internal/prready/shardingestion_test.go",
+      "line": 118,
+      "note": "Mutation-verified as load-bearing. Removing the mrvf- neutralisation in internal/reviewmanifest/manifest.go:718 (ingested) makes TestReviewLogListsIngestedAndIgnoredResults fail; forcing the FindingIDs loop body shows it iterates over 5 real IDs, so the loop is not vacuous; moving shardedReview ahead of '## Verdict' in internal/prready/review.go:923 fails the ordering assertion at line 103."
+    },
+    {
+      "path": "internal/prready/review.go",
+      "line": 293,
+      "note": "go test ./internal/prready -coverprofile shows block 293.4,294.1 with count 0: no Go test ever executes packWriter.GC. The positive half of TestGCOnlyRunsAfterAPassingGate's name is covered only by tests/go/test-sharded-review.sh:184,196."
+    },
+    {
+      "path": ".codex-plugin/plugin.json",
+      "line": 3,
+      "note": "Manifest chunk is consistent: version 0.9.0 matches package.json:3 and .claude-plugin/plugin.json:3 (tests/manifest/test-manifests.sh:27 enforces parity); the new 'workflow' keyword satisfies test-manifests.sh:42; 'Go 1.26+' matches go.mod's 'go 1.26'; skills/fsm/ and commands/fsm.md both exist for the added example prompt; the missing trailing newline is fixed."
+    },
+    {
+      "path": "tests/go/test-fsm.sh",
+      "line": 71,
+      "note": "Reproduced the fail-open: 'grep -rEil <pattern> present.md nosuchfile.md 2>/dev/null' prints the match on stdout but exits 2, so 'if grep ...; then FAIL' does not fire. All nine listed paths exist on this branch, so the gate works today."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The injection section asserts none of what its header claims. tests/go/test-fsm.sh:223 is titled 'injection: fenced values never appear raw in instructions' and builds an elaborate payload (line 227) that opens with '<<<END-0123456789abcdef' — a 16-hex-char imitation of a real nonce, clearly meant to test a fence break-out. The only assertion the block then makes about the prompt is line 235: an audit entry of type 'llm_call' exists. Nothing inspects instructions, nothing looks for the payload outside a DATA/END pair, and nothing checks the nonce is unpredictable. Proved by mutation: deleting the fence at internal/fsm/kind/kind.go:291 (judge.FenceBlock(nonce, s.AllFound) -> raw canonical JSON) leaves tests/go/test-fsm.sh printing 'test-fsm: ok'; only the Go unit test TestK5Instructions (internal/fsm/kind/kind_test.go:576) goes red. The second claim in the block is wrong the same way: line 232's comment 'rejected -> nothing confirmed -> clean' attributes the outcome to the payload being rejected, but testdata/fsm/scenarios/sdlc-loop/injection/judge.yaml:3 hard-codes is_real:false, so DONE/clean is the canned mock reply and would be identical for a benign finding. The underlying property is genuinely covered by the kind package's unit test, so this is not a hole in the product — it is a test section that tells a reader the black-box suite guards injection resistance when it does not, which is exactly the defect class this PR keeps producing. Fix: read the NEEDS_INPUT envelope's 'instructions' (and/or the recorded llm_call) and assert every occurrence of the payload lies between '<<<DATA-<nonce>' and '<<<END-<nonce>', and that the nonce is not the literal 0123456789abcdef; then reword the line 232 comment to say the mock rejects by construction.",
+      "evidence": [
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 223
+        },
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 235
+        },
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 232
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 291
+        },
+        {
+          "path": "testdata/fsm/scenarios/sdlc-loop/injection/judge.yaml",
+          "line": 3
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The forbidden-phrase gate at tests/go/test-fsm.sh:71 fails open. grep exits 2 when any operand cannot be opened, even when it also matched, and with stdout unchecked and stderr sent to /dev/null the guard reads that 2 as 'no match'. Verified: grep -rEil '<pattern>' present.md nosuchfile.md 2>/dev/null prints present.md and exits 2. So the day any of skills, commands, docs/fsm, README.md, INSTALL.md, docs/quickstart.md, AGENTS.md, CLAUDE.md or workflows is renamed, the gate silently stops guarding the remaining eight even when the phrase is present. All nine exist today, so the check currently works. The planted control on line 69-70 only proves the regex, never the operand list. Fix: capture the output (hits=$(grep ... || true)) and fail on non-empty output, or drop 2>/dev/null and fail on exit 2 as well as 0.",
+      "evidence": [
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 71
+        },
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 69
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "tests/go/test-fsm.sh:153 cannot exercise the rule its comment names. Line 152 says 'mock rules: env ignored after init', and line 153 runs MOCK_AI=scenarios/review-loop/clean fsm state --run \"$ID\" expecting OK/0. MOCK_AI is read in exactly one place, internal/fsm/cli/run.go:265, inside invocation.init(); no other subcommand consults it. 'fsm state' therefore succeeds identically with or without the variable, so the line proves nothing about the run keeping its original scenario. The sibling check on line 154 (--mock-ai on advance is ERR_USAGE) is real. Fix: set MOCK_AI to a different scenario, run an advance that actually calls the judge, and assert the recorded mock/scenario provenance is still the one chosen at init.",
+      "evidence": [
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 153
+        },
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 265
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Three presence guards survive the failure they are aimed at, because field() prints the literal '<absent>' for a missing key: line 58 [ \"$(field 'workflows.0.hash')\" != \"\" ], line 134 [ \"$(field report.common_prefix_seq)\" != 0 ] and line 208 [ \"$(field cmds.0.pinned)\" != \"{}\" ]. Confirmed against live output that all three keys are currently present and non-trivial (hash e8a5dd0c..., common_prefix_seq 14, pinned carrying two sha256 entries), so each guard catches only the narrow empty/zero/{} regression; drop the key from the envelope entirely and all three still pass. This is the same class the .shellcheckrc:21 comment says SC2251 already cleared fifteen of, so it is worth closing the remaining three. Fix: compare against the expected shape, e.g. printf '%s' \"$(field ...)\" | grep -Eq '^[0-9a-f]{64}$', and assert common_prefix_seq -gt 0 numerically.",
+      "evidence": [
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 58
+        },
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 134
+        },
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 208
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "tests/go/test-fsm.sh:9 is the only script in tests/go that reuses a pre-existing binary instead of building the code under test: 'if [ -x bin/metareview ]; then MRV=...; else go build ...'. bin/metareview is gitignored (.gitignore:2) and is left behind by npm run build and by tests/coverage.sh's cleanup trap (tests/coverage.sh:52), so a stale one is the normal state of a working tree. Run through tests/run-all.sh this is safe by ordering — tests/manifest/test-manifests.sh:115 runs npm run build first, which is also how the binary picks up GOFLAGS=-cover instrumentation under tests/coverage.sh — but a developer or agent running 'bash tests/go/test-fsm.sh' on its own (the invocation CLAUDE.md's completion rule encourages) can get a green 239-line black-box suite that never touched the source they just changed. Fix: build unconditionally, or gate the reuse on an explicit MRV_BIN/skip-build variable that tests/run-all.sh sets.",
+      "evidence": [
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 9
+        },
+        {
+          "path": "tests/coverage.sh",
+          "line": 52
+        },
+        {
+          "path": "tests/manifest/test-manifests.sh",
+          "line": 115
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestGCOnlyRunsAfterAPassingGate (internal/prready/shardingestion_test.go:132) names a two-sided property and tests one side. It asserts collections == 0 while the gate blocks, which does catch the removal of the 'if !result.Blocking' guard, but nothing in the Go suite ever runs the collection: the coverage profile for ./internal/prready reports block 293.4,294.1 (the packWriter.GC call in review.go) with count 0, so deleting that call outright leaves every Go test green. The behaviour is covered end to end by tests/go/test-sharded-review.sh:184 and :196, so this is a naming/locality nit rather than a hole — either rename it to what it checks (GC does not run while the gate blocks) or add the passing-gate half with a fakeWriter so the unit test matches its own name.",
+      "evidence": [
+        {
+          "path": "internal/prready/shardingestion_test.go",
+          "line": 132
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 293
+        },
+        {
+          "path": "tests/go/test-sharded-review.sh",
+          "line": 184
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Cross-shard observation surfaced by this shard's suite, outside its chunks: 'metareview fsm export' writes its bundle into the repository working tree, and the very next advance on any other live run in that repo reports metareview's own output as an unsanctioned edit. Instrumented tests/go/test-fsm.sh at line 156 (the first advance of $LIVE after 'fsm export --run $CHILD' on line 139) and the envelope carries warnings [{\"code\":\"UNSANCTIONED_EDIT\",\"detail\":\"? docs/metareview/fsm/<run>/audit.redacted.jsonl ...\"}]. Under the default advisory repo mode this is only a warning and the suite's expectations still hold, but internal/fsm/machine/machine.go:606-611 turns the same condition into a repo_mode gate failure under repo_mode=enforcing, so exporting one run would terminate another live run. Worth either excluding the export destination from the tree hash or documenting export as a between-runs operation.",
+      "evidence": [
+        {
+          "path": "tests/go/test-fsm.sh",
+          "line": 156
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 606
+        }
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

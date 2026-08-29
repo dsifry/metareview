@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-19-2-ed5089fa614d24d9",
+  "kind": "shard",
+  "shardId": "shard-19-2",
+  "shardHash": "ed5089fa614d24d9",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5 task-done-rubric",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 1,
+      "note": "Ran `go test ./internal/shardpack/ -count=1` (ok) and `go test -coverprofile ./internal/shardpack/` => 100.0% of statements; `go tool cover -func` shows every function in shardpack.go at 100%, so the new test file genuinely covers the source it accompanies."
+    },
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 1045,
+      "note": "Doc comment states GC leaves an unreadable result alone; the assertion three lines below and shardpack.go:404-408 both say it is deleted. See finding."
+    },
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 143,
+      "note": "TestFencedChunkCannotEscape is a real assertion, not a tautology: verified against internal/markdown FencedCodeBlock (size 3, widened to longest+1 when content holds a >=3 backtick run). With the fixture content `+```` an un-widened fence would emit no four-backtick run anywhere in the pack, so the check would fail."
+    },
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 484,
+      "note": "Comment claims it 'exercises the real wrapper bodies' but OSDeps (shardpack.go:39-48) assigns os.WriteFile/os.MkdirAll/... directly with no wrapper bodies. The test does exercise the real filesystem path, so the intent holds; only the wording names something that does not exist."
+    },
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 858,
+      "note": "TestUnreadableDiscoveredIsBlocker only asserts Discover reports the malformed file in Found.Unreadable; nothing here or in this package establishes that it blocks a gate (that lives in internal/prready and internal/taskdone). The name overstates the assertion."
+    },
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 178,
+      "note": "Checked both t.Skip guards (line 183 single-shard, line 1147 multi-shard) against the fixtures: budget 60000 over one 5-byte file always yields 1 shard, and the 400-byte budget over ~1.9KB of diff always yields >1, so neither test can silently skip itself into a green run."
+    },
+    {
+      "path": "internal/shardpack/shardpack_test.go",
+      "line": 193,
+      "note": "TestReplaceKeepsOldUntilNewInPlace compares only file counts before/after the injected rename failure. Because the replacement content is byte-identical to the original, a content comparison would be vacuous anyway, and the count check does catch the destructive-before-replace failure mode (it would drop to zero). Acceptable."
+    },
+    {
+      "path": "tests/go/test-override-coverage.sh",
+      "line": 23,
+      "note": "Verified the awk gate is genuinely sensitive rather than always-true: fed a synthetic coverprofile with one zero-hit override.go block and one findings.go block to the same expressions; blocks=2, uncovered=1. Field positions match Go's coverprofile format ($1 file:range, $3 hit count), and set-mode zero-hit-block-count==0 does imply 100% statement coverage."
+    },
+    {
+      "path": "tests/go/test-override-coverage.sh",
+      "line": 30,
+      "note": "Ran `bash tests/go/test-override-coverage.sh` from the repo root: exits 0 with 'override coverage: 100% (59 blocks)', so the claim in the header comment holds today. tests/run-all.sh:26 invokes it."
+    },
+    {
+      "note": "Static checks on this shard's files: `gofmt -l internal/shardpack/` empty, `go vet ./internal/shardpack/` clean, `shellcheck tests/go/test-override-coverage.sh` clean. No eval, no TODO/FIXME markers, no truncated diff context, both chunks are part 1/1."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Comment asserts a safety property GC does not have. internal/shardpack/shardpack_test.go:1045 reads 'A result file GC cannot read is left alone rather than removed blind.' The very next assertion (line 1055-1057) and its message ('an unreadable result is not current and should be collected') say the opposite, and the code agrees with the assertion: resultIsCurrent (shardpack.go:404-408) returns false whenever ReadFile errors, so GC (shardpack.go:393-398) deletes the file. Confirmed empirically: the test passes as written with the injected ReadFile failure. The inverted comment matters because the directory being collected is docs/metareview/shards/... , which is committed durable output: a transient read error on a result file whose name is not in the current plan causes GC to remove it, and the comment tells a maintainer that path is guarded. Fix either the comment (state that an unreadable result is treated as not-current and collected) or the behaviour (skip collection when ReadFile fails, and re-point the assertion).",
+      "evidence": [
+        {"path": "internal/shardpack/shardpack_test.go", "line": 1045, "note": "comment claiming unreadable results are left alone"},
+        {"path": "internal/shardpack/shardpack_test.go", "line": 1056, "note": "assertion and message state the file should be collected"},
+        {"path": "internal/shardpack/shardpack.go", "line": 404, "note": "resultIsCurrent returns false on ReadFile error, so GC removes the file"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "internal/shardpack/shardpack_test.go:484 comment says the test 'exercises the real wrapper bodies, which the stub Deps tests never enter'. OSDeps (shardpack.go:38-49) has no wrapper bodies; it assigns os.WriteFile, os.MkdirAll, os.MkdirTemp, os.Rename, os.RemoveAll, os.ReadDir, os.ReadFile and filepath.EvalSymlinks directly. The test's actual value is a real on-disk round trip, which is worth keeping; only the stated rationale describes code that does not exist.",
+      "evidence": [
+        {"path": "internal/shardpack/shardpack_test.go", "line": 484},
+        {"path": "internal/shardpack/shardpack.go", "line": 39, "note": "OSDeps assigns os functions directly, no wrappers"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Test name overstates its assertion: TestUnreadableDiscoveredIsBlocker (internal/shardpack/shardpack_test.go:858) only checks that Discover puts the malformed file into Found.Unreadable. Nothing in the test connects that to blocking a gate; the blocking decision lives in the consuming review scopes. A name such as TestUnreadableDiscoveredIsReported would match what is pinned, or the blocking half should be asserted where it is implemented.",
+      "evidence": [
+        {"path": "internal/shardpack/shardpack_test.go", "line": 858}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "tests/go/test-override-coverage.sh:12 sends `go test` stdout to /dev/null, and Go prints test failure detail to stdout. When the gate fails for a genuine test regression the operator sees only 'override coverage: go test failed' with no failing test name. Capturing output to a temp file and echoing it on the failure path (as tests/coverage.sh does) would keep the failure diagnosable. Same pattern exists in tests/go/test-shardpack-coverage.sh, so this is a shared, not new, weakness.",
+      "evidence": [
+        {"path": "tests/go/test-override-coverage.sh", "line": 12},
+        {"path": "tests/go/test-override-coverage.sh", "line": 13}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "tests/go/test-override-coverage.sh is a near-verbatim copy of tests/go/test-shardpack-coverage.sh: `diff` shows only the package path, the awk file filter, and the message prefix differ. Any future fix to the coverprofile parsing or the mode handling now has to be applied twice. A single script taking the package and an optional file-pattern argument would remove the duplicate.",
+      "evidence": [
+        {"path": "tests/go/test-override-coverage.sh", "line": 17},
+        {"path": "tests/go/test-shardpack-coverage.sh", "line": 16, "note": "same awk gate without the file filter"}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

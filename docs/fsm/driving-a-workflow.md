@@ -104,3 +104,24 @@ a deliberate human reset, not something the agent decides.
 redacted, one-way, durable). Delete by hand: a run without its `workflow.yaml` sidecar, an incomplete fork
 (`ERR_FORK_INCOMPLETE`), or a directory left behind by `ERR_RUN_LOCKED` at `init`. `metareview status` lists the runs of
 the main worktree. Prerequisite: git ≥ 2.31.
+
+## Escalation
+
+`adjudicate` gives a rejected candidate a second opinion when the finding names another changed
+file. The changed files are materialized at base and head under a temporary directory outside the
+repository, and a `codex/` judge is re-asked with its working directory set to that tree, so it can
+read both sides of a cross-file claim instead of the excerpts the prompt carries.
+
+It is on by default; `--no-escalate` turns it off. The asymmetry is the reason: a false reject drops
+a real finding and nothing reports it, while a false confirm only costs a human a look. Only
+rejections are escalated, so a second opinion can never delete a confirmation.
+
+The escalated call is audited as its own `llm_call` with `evidence: sandbox` and the
+`tree_hash`/`base_sha`/`head_sha` of what it could read, so the verdict stays replayable even though
+the prompt no longer carries the evidence. `fsm diff` reports `evidence_mismatch` and never marks a
+row `same` when the two runs' judges saw different kinds of evidence.
+
+Two outcomes are not judgments and are kept for a human rather than rejected:
+`unverified_no_evidence` (the diff carries no hunks for the candidate's file, so no judge was asked)
+and `checked_but_unverified` (a judge was asked and returned no usable answer, or the escalation
+itself failed).

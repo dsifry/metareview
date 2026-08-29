@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2f-2-review",
+  "kind": "shard",
+  "shardId": "shard-2f-2",
+  "shardHash": "e61d9b17b449570a",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5 task-done-rubric (adversarial, empirical: probe tests + mutation testing in a scratchpad copy)",
+  "reviewedAt": "2026-08-28T18:05:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 480,
+      "note": "The 'validity by construction' comment replaces the self-Decode that docs/specs/2026-08-27-metareview-0.9.0-fsm-judge-kinds.md:296 (§4.2 step 3) requires: 'Output {Confirmed ..., Rejected}; self-Decode before returning (ERR_NODE_OUTPUT_INVALID -> executor error)'. still-present (kind.go:597) and cmd (kind.go:655) both do self-Decode; match-then-adjudicate is the only executor that does not."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 414,
+      "note": "Pre-flight worst-case estimate counts min(canon(IssueText), MaxDesc) + 160 B per bug and len(goldens)*(MaxDesc+160). Finding.File is permitted up to MaxShort (1024 B) by checkFindings at kind.go:156 and is copied verbatim onto every emitted Bug (kind.go:458, 474, 477), but contributes nothing to the estimate, so the estimate is not an upper bound on the output."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 482,
+      "note": "EMPIRICAL: probe test in a scratchpad copy of HEAD. 256 candidates with 4-byte issue_text and a 1020-byte file gave a 286,749-byte output that its own adjudicateKind.Decode rejects (ERR_NODE_OUTPUT_INVALID reason=cap, limit 262,016). A non-maximal case - 200 candidates, 800-byte issue_text, 800-byte file path - gave 339,429 bytes; the resulting node_output event data is 339,440 bytes against the fold's hard MaxPayload of 262,144."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 669,
+      "note": "Consequence path: a fork executor ERROR is handled gracefully (pseudoGate + fail, machine.go:660-667), but an oversized SUCCESS goes to s.append(TypeNodeOutput...), which run.Apply refuses at internal/fsm/run/fold.go:43 (len(canon) > MaxPayload -> ReasonOversize) and store.prepareAppend wraps as ERR_APPEND_REJECTED (internal/fsm/run/store.go:149). runNode returns that raw error with no state change and nothing appended, so the next Advance re-enters the same fork node and re-spends every judge call."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 571,
+      "note": "EMPIRICAL: the trailing comment 'MaxDeltaList statuses of <= MaxShort ids always fit the payload' is false. 256 statuses with MaxShort ids canonicalize to 273,932 bytes; Decode returns nil (no checkPayload on this kind) although MaxPayload is 262,144. A probe drove stillPresentExec itself (AllFound of 256 bugs with 1 KB ids) to return the same 273,932-byte payload past its own self-Decode."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 156,
+      "note": "MUTATION: deleting '|| !shortOK(f.Severity)', '|| !shortOK(f.Category)' or '|| !shortOK(f.Source)' individually leaves the whole kind package suite green. Statement coverage is 100.0% because the four cap checks share one boolean expression; only File is actually exercised. Deleting the File check, the trailing-data check (kind.go:130), the cmd commit regex, the checkStatus duplicate check, dedupCandidates, either pre-flight branch, the still-present or cmd self-Decode, or widening the rejected desc cap were all caught."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 43,
+      "note": "MUTATION: envelopeMargin 128 -> 0 leaves the suite green, so the margin's value is asserted nowhere. Verified by reading that 128 is in fact sufficient: run.DeltaAppliedData (internal/fsm/run/event.go:90) inlines the Delta and adds ',\"output_hash\":\"sha256:<64 hex>\"' (~89 bytes), and NodeOutputData adds 12."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 4,
+      "note": "Package doc says untrusted values 'reach hosts and judges only inside nonce fences', but Instructions.Input carries findings_so_far/diff (kind.go:295) and unfixed_bugs (kind.go:525) raw, and internal/fsm/cli/run.go:486 emits them to the host as env[\"input\"], merely labelling them under 'untrusted'. Spec §4.1 scopes the fence rule to Text only, so the code follows the spec and the package comment overstates it."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 260,
+      "note": "Checked and cleared: validateLenses requires an int in 1..len(Lenses)=8 and workflow.go:390 runs ValidateParams at parse time, while workflow resolve.go:68-83 substitutes only string and []any params, so lensCount cannot see a mutated type and Lenses[:count] at kind.go:289 cannot panic. seen[] provisional-winner semantics (kind.go:452) and the confidence-0 rule match spec §4.2 step 1 verbatim. Registry Mock/nil-judge invariants, dedupBugs, unionSize/cliffCheck, agent-edit unfixed subset and fenced instructions all verified against the spec and by tests."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 349,
+      "note": "Spec §4.1 requires Rejected entries to carry a nil GoldenIdx, but checkBugs (kind.go:349) never inspects GoldenIdx, so adjudicateKind.Decode accepts {\"rejected\":[{...,\"golden_idx\":3}]}. Inert today because Reduce (kind.go:358) propagates only Confirmed, so nothing downstream reads a rejected bug's index."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "match-then-adjudicate's executor omits the spec-mandated self-Decode (spec §4.2 step 3) and justifies the omission with a false claim: 'validity by construction: the pre-flight bounds the size'. The pre-flight (kind.go:414-425) does not count Finding.File, which checkFindings allows up to MaxShort and which is copied onto every emitted Bug, so the estimate can under-count by ~1 KB per candidate. Measured on a scratchpad copy of HEAD: 200 candidates carrying an 800-byte issue_text and an 800-byte file path pass the pre-flight (estimate 192,000 B) and produce a 339,429-byte output - rejected by adjudicateKind.Decode itself and 77 KB over the fold's hard MaxPayload. Because Execute returns success, machine.runNode takes the append path (machine.go:669) rather than the executor-failure path, so run.Apply refuses the event (fold.go:43, ReasonOversize -> ERR_APPEND_REJECTED), Advance returns a bare error, no state changes, and the next Advance re-runs the whole node - re-spending up to 256 judge calls per attempt with no way to progress. Findings are untrusted subagent output, so their file/issue_text lengths are attacker- or sloppiness-controlled. Fix: restore the self-Decode before returning (as still-present and cmd already do), and/or include canon(File) in the pre-flight estimate.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 480, "note": "the 'validity by construction' comment standing in for the spec's self-Decode"},
+        {"path": "internal/fsm/kind/kind.go", "line": 414, "note": "pre-flight estimate omits Finding.File (<= MaxShort) entirely"},
+        {"path": "internal/fsm/kind/kind.go", "line": 156, "note": "checkFindings permits File up to MaxShort = 1024 bytes"},
+        {"path": "internal/fsm/machine/machine.go", "line": 669, "note": "oversized success goes to append, not to the graceful executor-failure gate"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "still-present's Decode carries the trailing claim '<= MaxDeltaList statuses of <= MaxShort ids always fit the payload' as the reason it is the only Decode without checkPayload. The arithmetic is wrong: 256 statuses with MaxShort ids canonicalize to 273,932 bytes against MaxPayload 262,144, and a probe drove stillPresentExec itself to emit exactly that payload past its own self-Decode (AllFound ids are bounded only by checkBugs' shortOK, i.e. MaxShort, and a cmd node can supply such ids in two sub-cap deltas). The outcome is the same unrecordable-event wedge as the finding above. Corroborating signal that this was noticed and dropped rather than fixed: kind_test.go builds 20,000 BugStatus values into fatSt and then discards them with '_ = fatSt' - a payload-cap assertion that was abandoned. Fix: call checkPayload in stillPresentKind.Decode (or cap ids where they enter AllFound) and correct or delete the comment.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 571, "note": "false 'always fit the payload' claim justifying the missing checkPayload"},
+        {"path": "internal/fsm/kind/kind.go", "line": 597, "note": "stillPresentExec's self-Decode cannot catch it, since Decode has no payload check"},
+        {"path": "internal/fsm/kind/kind.go", "line": 200, "note": "checkPayload exists and is used by every other kind's Decode"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Three of the four field caps in checkFindings (Severity, Category, Source) are asserted by no test: each can be deleted individually with the kind suite still green, even though the package reports 100.0% statement coverage - the four checks share one boolean expression, so File's coverage masks them. envelopeMargin's value is likewise unasserted (128 -> 0 survives). Non-blocking test-quality gap, not a behaviour defect.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 156, "note": "Severity/Category/Source cap checks survive deletion under the package's own tests"},
+        {"path": "internal/fsm/kind/kind.go", "line": 43, "note": "envelopeMargin 128 -> 0 survives"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Package doc overstates the fencing guarantee: 'Untrusted values reach hosts and judges only inside nonce fences'. Instructions.Input hands findings_so_far, diff and unfixed_bugs to the host raw (unfenced) and the CLI prints them under env[\"input\"], flagged but not fenced. Spec §4.1 deliberately scopes the fence rule to Text and names the untrusted Input keys, so the code is correct and only the comment is wrong. Documentation-only.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 4, "note": "package doc claim"},
+        {"path": "internal/fsm/kind/kind.go", "line": 295, "note": "Input carries the raw diff and findings alongside the fenced Text"},
+        {"path": "internal/fsm/cli/run.go", "line": 486, "note": "CLI emits input.* to the host raw, labelled untrusted"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Spec §4.1 requires Rejected bugs to have GoldenIdx nil; checkBugs never inspects GoldenIdx, so adjudicateKind.Decode accepts a rejected entry carrying golden_idx. Inert today (Reduce propagates only Confirmed) but a stale guard relative to the spec.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 349, "note": "checkBugs(\"rejected\", ...) validates caps, verdict and duplicate ids only"}
+      ]
+    }
+  ],
+  "blockingCount": 2
+}

@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2a.2bbc64f987694593",
+  "kind": "shard",
+  "shardId": "shard-2a",
+  "shardHash": "2bbc64f987694593",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:39:09Z",
+  "blockingCount": 5,
+  "evidence": [
+    {
+      "path": "internal/fsm/export/export_test.go",
+      "line": 237,
+      "note": "Redaction core is genuinely strong: 12 mutations of export.go (snapshot last_error.detail, snapshot stop_reason, snapshot vars hashing, node_output fail-closed, snapshot node_outputs fail-closed, cmd_call argv, argv path(), argv subst(), fileHashes subst, warn detail, cmd_call stdout, converge cmd reason, gate detail, statusBlock working-diff cut, minVarLen) were each caught by TestF8Redaction/TestF8Refusals."
+    },
+    {
+      "path": "internal/fsm/export/export_test.go",
+      "line": 348,
+      "note": "Mutation-proved dead assertion: dropping syscall.O_NOFOLLOW from export.go writeFile leaves the whole export package green."
+    },
+    {
+      "path": "internal/taskdone/review.go",
+      "line": 269,
+      "note": "Mutation-proved: making packWriter.GC unconditional leaves go test ./... green, so the stated safety guard is unenforced."
+    },
+    {
+      "path": "internal/taskdone/review.go",
+      "line": 548,
+      "note": "Mutation-proved: moving shardedReview ahead of the verdict token, and deleting the trailing separator, both leave go test ./... green."
+    },
+    {
+      "path": "internal/taskdone/review.go",
+      "line": 324,
+      "note": "Mutation-proved: deleting the BranchDiffFull plumbing line leaves go test ./... green, silently reverting the lint scope to the truncated diff."
+    },
+    {
+      "path": "internal/fsm/machine/types.go",
+      "line": 85,
+      "note": "Verified by grep of nil guards in internal/fsm/machine: only Terminal (machine.go:923) and Preflight (machine.go:99, 626) are nil-checked."
+    },
+    {
+      "path": "internal/fsm/machine/types.go",
+      "line": 122,
+      "note": "Verified accurate: OpenOptions.ReadOnly does skip the lock (machine.go:321) and returns right after the fold + sidecar parse/resolve (machine.go:392)."
+    },
+    {
+      "path": "internal/fsm/export/export_test.go",
+      "line": 262,
+      "note": "Verified accurate: reviewlog.go:120 nextNonEmpty confirms the verdict-token claim in taskdone/review.go holds as written; the pairwise chain and byte-identity checks on unredacted lines are real and load-bearing."
+    },
+    {
+      "path": "internal/taskdone/review.go",
+      "line": 279,
+      "note": "Verified accurate: merging --shard-result and --cross-shard-result into one explicit list is safe because shardpack Discover classifies by the result's kind field (shardpack.go:344), and it does union the results directory with the explicit paths as the Options doc comment claims."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The \"destination flags and perms\" assertion cannot fail on flags. The condition is `!strings.HasSuffix(o, \" \"+itoa(flags)+\" -rw-------\") && !strings.Contains(o, \"-rw-------\")`; the second clause is false for every recorded open because writeFile always passes 0o600, so the `&&` short-circuits to false and the flag half of the check is inert. Proved by mutation: changing export.go:222 from `os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW` to `os.O_WRONLY|os.O_CREATE|os.O_EXCL` leaves the entire export package green, so O_NOFOLLOW -- the TOCTOU defense on the final path component, the one thing checkDest's component walk cannot cover -- has zero coverage. (Changing the perm to 0o644 does fail, confirming only the perm clause is live; dropping O_EXCL is caught separately by TestOSFS:553, not by this loop.) Two further defects in the dead clause: `itoa` (export_test.go:120) reduces the flag word to a single decimal digit via `i%10`, and the literal `0x100` is darwin's O_NOFOLLOW -- on Linux it is 0x20000 -- so even if the clause were reachable it would be wrong on the CI platform.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 348,
+          "note": "if !strings.HasSuffix(o, \" \"+itoa(...)+\" -rw-------\") && !strings.Contains(o, \"-rw-------\")"
+        },
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 346,
+          "note": "comment claims the loop checks destination flags and perms"
+        },
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 120,
+          "note": "func itoa(i int) string { return string(rune('0' + i%10)) }"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The comment \"Superseded result files are collected only once the gate has passed, so a failing run never destroys the record it was judged on\" states a data-safety property that no test enforces. Removing the `if !result.Blocking` guard so packWriter.GC runs unconditionally leaves `go test ./...` green (verified over three runs in a scratchpad copy). GC deletes committed shard result files under docs/metareview/shards/, so a regression here destroys the evidence a blocking run was judged on -- precisely the outcome the comment claims is prevented. Note that the sibling housekeeping call is covered: deleting the packWriter.Prune line does fail TestTaskDonePlanIsWrittenAndPrunedWithMatchingHash, so the gap is specific to the blocking guard.",
+      "evidence": [
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 267,
+          "note": "comment: a failing run never destroys the record it was judged on"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 269,
+          "note": "if !result.Blocking { _ = packWriter.GC(...) } -- deleting the guard is not detected"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The sharded-section placement invariant in reviewMarkdown is stated in a comment and enforced by nothing. The comment says the section \"sits after the verdict value line, so reviewlog still reads the verdict token as the first non-empty line after the heading\" -- a real contract (reviewlog.go:120 sets summary.Verdict = nextNonEmpty(lines, i+1)). Two mutations both leave `go test ./...` green: (a) rewriting line 560 as `\"## Verdict\\n\\n\" + shardedReview + verdict + \"\\n\\n\"`, which would make reviewlog parse the verdict as the literal string \"## Sharded Review\" on every run that ingested shard results; and (b) deleting `shardedReview += \"\\n\\n\"` at line 551, which runs the last table row of the sharded section directly into the `## Reviewer Results` heading. The only direct unit test of reviewMarkdown passes \"\" for the new parameter (review_markdown_test.go:22), so the non-empty rendering path is executed by end-to-end tests but never asserted on.",
+      "evidence": [
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 548,
+          "note": "comment asserting the verdict-token ordering contract"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 551,
+          "note": "shardedReview += \"\\n\\n\" -- deletable with no test failure"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 560,
+          "note": "\"## Verdict\\n\\n\" + verdict + \"\\n\\n\" + shardedReview -- reorderable with no test failure"
+        },
+        {
+          "path": "internal/reviewlog/reviewlog.go",
+          "line": 120,
+          "note": "summary.Verdict = nextNonEmpty(lines, i+1) -- the contract the comment relies on"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The new BranchDiffFull plumbing into the reviewer context has no test. Deleting `BranchDiffFull: git.BranchDiffFull,` leaves `go test ./...` green. This is not cosmetic: reviewers/taskdone.go:350-356 falls back to the truncated `git.Diff` when BranchDiffFull is empty, so losing this line silently narrows the scan window for the eval and TODO/FIXME lints back to the truncated view -- the exact failure mode the comment at reviewers/taskdone.go:347-349 describes as having previously hidden violations by accident. The rubric blocks on both of those lints, so a silent regression here weakens the gate itself. internal/reviewers tests exercise addedLines with a synthetic GitContext and internal/gitcontext tests exercise the field's population, but nothing asserts the two are wired together in a task-done run.",
+      "evidence": [
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 324,
+          "note": "BranchDiffFull: git.BranchDiffFull,"
+        },
+        {
+          "path": "internal/reviewers/taskdone.go",
+          "line": 353,
+          "note": "branch := git.BranchDiffFull; if branch == \"\" { branch = git.Diff } -- silent fallback to the truncated diff"
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The markedLog fixture's porcelain status is not shaped like the real producer's output, and the gap hides a live defect in statusPaths. The fixture only ever contains an ordinary porcelain-v2 entry and an untracked entry, both with space-free trailing paths, so `statusPaths` (export.go:348, \"the last field of each line\") always happens to be right. Against real `git status --porcelain=v2 --untracked-files=all` output -- which is what feeds TreeData.Status and the commit_exists gate detail (gate/git.go:195, gate/gates.go:121) -- it is wrong twice. Reproduced against a real repo: a rename emits `2 R. N... <hashes> R100 new_name.txt<TAB>old_name.txt` and a modified spaced path emits `1 M. N... <hashes> a file with spaces.txt`. Calling the real statusPaths on those two lines returns [\"old_name.txt\" \"spaces.txt\"] where the correct answer is [\"a file with spaces.txt\" \"new_name.txt\"]. The export bundle is described as \"evidence for a reader\" (export.go:2), and its tree.status, snapshot tree_status and gate detail_summary.files will name the pre-rename path and a truncated fragment of any path containing a space. The code fix belongs to shard-1f (internal/fsm/export/export.go); the missing fixture cases belong here.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 146,
+          "note": "fixture status has only space-free ordinary and untracked entries, never a rename or a spaced path"
+        },
+        {
+          "path": "internal/fsm/export/export.go",
+          "line": 348,
+          "note": "statusPaths takes strings.Fields(line)[len-1]; for a v2 rename that is the ORIGINAL path, and for a spaced path only its trailing token"
+        },
+        {
+          "path": "internal/fsm/gate/git.go",
+          "line": 195,
+          "note": "git status --porcelain=v2 --untracked-files=all is the actual producer of the string statusPaths parses"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Leak marker \"porcelain-file.go \\n\" in the must-not-appear list can never match, so it asserts nothing. Two independent reasons: the fixture at line 146 has no space before the newline, and any literal newline is escaped to the two characters backslash-n by JSON encoding before it reaches the bundle, so no marker containing a literal newline can ever be found by strings.Contains over the written files. Verified by encoding the exact fixture string: strings.Contains(json.Marshal(status), \"porcelain-file.go \\n\") is false, and so is the same test without the stray space. The property the marker was presumably meant to guard (the raw porcelain line does not leak) is in fact covered by the tree-status shape assertion at lines 296-300 and by the diff-marker case, so this is dead weight rather than an open hole -- but it reads to a maintainer as coverage that does not exist.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 237,
+          "note": "marker list containing \"porcelain-file.go \\n\""
+        },
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 146,
+          "note": "the fixture the marker is supposed to match has no space before the newline"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The comment \"legacy init without workflow_source -> manifest \\\"\\\" (the recorder maps it; the exporter reports the stored value)\" describes a case the test never constructs, and the assertion under it asserts the opposite of what the comment describes. No legacy init event is built anywhere in the file; `m` is the manifest of the ordinary fixture whose WorkflowSource is \"embedded\", and the guard `if m.WorkflowSource == \"\"` therefore only re-checks a value already asserted at line 336 (`m.WorkflowSource != \"embedded\"`). Verified by deletion: removing the comment and both lines leaves the package green.",
+      "evidence": [
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 368,
+          "note": "comment claiming legacy-init coverage"
+        },
+        {
+          "path": "internal/fsm/export/export_test.go",
+          "line": 369,
+          "note": "if m.WorkflowSource == \"\" { t.Fatal(\"source\") } -- redundant with line 336 and deletable"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Deps doc comment \"Nothing here is optional except Terminal\" is contradicted by the struct it documents. Preflight, declared eleven lines below it, is documented in its own comment as \"(optional)\" and is nil-guarded at machine.go:99 and machine.go:626. A grep for nil guards across internal/fsm/machine finds exactly two Deps fields checked -- Terminal (machine.go:923) and Preflight -- so the comment should name both. Cosmetic, but it is the kind of stale invariant a caller wiring Deps will trust.",
+      "evidence": [
+        {
+          "path": "internal/fsm/machine/types.go",
+          "line": 85,
+          "note": "// Deps wires the machine. Nothing here is optional except Terminal."
+        },
+        {
+          "path": "internal/fsm/machine/types.go",
+          "line": 100,
+          "note": "// Preflight (optional) runs before Create for every exec: fork node ..."
+        },
+        {
+          "path": "internal/fsm/machine/machine.go",
+          "line": 99,
+          "note": "if deps.Preflight != nil { ... } -- the optionality the Deps comment denies"
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The new error paths added to Create are uncovered. `go test -covermode=count ./internal/taskdone/` shows count 0 for the errors.Join rollback branch (review.go:258) and for the body of the no-op packRollback closure (review.go:152), meaning neither the \"rollback error must not replace the error that caused the rollback\" behaviour nor the zero-shard no-op path is exercised. The PlanShards error return (review.go:110) and the ingestShardResults error return (review.go:145) are likewise count 0. The packWriter.Write failure path itself is covered. internal/taskdone sits at a floor rather than 100% in tests/coverage-floor.txt, so this is not a gate failure -- it is noted because the errors.Join line exists specifically to preserve an error the tests never produce.",
+      "evidence": [
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 257,
+          "note": "if rollbackErr := packRollback(); rollbackErr != nil { return Result{}, errors.Join(err, rollbackErr) } -- block count 0"
+        },
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 152,
+          "note": "packRollback := func() error { return nil } -- closure body count 0"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-10.46c39141a4409bd0",
+  "kind": "shard",
+  "shardId": "shard-10",
+  "shardHash": "46c39141a4409bd0",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T17:12:00Z",
+  "blockingCount": 0,
+  "evidence": [
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 115,
+      "note": "CapText's byte budget was verified empirically, not read: built a copy of the tree in the scratchpad and property-tested run.CapText against len(run.MarshalCanonical(s)) over 100k random strings drawn from a pool of quote, backslash, \\n \\r \\t, U+0000/U+0001/U+001F/U+007F, multi-byte runes, U+2028/U+2029, a genuine U+FFFD, HTML chars and stray 0x80-0xBF continuation bytes, at every max from 0 to full+3. Zero violations of (a) canonLen(result) <= max, (b) trunc==false implies result==input, (c) no spurious truncation. encodedRuneLen's table therefore matches encoding/json + marshalCanonical exactly on the installed Go 1.27.0."
+    },
+    {
+      "path": "internal/fsm/run/canonical.go",
+      "line": 36,
+      "note": "rejectDuplicateKeys was fuzzed for panics and idempotency: 400k random token strings filtered through json.Valid (38,376 valid documents) plus 22 hand-built probes covering duplicates at top level, nested in an object, inside an array element and two levels deep in arrays, the same key in sibling objects, empty object/array, bare scalars, trailing whitespace and 1e400. Zero panics, zero non-idempotent results, and every duplicate case was caught. The unchecked tok.(string) assertion at line 61 and the stack pop at line 75 are both unreachable with a non-string / empty stack after the json.Valid precondition."
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 112,
+      "note": "Checked the OutputHash doc claim ('Apply rejects such payloads before any hash is compared') against the real code rather than trusting it. fold.go returns ReasonBadPayload when Canonical(p.Output) errors, and DeltaAppliedData returns ReasonDeltaWithoutOutput when the key is absent, so the empty-string sha256 that OutputHash yields for invalid JSON can never satisfy a delta. machine.go:695 hashes snap.NodeOutputs[k], which is exactly the value the fold already validated. Not a defect."
+    },
+    {
+      "path": "internal/fsm/run/canonical_test.go",
+      "line": 133,
+      "note": "Coverage and test-quality check: go test ./internal/fsm/run/... reports 100.0% for all nine functions in canonical.go (Canonical, rejectDuplicateKeys, OutputHash, LineHash, BugID, Key, CapText, encodedRuneLen, CapDetail). TestCapText is not a smoke test - it cross-checks against canonLen (len(marshalCanonical(s))), so the hand-rolled escape table cannot silently drift from the encoder it mirrors. TestCanonicalIsToolchainIndependent, named in the canonical.go doc comment, exists at line 195."
+    },
+    {
+      "path": "docs/tasks/pr-b-slice-3.md",
+      "line": 8,
+      "note": "Every claim in the task doc resolves. ManifestContext{Present, Verdict, Blockers, ShardCount, ShardsCovered, CrossShard, PlanHash} matches internal/reviewers/taskdone.go:25-33 field for field; shardSatisfiableReasons at taskdone.go:37 is exactly {DIFF_TRUNCATED, LARGE_DIFF} as described; GitContext.BranchDiffFull and the architecture:context-risk-covered fingerprint both exist. docs/tasks/pr-b-shard-ingestion.md exists, commits 94c51e6 and 5ddbb72 resolve, and tests/go/test-shardpack-coverage.sh named in Acceptance is present. No dead references."
+    },
+    {
+      "path": "testdata/fsm/scenarios/review-loop/reviewed/judge.yaml",
+      "line": 3,
+      "note": "The fixture matches its consumer. tests/go/test-fsm.sh:198-202 inits review-loop with scenarios/review-loop/reviewed, records one finding, then asserts DONE with exit 1, outcome 'reviewed' and counts.confirmed 1 - which is what the header comment claims. expect_model is a real mockai field (internal/fsm/mockai/mockai.go:43) enforced at internal/fsm/judge/judge.go:655, and gpt-5.2 is the model used consistently across the other mock scripts. The single adjudicate call at iter 0 index 0 is the only judge call the one-finding path makes."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 345,
+      "note": "Read marshalCanonical to confirm the escape contract Canonical documents: SetEscapeHTML(false), trailing newline trimmed, then raw U+2028, U+2029 and U+FFFD replaced by their six-character escapes. The 'every pass only adds an escape' invariant in the canonical.go doc comment holds - all three transforms are add-only, so no payload text is rewritten."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "BugID truncates SHA-1 to 12 hex characters (48 bits) over issueText, which is model-supplied and therefore attacker-influenceable in the injection threat model this repo already models (testdata/fsm/scenarios/sdlc-loop/injection). A 48-bit space is birthday-collidable in ~2^24 work, and a collision is not detected anywhere: fold.go:137-141 dedupes p.Confirmed against idSet(next.AllFound), so a bug whose ID collides with one already accumulated is silently dropped from AllFound rather than flagged. kind.go:428-435 likewise collapses colliding candidates into one allIDs entry, understating the MaxDeltaList preflight count. Low because it needs adversarial control of discover output and the impact is a dropped finding, not a forged pass.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 103, "note": "hex(sha1(issueText))[:12] - 48 bits of identity over untrusted text"},
+        {"path": "internal/fsm/run/fold.go", "line": 139, "note": "if _, dup := seen[b.ID]; !dup - a collision silently suppresses the second bug with no warning"},
+        {"path": "internal/fsm/kind/kind.go", "line": 433, "note": "allIDs[run.BugID(c.IssueText)] = true - colliding candidates count as one against MaxDeltaList"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Canonical's doc comment states the output has 'U+2028/U+2029 and U+FFFD written as escapes', but that invariant only holds for the struct path (marshalCanonical over a Go string, where encoding/json first folds invalid bytes to U+FFFD). On the raw path Canonical takes, json.Valid does not validate UTF-8 and encoding/json's compact passes bytes through untouched, so invalid UTF-8 survives verbatim: I ran Canonical on {\"a\":\"\\xff\"} and the result is byte-identical to the input and fails utf8.Valid. No live break was found - NodeOutputs is json.RawMessage end to end (types.go:227, fold.go:117, machine.go:689/695) so the bytes are never round-tripped through a Go string and the hash stays stable - but the comment overstates the guarantee, and any future path that does string(NodeOutputs[k]) and re-marshals would change OutputHash and break chain verification. Worth narrowing the comment or rejecting non-UTF-8 in Canonical.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 16, "note": "doc claims U+FFFD is always written as an escape in Canonical output"},
+        {"path": "internal/fsm/run/canonical.go", "line": 30, "note": "marshalCanonical(json.RawMessage(raw)) - the compact path never touches invalid UTF-8, unlike the string path at types.go:364"},
+        {"path": "internal/fsm/run/types.go", "line": 227, "note": "NodeOutputs is map[string]json.RawMessage, which is what currently keeps the raw bytes stable"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "rejectDuplicateKeys fails open: every dec.Token() error is treated as end of input and returns nil, i.e. 'no duplicates'. The comment asserts only io.EOF is reachable after json.Valid, and that is true today - Canonical at line 27 is the sole caller and it validates first, and 38k fuzzed valid documents produced no other error. But this is the duplicate-key defence for bytes the audit chain hashes over, and the failure mode of any future decoder error (or of a caller that skips the json.Valid precondition) is silent acceptance rather than rejection. Returning an error on a non-EOF token error would cost nothing and make the precondition self-enforcing.",
+      "evidence": [
+        {"path": "internal/fsm/run/canonical.go", "line": 52, "note": "if err != nil { return nil } swallows every decoder error, not just io.EOF"},
+        {"path": "internal/fsm/run/canonical.go", "line": 27, "note": "only Canonical calls it, and only after json.Valid - the precondition is real but unenforced"}
+      ]
+    }
+  ]
+}

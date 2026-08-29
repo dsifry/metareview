@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-18.b5c8cd565f56ff2a",
+  "kind": "shard",
+  "shardId": "shard-18",
+  "shardHash": "b5c8cd565f56ff2a",
+  "planHash": "6bdab66d3d8430ba",
+  "verdict": "PASS",
+  "reviewer": "claude-opus-5-shard-agent",
+  "reviewedAt": "2026-08-28T00:00:00Z",
+  "evidence": [
+    {
+      "path": "workflows/embed.go",
+      "line": 2,
+      "note": "Package-doc claim \"Names resolve only to embedded files; paths are the caller's business\" verified against both callers: internal/fsm/machine/machine.go:65-74 and internal/fsm/cli/run.go:584-592 both route a value containing '/' or ending in '.yaml' to a file read (deps.ReadFile / readCapped) and only otherwise to deps.Workflows. So the name-only contract here is real and the path half genuinely lives in the caller."
+    },
+    {
+      "path": "workflows/embed.go",
+      "line": 17,
+      "note": "Justification comment \"the embedded tree always reads\" is correct, not a papered-over error: //go:embed *.yaml is a compile-time failure when it matches nothing, so `files` is never the zero embed.FS, and embed.FS.ReadDir(\".\") on a populated FS cannot fail. Verified the pattern currently matches workflows/review-loop.yaml and workflows/sdlc-loop.yaml."
+    },
+    {
+      "path": "workflows/embed.go",
+      "line": 22,
+      "note": "The \"sorted\" claim on Names() is load-bearing rather than decorative: fs.ReadDir sorts by full file name, and trimming a common '.yaml' suffix can reorder ('a-b.yaml' < 'a.yaml' but 'a' < 'a-b'), so the explicit sort.Strings after TrimSuffix is what actually makes the documented order true. It is a no-op for the two files present today but correct for future additions."
+    },
+    {
+      "path": "workflows/embed.go",
+      "line": 35,
+      "note": "No aliasing hazard in the returned bytes: Go's embed.FS.ReadFile converts the embedded string to []byte ($GOROOT/src/embed/embed.go:331), which copies, so machine.go:84's bytes.Equal(emb, raw) reserved-name check and any caller mutation are safe."
+    },
+    {
+      "path": "workflows/embed.go",
+      "line": 1,
+      "note": "Validation run locally and read-only: `go test ./workflows/ -cover` passes at 100.0% of statements; `go vet ./workflows/` clean; `gofmt -l workflows/` empty. tests/coverage.sh lines 10-11 confirm ./workflows is inside the hard 100% gate (not merely the floor file), so the build-plan claim at docs/specs/2026-08-26-metareview-0.9.0-build-plan.md:108 holds. No eval, no TODO/FIXME markers, no truncated diff context, and no duplication of an existing inventoried loader (this is the only embedded-workflow reader; every other consumer goes through the Deps.Workflows seam, internal/fsm/cli/deps.go:47,73)."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The ContainsAny(name, \"/\\\\.\") guard in Read is currently inert with respect to outcome, and the test that appears to cover it cannot detect its removal. Empirically checked by reproducing Read without the guard over a copy of the two embedded YAML files: every input the test exercises (\"missing\", \"../sdlc-loop\", \"sdlc-loop.yaml\", \"a/b\", plus \"a\\\\b\" and \"./sdlc-loop\") still returns an error, because embed.FS rejects them by fs.ValidPath or by not-found on name+\".yaml\". The guard therefore only changes the error message text, never error-vs-success, for any input reachable with the current embedded file set. workflows/embed_test.go:19-23 asserts only `err == nil` must not happen, so deleting lines 28-30 entirely leaves the suite green at a reported 100% statement coverage. This is defense-in-depth that would only bite if a dotted embedded file name (e.g. 'a.b.yaml') were ever added, at which point it would silently make that workflow unreadable by name. Not blocking: the behaviour is safe and the doc comment does not overclaim; the gap is that the coverage number overstates how much of this guard is actually pinned down.",
+      "evidence": [
+        {
+          "path": "workflows/embed.go",
+          "line": 28,
+          "note": "if strings.ContainsAny(name, \"/\\\\.\") - reproduced Read without this branch; all four negative test inputs still error via embed.FS alone."
+        },
+        {
+          "path": "workflows/embed_test.go",
+          "line": 19,
+          "note": "the `for _, bad := range ...` loop only checks err != nil, so it is insensitive to the guard's presence."
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Read collapses every embed.FS failure into \"unknown workflow %q\" and drops the underlying error. Today the only reachable cause is not-found, so the message is accurate, but embed.FS.ReadFile also returns \"is a directory\" (a directory named foo.yaml would be matched and embedded by the //go:embed *.yaml pattern), which would then be reported to the operator as an unknown workflow. Cosmetic today; noted because machine.Init and the fork path surface this string verbatim as the ERR_WORKFLOW_NOT_FOUND detail (internal/fsm/machine/machine.go:72, internal/fsm/cli/run.go:592).",
+      "evidence": [
+        {
+          "path": "workflows/embed.go",
+          "line": 33,
+          "note": "return nil, fmt.Errorf(\"workflows: unknown workflow %q\", name) - err is discarded rather than wrapped with %w."
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}
