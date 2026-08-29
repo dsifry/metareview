@@ -174,3 +174,46 @@ func TestMaterializeToleratesDuplicateDestinations(t *testing.T) {
 		t.Errorf("Files = %d with a duplicate, %d without", tree.Files, once.Files)
 	}
 }
+
+// TreeHash is what makes the audit honest: when the prompt no longer carries the evidence, the
+// recorded input stops determining the verdict unless the tree is content-addressed. Nothing
+// pinned that. Replacing the per-file hash line with the digest alone - dropping the side and
+// the path - left `go test ./...` fully green while collapsing two distinct trees onto one
+// address: a file present only at head hashes the same as the same file present only at base
+// (an addition and a deletion share an address), and a.go hashes the same as z.go at identical
+// content (a rename becomes invisible).
+func TestTreeHashAddressesSideAndPathNotJustContent(t *testing.T) {
+	body := []byte("package x\n")
+	only := func(side string) ShowFunc {
+		return func(rev, path string) ([]byte, bool, error) {
+			if (side == Head && rev == "H") || (side == Base && rev == "B") {
+				return body, true, nil
+			}
+			return nil, false, nil
+		}
+	}
+	headOnly, err := Materialize(t.TempDir(), "B", "H", []string{"a.go"}, only(Head))
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseOnly, err := Materialize(t.TempDir(), "B", "H", []string{"a.go"}, only(Base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headOnly.TreeHash == baseOnly.TreeHash {
+		t.Error("a file added on the branch and the same file deleted share an address: the side is not hashed")
+	}
+
+	same := func(rev, path string) ([]byte, bool, error) { return body, true, nil }
+	aGo, err := Materialize(t.TempDir(), "B", "H", []string{"a.go"}, same)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zGo, err := Materialize(t.TempDir(), "B", "H", []string{"z.go"}, same)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aGo.TreeHash == zGo.TreeHash {
+		t.Error("two different paths with identical content share an address: the path is not hashed")
+	}
+}

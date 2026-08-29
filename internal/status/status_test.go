@@ -19,6 +19,21 @@ func writeLog(t *testing.T, root, name, body string) {
 	}
 }
 
+func writeRuns(t *testing.T, root string, lines ...string) {
+	t.Helper()
+	dir := filepath.Join(root, ".metareview")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := ""
+	for _, l := range lines {
+		body += l + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, "runs.jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The contract a host hook sits on: one machine-readable answer to "may I proceed, and if
 // not, what must be cleared". Prose output cannot be a gate - a hook has to branch on it.
 func TestReportIsMachineReadableAndNamesWhatMustBeCleared(t *testing.T) {
@@ -32,11 +47,65 @@ func TestReportIsMachineReadableAndNamesWhatMustBeCleared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the report must marshal: %v", err)
 	}
-	if !strings.Contains(string(b), `"must_clear"`) {
-		t.Errorf("must_clear is the field a hook reads:\n%s", b)
+	// Asserting the field NAMES appear proves nothing: neither tag carries omitempty, so both
+	// literals are in every marshalled Report - deleting the fixture above entirely left this
+	// test passing. What a hook actually branches on is the CONTENT, so that is what is checked:
+	// blocked true, and a must_clear entry carrying the operator-facing payload.
+	var got struct {
+		Blocked   bool `json:"blocked"`
+		MustClear []struct {
+			Target        string `json:"target"`
+			RunID         string `json:"run_id"`
+			Verdict       string `json:"verdict"`
+			Kind          string `json:"kind"`
+			Path          string `json:"path"`
+			BlockingCount int    `json:"blocking_count"`
+			AttemptNumber int    `json:"attempt_number"`
+			MaxAttempts   int    `json:"max_attempts"`
+		} `json:"must_clear"`
 	}
-	if !strings.Contains(string(b), `"blocked"`) {
-		t.Errorf("blocked is the field a hook branches on:\n%s", b)
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("the report must unmarshal into the documented contract: %v\n%s", err, b)
+	}
+	if !got.Blocked {
+		t.Errorf("blocked must be true when a review has unresolved blockers:\n%s", b)
+	}
+	if len(got.MustClear) != 1 {
+		t.Fatalf("must_clear must name the blocking review, got %d entries:\n%s", len(got.MustClear), b)
+	}
+	e := got.MustClear[0]
+	if e.Target != "task-a" || e.RunID != "mrv-1" || e.Verdict != "NEEDS_REVISION" {
+		t.Errorf("must_clear entry does not identify the review: %+v", e)
+	}
+	if e.Kind != "task-done" {
+		t.Errorf("kind = %q, want task-done: a hook uses it to pick which gate to re-run", e.Kind)
+	}
+	if e.Path == "" {
+		t.Error("path is empty: a hook has no way to point an operator at the log")
+	}
+}
+
+// blocking_count, attempt_number and max_attempts are the operator-facing half of the contract -
+// how many blockers remain, and which attempt of how many, which is the escalation signal the
+// Completion Rule depends on. Deleting the line that populates all three left ./internal/status
+// and ./cmd/... green, and no assertion on any of the three names existed anywhere.
+func TestBlockerCarriesTheAttemptAndBlockerCounts(t *testing.T) {
+	root := t.TempDir()
+	writeLog(t, root, "mrv-2-task-done-b.md", "# metareview: task-done review\n\nRun ID: `mrv-2`\nTarget: `task-b`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	writeRuns(t, root, `{"id":"mrv-2","attemptNumber":2,"maxAttempts":3,"blockingFindingCount":4,"verdict":"NEEDS_REVISION"}`)
+	r, err := Build(root)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(r.MustClear) != 1 {
+		t.Fatalf("must_clear = %d entries, want 1", len(r.MustClear))
+	}
+	e := r.MustClear[0]
+	if e.BlockingCount != 4 {
+		t.Errorf("blocking_count = %d, want 4", e.BlockingCount)
+	}
+	if e.AttemptNumber != 2 || e.MaxAttempts != 3 {
+		t.Errorf("attempt = %d of %d, want 2 of 3", e.AttemptNumber, e.MaxAttempts)
 	}
 }
 

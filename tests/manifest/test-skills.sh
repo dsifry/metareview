@@ -94,10 +94,22 @@ grep -q 'not independently adversarial' skills/review-artifact/SKILL.md
 # listed five or eight, so the assertion could not fail and the docs drifted to "five" while
 # reviewlog.artifactReviewComplete required eight. Eight passing artifact reviews were left
 # permanently unresolvable as a result.
+# and against the ENUMERATION LINE, not the page. Every lens name also appears in prose on the
+# same page ("The Security lens uses rubrics/security-review-rubric.md"), so a whole-file grep
+# still passes when a name is deleted from the list agents are actually told to run: removing
+# ", Security," from the enumeration left this script at exit 0.
+# The enumeration and that prose share one markdown line, so anchoring to the line is not enough
+# either: the list itself has to be cut out of it, from "by default:" to the sentence's period.
+lens_line="$(grep -m1 'Run the required lenses' skills/review-artifact/SKILL.md || true)"
+test -n "$lens_line" || { echo "FAIL: skills/review-artifact/SKILL.md has no 'Run the required lenses' enumeration"; exit 1; }
+lens_list="$(printf '%s' "$lens_line" | sed -n 's/.*by default: \([^.]*\)\..*/\1/p')"
+test -n "$lens_list" || { echo "FAIL: could not read the lens enumeration out of skills/review-artifact/SKILL.md"; exit 1; }
 for lens in 'Feasibility' 'Completeness' 'Scope and alignment' 'Architecture' \
             'Intent preservation' 'Security' 'Testing-quality' 'Data-migration'; do
-  grep -q "$lens" skills/review-artifact/SKILL.md || {
-    echo "FAIL: skills/review-artifact/SKILL.md is missing the $lens lens"; exit 1; }
+  case "$lens_list" in
+    *"$lens"*) ;;
+    *) echo "FAIL: the required-lens enumeration in skills/review-artifact/SKILL.md omits $lens"; exit 1 ;;
+  esac
 done
 
 # and no user-facing document may claim a different count than the gate enforces
