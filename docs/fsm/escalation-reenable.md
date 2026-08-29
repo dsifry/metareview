@@ -29,7 +29,7 @@ and passed for the wrong reason, so "a test covers it" is not sufficient evidenc
 
 2. **`diff.noprefix=true` defeats the diff hardening** (`gitcontext`, no `--src-prefix`/
    `--dst-prefix`). An ordinary documented gitconfig setting turns the header into
-   `diff --git f.go f.go`; every consumer keys on ` b/`, so `ChangedPaths` returns empty and every
+   `diff --git f.go f.go`; every consumer keys on a `b/` prefix, so `ChangedPaths` returns empty and every
    candidate becomes `unverified_no_evidence`. **Required:** prefixes pinned explicitly, with a
    test that sets `diff.noprefix` in the fixture repo.
 
@@ -90,6 +90,12 @@ and passed for the wrong reason, so "a test covers it" is not sufficient evidenc
     re-enabling.
 
 ## The flip itself
+
+One more item belongs to the flip rather than to the gates above, raised on PR #21: `--escalate` is
+read per invocation (`run.go:49`) and is not carried in the run's durable state, so `init
+--escalate` followed by a bare `advance --run <id>` silently runs without it. That was masked while
+the default was on. Persist it through `InitData`/`Snapshot` and restore it on resume, with a test
+covering a real judge transition on a resumed run.
 
 When A–D are done, invert the default in `ctxDeps.escalation` (`wiring.go`), update
 `TestEscalationIsOffUnlessRequested`, the agent prompt, `skills/fsm/SKILL.md`,

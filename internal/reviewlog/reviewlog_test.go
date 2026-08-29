@@ -414,6 +414,12 @@ func TestArtifactLensSetIsGrandfathered(t *testing.T) {
 		{"post-cutoff log with only five lenses blocks", log("mrv-20260829-1-artifact-a-1", "", rows(five...)), true},
 		{"post-cutoff log with eight lenses passes", log("mrv-20260829-1-artifact-a-1", all, rows(eight...)), false},
 		{"declared set is what counts, not the cutoff", log("mrv-20260705-1-artifact-a-1", all, rows(five...)), true},
+		// An all-digit run of eight characters is not a date. Accepting one as legacy would hand the
+		// five-lens rubric to any log carrying a plausible-looking id, which is the opposite of a
+		// grandfather bounded by verifiable provenance.
+		{"impossible calendar date is not legacy", log("mrv-20260230-1-artifact-a-1", "", rows(five...)), true},
+		{"month 13 is not legacy", log("mrv-20261305-1-artifact-a-1", "", rows(five...)), true},
+		{"day 00 is not legacy", log("mrv-20260700-1-artifact-a-1", "", rows(five...)), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := parseMarkdown("docs/metareview/reviews/x.md", tc.text).HasUnresolvedBlockers

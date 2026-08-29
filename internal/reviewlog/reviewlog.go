@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/runchain"
@@ -207,10 +208,11 @@ func runDate(runID string) string {
 		return ""
 	}
 	date := parts[1][:8]
-	for _, r := range date {
-		if r < '0' || r > '9' {
-			return ""
-		}
+	// Parse it as a real calendar date, not just eight digits: "20260230" is all digits and sorts
+	// before the cutoff, so a digit check alone would hand the legacy rubric to a log whose id is
+	// merely plausible. time.Parse rejects an out-of-range month or day.
+	if _, err := time.Parse("20060102", date); err != nil {
+		return ""
 	}
 	return date
 }

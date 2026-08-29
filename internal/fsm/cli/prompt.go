@@ -45,8 +45,10 @@ through the Codex CLI on the OAuth session under ~/.codex, so it needs no API ke
 When a candidate the judge REJECTED names another changed file, a codex/ judge is asked again with
 the changed files materialized at base and head in a directory outside the repository, and that
 verdict is recorded with evidence=sandbox. It is OFF by default and --escalate opts in: the
-asymmetry argues for it, but the implementation has known defects that drop findings, so do not
-enable it unless told to. A candidate whose file the diff does not carry is never judged at all -
+asymmetry argues for it, but the implementation has known defects: it drops findings, the tree is
+not a read boundary (the judge can still read the repository and anything else on the box), and
+finding text chooses which files are copied into it. Do not enable it unless told to; the bar for
+turning it back on is docs/fsm/escalation-reenable.md. A candidate whose file the diff does not carry is never judged at all -
 it is kept as unverified_no_evidence for a human.
 Never pass a secret via --var; use a declared env name.
 fsm judge without --run is unaudited. A mock: true run never satisfies a gate. Fork first, then commit. After FORKED, pass --run <child> explicitly.

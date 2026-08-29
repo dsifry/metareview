@@ -42,9 +42,11 @@ repository, so a `codex/` judge can read both sides of the claim. That verdict i
 `evidence=sandbox` and its own tree hash, and `fsm diff` never calls a cross-evidence row `same`.
 The asymmetry argues for it - unattended a false reject is silent, the finding is simply gone,
 while a false confirm only costs a human a look - but it is opt-in because the implementation has
-known defects that drop findings, so it is not yet a guardrail you should rely on. Roughly 2x the
-judge tokens on a run where a fifth of the rejections are cross-file. A candidate whose file is not in the diff is
-never judged: it is kept as `unverified_no_evidence`.
+known defects that drop findings, so it is not yet a guardrail you should rely on, and the tree it
+materializes is not a read boundary. Estimated at roughly 2x the judge tokens on a run where a
+fifth of the rejections are cross-file - an estimate, not a measurement: no run has recorded the
+ratio. A candidate whose file is not in the diff is never judged: it is kept as
+`unverified_no_evidence`.
 
 `DONE(reviewed)`: the confirmed list is `snapshot.json` in `fsm export --run <id>`. `STOPPED`/`DONE` are terminal.
 

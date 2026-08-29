@@ -2,6 +2,8 @@
 
 - mrvf-20260827-215325129085000-pr-ready-branch-10d735e5-002 [high] Review context risk (architecture-reviewer)
 - mrvf-20260829-053638750543000-pr-ready-branch-10d735e5-001 [high] Missing validation evidence (validation-reviewer)
+- mrvf-20260829-155809811089000-pr-ready-branch-10d735e5-001 [high] Working tree changes excluded from PR-ready review (pr-readiness-reviewer)
+- mrvf-20260829-155809811089000-pr-ready-branch-10d735e5-002 [high] Missing validation evidence (validation-reviewer)
 
 ## Process Overrides
 
