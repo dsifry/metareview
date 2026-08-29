@@ -2,6 +2,7 @@ package tasksource
 
 import (
 	"errors"
+	"github.com/dsifry/metareview/internal/jsonl"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,10 +63,11 @@ func TestResolveBeads(t *testing.T) {
 	})
 
 	t.Run("a scan failure is an error, not a miss", func(t *testing.T) {
-		// One line past bufio.Scanner's token limit: Scan stops and reports
-		// ErrTooLong. Reading that as "no such issue" would silently downgrade
-		// the target to advisory.
-		root := write(t, `{"id":"`+strings.Repeat("x", 128<<10)+`"}`)
+		// One line past the shared scanner's limit: Scan stops and reports ErrTooLong. Reading
+		// that as "no such issue" would silently downgrade the target to advisory. Sized from
+		// jsonl.MaxLineBytes rather than a literal, so raising the cap cannot quietly turn this
+		// into a test of a line that now fits.
+		root := write(t, `{"id":"`+strings.Repeat("x", jsonl.MaxLineBytes+1)+`"}`)
 		err := func() error { _, e := Resolve(root, "mrv-1"); return e }()
 		if err == nil {
 			t.Fatal("an oversized line must surface as an error")

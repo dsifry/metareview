@@ -469,8 +469,10 @@ the chain-verified snapshot and re-hashes the scenario through `MockLoad`); the 
 (`relInside`) before anything is read.
 **Judge pre-flight** (`judge.Preflight(model, effort string, calibration bool, keys Keys) error`, spec 4 §9; wired as
 `machine.Deps.Preflight func(node *workflow.Node, calibration bool) error`, spec 2 handoff — the machine calls it after
-`Resolve` and before `Create` at `Init` for every `exec: fork` node, and on the `Advance` that would run a fork node,
-before any append of that node's work) → `ERR_JUDGE_MODEL`/`ERR_JUDGE_KEY`/`ERR_JUDGE_EFFORT_UNSUPPORTED` exit 2 (exit
+`Resolve` and before `Create` at `Init` for every judge-calling node - `KindInfo.NeedsJudge`, not every `exec: fork`
+node, since a `cmd` node carries no model or effort and is never pre-flighted (machine.go needsJudge,
+machine/types.go, workflow/workflow.go; pinned by TestPreflightSkipsNonJudgeForkNodes) - and on the `Advance` that
+would run such a node, before any append of that node's work) → `ERR_JUDGE_MODEL`/`ERR_JUDGE_KEY`/`ERR_JUDGE_EFFORT_UNSUPPORTED` exit 2 (exit
 1 only with `repair_moved`). `fsm judge` calls `judge.Preflight` itself before `RecordLLMCall`. Mock runs pass a nil
 `Preflight`.
 **Spec 2 handoffs used here** (all in spec 2 §8): `Init` resolves name-vs-path, stamps `WorkflowSource`, enforces
