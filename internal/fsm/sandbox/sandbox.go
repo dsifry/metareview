@@ -47,7 +47,8 @@ func Materialize(root, baseSHA, headSHA string, paths []string, show ShowFunc) (
 	sorted := append([]string(nil), paths...)
 	sort.Strings(sorted)
 	h := sha256.New()
-	fmt.Fprintf(h, "base %s\nhead %s\n", baseSHA, headSHA)
+	// hash.Hash.Write never returns an error (documented), so the result is discarded explicitly.
+	_, _ = fmt.Fprintf(h, "base %s\nhead %s\n", baseSHA, headSHA)
 	t := &Tree{Root: root, BaseSHA: baseSHA, HeadSHA: headSHA}
 	for _, rel := range sorted {
 		clean := filepath.Clean(rel)
@@ -70,7 +71,7 @@ func Materialize(root, baseSHA, headSHA string, paths []string, show ShowFunc) (
 				return nil, err
 			}
 			sum := sha256.Sum256(body)
-			fmt.Fprintf(h, "%s %s %s\n", side.dir, clean, hex.EncodeToString(sum[:]))
+			_, _ = fmt.Fprintf(h, "%s %s %s\n", side.dir, clean, hex.EncodeToString(sum[:]))
 			t.Files++
 		}
 	}

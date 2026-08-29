@@ -706,7 +706,7 @@ func TestMockTaintedGuards(t *testing.T) {
 	// StatusLines function also uses the same condition for output formatting
 	// Verify that StatusLines works correctly with runs
 	h := newHarness(t)
-	env = h.must(StatusOK, 0, mockInit...)
+	h.must(StatusOK, 0, mockInit...)
 	// For this test, we verify that StatusLines doesn't crash and properly formats runs
 	lines := StatusLines(context.Background(), h.deps, h.root)
 	if len(lines) < 2 || !strings.Contains(lines[0], "fsm runs:") {

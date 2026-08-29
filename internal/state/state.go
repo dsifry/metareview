@@ -18,7 +18,6 @@ import (
 // bufio rejects a token equal to the buffer maximum, and ScanLines needs the
 // line terminator to fit alongside the token, so callers size the buffer two
 // bytes larger to admit a line of exactly this length ending in CRLF.
-const maxJSONLLineBytes = jsonl.MaxLineBytes
 
 // closeFile is a seam so the Close-failure branch below can be tested. A
 // permission- or descriptor-based test would be the alternative, and those

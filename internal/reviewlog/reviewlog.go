@@ -18,7 +18,6 @@ import (
 // bufio rejects a token equal to the buffer maximum, and ScanLines needs the
 // line terminator to fit alongside the token, so callers size the buffer two
 // bytes larger to admit a line of exactly this length ending in CRLF.
-const maxJSONLLineBytes = jsonl.MaxLineBytes
 
 type Summary struct {
 	Path                  string            `json:"path"`
