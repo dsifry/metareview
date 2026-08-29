@@ -10,6 +10,10 @@
 package status
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
+
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewlog"
 	"github.com/dsifry/metareview/internal/version"
@@ -71,4 +75,24 @@ func Build(root string) (Report, error) {
 	}
 	r.Blocked = len(r.MustClear) > 0
 	return r, nil
+}
+
+// Emit writes the report as JSON and returns the process exit code: 1 when something must be
+// cleared, 0 otherwise. It lives here rather than in main so the contract - including the exit
+// decision a hook depends on - is covered by tests.
+func Emit(root string, w io.Writer) (int, error) {
+	r, err := Build(root)
+	if err != nil {
+		return 0, err
+	}
+	// Report holds only strings, bools, ints and slices of the same, so marshalling cannot
+	// fail; a branch here would be unreachable and untestable.
+	out, _ := json.MarshalIndent(r, "", "  ")
+	if _, err := fmt.Fprintln(w, string(out)); err != nil {
+		return 0, err
+	}
+	if r.Blocked {
+		return 1, nil
+	}
+	return 0, nil
 }

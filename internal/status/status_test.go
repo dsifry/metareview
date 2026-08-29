@@ -23,7 +23,7 @@ func writeLog(t *testing.T, root, name, body string) {
 // not, what must be cleared". Prose output cannot be a gate - a hook has to branch on it.
 func TestReportIsMachineReadableAndNamesWhatMustBeCleared(t *testing.T) {
 	root := t.TempDir()
-	writeLog(t, root, "mrv-1-task-done-a.md", "# Review\n\n## Verdict\n\nNEEDS_REVISION\n\n- runId: mrv-1\n- target: task-a\n")
+	writeLog(t, root, "mrv-1-task-done-a.md", "# metareview: task-done review\n\nRun ID: `mrv-1`\nTarget: `task-a`\n\n## Verdict\n\nNEEDS_REVISION\n")
 	r, err := Build(root)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -58,7 +58,7 @@ func TestCleanRepositoryIsNotBlocked(t *testing.T) {
 // here: two definitions of "blocker" would drift, which is the defect this branch keeps finding.
 func TestBlockedFollowsTheReviewLogsOwnVerdict(t *testing.T) {
 	root := t.TempDir()
-	writeLog(t, root, "mrv-2-task-done-b.md", "# Review\n\n## Verdict\n\nPASS\n\n- runId: mrv-2\n- target: task-b\n")
+	writeLog(t, root, "mrv-2-task-done-b.md", "# metareview: task-done review\n\nRun ID: `mrv-2`\nTarget: `task-b`\n\n## Verdict\n\nPASS\n")
 	r, err := Build(root)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -96,5 +96,67 @@ func TestUnreadableReviewsAreAnErrorNotAnAllClear(t *testing.T) {
 	}
 	if r.Blocked {
 		t.Error("an errored Build must not also claim blocked; the caller decides what to do")
+	}
+}
+
+// Emit keeps main.go thin: the marshalling and the exit decision are part of the contract and
+// belong where they can be tested, not in an untested main.
+func TestEmitWritesJSONAndReportsTheExitCode(t *testing.T) {
+	var buf strings.Builder
+	code, err := Emit(t.TempDir(), &buf)
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if code != 0 {
+		t.Errorf("exit = %d, want 0 for a clean repository", code)
+	}
+	var back Report
+	if err := json.Unmarshal([]byte(buf.String()), &back); err != nil {
+		t.Fatalf("Emit must write valid JSON: %v\n%s", err, buf.String())
+	}
+	if back.Blocked {
+		t.Error("clean repository must not report blocked")
+	}
+}
+
+func TestEmitReportsExitOneWhenSomethingMustBeCleared(t *testing.T) {
+	root := t.TempDir()
+	writeLog(t, root, "mrv-3-task-done-c.md", "# metareview: task-done review\n\nRun ID: `mrv-3`\nTarget: `task-c`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	var buf strings.Builder
+	code, err := Emit(root, &buf)
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if code != 1 {
+		t.Errorf("exit = %d, want 1 so a hook needs no parsing for the common decision", code)
+	}
+	if !strings.Contains(buf.String(), "task-c") {
+		t.Errorf("the blocker must be named in the output:\n%s", buf.String())
+	}
+}
+
+func TestEmitSurfacesBuildErrors(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "metareview"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "metareview", "reviews"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf strings.Builder
+	if _, err := Emit(root, &buf); err == nil {
+		t.Error("want the read failure surfaced rather than an all-clear")
+	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, os.ErrClosed }
+
+// A hook reads this on stdout; if the write fails the caller must hear about it rather than
+// receive a silent exit 0 that reads as "nothing to clear".
+func TestEmitSurfacesWriteFailures(t *testing.T) {
+	if _, err := Emit(t.TempDir(), failWriter{}); err == nil {
+		t.Error("want the write failure surfaced")
 	}
 }

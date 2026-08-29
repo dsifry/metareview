@@ -1,4 +1,6 @@
 # Per-package combined coverage floor (unit + shell suite). Regenerate: bash tests/coverage.sh --update-floor
+# 2026-08-29: findings/runchain/state lowered by ~1 statement each when the JSONL scanner moved
+# to internal/jsonl (100%, floored). Nothing became less tested - the covered code left the package.
 cmd/metareview 81.2
 internal/artifactreview 80.4
 internal/contextpack 76.1
@@ -6,10 +8,11 @@ internal/contextprofile 96.3
 internal/epicready 81.6
 internal/epicsource 83.2
 internal/evidence 85.2
-internal/findings 92.8
+internal/findings 92.7
 internal/gitcontext 86.8
 internal/githubcontext 95.9
 internal/integration 100.0
+internal/jsonl 100.0
 internal/knowledge 77.8
 internal/learning 90.8
 internal/learnsource 70.8
@@ -20,11 +23,11 @@ internal/reviewers 97.7
 internal/reviewlog 91.1
 internal/reviewmanifest 97.0
 internal/reviewstate 92.1
-internal/runchain 92.5
+internal/runchain 92.2
 internal/sessionhistory 86.3
 internal/setup 89.8
 internal/shardpack 100.0
-internal/state 86.2
+internal/state 84.9
 internal/status 100.0
 internal/taskdone 89.4
 internal/tasksource 100.0

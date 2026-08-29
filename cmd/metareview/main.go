@@ -105,13 +105,10 @@ func main() {
 	// "may work proceed, and if not, what must be cleared". Exits 1 when something must be
 	// cleared, so a hook needs no parsing to make the common decision.
 	if len(args) == 2 && args[0] == "status" && args[1] == "--json" {
-		report, err := status.Build(mustCwd())
+		code, err := status.Emit(mustCwd(), os.Stdout)
 		exitOnErr(err)
-		out, err := json.MarshalIndent(report, "", "  ")
-		exitOnErr(err)
-		fmt.Println(string(out))
-		if report.Blocked {
-			os.Exit(1)
+		if code != 0 {
+			os.Exit(code)
 		}
 		return
 	}

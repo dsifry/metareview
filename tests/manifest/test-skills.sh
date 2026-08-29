@@ -90,7 +90,22 @@ grep -q -- '--scaffold-only' skills/review-artifact/SKILL.md
 grep -q 'parallel subagents by default' skills/review-artifact/SKILL.md
 grep -q 'explicit authorization' skills/review-artifact/SKILL.md
 grep -q 'not independently adversarial' skills/review-artifact/SKILL.md
-grep -q 'Feasibility, Completeness, Scope and alignment, Architecture, Intent preservation' skills/review-artifact/SKILL.md
+# All EIGHT lens names, not the five-name prefix: the prefix matched whether the document
+# listed five or eight, so the assertion could not fail and the docs drifted to "five" while
+# reviewlog.artifactReviewComplete required eight. Eight passing artifact reviews were left
+# permanently unresolvable as a result.
+for lens in 'Feasibility' 'Completeness' 'Scope and alignment' 'Architecture' \
+            'Intent preservation' 'Security' 'Testing-quality' 'Data-migration'; do
+  grep -q "$lens" skills/review-artifact/SKILL.md || {
+    echo "FAIL: skills/review-artifact/SKILL.md is missing the $lens lens"; exit 1; }
+done
+
+# and no user-facing document may claim a different count than the gate enforces
+for doc in README.md docs/quickstart.md docs/README.claude.md docs/README.codex.md commands/review-artifact.md; do
+  if grep -q 'five required' "$doc"; then
+    echo "FAIL: $doc says 'five required' but artifactReviewComplete requires eight lenses"; exit 1
+  fi
+done
 grep -q 'return the actual artifact-review verdict' skills/review-artifact/SKILL.md
 grep -q 'parallel subagents by default' docs/quickstart.md
 grep -q 'in-session-emulated' docs/quickstart.md
