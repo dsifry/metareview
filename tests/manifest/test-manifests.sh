@@ -117,13 +117,12 @@ done
 # could compare a stale build's --agent-prompt output against a stale golden and report ok while
 # the source matched neither. It did exactly that on 2026-08-29. Any script that drives the real
 # binary must build it first.
-for script in "$ROOT"/tests/go/test-fsm.sh; do
-  if grep -Eq '\[ +-x +(\$ROOT/)?bin/metareview +\]' "$script"; then
-    echo "FAIL: $(basename "$script") reuses an existing bin/metareview; it must rebuild so the gate cannot certify stale code"; exit 1
-  fi
-  grep -Eq '^go build -o "\$ROOT/bin/metareview"' "$script" || {
-    echo "FAIL: $(basename "$script") must build bin/metareview unconditionally"; exit 1; }
-done
+fsm_script="$ROOT/tests/go/test-fsm.sh"
+if grep -Eq '\[ +-x +(\$ROOT/)?bin/metareview +\]' "$fsm_script"; then
+  echo "FAIL: test-fsm.sh reuses an existing bin/metareview; it must rebuild so the gate cannot certify stale code"; exit 1
+fi
+grep -Eq '^go build -o "\$ROOT/bin/metareview"' "$fsm_script" || {
+  echo "FAIL: test-fsm.sh must build bin/metareview unconditionally"; exit 1; }
 
 npm run build >/tmp/metareview-build-test.out
 test -x "$ROOT/bin/metareview"
