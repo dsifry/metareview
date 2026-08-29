@@ -384,7 +384,20 @@ func ContextForClaim(diff string, alreadyTruncated bool, file string, line int, 
 		return ContextFor(diff, alreadyTruncated, file, line, budget)
 	}
 	share := budget / (len(refs) + 2) // the declared file gets two shares
-	primary, ok, _ := ContextFor(diff, alreadyTruncated, file, line, budget-share*len(refs))
+	// The second return of ContextFor is named `truncated`, not `ok`. It was bound here to a
+	// variable called `ok` and OR'd in as `!ok`, so the term claimed truncation exactly when the
+	// primary was NOT truncated - an inversion that never changed an answer, because on this path
+	// ContextFor's flag is true by construction (it carries one file out of several) and the
+	// length test below decided every reachable case. Dropped rather than corrected.
+	//
+	// The length test is an approximation and known to be imperfect in both directions: each
+	// selection re-emits its own file header, so a claim carried in FULL can produce more bytes
+	// than the diff it came from (measured: 40193 from 40074) and read as complete. Measuring it
+	// properly needs SelectDiff to report whether it cut, which it does not - and its budget is
+	// not a hard cap, since a smaller budget can return MORE bytes (measured: 40102 at budget 133
+	// against 39983 unbounded). That contract is worth settling before this signal is rebuilt on
+	// top of it; see docs/0.10.0-candidates.md.
+	primary, _, _ := ContextFor(diff, alreadyTruncated, file, line, budget-share*len(refs))
 	var b strings.Builder
 	b.WriteString(primary)
 	for _, r := range refs {
@@ -394,5 +407,5 @@ func ContextForClaim(diff string, alreadyTruncated bool, file string, line int, 
 	}
 	out = b.String()
 	sum := sha1.Sum([]byte(out))
-	return out, alreadyTruncated || !ok || len(out) < len(diff), hex.EncodeToString(sum[:])
+	return out, alreadyTruncated || len(out) < len(diff), hex.EncodeToString(sum[:])
 }

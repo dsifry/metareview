@@ -411,3 +411,33 @@ func TestAllReferencedPathsSkipsRepeats(t *testing.T) {
 		t.Fatalf("got %v, want each path once", got)
 	}
 }
+
+// DiffTruncated is the one signal telling a judge it is not seeing the whole story, so its two
+// states both have to be constrained. ContextForClaim bound ContextFor's second return - named
+// `truncated` - to a variable named `ok` and then OR'd in `!ok`, so the term contributed
+// "truncated" exactly when the primary file was NOT truncated and contributed nothing when it
+// was. The bug was masked by a third term, len(out) < len(diff), which is true for essentially
+// any multi-file diff: the function returned the right answer for the wrong reason, and mutating
+// !ok to ok left the whole suite green.
+func TestContextForClaimReportsTruncationOfThePrimaryFile(t *testing.T) {
+	two := "diff --git a/pkg/a.go b/pkg/a.go\n--- a/pkg/a.go\n+++ b/pkg/a.go\n@@ -1,2 +1,3 @@\n+\taMarker()\n" +
+		"diff --git a/pkg/b.go b/pkg/b.go\n--- a/pkg/b.go\n+++ b/pkg/b.go\n@@ -1,2 +1,3 @@\n+\tbMarker()\n"
+
+	// Both files carried in full: the judge IS seeing the whole story, so the flag must be false.
+	// The old code got this right only by accident - its `!ok` term was false here because the
+	// primary selection reports itself truncated by construction on this path, so the answer came
+	// entirely from the length test. Pinning it means the inverted term cannot be reintroduced
+	// without a failure.
+	out, truncated, _ := ContextForClaim(two, false, "pkg/a.go", 1, "compare with pkg/b.go", 1<<20)
+	if !strings.Contains(out, "aMarker") || !strings.Contains(out, "bMarker") {
+		t.Fatalf("fixture invalid: both files must be carried, got %q", out)
+	}
+	if truncated {
+		t.Error("a claim whose primary and referenced files are both carried whole is not truncated")
+	}
+
+	// An upstream truncation always survives.
+	if _, truncated, _ := ContextForClaim(two, true, "pkg/a.go", 1, "compare with pkg/b.go", 1<<20); !truncated {
+		t.Error("alreadyTruncated must survive")
+	}
+}
