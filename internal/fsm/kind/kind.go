@@ -64,7 +64,21 @@ type Deps struct {
 	// Only rejections are escalated, and only for candidates whose text names another file
 	// the diff carries. A false reject silently drops a real bug while a false confirm only
 	// costs a human a look, and measurement showed excerpts are weakest on cross-file claims.
-	Escalate judge.Judge
+	Escalate *Escalation
+}
+
+// Escalation is the second opinion and everything the audit needs to describe it. The judge
+// carries its own model and effort because it is a different judge, not the node's; and the
+// evidence fields are recorded on its llm_call so a replayer can tell how the verdict was
+// reached and against exactly which tree.
+type Escalation struct {
+	Judge    judge.Judge
+	Model    string
+	Effort   string
+	Evidence string // run.EvidenceSandbox when the judge reads a materialized tree
+	TreeHash string
+	BaseSHA  string
+	HeadSHA  string
 }
 
 // Registry holds the built-ins.
@@ -374,16 +388,29 @@ func (adjudicateKind) Reduce(s run.Snapshot, out any) (run.Delta, error) {
 // adjudicateExec is the fork executor (spec 4 §4.2).
 type adjudicateExec struct {
 	judge    judge.Judge
-	escalate judge.Judge
+	escalate *Escalation
 }
 
 // call performs one judge call and audits it; parse failures are never errors.
 func call(ctx context.Context, j judge.Judge, in machine.ExecInput, req judge.Request) (judge.Verdict, error) {
+	return callAs(ctx, j, in, req, nil)
+}
+
+// callAs is call with an optional escalation identity. A normal call takes its model and
+// effort from the node; an escalation is a different judge and brings its own, and records
+// what it could see so the row is replayable.
+func callAs(ctx context.Context, j judge.Judge, in machine.ExecInput, req judge.Request, esc *Escalation) (judge.Verdict, error) {
 	req.RunID, req.Node, req.Iter = in.Snap.RunID, in.Node.Name, in.Snap.Iteration
 	req.Model, req.Effort = in.Node.Model, in.Node.Effort
+	if esc != nil {
+		req.Model, req.Effort = esc.Model, esc.Effort
+	}
 	req.Fence, req.Calibration = !in.Snap.Calibration, in.Snap.Calibration
 	v, err := j.Call(ctx, req)
 	data := run.LLMCallData{Kind: req.Kind, Model: req.Model, Effort: req.Effort, Index: req.Index, InputHash: v.InputHash, Verdict: json.RawMessage("null"), Confidence: v.Confidence, Tokens: v.Tokens, DurationMS: v.Duration.Milliseconds()}
+	if esc != nil {
+		data.Evidence, data.TreeHash, data.BaseSHA, data.HeadSHA = esc.Evidence, esc.TreeHash, esc.BaseSHA, esc.HeadSHA
+	}
 	if v.Parsed != nil {
 		data.Verdict = v.Parsed
 	}
@@ -523,12 +550,12 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 // the finding should be kept. It is only consulted for rejections, so it can never turn a
 // confirmation into a rejection - the error escalation exists to prevent.
 func (e *adjudicateExec) secondOpinion(ctx context.Context, in machine.ExecInput, cand run.Finding, index *int) (run.Bug, bool) {
-	if e.escalate == nil || len(judge.ReferencedPaths(in.Diff.Text, cand.File, cand.IssueText)) == 0 {
+	if e.escalate == nil || e.escalate.Judge == nil || len(judge.ReferencedPaths(in.Diff.Text, cand.File, cand.IssueText)) == 0 {
 		return run.Bug{}, false
 	}
 	desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
 	diff, truncated, diffHash := judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, cand.IssueText, judge.MaxDiffBytes)
-	v, err := call(ctx, e.escalate, in, judge.Request{Kind: judge.KindAdjudicate, Index: *index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand}})
+	v, err := callAs(ctx, e.escalate.Judge, in, judge.Request{Kind: judge.KindAdjudicate, Index: *index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand}}, e.escalate)
 	*index++
 	if err != nil {
 		// The second opinion never arrived, so nothing decided this finding. Keeping the
