@@ -1911,3 +1911,58 @@ func TestPinsAndClassesDemandsCompose(t *testing.T) {
 		t.Errorf("a node that asked for neither must get the plain schema: %s", bare.OutputSchema)
 	}
 }
+
+// The lens name must survive Reduce, and the fixer must be told where reviewers converged.
+//
+// Reduce flattened each lens report into a findings list and dropped l.Name, so by the time
+// anything downstream saw the findings it could tell that duplicates existed but not whether they
+// came from independent reviewers. Four lenses agreeing and one lens repeating itself were the
+// same data — and that difference is the entire value of the signal, because independent
+// convergence is evidence a defect is a CLASS with several instances.
+func TestLensNameSurvivesReduceAndReachesTheFixer(t *testing.T) {
+	out := lensesOut{Lenses: []run.LensReport{
+		{Name: "Security", Verdict: run.LensNeedsRevision, Findings: []run.Finding{{File: "a.go", IssueText: "x"}}},
+		{Name: "Architecture", Verdict: run.LensNeedsRevision, Findings: []run.Finding{{File: "a.go", IssueText: "y"}}},
+		{Name: "Feasibility", Verdict: run.LensPass},
+		{Name: "Completeness", Verdict: run.LensError},
+	}}
+	d, err := reviewLenses{}.Reduce(run.Snapshot{}, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bySource := map[string]int{}
+	for _, f := range d.Findings {
+		if f.Source == "" {
+			t.Errorf("a finding lost its lens: %+v", f)
+		}
+		bySource[f.Source]++
+	}
+	if bySource["Security"] != 1 || bySource["Architecture"] != 1 {
+		t.Errorf("wrong attribution: %v", bySource)
+	}
+	// A lens that could not run is attributed too, or its own report is anonymous.
+	if bySource["Completeness"] != 1 {
+		t.Errorf("the ERROR finding must name the lens that failed: %v", bySource)
+	}
+	if run.LensConvergence(d.Findings)["a.go"] != 2 {
+		t.Errorf("two independent lenses on a.go must count as 2: %v", run.LensConvergence(d.Findings))
+	}
+
+	// And the fixer is shown it, but only when it was asked to find classes — a node that did not
+	// ask gets the plain prompt.
+	snap := run.Snapshot{BaseSHA: "b", Head: "h", Findings: d.Findings,
+		AllFound: []run.Bug{{ID: "b1", Desc: "a bug", File: "a.go"}}}
+	strict := &workflow.Node{Name: "fix", Kind: AgentEdit, Params: map[string]any{"require_classes": true}}
+	got, err := agentEdit{}.Instructions(snap, strict, machine.Diff{Text: "+x"}, "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Text, "converged on these files") || !strings.Contains(got.Text, "a.go (2 reviewers)") {
+		t.Errorf("the fixer was not shown where reviewers converged:\n%s", got.Text)
+	}
+	plain := &workflow.Node{Name: "fix", Kind: AgentEdit}
+	bare, _ := agentEdit{}.Instructions(snap, plain, machine.Diff{Text: "+x"}, "n1")
+	if strings.Contains(bare.Text, "converged on these files") {
+		t.Error("a node that did not ask for classes must not be given the convergence hint")
+	}
+}
