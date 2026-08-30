@@ -27,6 +27,7 @@ if [ -f tests/go/test-override-coverage.sh ]; then bash tests/go/test-override-c
 if [ -f tests/go/test-taskdone-reviewers.sh ]; then bash tests/go/test-taskdone-reviewers.sh; fi
 if [ -f tests/go/test-task-done-review.sh ]; then bash tests/go/test-task-done-review.sh; fi
 if [ -f tests/go/test-mutation-report.sh ]; then bash tests/go/test-mutation-report.sh; fi
+if [ -f tests/go/test-stop-hook.sh ]; then bash tests/go/test-stop-hook.sh; fi
 if [ -f tests/go/test-reviewlog.sh ]; then bash tests/go/test-reviewlog.sh; fi
 if [ -f tests/go/test-epic-source.sh ]; then bash tests/go/test-epic-source.sh; fi
 if [ -f tests/go/test-epicready-reviewers.sh ]; then bash tests/go/test-epicready-reviewers.sh; fi

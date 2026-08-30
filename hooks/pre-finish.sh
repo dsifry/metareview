@@ -15,10 +15,19 @@
 # hook only needs the repository it is standing in.
 set -uo pipefail
 
-# --target scopes the answer to the work in hand. Without it `blocked` spans the entire review
-# history, so the hook would refuse an agent because of work it never touched — a livelock, not a
-# gate, and the reason this hook could not ship before.
+# Scope. The default is the branch: blockers against its own commits, plus files it changed that
+# no passing review has read. Unscoped, `blocked` spans the entire review history — 73 entries
+# here, the oldest from 2026-05 — so the hook refuses every session for work it never touched.
+# That is a livelock, and a gate an operator has to disable is not a gate.
+#
+# This defaulted to UNSCOPED while --scope branch already existed, which made the hook unusable
+# for the whole time it looked finished: nothing in the tree sets METAREVIEW_TARGET, so the
+# unscoped path was the only one that ever ran.
+#
+# METAREVIEW_TARGET still narrows to one target when the caller knows it. METAREVIEW_BASE picks
+# the branch base; empty lets metareview resolve it the way every other command does.
 TARGET="${METAREVIEW_TARGET:-}"
+BASE="${METAREVIEW_BASE:-}"
 
 BIN="${METAREVIEW_BIN:-metareview}"
 if ! command -v "$BIN" >/dev/null 2>&1; then
@@ -30,8 +39,10 @@ fi
 
 if [ -n "$TARGET" ]; then
   OUT="$("$BIN" status --json --target "$TARGET" 2>&1)"
+elif [ -n "$BASE" ]; then
+  OUT="$("$BIN" status --json --scope branch --base "$BASE" 2>&1)"
 else
-  OUT="$("$BIN" status --json 2>&1)"
+  OUT="$("$BIN" status --json --scope branch 2>&1)"
 fi
 CODE=$?
 
