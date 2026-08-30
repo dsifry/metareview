@@ -379,17 +379,24 @@ type Snapshot struct {
 	// Only a SURVIVED pin lands here. A malformed or unverifiable one says the claim could not be
 	// evaluated, which is a fact about the pin, not about the code, and pointing the next round's
 	// reviewers at it would send them to a line where nothing is known to be wrong.
-	Unproven    []Pin       `json:"unproven,omitempty"`
-	Status      []BugStatus `json:"status"`
-	Unfixed     int         `json:"unfixed"`
-	PrevUnfixed *int        `json:"prev_unfixed"`
-	// PrevFixed is how many bugs were FIXED as of the previous iteration boundary. Progress is
-	// measured against it rather than against PrevUnfixed, because unfixed is the total and the
-	// total grows when discovery works: an iteration that fixes six bugs and finds twenty-one has
-	// more unfixed than it started with, and reading that as "no progress" stops a loop for being
-	// productive. Measured on this repository 2026-08-30: round 0 fixed 6 of 10, round 1 found 21
-	// more, and the run halted on "unfixed 23 >= previous 4" while converging.
-	PrevFixed       *int                       `json:"prev_fixed,omitempty"`
+	Unproven []Pin       `json:"unproven,omitempty"`
+	Status   []BugStatus `json:"status"`
+	Unfixed  int         `json:"unfixed"`
+	// PrevUnfixed is retained for the wire schema and operator diagnostics ONLY. No predicate
+	// reads it: measuring progress by comparing unfixed totals is the defect UnfixedAtEntry
+	// exists to replace, and a consumer reaching for this field would reproduce it.
+	PrevUnfixed *int `json:"prev_unfixed"`
+	// UnfixedAtEntry is the ID of every bug that was unfixed when the current iteration began.
+	// Progress means fixing one of THESE — a set, not a count.
+	//
+	// Two counts were tried and both were wrong, in opposite directions. Comparing unfixed totals
+	// stalls a productive loop, because the total grows whenever discovery outpaces fixing.
+	// Comparing fixed totals never stalls a stuck one, because a bug discovered and fixed in the
+	// same round raises the count while the backlog is untouched — and it can be inflated with no
+	// work at all, since adjudicate confirming N bugs and verify calling those same N absent moves
+	// it by N with nothing edited. Only the entering set distinguishes "this round fixed something
+	// it was handed" from "this round found something easy".
+	UnfixedAtEntry  []string                   `json:"unfixed_at_entry,omitempty"`
 	Tokens          TokenTotals                `json:"tokens"`
 	NodeOutputs     map[string]json.RawMessage `json:"node_outputs"`
 	Applied         map[string]bool            `json:"applied"`
@@ -430,7 +437,7 @@ func (s Snapshot) Clone() Snapshot {
 		copy(c.Status, s.Status)
 	}
 	c.PrevUnfixed = cloneInt(s.PrevUnfixed)
-	c.PrevFixed = cloneInt(s.PrevFixed)
+	c.UnfixedAtEntry = append([]string(nil), s.UnfixedAtEntry...)
 	if s.NodeOutputs != nil {
 		c.NodeOutputs = make(map[string]json.RawMessage, len(s.NodeOutputs))
 		for k, v := range s.NodeOutputs {

@@ -1851,3 +1851,63 @@ func TestCheckClassesCaps(t *testing.T) {
 		}
 	}
 }
+
+// The two demands must COMPOSE. They were written as independent `if` blocks each assigning the
+// whole prompt and schema, so with both set — which is the only configuration either ships in,
+// sdlc-loop-proved — the second silently discarded the first while DecodeFor went on enforcing
+// both. That is the prompt-must-ask-for-what-the-schema-demands trap, which this file had already
+// been through once with require_verdicts, and it was invisible because require_pins and
+// require_classes were only ever tested SEPARATELY.
+func TestPinsAndClassesDemandsCompose(t *testing.T) {
+	snap := run.Snapshot{BaseSHA: "b", Head: "h", AllFound: []run.Bug{{ID: "b1", Desc: "a bug"}}}
+	both := &workflow.Node{Name: "fix", Kind: AgentEdit,
+		Params: map[string]any{"require_pins": true, "require_classes": true}}
+
+	got, err := agentEdit{}.Instructions(snap, both, machine.Diff{Text: "+x"}, "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"declare a pin", "SEARCH THE REPOSITORY", "already-correct", "EXACTLY ONCE"} {
+		if !strings.Contains(got.Text, want) {
+			t.Errorf("the composed prompt is missing %q:\n%s", want, got.Text)
+		}
+	}
+	for _, want := range []string{`"pins"`, `"classes"`, `"commit"`, `"summary"`} {
+		if !strings.Contains(string(got.OutputSchema), want) {
+			t.Errorf("the composed schema is missing %q: %s", want, got.OutputSchema)
+		}
+	}
+	// The decoder demands both, so a reply satisfying only one must be refused — that asymmetry
+	// is what made the clobber dangerous rather than merely untidy.
+	pinsOnly := `{"commit":"abc1234","summary":"s","pins":[{"file":"f.go","from":"a","to":"b","test":"T"}]}`
+	if _, err := (agentEdit{}).DecodeFor(both, json.RawMessage(pinsOnly)); err == nil {
+		t.Error("a reply with pins and no classes must be refused when both are required")
+	}
+	classesOnly := `{"commit":"abc1234","summary":"s","classes":[{"name":"c","instances":[{"file":"a.go","disposition":"fixed"}]}]}`
+	if _, err := (agentEdit{}).DecodeFor(both, json.RawMessage(classesOnly)); err == nil {
+		t.Error("a reply with classes and no pins must be refused when both are required")
+	}
+	full := `{"commit":"abc1234","summary":"s","pins":[{"file":"f.go","from":"a","to":"b","test":"T"}],` +
+		`"classes":[{"name":"c","instances":[{"file":"a.go","disposition":"fixed"}]}]}`
+	if _, err := (agentEdit{}).DecodeFor(both, json.RawMessage(full)); err != nil {
+		t.Errorf("a reply satisfying both must be accepted: %v", err)
+	}
+
+	// And each alone still asks for only its own thing, so a workflow that opted into one is
+	// not handed the other's contract.
+	pinsNode := &workflow.Node{Name: "fix", Kind: AgentEdit, Params: map[string]any{"require_pins": true}}
+	p, _ := agentEdit{}.Instructions(snap, pinsNode, machine.Diff{Text: "+x"}, "n1")
+	if strings.Contains(string(p.OutputSchema), "classes") || strings.Contains(p.Text, "SEARCH THE REPOSITORY") {
+		t.Error("require_pins alone must not ask for classes")
+	}
+	clsNode := &workflow.Node{Name: "fix", Kind: AgentEdit, Params: map[string]any{"require_classes": true}}
+	c, _ := agentEdit{}.Instructions(snap, clsNode, machine.Diff{Text: "+x"}, "n1")
+	if strings.Contains(string(c.OutputSchema), "pins") || strings.Contains(c.Text, "declare a pin") {
+		t.Error("require_classes alone must not ask for pins")
+	}
+	// Neither set: the plain contract, unchanged.
+	bare, _ := agentEdit{}.Instructions(snap, &workflow.Node{Name: "fix", Kind: AgentEdit}, machine.Diff{Text: "+x"}, "n1")
+	if strings.Contains(string(bare.OutputSchema), "pins") || strings.Contains(string(bare.OutputSchema), "classes") {
+		t.Errorf("a node that asked for neither must get the plain schema: %s", bare.OutputSchema)
+	}
+}

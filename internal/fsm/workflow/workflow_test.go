@@ -240,6 +240,15 @@ func TestW2Reasons(t *testing.T) {
 		{"missing-convergence", "missing_convergence", "convergence", edit("convergence: { any: [ no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}, {cmd: notify} ] }\n", "")},
 		{"cycle-without-loop", "cycle_without_loop", "transitions", edit("{ from: fix, to: verify, gate: commit_exists }", "{ from: fix, to: verify, gate: commit_exists }\n  - { from: fix, to: adjudicate, gate: findings_nonempty }")},
 		{"bad-convergence", "bad_convergence", "convergence", edit("{max_iterations: 5}", "{max_iterations: -5}")},
+		// A LOOPING workflow whose only predicates are no_fixation_progress and all_fixed has
+		// nothing that terminates. nfp is a stall detector — an agent may fix one bug it entered
+		// with and discover five, forever, which is progress every round — and all_fixed stops
+		// only if everything gets fixed. The old nfp hid this by requiring the unfixed total to
+		// strictly decrease, terminating as a side effect of being too strict. This case pins
+		// that Parse calls ValidateBounded, which testing the validator alone does not.
+		{"unbounded-loop", "bad_convergence", "convergence",
+			edit("convergence: { any: [ no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}, {cmd: notify} ] }",
+				"convergence: { any: [ no_fixation_progress, all_fixed ] }")},
 		{"bad-repo-mode", "bad_repo_mode", "repo_mode", edit("repo_mode: advisory", "repo_mode: strict")},
 		{"unknown-var-node", "unknown_var", "nodes.discover", edit("model: $REVIEWER, lenses: 8", "model: $REVIEWERX, lenses: 8")},
 		{"unknown-var-cmd", "unknown_var", "cmds.notify", edit("--model, $JUDGE]", "--model, $NOPE]")},

@@ -351,6 +351,13 @@ func TestFoldTransitionLoopAndBaseline(t *testing.T) {
 	if s.Iteration != 1 || s.PrevUnfixed == nil || *s.PrevUnfixed != 1 || len(s.Findings) != 0 || len(s.Confirmed) != 0 || len(s.AllFound) != 1 || s.LastError != nil || s.Head != "h1" {
 		t.Fatalf("loop transition: %+v", s)
 	}
+	// The entering SET, which is what progress is measured against. Its VALUE was previously
+	// asserted nowhere: the predicate was tested with hand-built snapshots and the fold with
+	// neither, so inverting the fixed/unfixed test inside unfixedIDs — or returning an empty set
+	// — left the whole suite green while the stall guard silently died.
+	if len(s.UnfixedAtEntry) != 1 || s.UnfixedAtEntry[0] != "b1" {
+		t.Fatalf("entering set at the boundary: %v (want [b1])", s.UnfixedAtEntry)
+	}
 	// second loop re-copies PrevUnfixed
 	b.Event(TypeNodeOutput, out(`{"s":1}`), WithNode("v"))
 	b.Event(TypeDeltaApplied, deltaFor(`{"s":1}`, Delta{Status: []BugStatus{{ID: "b1", StillPresent: false}}}), WithNode("v"))
@@ -358,6 +365,12 @@ func TestFoldTransitionLoopAndBaseline(t *testing.T) {
 	s = mustFold(t, b.Events())
 	if *s.PrevUnfixed != 0 || s.Iteration != 2 {
 		t.Fatalf("second loop: prev=%d iter=%d", *s.PrevUnfixed, s.Iteration)
+	}
+	// b1 is now fixed, so the second boundary enters with nothing outstanding. Empty and non-nil
+	// is the answer that says "there was nothing to make progress on", which the predicate reads
+	// differently from nil ("no boundary yet").
+	if s.UnfixedAtEntry == nil || len(s.UnfixedAtEntry) != 0 {
+		t.Fatalf("second loop entering set: %v (want empty, not nil)", s.UnfixedAtEntry)
 	}
 	// loop transition stamped with the current (not new) iteration is rejected
 	b.Event(TypeTransition, TransitionData{From: "discover", To: "discover", Loop: true, Head: "h3"}, WithIter(2))
