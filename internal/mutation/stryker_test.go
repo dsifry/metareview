@@ -163,7 +163,9 @@ func TestLoadAndLoadAllRefuseRatherThanSkip(t *testing.T) {
 
 // The uncovered edges of the format probe and the finding renderer.
 func TestParseEdgesAndFindingCaps(t *testing.T) {
-	// Leading whitespace before the files value must not confuse the structural probe.
+	// Leading whitespace before the files value must not confuse the structural probe. It cannot:
+	// encoding/json strips it before handing over the RawMessage, so the probe never sees it. This
+	// asserts the outcome, not a branch — the branch that claimed to handle it was unreachable.
 	ws := "{\"schemaVersion\":\"1.0\",\"files\":   {\"a.ts\":{\"mutants\":[{\"mutatorName\":\"X\",\"status\":\"Killed\",\"location\":{\"start\":{\"line\":1}}}]}}}"
 	if _, err := Parse([]byte(ws), ""); err != nil {
 		t.Errorf("whitespace before the files object must parse: %v", err)

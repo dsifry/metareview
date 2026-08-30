@@ -270,3 +270,38 @@ func TestReportWithoutAnEngineNameStaysReadable(t *testing.T) {
 		t.Errorf("the sentence begins with a hole where the engine name should be: %q", got[0].Finding)
 	}
 }
+
+// The honest score has to REACH the operator, or computing it is a private virtue. An engine
+// reporting "Test efficacy: 100.00%" while 97 mutants timed out is exactly the number this
+// contradicts, and a reader comparing the two needs both in front of them. Before this, Score and
+// Complete had no non-test caller anywhere in the module — the package's headline claim was
+// delivered entirely by Findings(), and the coverage floor certified an unreachable type kept
+// alive by its own unit tests.
+func TestTheUndecidedFindingCarriesTheHonestScore(t *testing.T) {
+	// The measured 2026-08-29 gremlins run: 10 killed, 97 timed out, and it reported 100%.
+	got := (Report{Engine: "gremlins", Mutants: mutants(10, 0, 97, 0)}).Findings()
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got))
+	}
+	text := got[0].Finding
+	for _, want := range []string{"10 killed", "97 undecided", "efficacy 9.3%", "INCOMPLETE"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the finding must carry %q:\n%s", want, text)
+		}
+	}
+	// The number an engine would have printed must not be reproducible from ours.
+	if strings.Contains(text, "100.0%") {
+		t.Errorf("efficacy must count undecided against the score:\n%s", text)
+	}
+	// A complete run says so by omission rather than claiming incompleteness.
+	done := (Report{Engine: "gremlins", Mutants: mutants(8, 2, 0, 0)}).Findings()
+	if len(done) != 2 {
+		t.Fatalf("two survivors are two findings, got %d", len(done))
+	}
+	if s := (Report{Mutants: mutants(8, 2, 0, 0)}).Score(); !s.Complete() || s.Efficacy != 0.8 {
+		t.Errorf("a decided run: complete=%v efficacy=%v", s.Complete(), s.Efficacy)
+	}
+	if strings.Contains((Score{Killed: 8, Survived: 2}).Summary(), "INCOMPLETE") {
+		t.Error("a complete run must not be labelled incomplete")
+	}
+}

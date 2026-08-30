@@ -10,6 +10,7 @@ package mutation
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -61,6 +62,26 @@ type Score struct {
 	// one. Uncovered sites are excluded: no mutation ran, so there is nothing for a test to catch,
 	// and they are reported in their own right instead.
 	Efficacy float64
+}
+
+// Summary states the score the way an engine's own summary will not.
+//
+// It exists on the finding because the honest formula is the package's whole argument and it has
+// to reach the operator to be worth anything: an engine reporting "Test efficacy: 100.00%" while
+// 97 mutants timed out is exactly the number this contradicts, and a reader comparing the two
+// needs to see both. Before this, Score and Complete had no non-test caller at all — the claim
+// that this package computes its own totals was delivered entirely by Findings(), and the
+// coverage floor was certifying an unreachable type kept alive by its own unit tests.
+func (s Score) Summary() string {
+	return fmt.Sprintf("Honest score: %d killed, %d survived, %d undecided, %d uncovered; efficacy %.1f%% (undecided counted against, uncovered excluded)%s.",
+		s.Killed, s.Survived, s.Unresolved, s.Uncovered, s.Efficacy*100, incompleteNote(s))
+}
+
+func incompleteNote(s Score) string {
+	if s.Complete() {
+		return ""
+	}
+	return "; this run is INCOMPLETE, so no threshold should be applied to it"
 }
 
 // Complete reports whether the run decided every mutant it attempted. A run that did not is not a
@@ -151,7 +172,13 @@ func (r Report) Findings() []findings.Input {
 			Expected:       "Every line the gate is asked to trust is executed by at least one test.",
 			Recommendation: "Cover those lines, or remove them.",
 			Evidence:       []findings.Evidence{{Type: "mutant", Path: file, Line: ms[0].Line}},
-			Fingerprint:    "mutation:uncovered:" + file,
+			// The ENGINE is part of the identity. Without it, two engines reporting uncovered
+			// sites in the same file produced one fingerprint, and the cross-engine dedupe in
+			// reviewers.MutationContext dropped the second — losing its sites and leaving the
+			// surviving finding's count wrong. Engines disagree about what is uncovered (gremlins
+			// and ooze differed by 137 mutants on one package here), so their reports are
+			// different claims and must not silently overwrite each other.
+			Fingerprint: "mutation:uncovered:" + r.engine() + ":" + file,
 		})
 	}
 
@@ -164,12 +191,19 @@ func (r Report) Findings() []findings.Input {
 			// is a fact about how the run was configured, not about the code under test.
 			Owner: "reviewer",
 			Title: "Mutation run did not decide every mutant",
-			Finding: fmt.Sprintf("%s left %d mutant(s) undecided (timeout or engine error), so this run measured less than it appears to: %s.",
-				r.engine(), len(unresolved), siteList(unresolved)),
+			Finding: fmt.Sprintf("%s left %d mutant(s) undecided (timeout or engine error), so this run measured less than it appears to: %s. %s",
+				r.engine(), len(unresolved), siteList(unresolved), r.Score().Summary()),
 			Expected:       "Every attempted mutant is decided; an undecided one is not evidence of anything.",
 			Recommendation: "Raise the engine's timeout or narrow the target until nothing is undecided, then re-run. Do not treat an undecided mutant as a kill.",
 			Evidence:       []findings.Evidence{{Type: "mutant", Path: unresolved[0].File, Line: unresolved[0].Line}},
-			Fingerprint:    "mutation:unresolved:" + r.engine() + ":" + r.Target,
+			// Deliberately NOT keyed on r.Target. Load fills Target with the report's FILE PATH,
+			// so a CI job writing /tmp/build-1234/mut.json and a developer's local copy produced
+			// different fingerprints for the same run. Fingerprint identity is what makes an
+			// `overridden` record suppress rediscovery, so a granted override on this — the
+			// highest-severity finding this package raises — silently failed to rematch on the
+			// next run, and the failure was invisible until someone relied on it. The engine and
+			// the files it could not decide are the stable identity of that claim.
+			Fingerprint: "mutation:unresolved:" + r.engine() + ":" + unresolvedKey(unresolved),
 		})
 	}
 	return out
@@ -216,4 +250,20 @@ func siteList(ms []Mutant) string {
 		parts = append(parts, fmt.Sprintf("%s:%d", m.File, m.Line))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// unresolvedKey identifies WHICH mutants an engine could not decide, independent of where the
+// report file happened to be written. Sorted, so the same run keys the same way whatever order
+// the engine emitted, and capped so one enormous failure cannot produce an unbounded key.
+func unresolvedKey(ms []Mutant) string {
+	const max = 8
+	sites := make([]string, 0, len(ms))
+	for _, m := range ms {
+		sites = append(sites, fmt.Sprintf("%s:%d", m.File, m.Line))
+	}
+	sort.Strings(sites)
+	if len(sites) > max {
+		sites = append(sites[:max], fmt.Sprintf("+%d", len(ms)-max))
+	}
+	return strings.Join(sites, ",")
 }

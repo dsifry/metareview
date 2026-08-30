@@ -362,21 +362,31 @@ func TestValidateBoundedRequiresATerminatingPredicate(t *testing.T) {
 		"only all_fixed":      "all_fixed",
 		"nfp and all_fixed":   "any: [no_fixation_progress, all_fixed]",
 		"nfp under a nesting": "any: [{not: {no_fixation_progress: true}}, no_fixation_progress]",
+		// `all` stops only when EVERY child fires, so two bounds under it guarantee nothing: the
+		// run continues until they fire together, which nothing arranges. This tree names two
+		// bounds and is unbounded. It was accepted before, which made the whole check a
+		// formality — an author could satisfy it with a bound that could never stop the run.
+		"two bounds under all": "all: [{max_iterations: 3}, {budget: {tokens: 100}}]",
+		"a bound under all":    "any: [no_fixation_progress, {all: [{max_iterations: 9}, {cmd: chk}]}]",
+		"a negated bound":      "any: [no_fixation_progress, {not: {max_iterations: 3}}]",
 	} {
-		if err := ValidateBounded(node(t, src), nil, true); err == nil {
+		if err := ValidateBounded(node(t, src), []string{"chk"}, true); err == nil {
 			t.Errorf("%s: a looping workflow with no bound must be refused", name)
 		}
 		// ...and the same tree is fine for a workflow that does not loop.
-		if err := ValidateBounded(node(t, src), nil, false); err != nil {
+		if err := ValidateBounded(node(t, src), []string{"chk"}, false); err != nil {
 			t.Errorf("%s: a non-looping workflow needs no bound: %v", name, err)
 		}
 	}
 	for name, src := range map[string]string{
-		"max_iterations":    "any: [no_fixation_progress, {max_iterations: 5}]",
-		"budget":            "any: [no_fixation_progress, {budget: {tokens: 100}}]",
-		"cmd":               "any: [no_fixation_progress, {cmd: chk}]",
-		"bound alone":       "{max_iterations: 3}",
-		"deeply nested cmd": "any: [no_fixation_progress, {all: [{max_iterations: 9}, {cmd: chk}]}]",
+		"max_iterations": "any: [no_fixation_progress, {max_iterations: 5}]",
+		"budget":         "any: [no_fixation_progress, {budget: {tokens: 100}}]",
+		"cmd":            "any: [no_fixation_progress, {cmd: chk}]",
+		"bound alone":    "{max_iterations: 3}",
+		// Nested `any` preserves the guarantee — the bound alone still stops the run.
+		"nested under any": "any: [no_fixation_progress, {any: [{cmd: chk}, {max_iterations: 9}]}]",
+		// A bound beside an `all` that buries one: the reachable bound is what counts.
+		"one reachable": "any: [{max_iterations: 4}, {all: [{cmd: chk}, no_fixation_progress]}]",
 	} {
 		if err := ValidateBounded(node(t, src), []string{"chk"}, true); err != nil {
 			t.Errorf("%s: must be accepted as bounded: %v", name, err)

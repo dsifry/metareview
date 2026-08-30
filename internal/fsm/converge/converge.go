@@ -120,18 +120,35 @@ func ValidateBounded(node *yaml.Node, cmdNames []string, loops bool) error {
 // agent fixes everything, and no_fixation_progress is a stall detector: an agent may fix one bug
 // it entered with and discover five, forever, which is progress every round and unbounded.
 //
-// Nesting is not inspected for reachability. An author who buries a bound under a `not` has
-// written something this check cannot reason about, and the point is to catch the workflow that
-// forgot, not to prove a bound fires.
+// A bound under `all` or `not` does NOT count. `all` stops only when EVERY child fires, so
+// {all: [{max_iterations: 3}, {budget: ...}]} is unbounded despite naming two bounds: the run
+// continues until both fire together, which nothing guarantees. `not` inverts the same way. This
+// is the identical argument the parser already makes about all_fixed, which it permits only at
+// the top level or directly under a top-level `any`.
+//
+// Reachability is not otherwise proven. cmd counts wherever it survives that rule because it is
+// an arbitrary author-supplied check and may well be the intended brake; refusing it would reject
+// workflows whose termination argument this code simply cannot read. The point is to catch the
+// workflow that forgot a bound, not to prove one fires.
 func hasBound(node *yaml.Node) bool {
 	if node == nil || node.Kind == yaml.ScalarNode {
 		return false
 	}
-	for _, c := range node.Content {
-		switch c.Value {
-		case "max_iterations", "budget", "cmd":
-			return true
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			switch node.Content[i].Value {
+			case "max_iterations", "budget", "cmd":
+				return true
+			case "all", "not":
+				continue
+			}
+			if hasBound(node.Content[i+1]) {
+				return true
+			}
 		}
+		return false
+	}
+	for _, c := range node.Content {
 		if hasBound(c) {
 			return true
 		}

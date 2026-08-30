@@ -37,9 +37,11 @@ func (m MutationContext) Findings() []Finding {
 	seen := map[string]bool{}
 	for _, r := range reports {
 		for _, f := range r.Findings() {
-			// Fingerprints from different engines differ by construction (the reviewer name is
-			// not part of them, but the operator is), so this collapses only what is genuinely
-			// the same claim about the same line.
+			// Every fingerprint names its engine, so this collapses only what is genuinely the
+			// same claim from the same engine. That was not always true: the uncovered
+			// fingerprint was once just the file path, so gremlins and stryker reporting
+			// uncovered sites in one file collided here and the second report's sites were
+			// dropped silently, leaving the surviving finding's site count wrong.
 			if seen[f.Fingerprint] {
 				continue
 			}

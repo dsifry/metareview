@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Mutation reports as review input (`--mutation-report`).** Any review gate accepts one or more
+  mutation-testing reports and turns them into findings. The input contract is Stryker's
+  `mutation-testing-report-schema`, which several engines already emit, so this is not a Go
+  feature: a JS or C# project pointing at its own report gets the same gate. gremlins' native
+  output is accepted too, detected structurally rather than by filename.
+
+  ```bash
+  metareview review task-done <task-id> --base main --mutation-report ./mutation.json
+  ```
+
+  A surviving mutant is a blocking finding naming the line and the test that must exist. Uncovered
+  sites are grouped per file and are **advisory** — a gate that blocks on every uncovered line is
+  one people switch off. Undecided mutants (timeouts, engine errors) collapse into a single
+  blocking finding owned by whoever configured the engine, because they are not N defects but one
+  fact: the run did not measure what it claims to have measured. metareview computes its own score
+  from the mutants rather than trusting the engine's summary, counting undecided against it. This
+  matters: a measured gremlins run here reported `Test efficacy: 100.00%` and exited 0 while 97 of
+  its 107 mutants had timed out.
+
+### Changed
+
+- **A looping workflow must now declare a bound, and `workflow.Parse` refuses one that does not.**
+  This is a **breaking** parse-time change: a workflow whose convergence is only `all_fixed` or
+  `no_fixation_progress` no longer loads. Neither terminates — `all_fixed` stops only if the agent
+  fixes everything, and `no_fixation_progress` is a stall detector, so an agent that fixes one bug
+  and discovers five makes progress every round, forever. Add `{max_iterations: n}` or
+  `{budget: {tokens: n}}`. A bound nested under `all` or `not` does not count, because `all` stops
+  only when every child fires and so guarantees nothing on its own. No shipped workflow changes.
+- **`no_fixation_progress` now measures whether the bugs it entered with got cleared**, rather
+  than comparing totals. Discovering more bugs than you fix is no longer read as a stall, and
+  fixing nothing is no longer hidden by a rising discovery count.
+- **A package with no coverage floor now fails the coverage gate** instead of passing unmeasured;
+  `bash tests/coverage.sh --update-floor` writes the missing lines and exits 0. `internal/mutation`
+  shipped an entire subsystem ungated before this.
+
 ## 0.10.0 - 2026-08-29
 
 0.10.0 is a repair release. A nine-reviewer sharded review of 0.9.0's own additions returned **72

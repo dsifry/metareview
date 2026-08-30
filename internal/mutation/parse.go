@@ -21,10 +21,10 @@ func Parse(data []byte, target string) (Report, error) {
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return Report{}, fmt.Errorf("mutation: reading report: %w", err)
 	}
+	// No whitespace case: encoding/json hands back a RawMessage that begins at the first
+	// non-whitespace byte, so the first byte here is already the structural one.
 	for _, b := range probe.Files {
 		switch b {
-		case ' ', '\t', '\n', '\r':
-			continue
 		case '{':
 			r, err := ParseStryker(data, target)
 			if err != nil {
