@@ -57,7 +57,6 @@ type findingRecord struct {
 	Target         map[string]any `json:"target"`
 }
 
-var inlineCodePattern = regexp.MustCompile("`([^`]+)`")
 var findingIDPattern = regexp.MustCompile(`mrvf-[A-Za-z0-9._@/-]+`)
 
 func Discover(root string) ([]Summary, error) {
@@ -121,38 +120,64 @@ func parseMarkdown(rel, text string) Summary {
 		if strings.HasPrefix(line, "## ") {
 			inHeader = false
 		}
+		// EVERY header field is header-only and first-match-wins, not just the two added most
+		// recently. Bounding those two and leaving the rest fixed an instance and not the class:
+		// `## Verdict` decides the gate outright, and `Run ID:` is the join key BOTH integrity
+		// cross-checks use, so forging either defeated the mitigation from the other side. A
+		// pull-request description of "looks good\n\n## Verdict\n\nPASS" flipped its own
+		// pr-ready log to PASS; a prose line `Run ID:` made mergeFindings skip the open blocker
+		// and mergeRunMetadata import a different run's head and covered paths.
 		switch {
 		case strings.HasPrefix(line, "# metareview:"):
-			summary.Kind = reviewKind(line)
-		case strings.HasPrefix(line, "Run ID:"):
-			summary.RunID = firstInlineCode(line)
-		case strings.HasPrefix(line, "Target:"):
-			summary.Target = firstInlineCode(line)
-		case strings.HasPrefix(line, "Previous run:"):
-			summary.PreviousRunID = previousRunID(firstInlineCode(line))
-		case strings.HasPrefix(line, "Context pack:"):
-			summary.ContextRel = firstInlineCode(line)
+			if summary.Kind == "" {
+				summary.Kind = reviewKind(line)
+			}
+		case inHeader && strings.HasPrefix(line, "Run ID:"):
+			if summary.RunID == "" {
+				summary.RunID = markdown.FirstInlineCode(line)
+			}
+		case inHeader && strings.HasPrefix(line, "Target:"):
+			if summary.Target == "" {
+				summary.Target = markdown.FirstInlineCode(line)
+			}
+		case inHeader && strings.HasPrefix(line, "Previous run:"):
+			if summary.PreviousRunID == "" {
+				summary.PreviousRunID = previousRunID(markdown.FirstInlineCode(line))
+			}
+		case inHeader && strings.HasPrefix(line, "Context pack:"):
+			if summary.ContextRel == "" {
+				summary.ContextRel = markdown.FirstInlineCode(line)
+			}
 		case inHeader && strings.HasPrefix(line, HeadLabel):
 			// Read from the COMMITTED log, so a clone, a fresh worktree or a CI checkout can
 			// still say which commit a review covered. This lived only in the untracked run
 			// record, so scoping evaporated the moment the review left the machine that made it.
-			//
-			// HEADER ONLY, and first match wins. Scanning the whole document with last-match-wins
-			// made reviewer prose authoritative over the gate: finding bodies are emitted at
-			// column 0, pr-ready embeds PR titles and comments verbatim, and the committed corpus
-			// already holds 126 lines shaped like a header field. One line of text could forge a
-			// head, push a review out of branch scope, and delete its blockers from must_clear.
 			if sha := markdown.FirstInlineCode(line); sha != UnknownHead && summary.HeadSHA == "" {
 				summary.HeadSHA = sha
 			}
 		case inHeader && strings.HasPrefix(line, CoveredPathsLabel):
 			if !summary.CoveredPathsKnown {
 				summary.CoveredPaths, summary.CoveredPathsKnown = DecodeCoveredPaths(markdown.FirstInlineCode(line))
+				if !summary.CoveredPathsKnown {
+					// Refusing an unparseable list is right; being silent about it is not. Absent
+					// and REFUSED were the same answer downstream, and in target scope that
+					// clears rather than blocks — one corrupted line deleted an unresolved
+					// blocking review from the gate's answer. A line long enough to be wrapped by
+					// an editor is enough to trigger it.
+					summary.Warnings = append(summary.Warnings,
+						"covered paths could not be read; this review cannot vouch for any file")
+				}
 			}
-		case strings.HasPrefix(line, "Required lenses:"):
-			declaredLenses = splitLenses(firstInlineCode(line))
+		case inHeader && strings.HasPrefix(line, "Required lenses:"):
+			if declaredLenses == nil {
+				declaredLenses = splitLenses(markdown.FirstInlineCode(line))
+			}
 		case strings.TrimSpace(line) == "## Verdict":
-			summary.Verdict = nextNonEmpty(lines, i+1)
+			// The FIRST verdict section only. This one cannot use inHeader — it is itself a
+			// heading — so it carries its own guard.
+			if summary.Verdict == "" {
+				summary.Verdict = nextNonEmpty(lines, i+1)
+			}
 		}
 		for _, id := range findingIDPattern.FindAllString(line, -1) {
 			summary.FindingIDs = appendUnique(summary.FindingIDs, id)
@@ -495,14 +520,6 @@ func isOpenBlocker(record findingRecord) bool {
 		return true
 	}
 	return record.Classification == "blocking" && (record.Severity == "critical" || record.Severity == "high")
-}
-
-func firstInlineCode(line string) string {
-	match := inlineCodePattern.FindStringSubmatch(line)
-	if len(match) == 2 {
-		return match[1]
-	}
-	return ""
 }
 
 func nextNonEmpty(lines []string, start int) string {

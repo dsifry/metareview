@@ -1036,6 +1036,16 @@ func TestProvedWorkflowRefusesAFixThatShowsNoWork(t *testing.T) {
 	bare := h.file("bare.json", `{"commit":"`+sha+`","summary":"fixed"}`)
 	h.mustErr(machine.CodeNodeOutputInvalid, 2, "record", "node-output", "--node", "fix", "--data", bare, "--run", id)
 
-	pinned := h.file("pinned.json", `{"commit":"`+sha+`","summary":"fixed","pins":[{"file":"f.go","from":"package f","to":"package g","test":"TestF"}]}`)
+	// sdlc-loop-proved sets require_classes as well as require_pins, so a fix must also name the
+	// class each bug belongs to and enumerate its instances.
+	pinned := h.file("pinned.json", `{"commit":"`+sha+`","summary":"fixed",`+
+		`"pins":[{"file":"f.go","from":"package f","to":"package g","test":"TestF"}],`+
+		`"classes":[{"name":"the class","instances":[{"file":"f.go","disposition":"fixed"}]}]}`)
+	// A fix that shows its work but never names the class is refused, which is the point of the
+	// param: the reported instance is the one a reviewer could see, and enumerating the rest is
+	// the step this node exists to stop being skipped.
+	classless := h.file("classless.json", `{"commit":"`+sha+`","summary":"fixed",`+
+		`"pins":[{"file":"f.go","from":"package f","to":"package g","test":"TestF"}]}`)
+	h.must("ERROR", 2, "record", "node-output", "--node", "fix", "--data", classless, "--run", id)
 	h.must(StatusOK, 0, "record", "node-output", "--node", "fix", "--data", pinned, "--run", id)
 }

@@ -253,6 +253,48 @@ func (o PinOutcome) Valid() bool {
 	return false
 }
 
+// FixClass is a fix node's account of the CLASS a set of findings belongs to, and every instance
+// of that class it found in the repository — including instances no reviewer reported.
+//
+// It exists because "fix every bug listed" made the work unit an instance, and an agent handed a
+// list of instances fixes instances. Measured over two iterations of this repository's own loop:
+// told the review-log header could be forged it bounded the two fields named and left six; told
+// three of four writers lacked a test it added one; told a duplicated list should be defined once
+// it exported the list and removed none of the three copies; told empty-versus-unknown was
+// claimed but unimplemented it added the flag to one of the two types that needed it. Four
+// findings, one behaviour, and every one of them was a faithful reading of the instruction.
+//
+// Enumerating is the step being skipped, so the schema demands the enumeration in writing. The
+// claim is then checkable: a declared instance that the commit never touches is either an
+// oversight or a false claim, and both are worth surfacing.
+type FixClass struct {
+	// Name is the shared defect, stated once: "header fields parsed unbounded", not "verdict".
+	Name string `json:"name"`
+	// Findings are the reported ids that belong to this class.
+	Findings []string `json:"findings,omitempty"`
+	// Instances is every place in the repository the class occurs, reported or not. This is the
+	// field that does the work: it is what the reviewer could not enumerate for you.
+	Instances []FixInstance `json:"instances"`
+}
+
+// FixInstance is one occurrence of a class and what became of it.
+type FixInstance struct {
+	File string `json:"file"`
+	// Disposition says what was done. Anything other than "fixed" needs a Reason, so that
+	// declining to fix an instance is a recorded decision rather than a silent omission.
+	Disposition string `json:"disposition"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+// Dispositions for a FixInstance. "already-correct" and "out-of-scope" are legitimate and are
+// recorded rather than dropped, because the difference between "I checked and it was fine" and
+// "I did not look" is the whole point of asking.
+const (
+	InstanceFixed          = "fixed"
+	InstanceAlreadyCorrect = "already-correct"
+	InstanceOutOfScope     = "out-of-scope"
+)
+
 // PinResult is the outcome of checking one Pin. Proven is the only value a gate accepts, and it
 // is true only when breaking the line failed the tests AND restoring it passed them.
 type PinResult struct {

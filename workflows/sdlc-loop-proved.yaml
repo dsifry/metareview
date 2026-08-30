@@ -34,7 +34,14 @@ nodes:
   # require_pins: the fix must declare, for each bug, the smallest edit to its own new code that
   # its new test catches. prove then breaks exactly that and requires the tests to fail. Without
   # this the proof step passes vacuously, because a fix that claims nothing can never be refuted.
-  fix:        {kind: agent-edit, require_pins: true}               # exec inferred from the kind (inline)
+  # require_classes changes what is ASKED for. The instruction "fix every bug listed", over a flat
+  # list of instances, made the work unit an instance — so an agent handed instances fixed
+  # instances, faithfully. Measured over two iterations of this repository's own loop, that
+  # produced the same behaviour four times: two of eight header fields bounded, one of four
+  # writers given a seam test, a duplicated list exported with none of its three copies removed,
+  # a presence flag added to one of the two types that needed it. Naming the class and
+  # enumerating its instances is the step being skipped, so the schema demands it in writing.
+  fix:        {kind: agent-edit, require_pins: true, require_classes: true}               # exec inferred from the kind (inline)
   # prove is deterministic: it breaks each line the fix claims a test now holds, requires the
   # tests to FAIL, restores it and requires them to PASS. No model is consulted, because whether
   # a test catches a mutation is a fact about the repository, not an opinion, and the answer

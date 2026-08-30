@@ -2,6 +2,7 @@ package epicready
 
 import (
 	"fmt"
+	"github.com/dsifry/metareview/internal/status"
 	"os"
 	"path/filepath"
 	"sort"
@@ -461,8 +462,13 @@ func isGeneratedMetareviewPath(path string) bool {
 		strings.HasPrefix(path, "docs/metareview/")
 }
 
+// generatedMetareviewPathExcludes defers to the one exported list. Four byte-identical copies
+// existed while a comment claimed it was "defined once"; divergence in either direction
+// re-creates a livelock — a new generated path added review-side only makes files permanently
+// unreviewable, added status-side only makes artifacts drop out of scope while reviews claim to
+// cover them.
 func generatedMetareviewPathExcludes() []string {
-	return []string{".metareview", ".metareview/**", "docs/metareview", "docs/metareview/**"}
+	return status.GeneratedMetareviewPathExcludes()
 }
 
 func generatedTargetExceptions(path string) []string {

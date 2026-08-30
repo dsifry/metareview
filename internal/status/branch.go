@@ -50,7 +50,15 @@ func ResolveBranchScope(root, base string, run RunGit) (BranchScope, error) {
 	if err != nil {
 		return BranchScope{}, err
 	}
-	s := BranchScope{Base: ctx.BaseSHA, Head: ctx.HeadSHA, Commits: map[string]bool{}, Files: ctx.ChangedFiles}
+	// Committed changes AND uncommitted ones. ChangedFiles is `git diff --name-only base..HEAD`,
+	// so staged, working-tree and untracked files were invisible — and a Stop hook fires exactly
+	// when an agent is about to finish, which is the moment work is most likely to be written and
+	// not yet committed. `git add newfeature.go` with no commit made the hook emit nothing and
+	// exit 0. The unscoped query it replaced at least failed closed; this default failed open on
+	// the single most common state at Stop time.
+	files := append([]string(nil), ctx.ChangedFiles...)
+	files = appendUnseen(files, ctx.StagedFiles, ctx.WorkingTreeFiles, ctx.UntrackedFiles)
+	s := BranchScope{Base: ctx.BaseSHA, Head: ctx.HeadSHA, Commits: map[string]bool{}, Files: files}
 	// HEAD is always in scope, set BEFORE anything that can fail. rev-list excludes it on a merge
 	// or an empty range, and an early return on rev-list failing used to skip this line entirely
 	// — which left no commit in scope at all, so a review of the branch tip counted for nothing.
@@ -80,7 +88,25 @@ func ResolveBranchScope(root, base string, run RunGit) (BranchScope, error) {
 // review clears current work — the failure this scoping exists to prevent, reintroduced one
 // level down. A review of this branch's own commits is the only thing that has seen this code.
 func (s BranchScope) InScope(r reviewlog.Summary) bool {
-	return r.HeadSHA != "" && s.Commits[r.HeadSHA]
+	if r.HeadSHA != "" && s.Commits[r.HeadSHA] {
+		return true
+	}
+	// A review OF a document this branch changed also speaks to this branch, whatever commit it
+	// names. Commit identity alone silently dropped every artifact review: the scaffold is
+	// normally the first thing on a branch, so the head it records is the branch BASE, which
+	// rev-list base..HEAD excludes by construction. Their NOT_REVIEWED blockers vanished from the
+	// scoped answer while the unscoped one still reported them — the same repository at the same
+	// commit giving opposite answers, which is exactly the inversion this scoping was meant to
+	// end.
+	if r.Target == "" {
+		return false
+	}
+	for _, f := range s.Files {
+		if f == r.Target {
+			return true
+		}
+	}
+	return false
 }
 
 // Unreviewed lists the branch's changed files that no review in scope has read.
@@ -93,6 +119,12 @@ func (s BranchScope) Unreviewed(logs []reviewlog.Summary) []string {
 	for _, r := range logs {
 		if !s.InScope(r) || r.HasUnresolvedBlockers {
 			// A review that is itself blocked has not cleared anything it read.
+			continue
+		}
+		if !r.CoveredPathsKnown {
+			// It never said what it read, so it vouches for nothing. This is the flag's reason to
+			// exist: "examined nothing" is an answer and "cannot say" is not, and treating them
+			// alike is what let a log predating the field clear a file it never opened.
 			continue
 		}
 		for _, p := range r.CoveredPaths {
@@ -115,4 +147,37 @@ func (s BranchScope) Unreviewed(logs []reviewlog.Summary) []string {
 // what made the divergence visible.
 func GeneratedMetareviewPathExcludes() []string {
 	return []string{".metareview", ".metareview/**", "docs/metareview", "docs/metareview/**"}
+}
+
+// appendUnseen adds every path not already present, preserving order so the report reads the same
+// way twice. Uncommitted paths are excluded the same way committed ones are: metareview's own
+// generated artifacts can never appear in a review's covered paths, so counting them would
+// livelock the scope.
+func appendUnseen(base []string, more ...[]string) []string {
+	seen := make(map[string]bool, len(base))
+	for _, p := range base {
+		seen[p] = true
+	}
+	for _, list := range more {
+		for _, p := range list {
+			if p == "" || seen[p] || isGeneratedMetareviewPath(p) {
+				continue
+			}
+			seen[p] = true
+			base = append(base, p)
+		}
+	}
+	return base
+}
+
+// isGeneratedMetareviewPath reports whether a path is one metareview itself writes. The exclude
+// globs are applied by git for the committed set; uncommitted paths never pass through git's
+// pathspec, so the same rule is applied here.
+func isGeneratedMetareviewPath(p string) bool {
+	for _, prefix := range []string{".metareview/", "docs/metareview/"} {
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return p == ".metareview" || p == "docs/metareview"
 }

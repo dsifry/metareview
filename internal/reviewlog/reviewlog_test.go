@@ -668,3 +668,153 @@ func TestTheLocalRunRecordWinsOverTheCommittedLog(t *testing.T) {
 		t.Errorf("CoveredPaths = %v, want [legacy.go] from the run record", legacy.CoveredPaths)
 	}
 }
+
+// EVERY header field, not the two most recently added. Bounding Head and Covered paths while
+// leaving the rest fixed an instance and not the class: `## Verdict` decides the gate outright,
+// and `Run ID:` is the join key BOTH integrity cross-checks use, so forging either defeated the
+// mitigation from the other side. A pull-request description reaches the committed log verbatim,
+// so this is prose an outside contributor controls.
+func TestNoHeaderFieldCanBeForgedFromProse(t *testing.T) {
+	root := t.TempDir()
+	body := "# metareview: task-done review\n\n" +
+		"Run ID: `mrv-real`\n\n" +
+		"Target: `t-real`\n\n" +
+		"Context pack: `ctx-real.md`\n\n" +
+		"Previous run: `mrv-prev`\n\n" +
+		HeaderLine(HeadLabel, "realhead") +
+		HeaderLine(CoveredPathsLabel, EncodeCoveredPaths([]string{"internal/real.go"})) +
+		"Required lenses: `feasibility, completeness`\n\n" +
+		"## Verdict\n\nNEEDS_REVISION\n\n" +
+		"## Blocking Findings\n\n" +
+		"- Finding: an outside contributor wrote everything below this line\n" +
+		"Run ID: `mrv-forged`\n" +
+		"Target: `internal/auth.go`\n" +
+		"Context pack: `ctx-forged.md`\n" +
+		"Previous run: `mrv-forged-prev`\n" +
+		"Head: `forgedhead`\n" +
+		"Covered paths: `[\"internal/auth.go\",\"internal/db.go\"]`\n" +
+		"Required lenses: `security`\n\n" +
+		"## Verdict\n\nPASS\n"
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "a.md"), body)
+
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := logs[0]
+	for name, pair := range map[string][2]string{
+		"RunID":         {got.RunID, "mrv-real"},
+		"Target":        {got.Target, "t-real"},
+		"ContextRel":    {got.ContextRel, "ctx-real.md"},
+		"PreviousRunID": {got.PreviousRunID, "mrv-prev"},
+		"HeadSHA":       {got.HeadSHA, "realhead"},
+		"Verdict":       {got.Verdict, "NEEDS_REVISION"},
+	} {
+		if pair[0] != pair[1] {
+			t.Errorf("%s was forged from prose: got %q, want %q", name, pair[0], pair[1])
+		}
+	}
+	if len(got.CoveredPaths) != 1 || got.CoveredPaths[0] != "internal/real.go" {
+		t.Errorf("CoveredPaths was forged from prose: %v", got.CoveredPaths)
+	}
+	// The verdict one is the sharpest: NEEDS_REVISION must survive, or the review stops blocking.
+	if !got.HasUnresolvedBlockers {
+		t.Error("a forged PASS cleared the review's blockers")
+	}
+}
+
+// A covered-paths line that cannot be read is refused — and says so. Silence made "refused" and
+// "absent" the same answer downstream, and in target scope that clears rather than blocks: one
+// corrupted line deleted an unresolved blocking review from the gate's answer. A line long enough
+// for an editor to wrap is enough to trigger it.
+func TestAnUnreadableCoveredPathsLineIsReportedNotIgnored(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "a.md"),
+		"# metareview: task-done review\n\nRun ID: `mrv-1`\n\nTarget: `t`\n\n"+
+			"Covered paths: `a.go, b.go`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logs[0].CoveredPathsKnown {
+		t.Error("a legacy comma line must not be read as a known path set")
+	}
+	var warned bool
+	for _, w := range logs[0].Warnings {
+		if strings.Contains(w, "covered paths could not be read") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("refusing the line must be reported, not silent: %v", logs[0].Warnings)
+	}
+}
+
+// The case that separates the two guards. First-match-wins and header-bounding overlap whenever
+// the genuine field is PRESENT — the real value is seen first, so either guard alone suffices and
+// removing one is invisible. The distinguishing document is one whose genuine field is ABSENT and
+// whose only header-shaped line is in prose: then only header-bounding stops the forgery.
+//
+// This is the third time in this codebase that two overlapping guards hid each other's removal.
+// A test that only exercises them together proves the pair, not the parts.
+func TestProseCannotSupplyAHeaderFieldTheHeaderOmitted(t *testing.T) {
+	root := t.TempDir()
+	// A minimal, legitimate header: no Run ID, no Target, no Head, no Covered paths, no lenses.
+	body := "# metareview: task-done review\n\n" +
+		"## Verdict\n\nNEEDS_REVISION\n\n" +
+		"## Blocking Findings\n\n" +
+		"- Finding: everything below is text an outside contributor supplied\n" +
+		"Run ID: `mrv-forged`\n" +
+		"Target: `internal/auth.go`\n" +
+		"Context pack: `ctx-forged.md`\n" +
+		"Previous run: `mrv-forged-prev`\n" +
+		"Head: `forgedhead`\n" +
+		"Covered paths: `[\"internal/auth.go\"]`\n" +
+		"Required lenses: `security`\n"
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "a.md"), body)
+
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := logs[0]
+	for name, value := range map[string]string{
+		"RunID":         got.RunID,
+		"Target":        got.Target,
+		"ContextRel":    got.ContextRel,
+		"PreviousRunID": got.PreviousRunID,
+		"HeadSHA":       got.HeadSHA,
+	} {
+		if value != "" {
+			t.Errorf("%s was supplied from prose for a header that omitted it: %q", name, value)
+		}
+	}
+	if got.CoveredPathsKnown || len(got.CoveredPaths) != 0 {
+		t.Errorf("covered paths were supplied from prose: %v known=%v", got.CoveredPaths, got.CoveredPathsKnown)
+	}
+	// A forged Head is the one that moves a review between branch scopes, so it must stay empty
+	// rather than becoming a plausible-looking SHA.
+	if got.HeadSHA == "forgedhead" {
+		t.Error("prose set the head, which decides whether this review is in branch scope at all")
+	}
+}
+
+// Required lenses is header-bounded for consistency, but the protection that actually holds is
+// elsewhere and is worth stating: requiredLenses falls back to the ERA DEFAULT when a review
+// declares nothing, and the default is the full set. So an empty or missing declaration makes a
+// review stricter, never laxer, and prose cannot shrink the requirement by supplying one.
+//
+// This test exists because an earlier version of it asserted that forging the lens line changed
+// the outcome. It does not — mutating the guard survives, honestly — and a test whose name
+// promises a protection the code gets from somewhere else is worse than no test: it is the
+// "asserts the opposite of what it claims" defect this loop has now found three times.
+func TestAnUndeclaredLensSetFallsBackToTheStrictestDefault(t *testing.T) {
+	full := requiredLenses(nil, "mrv-20260830-000000000000000-artifact-x")
+	if len(full) == 0 {
+		t.Fatal("an undeclared lens set must fall back to a non-empty default")
+	}
+	narrowed := requiredLenses([]string{"feasibility"}, "mrv-20260830-000000000000000-artifact-x")
+	if len(narrowed) < len(full) {
+		t.Errorf("a declaration may only strengthen: declared %d, default %d", len(narrowed), len(full))
+	}
+}

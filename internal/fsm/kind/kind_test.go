@@ -1736,3 +1736,118 @@ func TestRequireVerdictsPromptMatchesWhatTheDecoderAccepts(t *testing.T) {
 		}
 	}
 }
+
+// require_classes changes what the fix node is ASKED for, not how strongly it is exhorted.
+//
+// The instruction was "fix every bug listed" over a flat list of instances, so the work unit was
+// an instance and an agent handed instances fixed instances — a faithful reading, not a lapse.
+// Measured over two iterations of this repository's own loop, the same behaviour appeared four
+// times: two of eight header fields bounded, one of four writers given a seam test, a list
+// exported with none of its three copies removed, a presence flag added to one of the two types
+// that needed it.
+func TestRequireClassesAsksForTheClassAndEnforcesIt(t *testing.T) {
+	snap := run.Snapshot{BaseSHA: "b", Head: "h", AllFound: []run.Bug{{ID: "b1", Desc: "a bug"}}}
+	plain := &workflow.Node{Name: "fix", Kind: AgentEdit}
+	strict := &workflow.Node{Name: "fix", Kind: AgentEdit, Params: map[string]any{"require_classes": true}}
+
+	// The prompt must ask for what the decoder will demand — the trap this codebase already fell
+	// into once with require_verdicts.
+	got, err := agentEdit{}.Instructions(snap, strict, machine.Diff{Text: "+x"}, "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"CLASS", "SEARCH THE REPOSITORY", "instances", "already-correct"} {
+		if !strings.Contains(got.Text, want) {
+			t.Errorf("the strict prompt never mentions %q:\n%s", want, got.Text)
+		}
+	}
+	if !strings.Contains(string(got.OutputSchema), "classes") {
+		t.Errorf("the schema must ask for classes: %s", got.OutputSchema)
+	}
+	// And the permissive node is untouched, so a workflow that has not opted in is unaffected.
+	if plainGot, err := (agentEdit{}).Instructions(snap, plain, machine.Diff{Text: "+x"}, "n1"); err != nil {
+		t.Fatal(err)
+	} else if strings.Contains(string(plainGot.OutputSchema), "classes") {
+		t.Error("require_classes must be opt-in")
+	}
+
+	full := `{"commit":"abc1234","summary":"s","classes":[{"name":"header fields parsed unbounded",` +
+		`"findings":["b1"],"instances":[{"file":"a.go","disposition":"fixed"},` +
+		`{"file":"b.go","disposition":"already-correct","reason":"already bounded"}]}]}`
+	if _, err := (agentEdit{}).DecodeFor(strict, json.RawMessage(full)); err != nil {
+		t.Errorf("a complete declaration must be accepted: %v", err)
+	}
+	// The same output is fine on a node that did not ask.
+	if _, err := (agentEdit{}).DecodeFor(plain, json.RawMessage(`{"commit":"abc1234","summary":"s"}`)); err != nil {
+		t.Errorf("the permissive node must still accept a bare fix: %v", err)
+	}
+
+	for name, body := range map[string]string{
+		"no classes at all":      `{"commit":"abc1234","summary":"s"}`,
+		"empty class list":       `{"commit":"abc1234","summary":"s","classes":[]}`,
+		"unnamed class":          `{"commit":"abc1234","summary":"s","classes":[{"name":"  ","instances":[{"file":"a.go","disposition":"fixed"}]}]}`,
+		"no instances":           `{"commit":"abc1234","summary":"s","classes":[{"name":"c","instances":[]}]}`,
+		"instance with no file":  `{"commit":"abc1234","summary":"s","classes":[{"name":"c","instances":[{"file":"","disposition":"fixed"}]}]}`,
+		"unknown disposition":    `{"commit":"abc1234","summary":"s","classes":[{"name":"c","instances":[{"file":"a.go","disposition":"maybe"}]}]}`,
+		"skipped with no reason": `{"commit":"abc1234","summary":"s","classes":[{"name":"c","instances":[{"file":"a.go","disposition":"out-of-scope"}]}]}`,
+	} {
+		if _, err := (agentEdit{}).DecodeFor(strict, json.RawMessage(body)); err == nil {
+			t.Errorf("%s: must be refused when require_classes is set", name)
+		}
+	}
+
+	// A one-instance class is a fine ANSWER; an empty list is the shape a skipped search leaves.
+	one := `{"commit":"abc1234","summary":"s","classes":[{"name":"c","instances":[{"file":"only.go","disposition":"fixed"}]}]}`
+	if _, err := (agentEdit{}).DecodeFor(strict, json.RawMessage(one)); err != nil {
+		t.Errorf("a genuinely single-instance class must be accepted: %v", err)
+	}
+	// The param is validated, so a typo is refused rather than silently disabling the demand.
+	if err := validateEdit(map[string]any{"require_classes": "yes"}); err == nil {
+		t.Error("a non-boolean require_classes must be refused")
+	}
+	if err := validateEdit(map[string]any{"require_classes": true, "require_pins": true}); err != nil {
+		t.Errorf("both params together must validate: %v", err)
+	}
+}
+
+// The remaining refusals checkClasses must make, each a way an enumeration could be nominally
+// present and actually absent.
+func TestCheckClassesCaps(t *testing.T) {
+	strict := &workflow.Node{Name: "fix", Kind: AgentEdit, Params: map[string]any{"require_classes": true}}
+	many := make([]run.FixClass, run.MaxDeltaList+1)
+	for i := range many {
+		many[i] = run.FixClass{Name: "c", Instances: []run.FixInstance{{File: "a.go", Disposition: run.InstanceFixed}}}
+	}
+	if err := checkClasses(strict, many); err == nil {
+		t.Error("more classes than the cap must be refused")
+	}
+	insts := make([]run.FixInstance, run.MaxDeltaList+1)
+	for i := range insts {
+		insts[i] = run.FixInstance{File: "a.go", Disposition: run.InstanceFixed}
+	}
+	if err := checkClasses(strict, []run.FixClass{{Name: "c", Instances: insts}}); err == nil {
+		t.Error("more instances than the cap must be refused")
+	}
+	if err := checkClasses(strict, []run.FixClass{{Name: strings.Repeat("n", 4096), Instances: insts[:1]}}); err == nil {
+		t.Error("an oversized class name must be refused")
+	}
+	if err := checkClasses(strict, []run.FixClass{{Name: "c", Instances: []run.FixInstance{
+		{File: "a.go", Disposition: run.InstanceAlreadyCorrect, Reason: strings.Repeat("r", run.MaxDesc+1)}}}}); err == nil {
+		t.Error("an oversized reason must be refused")
+	}
+	// And a node that never asked is unaffected by any of it.
+	if err := checkClasses(&workflow.Node{Name: "fix", Kind: AgentEdit}, nil); err != nil {
+		t.Errorf("a node that did not ask must not be constrained: %v", err)
+	}
+	// A malformed document fails at the shared decode, before either node-specific demand, so the
+	// operator is told what is wrong with the JSON rather than which param it did not satisfy.
+	for name, body := range map[string]string{
+		"not an object":  `["commit"]`,
+		"unknown field":  `{"commit":"abc1234","summary":"s","nope":1}`,
+		"bad commit sha": `{"commit":"zzz","summary":"s"}`,
+	} {
+		if _, err := (agentEdit{}).DecodeFor(strict, json.RawMessage(body)); err == nil {
+			t.Errorf("%s: must be refused", name)
+		}
+	}
+}

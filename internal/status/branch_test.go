@@ -53,12 +53,12 @@ func TestUnreviewedNamesFilesNoPassingReviewRead(t *testing.T) {
 	}
 	logs := []reviewlog.Summary{
 		// In scope and passing: clears what it read.
-		{HeadSHA: "c1", CoveredPaths: []string{"a.go"}},
+		{HeadSHA: "c1", CoveredPaths: []string{"a.go"}, CoveredPathsKnown: true},
 		// In scope but itself blocked: has cleared nothing, however much it read.
-		{HeadSHA: "c1", CoveredPaths: []string{"b.go"}, HasUnresolvedBlockers: true},
+		{HeadSHA: "c1", CoveredPaths: []string{"b.go"}, CoveredPathsKnown: true, HasUnresolvedBlockers: true},
 		// Passing, and it read c.go — but on another branch, so at a version this branch has
 		// since changed. It clears nothing here.
-		{HeadSHA: "elsewhere", CoveredPaths: []string{"c.go"}},
+		{HeadSHA: "elsewhere", CoveredPaths: []string{"c.go"}, CoveredPathsKnown: true},
 	}
 	got := s.Unreviewed(logs)
 	if len(got) != 2 || got[0] != "b.go" || got[1] != "c.go" {
@@ -377,13 +377,28 @@ func TestBranchScopeIgnoresMetareviewsOwnArtifacts(t *testing.T) {
 	git("add", ".")
 	git("commit", "-qm", "work")
 
+	// Uncommitted work too: a Stop hook fires exactly when an agent is about to finish, which is
+	// when work is most likely written and not yet committed. Committed-only scope made the hook
+	// emit nothing and exit 0 on `git add` with no commit — failing OPEN at the one moment it
+	// exists for, where the unscoped query it replaced at least failed closed.
+	mustWriteFile(t, filepath.Join(root, "staged.go"), "package p // staged\n")
+	git("add", "staged.go")
+	mustWriteFile(t, filepath.Join(root, "untracked.go"), "package p // untracked\n")
+
 	scope, err := ResolveBranchScope(root, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	inScope := map[string]bool{}
 	for _, f := range scope.Files {
+		inScope[f] = true
 		if strings.HasPrefix(f, "docs/metareview/") || strings.HasPrefix(f, ".metareview/") {
 			t.Errorf("metareview's own artifact is in the branch scope and can never be cleared: %q", f)
+		}
+	}
+	for _, want := range []string{"staged.go", "untracked.go"} {
+		if !inScope[want] {
+			t.Errorf("uncommitted %s is invisible to the gate: %v", want, scope.Files)
 		}
 	}
 	var sawReal bool
@@ -394,5 +409,77 @@ func TestBranchScopeIgnoresMetareviewsOwnArtifacts(t *testing.T) {
 	}
 	if !sawReal {
 		t.Errorf("the actual source change must still be in scope: %v", scope.Files)
+	}
+}
+
+// A review that never recorded WHAT it read vouches for nothing, even in scope and passing. That
+// is the whole reason CoveredPathsKnown exists: "examined nothing" is an answer, "cannot say" is
+// not, and every review written before the field carries the second. Treating them alike would
+// let a log predating the field clear a file it never opened.
+func TestAReviewThatCannotSayWhatItReadClearsNothing(t *testing.T) {
+	s := BranchScope{Commits: map[string]bool{"c1": true}, Files: []string{"a.go"}}
+	silent := []reviewlog.Summary{{HeadSHA: "c1", CoveredPaths: []string{"a.go"}}} // Known is false
+	if got := s.Unreviewed(silent); len(got) != 1 || got[0] != "a.go" {
+		t.Errorf("a review with unknown coverage must clear nothing, got %v", got)
+	}
+	spoke := []reviewlog.Summary{{HeadSHA: "c1", CoveredPaths: []string{"a.go"}, CoveredPathsKnown: true}}
+	if got := s.Unreviewed(spoke); len(got) != 0 {
+		t.Errorf("a review that said what it read must clear it, got %v", got)
+	}
+}
+
+// An artifact review records its head at SCAFFOLD time, which on a fresh branch is the base — a
+// commit rev-list base..HEAD excludes by construction. Commit identity alone therefore dropped
+// every artifact review from the scoped answer while the unscoped one still reported it: the same
+// repository at the same commit giving opposite answers. A review OF a document the branch
+// changed speaks to the branch, whatever commit it names.
+func TestAReviewOfAChangedDocumentIsInScope(t *testing.T) {
+	s := BranchScope{Commits: map[string]bool{"c1": true}, Files: []string{"docs/spec.md", "a.go"}}
+	artifact := reviewlog.Summary{Target: "docs/spec.md", HeadSHA: "base-commit"}
+	if !s.InScope(artifact) {
+		t.Error("an artifact review of a document this branch changed must be in scope")
+	}
+	elsewhere := reviewlog.Summary{Target: "docs/other.md", HeadSHA: "base-commit"}
+	if s.InScope(elsewhere) {
+		t.Error("a review of a document this branch did not touch is not in scope")
+	}
+	if s.InScope(reviewlog.Summary{HeadSHA: "base-commit"}) {
+		t.Error("no target and no branch commit is not in scope")
+	}
+}
+
+// Uncommitted work is in scope, and metareview's own artifacts are not — the same rule the
+// committed set gets from git's pathspec, applied by hand because uncommitted paths never pass
+// through it. Without the first half the hook fails open at exactly the moment it fires: an agent
+// about to finish is the agent most likely to have written code and not yet committed it.
+func TestBranchScopeIncludesUncommittedWorkButNotGeneratedArtifacts(t *testing.T) {
+	got := appendUnseen([]string{"committed.go"},
+		[]string{"staged.go", "committed.go"},            // a duplicate must not repeat
+		[]string{"worktree.go", ""},                      // an empty path is not a path
+		[]string{"untracked.go", "docs/metareview/x.md"}, // generated artifacts stay out
+		[]string{".metareview/runs.jsonl", ".metareview", "docs/metareview"},
+	)
+	want := []string{"committed.go", "staged.go", "worktree.go", "untracked.go"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("position %d = %q, want %q (order must be stable)", i, got[i], want[i])
+		}
+	}
+	for path, want := range map[string]bool{
+		".metareview":            true,
+		".metareview/runs.jsonl": true,
+		"docs/metareview":        true,
+		"docs/metareview/x.md":   true,
+		"docs/metareviewing.md":  false,
+		"internal/metareview.go": false,
+		"a/docs/metareview/x.md": false,
+		"":                       false,
+	} {
+		if got := isGeneratedMetareviewPath(path); got != want {
+			t.Errorf("isGeneratedMetareviewPath(%q) = %v, want %v", path, got, want)
+		}
 	}
 }
