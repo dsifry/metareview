@@ -54,10 +54,29 @@ printf '%s' "$scoped" | grep -q 't-1' || { echo "FAIL: the scoped report must na
 printf '%s' "$scoped" | grep -q 't-2' && { echo "FAIL: scoping must not leak another target's blocker"; exit 1; }
 printf '%s' "$scoped" | grep -q '"target": "t-1"' || { echo "FAIL: the report must say what it was scoped to"; exit 1; }
 
-# A target with nothing against it is not blocked, which is what lets a hook pass work through
-# while the rest of the history is still red.
-if ! (cd "$clean" && ./mrv status --json --target t-untouched >/dev/null 2>&1); then
-  echo "FAIL: an untouched target must exit 0 even while other work is blocked"; exit 1
+# A target NO REVIEW COVERS is blocked, as UNREVIEWED. This assertion used to be the opposite,
+# and that was the hole: the narrower the scope an agent claimed, the more certainly the gate let
+# it through, because an unknown target matched no log and produced an empty must_clear. Naming a
+# file nobody had reviewed was the reliable way to be told everything was fine.
+unreviewed="$( (cd "$clean" && ./mrv status --json --target t-untouched 2>/dev/null) || true )"
+printf '%s' "$unreviewed" | grep -q 'UNREVIEWED' || {
+  echo "FAIL: a target no review covers must be reported UNREVIEWED, not cleared"; exit 1; }
+if (cd "$clean" && ./mrv status --json --target t-untouched >/dev/null 2>&1); then
+  echo "FAIL: a target no review covers must not exit 0"; exit 1
+fi
+
+# ...and a target that WAS reviewed and passed still lets work through, or the gate is a livelock.
+printf '# metareview: task-done review\n\nRun ID: `mrv-z`\nTarget: `t-3`\n\n## Verdict\n\nPASS\n' \
+  > "$clean/docs/metareview/reviews/mrv-z-task-done-t-3.md"
+if ! (cd "$clean" && ./mrv status --json --target t-3 >/dev/null 2>&1); then
+  echo "FAIL: a reviewed, passing target must exit 0"; exit 1
+fi
+
+# The gate must also survive being run from a subdirectory, which is where a Stop hook actually
+# runs: it inherits the session's cwd, and resolving there used to find no review logs at all.
+mkdir -p "$clean/internal/deep"
+if (cd "$clean/internal/deep" && "$clean/mrv" status --json >/dev/null 2>&1); then
+  echo "FAIL: status from a subdirectory must still see the repository's blockers"; exit 1
 fi
 # ...while the unscoped answer over the same tree still blocks.
 if (cd "$clean" && ./mrv status --json >/dev/null 2>&1); then

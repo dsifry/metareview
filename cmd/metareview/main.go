@@ -120,7 +120,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Usage: metareview status --json [--target <path>]")
 			os.Exit(2)
 		}
-		code, err := status.EmitFor(mustCwd(), target, os.Stdout)
+		// Resolved from the repository root, not the process cwd. A Stop hook inherits whatever
+		// directory the session is standing in, and resolving there found no review logs and
+		// reported nothing to clear — the gate was bypassed by working in a subdirectory.
+		code, err := status.EmitFor(repo.RootOr(mustCwd()), target, os.Stdout)
 		exitOnErr(err)
 		if code != 0 {
 			os.Exit(code)

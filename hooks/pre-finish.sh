@@ -43,7 +43,28 @@ fi
 # both block — but they are reported differently, because "you have work to do" and "the gate is
 # broken" call for different responses from a human.
 if [ "$CODE" -eq 1 ]; then
-  SUMMARY="$(printf '%s' "$OUT" | sed -n 's/.*"target": *"\([^"]*\)".*/ on \1/p' | head -1)"
+  # Name what must actually be cleared. The first version scraped `"target"` with sed and took
+  # head -1, which finds reviews[0] — the FIRST review in the whole log, not a must_clear entry —
+  # so the message routinely named a target that was not blocking anything and sent whoever read
+  # it to the wrong place. must_clear is the field the decision is made on, so it is the field
+  # the reason has to quote.
+  SUMMARY="$(printf '%s' "$OUT" | python3 -c '
+import json, sys
+try:
+    r = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+items = r.get("must_clear") or []
+if not items:
+    sys.exit(0)
+unreviewed = [i for i in items if i.get("verdict") == "UNREVIEWED"]
+if unreviewed:
+    print(" — %s has never been reviewed; run the appropriate metareview gate on it" % unreviewed[0].get("target", "the target"))
+else:
+    first = items[0]
+    extra = "" if len(items) == 1 else " (and %d more)" % (len(items) - 1)
+    print(" on %s [%s]%s" % (first.get("target", "?"), first.get("verdict", "?"), extra))
+' 2>/dev/null)"
   printf '{"decision":"block","reason":"metareview has unresolved blockers%s. Run `metareview status --json` to see what must be cleared, fix them, or record a process override with a reason."}\n' "${SUMMARY:-}"
 else
   printf '{"decision":"block","reason":"metareview status failed (exit %s), so the review gate could not answer. This is a broken gate, not a clean tree."}\n' "$CODE"

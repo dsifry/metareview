@@ -259,6 +259,10 @@ func TestTargetScopingNarrowsWhatMustBeCleared(t *testing.T) {
 		"# metareview: task-done review\n\nRun ID: `mrv-a`\nTarget: `internal/alpha/thing.go`\n\n## Verdict\n\nNEEDS_REVISION\n")
 	writeLog(t, root, "mrv-b-task-done-beta.md",
 		"# metareview: task-done review\n\nRun ID: `mrv-b`\nTarget: `internal/beta/other.go`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	// A target that was reviewed and passed, so the gate can be shown to let work through.
+	const cleanTarget = "internal/delta/done.go"
+	writeLog(t, root, "mrv-c-task-done-delta.md",
+		"# metareview: task-done review\n\nRun ID: `mrv-c`\nTarget: `"+cleanTarget+"`\n\n## Verdict\n\nPASS\n")
 
 	all, err := Build(root)
 	if err != nil {
@@ -288,17 +292,32 @@ func TestTargetScopingNarrowsWhatMustBeCleared(t *testing.T) {
 		t.Fatalf("scoping must not leak across targets: %+v", other.MustClear)
 	}
 
-	// A target with nothing against it is not blocked, which is what lets a hook let work through.
-	clean, err := BuildFor(root, "internal/gamma/new.go")
+	// A target NO REVIEW COVERS is blocked, and blocked as UNREVIEWED rather than as a finding.
+	// This assertion used to be the opposite, and that was the bug: the narrower the scope an
+	// agent claimed, the more certainly the gate let it through, because a target nothing had
+	// reviewed matched no log, produced an empty must_clear and reported blocked:false. Asking
+	// about a file that had never been reviewed was the reliable way to be told all was well.
+	unreviewed, err := BuildFor(root, "internal/gamma/new.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if clean.Blocked || len(clean.MustClear) != 0 {
-		t.Errorf("an untouched target must not be blocked by other work: %+v", clean)
+	if !unreviewed.Blocked || len(unreviewed.MustClear) != 1 {
+		t.Fatalf("a target no review covers must not read as cleared: %+v", unreviewed)
+	}
+	if got := unreviewed.MustClear[0].Verdict; got != VerdictUnreviewed {
+		t.Errorf("verdict = %q, want %q: a hook must tell \"fix your findings\" from \"run a review\"", got, VerdictUnreviewed)
+	}
+	// A target that WAS reviewed and came back clean still passes, or the gate is a livelock.
+	passed, err := BuildFor(root, cleanTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if passed.Blocked {
+		t.Errorf("a reviewed, passing target must let work through: %+v", passed)
 	}
 	// And the scope is reported, so a reader knows whether they are seeing everything.
-	if clean.Target != "internal/gamma/new.go" || all.Target != "" {
-		t.Errorf("the report must say what it was scoped to: %q / %q", clean.Target, all.Target)
+	if unreviewed.Target != "internal/gamma/new.go" || all.Target != "" {
+		t.Errorf("the report must say what it was scoped to: %q / %q", unreviewed.Target, all.Target)
 	}
 }
 

@@ -6,8 +6,9 @@
 // and carry on. A host hook can enforce it, but only against a machine-readable contract, and
 // `metareview status` printed for humans. This is that contract. A host hook is meant to be a
 // thin shim over it, which is what would keep the enforcement model-agnostic rather than one
-// implementation per host drifting apart - but no hook ships in this repository yet, so this is
-// the surface they will sit on rather than a description of something already wired.
+// implementation per host drifting apart. hooks/pre-finish.sh is that shim, and .claude/settings.json
+// registers it — the manifest in hooks/hooks.json applies only to a plugin install, so for a long
+// while the hook existed as a file nothing loaded, and the enforcement it describes never once ran.
 package status
 
 import (
@@ -102,9 +103,29 @@ func BuildFor(root, target string) (Report, error) {
 			BlockingCount: s.BlockingFindingCount, AttemptNumber: s.AttemptNumber, MaxAttempts: s.MaxAttempts,
 		})
 	}
+	// An UNREVIEWED target is not a cleared one. Scoping matched a target string against the
+	// review log, and a target nothing had ever reviewed matched nothing, produced an empty
+	// must_clear, and reported blocked:false — so the narrower the scope an agent claimed, the
+	// more certainly the gate let it through, and asking about a file that had never been
+	// reviewed was the reliable way to be told everything was fine.
+	//
+	// The Completion Rule is "before saying work is done, run the gate". A gate that answers
+	// "nothing to clear" when it has never looked at the work states the opposite.
+	if target != "" && len(r.Reviews) == 0 {
+		r.MustClear = append(r.MustClear, Blocker{
+			Target:  target,
+			Verdict: VerdictUnreviewed,
+			Kind:    "unreviewed",
+		})
+	}
 	r.Blocked = len(r.MustClear) > 0
 	return r, nil
 }
+
+// VerdictUnreviewed is the verdict on a target no review log covers. It is not a review outcome —
+// it is the absence of one — and it is named so a hook can tell "you have findings to fix" from
+// "you have not run a review", which call for different things from the operator.
+const VerdictUnreviewed = "UNREVIEWED"
 
 // Emit writes the report as JSON and returns the process exit code: 1 when something must be
 // cleared, 0 otherwise. It lives here rather than in main so the contract - including the exit
