@@ -40,7 +40,9 @@ var hashFile = func(path string) (string, error) {
 
 // pathish matches a path-shaped token: at least one slash, and an extension. Findings in this
 // repository carry their file information in the fingerprint far more often than in Evidence.Path,
-// which frequently holds a pattern ("TODO|FIXME") or a marker ("diffTruncated") rather than a path.
+// which frequently holds a work-marker regex or a state marker ("diffTruncated") rather than a
+// path. (The regex is not quoted here on purpose: the deterministic work-marker lint reads this
+// file, and a comment describing the lint should not trip it.)
 var pathish = regexp.MustCompile(`[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+\.[A-Za-z0-9]+`)
 
 // bindablePaths returns the repo-relative files this finding names that actually exist. A path
