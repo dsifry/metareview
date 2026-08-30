@@ -222,11 +222,32 @@ type noProgress struct{}
 
 func (noProgress) Name() string       { return "no_fixation_progress" }
 func (noProgress) Class() run.Outcome { return run.OutcomeStalled }
+
+// Evaluate stops when an iteration FIXED NOTHING NEW.
+//
+// It used to compare the total unfixed count against the previous total, and that punished the
+// loop for reviewing well: unfixed is a total, and the total grows whenever discovery outpaces
+// fixing. Measured on this repository 2026-08-30 — round 0 fixed 6 of 10 bugs, round 1 discovered
+// 21 more, and the run halted on "unfixed 23 >= previous 4" while converging. A substantial fix
+// adds reviewable surface by construction, so the better the review node works the sooner the old
+// predicate declared the run stalled.
+//
+// Progress is now the fixed count. A round that fixes even one bug it entered with is making
+// progress, however many new ones it turns up; a round that fixes none is stalled whether or not
+// discovery was quiet. Newly found bugs move the denominator and are not evidence either way.
 func (n noProgress) Evaluate(_ context.Context, s run.Snapshot) (Result, error) {
-	stop := s.PrevUnfixed != nil && s.Unfixed >= *s.PrevUnfixed
+	if s.PrevFixed == nil {
+		// No previous boundary to compare against — the first iteration cannot have stalled.
+		// PrevUnfixed alone is not a fallback: reading it would restore the defect above on
+		// exactly the runs recorded before PrevFixed existed.
+		return decide(n, false, ""), nil
+	}
+	fixed := len(s.AllFound) - s.Unfixed
+	stop := fixed <= *s.PrevFixed
 	reason := ""
 	if stop {
-		reason = fmt.Sprintf("unfixed %d >= previous %d", s.Unfixed, *s.PrevUnfixed)
+		reason = fmt.Sprintf("fixed %d, no more than the previous %d (%d bugs known, %d unfixed)",
+			fixed, *s.PrevFixed, len(s.AllFound), s.Unfixed)
 	}
 	return decide(n, stop, reason), nil
 }

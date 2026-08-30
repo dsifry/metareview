@@ -379,10 +379,17 @@ type Snapshot struct {
 	// Only a SURVIVED pin lands here. A malformed or unverifiable one says the claim could not be
 	// evaluated, which is a fact about the pin, not about the code, and pointing the next round's
 	// reviewers at it would send them to a line where nothing is known to be wrong.
-	Unproven        []Pin                      `json:"unproven,omitempty"`
-	Status          []BugStatus                `json:"status"`
-	Unfixed         int                        `json:"unfixed"`
-	PrevUnfixed     *int                       `json:"prev_unfixed"`
+	Unproven    []Pin       `json:"unproven,omitempty"`
+	Status      []BugStatus `json:"status"`
+	Unfixed     int         `json:"unfixed"`
+	PrevUnfixed *int        `json:"prev_unfixed"`
+	// PrevFixed is how many bugs were FIXED as of the previous iteration boundary. Progress is
+	// measured against it rather than against PrevUnfixed, because unfixed is the total and the
+	// total grows when discovery works: an iteration that fixes six bugs and finds twenty-one has
+	// more unfixed than it started with, and reading that as "no progress" stops a loop for being
+	// productive. Measured on this repository 2026-08-30: round 0 fixed 6 of 10, round 1 found 21
+	// more, and the run halted on "unfixed 23 >= previous 4" while converging.
+	PrevFixed       *int                       `json:"prev_fixed,omitempty"`
 	Tokens          TokenTotals                `json:"tokens"`
 	NodeOutputs     map[string]json.RawMessage `json:"node_outputs"`
 	Applied         map[string]bool            `json:"applied"`
@@ -423,6 +430,7 @@ func (s Snapshot) Clone() Snapshot {
 		copy(c.Status, s.Status)
 	}
 	c.PrevUnfixed = cloneInt(s.PrevUnfixed)
+	c.PrevFixed = cloneInt(s.PrevFixed)
 	if s.NodeOutputs != nil {
 		c.NodeOutputs = make(map[string]json.RawMessage, len(s.NodeOutputs))
 		for k, v := range s.NodeOutputs {

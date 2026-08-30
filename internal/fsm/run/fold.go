@@ -214,6 +214,8 @@ func Apply(st FoldState, ev Event) (FoldState, error) {
 			next.Iteration = st.Iteration + 1
 			v := st.Unfixed
 			next.PrevUnfixed = &v
+			f := len(st.AllFound) - st.Unfixed
+			next.PrevFixed = &f
 			next.Findings = []Finding{}
 			next.Confirmed = []Bug{}
 		}
@@ -281,6 +283,7 @@ func (st FoldState) cow() FoldState {
 	next.AllFound = append([]Bug{}, st.AllFound...)
 	next.Status = append([]BugStatus{}, st.Status...)
 	next.PrevUnfixed = cloneInt(st.PrevUnfixed)
+	next.PrevFixed = cloneInt(st.PrevFixed)
 	next.NodeOutputs = make(map[string]json.RawMessage, len(st.NodeOutputs)+1)
 	for k, v := range st.NodeOutputs {
 		next.NodeOutputs[k] = v
@@ -321,7 +324,7 @@ func (st *FoldState) applyInit(d *InitData) {
 		st.FixEntryHead = d.Head
 	}
 	st.Findings, st.Confirmed, st.AllFound, st.Status = []Finding{}, []Bug{}, []Bug{}, []BugStatus{}
-	st.PrevUnfixed = nil
+	st.PrevUnfixed, st.PrevFixed = nil, nil
 	st.NodeOutputs = map[string]json.RawMessage{}
 	st.Applied = map[string]bool{}
 	st.NodesRun = []string{}

@@ -39,9 +39,12 @@ func (f *fakeRunner) Run(_ context.Context, name string, stdin []byte) (CmdResul
 
 func intp(i int) *int { return &i }
 
+// snap builds a snapshot. prev is the previous boundary's FIXED count, which is what progress is
+// measured against — not the previous unfixed count, which is a total and grows whenever
+// discovery outpaces fixing.
 func snap(iter int, unfixed int, prev *int, tokens int64, found int) run.Snapshot {
 	// tokens are spread over the non-Input counters so a Total() that only reads Input fails.
-	s := run.Snapshot{Iteration: iter, Unfixed: unfixed, PrevUnfixed: prev, Tokens: run.TokenTotals{Output: tokens / 2, CacheRead: tokens - tokens/2 - tokens/4, Reasoning: tokens / 4}}
+	s := run.Snapshot{Iteration: iter, Unfixed: unfixed, PrevFixed: prev, Tokens: run.TokenTotals{Output: tokens / 2, CacheRead: tokens - tokens/2 - tokens/4, Reasoning: tokens / 4}}
 	for i := 0; i < found; i++ {
 		s.AllFound = append(s.AllFound, run.Bug{ID: strings.Repeat("a", 12), Desc: "d"})
 	}
@@ -72,10 +75,17 @@ func TestC2Atoms(t *testing.T) {
 	}{
 		{"all_fixed-bare-true", "all_fixed", snap(0, 0, nil, 0, 2), true, "all_fixed", run.OutcomeFixed},
 		{"all_fixed-map-false", "{all_fixed: true}", snap(0, 1, nil, 0, 2), false, "all_fixed", run.OutcomeFixed},
+		// (iteration, unfixed, previous FIXED count, tokens, bugs known). Fixed = known - unfixed.
 		{"nfp-nil-prev", "no_fixation_progress", snap(1, 5, nil, 0, 5), false, "no_fixation_progress", run.OutcomeStalled},
-		{"nfp-equal", "{no_fixation_progress: true}", snap(1, 5, intp(5), 0, 5), true, "no_fixation_progress", run.OutcomeStalled},
-		{"nfp-less", "no_fixation_progress", snap(1, 4, intp(5), 0, 5), false, "no_fixation_progress", run.OutcomeStalled},
-		{"nfp-more", "no_fixation_progress", snap(1, 6, intp(5), 0, 6), true, "no_fixation_progress", run.OutcomeStalled},
+		// 5 known, 5 unfixed -> 0 fixed, same as before: nothing was fixed, so it is stalled.
+		{"nfp-fixed-none", "{no_fixation_progress: true}", snap(1, 5, intp(0), 0, 5), true, "no_fixation_progress", run.OutcomeStalled},
+		// 5 known, 4 unfixed -> 1 fixed, up from 0: progress.
+		{"nfp-fixed-one-more", "no_fixation_progress", snap(1, 4, intp(0), 0, 5), false, "no_fixation_progress", run.OutcomeStalled},
+		// THE CASE THAT USED TO STALL A WORKING LOOP: unfixed rose from 4 to 23 because discovery
+		// found 21 new bugs, while the fixed count rose 6 -> 8. Progress, not a stall.
+		{"nfp-discovery-outpaces-fixing", "no_fixation_progress", snap(1, 23, intp(6), 0, 31), false, "no_fixation_progress", run.OutcomeStalled},
+		// And the mirror: discovery found the same 21, and nothing new was fixed. Stalled.
+		{"nfp-discovery-without-fixing", "no_fixation_progress", snap(1, 25, intp(6), 0, 31), true, "no_fixation_progress", run.OutcomeStalled},
 		{"max-iter-3", "{max_iterations: 5}", snap(3, 1, nil, 0, 1), false, "max_iterations", run.OutcomeOverflow},
 		{"max-iter-4", "{max_iterations: 5}", snap(4, 1, nil, 0, 1), true, "max_iterations", run.OutcomeOverflow},
 		{"budget-under", "{budget: {tokens: 100}}", snap(0, 1, nil, 99, 1), false, "budget", run.OutcomeOverflow},
@@ -165,7 +175,9 @@ func TestC2CmdAtom(t *testing.T) {
 
 func TestC3Compose(t *testing.T) {
 	ctx := context.Background()
-	fired := snap(4, 5, intp(5), 0, 5) // nfp fires, max_iterations 5 fires, budget doesn't
+	// 5 known, 5 unfixed -> 0 fixed, no more than the previous 0: nfp fires. max_iterations 5
+	// fires at iteration 4. budget does not.
+	fired := snap(4, 5, intp(0), 0, 5)
 	quiet := snap(0, 1, nil, 0, 1)
 
 	anyP, err := Parse(node(t, "any: [{budget: {tokens: 1000}}, no_fixation_progress, {max_iterations: 5}]"), nil)
@@ -192,7 +204,8 @@ func TestC3Compose(t *testing.T) {
 	if !r.Stop || r.Atom != "no_fixation_progress+max_iterations" || r.Class != run.OutcomeStalled || !strings.Contains(r.Reason, "; ") {
 		t.Fatalf("all fired: %+v", r)
 	}
-	r, _ = allP.Evaluate(ctx, snap(4, 4, intp(5), 0, 5)) // nfp quiet, max fires
+	// 5 known, 1 unfixed -> 4 fixed, up from 2: nfp quiet. max fires, so `all` is only partial.
+	r, _ = allP.Evaluate(ctx, snap(4, 1, intp(2), 0, 5))
 	if r.Stop || r.Atom != allP.Name() || r.Reason != "" {
 		t.Fatalf("all partial: %+v", r)
 	}

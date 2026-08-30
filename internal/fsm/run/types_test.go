@@ -56,6 +56,7 @@ func TestRunIDs(t *testing.T) {
 // R5: Clone is a deep copy through every slice element, map value, pointer target and RawMessage.
 func TestCloneIsDeep(t *testing.T) {
 	one := 1
+	two := 2
 	orig := Snapshot{
 		Vars:        map[string]string{"k": "v"},
 		AllowedCmds: []AllowedCmd{{Name: "n", Argv: []string{"a"}, FileHashes: map[string]string{"p": "h"}}},
@@ -66,6 +67,7 @@ func TestCloneIsDeep(t *testing.T) {
 		AllFound:    []Bug{{ID: "b", GoldenIdx: &one}},
 		Status:      []BugStatus{{ID: "b"}},
 		PrevUnfixed: &one,
+		PrevFixed:   &two,
 		NodeOutputs: map[string]json.RawMessage{"n@0": json.RawMessage(`{"x":1}`)},
 		Applied:     map[string]bool{"n@0": true},
 		NodesRun:    []string{"n"},
@@ -87,6 +89,7 @@ func TestCloneIsDeep(t *testing.T) {
 	c.Findings[0].IssueText = "changed"
 	*c.Confirmed[0].GoldenIdx = 9
 	*c.PrevUnfixed = 7
+	*c.PrevFixed = 8
 	c.NodeOutputs["n@0"][0] = '['
 	c.Applied["n@0"] = false
 	c.NodesRun[0] = "changed"
@@ -96,7 +99,7 @@ func TestCloneIsDeep(t *testing.T) {
 	c.Unproven[0].File = "changed"
 	if orig.Vars["k"] != "v" || orig.AllowedCmds[0].Argv[0] != "a" || orig.AllowedCmds[0].FileHashes["p"] != "h" ||
 		orig.Lineage[0] != "p" || orig.Goldens[0].Comment != "c" || orig.Findings[0].IssueText != "i" ||
-		*orig.Confirmed[0].GoldenIdx != 1 || *orig.AllFound[0].GoldenIdx != 1 || *orig.PrevUnfixed != 1 ||
+		*orig.Confirmed[0].GoldenIdx != 1 || *orig.AllFound[0].GoldenIdx != 1 || *orig.PrevUnfixed != 1 || *orig.PrevFixed != 2 ||
 		string(orig.NodeOutputs["n@0"]) != `{"x":1}` || !orig.Applied["n@0"] || orig.NodesRun[0] != "n" ||
 		orig.LastError.Code != "c" || orig.Warnings[0] != "w" || orig.Pins[0].File != "a.go" ||
 		orig.Unproven[0].File != "u.go" {
@@ -110,7 +113,7 @@ func TestCloneIsDeep(t *testing.T) {
 	}
 	// reflect walk: every slice/map/pointer/RawMessage field of Snapshot was exercised above
 	rt := reflect.TypeOf(Snapshot{})
-	exercised := map[string]bool{"Vars": true, "AllowedCmds": true, "Lineage": true, "Goldens": true, "Findings": true, "Confirmed": true, "AllFound": true, "Status": true, "PrevUnfixed": true, "NodeOutputs": true, "Applied": true, "NodesRun": true, "LastError": true, "Warnings": true, "Pins": true, "Unproven": true}
+	exercised := map[string]bool{"Vars": true, "AllowedCmds": true, "Lineage": true, "Goldens": true, "Findings": true, "Confirmed": true, "AllFound": true, "Status": true, "PrevUnfixed": true, "PrevFixed": true, "NodeOutputs": true, "Applied": true, "NodesRun": true, "LastError": true, "Warnings": true, "Pins": true, "Unproven": true}
 	for i := 0; i < rt.NumField(); i++ {
 		f := rt.Field(i)
 		switch f.Type.Kind() {
