@@ -69,7 +69,15 @@ type Deps struct {
 	// the diff carries. A false reject silently drops a real bug while a false confirm only
 	// costs a human a look, and measurement showed excerpts are weakest on cross-file claims.
 	Escalate EscalateFunc
+	// VerifyPins proves the fix node's claims. Optional: nil means the mutation-verify node
+	// cannot run, and it fails loudly rather than passing vacuously — a verifier that is absent
+	// must not read as a verifier that found nothing wrong.
+	VerifyPins VerifyFunc
 }
+
+// VerifyFunc checks each pin against the repository and reports what it found. It runs commands
+// and writes files, so it lives outside this package: kind orchestrates, cli supplies the tools.
+type VerifyFunc func(ctx context.Context, pins []run.Pin) ([]run.PinResult, error)
 
 // EscalateFunc resolves the second opinion for a run. It is called lazily - at most once per
 // REGISTRY, on the first cross-file rejection - because materializing an evidence tree costs real
@@ -127,6 +135,7 @@ func New(d Deps) (*Registry, error) {
 	r.execs[MatchThenAdjudicate] = &adjudicateExec{judge: d.Judge, escalate: d.Escalate}
 	r.execs[StillPresent] = &stillPresentExec{judge: d.Judge}
 	r.execs[Cmd] = cmdExec{}
+	r.execs[MutationVerify] = &mutationVerifyExec{verify: d.VerifyPins}
 	return r, nil
 }
 
@@ -813,6 +822,31 @@ func (mutationVerifyKind) Decode(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 	return d, nil
+}
+
+// mutationVerifyExec proves the pins in the snapshot. It calls no model.
+type mutationVerifyExec struct{ verify VerifyFunc }
+
+func (e *mutationVerifyExec) Execute(ctx context.Context, in machine.ExecInput) (json.RawMessage, error) {
+	if e.verify == nil {
+		// Absent tooling is a failure, never a pass. A node that cannot verify must not report
+		// that it verified nothing wrong.
+		return nil, errs.E(machine.CodeExecutorFailed, "mutation-verify has no verifier wired", "reason", "no_verifier")
+	}
+	results, err := e.verify(ctx, in.Snap.Pins)
+	if err != nil {
+		return nil, errs.E(machine.CodeExecutorFailed, "mutation-verify failed: "+err.Error(), "reason", "verify")
+	}
+	out := run.Delta{Findings: []run.Finding{}}
+	for _, r := range results {
+		if r.Proven {
+			continue
+		}
+		text, _ := run.CapText(fmt.Sprintf("Unproven fix in %s: breaking %q did not make the tests fail. %s",
+			r.Pin.File, r.Pin.From, r.Detail), run.MaxDesc)
+		out.Findings = append(out.Findings, run.Finding{IssueText: text, File: r.Pin.File})
+	}
+	return json.RawMessage(run.MarshalCanonical(out)), nil
 }
 
 func (mutationVerifyKind) Reduce(_ run.Snapshot, out any) (run.Delta, error) {

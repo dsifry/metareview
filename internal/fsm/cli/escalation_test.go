@@ -528,3 +528,97 @@ func TestEscapesTree(t *testing.T) {
 		}
 	}
 }
+
+// The CLI's half of mutation-verify: a real Verifier rooted at the repository, running the
+// repository's own test command — which comes from the operator's environment or the language
+// default, never from the agent whose fix is under review.
+func TestVerifyPinsRunsAgainstTheRepository(t *testing.T) {
+	h, c, _, _ := escalationHarness(t)
+	// A tiny module with a test that genuinely pins a boundary.
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(h.root, rel)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// package f, matching the harness's existing f.go: two packages in one directory would not
+	// build, and the verifier's baseline check would (correctly) refuse to conclude anything.
+	write("go.mod", "module fixture\n\ngo 1.22\n")
+	write("calc.go", "package f\n\nfunc Allow(n int) bool {\n\treturn n < 10\n}\n")
+	write("calc_test.go", "package f\n\nimport \"testing\"\n\nfunc TestBoundary(t *testing.T) {\n\tif Allow(10) {\n\t\tt.Fatal(\"10 must not be allowed\")\n\t}\n}\n")
+
+	verify := c.verifyPins(h.root, nil)
+	if verify == nil {
+		t.Fatal("a real run must get a verifier")
+	}
+	got, err := verify(context.Background(), []run.Pin{
+		{File: "calc.go", From: "n < 10", To: "n <= 10", Test: "TestBoundary"},
+		{File: "calc.go", From: "func Allow", To: "func allow", Test: "TestBoundary"},
+	})
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("one result per pin, got %d", len(got))
+	}
+	if !got[0].Proven {
+		t.Errorf("a pinned boundary must verify: %s", got[0].Detail)
+	}
+	// Renaming the function breaks the build, which proves nothing about the test.
+	if got[1].Proven || !strings.Contains(got[1].Detail, "compile") {
+		t.Errorf("a non-compiling mutation must be refused as such: %+v", got[1])
+	}
+	// The pin travels through unchanged, so a finding can name it.
+	if got[0].Pin.File != "calc.go" || got[0].Pin.Test != "TestBoundary" {
+		t.Errorf("the pin must survive the round trip: %+v", got[0].Pin)
+	}
+}
+
+// A mock run cannot prove anything: there is no real code to break and no real tests to run.
+// Saying "unproven" is the truthful answer — a mock that reported proof would let a fixture stand
+// in for evidence.
+func TestVerifyPinsRefusesEverythingOnAMockRun(t *testing.T) {
+	h, c, _, _ := escalationHarness(t)
+	verify := c.verifyPins(h.root, &mockai.Scenario{})
+	got, err := verify(context.Background(), []run.Pin{{File: "a.go", From: "x", To: "y", Test: "T"}})
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if len(got) != 1 || got[0].Proven {
+		t.Fatalf("a mock run must not prove anything: %+v", got)
+	}
+	if !strings.Contains(got[0].Detail, "mock run") {
+		t.Errorf("the reason must say it was a mock: %q", got[0].Detail)
+	}
+	// With nothing claimed there is nothing to refuse, so a mock fix that declares no pins still
+	// passes the gate.
+	if empty, _ := verify(context.Background(), nil); len(empty) != 0 {
+		t.Errorf("no pins means no results, got %+v", empty)
+	}
+}
+
+// The test command is the operator's, never the agent's.
+func TestTestCommandComesFromTheOperator(t *testing.T) {
+	h, c, _, _ := escalationHarness(t)
+	_ = h
+	if got := strings.Join(c.testCommand(), " "); got != "go test ./..." {
+		t.Errorf("default = %q", got)
+	}
+	h.env[EnvTestCmd] = "  make  check  "
+	if got := strings.Join(c.testCommand(), "|"); got != "make|check" {
+		t.Errorf("override = %q", got)
+	}
+}
+
+// The CLI adapter must surface a verifier failure rather than swallow it. With no test command
+// configured nothing can be checked, and reporting every pin as survived would blame the fixes
+// for the harness's own misconfiguration.
+func TestVerifyPinsSurfacesAVerifierFailure(t *testing.T) {
+	h, c, _, _ := escalationHarness(t)
+	h.env[EnvTestCmd] = " " // whitespace only: no command at all
+	verify := c.verifyPins(h.root, nil)
+	if _, err := verify(context.Background(), []run.Pin{{File: "f.go", From: "x", To: "y", Test: "T"}}); err == nil {
+		t.Error("a verifier failure must reach the node, not be reported as nothing wrong")
+	}
+}

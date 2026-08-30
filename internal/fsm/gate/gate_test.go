@@ -66,7 +66,7 @@ func TestG1Gates(t *testing.T) {
 	if _, ok := Builtin("nope"); ok {
 		t.Fatal("unknown gate")
 	}
-	want := []string{"all_fixed", "bugs_remain", "commit_exists", "confirmed_empty", "confirmed_nonempty", "findings_empty", "findings_nonempty", "nothing_confirmed", "nothing_found"}
+	want := []string{"all_fixed", "bugs_remain", "commit_exists", "confirmed_empty", "confirmed_nonempty", "findings_empty", "findings_nonempty", "nothing_confirmed", "nothing_found", "pins_proven"}
 	if strings.Join(Names(), ",") != strings.Join(want, ",") {
 		t.Fatalf("Names: %v", Names())
 	}
@@ -486,5 +486,34 @@ func TestG4FakeContract(t *testing.T) {
 	}
 	if s, tr := Cut("é", 1); s != "" || !tr {
 		t.Fatal("cut before a partial rune")
+	}
+}
+
+// pins_proven is what stops a fix round advancing on a claim nothing holds. It is vacuously true
+// when the fix declared no pins: "made no claim" and "made a claim that failed" are different
+// states, and only the second is a defect in the fix.
+func TestG1PinsProven(t *testing.T) {
+	g, ok := Builtin("pins_proven")
+	if !ok {
+		t.Fatal("pins_proven is not registered")
+	}
+	ctx := context.Background()
+	if err := g(ctx, run.Snapshot{}, &Fake{}); err != nil {
+		t.Errorf("no findings at all must pass: %+v", err)
+	}
+	clean := run.Snapshot{Findings: []run.Finding{{IssueText: "some ordinary finding"}}}
+	if err := g(ctx, clean, &Fake{}); err != nil {
+		t.Errorf("unrelated findings must not fail this gate: %+v", err)
+	}
+	bad := run.Snapshot{Findings: []run.Finding{
+		{IssueText: "some ordinary finding"},
+		{IssueText: "Unproven fix in calc.go: breaking \"n < 10\" did not make the tests fail.", File: "calc.go"},
+	}}
+	err := g(ctx, bad, &Fake{})
+	if err == nil {
+		t.Fatal("an unproven fix must fail the gate")
+	}
+	if !strings.Contains(err.Detail, "calc.go") {
+		t.Errorf("the failure must name the file: %+v", err)
 	}
 }

@@ -44,7 +44,11 @@ type PinResult struct {
 type Verifier struct {
 	Dir     string
 	TestCmd []string
-	Timeout time.Duration
+	// BuildCmd checks that a mutation still compiles. Empty defaults to the Go form. It is
+	// separate from TestCmd because "does this build" and "do the tests pass" are different
+	// questions, and a language whose build check is not a test invocation needs to say so.
+	BuildCmd []string
+	Timeout  time.Duration
 	// Now and Run are seams for tests; nil means the real thing.
 	Run func(ctx context.Context, dir string, argv []string) (int, string, error)
 }
@@ -55,6 +59,13 @@ const defaultVerifyTimeout = 10 * time.Minute
 // reported unproven with the reason; it is never an error for the whole run, because one bad pin
 // must not discard the evidence for the others.
 func (v Verifier) Verify(ctx context.Context, pins []Pin) ([]PinResult, error) {
+	// A misconfiguration aborts the whole run rather than marking every pin unproven. Reporting
+	// "the mutation survived" for each of them when no test command was ever configured would
+	// blame the fixes for the harness's own fault, and a wall of false blockers is worse than one
+	// honest error.
+	if len(pins) > 0 && len(v.TestCmd) == 0 {
+		return nil, fmt.Errorf("mutation: no test command configured, so no pin can be checked")
+	}
 	out := make([]PinResult, 0, len(pins))
 	for _, p := range pins {
 		out = append(out, v.verifyOne(ctx, p))
@@ -124,8 +135,15 @@ func (v Verifier) run(ctx context.Context, dir string) (int, string, error) {
 	return v.exec(ctx, dir, v.TestCmd)
 }
 
+// build checks that the mutation still compiles — INCLUDING test files. `go build ./...` does not
+// compile tests, so a mutation that renames a production symbol builds cleanly and then fails
+// every test with "undefined: X": a build error scored as a kill. `go test -run ^$` compiles
+// everything and runs nothing, which is the question actually being asked.
 func (v Verifier) build(ctx context.Context, dir string) (int, string, error) {
-	return v.exec(ctx, dir, []string{"go", "build", "./..."})
+	if len(v.BuildCmd) > 0 {
+		return v.exec(ctx, dir, v.BuildCmd)
+	}
+	return v.exec(ctx, dir, []string{"go", "test", "-run", "^$", "./..."})
 }
 
 func (v Verifier) exec(ctx context.Context, dir string, argv []string) (int, string, error) {

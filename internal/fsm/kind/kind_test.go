@@ -1138,3 +1138,63 @@ func TestPinCapsAndMutationVerifyKindSurface(t *testing.T) {
 		t.Error("a finding that breaches the caps must be refused")
 	}
 }
+
+// The mutation-verify executor turns pin results into findings the gate blocks on. It is the last
+// link: everything before it produces claims, and this is where a claim nothing holds becomes a
+// blocker instead of a shrug.
+func TestMutationVerifyExecutorReportsOnlyUnprovenPins(t *testing.T) {
+	pins := []run.Pin{
+		{File: "held.go", From: "a < 1", To: "a <= 1", Test: "TestHeld"},
+		{File: "loose.go", From: "b < 2", To: "b <= 2", Test: "TestLoose"},
+	}
+	var got []run.Pin
+	r, err := New(Deps{
+		VerifyPins: func(_ context.Context, in []run.Pin) ([]run.PinResult, error) {
+			got = in
+			return []run.PinResult{
+				{Pin: in[0], Proven: true, Detail: "fails when broken"},
+				{Pin: in[1], Proven: false, Detail: "the mutation survived"},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex, ok := r.Executor(MutationVerify)
+	if !ok {
+		t.Fatal("mutation-verify has no executor")
+	}
+	raw, err := ex.Execute(context.Background(), machine.ExecInput{Snap: run.Snapshot{Pins: pins}})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("the executor must pass the snapshot's pins through, got %+v", got)
+	}
+	var d run.Delta
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Findings) != 1 {
+		t.Fatalf("exactly the unproven pin becomes a finding, got %d: %+v", len(d.Findings), d.Findings)
+	}
+	if d.Findings[0].File != "loose.go" || !strings.Contains(d.Findings[0].IssueText, "Unproven fix in loose.go") {
+		t.Errorf("the finding must name the unproven file and be recognisable to the gate: %+v", d.Findings[0])
+	}
+
+	// A verifier that fails is an error, never an empty pass.
+	rErr, _ := New(Deps{VerifyPins: func(context.Context, []run.Pin) ([]run.PinResult, error) {
+		return nil, errors.New("the test command could not run")
+	}})
+	exErr, _ := rErr.Executor(MutationVerify)
+	if _, err := exErr.Execute(context.Background(), machine.ExecInput{Snap: run.Snapshot{Pins: pins}}); err == nil {
+		t.Error("a verifier that fails must surface, not report nothing wrong")
+	}
+
+	// And no verifier at all fails loudly: an absent check must never read as a passed one.
+	rNil, _ := New(Deps{})
+	exNil, _ := rNil.Executor(MutationVerify)
+	if _, err := exNil.Execute(context.Background(), machine.ExecInput{Snap: run.Snapshot{Pins: pins}}); err == nil {
+		t.Error("a missing verifier must fail the node")
+	}
+}

@@ -1,0 +1,44 @@
+workflow: sdlc-loop-proved
+# sdlc-loop-proved: sdlc-loop with a deterministic proof step between fix and verify.
+#
+# Identical to sdlc-loop except that a fix must SHOW its work. The fix node returns pins -
+# {file, from, to, test} - and `prove` breaks each line and requires the named tests to fail.
+# sdlc-loop takes the fix agent's word; this one does not.
+#
+# Separate rather than a change to sdlc-loop because adding a state changes the state list every
+# driver sees, and until fix agents emit pins the node can only pass vacuously. Switch the default
+# once pins are routinely declared.
+version: 1
+vars:
+  REVIEWER:     {default: claude-opus-5}
+  JUDGE:        {required: true}
+  REV_EFFORT:   {default: low}
+  JUDGE_EFFORT: {required: true}   # Pareto-selected with JUDGE (spec §17); pinned to medium under --calibration
+states: [discover, adjudicate, fix, prove, verify, done, failed]
+transitions:                                  # ordered
+  - {from: discover,   to: done,       gate: nothing_found,      outcome: clean}   # iteration 0 only: refuses once bugs are known
+  - {from: discover,   to: adjudicate, gate: findings_nonempty}
+  - {from: adjudicate, to: done,       gate: nothing_confirmed,  outcome: clean}
+  - {from: adjudicate, to: fix,        gate: confirmed_nonempty}
+  - {from: fix,        to: prove,      gate: commit_exists}
+  - {from: prove,      to: verify,     gate: pins_proven}          # a claim nothing holds does not advance
+  - {from: verify,     to: done,       gate: all_fixed,   outcome: fixed}
+  - {from: verify,     to: discover,   gate: bugs_remain, loop: true}
+nodes:
+  discover:   {kind: review-lenses,        exec: subagent, lenses: 8, model: $REVIEWER, effort: $REV_EFFORT}
+  adjudicate: {kind: match-then-adjudicate, exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
+  fix:        {kind: agent-edit}                                   # exec inferred from the kind (inline)
+  # prove is deterministic: it breaks each line the fix claims a test now holds, requires the
+  # tests to FAIL, restores it and requires them to PASS. No model is consulted, because whether
+  # a test catches a mutation is a fact about the repository, not an opinion, and the answer
+  # must not vary with the model. still-present stays below as the COMPLEMENT for bugs no test
+  # can pin: it answers a question mutation cannot, and never replaces one mutation can.
+  prove:      {kind: mutation-verify}                              # exec inferred (fork)
+  verify:     {kind: still-present,         model: $JUDGE, effort: $JUDGE_EFFORT}   # exec inferred (fork)
+convergence:
+  any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]
+repo_mode: advisory
+# Escape hatch (requires --allow-custom-cmds <sha256>; see docs/fsm):
+# cmds:
+#   notify: {argv: [bash, ./notify-overflow.sh], timeout: 30, env: [SLACK_WEBHOOK]}
+# on_overflow: notify

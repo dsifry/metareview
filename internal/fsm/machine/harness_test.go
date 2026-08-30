@@ -109,6 +109,8 @@ func newRegistry() *fakeRegistry {
 	r.kinds["match-then-adjudicate"] = &fakeKind{name: "match-then-adjudicate", info: workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, NeedsJudge: true}}
 	r.kinds["agent-edit"] = &fakeKind{name: "agent-edit", info: workflow.KindInfo{DefaultExec: "inline", AllowedExec: []string{"inline", "subagent"}}}
 	r.kinds["still-present"] = &fakeKind{name: "still-present", info: workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, NeedsJudge: true}}
+	// mutation-verify: deterministic, so NeedsJudge is false and pre-flight skips it.
+	r.kinds["mutation-verify"] = &fakeKind{name: "mutation-verify", info: workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}}}
 	r.kinds["cmd"] = &fakeKind{name: "cmd", info: workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}}}
 	// agent-edit output is {commit, summary}; reduce to Commit
 	r.kinds["agent-edit"].decode = func(raw json.RawMessage) (any, error) {
@@ -146,6 +148,9 @@ func newRegistry() *fakeRegistry {
 		return json.RawMessage(run.MarshalCanonical(run.Delta{Status: st})), nil
 	}}
 	r.execs["cmd"] = &fakeExecutor{fn: func(in ExecInput) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }}
+	// mutation-verify with nothing to prove reports no findings, which is what a fix that
+	// declared no pins produces.
+	r.execs["mutation-verify"] = &fakeExecutor{fn: func(ExecInput) (json.RawMessage, error) { return json.RawMessage(`{"findings":[]}`), nil }}
 	return r
 }
 

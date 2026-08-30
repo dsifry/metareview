@@ -21,6 +21,7 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/mockai"
 	"github.com/dsifry/metareview/internal/fsm/run"
 	"github.com/dsifry/metareview/internal/fsm/workflow"
+	"github.com/dsifry/metareview/internal/mutation"
 )
 
 // Env names the CLI reads (spec 5 §6: the closed set).
@@ -34,6 +35,9 @@ const (
 	EnvJudgeEffort  = "METAREVIEW_JUDGE_EFFORT"
 	EnvRunID        = "MRV_RUN_ID"
 	EnvHome         = "HOME"
+	// EnvTestCmd overrides what mutation-verify runs to decide whether a mutation was caught.
+	// Set by the operator, never by the agent under review.
+	EnvTestCmd = "METAREVIEW_TEST_CMD"
 )
 
 // git runs one git command through the Exec seam and returns TRIMMED stdout. It is for short
@@ -260,7 +264,7 @@ func (c *ctxDeps) machineDeps(root string, scenario *mockai.Scenario, mode judge
 			return machine.Deps{}, err
 		}
 	}
-	kinds, _ := kind.New(kind.Deps{Judge: j, Mock: scenario != nil, Escalate: c.escalation(root, scenario, mode)}) // consistent by construction: a mock judge iff a scenario
+	kinds, _ := kind.New(kind.Deps{Judge: j, Mock: scenario != nil, Escalate: c.escalation(root, scenario, mode), VerifyPins: c.verifyPins(root, scenario)}) // consistent by construction: a mock judge iff a scenario
 	d := c.deps
 	md := machine.Deps{
 		Store: d.Store(root), Sidecar: d.Sidecar(root), Kinds: kinds,
@@ -361,4 +365,58 @@ func (c *ctxDeps) applyJudgeOverrideFor(vars map[string]string, modelFlag, effor
 		out[JudgeEffortVar] = o.Effort
 	}
 	return out
+}
+
+// verifyPins builds the mutation-verify node's tooling: a Verifier rooted at the repository,
+// running the repository's own test command.
+//
+// A mock run gets a verifier that refuses every pin. A scripted scenario has no real code to
+// break and no real tests to run, so it cannot prove anything, and saying "unproven" is the
+// truthful answer — a mock that reported proof would let a fixture stand in for evidence. A mock
+// fix that declares no pins therefore still passes the gate, because there is nothing to refuse.
+func (c *ctxDeps) verifyPins(root string, scenario *mockai.Scenario) kind.VerifyFunc {
+	if scenario != nil {
+		return func(_ context.Context, pins []run.Pin) ([]run.PinResult, error) {
+			out := make([]run.PinResult, 0, len(pins))
+			for _, p := range pins {
+				out = append(out, run.PinResult{Pin: p, Detail: "mock run: a scripted scenario has no code to break, so nothing can be proved"})
+			}
+			return out, nil
+		}
+	}
+	return func(ctx context.Context, pins []run.Pin) ([]run.PinResult, error) {
+		v := mutation.Verifier{Dir: root, TestCmd: c.testCommand()}
+		in := make([]mutation.Pin, 0, len(pins))
+		for _, p := range pins {
+			in = append(in, mutation.Pin{File: p.File, From: p.From, To: p.To, Test: p.Test})
+		}
+		got, err := v.Verify(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]run.PinResult, 0, len(got))
+		for i, r := range got {
+			out = append(out, run.PinResult{Pin: pins[i], Proven: r.Proven, Detail: r.Detail})
+		}
+		return out, nil
+	}
+}
+
+// testCommand is what mutation-verify runs to decide whether a mutation was caught. It comes from
+// the environment or defaults to the language's own runner — never from the agent whose fix is
+// being checked, which is the point: a pin says what to break, never what to run.
+func (c *ctxDeps) testCommand() []string {
+	if v, set := lookupEnv(c.deps.Getenv, EnvTestCmd); set {
+		// An operator who sets it to whitespace has said "no command", and the verifier refuses
+		// rather than silently falling back to a Go default in a repository that may not be Go.
+		return strings.Fields(v)
+	}
+	return []string{"go", "test", "./..."}
+}
+
+// lookupEnv distinguishes "unset" from "set to nothing": the first takes the default, the second
+// is an explicit instruction that there is no command.
+func lookupEnv(get func(string) string, key string) (string, bool) {
+	v := get(key)
+	return strings.TrimSpace(v), v != ""
 }

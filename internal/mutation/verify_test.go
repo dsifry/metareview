@@ -242,3 +242,43 @@ func TestCopyTreeSkipsGitAndIrregularFiles(t *testing.T) {
 		}
 	}
 }
+
+// The build check is configurable because "does this compile" is not the same question in every
+// language, and a Go-shaped default should not be a Go-shaped assumption.
+func TestBuildCommandIsConfigurable(t *testing.T) {
+	dir := fixtureRepo(t, "n < 10", "func TestBoundary(t *testing.T) {\n\tif Allow(10) {\n\t\tt.Fatal(\"no\")\n\t}\n}\n")
+	var ran [][]string
+	v := Verifier{
+		Dir: dir, TestCmd: []string{"go", "test", "./..."},
+		BuildCmd: []string{"true"},
+		Run: func(_ context.Context, _ string, argv []string) (int, string, error) {
+			ran = append(ran, argv)
+			return 0, "", nil
+		},
+	}
+	// With everything stubbed to succeed, the mutation "survives" — what matters here is which
+	// commands were chosen.
+	if _, err := v.Verify(context.Background(), []Pin{{File: "calc.go", From: "n < 10", To: "n <= 10", Test: "T"}}); err != nil {
+		t.Fatal(err)
+	}
+	var joined []string
+	for _, a := range ran {
+		joined = append(joined, strings.Join(a, " "))
+	}
+	if len(joined) < 2 || joined[1] != "true" {
+		t.Errorf("the configured build command must be used, ran: %v", joined)
+	}
+}
+
+// A harness with no test command cannot check anything, and must say so once rather than report
+// every pin as survived — that would blame the fixes for the harness's own misconfiguration.
+func TestVerifyRefusesWithNoTestCommand(t *testing.T) {
+	v := Verifier{Dir: t.TempDir()}
+	if _, err := v.Verify(context.Background(), []Pin{{File: "a.go", From: "x", To: "y", Test: "T"}}); err == nil {
+		t.Error("a missing test command must be an error, not a wall of false blockers")
+	}
+	// With nothing to check there is nothing to misconfigure.
+	if got, err := v.Verify(context.Background(), nil); err != nil || len(got) != 0 {
+		t.Errorf("no pins: %v %+v", err, got)
+	}
+}

@@ -186,6 +186,14 @@ type Delta struct {
 	Pins []Pin `json:"pins,omitempty"`
 }
 
+// PinResult is the outcome of checking one Pin. Proven is the only value a gate accepts, and it
+// is true only when breaking the line failed the tests AND restoring it passed them.
+type PinResult struct {
+	Pin    Pin    `json:"pin"`
+	Proven bool   `json:"proven"`
+	Detail string `json:"detail,omitempty"`
+}
+
 // Time marshals as UTC RFC3339Nano and unmarshals only the Z form (§2.2).
 type Time struct{ time.Time }
 

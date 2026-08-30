@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/dsifry/metareview/internal/fsm/converge"
 	"github.com/dsifry/metareview/internal/fsm/run"
@@ -42,6 +43,18 @@ var builtin = map[string]Gate{
 			return nil
 		}
 		return fail("findings_empty", CodeFindingsPresent, fmt.Sprintf("%d findings present", len(s.Findings)))
+	},
+	// pins_proven passes when the verify node left no unproven-fix findings. It is vacuously
+	// true when the fix declared no pins: a workflow that wants to require them should say so
+	// with findings_empty on the verify node, because "made no claim" and "made a claim that
+	// failed" are different states and only the second is a defect in the fix.
+	"pins_proven": func(_ context.Context, s run.Snapshot, _ Git) *run.GateError {
+		for _, f := range s.Findings {
+			if strings.HasPrefix(f.IssueText, "Unproven fix in ") {
+				return fail("pins_proven", CodeFindingsPresent, f.IssueText)
+			}
+		}
+		return nil
 	},
 	"confirmed_nonempty": func(_ context.Context, s run.Snapshot, _ Git) *run.GateError {
 		if len(s.Confirmed) > 0 {

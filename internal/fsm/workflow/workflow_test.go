@@ -30,9 +30,11 @@ func kinds() map[string]KindInfo {
 	return map[string]KindInfo{
 		"review-lenses":         {DefaultExec: "subagent", AllowedExec: []string{"inline", "subagent"}, ValidateParams: lenses},
 		"match-then-adjudicate": {DefaultExec: "fork", AllowedExec: []string{"fork"}},
-		"agent-edit":            {DefaultExec: "inline", AllowedExec: []string{"inline", "subagent"}},
-		"still-present":         {DefaultExec: "fork", AllowedExec: []string{"fork"}},
-		"cmd":                   {DefaultExec: "fork", AllowedExec: []string{"fork"}},
+		// deterministic: no model, so NeedsJudge stays false
+		"mutation-verify": {DefaultExec: "fork", AllowedExec: []string{"fork"}},
+		"agent-edit":      {DefaultExec: "inline", AllowedExec: []string{"inline", "subagent"}},
+		"still-present":   {DefaultExec: "fork", AllowedExec: []string{"fork"}},
+		"cmd":             {DefaultExec: "fork", AllowedExec: []string{"fork"}},
 	}
 }
 
@@ -613,5 +615,46 @@ func TestW5Accessors(t *testing.T) {
 	sort.Strings(names)
 	if strings.Join(names, ",") != "notify" {
 		t.Fatal("cmdNames")
+	}
+}
+
+// sdlc-loop-proved is sdlc-loop with a deterministic proof step between fix and verify. It ships
+// separately because adding a state changes the state list every driver sees, and until fix
+// agents emit pins the node could only pass vacuously.
+func TestW1SdlcLoopProved(t *testing.T) {
+	w := mustParse(t, string(must(workflows.Read("sdlc-loop-proved"))))
+	if w.Name != "sdlc-loop-proved" || len(w.Warnings) != 0 {
+		t.Fatalf("name %q warnings %v", w.Name, w.Warnings)
+	}
+	if len(w.Transitions) != 8 {
+		t.Fatalf("transitions: %+v", w.Transitions)
+	}
+	var fixTo, proveTo run.State
+	var proveGate string
+	for _, tr := range w.Transitions {
+		switch tr.From {
+		case "fix":
+			fixTo = tr.To
+		case "prove":
+			proveTo, proveGate = tr.To, tr.Gate
+		}
+	}
+	if fixTo != "prove" {
+		t.Errorf("fix must advance into prove, got %q", fixTo)
+	}
+	if proveTo != "verify" || proveGate != "pins_proven" {
+		t.Errorf("prove must reach verify behind pins_proven, got %q/%q", proveTo, proveGate)
+	}
+	// The proof step consults no model, so the node carries no model or effort at all.
+	n := w.NodeFor("prove")
+	if n == nil || n.Kind != "mutation-verify" {
+		t.Fatalf("prove node: %+v", n)
+	}
+	if n.Model != "" || n.Effort != "" {
+		t.Errorf("a deterministic node must not carry a model: %+v", n)
+	}
+	// still-present survives as the complement rather than being replaced by mutation.
+	if v := w.NodeFor("verify"); v == nil || v.Kind != "still-present" {
+		t.Errorf("verify must remain still-present: %+v", v)
 	}
 }
