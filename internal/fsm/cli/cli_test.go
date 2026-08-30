@@ -1002,3 +1002,40 @@ func TestProvedWorkflowRefusesAFlatLensReport(t *testing.T) {
 		t.Fatalf("eight passing lenses with nothing found is a clean exit: %v", done)
 	}
 }
+
+// The proved loop end to end: a fix that shows no work is refused at the point of recording, so
+// it never reaches prove. Before this the machine accepted {commit, summary} and believed it.
+func TestProvedWorkflowRefusesAFixThatShowsNoWork(t *testing.T) {
+	// Mock judge: adjudicate is not what this row is about, and a scripted scenario keeps the
+	// test off the network.
+	h := newHarness(t)
+	id := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop-proved",
+		"--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock")["run_id"].(string)
+	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
+
+	var lenses []string
+	for i, name := range kind.Lenses {
+		v := "PASS"
+		if i == 0 {
+			v = "NEEDS_REVISION"
+		}
+		f := ""
+		if i == 0 {
+			f = `,"findings":[{"issue_text":"off by one in f.go","file":"f.go"}]`
+		}
+		lenses = append(lenses, `{"name":"`+name+`","verdict":"`+v+`"`+f+`}`)
+	}
+	h.must(StatusOK, 0, "record", "node-output", "--node", "discover",
+		"--data", h.file("lenses.json", `{"lenses":[`+strings.Join(lenses, ",")+`]}`), "--run", id)
+	h.must(machine.StatusAdvanced, 0, "advance", "--run", id) // → adjudicate
+
+	h.must(machine.StatusAdvanced, 0, "advance", "--run", id)   // adjudicate → fix
+	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id) // fix needs the host
+
+	sha := h.commit("fix it")
+	bare := h.file("bare.json", `{"commit":"`+sha+`","summary":"fixed"}`)
+	h.mustErr(machine.CodeNodeOutputInvalid, 2, "record", "node-output", "--node", "fix", "--data", bare, "--run", id)
+
+	pinned := h.file("pinned.json", `{"commit":"`+sha+`","summary":"fixed","pins":[{"file":"f.go","from":"package f","to":"package g","test":"TestF"}]}`)
+	h.must(StatusOK, 0, "record", "node-output", "--node", "fix", "--data", pinned, "--run", id)
+}

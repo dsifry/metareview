@@ -31,7 +31,10 @@ nodes:
   # review is not a clean one.
   discover:   {kind: review-lenses,        exec: subagent, lenses: 8, require_verdicts: true, model: $REVIEWER, effort: $REV_EFFORT}
   adjudicate: {kind: match-then-adjudicate, exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
-  fix:        {kind: agent-edit}                                   # exec inferred from the kind (inline)
+  # require_pins: the fix must declare, for each bug, the smallest edit to its own new code that
+  # its new test catches. prove then breaks exactly that and requires the tests to fail. Without
+  # this the proof step passes vacuously, because a fix that claims nothing can never be refuted.
+  fix:        {kind: agent-edit, require_pins: true}               # exec inferred from the kind (inline)
   # prove is deterministic: it breaks each line the fix claims a test now holds, requires the
   # tests to FAIL, restores it and requires them to PASS. No model is consulted, because whether
   # a test catches a mutation is a fact about the repository, not an opinion, and the answer

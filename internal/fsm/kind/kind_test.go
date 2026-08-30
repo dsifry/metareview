@@ -1312,3 +1312,92 @@ func TestReviewLensesStrictEdges(t *testing.T) {
 		t.Error("a finding that breaches the caps must be refused wherever it is nested")
 	}
 }
+
+// The fix node's prompt asked for {commit, summary} and the machine believed it. When a workflow
+// requires pins, the prompt must ask for them and the decode must refuse a fix that declared
+// none — otherwise `prove` passes vacuously and the proof step is ceremony.
+func TestAgentEditRequiresPinsWhenAsked(t *testing.T) {
+	r := mustNew(t, &recordingJudge{}, false)
+	k, _ := r.Kind(AgentEdit)
+	dec := k.(interface {
+		DecodeFor(*workflow.Node, json.RawMessage) (any, error)
+	})
+	lax := &workflow.Node{Name: "fix", Kind: AgentEdit}
+	strict := &workflow.Node{Name: "fix", Kind: AgentEdit, Params: map[string]any{"require_pins": true}}
+
+	noPins := `{"commit":"abc1234","summary":"fixed it"}`
+	if _, err := dec.DecodeFor(lax, json.RawMessage(noPins)); err != nil {
+		t.Fatalf("the permissive default must still accept a fix with no pins: %v", err)
+	}
+	if _, err := dec.DecodeFor(strict, json.RawMessage(noPins)); err == nil {
+		t.Error("a workflow that requires pins must refuse a fix that declared none")
+	}
+	withPins := `{"commit":"abc1234","summary":"fixed it","pins":[{"file":"a.go","from":"x > 1","to":"x >= 1","test":"TestBoundary"}]}`
+	if _, err := dec.DecodeFor(strict, json.RawMessage(withPins)); err != nil {
+		t.Errorf("a fix that shows its work must be accepted: %v", err)
+	}
+
+	// The prompt has to ask. A schema that demands what the instructions never mentioned is a
+	// trap: the agent fails for not supplying something nobody told it about.
+	snap := run.Snapshot{RunID: "r", BaseSHA: "b", Head: "h", AllFound: []run.Bug{{ID: "b1", Desc: "off by one"}}}
+	plain, err := k.Instructions(snap, lax, machine.Diff{Text: "d"}, "n0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.Text, "pins") {
+		t.Error("the permissive node must not ask for pins it will not require")
+	}
+	asked, err := k.Instructions(snap, strict, machine.Diff{Text: "d"}, "n0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"pins", "exactly once", "compile", "fail"} {
+		if !strings.Contains(strings.ToLower(asked.Text), want) {
+			t.Errorf("the strict prompt must explain %q: %s", want, asked.Text)
+		}
+	}
+	if !strings.Contains(string(asked.OutputSchema), "pins") {
+		t.Errorf("the strict schema must declare pins: %s", asked.OutputSchema)
+	}
+	if strings.Contains(string(plain.OutputSchema), "pins") {
+		t.Errorf("the permissive schema must not: %s", plain.OutputSchema)
+	}
+
+	// A nil node cannot have asked for anything.
+	if _, err := dec.DecodeFor(nil, json.RawMessage(noPins)); err != nil {
+		t.Errorf("a nil node must take the permissive contract: %v", err)
+	}
+
+	// require_pins is a boolean, and a workflow that says otherwise is refused at parse time.
+	if err := k.Info().ValidateParams(map[string]any{"require_pins": "sure"}); err == nil {
+		t.Error("a non-boolean require_pins must be refused")
+	}
+	// An unknown param is refused rather than ignored: a knob nobody reads is a knob nobody set.
+	if err := k.Info().ValidateParams(map[string]any{"require_pinz": true}); err == nil {
+		t.Error("an unknown param must be refused")
+	}
+	if err := k.Info().ValidateParams(map[string]any{"require_pins": true}); err != nil {
+		t.Errorf("the documented form must validate: %v", err)
+	}
+}
+
+// Kinds that take no params must refuse one rather than ignore it. A workflow that sets a knob
+// the kind never reads has said something the machine silently discarded, and the author will
+// believe it took effect. Enumerated so a new kind cannot quietly accept anything.
+func TestKindsWithoutParamsRefuseThem(t *testing.T) {
+	r := mustNew(t, &recordingJudge{}, false)
+	takesParams := map[string]bool{ReviewLenses: true, AgentEdit: true}
+	for name, info := range r.Info() {
+		if takesParams[name] {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			if err := info.ValidateParams(map[string]any{"lenses": 8}); err == nil {
+				t.Errorf("kind %q accepted a param it does not read", name)
+			}
+			if err := info.ValidateParams(map[string]any{}); err != nil {
+				t.Errorf("kind %q rejected an empty param set: %v", name, err)
+			}
+		})
+	}
+}
