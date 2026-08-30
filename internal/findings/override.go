@@ -108,6 +108,12 @@ func GrantOverride(root, findingID string, grant OverrideGrant) error {
 			return fmt.Errorf("%s requested this override and cannot also grant it; acknowledgement comes from outside the workflow", by)
 		}
 		record.Status = StatusOverridden
+		// Bind the exception to what justified it, so it cannot outlive the state it was granted
+		// over. Without this a grant is permanent AND silent: an overridden record suppresses
+		// rediscovery of the same fingerprint, so the check never fires again on this target.
+		kind, paths, hash := bindingFor(root, *record, record.GitHead)
+		record.OverrideBoundKind, record.OverrideBoundPaths, record.OverrideBoundHash = kind, paths, hash
+		record.OverrideLapsedAt = ""
 		record.OverrideGrantedBy = by
 		record.OverrideGrantReason = strings.TrimSpace(grant.Reason)
 		record.OverrideGrantedAt = now

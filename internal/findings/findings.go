@@ -82,10 +82,17 @@ type Record struct {
 	OverrideGrantedBy     string `json:"overrideGrantedBy,omitempty"`
 	OverrideGrantedAt     string `json:"overrideGrantedAt,omitempty"`
 	OverrideGrantReason   string `json:"overrideGrantReason,omitempty"`
-	CreatedAt             string `json:"createdAt"`
-	UpdatedAt             string `json:"updatedAt"`
-	RepoRoot              string `json:"repoRoot"`
-	GitHead               string `json:"gitHead"`
+	// What the exception is an exception TO. See bind.go: a grant is bound to the files the
+	// finding names (or to the head when it names none), and lapses when they change, so an
+	// unattended run cannot accumulate permanent blind spots.
+	OverrideBoundKind  string   `json:"overrideBoundKind,omitempty"`
+	OverrideBoundPaths []string `json:"overrideBoundPaths,omitempty"`
+	OverrideBoundHash  string   `json:"overrideBoundHash,omitempty"`
+	OverrideLapsedAt   string   `json:"overrideLapsedAt,omitempty"`
+	CreatedAt          string   `json:"createdAt"`
+	UpdatedAt          string   `json:"updatedAt"`
+	RepoRoot           string   `json:"repoRoot"`
+	GitHead            string   `json:"gitHead"`
 }
 
 type Result struct {
@@ -105,6 +112,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	if err != nil {
 		return Result{}, err
 	}
+	existing = lapseStaleOverrides(root, existing, run, nowISO())
 	previousRuns := previousRunSet(options)
 	resetRuns := resetRunSet(options)
 	currentFingerprints := map[string]bool{}

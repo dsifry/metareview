@@ -55,6 +55,18 @@ metareview override list [--pending]
 - Both halves are recorded with actor, timestamp and reason, rendered under "Process Overrides" in
   `docs/metareview/FINDINGS.md`, and an override is never a fix (`fixedInRunId` stays empty), so post-merge
   learning can analyse exceptions separately from resolutions.
+- **A granted override is bound to what justified it, and lapses on its own.** The grant records the
+  files the finding names (`overrideBoundPaths`, hashed into `overrideBoundHash`); when their contents
+  change, the next run returns the finding to `open` and it blocks again, with `overrideLapsedAt`
+  recorded and the grant provenance kept. A finding that names no file is bound to the head instead and
+  lapses on the next commit — noisier, deliberately, because a gate that cannot work out what to watch
+  must fail toward blocking.
+
+  This is what makes unattended operation safe. An `overridden` record also suppresses *rediscovery* of
+  the same fingerprint, so before binding a single grant silenced that check on that target permanently:
+  every exception an autonomous run took was a check it could never get back. Re-granting after a lapse
+  is a fresh request and a fresh grant, so an exception that keeps being needed leaves a visible trail
+  instead of one forgotten record.
 
 ## Lifecycle Placement
 
