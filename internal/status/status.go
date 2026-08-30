@@ -47,6 +47,8 @@ type Report struct {
 	// Target is the scope this report was built for, empty when it covers everything. A reader
 	// has to be able to tell a clean repository from a clean corner of a blocked one.
 	Target string `json:"target,omitempty"`
+	// Abandoned are FSM runs stopped somewhere that is not an ending.
+	Abandoned []AbandonedRun `json:"abandoned,omitempty"`
 	// Warnings say why an answer may be narrower or wider than asked for — a scope that could
 	// not be resolved reports unscoped rather than empty, and has to say so.
 	Warnings []string `json:"warnings,omitempty"`
@@ -121,9 +123,21 @@ func BuildFor(root, target string) (Report, error) {
 			Kind:    "unreviewed",
 		})
 	}
+	r.Abandoned = DiscoverAbandonedRuns(root)
+	for _, a := range r.Abandoned {
+		r.MustClear = append(r.MustClear, Blocker{
+			Target: a.Workflow + " @ " + a.State, RunID: a.RunID, Verdict: VerdictAbandoned, Kind: "fsm-run",
+		})
+	}
 	r.Blocked = len(r.MustClear) > 0
 	return r, nil
 }
+
+// VerdictAbandoned is the verdict on an FSM run left mid-flight. Every loop here ends by handing
+// control to an agent, and nothing brought it back: six runs on this repository sit at `fix`, and
+// none has ever reached `verify`. They were invisible to this report, so the gate whose job is
+// saying "work is unfinished" could not see the plainest unfinished work there was.
+const VerdictAbandoned = "ABANDONED"
 
 // VerdictUnreviewed is the verdict on a target no review log covers. It is not a review outcome —
 // it is the absence of one — and it is named so a hook can tell "you have findings to fix" from
