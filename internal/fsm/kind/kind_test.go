@@ -10,6 +10,7 @@ import (
 
 	"github.com/dsifry/metareview/internal/fsm/converge"
 	"github.com/dsifry/metareview/internal/fsm/errs"
+	"github.com/dsifry/metareview/internal/fsm/gate"
 	"github.com/dsifry/metareview/internal/fsm/judge"
 	"github.com/dsifry/metareview/internal/fsm/machine"
 	"github.com/dsifry/metareview/internal/fsm/run"
@@ -1152,8 +1153,8 @@ func TestMutationVerifyExecutorReportsOnlyUnprovenPins(t *testing.T) {
 		VerifyPins: func(_ context.Context, in []run.Pin) ([]run.PinResult, error) {
 			got = in
 			return []run.PinResult{
-				{Pin: in[0], Proven: true, Detail: "fails when broken"},
-				{Pin: in[1], Proven: false, Detail: "the mutation survived"},
+				{Pin: in[0], Proven: true, Outcome: run.PinProven, Detail: "fails when broken"},
+				{Pin: in[1], Proven: false, Outcome: run.PinSurvived, Detail: "the mutation survived"},
 			}, nil
 		},
 	})
@@ -1178,8 +1179,13 @@ func TestMutationVerifyExecutorReportsOnlyUnprovenPins(t *testing.T) {
 	if len(d.Findings) != 1 {
 		t.Fatalf("exactly the unproven pin becomes a finding, got %d: %+v", len(d.Findings), d.Findings)
 	}
-	if d.Findings[0].File != "loose.go" || !strings.Contains(d.Findings[0].IssueText, "Unproven fix in loose.go") {
-		t.Errorf("the finding must name the unproven file and be recognisable to the gate: %+v", d.Findings[0])
+	f := d.Findings[0]
+	if f.File != "loose.go" || !strings.Contains(f.IssueText, "loose.go") {
+		t.Errorf("the finding must name the unproven file: %+v", f)
+	}
+	// Recognisable to the gate by its fields, not by how the sentence is worded.
+	if f.Source != run.SourceMutationVerify || f.Category != run.CategoryUnprovenFix {
+		t.Errorf("the finding must be selectable on Source+Category: %+v", f)
 	}
 
 	// A verifier that fails is an error, never an empty pass.
@@ -1399,5 +1405,141 @@ func TestKindsWithoutParamsRefuseThem(t *testing.T) {
 				t.Errorf("kind %q rejected an empty param set: %v", name, err)
 			}
 		})
+	}
+}
+
+// Two things a first supervised run needs. A malformed pin must not block — it says the claim
+// could not be checked, not that the code is wrong, and an agent with clumsy syntax must not be
+// indistinguishable from one shipping untested code. And `mode: advisory` reports everything
+// while blocking nothing, so the node can be run to watch before it is run to enforce.
+func TestMutationVerifyDistinguishesAndCanBeAdvisory(t *testing.T) {
+	pins := []run.Pin{
+		{File: "held.go", From: "a", To: "b", Test: "T1"},
+		{File: "loose.go", From: "c", To: "d", Test: "T2"},
+		{File: "bad.go", From: "e", To: "f", Test: "T3"},
+		{File: "odd.go", From: "g", To: "h", Test: "T4"},
+	}
+	results := []run.PinResult{
+		{Pin: pins[0], Proven: true, Outcome: run.PinProven},
+		{Pin: pins[1], Outcome: run.PinSurvived, Detail: "the mutation survived"},
+		{Pin: pins[2], Outcome: run.PinMalformed, Detail: "does not compile"},
+		// An outcome this build does not recognise — a newer verifier, or a hand-edited log.
+		// It must block (an unreadable claim is not a proof) but be reported as "not checked"
+		// rather than as an unproven fix, or an agent is sent to write a test for a result
+		// nobody established.
+		{Pin: pins[3], Outcome: run.PinOutcome("from-the-future"), Detail: "unknown"},
+	}
+	r, err := New(Deps{VerifyPins: func(context.Context, []run.Pin) ([]run.PinResult, error) { return results, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex, _ := r.Executor(MutationVerify)
+
+	enforcing := &workflow.Node{Name: "prove", Kind: MutationVerify}
+	raw, err := ex.Execute(context.Background(), machine.ExecInput{Snap: run.Snapshot{Pins: pins}, Node: enforcing})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var d run.Delta
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	// Counted the way the gate counts them: on the structured fields, not the prose. If these
+	// two ever disagree the node reports one thing and the gate enforces another.
+	blocking, advisory := countByCategory(t, d.Findings)
+	var unverifiable int
+	for _, f := range d.Findings {
+		if f.Category == run.CategoryUnverifiable {
+			unverifiable++
+		}
+	}
+	if unverifiable != 1 {
+		t.Errorf("the unrecognised outcome must be reported as unverifiable, got %d: %+v", unverifiable, d.Findings)
+	}
+	if blocking != 2 {
+		t.Errorf("the unheld fix and the unreadable outcome block, got %d: %+v", blocking, d.Findings)
+	}
+	if advisory != 1 {
+		t.Errorf("the malformed pin is reported but does not block, got %d: %+v", advisory, d.Findings)
+	}
+
+	// Advisory mode: everything is still reported, and nothing is phrased so the gate refuses.
+	// This is the mode for a first supervised run — see what it would say before it can stop you.
+	obs := &workflow.Node{Name: "prove", Kind: MutationVerify, Params: map[string]any{"mode": "advisory"}}
+	raw, err = ex.Execute(context.Background(), machine.ExecInput{Snap: run.Snapshot{Pins: pins}, Node: obs})
+	if err != nil {
+		t.Fatalf("Execute (advisory): %v", err)
+	}
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Findings) != 3 {
+		t.Errorf("advisory mode still reports every problem, got %d", len(d.Findings))
+	}
+	if b, a := countByCategory(t, d.Findings); b != 0 || a != 3 {
+		t.Errorf("advisory mode reports everything and blocks nothing, got %d blocking / %d advisory", b, a)
+	}
+	// mode is validated, so a typo is refused rather than silently enforcing.
+	if err := r.Info()[MutationVerify].ValidateParams(map[string]any{"mode": "advisroy"}); err == nil {
+		t.Error("an unknown mode must be refused")
+	}
+	if err := r.Info()[MutationVerify].ValidateParams(map[string]any{"mode": "advisory"}); err != nil {
+		t.Errorf("the documented mode must validate: %v", err)
+	}
+}
+
+// countByCategory splits findings the way the pins_proven gate does, and asserts the real gate
+// agrees. Producer and consumer are checked against each other here on purpose: the point of
+// moving the meaning out of the prose and into Source/Category is that these two cannot drift,
+// and a test that re-implemented the selection inline would not notice if they did.
+func countByCategory(t *testing.T, fs []run.Finding) (blocking, advisory int) {
+	t.Helper()
+	for _, f := range fs {
+		if f.Source != run.SourceMutationVerify {
+			t.Errorf("every finding from this node must name its producer: %+v", f)
+			continue
+		}
+		switch f.Category {
+		case run.CategoryUnprovenFix, run.CategoryUnverifiable:
+			blocking++
+		case run.CategoryMalformedPin:
+			advisory++
+		default:
+			t.Errorf("unknown category %q: %+v", f.Category, f)
+		}
+	}
+	g, ok := gate.Builtin("pins_proven")
+	if !ok {
+		t.Fatal("pins_proven is not registered")
+	}
+	err := g(context.Background(), run.Snapshot{Findings: fs}, nil)
+	if (err != nil) != (blocking > 0) {
+		t.Errorf("the gate and the node disagree: %d blocking findings, gate says %+v", blocking, err)
+	}
+	return blocking, advisory
+}
+
+// A result that does not say what happened has established nothing, so it must not be reported
+// as a specific verdict. Before outcomes were typed, an unset field and "the tests did not fail"
+// were the same value, which meant a truncated or older log read as a confident finding.
+func TestMutationVerifyTreatsAnUnsetOutcomeAsUnverifiable(t *testing.T) {
+	pin := run.Pin{File: "quiet.go", From: "a", To: "b", Test: "T"}
+	r, err := New(Deps{VerifyPins: func(context.Context, []run.Pin) ([]run.PinResult, error) {
+		return []run.PinResult{{Pin: pin, Detail: "no outcome recorded"}}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex, _ := r.Executor(MutationVerify)
+	raw, err := ex.Execute(context.Background(), machine.ExecInput{Snap: run.Snapshot{Pins: []run.Pin{pin}}})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var d run.Delta
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Findings) != 1 || d.Findings[0].Category != run.CategoryUnverifiable {
+		t.Errorf("an unset outcome must be unverifiable, not a verdict: %+v", d.Findings)
 	}
 }

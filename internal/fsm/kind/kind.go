@@ -939,7 +939,33 @@ type mutationVerifyKind struct{}
 func (mutationVerifyKind) Name() string { return MutationVerify }
 func (mutationVerifyKind) Info() workflow.KindInfo {
 	// NeedsJudge false: nothing here calls a model, so judge pre-flight has nothing to validate.
-	return workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, ValidateParams: noParams}
+	return workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, ValidateParams: validateProve}
+}
+
+func validateProve(p map[string]any) error {
+	for k := range p {
+		if k != "mode" {
+			return errors.New("unknown param " + k)
+		}
+	}
+	if v, ok := p["mode"]; ok {
+		s, isStr := v.(string)
+		if !isStr || (s != "advisory" && s != "enforcing") {
+			return errors.New(`mode must be "advisory" or "enforcing"`)
+		}
+	}
+	return nil
+}
+
+// advisoryProve reports whether this node observes rather than blocks. A first supervised run
+// wants to see what the check WOULD say before it can stop anything: a gate nobody can survive is
+// switched off, and a gate switched off is worse than one that was never trusted.
+func advisoryProve(n *workflow.Node) bool {
+	if n == nil {
+		return false
+	}
+	m, _ := n.Params["mode"].(string)
+	return m == "advisory"
 }
 
 func (mutationVerifyKind) Instructions(run.Snapshot, *workflow.Node, machine.Diff, string) (machine.Instructions, error) {
@@ -971,14 +997,32 @@ func (e *mutationVerifyExec) Execute(ctx context.Context, in machine.ExecInput) 
 	if err != nil {
 		return nil, errs.E(machine.CodeExecutorFailed, "mutation-verify failed: "+err.Error(), "reason", "verify")
 	}
+	advisory := advisoryProve(in.Node)
 	out := run.Delta{Findings: []run.Finding{}}
 	for _, r := range results {
 		if r.Proven {
 			continue
 		}
-		text, _ := run.CapText(fmt.Sprintf("Unproven fix in %s: breaking %q did not make the tests fail. %s",
-			r.Pin.File, r.Pin.From, r.Detail), run.MaxDesc)
-		out.Findings = append(out.Findings, run.Finding{IssueText: text, File: r.Pin.File})
+		// Category carries the meaning, not the prose. Only an unheld fix blocks: a malformed pin
+		// says the claim could not be checked, not that the code is wrong, and if the two were
+		// indistinguishable an agent with clumsy syntax would look like one shipping untested
+		// code and the iteration budget would go on the wrong problem.
+		category, why := run.CategoryUnprovenFix, "did not make the tests fail"
+		switch {
+		case r.Outcome == run.PinMalformed || advisory:
+			category, why = run.CategoryMalformedPin, "could not be evaluated, so the fix was neither proved nor disproved"
+		case r.Outcome == run.PinUnverifiable || !r.Outcome.Valid():
+			// An outcome this build does not recognise is treated as "nothing was learned", not
+			// as a specific verdict. It still blocks — a claim that cannot be read is not a
+			// proof — but it must not be reported as an unproven fix, which would send an agent
+			// off to write a test for a result nobody actually established.
+			category, why = run.CategoryUnverifiable, "could not be checked: the tree did not answer"
+		}
+		text, _ := run.CapText(fmt.Sprintf("%s: breaking %q %s. %s", r.Pin.File, r.Pin.From, why, r.Detail), run.MaxDesc)
+		out.Findings = append(out.Findings, run.Finding{
+			IssueText: text, File: r.Pin.File,
+			Source: run.SourceMutationVerify, Category: category,
+		})
 	}
 	return json.RawMessage(run.MarshalCanonical(out)), nil
 }

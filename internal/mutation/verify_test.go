@@ -282,3 +282,59 @@ func TestVerifyRefusesWithNoTestCommand(t *testing.T) {
 		t.Errorf("no pins: %v %+v", err, got)
 	}
 }
+
+// A malformed pin is not a verdict on the fix. "I could not evaluate this claim" and "this claim
+// is false" call for opposite responses — rewrite the pin, versus write a test — and collapsing
+// them makes an agent with clumsy syntax indistinguishable from one shipping untested code.
+func TestOutcomesDistinguishAMalformedPinFromAnUnheldFix(t *testing.T) {
+	held := "func TestBoundary(t *testing.T) {\n\tif Allow(10) {\n\t\tt.Fatal(\"no\")\n\t}\n}\n"
+	for _, tc := range []struct {
+		name string
+		pin  Pin
+		want Outcome
+	}{
+		{"a mutation the test catches", Pin{File: "calc.go", From: "n < 10", To: "n <= 10", Test: "T"}, PinProven},
+		{"a mutation nothing catches", Pin{File: "calc.go", From: "// Allow reports", To: "// allow reports", Test: "T"}, PinSurvived},
+		{"a mutation that does not compile", Pin{File: "calc.go", From: "n < 10", To: "n <<< 10", Test: "T"}, PinMalformed},
+		{"an anchor that appears twice", Pin{File: "calc.go", From: "n", To: "m", Test: "T"}, PinMalformed},
+		{"an anchor that appears nowhere", Pin{File: "calc.go", From: "not here", To: "x", Test: "T"}, PinMalformed},
+		{"a file that is not there", Pin{File: "gone.go", From: "a", To: "b", Test: "T"}, PinMalformed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := fixtureRepo(t, "n < 10", held)
+			got, err := Verifier{Dir: dir, TestCmd: []string{"go", "test", "./..."}}.Verify(context.Background(), []Pin{tc.pin})
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+			if got[0].Outcome != tc.want {
+				t.Errorf("Outcome = %q, want %q (%s)", got[0].Outcome, tc.want, got[0].Detail)
+			}
+			if (got[0].Outcome == PinProven) != got[0].Proven {
+				t.Errorf("Proven must agree with Outcome: %+v", got[0])
+			}
+		})
+	}
+}
+
+// Severity follows the distinction: an unheld fix blocks, a malformed pin is worth fixing but is
+// not evidence that the code is wrong.
+func TestFindingSeverityFollowsTheOutcome(t *testing.T) {
+	got := FindingsForPins([]PinResult{
+		{Pin: Pin{File: "a.go"}, Outcome: PinProven, Proven: true},
+		{Pin: Pin{File: "b.go"}, Outcome: PinSurvived, Detail: "the mutation survived"},
+		{Pin: Pin{File: "c.go"}, Outcome: PinMalformed, Detail: "does not compile"},
+	})
+	if len(got) != 2 {
+		t.Fatalf("a proven pin produces nothing, got %d findings", len(got))
+	}
+	bySeverity := map[string]string{}
+	for _, f := range got {
+		bySeverity[f.Evidence[0].Path] = f.Severity + "/" + f.Classification
+	}
+	if bySeverity["b.go"] != "high/blocking" {
+		t.Errorf("an unheld fix must block: %s", bySeverity["b.go"])
+	}
+	if bySeverity["c.go"] != "medium/advisory" {
+		t.Errorf("a malformed pin is advisory, not a verdict on the code: %s", bySeverity["c.go"])
+	}
+}

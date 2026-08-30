@@ -12,6 +12,7 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/run"
 	"github.com/dsifry/metareview/internal/fsm/sandbox"
 	"github.com/dsifry/metareview/internal/fsm/workflow"
+	"github.com/dsifry/metareview/internal/mutation"
 )
 
 // The provider is exercised against a real git repository with a real diff, and only the
@@ -620,5 +621,33 @@ func TestVerifyPinsSurfacesAVerifierFailure(t *testing.T) {
 	verify := c.verifyPins(h.root, nil)
 	if _, err := verify(context.Background(), []run.Pin{{File: "f.go", From: "x", To: "y", Test: "T"}}); err == nil {
 		t.Error("a verifier failure must reach the node, not be reported as nothing wrong")
+	}
+}
+
+// The verifier's vocabulary and the schema's are separate on purpose — internal/mutation is a
+// standalone tool that must not depend on the FSM's types — so the seam between them is exactly
+// where a value can be lost. The mapping must be total: every outcome the verifier can return
+// has a name here, and anything it cannot name becomes PinUnverifiable, never something that
+// reads as a pass. If a fifth outcome is ever added to the verifier this test fails, which is
+// the point: the translation is a decision, not a default.
+func TestOutcomeForIsTotal(t *testing.T) {
+	for verifier, schema := range map[mutation.Outcome]run.PinOutcome{
+		mutation.PinProven:        run.PinProven,
+		mutation.PinSurvived:      run.PinSurvived,
+		mutation.PinMalformed:     run.PinMalformed,
+		mutation.PinUnverifiable:  run.PinUnverifiable,
+		mutation.Outcome("later"): run.PinUnverifiable,
+		mutation.Outcome(""):      run.PinUnverifiable,
+	} {
+		got := outcomeFor(verifier)
+		if got != schema {
+			t.Errorf("outcomeFor(%q) = %q, want %q", verifier, got, schema)
+		}
+		if !got.Valid() {
+			t.Errorf("outcomeFor(%q) produced %q, which the schema does not recognise", verifier, got)
+		}
+	}
+	if outcomeFor(mutation.Outcome("later")) == run.PinProven {
+		t.Error("an unrecognised outcome must never map to a pass")
 	}
 }

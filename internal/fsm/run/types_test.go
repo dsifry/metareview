@@ -229,3 +229,20 @@ func TestCloneKeepsAllowedCmdScalars(t *testing.T) {
 		t.Fatal("env must be copied")
 	}
 }
+
+// Valid is what lets a consumer say "I do not recognise this" instead of guessing, so it has to
+// be exact: the four outcomes and nothing else. A value from a newer producer, a wrong case, or
+// an empty field must all fail it — the executor turns a !Valid outcome into "nothing was
+// learned", and that is only safe if Valid never accepts something it should not.
+func TestPinOutcomeValid(t *testing.T) {
+	for _, o := range []PinOutcome{PinProven, PinSurvived, PinMalformed, PinUnverifiable} {
+		if !o.Valid() {
+			t.Errorf("%q is part of the schema but Valid() rejects it", o)
+		}
+	}
+	for _, o := range []PinOutcome{"", "ok", "PROVEN", "unusable", "proven "} {
+		if o.Valid() {
+			t.Errorf("%q is not in the schema but Valid() accepts it", o)
+		}
+	}
+}

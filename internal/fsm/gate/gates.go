@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/dsifry/metareview/internal/fsm/converge"
 	"github.com/dsifry/metareview/internal/fsm/run"
@@ -50,7 +49,14 @@ var builtin = map[string]Gate{
 	// failed" are different states and only the second is a defect in the fix.
 	"pins_proven": func(_ context.Context, s run.Snapshot, _ Git) *run.GateError {
 		for _, f := range s.Findings {
-			if strings.HasPrefix(f.IssueText, "Unproven fix in ") {
+			// Selected on structure, never on prose. The first version matched a prefix of
+			// IssueText, which means rewording a message silently disables the gate — and
+			// Source/Category already existed for exactly this.
+			if f.Source != run.SourceMutationVerify {
+				continue
+			}
+			switch f.Category {
+			case run.CategoryUnprovenFix, run.CategoryUnverifiable:
 				return fail("pins_proven", CodeFindingsPresent, f.IssueText)
 			}
 		}

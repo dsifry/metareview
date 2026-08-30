@@ -501,19 +501,49 @@ func TestG1PinsProven(t *testing.T) {
 	if err := g(ctx, run.Snapshot{}, &Fake{}); err != nil {
 		t.Errorf("no findings at all must pass: %+v", err)
 	}
-	clean := run.Snapshot{Findings: []run.Finding{{IssueText: "some ordinary finding"}}}
-	if err := g(ctx, clean, &Fake{}); err != nil {
-		t.Errorf("unrelated findings must not fail this gate: %+v", err)
-	}
-	bad := run.Snapshot{Findings: []run.Finding{
+	clean := run.Snapshot{Findings: []run.Finding{
 		{IssueText: "some ordinary finding"},
-		{IssueText: "Unproven fix in calc.go: breaking \"n < 10\" did not make the tests fail.", File: "calc.go"},
+		// The prose alone must not trip the gate. An earlier version matched a prefix of
+		// IssueText, so a review finding that merely quoted the phrase failed the run, and
+		// rewording the real message disabled the gate. Selection is on Source+Category now.
+		{IssueText: "Unproven fix in calc.go: breaking \"n < 10\" did not make the tests fail."},
+		// Right producer, but an outcome that does not block.
+		{IssueText: "bad.go: could not be evaluated", File: "bad.go",
+			Source: run.SourceMutationVerify, Category: run.CategoryMalformedPin},
+		// Right category, but not from the prover: not this gate's business.
+		{IssueText: "calc.go: unproven", File: "calc.go", Category: run.CategoryUnprovenFix},
 	}}
-	err := g(ctx, bad, &Fake{})
-	if err == nil {
-		t.Fatal("an unproven fix must fail the gate")
+	if err := g(ctx, clean, &Fake{}); err != nil {
+		t.Errorf("only a blocking mutation-verify finding may fail this gate: %+v", err)
 	}
-	if !strings.Contains(err.Detail, "calc.go") {
-		t.Errorf("the failure must name the file: %+v", err)
+
+	for _, cat := range []string{run.CategoryUnprovenFix, run.CategoryUnverifiable} {
+		bad := run.Snapshot{Findings: []run.Finding{
+			{IssueText: "some ordinary finding"},
+			{IssueText: "calc.go: breaking \"n < 10\" did not make the tests fail.", File: "calc.go",
+				Source: run.SourceMutationVerify, Category: cat},
+		}}
+		err := g(ctx, bad, &Fake{})
+		if err == nil {
+			t.Fatalf("category %q must fail the gate", cat)
+		}
+		if !strings.Contains(err.Detail, "calc.go") {
+			t.Errorf("the failure must name the file: %+v", err)
+		}
+	}
+}
+
+// The schema owns the pin vocabulary, so an outcome it does not recognise must not read as a
+// success anywhere. Valid() is what lets a caller say "I do not know this" instead of guessing.
+func TestPinOutcomeVocabulary(t *testing.T) {
+	for _, o := range []run.PinOutcome{run.PinProven, run.PinSurvived, run.PinMalformed, run.PinUnverifiable} {
+		if !o.Valid() {
+			t.Errorf("%q is part of the schema but Valid() rejects it", o)
+		}
+	}
+	for _, o := range []run.PinOutcome{"", "ok", "PROVEN", "unusable"} {
+		if o.Valid() {
+			t.Errorf("%q is not in the schema but Valid() accepts it", o)
+		}
 	}
 }

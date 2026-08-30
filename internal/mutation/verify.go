@@ -22,14 +22,36 @@ type Pin struct {
 	Test string
 }
 
+// Outcome separates "this claim is false" from "I could not evaluate this claim". They call for
+// opposite responses — write a test, versus rewrite the pin — and collapsing them makes an agent
+// with clumsy syntax indistinguishable from one shipping untested code, while burning the
+// iteration budget on the wrong problem.
+type Outcome string
+
+const (
+	// Proven: breaking the line failed the tests and restoring it passed them.
+	PinProven Outcome = "proven"
+	// Survived: the mutation was applied, compiled, and the tests still passed. A real defect in
+	// the test, and the finding this whole node exists to raise.
+	PinSurvived Outcome = "survived"
+	// Malformed: the pin could not be evaluated — the anchor is absent or ambiguous, the file is
+	// unreadable, or the mutation does not compile. Says nothing about the fix.
+	PinMalformed Outcome = "malformed"
+	// Unverifiable: the tree itself could not answer — the baseline is red, or a command would not
+	// run. Neither the pin nor the fix is implicated, and nothing may be concluded from the run.
+	PinUnverifiable Outcome = "unverifiable"
+)
+
 // PinResult is what verification found. Proven is the only value a gate should accept, and it is
 // true only when BOTH halves held: the mutation failed the tests and the restored code passed
 // them. Either half alone proves nothing — a suite that always fails "detects" everything, and
 // one that always passes detects nothing.
 type PinResult struct {
-	Pin    Pin
-	Proven bool
-	Detail string
+	Pin Pin
+	// Proven is kept as the single thing a gate needs, and is true exactly when Outcome is Proven.
+	Proven  bool
+	Outcome Outcome
+	Detail  string
 }
 
 // Verifier proves pins against a copy of a tree.
@@ -74,60 +96,60 @@ func (v Verifier) Verify(ctx context.Context, pins []Pin) ([]PinResult, error) {
 }
 
 func (v Verifier) verifyOne(ctx context.Context, p Pin) PinResult {
-	fail := func(format string, a ...any) PinResult {
-		return PinResult{Pin: p, Detail: fmt.Sprintf(format, a...)}
+	fail := func(o Outcome, format string, a ...any) PinResult {
+		return PinResult{Pin: p, Outcome: o, Detail: fmt.Sprintf(format, a...)}
 	}
 	work, err := os.MkdirTemp("", "mrv-verify-")
 	if err != nil {
-		return fail("could not create a working copy: %v", err)
+		return fail(PinUnverifiable, "could not create a working copy: %v", err)
 	}
 	defer func() { _ = os.RemoveAll(work) }()
 	if err := copyTree(v.Dir, work); err != nil {
-		return fail("could not copy the tree: %v", err)
+		return fail(PinUnverifiable, "could not copy the tree: %v", err)
 	}
 
 	target := filepath.Join(work, filepath.FromSlash(p.File))
 	original, err := os.ReadFile(target) // #nosec G304 -- path validated by the caller, inside a temp copy
 	if err != nil {
-		return fail("could not read %s in the copy: %v", p.File, err)
+		return fail(PinMalformed, "could not read %s in the copy: %v", p.File, err)
 	}
 	body := string(original)
 	if n := strings.Count(body, p.From); n != 1 {
 		// Zero occurrences means the pin does not describe this tree; more than one means the
 		// mutation is ambiguous and we would be proving something other than what was claimed.
-		return fail("the anchor text appears %d times in %s; it must appear exactly once", n, p.File)
+		return fail(PinMalformed, "the anchor text appears %d times in %s; it must appear exactly once", n, p.File)
 	}
 
 	// 1. Baseline: the restored tree must pass, or the mutation result means nothing.
 	if code, out, err := v.run(ctx, work); err != nil {
-		return fail("baseline test run failed to execute: %v", err)
+		return fail(PinUnverifiable, "baseline test run failed to execute: %v", err)
 	} else if code != 0 {
-		return fail("the tests do not pass before mutating, so nothing can be concluded: %s", tail(out))
+		return fail(PinUnverifiable, "the tests do not pass before mutating, so nothing can be concluded: %s", tail(out))
 	}
 
 	// 2. Mutate.
 	if err := os.WriteFile(target, []byte(strings.Replace(body, p.From, p.To, 1)), 0o644); err != nil {
-		return fail("could not write the mutation: %v", err)
+		return fail(PinUnverifiable, "could not write the mutation: %v", err)
 	}
 
 	// 3. It has to compile. A mutation that breaks the build fails every test for a reason that
 	//    has nothing to do with the behaviour under test.
 	if code, out, err := v.build(ctx, work); err != nil {
-		return fail("build failed to execute: %v", err)
+		return fail(PinUnverifiable, "build failed to execute: %v", err)
 	} else if code != 0 {
-		return fail("the mutation does not compile, so it proves nothing: %s", tail(out))
+		return fail(PinMalformed, "the mutation does not compile, so it proves nothing: %s", tail(out))
 	}
 
 	// 4. The mutation must be caught.
 	code, out, err := v.run(ctx, work)
 	if err != nil {
-		return fail("mutated test run failed to execute: %v", err)
+		return fail(PinUnverifiable, "mutated test run failed to execute: %v", err)
 	}
 	if code == 0 {
-		return fail("the mutation survived: %s -> %s in %s left the tests passing, so %q does not hold this line",
+		return fail(PinSurvived, "the mutation survived: %s -> %s in %s left the tests passing, so %q does not hold this line",
 			p.From, p.To, p.File, p.Test)
 	}
-	return PinResult{Pin: p, Proven: true,
+	return PinResult{Pin: p, Proven: true, Outcome: PinProven,
 		Detail: fmt.Sprintf("%s -> %s in %s fails the tests and the restored code passes them (%s)", p.From, p.To, p.File, tail(out))}
 }
 
@@ -204,27 +226,47 @@ func copyTree(src, dst string) error {
 	})
 }
 
-// FindingsForPins turns unproven claims into blocking findings. A proven pin produces nothing:
-// it is the expected state, and a gate that reported it would drown the one that matters.
+// FindingsForPins turns what verification found into findings. A proven pin produces nothing: it
+// is the expected state, and reporting it would bury the one that matters.
+//
+// Severity follows the outcome, because the outcomes call for different work. An unheld fix is a
+// defect in the code's tests and blocks. A malformed pin is a defect in the CLAIM — the fix may
+// be perfect — so it is advisory: worth fixing, never evidence that the code is wrong. A tree
+// that could not answer blocks, because nothing was learned and a gate must not read silence as
+// success.
 func FindingsForPins(results []PinResult) []findings.Input {
 	out := make([]findings.Input, 0, len(results))
 	for _, r := range results {
-		if r.Proven {
+		if r.Outcome == PinProven {
 			continue
 		}
-		out = append(out, findings.Input{
-			Reviewer:       "mutation-verify",
-			Severity:       "high",
-			Classification: "blocking",
-			Title:          "Unproven fix: " + r.Pin.File,
-			Finding: fmt.Sprintf("The fix claims %q holds %s, but breaking that line did not make the tests fail.",
-				r.Pin.Test, r.Pin.File),
-			Expected:       "Breaking the fixed line makes the named test fail, and restoring it makes the test pass.",
-			Found:          r.Detail,
-			Recommendation: "Add a test that fails under this mutation, or withdraw the claim. A fix nothing holds is a fix nothing keeps.",
-			Evidence:       []findings.Evidence{{Type: "pin", Path: r.Pin.File}},
-			Fingerprint:    "mutation-verify:unproven:" + r.Pin.File + ":" + r.Pin.From,
-		})
+		f := findings.Input{
+			Reviewer:    "mutation-verify",
+			Found:       r.Detail,
+			Evidence:    []findings.Evidence{{Type: "pin", Path: r.Pin.File}},
+			Fingerprint: fmt.Sprintf("mutation-verify:%s:%s:%s", r.Outcome, r.Pin.File, r.Pin.From),
+		}
+		switch r.Outcome {
+		case PinSurvived:
+			f.Severity, f.Classification = "high", "blocking"
+			f.Title = "Unproven fix: " + r.Pin.File
+			f.Finding = fmt.Sprintf("The fix claims %q holds %s, but breaking that line did not make the tests fail.", r.Pin.Test, r.Pin.File)
+			f.Expected = "Breaking the fixed line makes the named test fail, and restoring it makes the test pass."
+			f.Recommendation = "Add a test that fails under this mutation, or withdraw the claim. A fix nothing holds is a fix nothing keeps."
+		case PinMalformed:
+			f.Severity, f.Classification = "medium", "advisory"
+			f.Title = "Unusable pin: " + r.Pin.File
+			f.Finding = fmt.Sprintf("The pin for %s could not be evaluated, so the fix was neither proved nor disproved.", r.Pin.File)
+			f.Expected = "A pin names text that appears exactly once and mutates it into something that still compiles."
+			f.Recommendation = "Rewrite the pin. This says nothing about the fix itself: the claim could not be checked, not that it was false."
+		default:
+			f.Severity, f.Classification = "high", "blocking"
+			f.Title = "Verification could not run: " + r.Pin.File
+			f.Finding = "The tree could not answer whether this fix is held: " + r.Detail
+			f.Expected = "The test suite passes before mutation, so a failure after it means something."
+			f.Recommendation = "Fix the tree or the harness. Nothing was learned here, and an unanswered check is not a passed one."
+		}
+		out = append(out, f)
 	}
 	return out
 }

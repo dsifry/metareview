@@ -204,12 +204,55 @@ type LensReport struct {
 	Findings []Finding `json:"findings,omitempty"`
 }
 
+// Finding provenance. Source says which producer raised a finding and Category says what kind it
+// is, so a gate can select on structure instead of matching prose. The first version of the
+// prove node encoded both in the IssueText and the gate did strings.HasPrefix on it — which means
+// rewording a message silently disables the gate, and these two fields already existed for
+// exactly this.
+const (
+	SourceMutationVerify = "mutation-verify"
+
+	CategoryUnprovenFix  = "unproven-fix"  // a fix whose pin the tests did not catch: blocks
+	CategoryMalformedPin = "malformed-pin" // a pin that could not be evaluated: reported, does not block
+	CategoryUnverifiable = "unverifiable"  // the tree could not answer at all
+)
+
+// PinOutcome is the schema's vocabulary for what checking a pin found. It is typed and lives here
+// rather than in the tool that produces it, because it is persisted in the audit log and folded
+// into snapshots: the durable shape belongs to the durable package.
+type PinOutcome string
+
+const (
+	// PinProven: breaking the line failed the tests and restoring it passed them.
+	PinProven PinOutcome = "proven"
+	// PinSurvived: the mutation compiled and the tests still passed. A defect in the tests.
+	PinSurvived PinOutcome = "survived"
+	// PinMalformed: the claim could not be evaluated. Says nothing about the fix.
+	PinMalformed PinOutcome = "malformed"
+	// PinUnverifiable: the tree itself could not answer. Nothing was learned.
+	PinUnverifiable PinOutcome = "unverifiable"
+)
+
+// Valid reports whether o is one of the four outcomes. An unrecognised value is not treated as a
+// success anywhere, but a gate should be able to say so rather than infer it.
+func (o PinOutcome) Valid() bool {
+	switch o {
+	case PinProven, PinSurvived, PinMalformed, PinUnverifiable:
+		return true
+	}
+	return false
+}
+
 // PinResult is the outcome of checking one Pin. Proven is the only value a gate accepts, and it
 // is true only when breaking the line failed the tests AND restoring it passed them.
 type PinResult struct {
-	Pin    Pin    `json:"pin"`
-	Proven bool   `json:"proven"`
-	Detail string `json:"detail,omitempty"`
+	Pin    Pin  `json:"pin"`
+	Proven bool `json:"proven"`
+	// Outcome separates "this claim is false" from "I could not evaluate this claim". They call
+	// for opposite work — write a test, versus rewrite the pin — so only the first blocks. See
+	// internal/mutation for the values.
+	Outcome PinOutcome `json:"outcome,omitempty"`
+	Detail  string     `json:"detail,omitempty"`
 }
 
 // Time marshals as UTC RFC3339Nano and unmarshals only the Z form (§2.2).

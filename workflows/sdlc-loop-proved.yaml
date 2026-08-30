@@ -40,6 +40,14 @@ nodes:
   # a test catches a mutation is a fact about the repository, not an opinion, and the answer
   # must not vary with the model. still-present stays below as the COMPLEMENT for bugs no test
   # can pin: it answers a question mutation cannot, and never replaces one mutation can.
+  # mode: enforcing is the default. Set `mode: advisory` for a first supervised run: every problem
+  # is still reported, nothing is phrased so the gate refuses, and you can see what the check WOULD
+  # say before it can stop anything. A gate nobody can survive gets switched off, and a gate that
+  # is switched off is worse than one that was never trusted.
+  #
+  # A MALFORMED pin never blocks even when enforcing: "I could not evaluate this claim" is not
+  # "this claim is false", and an agent with clumsy pin syntax must not look like one shipping
+  # untested code.
   prove:      {kind: mutation-verify}                              # exec inferred (fork)
   verify:     {kind: still-present,         model: $JUDGE, effort: $JUDGE_EFFORT}   # exec inferred (fork)
 convergence:

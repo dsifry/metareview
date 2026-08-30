@@ -379,7 +379,10 @@ func (c *ctxDeps) verifyPins(root string, scenario *mockai.Scenario) kind.Verify
 		return func(_ context.Context, pins []run.Pin) ([]run.PinResult, error) {
 			out := make([]run.PinResult, 0, len(pins))
 			for _, p := range pins {
-				out = append(out, run.PinResult{Pin: p, Detail: "mock run: a scripted scenario has no code to break, so nothing can be proved"})
+				// Unusable, not survived: a mock has no code to break, so the fix is neither
+				// proved nor disproved. Calling it survived would blame a fix for a fixture.
+				out = append(out, run.PinResult{Pin: p, Outcome: run.PinUnverifiable,
+					Detail: "mock run: a scripted scenario has no code to break, so nothing can be proved"})
 			}
 			return out, nil
 		}
@@ -396,7 +399,7 @@ func (c *ctxDeps) verifyPins(root string, scenario *mockai.Scenario) kind.Verify
 		}
 		out := make([]run.PinResult, 0, len(got))
 		for i, r := range got {
-			out = append(out, run.PinResult{Pin: pins[i], Proven: r.Proven, Detail: r.Detail})
+			out = append(out, run.PinResult{Pin: pins[i], Proven: r.Proven, Outcome: outcomeFor(r.Outcome), Detail: r.Detail})
 		}
 		return out, nil
 	}
@@ -419,4 +422,23 @@ func (c *ctxDeps) testCommand() []string {
 func lookupEnv(get func(string) string, key string) (string, bool) {
 	v := get(key)
 	return strings.TrimSpace(v), v != ""
+}
+
+// outcomeFor maps the verifier's vocabulary onto the schema's. The mapping is exhaustive and
+// total on purpose: an outcome this code does not recognise becomes PinUnverifiable rather than
+// anything that could read as success, which is the same rule the mutation scoring uses for a
+// status it does not understand.
+func outcomeFor(o mutation.Outcome) run.PinOutcome {
+	switch o {
+	case mutation.PinProven:
+		return run.PinProven
+	case mutation.PinSurvived:
+		return run.PinSurvived
+	case mutation.PinMalformed:
+		return run.PinMalformed
+	case mutation.PinUnverifiable:
+		return run.PinUnverifiable
+	default:
+		return run.PinUnverifiable
+	}
 }
