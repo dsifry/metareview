@@ -12,6 +12,7 @@ type PRReadyContext struct {
 	Git                   GitContext
 	Manifest              ManifestContext
 	Knowledge             KnowledgeContext
+	Mutation              MutationContext
 	EvidenceText          string
 	PREvidenceMarkdown    string
 	ReviewLogs            []PRReviewLog
@@ -43,6 +44,7 @@ type PRGitHubEntry struct {
 
 func RunPRReady(context PRReadyContext) []Finding {
 	var results []Finding
+	results = append(results, context.Mutation.Findings()...)
 	if !context.IncludeWorkingTree && len(context.WorkingTreeDirtyFiles) > 0 {
 		results = append(results, finding(Finding{
 			Reviewer:       "pr-readiness-reviewer",

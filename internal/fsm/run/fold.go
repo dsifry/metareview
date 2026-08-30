@@ -205,6 +205,7 @@ func Apply(st FoldState, ev Event) (FoldState, error) {
 			next.Iteration = st.Iteration + 1
 			v := st.Unfixed
 			next.PrevUnfixed = &v
+			next.UnfixedAtEntry = unfixedIDs(st.AllFound, st.Status)
 			next.Findings = []Finding{}
 			next.Confirmed = []Bug{}
 		}
@@ -272,6 +273,7 @@ func (st FoldState) cow() FoldState {
 	next.AllFound = append([]Bug{}, st.AllFound...)
 	next.Status = append([]BugStatus{}, st.Status...)
 	next.PrevUnfixed = cloneInt(st.PrevUnfixed)
+	next.UnfixedAtEntry = append([]string(nil), st.UnfixedAtEntry...)
 	next.NodeOutputs = make(map[string]json.RawMessage, len(st.NodeOutputs)+1)
 	for k, v := range st.NodeOutputs {
 		next.NodeOutputs[k] = v
@@ -312,7 +314,7 @@ func (st *FoldState) applyInit(d *InitData) {
 		st.FixEntryHead = d.Head
 	}
 	st.Findings, st.Confirmed, st.AllFound, st.Status = []Finding{}, []Bug{}, []Bug{}, []BugStatus{}
-	st.PrevUnfixed = nil
+	st.PrevUnfixed, st.UnfixedAtEntry = nil, nil
 	st.NodeOutputs = map[string]json.RawMessage{}
 	st.Applied = map[string]bool{}
 	st.NodesRun = []string{}
@@ -584,4 +586,22 @@ func withinCaps(p any) bool {
 		return shortOK(d.ChildRunID)
 	}
 	return true
+}
+
+// unfixedIDs is the id of every AllFound bug with no fixed status, in AllFound order so the
+// recorded set is stable between folds of the same log.
+func unfixedIDs(all []Bug, status []BugStatus) []string {
+	fixed := make(map[string]bool, len(status))
+	for _, st := range status {
+		if !st.StillPresent {
+			fixed[st.ID] = true
+		}
+	}
+	out := []string{}
+	for _, b := range all {
+		if !fixed[b.ID] {
+			out = append(out, b.ID)
+		}
+	}
+	return out
 }

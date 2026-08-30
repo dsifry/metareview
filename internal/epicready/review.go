@@ -2,6 +2,7 @@ package epicready
 
 import (
 	"fmt"
+	"github.com/dsifry/metareview/internal/mutation"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,9 @@ type Options struct {
 	EvidencePath  string
 	MaxAttempts   int
 	Now           time.Time
+	// MutationReportPaths are --mutation-report files: a mutation-testing engine's output,
+	// either mutation-testing-report-schema or gremlins JSON. Empty is the ordinary case.
+	MutationReportPaths []string
 }
 
 type Result struct {
@@ -131,7 +135,13 @@ func Create(root, target string, options Options) (Result, error) {
 	if report.Capabilities.Beads || report.Capabilities.Metaswarm {
 		gateEffect = "gate"
 	}
-	rawFindings := reviewers.RunEpicReady(reviewerContext(epic, children, reviewGit, profile, knowledgeContext, childLogs, evidenceText))
+	mutationContext, err := mutationContextFor(options.MutationReportPaths)
+	if err != nil {
+		return Result{}, err
+	}
+	reviewerCtx := reviewerContext(epic, children, reviewGit, profile, knowledgeContext, childLogs, evidenceText)
+	reviewerCtx.Mutation = mutationContext
+	rawFindings := reviewers.RunEpicReady(reviewerCtx)
 	targetRecord := map[string]string{"type": epicTargetType(epic), "id": epic.ID}
 	run := findings.Run{ID: runID, Scope: "epic-ready", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
 
@@ -767,4 +777,18 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// mutationContextFor loads the declared mutation reports. An unreadable or unrecognised report is
+// an error that stops the review, never a skipped file: a mutation gate that quietly drops a
+// report is a gate that passes because it looked at less.
+func mutationContextFor(paths []string) (reviewers.MutationContext, error) {
+	if len(paths) == 0 {
+		return reviewers.MutationContext{}, nil
+	}
+	reports, err := mutation.LoadAll(paths)
+	if err != nil {
+		return reviewers.MutationContext{}, err
+	}
+	return reviewers.MutationContext{Reports: reports}, nil
 }

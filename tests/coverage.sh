@@ -98,7 +98,11 @@ check_pkg() {
       if [ -n "$floor" ] && awk -v a="$pct" -v b="$floor" 'BEGIN{exit !(a < b)}'; then
         status="FAIL (floor $floor)"; failures=$((failures + 1))
       elif [ -z "$floor" ]; then
-        status="no floor"
+        # A package with no floor line is UNGATED, and silently so — internal/mutation shipped an
+        # entire subsystem that way. A new package must be given a floor deliberately
+        # (bash tests/coverage.sh --update-floor) rather than default to unmeasured.
+        status="FAIL (no floor: add a line to tests/coverage-floor.txt, or run --update-floor)"
+        failures=$((failures + 1))
       fi
       ;;
   esac

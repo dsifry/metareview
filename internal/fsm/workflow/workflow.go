@@ -216,7 +216,7 @@ func Parse(raw []byte, opts Options) (*Workflow, error) {
 	}
 	if rw.Convergence.Kind != 0 {
 		w.Convergence = &rw.Convergence
-		if err := converge.Validate(w.Convergence, w.cmdNames()); err != nil {
+		if err := converge.ValidateBounded(w.Convergence, w.cmdNames(), w.LoopTransition() != nil); err != nil {
 			return nil, invalid("bad_convergence", "convergence", errs.As(err).Field("detail"))
 		}
 	} else if w.LoopTransition() != nil {
