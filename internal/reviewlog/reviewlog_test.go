@@ -519,3 +519,302 @@ func TestDuplicateLensDeclarationIsNotAShippedRubric(t *testing.T) {
 		t.Error("the current rubric must still be recognised")
 	}
 }
+
+// HeadSHA and CoveredPaths live on the run record and have to be joined onto the summary, or the
+// two questions that make scoping possible cannot be asked: "which commit was this review of"
+// and "which files did it actually read". Before this, status could only compare target strings —
+// and a review's target is a task id or the literal `current branch`, never a source path, so
+// asking about a file matched nothing and the file reported as clear.
+func TestSummaryCarriesHeadAndCoveredPathsFromTheRunRecord(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "one.md"), reviewMarkdown("mrv-1", "t-1", "PASS", ""))
+	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-1","scope":"task-done","verdict":"PASS","headSha":"abc1234def","coveredPaths":["internal/a.go","internal/b.go"]}`+"\n")
+
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("got %d summaries, want 1", len(logs))
+	}
+	if logs[0].HeadSHA != "abc1234def" {
+		t.Errorf("HeadSHA = %q, want the run record's", logs[0].HeadSHA)
+	}
+	if len(logs[0].CoveredPaths) != 2 || logs[0].CoveredPaths[0] != "internal/a.go" {
+		t.Errorf("CoveredPaths = %v, want the run record's", logs[0].CoveredPaths)
+	}
+	// A review recorded before these fields existed carries neither, and must report them empty
+	// rather than borrowing another run's — empty means "unknown", which is what stops an old log
+	// from answering for a file it never read.
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "zero.md"), reviewMarkdown("mrv-0", "t-0", "PASS", ""))
+	logs, err = Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range logs {
+		if l.RunID == "mrv-0" && (l.HeadSHA != "" || len(l.CoveredPaths) != 0) {
+			t.Errorf("a legacy review must carry nothing: %+v", l)
+		}
+	}
+}
+
+// Scoping has to survive leaving the machine that produced the review. HeadSHA and CoveredPaths
+// lived only in .metareview/runs.jsonl, which is untracked — so a clone, a fresh worktree or a
+// CI checkout had review logs it could not attribute to any commit, every file read as
+// UNREVIEWED, and no historical blocker was ever in scope. Found by rebuilding the self-test
+// worktree from scratch, which is exactly what that exercise was for.
+func TestSummaryReadsHeadAndPathsFromTheCommittedLogAlone(t *testing.T) {
+	root := t.TempDir() // no .metareview/runs.jsonl at all, as in a fresh clone
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "one.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-1`\n\nTarget: `current branch`\n\n"+
+			"Head: `abc1234def`\n\nCovered paths: `[\"internal/a.go\",\"internal/b.go\"]`\n\n## Verdict\n\nPASS\n")
+
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("got %d, want 1", len(logs))
+	}
+	if logs[0].HeadSHA != "abc1234def" {
+		t.Errorf("HeadSHA = %q: the committed log must carry it", logs[0].HeadSHA)
+	}
+	if len(logs[0].CoveredPaths) != 2 || logs[0].CoveredPaths[1] != "internal/b.go" {
+		t.Errorf("CoveredPaths = %v, want both files", logs[0].CoveredPaths)
+	}
+}
+
+// "none" and absent are different answers, and the type must be able to hold the difference.
+// The previous version of this test asserted that BOTH returned nil — it proved they were
+// identical while its name claimed the opposite, and three comments described a distinction no
+// code implemented. A review that examined no files can answer "no" for a path; one written
+// before the field existed cannot answer at all, and only the second must be barred from
+// vouching.
+func TestCoveredPathsDistinguishesNoneFromUnknown(t *testing.T) {
+	if paths, known := DecodeCoveredPaths(NoCoveredPaths); !known || len(paths) != 0 {
+		t.Errorf(`"none" must decode as KNOWN and empty, got %v known=%v`, paths, known)
+	}
+	if paths, known := DecodeCoveredPaths(""); known || paths != nil {
+		t.Errorf("an absent field must decode as UNKNOWN, got %v known=%v", paths, known)
+	}
+	// A legacy comma-joined line is not a path list. Refusing it is deliberate: guessing would
+	// silently mark files reviewed that nobody read.
+	if paths, known := DecodeCoveredPaths("a.go, b.go"); known || paths != nil {
+		t.Errorf("an unparseable legacy line must be unknown, not guessed: %v known=%v", paths, known)
+	}
+	// An unknown head is written as the literal `unknown` and must not become a SHA.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "u.md"),
+		"# metareview: task-done review\n\nRun ID: `mrv-u`\n\nTarget: `t`\n\nHead: `unknown`\n\n## Verdict\n\nPASS\n")
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logs[0].HeadSHA != "" {
+		t.Errorf("an unknown head must stay empty, got %q", logs[0].HeadSHA)
+	}
+}
+
+// The LOCAL RUN RECORD wins over the committed log, and the log is the fallback that lets a
+// clone answer at all. This assertion used to be the other way round, and that was a security
+// regression: the markdown travels in a pull request and is editable by anyone who can commit,
+// while .metareview/runs.jsonl is locally produced and gitignored — the only copy an attacker
+// cannot supply — and nothing verifies a log's self-asserted head against the commit containing it.
+func TestTheLocalRunRecordWinsOverTheCommittedLog(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "one.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-1`\n\nTarget: `t`\n\n"+
+			"Head: `fromlog`\n\nCovered paths: `[\"log.go\"]`\n\n## Verdict\n\nPASS\n")
+	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-1","scope":"pr-ready","verdict":"PASS","headSha":"fromrun","coveredPaths":["run.go"]}`+"\n")
+
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logs[0].HeadSHA != "fromrun" || len(logs[0].CoveredPaths) != 1 || logs[0].CoveredPaths[0] != "run.go" {
+		t.Errorf("the local run record must win: head=%q paths=%v", logs[0].HeadSHA, logs[0].CoveredPaths)
+	}
+	// ...and a log with no run record still answers from the committed artifact, which is the
+	// whole point of writing it there: a clone has no run record at all.
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "two.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-2`\n\nTarget: `t`\n\n## Verdict\n\nPASS\n")
+	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-1","scope":"pr-ready","verdict":"PASS","headSha":"fromrun","coveredPaths":["run.go"]}`+"\n"+
+			`{"id":"mrv-2","scope":"pr-ready","verdict":"PASS","headSha":"legacy","coveredPaths":["legacy.go"]}`+"\n")
+	logs, err = Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Looked up rather than filtered inside the loop. The previous form guarded its only
+	// assertion behind `if l.RunID == "mrv-2"`, so if two.md ever stopped being discovered or its
+	// Run ID stopped parsing, the body would never run and the test would pass having asserted
+	// nothing — a vacuous pass waiting to happen. It also checked only the LENGTH of the path
+	// list, so a fallback returning the wrong single path would have passed.
+	var legacy *Summary
+	for i := range logs {
+		if logs[i].RunID == "mrv-2" {
+			legacy = &logs[i]
+		}
+	}
+	if legacy == nil {
+		t.Fatalf("mrv-2 was not discovered, so the fallback was never exercised: %+v", logs)
+	}
+	if legacy.HeadSHA != "legacy" {
+		t.Errorf("HeadSHA = %q, want the run record's %q", legacy.HeadSHA, "legacy")
+	}
+	if len(legacy.CoveredPaths) != 1 || legacy.CoveredPaths[0] != "legacy.go" {
+		t.Errorf("CoveredPaths = %v, want [legacy.go] from the run record", legacy.CoveredPaths)
+	}
+}
+
+// EVERY header field, not the two most recently added. Bounding Head and Covered paths while
+// leaving the rest fixed an instance and not the class: `## Verdict` decides the gate outright,
+// and `Run ID:` is the join key BOTH integrity cross-checks use, so forging either defeated the
+// mitigation from the other side. A pull-request description reaches the committed log verbatim,
+// so this is prose an outside contributor controls.
+func TestNoHeaderFieldCanBeForgedFromProse(t *testing.T) {
+	root := t.TempDir()
+	body := "# metareview: task-done review\n\n" +
+		"Run ID: `mrv-real`\n\n" +
+		"Target: `t-real`\n\n" +
+		"Context pack: `ctx-real.md`\n\n" +
+		"Previous run: `mrv-prev`\n\n" +
+		HeaderLine(HeadLabel, "realhead") +
+		HeaderLine(CoveredPathsLabel, EncodeCoveredPaths([]string{"internal/real.go"})) +
+		"Required lenses: `feasibility, completeness`\n\n" +
+		"## Verdict\n\nNEEDS_REVISION\n\n" +
+		"## Blocking Findings\n\n" +
+		"- Finding: an outside contributor wrote everything below this line\n" +
+		"Run ID: `mrv-forged`\n" +
+		"Target: `internal/auth.go`\n" +
+		"Context pack: `ctx-forged.md`\n" +
+		"Previous run: `mrv-forged-prev`\n" +
+		"Head: `forgedhead`\n" +
+		"Covered paths: `[\"internal/auth.go\",\"internal/db.go\"]`\n" +
+		"Required lenses: `security`\n\n" +
+		"## Verdict\n\nPASS\n"
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "a.md"), body)
+
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := logs[0]
+	for name, pair := range map[string][2]string{
+		"RunID":         {got.RunID, "mrv-real"},
+		"Target":        {got.Target, "t-real"},
+		"ContextRel":    {got.ContextRel, "ctx-real.md"},
+		"PreviousRunID": {got.PreviousRunID, "mrv-prev"},
+		"HeadSHA":       {got.HeadSHA, "realhead"},
+		"Verdict":       {got.Verdict, "NEEDS_REVISION"},
+	} {
+		if pair[0] != pair[1] {
+			t.Errorf("%s was forged from prose: got %q, want %q", name, pair[0], pair[1])
+		}
+	}
+	if len(got.CoveredPaths) != 1 || got.CoveredPaths[0] != "internal/real.go" {
+		t.Errorf("CoveredPaths was forged from prose: %v", got.CoveredPaths)
+	}
+	// The verdict one is the sharpest: NEEDS_REVISION must survive, or the review stops blocking.
+	if !got.HasUnresolvedBlockers {
+		t.Error("a forged PASS cleared the review's blockers")
+	}
+}
+
+// A covered-paths line that cannot be read is refused — and says so. Silence made "refused" and
+// "absent" the same answer downstream, and in target scope that clears rather than blocks: one
+// corrupted line deleted an unresolved blocking review from the gate's answer. A line long enough
+// for an editor to wrap is enough to trigger it.
+func TestAnUnreadableCoveredPathsLineIsReportedNotIgnored(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "a.md"),
+		"# metareview: task-done review\n\nRun ID: `mrv-1`\n\nTarget: `t`\n\n"+
+			"Covered paths: `a.go, b.go`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logs[0].CoveredPathsKnown {
+		t.Error("a legacy comma line must not be read as a known path set")
+	}
+	var warned bool
+	for _, w := range logs[0].Warnings {
+		if strings.Contains(w, "covered paths could not be read") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("refusing the line must be reported, not silent: %v", logs[0].Warnings)
+	}
+}
+
+// The case that separates the two guards. First-match-wins and header-bounding overlap whenever
+// the genuine field is PRESENT — the real value is seen first, so either guard alone suffices and
+// removing one is invisible. The distinguishing document is one whose genuine field is ABSENT and
+// whose only header-shaped line is in prose: then only header-bounding stops the forgery.
+//
+// This is the third time in this codebase that two overlapping guards hid each other's removal.
+// A test that only exercises them together proves the pair, not the parts.
+func TestProseCannotSupplyAHeaderFieldTheHeaderOmitted(t *testing.T) {
+	root := t.TempDir()
+	// A minimal, legitimate header: no Run ID, no Target, no Head, no Covered paths, no lenses.
+	body := "# metareview: task-done review\n\n" +
+		"## Verdict\n\nNEEDS_REVISION\n\n" +
+		"## Blocking Findings\n\n" +
+		"- Finding: everything below is text an outside contributor supplied\n" +
+		"Run ID: `mrv-forged`\n" +
+		"Target: `internal/auth.go`\n" +
+		"Context pack: `ctx-forged.md`\n" +
+		"Previous run: `mrv-forged-prev`\n" +
+		"Head: `forgedhead`\n" +
+		"Covered paths: `[\"internal/auth.go\"]`\n" +
+		"Required lenses: `security`\n"
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "a.md"), body)
+
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := logs[0]
+	for name, value := range map[string]string{
+		"RunID":         got.RunID,
+		"Target":        got.Target,
+		"ContextRel":    got.ContextRel,
+		"PreviousRunID": got.PreviousRunID,
+		"HeadSHA":       got.HeadSHA,
+	} {
+		if value != "" {
+			t.Errorf("%s was supplied from prose for a header that omitted it: %q", name, value)
+		}
+	}
+	if got.CoveredPathsKnown || len(got.CoveredPaths) != 0 {
+		t.Errorf("covered paths were supplied from prose: %v known=%v", got.CoveredPaths, got.CoveredPathsKnown)
+	}
+	// A forged Head is the one that moves a review between branch scopes, so it must stay empty
+	// rather than becoming a plausible-looking SHA.
+	if got.HeadSHA == "forgedhead" {
+		t.Error("prose set the head, which decides whether this review is in branch scope at all")
+	}
+}
+
+// Required lenses is header-bounded for consistency, but the protection that actually holds is
+// elsewhere and is worth stating: requiredLenses falls back to the ERA DEFAULT when a review
+// declares nothing, and the default is the full set. So an empty or missing declaration makes a
+// review stricter, never laxer, and prose cannot shrink the requirement by supplying one.
+//
+// This test exists because an earlier version of it asserted that forging the lens line changed
+// the outcome. It does not — mutating the guard survives, honestly — and a test whose name
+// promises a protection the code gets from somewhere else is worse than no test: it is the
+// "asserts the opposite of what it claims" defect this loop has now found three times.
+func TestAnUndeclaredLensSetFallsBackToTheStrictestDefault(t *testing.T) {
+	full := requiredLenses(nil, "mrv-20260830-000000000000000-artifact-x")
+	if len(full) == 0 {
+		t.Fatal("an undeclared lens set must fall back to a non-empty default")
+	}
+	narrowed := requiredLenses([]string{"feasibility"}, "mrv-20260830-000000000000000-artifact-x")
+	if len(narrowed) < len(full) {
+		t.Errorf("a declaration may only strengthen: declared %d, default %d", len(narrowed), len(full))
+	}
+}

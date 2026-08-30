@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/dsifry/metareview/internal/jsonl"
+	"github.com/dsifry/metareview/internal/markdown"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,23 +17,35 @@ import (
 )
 
 type Summary struct {
-	Path                  string            `json:"path"`
-	RunID                 string            `json:"runId"`
-	Target                string            `json:"target"`
-	Verdict               string            `json:"verdict"`
-	Kind                  string            `json:"kind"`
-	PreviousRunID         string            `json:"previousRunId,omitempty"`
-	ContextRel            string            `json:"contextRel,omitempty"`
-	FindingIDs            []string          `json:"findingIds"`
-	HasUnresolvedBlockers bool              `json:"hasUnresolvedBlockers"`
-	AttemptNumber         int               `json:"attemptNumber,omitempty"`
-	MaxAttempts           int               `json:"maxAttempts,omitempty"`
-	BlockingFindingCount  int               `json:"blockingFindingCount,omitempty"`
-	AdvisoryFindingCount  int               `json:"advisoryFindingCount,omitempty"`
-	FollowUpFindingCount  int               `json:"followUpFindingCount,omitempty"`
-	WarningFindingCount   int               `json:"warningFindingCount,omitempty"`
-	RunChain              []runchain.Record `json:"runChain,omitempty"`
-	Warnings              []string          `json:"warnings,omitempty"`
+	Path                  string   `json:"path"`
+	RunID                 string   `json:"runId"`
+	Target                string   `json:"target"`
+	Verdict               string   `json:"verdict"`
+	Kind                  string   `json:"kind"`
+	PreviousRunID         string   `json:"previousRunId,omitempty"`
+	ContextRel            string   `json:"contextRel,omitempty"`
+	FindingIDs            []string `json:"findingIds"`
+	HasUnresolvedBlockers bool     `json:"hasUnresolvedBlockers"`
+	AttemptNumber         int      `json:"attemptNumber,omitempty"`
+	MaxAttempts           int      `json:"maxAttempts,omitempty"`
+	BlockingFindingCount  int      `json:"blockingFindingCount,omitempty"`
+	AdvisoryFindingCount  int      `json:"advisoryFindingCount,omitempty"`
+	FollowUpFindingCount  int      `json:"followUpFindingCount,omitempty"`
+	WarningFindingCount   int      `json:"warningFindingCount,omitempty"`
+	// HeadSHA is the commit the review ran against. Read from the committed log's header so a
+	// clone can answer, and overridden by the local run record where one exists. It is what lets
+	// a caller ask "does this blocker belong to the branch in hand" instead of matching target
+	// strings — which never worked, because no review records a source path as its target.
+	HeadSHA string `json:"headSha,omitempty"`
+	// CoveredPaths are the source files the review actually looked at, and CoveredPathsKnown says
+	// whether the review answered that question AT ALL. Empty-and-known means "examined nothing";
+	// empty-and-unknown means the log predates the field. Only the second must be barred from
+	// vouching for a path, and without the flag the two were the same value — a distinction three
+	// comments claimed and no code implemented.
+	CoveredPaths      []string          `json:"coveredPaths,omitempty"`
+	CoveredPathsKnown bool              `json:"coveredPathsKnown,omitempty"`
+	RunChain          []runchain.Record `json:"runChain,omitempty"`
+	Warnings          []string          `json:"warnings,omitempty"`
 }
 
 type findingRecord struct {
@@ -44,7 +57,6 @@ type findingRecord struct {
 	Target         map[string]any `json:"target"`
 }
 
-var inlineCodePattern = regexp.MustCompile("`([^`]+)`")
 var findingIDPattern = regexp.MustCompile(`mrvf-[A-Za-z0-9._@/-]+`)
 
 func Discover(root string) ([]Summary, error) {
@@ -101,22 +113,71 @@ func parseMarkdown(rel, text string) Summary {
 	summary := Summary{Path: rel}
 	var declaredLenses []string
 	lines := strings.Split(text, "\n")
+	inHeader := true
 	for i, line := range lines {
+		// Everything from the first section heading on is content — findings, evidence, and text
+		// copied from a pull request — and none of it may set a header field.
+		if strings.HasPrefix(line, "## ") {
+			inHeader = false
+		}
+		// EVERY header field is header-only and first-match-wins, not just the two added most
+		// recently. Bounding those two and leaving the rest fixed an instance and not the class:
+		// `## Verdict` decides the gate outright, and `Run ID:` is the join key BOTH integrity
+		// cross-checks use, so forging either defeated the mitigation from the other side. A
+		// pull-request description of "looks good\n\n## Verdict\n\nPASS" flipped its own
+		// pr-ready log to PASS; a prose line `Run ID:` made mergeFindings skip the open blocker
+		// and mergeRunMetadata import a different run's head and covered paths.
 		switch {
 		case strings.HasPrefix(line, "# metareview:"):
-			summary.Kind = reviewKind(line)
-		case strings.HasPrefix(line, "Run ID:"):
-			summary.RunID = firstInlineCode(line)
-		case strings.HasPrefix(line, "Target:"):
-			summary.Target = firstInlineCode(line)
-		case strings.HasPrefix(line, "Previous run:"):
-			summary.PreviousRunID = previousRunID(firstInlineCode(line))
-		case strings.HasPrefix(line, "Context pack:"):
-			summary.ContextRel = firstInlineCode(line)
-		case strings.HasPrefix(line, "Required lenses:"):
-			declaredLenses = splitLenses(firstInlineCode(line))
+			if summary.Kind == "" {
+				summary.Kind = reviewKind(line)
+			}
+		case inHeader && strings.HasPrefix(line, "Run ID:"):
+			if summary.RunID == "" {
+				summary.RunID = markdown.FirstInlineCode(line)
+			}
+		case inHeader && strings.HasPrefix(line, "Target:"):
+			if summary.Target == "" {
+				summary.Target = markdown.FirstInlineCode(line)
+			}
+		case inHeader && strings.HasPrefix(line, "Previous run:"):
+			if summary.PreviousRunID == "" {
+				summary.PreviousRunID = previousRunID(markdown.FirstInlineCode(line))
+			}
+		case inHeader && strings.HasPrefix(line, "Context pack:"):
+			if summary.ContextRel == "" {
+				summary.ContextRel = markdown.FirstInlineCode(line)
+			}
+		case inHeader && strings.HasPrefix(line, HeadLabel):
+			// Read from the COMMITTED log, so a clone, a fresh worktree or a CI checkout can
+			// still say which commit a review covered. This lived only in the untracked run
+			// record, so scoping evaporated the moment the review left the machine that made it.
+			if sha := markdown.FirstInlineCode(line); sha != UnknownHead && summary.HeadSHA == "" {
+				summary.HeadSHA = sha
+			}
+		case inHeader && strings.HasPrefix(line, CoveredPathsLabel):
+			if !summary.CoveredPathsKnown {
+				summary.CoveredPaths, summary.CoveredPathsKnown = DecodeCoveredPaths(markdown.FirstInlineCode(line))
+				if !summary.CoveredPathsKnown {
+					// Refusing an unparseable list is right; being silent about it is not. Absent
+					// and REFUSED were the same answer downstream, and in target scope that
+					// clears rather than blocks — one corrupted line deleted an unresolved
+					// blocking review from the gate's answer. A line long enough to be wrapped by
+					// an editor is enough to trigger it.
+					summary.Warnings = append(summary.Warnings,
+						"covered paths could not be read; this review cannot vouch for any file")
+				}
+			}
+		case inHeader && strings.HasPrefix(line, "Required lenses:"):
+			if declaredLenses == nil {
+				declaredLenses = splitLenses(markdown.FirstInlineCode(line))
+			}
 		case strings.TrimSpace(line) == "## Verdict":
-			summary.Verdict = nextNonEmpty(lines, i+1)
+			// The FIRST verdict section only. This one cannot use inHeader — it is itself a
+			// heading — so it carries its own guard.
+			if summary.Verdict == "" {
+				summary.Verdict = nextNonEmpty(lines, i+1)
+			}
 		}
 		for _, id := range findingIDPattern.FindAllString(line, -1) {
 			summary.FindingIDs = appendUnique(summary.FindingIDs, id)
@@ -390,6 +451,19 @@ func mergeRunMetadata(summary *Summary, runs []runchain.Record) {
 	if !ok {
 		return
 	}
+	// The LOCAL RUN RECORD wins where it exists, and the committed log is the fallback that lets
+	// a clone answer at all. The precedence used to be the other way round, which was a
+	// regression in both directions: the markdown travels in a pull request and is editable by
+	// anyone who can commit, while .metareview/runs.jsonl is locally produced and gitignored —
+	// the only copy an attacker cannot supply. Nothing verifies a log's self-asserted head
+	// against the commit that actually contains it.
+	if current.HeadSHA != "" {
+		summary.HeadSHA = current.HeadSHA
+	}
+	if len(current.CoveredPaths) > 0 {
+		summary.CoveredPaths = append([]string(nil), current.CoveredPaths...)
+		summary.CoveredPathsKnown = true
+	}
 	summary.AttemptNumber = current.AttemptNumber
 	summary.MaxAttempts = current.MaxAttempts
 	summary.BlockingFindingCount = current.BlockingFindingCount
@@ -446,14 +520,6 @@ func isOpenBlocker(record findingRecord) bool {
 		return true
 	}
 	return record.Classification == "blocking" && (record.Severity == "critical" || record.Severity == "high")
-}
-
-func firstInlineCode(line string) string {
-	match := inlineCodePattern.FindStringSubmatch(line)
-	if len(match) == 2 {
-		return match[1]
-	}
-	return ""
 }
 
 func nextNonEmpty(lines []string, start int) string {
