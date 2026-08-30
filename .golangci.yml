@@ -6,6 +6,17 @@ version: "2"
 # nothing is excluded: the noisy cases were fixed at the source instead.
 linters:
   default: standard
+  enable:
+    # A suppression is a hole in a gate, so it has to explain itself and it must not outlive what
+    # it suppressed. nolintlint requires a reason on every //nolint and reports any directive that
+    # no longer suppresses anything - the "expired exception" problem, already solved here rather
+    # than reinvented for our own lints.
+    - nolintlint
+  settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
 
 issues:
   # Report everything. The defaults cap output at three issues per linter,
