@@ -94,7 +94,8 @@ escalation-specific and affected every review.
 
 ### Known limits
 
-Three defects are recorded rather than fixed, in `docs/0.10.0-candidates.md`, because fixing them
+Three defects are recorded rather than fixed, in `docs/0.11.0-candidates.md` (named
+`0.10.0-candidates.md` when this released), because fixing them
 properly needs a decision this release should not make quietly:
 
 - `DiffTruncated` — the only signal telling a judge it is not seeing the whole story — rests on a

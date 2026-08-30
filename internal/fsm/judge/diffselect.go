@@ -431,7 +431,7 @@ func ContextForClaim(diff string, alreadyTruncated bool, file string, line int, 
 	// properly needs SelectDiff to report whether it cut, which it does not - and its budget is
 	// not a hard cap, since a smaller budget can return MORE bytes (measured: 40102 at budget 133
 	// against 39983 unbounded). That contract is worth settling before this signal is rebuilt on
-	// top of it; see docs/0.10.0-candidates.md.
+	// top of it; see docs/0.11.0-candidates.md.
 	primary, _, _ := ContextFor(diff, alreadyTruncated, file, line, budget-share*len(refs))
 	var b strings.Builder
 	b.WriteString(primary)
