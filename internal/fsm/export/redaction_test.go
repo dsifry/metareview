@@ -60,6 +60,7 @@ var verbatim = map[string]string{
 	"fix_entry_head":   "commit id",
 	"tree_hash":        "hash",
 	"goldens":          "supplied by the operator, already their own data",
+	"unfixed_at_entry": "bug ids only, already exported verbatim in all_found/confirmed",
 	"findings":         "review findings, the point of the bundle",
 	"confirmed":        "review findings, the point of the bundle",
 	"all_found":        "review findings, the point of the bundle",

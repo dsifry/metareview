@@ -57,20 +57,21 @@ func TestRunIDs(t *testing.T) {
 func TestCloneIsDeep(t *testing.T) {
 	one := 1
 	orig := Snapshot{
-		Vars:        map[string]string{"k": "v"},
-		AllowedCmds: []AllowedCmd{{Name: "n", Argv: []string{"a"}, FileHashes: map[string]string{"p": "h"}}},
-		Lineage:     []string{"p"},
-		Goldens:     []Golden{{Comment: "c"}},
-		Findings:    []Finding{{IssueText: "i"}},
-		Confirmed:   []Bug{{ID: "b", GoldenIdx: &one}},
-		AllFound:    []Bug{{ID: "b", GoldenIdx: &one}},
-		Status:      []BugStatus{{ID: "b"}},
-		PrevUnfixed: &one,
-		NodeOutputs: map[string]json.RawMessage{"n@0": json.RawMessage(`{"x":1}`)},
-		Applied:     map[string]bool{"n@0": true},
-		NodesRun:    []string{"n"},
-		LastError:   &GateError{Code: "c"},
-		Warnings:    []string{"w"},
+		Vars:           map[string]string{"k": "v"},
+		AllowedCmds:    []AllowedCmd{{Name: "n", Argv: []string{"a"}, FileHashes: map[string]string{"p": "h"}}},
+		Lineage:        []string{"p"},
+		Goldens:        []Golden{{Comment: "c"}},
+		Findings:       []Finding{{IssueText: "i"}},
+		Confirmed:      []Bug{{ID: "b", GoldenIdx: &one}},
+		AllFound:       []Bug{{ID: "b", GoldenIdx: &one}},
+		Status:         []BugStatus{{ID: "b"}},
+		PrevUnfixed:    &one,
+		UnfixedAtEntry: []string{"bug-1"},
+		NodeOutputs:    map[string]json.RawMessage{"n@0": json.RawMessage(`{"x":1}`)},
+		Applied:        map[string]bool{"n@0": true},
+		NodesRun:       []string{"n"},
+		LastError:      &GateError{Code: "c"},
+		Warnings:       []string{"w"},
 	}
 	c := orig.Clone()
 	if !reflect.DeepEqual(c, orig) {
@@ -85,6 +86,7 @@ func TestCloneIsDeep(t *testing.T) {
 	c.Findings[0].IssueText = "changed"
 	*c.Confirmed[0].GoldenIdx = 9
 	*c.PrevUnfixed = 7
+	c.UnfixedAtEntry[0] = "changed"
 	c.NodeOutputs["n@0"][0] = '['
 	c.Applied["n@0"] = false
 	c.NodesRun[0] = "changed"
@@ -92,7 +94,7 @@ func TestCloneIsDeep(t *testing.T) {
 	c.Warnings[0] = "changed"
 	if orig.Vars["k"] != "v" || orig.AllowedCmds[0].Argv[0] != "a" || orig.AllowedCmds[0].FileHashes["p"] != "h" ||
 		orig.Lineage[0] != "p" || orig.Goldens[0].Comment != "c" || orig.Findings[0].IssueText != "i" ||
-		*orig.Confirmed[0].GoldenIdx != 1 || *orig.AllFound[0].GoldenIdx != 1 || *orig.PrevUnfixed != 1 ||
+		*orig.Confirmed[0].GoldenIdx != 1 || *orig.AllFound[0].GoldenIdx != 1 || *orig.PrevUnfixed != 1 || orig.UnfixedAtEntry[0] != "bug-1" ||
 		string(orig.NodeOutputs["n@0"]) != `{"x":1}` || !orig.Applied["n@0"] || orig.NodesRun[0] != "n" ||
 		orig.LastError.Code != "c" || orig.Warnings[0] != "w" {
 		t.Fatalf("clone shares storage with original: %+v", orig)
@@ -105,7 +107,7 @@ func TestCloneIsDeep(t *testing.T) {
 	}
 	// reflect walk: every slice/map/pointer/RawMessage field of Snapshot was exercised above
 	rt := reflect.TypeOf(Snapshot{})
-	exercised := map[string]bool{"Vars": true, "AllowedCmds": true, "Lineage": true, "Goldens": true, "Findings": true, "Confirmed": true, "AllFound": true, "Status": true, "PrevUnfixed": true, "NodeOutputs": true, "Applied": true, "NodesRun": true, "LastError": true, "Warnings": true}
+	exercised := map[string]bool{"Vars": true, "AllowedCmds": true, "Lineage": true, "Goldens": true, "Findings": true, "Confirmed": true, "AllFound": true, "Status": true, "PrevUnfixed": true, "UnfixedAtEntry": true, "NodeOutputs": true, "Applied": true, "NodesRun": true, "LastError": true, "Warnings": true}
 	for i := 0; i < rt.NumField(); i++ {
 		f := rt.Field(i)
 		switch f.Type.Kind() {

@@ -47,6 +47,21 @@ metareview review pr-ready --base <base-ref> --evidence /tmp/metareview-evidence
 metareview learn --post-merge <pr-number> --base <pre-merge-ref>
 ```
 
+`task-done`, `epic-ready` and `pr-ready` also accept mutation-testing reports, which become
+findings alongside the rest (`review artifact` does not — there is no code under review yet):
+
+```bash
+metareview review task-done <task-id-or-path> --base <base-ref> --mutation-report ./mutation.json
+```
+
+The input contract is Stryker's `mutation-testing-report-schema` (gremlins' native output is
+accepted too, detected by structure rather than filename), so this is not Go-specific. Surviving
+mutants block; uncovered sites are advisory and grouped per file; undecided mutants (timeouts,
+engine errors) collapse into one blocking finding, because they are one fact rather than N
+defects — the run measured less than it claims. metareview computes the score itself and counts
+undecided against it rather than trusting the engine's summary.
+
+
 In a source checkout without a packaged binary, prefix commands with `go run ./cmd/metareview`.
 
 ## Agent Contract

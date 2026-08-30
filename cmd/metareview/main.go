@@ -19,6 +19,7 @@ import (
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/learning"
+	"github.com/dsifry/metareview/internal/mutation"
 	"github.com/dsifry/metareview/internal/prready"
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
@@ -45,9 +46,9 @@ Usage:
   metareview evidence run -- <command> [args...]
   metareview evidence import --github-checks <pr-number> [--repo <owner/repo>]
   metareview review artifact <path> [--previous-run <run-id>] [--scaffold-only]
-  metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--shard-result <path>]... [--cross-shard-result <path>]
-  metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
-  metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
+  metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--shard-result <path>]... [--cross-shard-result <path>]
+  metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]...
+  metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
 
 Commands:
@@ -207,6 +208,9 @@ func main() {
 			case "--evidence":
 				options.EvidencePath = flagValue(args, i, "--evidence")
 				i++
+			case "--mutation-report":
+				options.MutationReportPaths = append(options.MutationReportPaths, mustMutationReport(flagValue(args, i, "--mutation-report")))
+				i++
 			case "--shard-result":
 				options.ShardResultPaths = append(options.ShardResultPaths, mustResultFile(flagValue(args, i, "--shard-result")))
 				i++
@@ -243,6 +247,9 @@ func main() {
 			case "--evidence":
 				options.EvidencePath = flagValue(args, i, "--evidence")
 				i++
+			case "--mutation-report":
+				options.MutationReportPaths = append(options.MutationReportPaths, mustMutationReport(flagValue(args, i, "--mutation-report")))
+				i++
 			default:
 				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
 				os.Exit(2)
@@ -272,6 +279,9 @@ func main() {
 				i++
 			case "--evidence":
 				options.EvidencePath = flagValue(args, i, "--evidence")
+				i++
+			case "--mutation-report":
+				options.MutationReportPaths = append(options.MutationReportPaths, mustMutationReport(flagValue(args, i, "--mutation-report")))
 				i++
 			case "--github-pr":
 				options.GitHubPR = flagValue(args, i, "--github-pr")
@@ -644,6 +654,27 @@ func mustResultFile(path string) string {
 	}
 	if _, _, err := reviewmanifest.ParseResult(data); err != nil {
 		reject("is not a metareview review result")
+	}
+	return path
+}
+
+// mustMutationReport rejects a --mutation-report file the review could not act on, at the point
+// the operator can still fix it. Parsing here as well as in the review is deliberate: a typo in a
+// path or a truncated report otherwise surfaces as a review that found nothing, which reads
+// exactly like a clean one.
+func mustMutationReport(path string) string {
+	reject := func(reason string) {
+		fmt.Fprintf(os.Stderr, "Invalid mutation report %s: %s\n", path, reason)
+		os.Exit(2)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		reject("does not exist")
+	} else if !info.Mode().IsRegular() {
+		reject("is not a regular file")
+	}
+	if _, err := mutation.Load(path); err != nil {
+		reject(err.Error())
 	}
 	return path
 }

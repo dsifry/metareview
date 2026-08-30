@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -37,15 +38,34 @@ func (f *fakeRunner) Run(_ context.Context, name string, stdin []byte) (CmdResul
 	return f.res, f.err
 }
 
-func intp(i int) *int { return &i }
-
-func snap(iter int, unfixed int, prev *int, tokens int64, found int) run.Snapshot {
+// snap builds a snapshot with `found` bugs (ids b00, b01, ...), of which the first `unfixed` are
+// still present and the rest are fixed. entry is the ENTERING SET — the ids that were unfixed
+// when the iteration began — stated explicitly, because which of them are now fixed is the whole
+// measurement and no positional rule expresses both cases. nil means no boundary has been crossed.
+//
+// The shape is a set, not a count, because both counts were tried and both were wrong: unfixed
+// totals stall a productive loop, and fixed totals never stall a stuck one.
+func snap(iter int, unfixed int, entry []string, tokens int64, found int) run.Snapshot {
 	// tokens are spread over the non-Input counters so a Total() that only reads Input fails.
-	s := run.Snapshot{Iteration: iter, Unfixed: unfixed, PrevUnfixed: prev, Tokens: run.TokenTotals{Output: tokens / 2, CacheRead: tokens - tokens/2 - tokens/4, Reasoning: tokens / 4}}
+	s := run.Snapshot{Iteration: iter, Unfixed: unfixed, UnfixedAtEntry: entry,
+		Tokens: run.TokenTotals{Output: tokens / 2, CacheRead: tokens - tokens/2 - tokens/4, Reasoning: tokens / 4}}
 	for i := 0; i < found; i++ {
-		s.AllFound = append(s.AllFound, run.Bug{ID: strings.Repeat("a", 12), Desc: "d"})
+		id := bug(i)
+		s.AllFound = append(s.AllFound, run.Bug{ID: id, Desc: "d"})
+		s.Status = append(s.Status, run.BugStatus{ID: id, StillPresent: i < unfixed})
 	}
 	return s
+}
+
+func bug(i int) string { return fmt.Sprintf("b%02d", i) }
+
+// bugs names ids by index, so a fixture can say exactly which bugs entered the iteration.
+func bugs(idx ...int) []string {
+	out := []string{}
+	for _, i := range idx {
+		out = append(out, bug(i))
+	}
+	return out
 }
 
 func TestC1AllFixed(t *testing.T) {
@@ -72,10 +92,21 @@ func TestC2Atoms(t *testing.T) {
 	}{
 		{"all_fixed-bare-true", "all_fixed", snap(0, 0, nil, 0, 2), true, "all_fixed", run.OutcomeFixed},
 		{"all_fixed-map-false", "{all_fixed: true}", snap(0, 1, nil, 0, 2), false, "all_fixed", run.OutcomeFixed},
-		{"nfp-nil-prev", "no_fixation_progress", snap(1, 5, nil, 0, 5), false, "no_fixation_progress", run.OutcomeStalled},
-		{"nfp-equal", "{no_fixation_progress: true}", snap(1, 5, intp(5), 0, 5), true, "no_fixation_progress", run.OutcomeStalled},
-		{"nfp-less", "no_fixation_progress", snap(1, 4, intp(5), 0, 5), false, "no_fixation_progress", run.OutcomeStalled},
-		{"nfp-more", "no_fixation_progress", snap(1, 6, intp(5), 0, 6), true, "no_fixation_progress", run.OutcomeStalled},
+		// (iteration, unfixed, ENTERING SET, tokens, bugs known). Ids b00.. ; the first `unfixed`
+		// are still present, the rest are fixed.
+		{"nfp-no-boundary-yet", "no_fixation_progress", snap(1, 5, nil, 0, 5), false, "no_fixation_progress", run.OutcomeStalled},
+		// Entered with b00-b02, all still unfixed. Nothing handed to this round was fixed.
+		{"nfp-entering-set-untouched", "{no_fixation_progress: true}", snap(1, 5, bugs(0, 1, 2), 0, 5), true, "no_fixation_progress", run.OutcomeStalled},
+		// Entered with b02-b04; b03 and b04 are now fixed. Progress.
+		{"nfp-entering-set-partly-cleared", "no_fixation_progress", snap(1, 3, bugs(2, 3, 4), 0, 5), false, "no_fixation_progress", run.OutcomeStalled},
+		// THE CASE THE UNFIXED-TOTAL RULE STALLED: unfixed rose 4 -> 23 because discovery found 21
+		// new bugs, while entering bugs b23-b30 were cleared. Progress, and the old rule stopped it.
+		{"nfp-discovery-outpaces-fixing", "no_fixation_progress", snap(1, 23, bugs(0, 23, 24), 0, 31), false, "no_fixation_progress", run.OutcomeStalled},
+		// THE CASE THE FIXED-TOTAL RULE MISSED: the round cleared only bugs it discovered itself
+		// (b23-b30), and every bug it entered with (b00-b02) is untouched. Stalled.
+		{"nfp-only-new-bugs-fixed", "no_fixation_progress", snap(1, 23, bugs(0, 1, 2), 0, 31), true, "no_fixation_progress", run.OutcomeStalled},
+		// Entering with nothing unfixed is not a stall — there was nothing to make progress on.
+		{"nfp-entered-clean", "no_fixation_progress", snap(1, 0, []string{}, 0, 5), false, "no_fixation_progress", run.OutcomeStalled},
 		{"max-iter-3", "{max_iterations: 5}", snap(3, 1, nil, 0, 1), false, "max_iterations", run.OutcomeOverflow},
 		{"max-iter-4", "{max_iterations: 5}", snap(4, 1, nil, 0, 1), true, "max_iterations", run.OutcomeOverflow},
 		{"budget-under", "{budget: {tokens: 100}}", snap(0, 1, nil, 99, 1), false, "budget", run.OutcomeOverflow},
@@ -165,7 +196,9 @@ func TestC2CmdAtom(t *testing.T) {
 
 func TestC3Compose(t *testing.T) {
 	ctx := context.Background()
-	fired := snap(4, 5, intp(5), 0, 5) // nfp fires, max_iterations 5 fires, budget doesn't
+	// 5 known, 5 unfixed -> 0 fixed, no more than the previous 0: nfp fires. max_iterations 5
+	// fires at iteration 4. budget does not.
+	fired := snap(4, 5, bugs(0, 1, 2), 0, 5)
 	quiet := snap(0, 1, nil, 0, 1)
 
 	anyP, err := Parse(node(t, "any: [{budget: {tokens: 1000}}, no_fixation_progress, {max_iterations: 5}]"), nil)
@@ -192,7 +225,8 @@ func TestC3Compose(t *testing.T) {
 	if !r.Stop || r.Atom != "no_fixation_progress+max_iterations" || r.Class != run.OutcomeStalled || !strings.Contains(r.Reason, "; ") {
 		t.Fatalf("all fired: %+v", r)
 	}
-	r, _ = allP.Evaluate(ctx, snap(4, 4, intp(5), 0, 5)) // nfp quiet, max fires
+	// 5 known, 1 unfixed -> 4 fixed, up from 2: nfp quiet. max fires, so `all` is only partial.
+	r, _ = allP.Evaluate(ctx, snap(4, 1, bugs(1, 2, 3), 0, 5))
 	if r.Stop || r.Atom != allP.Name() || r.Reason != "" {
 		t.Fatalf("all partial: %+v", r)
 	}
@@ -313,5 +347,54 @@ func TestDescribe(t *testing.T) {
 	}
 	if _, err := Describe(node(t, "bogus: 1"), nil); err == nil {
 		t.Fatal("invalid tree")
+	}
+}
+
+// A looping workflow must carry something that terminates. no_fixation_progress is a STALL
+// detector, not a bound: an agent may fix one bug it entered with and discover five, forever, and
+// that is progress every round. The old predicate hid this by being too strict — it required the
+// unfixed total to strictly decrease, and that total is bounded below by zero, so it terminated
+// as a side effect. Replacing it with a correct stall detector removed a guarantee nobody had
+// written down, so it is written down here.
+func TestValidateBoundedRequiresATerminatingPredicate(t *testing.T) {
+	for name, src := range map[string]string{
+		"only nfp":            "no_fixation_progress",
+		"only all_fixed":      "all_fixed",
+		"nfp and all_fixed":   "any: [no_fixation_progress, all_fixed]",
+		"nfp under a nesting": "any: [{not: {no_fixation_progress: true}}, no_fixation_progress]",
+		// `all` stops only when EVERY child fires, so two bounds under it guarantee nothing: the
+		// run continues until they fire together, which nothing arranges. This tree names two
+		// bounds and is unbounded. It was accepted before, which made the whole check a
+		// formality — an author could satisfy it with a bound that could never stop the run.
+		"two bounds under all": "all: [{max_iterations: 3}, {budget: {tokens: 100}}]",
+		"a bound under all":    "any: [no_fixation_progress, {all: [{max_iterations: 9}, {cmd: chk}]}]",
+		"a negated bound":      "any: [no_fixation_progress, {not: {max_iterations: 3}}]",
+	} {
+		if err := ValidateBounded(node(t, src), []string{"chk"}, true); err == nil {
+			t.Errorf("%s: a looping workflow with no bound must be refused", name)
+		}
+		// ...and the same tree is fine for a workflow that does not loop.
+		if err := ValidateBounded(node(t, src), []string{"chk"}, false); err != nil {
+			t.Errorf("%s: a non-looping workflow needs no bound: %v", name, err)
+		}
+	}
+	for name, src := range map[string]string{
+		"max_iterations": "any: [no_fixation_progress, {max_iterations: 5}]",
+		"budget":         "any: [no_fixation_progress, {budget: {tokens: 100}}]",
+		"cmd":            "any: [no_fixation_progress, {cmd: chk}]",
+		"bound alone":    "{max_iterations: 3}",
+		// Nested `any` preserves the guarantee — the bound alone still stops the run.
+		"nested under any": "any: [no_fixation_progress, {any: [{cmd: chk}, {max_iterations: 9}]}]",
+		// A bound beside an `all` that buries one: the reachable bound is what counts.
+		"one reachable": "any: [{max_iterations: 4}, {all: [{cmd: chk}, no_fixation_progress]}]",
+	} {
+		if err := ValidateBounded(node(t, src), []string{"chk"}, true); err != nil {
+			t.Errorf("%s: must be accepted as bounded: %v", name, err)
+		}
+	}
+	// An invalid tree still fails for its own reason, not for missing a bound.
+	if err := ValidateBounded(node(t, "frobnicate"), nil, true); err == nil ||
+		strings.Contains(err.Error(), "terminating predicate") {
+		t.Errorf("a malformed tree must fail on its own error: %v", err)
 	}
 }

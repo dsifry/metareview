@@ -84,6 +84,78 @@ func Validate(node *yaml.Node, cmdNames []string) error {
 	return err
 }
 
+// ValidateBounded is Validate plus the requirement that a LOOPING workflow carry a predicate that
+// terminates on its own — max_iterations or budget.
+//
+// no_fixation_progress is a stall detector, not a bound. The old version happened to guarantee
+// termination as a side effect of being too strict (it required the unfixed total to strictly
+// decrease, and that total is bounded below by zero), and replacing it with a correct stall
+// detector removed a guarantee nobody had written down. An agent may legitimately fix one bug it
+// entered with and discover five, forever; that is progress, and the atom is right not to stop
+// it. Something else has to.
+//
+// Enforced at parse time rather than left to every workflow author to remember, because the
+// failure mode is a run that consumes tokens until DefaultMaxEvents — thousands of iterations —
+// and it is invisible in a workflow that looks complete.
+func ValidateBounded(node *yaml.Node, cmdNames []string, loops bool) error {
+	if err := Validate(node, cmdNames); err != nil {
+		return err
+	}
+	if !loops {
+		return nil
+	}
+	if hasBound(node) {
+		return nil
+	}
+	return bad("a looping workflow needs a terminating predicate: add {max_iterations: n} or {budget: {tokens: n}}")
+}
+
+// hasBound reports whether the tree contains any predicate that can stop a run on its own:
+// max_iterations, budget, or a cmd atom.
+//
+// cmd counts because it is an arbitrary author-supplied check and may well be the intended brake;
+// refusing it would reject workflows whose termination argument this code simply cannot read. The
+// case being caught is narrower and quite specific — a looping workflow whose ONLY predicates are
+// no_fixation_progress and all_fixed, neither of which terminates. all_fixed stops only if the
+// agent fixes everything, and no_fixation_progress is a stall detector: an agent may fix one bug
+// it entered with and discover five, forever, which is progress every round and unbounded.
+//
+// A bound under `all` or `not` does NOT count. `all` stops only when EVERY child fires, so
+// {all: [{max_iterations: 3}, {budget: ...}]} is unbounded despite naming two bounds: the run
+// continues until both fire together, which nothing guarantees. `not` inverts the same way. This
+// is the identical argument the parser already makes about all_fixed, which it permits only at
+// the top level or directly under a top-level `any`.
+//
+// Reachability is not otherwise proven. cmd counts wherever it survives that rule because it is
+// an arbitrary author-supplied check and may well be the intended brake; refusing it would reject
+// workflows whose termination argument this code simply cannot read. The point is to catch the
+// workflow that forgot a bound, not to prove one fires.
+func hasBound(node *yaml.Node) bool {
+	if node == nil || node.Kind == yaml.ScalarNode {
+		return false
+	}
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			switch node.Content[i].Value {
+			case "max_iterations", "budget", "cmd":
+				return true
+			case "all", "not":
+				continue
+			}
+			if hasBound(node.Content[i+1]) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, c := range node.Content {
+		if hasBound(c) {
+			return true
+		}
+	}
+	return false
+}
+
 // Parse validates and binds a convergence tree; cmd atoms call runner.
 func Parse(node *yaml.Node, runner Runner) (Predicate, error) {
 	return parse(node, runner, nil, true, 0)
@@ -222,13 +294,74 @@ type noProgress struct{}
 
 func (noProgress) Name() string       { return "no_fixation_progress" }
 func (noProgress) Class() run.Outcome { return run.OutcomeStalled }
+
+// Evaluate stops when an iteration fixed NONE OF THE BUGS IT WAS HANDED.
+//
+// Progress is measured against the entering SET, not against any count. Two counts were tried
+// first and both were wrong, in opposite directions:
+//
+//   - unfixed totals: stalls a productive loop, because the total grows whenever discovery
+//     outpaces fixing. Measured 2026-08-30 — round 0 fixed 6 of 10, round 1 found 21 more, and
+//     the run halted on "unfixed 23 >= previous 4" while converging.
+//   - fixed totals: never stalls a stuck one. A bug discovered and fixed in the same round raises
+//     the count while the backlog is untouched, so an agent that clears one easy new bug per
+//     round runs forever; verified at 200 rounds. Worse, the count is inflatable with no work at
+//     all, because adjudicate confirming N bugs and verify calling those same N absent moves it
+//     by N with nothing edited.
+//
+// The entering set has neither hole: a bug found this round is not in it, and a bug fixed from it
+// is fixed whatever else happened. It is deliberately NOT a termination guarantee — an agent may
+// fix one entering bug and find five, forever. That is genuine progress and stopping it is not
+// this atom's job; max_iterations and budget bound the run, and Validate now requires a looping
+// workflow to carry one of them.
 func (n noProgress) Evaluate(_ context.Context, s run.Snapshot) (Result, error) {
-	stop := s.PrevUnfixed != nil && s.Unfixed >= *s.PrevUnfixed
+	if s.UnfixedAtEntry == nil {
+		// No boundary has been crossed yet. This is the atom's failure-open mode, not a
+		// compatibility shim: snapshots are always re-folded from the event log, never persisted
+		// and reloaded, so there is no such thing as a run recorded before this field existed.
+		return decide(n, false, ""), nil
+	}
+	if len(s.UnfixedAtEntry) == 0 {
+		// The iteration began with nothing unfixed, so there was nothing to make progress on.
+		// That is not a stall; a run in that state is finished, and all_fixed says so.
+		return decide(n, false, ""), nil
+	}
+	stillUnfixed := map[string]bool{}
+	for _, id := range unfixedNow(s) {
+		stillUnfixed[id] = true
+	}
+	var cleared int
+	for _, id := range s.UnfixedAtEntry {
+		if !stillUnfixed[id] {
+			cleared++
+		}
+	}
+	stop := cleared == 0
 	reason := ""
 	if stop {
-		reason = fmt.Sprintf("unfixed %d >= previous %d", s.Unfixed, *s.PrevUnfixed)
+		reason = fmt.Sprintf("none of the %d bugs this iteration began with was fixed (%d bugs known, %d unfixed)",
+			len(s.UnfixedAtEntry), len(s.AllFound), s.Unfixed)
 	}
 	return decide(n, stop, reason), nil
+}
+
+// unfixedNow is the ids currently without a fixed status. It reads the same two snapshot fields
+// the fold does; keeping the rule in one shape on both sides is what stops "unfixed" acquiring a
+// second definition, which this repository's persistence spec already tracks as a risk.
+func unfixedNow(s run.Snapshot) []string {
+	fixed := make(map[string]bool, len(s.Status))
+	for _, st := range s.Status {
+		if !st.StillPresent {
+			fixed[st.ID] = true
+		}
+	}
+	out := []string{}
+	for _, b := range s.AllFound {
+		if !fixed[b.ID] {
+			out = append(out, b.ID)
+		}
+	}
+	return out
 }
 
 type maxIter struct{ n int }

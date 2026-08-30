@@ -17,6 +17,7 @@ type Context struct {
 	Git          GitContext
 	Knowledge    KnowledgeContext
 	Manifest     ManifestContext
+	Mutation     MutationContext
 	EvidenceText string
 }
 
@@ -95,6 +96,7 @@ var inventoryPathPattern = regexp.MustCompile(`[A-Za-z0-9_./-]+\.(go|js|ts|tsx|j
 
 func RunTaskDone(context Context) []Finding {
 	var results []Finding
+	results = append(results, context.Mutation.Findings()...)
 	sharded := false
 	if context.Git.RiskLevel == "context-risk" {
 		if !context.Manifest.Satisfies(context.Git.RiskReasons) {

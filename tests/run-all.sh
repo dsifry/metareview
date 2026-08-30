@@ -26,6 +26,7 @@ if [ -f tests/go/test-override.sh ]; then bash tests/go/test-override.sh; fi
 if [ -f tests/go/test-override-coverage.sh ]; then bash tests/go/test-override-coverage.sh; fi
 if [ -f tests/go/test-taskdone-reviewers.sh ]; then bash tests/go/test-taskdone-reviewers.sh; fi
 if [ -f tests/go/test-task-done-review.sh ]; then bash tests/go/test-task-done-review.sh; fi
+if [ -f tests/go/test-mutation-report.sh ]; then bash tests/go/test-mutation-report.sh; fi
 if [ -f tests/go/test-reviewlog.sh ]; then bash tests/go/test-reviewlog.sh; fi
 if [ -f tests/go/test-epic-source.sh ]; then bash tests/go/test-epic-source.sh; fi
 if [ -f tests/go/test-epicready-reviewers.sh ]; then bash tests/go/test-epicready-reviewers.sh; fi
@@ -54,4 +55,19 @@ if command -v shellcheck >/dev/null 2>&1; then
   echo "shellcheck: ok"
 else
   echo "shellcheck: SKIPPED (not installed; CI still enforces it)" >&2
+fi
+
+# The same gap again, and worth naming as a class rather than a second instance: CI runs checks
+# this suite does not, so a defect passes everything locally and fails on the PR. shellcheck was
+# added above on 2026-08-29 after SC2043 did exactly that; on 2026-08-30 golangci-lint did it
+# again (SA4004, a loop left unconditionally terminated by removing a dead branch). Every check in
+# .github/workflows/test.yml belongs here too.
+if command -v golangci-lint >/dev/null 2>&1; then
+  # GOFLAGS is unset deliberately: coverage.sh runs this suite with `-cover -covermode=atomic` to
+  # instrument the binaries the scripts build, and golangci-lint inherits it, fails to typecheck
+  # the instrumented tree, and reports a phantom issue. The linter must see the code as written.
+  GOFLAGS="" golangci-lint run
+  echo "golangci-lint: ok"
+else
+  echo "golangci-lint: SKIPPED (not installed; CI still enforces it)" >&2
 fi

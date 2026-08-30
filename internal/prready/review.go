@@ -3,6 +3,7 @@ package prready
 import (
 	"errors"
 	"fmt"
+	"github.com/dsifry/metareview/internal/mutation"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,9 @@ type Options struct {
 	// --cross-shard-result files, added to whatever the results directory holds.
 	ShardResultPaths      []string
 	CrossShardResultPaths []string
+	// MutationReportPaths are --mutation-report files: a mutation-testing engine's output,
+	// either mutation-testing-report-schema or gremlins JSON. Empty is the ordinary case.
+	MutationReportPaths []string
 	// ShardWriter is the pack-writing seam; nil uses the real filesystem.
 	ShardWriter shardpack.Writer
 }
@@ -182,7 +186,13 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	rawFindings := reviewers.RunPRReady(reviewerContext(analysisGit, profile, knowledgeContext, reviewLogs, evidenceText, prEvidence, ghCtx, options.IncludeWorkingTree, dirtyFiles, manifestContext(manifest, aggregate)))
+	mutationContext, err := mutationContextFor(options.MutationReportPaths)
+	if err != nil {
+		return Result{}, err
+	}
+	reviewerCtx := reviewerContext(analysisGit, profile, knowledgeContext, reviewLogs, evidenceText, prEvidence, ghCtx, options.IncludeWorkingTree, dirtyFiles, manifestContext(manifest, aggregate))
+	reviewerCtx.Mutation = mutationContext
+	rawFindings := reviewers.RunPRReady(reviewerCtx)
 	run := findings.Run{ID: runID, Scope: "pr-ready", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
 
 	packDir := ""
@@ -1136,4 +1146,18 @@ func findingIDs(records []findings.Record) []string {
 
 func shardTargetID(git gitcontext.Context) string {
 	return firstNonEmpty(git.Branch, git.HeadSHA)
+}
+
+// mutationContextFor loads the declared mutation reports. An unreadable or unrecognised report is
+// an error that stops the review, never a skipped file: a mutation gate that quietly drops a
+// report is a gate that passes because it looked at less.
+func mutationContextFor(paths []string) (reviewers.MutationContext, error) {
+	if len(paths) == 0 {
+		return reviewers.MutationContext{}, nil
+	}
+	reports, err := mutation.LoadAll(paths)
+	if err != nil {
+		return reviewers.MutationContext{}, err
+	}
+	return reviewers.MutationContext{Reports: reports}, nil
 }

@@ -48,6 +48,21 @@ metareview review pr-ready --base <base-ref> --evidence "$tmp_evidence"
 metareview learn --post-merge <pr-number> --base <pre-merge-ref>
 ```
 
+`task-done`, `epic-ready` and `pr-ready` also accept mutation-testing reports, which become
+findings alongside the rest (`review artifact` does not — there is no code under review yet):
+
+```bash
+metareview review task-done <task-id-or-path> --base <base-ref> --mutation-report ./mutation.json
+```
+
+The input contract is Stryker's `mutation-testing-report-schema` (gremlins' native output is
+accepted too, detected by structure rather than filename), so this is not Go-specific. Surviving
+mutants block; uncovered sites are advisory and grouped per file; undecided mutants (timeouts,
+engine errors) collapse into one blocking finding, because they are one fact rather than N
+defects — the run measured less than it claims. metareview computes the score itself and counts
+undecided against it rather than trusting the engine's summary.
+
+
 `artifact` creates an incomplete review scaffold for specs, plans, and docs. The command exits nonzero while the scaffold is still `NOT_REVIEWED`; complete every required reviewer row and update the verdict before treating the artifact as reviewed. Artifact review runs the eight required lenses as parallel subagents by default. Use `in-session-emulated` only when subagents are unavailable or the human explicitly requests no delegation, and state that the review is not independently adversarial and is weaker evidence. Use `--scaffold-only` only when scaffold creation itself is the intended action. `task-done` runs after a local task or chunk claims done. `epic-ready` runs when child tasks are complete. `pr-ready` runs before push or merge readiness. `learn --post-merge` runs after confirmed PR merge.
 
 Lifecycle gate results use this contract:

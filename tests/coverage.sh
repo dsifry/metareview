@@ -85,6 +85,7 @@ PCTS="$(awk -v mod="$MODULE/" 'NR > 1 {
 }' "$PROFILE" | sort)"
 
 failures=0
+missing_floor=0
 table=""
 check_pkg() {
   local rel="$1" pct="$2" exact="$3" status="ok"
@@ -98,7 +99,11 @@ check_pkg() {
       if [ -n "$floor" ] && awk -v a="$pct" -v b="$floor" 'BEGIN{exit !(a < b)}'; then
         status="FAIL (floor $floor)"; failures=$((failures + 1))
       elif [ -z "$floor" ]; then
-        status="no floor"
+        # A package with no floor line is UNGATED, and silently so — internal/mutation shipped an
+        # entire subsystem that way. A new package must be given a floor deliberately
+        # (bash tests/coverage.sh --update-floor) rather than default to unmeasured.
+        status="FAIL (no floor: add a line to tests/coverage-floor.txt, or run --update-floor)"
+        failures=$((failures + 1)); missing_floor=$((missing_floor + 1))
       fi
       ;;
   esac
@@ -159,6 +164,11 @@ if [ "$UPDATE_FLOOR" = true ]; then
     printf '%s\n' "$new_floor"
   } > "$FLOOR_FILE"
   echo "floor updated: $FLOOR_FILE"
+  # The write above IS the remedy the no-floor message prescribes, so those failures are now
+  # resolved and must not still fail the run — a remedy that fails on the run that applies it
+  # teaches people to ignore the gate. Only the missing-floor count is forgiven: a package that
+  # was genuinely BELOW its floor still fails, and --update-floor refuses to lower a floor anyway.
+  failures=$((failures - missing_floor)); missing_floor=0
 fi
 
 if [ "$failures" -gt 0 ]; then

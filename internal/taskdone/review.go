@@ -3,6 +3,7 @@ package taskdone
 import (
 	"errors"
 	"fmt"
+	"github.com/dsifry/metareview/internal/mutation"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,9 @@ type Options struct {
 	// --cross-shard-result files, added to whatever the results directory holds.
 	ShardResultPaths      []string
 	CrossShardResultPaths []string
+	// MutationReportPaths are --mutation-report files: a mutation-testing engine's output,
+	// either mutation-testing-report-schema or gremlins JSON. Empty is the ordinary case.
+	MutationReportPaths []string
 	// ShardWriter is the pack-writing seam; nil uses the real filesystem.
 	ShardWriter shardpack.Writer
 }
@@ -144,7 +148,13 @@ func Create(root, target string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	rawFindings := reviewers.RunTaskDone(reviewerContext(task, reviewGit, profile, knowledgeContext, evidenceText, manifestContext(manifest, aggregate)))
+	mutationContext, err := mutationContextFor(options.MutationReportPaths)
+	if err != nil {
+		return Result{}, err
+	}
+	reviewerCtx := reviewerContext(task, reviewGit, profile, knowledgeContext, evidenceText, manifestContext(manifest, aggregate))
+	reviewerCtx.Mutation = mutationContext
+	rawFindings := reviewers.RunTaskDone(reviewerCtx)
 	targetRecord := map[string]string{"type": taskTargetType(task), "id": task.ID}
 	run := findings.Run{ID: runID, Scope: "task-done", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
 
@@ -743,4 +753,18 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// mutationContextFor loads the declared mutation reports. An unreadable or unrecognised report is
+// an error that stops the review, never a skipped file: a mutation gate that quietly drops a
+// report is a gate that passes because it looked at less.
+func mutationContextFor(paths []string) (reviewers.MutationContext, error) {
+	if len(paths) == 0 {
+		return reviewers.MutationContext{}, nil
+	}
+	reports, err := mutation.LoadAll(paths)
+	if err != nil {
+		return reviewers.MutationContext{}, err
+	}
+	return reviewers.MutationContext{Reports: reports}, nil
 }

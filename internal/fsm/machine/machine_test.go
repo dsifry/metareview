@@ -807,7 +807,10 @@ func TestM4Convergence(t *testing.T) {
 		}
 	}
 	wf = sdlcWith(t, h, "wide.yaml", "  any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]\nrepo_mode: advisory",
-		"  all: ["+strings.Join(names, ", ")+"]\ncmds:\n"+strings.Join(decls, "\n")+"\nrepo_mode: advisory")
+		// The `all` is wrapped in an `any` beside a bound that cannot fire: a bare `all` is
+		// (correctly) not a bound, and this fixture is about capping a long atom NAME. `any`
+		// returns the first child that stops, so the joined name under test is unchanged.
+		"  any: [{all: ["+strings.Join(names, ", ")+"]}, {max_iterations: 9000}]\ncmds:\n"+strings.Join(decls, "\n")+"\nrepo_mode: advisory")
 	h.runner.res = converge.CmdResult{Stdout: []byte(`{"stop": true, "reason": "x"}`)}
 	_, sha, _ = workflow.ResolveCmds(mustResolve(t, h, wf), "/repo", h.deps.LookPath, h.deps.FileHash)
 	allPresent(h)
