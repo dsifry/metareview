@@ -47,7 +47,8 @@ metareview review pr-ready --base <base-ref> --evidence /tmp/metareview-evidence
 metareview learn --post-merge <pr-number> --base <pre-merge-ref>
 ```
 
-Any review gate also accepts mutation-testing reports, which become findings alongside the rest:
+`task-done`, `epic-ready` and `pr-ready` also accept mutation-testing reports, which become
+findings alongside the rest (`review artifact` does not — there is no code under review yet):
 
 ```bash
 metareview review task-done <task-id-or-path> --base <base-ref> --mutation-report ./mutation.json

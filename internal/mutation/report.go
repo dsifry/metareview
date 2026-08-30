@@ -9,6 +9,7 @@
 package mutation
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strconv"
@@ -253,17 +254,31 @@ func siteList(ms []Mutant) string {
 }
 
 // unresolvedKey identifies WHICH mutants an engine could not decide, independent of where the
-// report file happened to be written. Sorted, so the same run keys the same way whatever order
-// the engine emitted, and capped so one enormous failure cannot produce an unbounded key.
+// report file happened to be written.
+//
+// The whole sorted set is hashed rather than a capped list of sites. A capped list collided: two
+// reports from one engine sharing their first eight sites AND their total count keyed identically
+// despite differing later, so the second was dropped by the dedupe in reviewers.MutationContext
+// and an override granted for one rematched the other. The cap survives in siteList, which is
+// presentation — the finding still reads a handful of sites and a count.
+//
+// A residual ambiguity is worth stating rather than hiding: gremlins emits basenames, so two
+// packages whose undecided sets are byte-identical are indistinguishable from report content
+// alone. Keying on the report path used to disambiguate that, but the path is not a property of
+// the run — CI and a developer's checkout produced different fingerprints for the same report —
+// and an identity that changes by machine is worse than one that is occasionally ambiguous,
+// because it fails silently every time rather than rarely.
 func unresolvedKey(ms []Mutant) string {
-	const max = 8
 	sites := make([]string, 0, len(ms))
 	for _, m := range ms {
 		sites = append(sites, fmt.Sprintf("%s:%d", m.File, m.Line))
 	}
 	sort.Strings(sites)
-	if len(sites) > max {
-		sites = append(sites[:max], fmt.Sprintf("+%d", len(ms)-max))
+	parts := make([]string, 0, len(sites))
+	for _, site := range sites {
+		// Length-prefixed: "a:1" + "b:2" and "a:1b" + ":2" must not hash alike.
+		parts = append(parts, strconv.Itoa(len(site))+":"+site)
 	}
-	return strings.Join(sites, ",")
+	sum := sha256.Sum256([]byte(strings.Join(parts, "")))
+	return fmt.Sprintf("%x", sum[:16])
 }

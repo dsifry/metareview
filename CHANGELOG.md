@@ -4,8 +4,9 @@
 
 ### Added
 
-- **Mutation reports as review input (`--mutation-report`).** Any review gate accepts one or more
-  mutation-testing reports and turns them into findings. The input contract is Stryker's
+- **Mutation reports as review input (`--mutation-report`).** `review task-done`, `review
+  epic-ready` and `review pr-ready` accept one or more mutation-testing reports and turn them into
+  findings. `review artifact` does not: it reviews a document, with no code to mutate. The input contract is Stryker's
   `mutation-testing-report-schema`, which several engines already emit, so this is not a Go
   feature: a JS or C# project pointing at its own report gets the same gate. gremlins' native
   output is accepted too, detected structurally rather than by filename.

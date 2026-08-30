@@ -157,8 +157,42 @@ func TestTheUnresolvedFingerprintSurvivesADifferentPath(t *testing.T) {
 	if len(big) > 200 {
 		t.Errorf("the key grows with the failure (%d chars): %s", len(big), big)
 	}
-	if !strings.Contains(big, "+89") {
-		t.Errorf("a truncated key must still carry how many it dropped: %s", big)
+	// The WHOLE set is part of the identity, not a prefix of it. A capped list collided: two
+	// reports from one engine sharing their first eight sites and their total count keyed
+	// identically despite differing later, so the second was dropped by the dedupe and an
+	// override granted for one rematched the other. Both bots on #24 caught this; the first
+	// version of this test did not, because it only ever compared 97 sites against 96.
+	shared := func(differAt int) string {
+		ms := make([]mutation.Mutant, 20)
+		for i := range ms {
+			ms[i] = mutation.Mutant{File: "a.go", Line: i + 1, Status: "timeout"}
+		}
+		ms[differAt].Line = 900 + differAt
+		return (mutation.Report{Engine: "gremlins", Mutants: ms}).Findings()[0].Fingerprint
+	}
+	if shared(19) == shared(18) {
+		t.Error("two sets identical in their first eight sites and count must not share a fingerprint")
+	}
+	// Concatenating "file:line" strings without a length prefix lets the boundary move: one
+	// mutant in a file named "a:1b" at line 2 concatenates to exactly what two mutants at a.go:1
+	// and b.go:2 do. A colon in a path is unusual, not impossible, and a fingerprint that can be
+	// forged by a filename is not an identity.
+	keyOf := func(ms ...mutation.Mutant) string {
+		return (mutation.Report{Engine: "gremlins", Mutants: ms}).Findings()[0].Fingerprint
+	}
+	two := keyOf(mutation.Mutant{File: "a", Line: 1, Status: "timeout"},
+		mutation.Mutant{File: "b", Line: 2, Status: "timeout"})
+	one := keyOf(mutation.Mutant{File: "a:1b", Line: 2, Status: "timeout"})
+	if two == one {
+		t.Errorf("a colon in a path collapsed two claims into one: %s", two)
+	}
+	// Enough entropy to be an identity. A short digest passes every collision test above (four
+	// fixtures rarely collide in one byte) and then collides constantly against a real repo's
+	// worth of reports, which is the failure mode that matters: an override rematching a finding
+	// it was never granted for. 128 bits is the floor, and the key stays bounded regardless.
+	digest := strings.TrimPrefix(big, "mutation:unresolved:gremlins:")
+	if len(digest) < 32 {
+		t.Errorf("the identity carries only %d hex chars: %s", len(digest), big)
 	}
 	// Truncation must not erase the difference between two different large failures.
 	if big == many(96, "a.go") {
