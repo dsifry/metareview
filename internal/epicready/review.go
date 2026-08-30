@@ -228,6 +228,8 @@ func Create(root, target string, options Options) (Result, error) {
 			AdvisoryFindingCount: counts.Advisory,
 			FollowUpFindingCount: counts.FollowUp,
 			WarningFindingCount:  counts.Warnings,
+			HeadSHA:              git.HeadSHA,
+			CoveredPaths:         coveredPaths(reviewGit),
 		}
 		return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, target, contextRel, options.PreviousRunID, gateEffect, verdict, reconciled.OpenFindings, meta)), 0o644)
 	}()
@@ -567,6 +569,13 @@ type reviewMetadata struct {
 	AdvisoryFindingCount int
 	FollowUpFindingCount int
 	WarningFindingCount  int
+	// HeadSHA and CoveredPaths are written into the COMMITTED review log, not only into the
+	// untracked run record. Branch scoping asks "was this commit reviewed" and "which files did
+	// it read", and both answers lived only in .metareview/runs.jsonl — which no clone, no fresh
+	// worktree and no CI checkout has. Scoping therefore evaporated the moment the review left
+	// the machine that produced it, and every file read as UNREVIEWED.
+	HeadSHA      string
+	CoveredPaths []string
 }
 
 func verdictForCounts(counts findings.ClassCounts, gateEffect string, attemptNumber, maxAttempts int) (string, string, bool, string) {
@@ -592,6 +601,8 @@ func reviewMarkdown(runID, target, contextRel, previousRun, gateEffect, verdict 
 		"Context pack: " + markdown.InlineCode(contextRel) + "\n\n" +
 		"Execution mode: " + markdown.InlineCode("deterministic-local") + "\n\n" +
 		"Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
+		"Head: " + markdown.InlineCode(firstNonEmpty(meta.HeadSHA, "unknown")) + "\n\n" +
+		"Covered paths: " + markdown.InlineCode(coveredPathsLine(meta.CoveredPaths)) + "\n\n" +
 		"Previous run: " + markdown.InlineCode(firstNonEmpty(previousRun, "none")) + "\n\n" +
 		"## Verdict\n\n" + verdict + "\n\n" +
 		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n" +
@@ -815,4 +826,15 @@ func coveredPaths(g gitcontext.Context) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// coveredPathsLine renders the files a review read as one inline-code field. "none" is written
+// explicitly rather than left blank, so a reader can tell a review that examined nothing from one
+// written before this field existed — the difference between "covers no files" and "unknown",
+// which is what decides whether an old log may answer for a path.
+func coveredPathsLine(paths []string) string {
+	if len(paths) == 0 {
+		return "none"
+	}
+	return strings.Join(paths, ", ")
 }

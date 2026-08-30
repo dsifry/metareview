@@ -49,3 +49,26 @@ func TestRunChainMarkdownIncludesEscalationDetails(t *testing.T) {
 		}
 	}
 }
+
+// The review log has to carry the head and the files it read, because that is the only copy that
+// survives leaving this machine: .metareview/runs.jsonl is untracked, so a clone, a fresh
+// worktree or a CI checkout had logs it could not attribute to any commit — every file read as
+// UNREVIEWED and no historical blocker was ever in scope. This asserts the WRITER emits them;
+// the parser was already tested, which is exactly why the gap survived.
+func TestReviewMarkdownRecordsHeadAndCoveredPaths(t *testing.T) {
+	meta := reviewMetadata{HeadSHA: "abc1234def", CoveredPaths: []string{"internal/a.go", "internal/b.go"}}
+	md := reviewMarkdown("mrv-1", "epic-1", "ctx.md", "", "gate", "PASS", nil, meta)
+	for _, required := range []string{"Head: `abc1234def`", "Covered paths: `internal/a.go, internal/b.go`"} {
+		if !strings.Contains(md, required) {
+			t.Fatalf("review markdown missing %q:\n%s", required, md)
+		}
+	}
+	// A review with neither says so explicitly. "unknown" and "none" are answers; a blank field
+	// would be indistinguishable from a log written before these existed.
+	md = reviewMarkdown("mrv-1", "epic-1", "ctx.md", "", "gate", "PASS", nil, reviewMetadata{})
+	for _, required := range []string{"Head: `unknown`", "Covered paths: `none`"} {
+		if !strings.Contains(md, required) {
+			t.Fatalf("review markdown missing %q:\n%s", required, md)
+		}
+	}
+}

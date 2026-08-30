@@ -558,3 +558,89 @@ func TestSummaryCarriesHeadAndCoveredPathsFromTheRunRecord(t *testing.T) {
 		}
 	}
 }
+
+// Scoping has to survive leaving the machine that produced the review. HeadSHA and CoveredPaths
+// lived only in .metareview/runs.jsonl, which is untracked — so a clone, a fresh worktree or a
+// CI checkout had review logs it could not attribute to any commit, every file read as
+// UNREVIEWED, and no historical blocker was ever in scope. Found by rebuilding the self-test
+// worktree from scratch, which is exactly what that exercise was for.
+func TestSummaryReadsHeadAndPathsFromTheCommittedLogAlone(t *testing.T) {
+	root := t.TempDir() // no .metareview/runs.jsonl at all, as in a fresh clone
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "one.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-1`\n\nTarget: `current branch`\n\n"+
+			"Head: `abc1234def`\n\nCovered paths: `internal/a.go, internal/b.go`\n\n## Verdict\n\nPASS\n")
+
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("got %d, want 1", len(logs))
+	}
+	if logs[0].HeadSHA != "abc1234def" {
+		t.Errorf("HeadSHA = %q: the committed log must carry it", logs[0].HeadSHA)
+	}
+	if len(logs[0].CoveredPaths) != 2 || logs[0].CoveredPaths[1] != "internal/b.go" {
+		t.Errorf("CoveredPaths = %v, want both files", logs[0].CoveredPaths)
+	}
+}
+
+// "none" and absent are different answers. A review that examined no files can say so; one
+// written before the field existed cannot say anything, and must not be read as saying "none" —
+// that would let an old log answer for a path it never opened.
+func TestCoveredPathsDistinguishesNoneFromUnknown(t *testing.T) {
+	if got := splitCoveredPaths("none"); got != nil {
+		t.Errorf("none = %v, want nil", got)
+	}
+	if got := splitCoveredPaths(""); got != nil {
+		t.Errorf("empty = %v, want nil", got)
+	}
+	if got := splitCoveredPaths("a.go,  b.go , "); len(got) != 2 || got[1] != "b.go" {
+		t.Errorf("got %v, want [a.go b.go] with whitespace and trailing separators handled", got)
+	}
+	// An unknown head is written as the literal `unknown` and must not become a SHA.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "u.md"),
+		"# metareview: task-done review\n\nRun ID: `mrv-u`\n\nTarget: `t`\n\nHead: `unknown`\n\n## Verdict\n\nPASS\n")
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logs[0].HeadSHA != "" {
+		t.Errorf("an unknown head must stay empty, got %q", logs[0].HeadSHA)
+	}
+}
+
+// The committed log wins over the local run record: the run record is enrichment for a review
+// made on this machine, and must never blank a value the durable artifact already carried.
+func TestTheCommittedLogWinsOverTheLocalRunRecord(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "one.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-1`\n\nTarget: `t`\n\n"+
+			"Head: `fromlog`\n\nCovered paths: `log.go`\n\n## Verdict\n\nPASS\n")
+	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-1","scope":"pr-ready","verdict":"PASS","headSha":"fromrun","coveredPaths":["run.go"]}`+"\n")
+
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logs[0].HeadSHA != "fromlog" || len(logs[0].CoveredPaths) != 1 || logs[0].CoveredPaths[0] != "log.go" {
+		t.Errorf("the durable artifact must win: head=%q paths=%v", logs[0].HeadSHA, logs[0].CoveredPaths)
+	}
+	// ...and a log with neither still takes them from the run record.
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "two.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-2`\n\nTarget: `t`\n\n## Verdict\n\nPASS\n")
+	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-1","scope":"pr-ready","verdict":"PASS","headSha":"fromrun","coveredPaths":["run.go"]}`+"\n"+
+			`{"id":"mrv-2","scope":"pr-ready","verdict":"PASS","headSha":"legacy","coveredPaths":["legacy.go"]}`+"\n")
+	logs, err = Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range logs {
+		if l.RunID == "mrv-2" && (l.HeadSHA != "legacy" || len(l.CoveredPaths) != 1) {
+			t.Errorf("a log with no head must still take one from the run record: %+v", l)
+		}
+	}
+}

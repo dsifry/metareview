@@ -121,6 +121,15 @@ func parseMarkdown(rel, text string) Summary {
 			summary.PreviousRunID = previousRunID(firstInlineCode(line))
 		case strings.HasPrefix(line, "Context pack:"):
 			summary.ContextRel = firstInlineCode(line)
+		case strings.HasPrefix(line, "Head:"):
+			// Read from the COMMITTED log, so a clone, a fresh worktree or a CI checkout can
+			// still say which commit a review covered. This lived only in the untracked run
+			// record, so scoping evaporated the moment the review left the machine that made it.
+			if sha := firstInlineCode(line); sha != "unknown" {
+				summary.HeadSHA = sha
+			}
+		case strings.HasPrefix(line, "Covered paths:"):
+			summary.CoveredPaths = splitCoveredPaths(firstInlineCode(line))
 		case strings.HasPrefix(line, "Required lenses:"):
 			declaredLenses = splitLenses(firstInlineCode(line))
 		case strings.TrimSpace(line) == "## Verdict":
@@ -398,8 +407,14 @@ func mergeRunMetadata(summary *Summary, runs []runchain.Record) {
 	if !ok {
 		return
 	}
-	summary.HeadSHA = current.HeadSHA
-	summary.CoveredPaths = append([]string(nil), current.CoveredPaths...)
+	// The committed log wins. The run record is local enrichment for a review made on this
+	// machine, and must not blank a value the durable artifact already carried.
+	if summary.HeadSHA == "" {
+		summary.HeadSHA = current.HeadSHA
+	}
+	if len(summary.CoveredPaths) == 0 {
+		summary.CoveredPaths = append([]string(nil), current.CoveredPaths...)
+	}
 	summary.AttemptNumber = current.AttemptNumber
 	summary.MaxAttempts = current.MaxAttempts
 	summary.BlockingFindingCount = current.BlockingFindingCount
@@ -483,4 +498,20 @@ func appendUnique(values []string, value string) []string {
 		}
 	}
 	return append(values, value)
+}
+
+// splitCoveredPaths reads the inline list a review log writes. "none" means the review examined
+// no files, which is NOT the same as a log written before the field existed and carrying nothing
+// at all — the first can answer for a path (with "no"), the second cannot answer at all.
+func splitCoveredPaths(text string) []string {
+	if text == "" || text == "none" {
+		return nil
+	}
+	out := []string{}
+	for _, p := range strings.Split(text, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
