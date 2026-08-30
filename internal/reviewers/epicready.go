@@ -14,6 +14,7 @@ type EpicReadyContext struct {
 	Git          EpicGitContext
 	ReviewLogs   []EpicReviewLog
 	Knowledge    EpicKnowledgeContext
+	Mutation     MutationContext
 	EvidenceText string
 }
 
@@ -51,6 +52,7 @@ var servicePathPattern = regexp.MustCompile(`(?i)(service|controller|worker|clie
 
 func RunEpicReady(context EpicReadyContext) []Finding {
 	var results []Finding
+	results = append(results, context.Mutation.Findings()...)
 	if context.Git.RiskLevel == "context-risk" {
 		return append(results, epicFinding(Finding{
 			Reviewer:       "architecture-reviewer",

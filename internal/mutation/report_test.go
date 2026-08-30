@@ -165,3 +165,108 @@ func TestUnparseableEngineOutputIsAnError(t *testing.T) {
 		t.Errorf("empty report efficacy = %v, want 0 (a NaN here passes every threshold silently)", s.Efficacy)
 	}
 }
+
+// The shape of the output decides whether a human can survive this gate, so it is pinned here.
+// The measured gremlins run on 2026-08-29 left 97 mutants undecided from ONE bad timeout; a
+// finding apiece would have buried ten real survivors under 97 lines of noise, and a gate that
+// does that gets switched off. Undecided mutants are one fact about the run, uncovered sites
+// group per file, and only survivors are per-site — because only a survivor names a specific
+// missing test.
+func TestFindingVolumeSurvivesARealMisconfiguredRun(t *testing.T) {
+	r := Report{Engine: "gremlins", Target: "./internal/findings", Mutants: mutants(10, 0, 97, 0)}
+	got := r.Findings()
+	if len(got) != 1 {
+		t.Fatalf("97 undecided mutants are one fact about the run, not %d findings", len(got))
+	}
+	f := got[0]
+	if f.Severity != "high" || f.Classification != "blocking" {
+		t.Errorf("a run that decided nothing must block: %+v", f)
+	}
+	// The code is not what is wrong here — the engine's configuration is — and sending an
+	// implementer to fix 97 "defects" caused by a timeout wastes the whole iteration.
+	if f.Owner != "reviewer" {
+		t.Errorf("an undecided mutant is a configuration fact, not an implementer's defect: %q", f.Owner)
+	}
+	if !strings.Contains(f.Finding, "97 mutant(s) undecided") {
+		t.Errorf("the true count must survive the summarising: %q", f.Finding)
+	}
+	if strings.Count(f.Finding, "u.go:") > 9 {
+		t.Errorf("the example list must be capped so the finding stays readable: %q", f.Finding)
+	}
+}
+
+func TestUncoveredSitesGroupPerFileAndDoNotBlock(t *testing.T) {
+	r := Report{Engine: "gremlins", Mutants: []Mutant{
+		{Status: Uncovered, File: "b.go", Line: 9, Operator: "ARITHMETIC_BASE"},
+		{Status: Uncovered, File: "a.go", Line: 2, Operator: "INVERT_NEGATIVES"},
+		{Status: Uncovered, File: "b.go", Line: 40, Operator: "CONDITIONALS_BOUNDARY"},
+	}}
+	got := r.Findings()
+	if len(got) != 2 {
+		t.Fatalf("three sites in two files are two findings, got %d", len(got))
+	}
+	for _, f := range got {
+		// Advisory on purpose. An uncovered line is worth knowing and worth fixing, but blocking
+		// every one of them makes the gate unsurvivable on any under-tested package, and an
+		// unsurvivable gate is switched off — which costs more than it ever caught.
+		if f.Classification != "advisory" || f.Severity != "low" {
+			t.Errorf("uncovered sites are advisory, not blockers: %+v", f)
+		}
+	}
+	// Grouping must not lose the lines, or the finding is unactionable.
+	var b string
+	for _, f := range got {
+		if strings.Contains(f.Title, "b.go") {
+			b = f.Finding
+		}
+	}
+	if !strings.Contains(b, "line 9") || !strings.Contains(b, "line 40") || !strings.Contains(b, "2 site(s)") {
+		t.Errorf("the group must name every line it covers: %q", b)
+	}
+}
+
+// A survivor is the finding this whole node exists to raise, so it stays one per site, blocking,
+// and owned by the implementer: it names a line and the test that must exist.
+func TestSurvivorsStayPerSiteAndBlock(t *testing.T) {
+	r := Report{Engine: "gremlins", Mutants: mutants(0, 3, 0, 0)}
+	got := r.Findings()
+	if len(got) != 3 {
+		t.Fatalf("survivors are per-site, got %d", len(got))
+	}
+	seen := map[string]bool{}
+	for _, f := range got {
+		if f.Classification != "blocking" || f.Owner != "implementer" {
+			t.Errorf("a survivor is a defect in the tests and must block: %+v", f)
+		}
+		if seen[f.Fingerprint] {
+			t.Errorf("two survivors share a fingerprint, so one would silently vanish: %q", f.Fingerprint)
+		}
+		seen[f.Fingerprint] = true
+	}
+}
+
+// A clean run raises nothing at all. Repositories that run no engine, and packages that are
+// fully killed, must pass exactly as before.
+func TestACleanRunRaisesNothing(t *testing.T) {
+	if got := (Report{Engine: "gremlins", Mutants: mutants(12, 0, 0, 0)}).Findings(); len(got) != 0 {
+		t.Errorf("a fully-killed run is not a finding: %+v", got)
+	}
+	if got := (Report{}).Findings(); len(got) != 0 {
+		t.Errorf("an empty report is not a finding: %+v", got)
+	}
+}
+
+// An engine-less report can still be translated; it must not produce a reviewer named
+// "mutation-" or a sentence with a hole in it.
+func TestReportWithoutAnEngineNameStaysReadable(t *testing.T) {
+	got := (Report{Mutants: mutants(0, 0, 1, 0)}).Findings()
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1", len(got))
+	}
+	if got[0].Reviewer != "mutation-reviewer" || strings.Contains(got[0].Finding, " left") == false {
+		t.Errorf("unnamed engine produced a malformed finding: %+v", got[0])
+	}
+	if strings.HasPrefix(got[0].Finding, " ") {
+		t.Errorf("the sentence begins with a hole where the engine name should be: %q", got[0].Finding)
+	}
+}
