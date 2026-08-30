@@ -219,8 +219,14 @@ promised determinism).
 
 **Built-in atoms:**
 - `all_fixed` — `n_unfixed == 0`
-- `no_fixation_progress` — `n_unfixed >= prev_unfixed` (prevents infinite loop when the agent
-  can't fix the last few bugs)
+- `no_fixation_progress` — none of the bugs the iteration BEGAN with is now fixed (detects a fix
+  node that cannot make progress on the backlog it was handed). **Amended 2026-08-30**, was
+  `n_unfixed >= prev_unfixed`: comparing unfixed totals stalled a converging run, because the
+  total grows whenever discovery outpaces fixing. Note the guarantee that changed with it — the
+  old form terminated on its own, since the unfixed total had to strictly decrease and is bounded
+  below by zero. This form does not: an agent may fix one entering bug and discover five, forever,
+  which is genuine progress. A looping workflow therefore needs `max_iterations`, `budget` or a
+  `cmd` atom, and `converge.ValidateBounded` refuses one without.
 - `max_iterations: N` — `iter_count >= N`
 - `budget: {tokens: N}` — total token spend ≥ N (prevents the 8.6M-token Codex runaway)
 

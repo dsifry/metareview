@@ -22,6 +22,15 @@ import (
 // They were invisible, which is the part that matters. `status` read review logs only, so an
 // abandoned run looked exactly like no run at all, and the gate that exists to say "work is
 // unfinished" could not see the most direct evidence of unfinished work in the repository.
+// StoppedNote is the event name that closes a run on purpose. `metareview fsm record stopped
+// --data '{"reason":"..."}'` writes it, and a run carrying one is finished rather than abandoned.
+//
+// Without it every deliberate stop looked exactly like a loop nobody came back to, so the
+// abandoned-run report accumulated entries no one could ever clear — and a signal that only grows
+// stops being read. The distinction it draws is the honest one: abandoned means stopped with no
+// reason recorded.
+const StoppedNote = "stopped"
+
 type AbandonedRun struct {
 	RunID    string `json:"runId"`
 	Workflow string `json:"workflow"`
@@ -85,15 +94,18 @@ func abandonedRun(dir string, kinds map[string]workflow.KindInfo) (AbandonedRun,
 	}
 	got := AbandonedRun{RunID: filepath.Base(dir)}
 	var state, mock string
+	var stopped bool
 	for _, line := range strings.Split(string(audit), "\n") {
 		if line == "" {
 			continue
 		}
 		var ev struct {
+			Name  string `json:"name"`
 			Type  string `json:"type"`
 			At    string `json:"at"`
 			State string `json:"state"`
 			Data  struct {
+				Name     string `json:"name"`
 				Workflow string `json:"workflow"`
 				Mock     string `json:"mock"`
 				To       string `json:"to"`
@@ -102,6 +114,9 @@ func abandonedRun(dir string, kinds map[string]workflow.KindInfo) (AbandonedRun,
 		}
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			continue
+		}
+		if ev.Name == StoppedNote || ev.Data.Name == StoppedNote {
+			stopped = true
 		}
 		if ev.Data.Workflow != "" {
 			got.Workflow = ev.Data.Workflow
@@ -118,8 +133,9 @@ func abandonedRun(dir string, kinds map[string]workflow.KindInfo) (AbandonedRun,
 			state = ev.State
 		}
 	}
-	// A mock run proves nothing and is not work left undone.
-	if state == "" || mock != "" {
+	// A mock run proves nothing and is not work left undone, and a run stopped on purpose is
+	// finished — the operator said so and the reason is in the audit.
+	if state == "" || mock != "" || stopped {
 		return AbandonedRun{}, false
 	}
 	got.State = state

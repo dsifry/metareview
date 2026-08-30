@@ -141,7 +141,7 @@ type Snapshot struct {          // DERIVED: Fold(events). Never authoritative on
     State State `json:"state"`; Outcome Outcome `json:"outcome,omitempty"`; Iteration int `json:"iteration"`
     BaseSHA string `json:"base_sha"`; Head string `json:"head"`; FixEntryHead string `json:"fix_entry_head,omitempty"`; TreeHash string `json:"tree_hash,omitempty"`
     Goldens []Golden `json:"goldens,omitempty"`; Findings []Finding `json:"findings"`; Confirmed []Bug `json:"confirmed"`; AllFound []Bug `json:"all_found"`; Status []BugStatus `json:"status"`
-    Unfixed int `json:"unfixed"`; PrevUnfixed *int `json:"prev_unfixed"`; Tokens TokenTotals `json:"tokens"`
+    Unfixed int `json:"unfixed"`; PrevUnfixed *int `json:"prev_unfixed"`; UnfixedAtEntry []string `json:"unfixed_at_entry,omitempty"`; Tokens TokenTotals `json:"tokens"`
     NodeOutputs map[string]json.RawMessage `json:"node_outputs"`; Applied map[string]bool `json:"applied"`   // "node@iter"
     LastError *GateError `json:"last_error,omitempty"`; StopReason string `json:"stop_reason,omitempty"`; OverflowHandled bool `json:"overflow_handled"`
 }
@@ -446,7 +446,7 @@ M8 amends AGENTS.md, CLAUDE.md, docs/quickstart.md, skill/command docs.
 | # | scenario | asserts |
 |---|---|---|
 | E1 | sdlc happy path | events in order with typed payloads; outcome `fixed`; exit 0; no `overflow_handler`; `runs.jsonl` row with verdict PASS |
-| E2 | cumulative convergence | 3 iterations; iter 3 fixes its own bug while 7 cumulative remain → not `fixed`; `stalled` at the right iteration; after re-`Open`, `PrevUnfixed == nil` before the second verify and equals the value copy afterwards; `AllFound` union by ID |
+| E2 | cumulative convergence | 3 iterations; iter 3 fixes its own bug while 7 cumulative remain → not `fixed`; **amended 2026-08-30**: `stalled` now fires on the ENTERING SET, so iter 3 fixing only a bug it discovered itself IS stalled while fixing one it was handed is not; after re-`Open`, `PrevUnfixed == nil` before the second verify and equals the value copy afterwards; `AllFound` union by ID |
 | E3 | ERR_NO_COMMIT + fork | dirty tree → `failed`, `Detail` has the diff, `resume_hint --from fix`; **negative control:** fork `--from fix`, record fix output, advance without committing → `ERR_NO_COMMIT` again; then commit → passes; `replay` covers `[2..seq]`; `MockJudge.Calls()` unchanged for replayed nodes; P's audit byte-identical |
 | E4 | judge swap | review-loop: `--from adjudicate --var JUDGE=b` → `Calls()[i].Model == "b"` for every new call, `llm_call.model == "b"`, diff rows differ only in `b`; sdlc-loop `--at-iter 0` same; sdlc-loop at iter 1 → `ERR_VAR_FROZEN`; `--var REVIEWER` → `ERR_VAR_FROZEN` |
 | E5 | overflow | `max_iterations`/`budget` → `STOPPED`, `overflow`, exit 1; handler once with snapshot on stdin; handler failure → warn; E1/E2 never run it; `custom` outcome for a `cmd` atom |

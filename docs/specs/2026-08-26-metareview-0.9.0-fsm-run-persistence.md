@@ -99,7 +99,7 @@ type Snapshot struct {
     BaseSHA string `json:"base_sha"`; Head string `json:"head"`; FixEntryHead string `json:"fix_entry_head,omitempty"`
     TreeHash string `json:"tree_hash,omitempty"`; TreeStatus string `json:"tree_status,omitempty"`
     Goldens []Golden `json:"goldens"`; Findings []Finding `json:"findings"`; Confirmed []Bug `json:"confirmed"`; AllFound []Bug `json:"all_found"`; Status []BugStatus `json:"status"`
-    Unfixed int `json:"unfixed"`; PrevUnfixed *int `json:"prev_unfixed"`; Tokens TokenTotals `json:"tokens"`
+    Unfixed int `json:"unfixed"`; PrevUnfixed *int `json:"prev_unfixed"`; UnfixedAtEntry []string `json:"unfixed_at_entry,omitempty"`; Tokens TokenTotals `json:"tokens"`
     NodeOutputs map[string]json.RawMessage `json:"node_outputs"`; Applied map[string]bool `json:"applied"`; NodesRun []string `json:"nodes_run"`
     LastError *GateError `json:"last_error,omitempty"`; StopReason string `json:"stop_reason,omitempty"`; OverflowHandled bool `json:"overflow_handled"`
     Warnings []string `json:"warnings"`
@@ -211,7 +211,7 @@ Deterministic (same events → identical `Canonical(marshal(snapshot))`). Sequen
 `unknown_type`; `bad_payload`; `oversize`; `bad_outcome`. After every accepted event `Snapshot.Seq ← ev.Seq`.
 
 - **4.1 `init`** — copies every `InitData` field; `SchemaVersion ← run.SchemaVersion`; `State ← InitialState`; `StateKind ← InitialKind`;
-  `Iteration ← 0`; `PrevUnfixed ← nil`; if `InitialKind == KindAgentEdit && ParentRunID == ""`: `FixEntryHead ← Head`. Maps/slices empty.
+  `Iteration ← 0`; `PrevUnfixed ← nil`; `UnfixedAtEntry ← nil`; if `InitialKind == KindAgentEdit && ParentRunID == ""`: `FixEntryHead ← Head`. Maps/slices empty.
 - **4.2 `node_output`** — `Node != ""` (`node_scope`); `k = Key(Node, Iter)`; `!Applied[k]` (`output_after_delta`); `NodeOutputs[k] ←
   Canonical(Output)`; append `Node` to `NodesRun` if absent (`NodesRun` records nodes that produced output; a node with only `llm_call`s is not listed).
 - **4.3 `delta_applied`** — `node_scope`; `NodeOutputs[k]` exists (`delta_without_output`); `!Applied[k]` (`second_delta`); `OutputHash ==
@@ -222,7 +222,8 @@ Deterministic (same events → identical `Canonical(marshal(snapshot))`). Sequen
 - **4.4 `llm_call`** — `node_scope`; `Index == indexes[k]` (`stamp`); `indexes[k]++`; `Tokens += Tokens`. **`tokens`** — `Tokens += payload`.
 - **4.5 `tree`** — `Head`, `TreeHash`, `TreeStatus` ← payload.
 - **4.6 `transition`** — `State ← To`; `StateKind ← ToKind`; `Head ← Head`; `LastError ← nil`; if `Loop`: `Iteration++`, `v := Unfixed;
-  PrevUnfixed ← &v`, `Findings`/`Confirmed` ← empty; if `ToKind == KindAgentEdit && ev.Origin == nil`: `FixEntryHead ← Head`; if
+  PrevUnfixed ← &v`, `UnfixedAtEntry ← ids of every AllFound bug with no fixed status, in AllFound
+  order`, `Findings`/`Confirmed` ← empty; if `ToKind == KindAgentEdit && ev.Origin == nil`: `FixEntryHead ← Head`; if
   `Outcome != ""`: must be in `Outcomes` (`bad_outcome`), `Outcome ← Outcome`. **`fix_baseline`** — `StateKind == KindAgentEdit`
   (`fix_baseline_kind`); the immediately preceding event is a `tree` with the same `Head` (`fix_baseline_order`); `payload.Head ==
   Snapshot.Head` (`fix_baseline_head`); `FixEntryHead ← Head`.
@@ -328,6 +329,7 @@ func (b *Builder) Copy(parent []Event, from, to int64, childID string) []Event  
 | R4 | per-prefix goldens (`testdata/golden-log.jsonl`, `golden-snapshots.jsonl`; regression-only, authority = R1/R2b/R13; regenerated only with `FSM_RUN_UPDATE_GOLDEN=1`); mutation table {delete, duplicate, swap} × 16 types with enumerated outcomes | compositional |
 | R5 | recursive reflect `Clone` walk; mutate in place both directions | copy depth |
 | R6 | `PrevUnfixed` nil/copy/second loop/JSONL round trip | aliasing |
+| R6b | `UnfixedAtEntry` VALUE at a loop boundary, not merely its presence: the ids of the still-unfixed bugs, empty-and-non-nil when the iteration entered clean, and deep-copied by `Clone` | the value was asserted nowhere when this field's predecessor shipped, so inverting the fold's fixed/unfixed test left the whole suite green while the stall guard silently died |
 | R7 | conformance over both stores (`Options{MaxEvents: 5}` to reach `ERR_AUDIT_FULL` and its exemptions): `Create` refusals + `ERR_RUN_EXISTS`; `ERR_RUN_NOT_FOUND`; CAS on `ChainHead`/`Seq`; no lock; second `Lock`; `ERR_APPEND_REJECTED` leaves file/state unchanged; dup keys at depth 3; canonical storage; `Root()`; `EventsWithLines`. JSONL-only: modes, `.gitignore` exact content re-ensured, symlink → `ERR_STORE_PATH`, fsync path, flock release, fresh fd | store contract |
 | R8 | torn (a)(b)(c) → `Torn`, `Append` → `ERR_AUDIT_TORN`; `RepairTail` sidecar name/`O_EXCL`/lock/`ERR_AUDIT_NOT_TORN`; offset-0 → sidecar moved to `.torn/`, dir removed; undecodable complete last line → `ERR_AUDIT_CHAIN` | repair |
 | R9 | `List()` order, `Error` rows, missing `runs/`, `Torn`/`Sidecars`, id table | listing |
@@ -372,6 +374,7 @@ func (b *Builder) Copy(parent []Event, from, to int64, childID string) []Event  
 | spec 2 r3 (implemented) | `tokens`/`llm_call` with any negative counter are rejected (`FoldError{Reason: tokens_negative}`); `TokenTotals.Negative()`. |
 | spec 2 r3 (implemented) | `FoldState.NextIndex(key) int` and `run.MarshalCanonical` exported. |
 | §5.3 repair-warn Detail | the literal is spec 2's (`"<n> bytes dropped after seq <s> from audit.jsonl"`); this spec defers. |
+| **SchemaVersion additive exception, 2026-08-30 (v0.11.0)** | Four fields were added to persisted structures after v0.9.0 and v0.10.0 were tagged, so the earlier "no tagged release contains `run` yet" exception no longer applies: `Snapshot.UnfixedAtEntry` (`unfixed_at_entry`), `Delta.PinResults`/`Snapshot.Unproven` (`pin_results`, `unproven`), and `reviewlog.Summary.CoveredPathsKnown` (`coveredPathsKnown`). **`SchemaVersion` stays 1 deliberately.** A bump is destructive here rather than protective: `Fold` rejects every event whose `schemaVersion` differs, so raising it would make every existing audit log unreadable — the opposite of what the field is for. All four are additive and `omitempty`, so an older reader ignores them and a newer reader treats absence as "unknown", which every consumer already handles. The cost is accepted and named: `fsm gate --input snapshot.json` decodes with `DisallowUnknownFields`, so a snapshot from a v0.11.0 export fed to an installed v0.10.0 binary fails on the unknown field while `schemaVersion` still reads 1. That is a cross-version diagnostic gap, not a data-loss risk, and the resolution belongs with a versioning scheme that can distinguish "additive" from "breaking" rather than with a counter the fold treats as an equality check. |
 | spec 3 r4/r5 (owned there) | `InitData.WorkflowSource string` + `Snapshot.WorkflowSource` (fold copies from `init`; `Clone` copies it; accepted additive-v1 exception: no tagged release contains `run` yet — thereafter bump `SchemaVersion`) (`workflow_source`, omitempty, ≤ `MaxShort`, `embedded|path|""`); `RunStore.TornFiles(runID) ([]TornFile, error)` + `TornFile{Name, SHA256 string; Bytes int64}`; `RunStore.MaxEvents() int`; `run.Counted(type) bool` (exports `countedType`); `summarize` marks an incomplete fork (`ParentRunID != "" ∧ (Seq ≤ ForkedAtSeq ∨ (Seq == ForkedAtSeq+1 ∧ StateKind == agent-edit))`) in `RunSummary.Error`. |
 
 ## 12. Ownership ledger (partition)

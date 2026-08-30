@@ -221,8 +221,17 @@ true}`, `{no_fixation_progress: true}`, `{max_iterations: N>0}`, `{budget: {toke
 is legal only at the root or as a direct child of a root-level `any` (a give-up can never carry class `fixed` through
 `all`/`not` — plan C3); `not` always classes `custom`. `Validate(node, cmdNames)`: `workflow.Parse` passes the declared
 names (an empty non-nil slice when none), so an unknown atom name is `bad_convergence`. Anything else →
-`ERR_BAD_CONVERGENCE{detail}` (Parse reason `bad_convergence`). The cmd atom's `reason` field is optional. Atoms: `all_fixed` (class `fixed`), `no_fixation_progress` (class `stalled`: `PrevUnfixed != nil
-&& Unfixed >= *PrevUnfixed`; nil ⇒ false), `max_iterations: N` (class `overflow`: stop iff `Iteration+1 >= N`; `N: 5`
+`ERR_BAD_CONVERGENCE{detail}` (Parse reason `bad_convergence`). The cmd atom's `reason` field is optional. Atoms: `all_fixed` (class `fixed`), `no_fixation_progress` (class `stalled`: none of the ids in
+`UnfixedAtEntry` is now fixed; `UnfixedAtEntry == nil` ⇒ false, i.e. no boundary crossed yet; an
+EMPTY entering set ⇒ false, i.e. nothing to make progress on. **Amended 2026-08-30**, was
+`PrevUnfixed != nil && Unfixed >= *PrevUnfixed`: that compared TOTALS, and the unfixed total grows
+whenever discovery outpaces fixing, so it stalled a converging run — measured, round 0 fixed 6 of
+10 and round 1 found 21 more. A fixed-total form was tried next and never stalls a stuck run,
+because a bug found and fixed in the same round raises the count while the backlog is untouched.
+Only the entering SET distinguishes the two. It is a stall detector and NOT a termination
+guarantee — the old form guaranteed termination only as a side effect of being too strict — so a
+looping workflow must now carry `max_iterations`, `budget` or a `cmd` atom, enforced by
+`converge.ValidateBounded` at parse time), `max_iterations: N` (class `overflow`: stop iff `Iteration+1 >= N`; `N: 5`
 stops at `Iteration == 4`), `budget` (class `overflow`: `Tokens.Total() >= N`), `cmd` (class `custom`; stdout must be
 exactly `{"stop": bool, "reason": string}` → `ERR_CMD_OUTPUT_INVALID`; non-zero exit → `ERR_CMD_FAILED{exit}`). `any`
 returns the first firing child's `Result`; `all` fires only when every child fires (`Atom` = names joined by `+`, class

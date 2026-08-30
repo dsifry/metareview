@@ -180,3 +180,37 @@ func TestAbandonedRunsAreReportedInAStableOrder(t *testing.T) {
 		}
 	}
 }
+
+// A run stopped on purpose is finished, not abandoned. Without this distinction every deliberate
+// stop looked exactly like a loop nobody came back to, so the report accumulated entries nobody
+// could ever clear — and a signal that only grows stops being read. Abandoned means stopped with
+// NO reason recorded.
+func TestARunStoppedOnPurposeIsNotAbandoned(t *testing.T) {
+	root := t.TempDir()
+	const init = `{"seq":1,"type":"init","at":"2026-08-30T01:00:00Z","data":{"workflow":"t","run_id":"r"}}`
+	const moved = `{"seq":2,"type":"transition","at":"2026-08-30T01:05:00Z","state":"discover","data":{"from":"discover","to":"fix","to_kind":"agent-edit"}}`
+
+	writeRun(t, root, "run-left-open", init, moved)
+	writeRun(t, root, "run-stopped-by-name", init, moved,
+		`{"seq":3,"type":"record","name":"stopped","at":"2026-08-30T01:06:00Z","data":{"reason":"superseded"}}`)
+	writeRun(t, root, "run-stopped-in-data", init, moved,
+		`{"seq":3,"type":"record","at":"2026-08-30T01:06:00Z","data":{"name":"stopped","reason":"superseded"}}`)
+	// A note that is not the stop note leaves the run open.
+	writeRun(t, root, "run-other-note", init, moved,
+		`{"seq":3,"type":"record","name":"observation","at":"2026-08-30T01:06:00Z","data":{"reason":"just a note"}}`)
+
+	got := DiscoverAbandonedRuns(root)
+	open := map[string]bool{}
+	for _, r := range got {
+		open[r.RunID] = true
+	}
+	if !open["run-left-open"] || !open["run-other-note"] {
+		t.Errorf("a run with no stop note is still abandoned: %+v", got)
+	}
+	if open["run-stopped-by-name"] || open["run-stopped-in-data"] {
+		t.Errorf("a run stopped on purpose must not be reported abandoned: %+v", got)
+	}
+	if len(got) != 2 {
+		t.Errorf("got %d abandoned runs, want 2: %+v", len(got), got)
+	}
+}
