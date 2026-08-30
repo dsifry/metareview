@@ -63,7 +63,10 @@ fi
 # again (SA4004, a loop left unconditionally terminated by removing a dead branch). Every check in
 # .github/workflows/test.yml belongs here too.
 if command -v golangci-lint >/dev/null 2>&1; then
-  golangci-lint run
+  # GOFLAGS is unset deliberately: coverage.sh runs this suite with `-cover -covermode=atomic` to
+  # instrument the binaries the scripts build, and golangci-lint inherits it, fails to typecheck
+  # the instrumented tree, and reports a phantom issue. The linter must see the code as written.
+  GOFLAGS="" golangci-lint run
   echo "golangci-lint: ok"
 else
   echo "golangci-lint: SKIPPED (not installed; CI still enforces it)" >&2
