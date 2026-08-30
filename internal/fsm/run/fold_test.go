@@ -1332,3 +1332,41 @@ func TestFoldRecordsUnprovenPinsInTheSnapshot(t *testing.T) {
 		t.Errorf("the gap did not survive Clone: %+v", got)
 	}
 }
+
+// Pins were added to the Delta without a clause in withinCaps, so MaxPins was enforced by the
+// agent-edit validator alone and not by the cap check every recorded event passes through — the
+// one guard that does not care which node produced the event. Each pin carries two source
+// fragments, so an uncapped list is also the cheapest way to make a snapshot too large to
+// serialise, which loses the whole audit rather than one entry.
+func TestRecordedDeltasCapPinsAndPinResults(t *testing.T) {
+	pin := func(i int) Pin { return Pin{File: "f.go", From: strconv.Itoa(i), To: "x", Test: "T"} }
+	many := func(n int) []Pin {
+		out := make([]Pin, n)
+		for i := range out {
+			out[i] = pin(i)
+		}
+		return out
+	}
+	if !withinCaps(&DeltaAppliedData{Delta: Delta{Pins: many(MaxPins)}, OutputHash: "h"}) {
+		t.Error("exactly the cap must be accepted")
+	}
+	if withinCaps(&DeltaAppliedData{Delta: Delta{Pins: many(MaxPins + 1)}, OutputHash: "h"}) {
+		t.Error("more pins than MaxPins must be refused by the recorded-event cap check")
+	}
+	results := make([]PinResult, MaxPins+1)
+	for i := range results {
+		results[i] = PinResult{Pin: pin(i), Outcome: PinSurvived}
+	}
+	if withinCaps(&DeltaAppliedData{Delta: Delta{PinResults: results}, OutputHash: "h"}) {
+		t.Error("more pin results than MaxPins must be refused")
+	}
+	// The text inside a pin is bounded too: the fragments are source, so an unbounded From is
+	// the same problem in a different shape.
+	huge := Pin{File: "f.go", From: strings.Repeat("x", MaxDesc+1), To: "y", Test: "T"}
+	if withinCaps(&DeltaAppliedData{Delta: Delta{Pins: []Pin{huge}}, OutputHash: "h"}) {
+		t.Error("an unbounded source fragment must be refused")
+	}
+	if withinCaps(&DeltaAppliedData{Delta: Delta{PinResults: []PinResult{{Pin: pin(1), Detail: strings.Repeat("d", MaxDetail+1)}}}, OutputHash: "h"}) {
+		t.Error("an unbounded pin-result detail must be refused")
+	}
+}

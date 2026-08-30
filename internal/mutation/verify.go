@@ -181,8 +181,21 @@ func (v Verifier) exec(ctx context.Context, dir string, argv []string) (int, str
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) // #nosec G204 -- argv comes from the consent-hashed workflow, never the agent
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
+	// A signal-killed process HAS a ProcessState, and its ExitCode() is -1. Returning that as an
+	// ordinary exit code told the caller "non-zero", which step 4 reads as "the mutation was
+	// caught" — so a run killed by the timeout was recorded as PROOF, with a detail sentence
+	// asserting tests that never finished had failed. That is the same class of defect as the
+	// engine bug this package exists to correct, pointing the other way: theirs loses timeouts
+	// from the score, ours counted them as kills.
+	if ctx.Err() != nil {
+		return -1, string(out), fmt.Errorf("the test command did not finish within %s: %w", timeout, ctx.Err())
+	}
 	if cmd.ProcessState != nil {
-		return cmd.ProcessState.ExitCode(), string(out), nil
+		if code := cmd.ProcessState.ExitCode(); code >= 0 {
+			return code, string(out), nil
+		}
+		// Killed by a signal with no deadline of ours: still not an answer about the mutation.
+		return -1, string(out), fmt.Errorf("the test command was killed by a signal: %v", cmd.ProcessState)
 	}
 	return -1, string(out), err
 }

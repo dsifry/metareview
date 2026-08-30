@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-6.8e244930d4f3d3c4",
+  "kind": "shard",
+  "shardId": "shard-6",
+  "shardHash": "8e244930d4f3d3c4",
+  "planHash": "22cbb3df197e8b3e",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "shard-6-reviewer",
+  "reviewedAt": "2026-08-30T00:00:00Z",
+  "blockingCount": 3,
+  "evidence": [
+    {
+      "path": "internal/fsm/gate/gates.go",
+      "line": 50,
+      "note": "Reviewed the new pins_proven gate and traced its inputs end to end: Snapshot.Findings <- fold.go:132 <- mutationVerifyExec (kind.go:1008-1049) <- Snapshot.Pins <- fold.go:148 <- Delta.Pins."
+    },
+    {
+      "path": "internal/fsm/run/types.go",
+      "line": 186,
+      "note": "Delta.Pins / Snapshot.Pins / PinOutcome / PinResult schema additions read against every producer and consumer in the tree (grep for '.Pins' outside tests: kind.go:814, kind.go:873, kind.go:1014, types.go:371, fold.go:148)."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 879,
+      "note": "agentEdit.Reduce is the only reduce seam for the fix node (machine.go:700 is the sole Reduce caller; there is no nodeAwareReducer). It returns run.Delta{Commit: ...} and never sets Pins."
+    },
+    {
+      "path": "internal/mutation/stryker_test.go",
+      "line": 8,
+      "note": "Checked every assertion against internal/mutation/stryker.go and parse.go: sort order, statusReason passthrough, Ignored->Unresolved, and the three refusal cases all match the implementation. No finding."
+    },
+    {
+      "path": "tests/go/test-mutation-report.sh",
+      "line": 1,
+      "note": "Executed the new script end to end on this checkout: it builds the binary, drives seven cases and prints 'test-mutation-report: ok'. Wiring into tests/run-all.sh:29 is correct."
+    },
+    {
+      "path": "internal/fsm/gate/gate_test.go",
+      "line": 471,
+      "note": "TestG1PinsProven covers the three near-miss shapes (prose-only, right source wrong category, right category wrong source) and both blocking categories; the Names() list is correctly re-sorted with pins_proven."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "critical",
+      "disposition": "open",
+      "note": "pins_proven can never fail in a real run: the fix node's pins are discarded before they reach the snapshot, so the prove node always verifies an empty list. internal/fsm/kind/kind.go:879-881 `func (agentEdit) Reduce(_ run.Snapshot, out any) (run.Delta, error) { return run.Delta{Commit: out.(editOut).Commit}, nil }` drops editOut.Pins. machine.go:700 is the only Reduce call site and there is no per-node reducer seam, so no other code path can populate Delta.Pins -- grepping non-test code for '.Pins' yields exactly kind.go:814 and :873 (validation of editOut, which is then thrown away), kind.go:1014 (the consumer), types.go:371 (Clone) and fold.go:148 (the fold). Nothing ever assigns Delta.Pins. Concrete failure: run workflows/sdlc-loop-proved.yaml; the fix node has require_pins: true so DecodeFor (kind.go:809-816) forces the agent to declare a pin, and checkPins (kind.go:216) validates it; Reduce then returns {commit} only; fold.go:148 sees p.Pins == nil so Snapshot.Pins stays empty; mutationVerifyExec (kind.go:1014) calls verify(ctx, nil) and gets no results; the delta carries no findings; pins_proven (gates.go:50-63) iterates an empty Findings list and returns nil; the run advances prove->verify (workflows/sdlc-loop-proved.yaml:24) with an entirely unverified fix. Verified by direct probe against this tree: agentEdit{}.DecodeFor accepted a pin, and agentEdit{}.Reduce returned a Delta with len(Pins)==0. This makes the whole 0.11.0 proof step inert -- exactly the 'ceremony' the kind.go:807-808 comment says it is guarding against -- while the workflow prose (types.go:184-186 'It carries forward to the verify node', types.go:322-324 'Pins carries the fix node's claims to the verify node') and the gate comment assert the opposite. Fix: return run.Delta{Commit: ..., Pins: out.(editOut).Pins} and add an end-to-end test that records a fix output with a surviving pin and asserts pins_proven blocks (internal/fsm/cli/cli_test.go:1039 stops at `record node-output` and never advances into prove, which is why this was not caught).",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 879, "note": "agentEdit.Reduce drops editOut.Pins; Delta.Pins is never assigned anywhere in non-test code."},
+        {"path": "internal/fsm/gate/gates.go", "line": 50, "note": "pins_proven only ever sees Findings produced from Snapshot.Pins, which is permanently empty."},
+        {"path": "internal/fsm/run/types.go", "line": 322, "note": "Snapshot.Pins is documented as carrying the fix node's claims to verify; in practice it is always nil."},
+        {"path": "internal/fsm/run/fold.go", "line": 148, "note": "fold only copies pins when p.Pins != nil, and no Delta ever has them."}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The remedy the new gate's own doc comment prescribes deadlocks the run. gates.go:46-49 tells workflow authors that a workflow wanting to require pins 'should say so with findings_empty on the verify node'. That gate can never pass on a mutation-verify node. mutationVerifyExec builds `out := run.Delta{Findings: []run.Finding{}, PinResults: results}` (kind.go:1022) intending to clear the previous node's findings, but Delta.Findings carries `omitempty` (internal/fsm/run/types.go:179), so run.MarshalCanonical drops the key entirely -- verified by probe: the emitted bytes are `{\"pin_results\":[...]}` with no findings key, and decoding them back yields Findings == nil. fold.go:132 replaces Findings only when `p.Findings != nil`, so after a fully-proven prove round Snapshot.Findings still holds the discover node's list. In sdlc-loop-proved that list is non-empty by construction (the discover->adjudicate transition requires findings_nonempty, and neither adjudicateKind.Reduce at kind.go:540-546 nor agentEdit.Reduce at kind.go:879 emits Findings). Concrete failure: an author follows the comment and writes `- {from: prove, to: verify, gate: findings_empty}`; every run reaches prove with the discover findings intact, findings_empty fails with 'N findings present', and prove has no other outgoing transition (workflows/sdlc-loop-proved.yaml:24), so the run is stuck at GATE_FAILED forever no matter how good the fix is. Either drop `omitempty` from Delta.Findings (or have the executor emit an explicit empty list some other way) so a node can actually clear findings, or correct the comment.",
+      "evidence": [
+        {"path": "internal/fsm/gate/gates.go", "line": 47, "note": "The comment prescribes findings_empty on the verify node as the way to require pins."},
+        {"path": "internal/fsm/run/types.go", "line": 179, "note": "Delta.Findings is `json:\"findings,omitempty\"`, so an explicit empty slice is omitted from the canonical bytes."},
+        {"path": "internal/fsm/kind/kind.go", "line": 1022, "note": "The verify executor sets Findings: []run.Finding{} expecting it to clear the snapshot; omitempty means it does not."},
+        {"path": "internal/fsm/run/fold.go", "line": 132, "note": "Findings are only replaced when the decoded delta's Findings is non-nil."}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The only machine-level fixture for the new mutation-verify node is both unused and encodes an output the real node cannot produce, so the FSM's prove path has no machine-level coverage at all -- which is why the critical finding above survived. harness_test.go:153 registers `r.execs[\"mutation-verify\"]` returning the literal `{\"findings\":[]}`. That decodes to a non-nil empty slice and therefore CLEARS Snapshot.Findings at fold.go:132, whereas the production executor emits `{}` (see the finding above) and leaves the previous node's findings in place. Grepping internal/fsm/machine/*_test.go for 'mutation-verify' or 'prove' returns only the two registration lines themselves (harness_test.go:113 and :153) and one unrelated comment, so no test ever drives the node -- a machine test written on top of this fake would assert a fold outcome (findings cleared after prove) that never happens in production and would go green while the shipped node behaves the opposite way. Either wire a machine test that runs the fix->prove->verify path with pins and non-empty prior findings, or make the fake emit `run.MarshalCanonical(run.Delta{PinResults: ...})` so it matches the real producer byte for byte.",
+      "evidence": [
+        {"path": "internal/fsm/machine/harness_test.go", "line": 153, "note": "Fake mutation-verify executor returns {\"findings\":[]}, which clears Snapshot.Findings; the real executor's canonical bytes omit the key and clear nothing."},
+        {"path": "internal/fsm/machine/harness_test.go", "line": 113, "note": "The mutation-verify kind is registered in the fake registry but no test in the package references it, so the prove node is exercised nowhere at machine level."}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Snapshot.Clone clones the two new pin slices with different nil semantics: types.go:370 `c.Unproven = append([]Pin(nil), s.Unproven...)` maps a non-nil empty Unproven to nil, while types.go:371-373 only rewrites Pins when s.Pins != nil, preserving nil-ness there. Both fields are `omitempty` so the JSON is identical either way and Pin holds only strings, so I could not construct a behavioural failure -- reporting it low with that uncertainty stated because a later caller that distinguishes 'never recorded' (nil) from 'recorded and empty' would get inconsistent answers from Clone depending on which field it asks about.",
+      "evidence": [
+        {"path": "internal/fsm/run/types.go", "line": 370, "note": "Unproven is unconditionally reallocated from a nil base; Pins is conditionally reallocated from an empty base."}
+      ]
+    }
+  ]
+}

@@ -2,6 +2,8 @@ package export
 
 import (
 	"encoding/json"
+	"github.com/dsifry/metareview/internal/fsm/kind"
+	"github.com/dsifry/metareview/internal/fsm/workflow"
 	"reflect"
 	"sort"
 	"strings"
@@ -180,4 +182,84 @@ func TestExportHashesPinSourceFragments(t *testing.T) {
 			t.Errorf("%s: from and to hashed to the same value", key)
 		}
 	}
+}
+
+// Two more places pin source reaches an export, neither covered by hashing the snapshot's copy.
+//
+// agent-edit is a knownKind, so its node_output is kept whole — and that output CARRIES the pins,
+// with from/to as literal source. And delta_applied had no case in event() at all, which was
+// harmless while a Delta held only findings and ids, and stopped being harmless the moment it
+// gained pins and pin_results. Fixing the dropped-pins defect is what makes that line actually
+// carry source, so the fix widened the leak rather than closing it.
+func TestPinSourceIsRedactedOnEveryExportPath(t *testing.T) {
+	const secret = "if key == expectedSecret { return true }"
+	rd := &redactor{snap: run.Snapshot{RepoRoot: "/repo"}, repoRoot: "/repo", w: pinWorkflow(t)}
+
+	nodeOut := run.Event{Type: run.TypeNodeOutput, Node: "fix", Data: json.RawMessage(
+		`{"output":{"commit":"abc1234","pins":[{"file":"internal/secret/algo.go","from":` +
+			mustJSON(secret) + `,"to":"if key != expectedSecret { return true }","test":"TestKey"}]}}`)}
+	line, fields := rd.event(nodeOut)
+	if line == nil {
+		t.Fatal("agent-edit output carrying pins was exported unchanged")
+	}
+	if strings.Contains(string(line), "expectedSecret") {
+		t.Errorf("node_output still carries source: %s", line)
+	}
+	if !strings.Contains(string(line), "sha256:") || len(fields) == 0 {
+		t.Errorf("the fragments must be hashed and the redaction recorded: %s %v", line, fields)
+	}
+	// The path and test name stay: they identify what was proven without reproducing the code.
+	if !strings.Contains(string(line), "internal/secret/algo.go") || !strings.Contains(string(line), "TestKey") {
+		t.Errorf("the export lost what identifies the proof: %s", line)
+	}
+
+	delta := run.Event{Type: run.TypeDeltaApplied, Node: "prove", Data: json.RawMessage(
+		`{"findings":[],"pins":[{"file":"a.go","from":` + mustJSON(secret) + `,"to":"y","test":"T"}],` +
+			`"pin_results":[{"pin":{"file":"a.go","from":` + mustJSON(secret) + `,"to":"y","test":"T"},` +
+			`"outcome":"survived","detail":"a.go: breaking ` + secret + ` left the tests passing"}],"output_hash":"h"}`)}
+	line, fields = rd.event(delta)
+	if line == nil {
+		t.Fatal("a delta_applied event carrying pins was exported unchanged")
+	}
+	if strings.Contains(string(line), "expectedSecret") {
+		t.Errorf("delta_applied still carries source: %s", line)
+	}
+	if len(fields) == 0 {
+		t.Error("the redaction was not recorded")
+	}
+}
+
+func mustJSON(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// pinWorkflow is the smallest workflow with an agent-edit node named "fix", so kindOf resolves it
+// to a known kind and the node_output branch keeps the output whole — the condition under which
+// the leak existed.
+func pinWorkflow(t *testing.T) *workflow.Workflow {
+	t.Helper()
+	src := []byte(`workflow: t
+version: 1
+vars: {}
+states: [fix, done, failed]
+transitions:
+  - {from: fix, to: done, gate: commit_exists, outcome: fixed}
+nodes:
+  fix: {kind: agent-edit}
+convergence:
+  any: [{max_iterations: 1}]
+`)
+	kinds, err := kind.New(kind.Deps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := workflow.Parse(src, workflow.Options{Kinds: kinds.Info()})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	return w
 }

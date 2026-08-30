@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-7-2.906ad9460de31a76",
+  "kind": "shard",
+  "shardId": "shard-7-2",
+  "shardHash": "906ad9460de31a76",
+  "planHash": "22cbb3df197e8b3e",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "shard-7-2-reviewer",
+  "reviewedAt": "2026-08-30T14:47:17Z",
+  "blockingCount": 2,
+  "evidence": [
+    {
+      "path": "internal/mutation/report_test.go",
+      "line": 1,
+      "note": "Ran `go test ./internal/mutation/` (pass, 8.0s) and `go tool cover -func`; every assertion in this file was traced against internal/mutation/report.go and internal/mutation/gremlins.go."
+    },
+    {
+      "path": "internal/mutation/report.go",
+      "line": 194,
+      "note": "lineList measured at 75.0% of statements by go tool cover -func: the cap branch is never executed by any test in the package."
+    },
+    {
+      "path": "workflows/sdlc-loop-proved.yaml",
+      "line": 32,
+      "note": "Workflow parses cleanly (internal/fsm/workflow TestW1SdlcLoopProved) and lenses:8 / require_verdicts:true / mode validate against the real kind registry; the defect is in what the discover node then tells the host to produce."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 436,
+      "note": "reviewLenses.Instructions never consults requireVerdicts; grep shows the only callers of requireVerdicts are DecodeFor (line 403) and the Findings extraction (line 482)."
+    },
+    {
+      "path": "internal/fsm/cli/run.go",
+      "line": 486,
+      "note": "The NEEDS_INPUT envelope carries only instructions, input and output_schema - node params such as require_verdicts are never surfaced to the driving host."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "sdlc-loop-proved's discover node is unsatisfiable as instructed: it opts into the strict lens contract, but nothing tells the host about it. workflows/sdlc-loop-proved.yaml:32 sets `require_verdicts: true` on the review-lenses node. That flag is read in exactly two places (internal/fsm/kind/kind.go:403 DecodeFor and :482 findings extraction) and NOT in reviewLenses.Instructions (kind.go:436-464), which unconditionally writes `Return ONLY {\"findings\":[{\"file\",\"line\",\"issue_text\",\"severity\"}...]}` and sets OutputSchema to that same flat shape. internal/fsm/cli/run.go:486 hands the host only `instructions` and `output_schema` - never the node's params - so a driver following docs/fsm/driving-a-workflow.md verbatim records `{\"findings\":[...]}` for discover, and DecodeFor (kind.go:406-412) rejects it with `lenses: 0 lens reports for 8 declared lenses`. This is pinned as intended behaviour by internal/fsm/kind/kind_test.go:1240 ('the flat form is refused once verdicts are required'). Concrete failure: `metareview fsm init --workflow sdlc-loop-proved ... && metareview fsm advance` emits NEEDS_INPUT for discover; the host returns exactly the shape the prompt and output_schema demanded; `fsm record node-output --node discover` fails. discover is the initial state, so the shipped workflow can never reach its first transition. Recovering requires the host to guess an undocumented schema including the literal eight lens names (kind.go:54) and the PASS/NEEDS_REVISION/ERROR vocabulary, none of which appear in the prompt, output_schema, `fsm --agent-prompt` (internal/fsm/cli/prompt.go has no lens text) or docs/fsm/*. Fix either by branching Instructions/OutputSchema on requireVerdicts, or by dropping require_verdicts from this workflow until the prompt side exists. Secondary: the header at workflows/sdlc-loop-proved.yaml:4 claims the file is 'Identical to sdlc-loop except that a fix must SHOW its work', which is false - require_verdicts is a second, unrelated contract change on a node that has nothing to do with pins, and it is the one that breaks existing drivers.",
+      "evidence": [
+        {"path": "workflows/sdlc-loop-proved.yaml", "line": 32},
+        {"path": "internal/fsm/kind/kind.go", "line": 403},
+        {"path": "internal/fsm/kind/kind.go", "line": 464},
+        {"path": "internal/fsm/cli/run.go", "line": 486},
+        {"path": "workflows/sdlc-loop-proved.yaml", "line": 4}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "report_test.go asserts the output-volume cap for unresolved mutants but never for uncovered ones, leaving the guard its own thesis rests on untested. TestFindingVolumeSurvivesARealMisconfiguredRun (internal/mutation/report_test.go:175-196) pins siteList's cap via `strings.Count(f.Finding, \"u.go:\") > 9`, but TestUncoveredSitesGroupPerFileAndDoNotBlock (report_test.go:198-225) drives only two uncovered sites in one file, and the `mutants` helper (report_test.go:93-105) is never called with more than three uncovered. Nothing in the package produces more than 12 uncovered sites in a single file, so the cap branch at internal/mutation/report.go:197-200 (`if i == max { parts = append(parts, fmt.Sprintf(\"and %d more\", len(ms)-max)); break }`) is never executed - `go tool cover -func` reports lineList at 75.0% while siteList is at 100.0%. Concrete failure: delete that branch, or change `const max = 12` to any value, and `go test ./internal/mutation/` still passes green. The first real run against the under-tested package report.go:96-97 explicitly anticipates ('the first real run of this against an under-tested package produces hundreds') then emits one finding whose sentence enumerates hundreds of line numbers - exactly the unreadable-gate failure mode report_test.go:209-212 says makes a gate get switched off. internal/mutation has no line in tests/coverage-floor.txt, so tests/coverage.sh reports it as 'no floor' and CI will not catch this regression either.",
+      "evidence": [
+        {"path": "internal/mutation/report_test.go", "line": 223},
+        {"path": "internal/mutation/report.go", "line": 197},
+        {"path": "tests/coverage-floor.txt", "line": 1}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestParseGremlinsMapsEveryStatusAndNeverInventsAKill pins an unqualified file name and then asserts locatability only by substring, so the assertion passes over a path no consumer can resolve. report_test.go:121 calls `ParseGremlins(raw, \"./internal/findings\")` with fixture file_names 'bind.go' and 'override.go'; internal/mutation/gremlins.go:39-45 copies f.FileName into Mutant.File and never joins it with the target, which is stored on Report.Target and used only in the unresolved fingerprint. The test's own comment at report_test.go:135 says 'a finding that cannot be located is not actionable', but the check at :136-138 is `strings.Contains(strings.Join(files,\",\"), \"bind.go\")` - satisfied by a bare basename. Downstream, findings.Input.Evidence.Path becomes 'bind.go' and the fingerprint 'mutation:survived:INVERT_NEGATIVES:bind.go:53'; internal/findings/bind.go:45 `pathish` requires at least one slash, so bindablePaths finds nothing and bindingFor (bind.go:74-76) falls back to BoundHead. Concrete consequence once these findings are wired to a gate: an override granted on any mutation finding is head-bound and lapses on the very next commit, so mutation findings are effectively un-overridable. Rated low, with the uncertainty stated: `grep` finds no production caller of ParseGremlins, ParseStryker or Report.Findings() outside internal/mutation on this branch (only internal/mutation/verify.go is wired into the fsm kind), so today the effect is unreachable and this is a latent contract the test locks in rather than a live defect. It becomes medium the moment a gate consumes Report.Findings(). Cheap fix: join target and file_name in ParseGremlins/ParseStryker and assert the repo-relative path in this test.",
+      "evidence": [
+        {"path": "internal/mutation/report_test.go", "line": 135},
+        {"path": "internal/mutation/gremlins.go", "line": 41},
+        {"path": "internal/findings/bind.go", "line": 45}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-5.022b4651a04cf368",
+  "kind": "shard",
+  "shardId": "shard-5",
+  "shardHash": "022b4651a04cf368",
+  "planHash": "22cbb3df197e8b3e",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "shard-5-reviewer",
+  "reviewedAt": "2026-08-30T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 879,
+      "note": "Read the whole file plus machine.go's delta pipeline (machine.go:695-705), fold.go:132-158, run/types.go:180-270 and gate/gates.go pins_proven. Traced the pin lifecycle end to end: editOut.Pins -> Reduce -> Delta -> Fold -> Snapshot.Pins -> mutationVerifyExec. The chain is broken at Reduce."
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 437,
+      "note": "reviewLenses.Instructions compared against DecodeFor (402-431) and workflows/sdlc-loop-proved.yaml:32; grepped require_verdicts across all .go/.yaml/.md - nothing else adjusts the prompt or OutputSchema."
+    },
+    {
+      "path": "internal/mutation/stryker.go",
+      "line": 38,
+      "note": "ParseStryker read against parse.go's Parse/Load/LoadAll detection probe, report.go Score/Findings, and reviewers/mutation.go MutationContext.Findings to work out what a zero-mutant report does downstream."
+    },
+    {
+      "path": "internal/taskdone/review.go",
+      "line": 761,
+      "note": "mutationContextFor and the --mutation-report wiring checked in cmd/metareview/main.go:224/263/296 and in prready/epicready; the option plumbing itself is complete and consistent across the three scopes."
+    },
+    {
+      "path": "internal/fsm/run/fold_test.go",
+      "line": 1200,
+      "note": "The new fold/clone/outcome tests exercise foldUnproven, Delta.Pins and PinOutcome.Valid correctly, but every one of them constructs Delta{Pins: ...} by hand; no test drives a fix node's output through agentEdit.Reduce, which is why the dropped-pins defect below is invisible to the suite."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "critical",
+      "disposition": "open",
+      "note": "The fix node's pins never reach the prove node, so mutation-verify is vacuous in every real run. agentEdit.Decode validates o.Pins (kind.go:873) and DecodeFor refuses a fix with zero pins when require_pins is set (kind.go:809-817), but agentEdit.Reduce returns run.Delta{Commit: out.(editOut).Commit} and drops Pins entirely (kind.go:879-881). Reduce is the ONLY path from a node output into the snapshot (machine.go:695-700 -> append TypeDeltaApplied -> fold.go:148 `if p.Pins != nil`), and grepping every non-test .go file shows no other assignment to Delta.Pins or Snapshot.Pins. Concrete failure: run sdlc-loop-proved, record a fix output {commit, summary, pins:[{file:\"f.go\",from:...,to:...,test:\"TestF\"}]}; the delta stores only the commit; Snapshot.Pins stays empty; mutationVerifyExec calls e.verify(ctx, in.Snap.Pins) with nil (kind.go:1014); the verifier returns zero results; no findings are produced; the pins_proven gate passes vacuously (gates.go, documented as vacuous when no pins were declared) and the run advances to verify reporting a proof it never performed. The whole point of the workflow - 'sdlc-loop takes the fix agent's word; this one does not' - is inverted: it takes the agent's word and additionally claims it checked. No test covers it: kind_test builds ExecInput.Snap.Pins directly, escalation_test calls verifyPins directly, fold_test hand-builds Delta{Pins}, and cli_test's TestProvedWorkflowRefusesAFixThatShowsNoWork stops at the record step without advancing into prove.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 879
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 1014
+        },
+        {
+          "path": "internal/fsm/run/fold.go",
+          "line": 148
+        },
+        {
+          "path": "internal/fsm/cli/cli_test.go",
+          "line": 1008
+        }
+      ]
+    },
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "require_verdicts changes the accepted output shape but not the instructions or the output schema, so a driver that follows the prompt exactly is always rejected. reviewLenses.Instructions still emits 'Return ONLY {\"findings\":[{\"file\",\"line\",\"issue_text\",\"severity\"}...]}' (kind.go:441) and OutputSchema {\"findings\":[...]} (kind.go:464) regardless of the node, while DecodeFor with require_verdicts strict-decodes {\"lenses\":[...]} and refuses anything else (kind.go:402-411). Concrete failure: `metareview fsm init --workflow sdlc-loop-proved` (discover is exec: subagent, require_verdicts: true - workflows/sdlc-loop-proved.yaml:32); advance returns needs_input carrying the flat-shape instructions; the subagent complies and returns {\"findings\":[...]}; `record node-output --node discover` fails with ERR_NODE_OUTPUT_INVALID '0 lens reports for 8 declared lenses'. The run cannot progress past its first node without the operator guessing an undocumented shape, and nothing in the prompt names the lens report fields or the legal verdicts. This is exactly the trap the sibling code warns against for pins: 'The prompt has to ask for what the schema will demand. A schema that requires something the instructions never mentioned is a trap' (kind.go:834-836) - agentEdit switches its `shape` string and OutputSchema on require_pins; reviewLenses does not.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 441
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 464
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 402
+        },
+        {
+          "path": "workflows/sdlc-loop-proved.yaml",
+          "line": 32
+        }
+      ]
+    },
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "A lens that reports NEEDS_REVISION with no findings is silently discarded and the run exits clean. DecodeFor accepts LensPass/LensNeedsRevision/LensError and never requires NEEDS_REVISION to carry findings (kind.go:402-431; LensReport.Findings is `omitempty`, run/types.go:206-210), and Reduce only synthesises a finding for LensError (kind.go:482-495) - a NEEDS_REVISION lens with an empty findings array contributes nothing to the delta. Concrete failure: at iteration 0 of sdlc-loop-proved the discover subagent returns eight lens reports of which one is {\"name\":\"Security\",\"verdict\":\"NEEDS_REVISION\"} with findings omitted (highly likely given the previous finding: the prompt never tells the agent that a lens report may carry findings at all). Reduce yields zero findings, the discover->done transition's nothing_found gate passes (AllFound empty, Findings empty, gates.go), and the FSM reports outcome 'clean' while a lens explicitly said the diff needs revision. That is the same false-negative the ERROR handling was written to prevent - 'an incomplete review must not be scored as a clean one' - left open for the verdict that most often means a real defect. Either refuse NEEDS_REVISION with no findings at decode, or synthesise a finding for it in Reduce as ERROR does.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 415
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 482
+        },
+        {
+          "path": "internal/fsm/run/types.go",
+          "line": 206
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "In advisory mode the prove node relabels every unproven result as a malformed pin and states something factually false about it. mutationVerifyExec's switch is `case r.Outcome == run.PinMalformed || advisory:` (kind.go:1033), which assigns CategoryMalformedPin and the text 'could not be evaluated, so the fix was neither proved nor disproved' to a PinSurvived result - the one outcome that means the mutation compiled, the tests ran, and they all passed. Concrete failure: a workflow with `prove: {kind: mutation-verify, mode: advisory}` (the mode sdlc-loop-proved documents for a first supervised run) verifies a fix whose pin survives; the audit records Source=mutation-verify, Category=malformed-pin, Detail claiming nothing was evaluated. The human reading that supervised run concludes their pin syntax was wrong and rewrites the pin, when the real result is an untested fix. It also destroys the exact measurement advisory mode exists to collect and that docs/0.12.0-benchmarking.md proposes to count by category. Non-blocking is achievable without lying: keep the true category and let the gate (or a separate advisory flag on the finding) decide, or add a distinct advisory category. kind_test.go:1469-1482 only counts blocking vs advisory findings, so the mislabelling is unasserted.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 1033
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 1031
+        },
+        {
+          "path": "workflows/sdlc-loop-proved.yaml",
+          "line": 44
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The strict lens path skips the payload and aggregate-count caps the flat path enforces. Decode calls checkPayload(o) (kind.go:475) and checkFindings over the WHOLE list, capping the node at run.MaxDeltaList=256 findings; DecodeFor's require_verdicts branch calls checkFindings per lens only and never calls checkPayload (kind.go:402-431). Eight lenses of 256 findings each is accepted, so the resulting Delta carries up to 2048 findings where the flat form would have been refused at 257. The record-size cap (machine.go:1020, MaxPayload-128) bounds the bytes, so the damage is bounded, but the run then fails later and confusingly: the oversized delta_applied event either trips fold.go:43's MaxPayload check and surfaces as ERR_NODE_OUTPUT_INVALID, or reaches adjudicate and trips cliffCheck's len(goldens)+len(cands) > MaxDeltaList (kind.go:626). A checkPayload plus a total-findings cap in DecodeFor would refuse it at the point of recording with an accurate message.",
+      "evidence": [
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 428
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 475
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "ParseStryker accepts any JSON whose `files` is an object and produces a zero-mutant report, which scores as a clean mutation run. schemaVersion is parsed (stryker.go:20) and never read, and nothing requires a single mutant. Parse's detection probe only looks at the first byte of `files` (parse.go:22-31), so {\"files\":{}} - what StrykerJS writes when its mutate glob matches nothing - reaches ParseStryker, returns Report{Mutants: nil}, Score().Complete() is true with Efficacy 0, and MutationContext.Findings() emits nothing. Concrete failure: `metareview review task-done --mutation-report stryker.json` after a misconfigured run passes the gate with mutation evidence attached, which is precisely what parse.go:32-33 says must not happen ('a report this code cannot read must not become an empty report, which would score as a clean run'). Uncertainty stated: this may be an accepted trade-off since a repository can legitimately mutate nothing, but the empty case is currently indistinguishable from a measured clean one, and validating schemaVersion or refusing a zero-mutant report would separate them.",
+      "evidence": [
+        {
+          "path": "internal/mutation/stryker.go",
+          "line": 20
+        },
+        {
+          "path": "internal/mutation/stryker.go",
+          "line": 44
+        },
+        {
+          "path": "internal/mutation/parse.go",
+          "line": 32
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "spike_check_test.go hardcodes four world-writable /tmp paths and Fatalf's on any of them that exists but is not a gremlins report. On a shared or long-lived machine /tmp/g-c2.json is a name anything can claim; if it holds unrelated JSON, ParseGremlins fails and `go test ./internal/mutation` fails for a reason that has nothing to do with the code under test. The test also asserts nothing (it only t.Logf's), so it adds statement coverage of ParseGremlins/Score without verifying either - relevant in a repo that gates on coverage. Either drop it or gate it behind an env var naming the report directory.",
+      "evidence": [
+        {
+          "path": "internal/mutation/spike_check_test.go",
+          "line": 12
+        },
+        {
+          "path": "internal/mutation/spike_check_test.go",
+          "line": 18
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "mutationContextFor is duplicated verbatim in three packages (taskdone/review.go:761, prready/review.go:1154, epicready/review.go:785), each with the same doc comment. Rubric duplication concern rather than a bug today: the three copies must stay in step for the 'an unreadable report stops the review' contract to hold uniformly across scopes, and nothing enforces that. One helper in internal/reviewers (next to MutationContext) would make them agree by construction.",
+      "evidence": [
+        {
+          "path": "internal/taskdone/review.go",
+          "line": 761
+        },
+        {
+          "path": "internal/prready/review.go",
+          "line": 1154
+        },
+        {
+          "path": "internal/epicready/review.go",
+          "line": 785
+        }
+      ]
+    }
+  ],
+  "blockingCount": 4
+}

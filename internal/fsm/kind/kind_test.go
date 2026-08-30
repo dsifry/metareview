@@ -1641,3 +1641,98 @@ func TestProveRecordsItsResultsForTheNextRound(t *testing.T) {
 		t.Fatalf("the round's results were not published for the fold: %+v", d.PinResults)
 	}
 }
+
+// The seam, not the layers. Every pin test in this package injected pins at the layer it was
+// testing — kind_test set ExecInput.Snap.Pins, fold_test hand-built Delta{Pins}, escalation_test
+// called verifyPins directly — so all three layers were correct and the join between two of them
+// was broken: agentEdit.Reduce dropped Pins, Snapshot.Pins was permanently empty, mutation-verify
+// verified nothing, and pins_proven passed vacuously on every run. This test walks the actual
+// path a pin takes, and would have failed the day that was written.
+func TestPinsSurviveDecodeAndReduce(t *testing.T) {
+	r, err := New(Deps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := agentEdit{}
+	_ = r
+	node := &workflow.Node{Name: "fix", Kind: AgentEdit, Params: map[string]any{"require_pins": true}}
+	raw := json.RawMessage(`{"commit":"abc1234","summary":"fixed it","pins":[{"file":"calc.go","from":"n < 10","to":"n < 11","test":"TestBound"}]}`)
+
+	out, err := k.DecodeFor(node, raw)
+	if err != nil {
+		t.Fatalf("DecodeFor: %v", err)
+	}
+	d, err := k.Reduce(run.Snapshot{}, out)
+	if err != nil {
+		t.Fatalf("Reduce: %v", err)
+	}
+	if d.Commit != "abc1234" {
+		t.Errorf("the commit was lost: %+v", d)
+	}
+	if len(d.Pins) != 1 || d.Pins[0].File != "calc.go" || d.Pins[0].From != "n < 10" {
+		t.Fatalf("Reduce is the only path into the snapshot and it dropped the pins: %+v", d.Pins)
+	}
+}
+
+// Every route that can introduce a pin must validate it. checkPins guarded agent-edit alone, so
+// this decoder accepted a path escaping the repository — and the verifier joins and rewrites that
+// path under a #nosec comment asserting the caller had already checked it.
+func TestEveryPinRouteValidatesPaths(t *testing.T) {
+	r, err := New(Deps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := mutationVerifyKind{}
+	_ = r
+	for _, bad := range []string{"../../../etc/hosts", "/etc/hosts", "a/../../b.go"} {
+		raw := json.RawMessage(fmt.Sprintf(`{"findings":[],"pins":[{"file":%q,"from":"x","to":"y","test":"T"}]}`, bad))
+		if _, err := k.Decode(raw); err == nil {
+			t.Errorf("mutation-verify accepted a pin escaping the tree: %q", bad)
+		}
+		res := json.RawMessage(fmt.Sprintf(`{"findings":[],"pin_results":[{"pin":{"file":%q,"from":"x","to":"y","test":"T"},"outcome":"survived"}]}`, bad))
+		if _, err := k.Decode(res); err == nil {
+			t.Errorf("mutation-verify accepted a pin RESULT escaping the tree: %q", bad)
+		}
+	}
+	ok := json.RawMessage(`{"findings":[],"pins":[{"file":"internal/a.go","from":"x","to":"y","test":"T"}]}`)
+	if _, err := k.Decode(ok); err != nil {
+		t.Errorf("an ordinary pin must still decode: %v", err)
+	}
+}
+
+// The prompt has to ask for exactly what the decoder will accept. It did not: require_verdicts
+// changed the accepted shape while the prompt kept asking for the flat one, so every compliant
+// driver was rejected on the workflow's FIRST node with an error naming a field the prompt had
+// just told it to send. sdlc-loop-proved could never reach a transition.
+func TestRequireVerdictsPromptMatchesWhatTheDecoderAccepts(t *testing.T) {
+	snap := run.Snapshot{BaseSHA: "b", Head: "h"}
+	for _, strict := range []bool{false, true} {
+		node := &workflow.Node{Name: "discover", Kind: ReviewLenses, Params: map[string]any{"lenses": 2}}
+		if strict {
+			node.Params["require_verdicts"] = true
+		}
+		got, err := reviewLenses{}.Instructions(snap, node, machine.Diff{Text: "+x"}, "n1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Build the document the prompt asks for, and require the decoder to take it.
+		var reply json.RawMessage
+		if strict {
+			reply = json.RawMessage(`{"lenses":[{"name":"Feasibility","verdict":"PASS","findings":[]},{"name":"Completeness","verdict":"NEEDS_REVISION","findings":[{"issue_text":"x"}]}]}`)
+			if !strings.Contains(got.Text, `{"lenses"`) || !strings.Contains(string(got.OutputSchema), "verdict") {
+				t.Errorf("strict mode still asks for the flat shape:\n%s\n%s", got.Text, got.OutputSchema)
+			}
+			if !strings.Contains(got.Text, "ERROR") {
+				t.Error("a lens that cannot run must be told to say ERROR, or silence reads as clean")
+			}
+		} else {
+			reply = json.RawMessage(`{"findings":[{"issue_text":"x"}]}`)
+			if !strings.Contains(got.Text, `{"findings"`) {
+				t.Errorf("permissive mode changed shape:\n%s", got.Text)
+			}
+		}
+		if _, err := (reviewLenses{}).DecodeFor(node, reply); err != nil {
+			t.Errorf("require_verdicts=%v: the decoder refuses what the prompt asked for: %v", strict, err)
+		}
+	}
+}

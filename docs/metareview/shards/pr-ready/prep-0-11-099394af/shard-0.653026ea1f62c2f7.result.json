@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0.653026ea1f62c2f7",
+  "kind": "shard",
+  "shardId": "shard-0",
+  "shardHash": "653026ea1f62c2f7",
+  "planHash": "22cbb3df197e8b3e",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "shard-0-reviewer",
+  "reviewedAt": "2026-08-30T14:52:00Z",
+  "evidence": [
+    {
+      "path": "internal/findings/bind.go",
+      "line": 97,
+      "note": "Read the whole new file. Verified bindablePaths/bindingFor/lapseStaleOverrides against internal/findings/override.go GrantOverride (which calls bindingFor with record.GitHead) and against internal/findings/bind_test.go, which covers path binding, head binding, multi-path binding, traversal rejection and the unreadable-file seam."
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 115,
+      "note": "New lapseStaleOverrides call site sits before the open->fixed transition at lines 144-153. Traced the interaction end to end with a throwaway probe test in package findings (written, run, then deleted)."
+    },
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 112,
+      "note": "Exhaustively enumerated the new status --json arg shapes: len 2 (unscoped), len 4 with --target (scoped), every other length and any non---target third arg fall to the usage branch and exit 2. No parse hole found."
+    },
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 683,
+      "note": "mustMutationReport verified against internal/mutation/parse.go Load/Parse: missing file, non-JSON, empty file and a non-array files field all return an error, and reject() exits 2 before any fallthrough. tests/go/test-mutation-report.sh:122-125 covers the exit-2 contract."
+    },
+    {
+      "path": "internal/prready/mutationctx_test.go",
+      "line": 14,
+      "note": "Ran go build ./... and go test ./internal/findings/... ./internal/prready/... ./internal/mutation/... - all pass. Confirmed no writeTemp/mutationContextFor identifier collision in package prready and that the gremlins fixture routes through Parse -> ParseGremlins to exactly one finding."
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 92,
+      "note": "Checked the four new Record fields for JSONL compatibility: all omitempty, so pre-0.11 rows decode. Pre-existing granted overrides carry no bound kind or hash, so the first run after upgrade lapses them all back to open - noisy but it fails toward blocking, which is the documented direction."
+    },
+    {
+      "note": "Disproved candidate finding: a head-bound grant with an empty GitHead would never lapse (hash '' == hash ''), a permanent silent hole. Not reachable in production - findings.Run is built in only three places (internal/prready/review.go:196, internal/taskdone/review.go:159, internal/epicready/review.go:146), all from gitcontext.HeadSHA, and internal/gitcontext/gitcontext.go:110 returns an error rather than an empty head. Record.GitHead comes from run.GitHead via normalize(). Dropped rather than reported."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "A granted override that lapses can be recorded as FIXED in the same Reconcile pass, which breaks the invariant this package states explicitly. internal/findings/bind.go:111 turns an overridden record into status \"open\", and internal/findings/findings.go:115 runs that before the open->fixed transition at findings.go:144-153, whose guard accepts status \"open\". internal/findings/findings.go:142-143 says the opposite is intended: \"StatusOverridden is deliberately not included: a granted override is an acknowledged exception, never a fix, and its fixedInRunId stays empty so post-merge learning can tell the two apart\" - and CLAUDE.md repeats it (\"an override is never a fix (fixedInRunId stays empty)\"). Before this diff `overridden` was terminal so the fix branch was unreachable from it; the new lapse transition opens that route. Concrete failure, verified by a probe test in package findings (temporarily added, run, then deleted): seed an open blocker with fingerprint pr:some-lint:internal/x.go and RunID mrv-run-1, RequestOverride then GrantOverride (status overridden, kind paths), edit internal/x.go, then Reconcile with run mrv-run-2 and Options{PreviousRunID: \"mrv-run-1\"} and NO current inputs carrying that fingerprint. Observed result: status=\"fixed\", fixedInRunId=\"mrv-run-2\", overrideGrantedBy=\"dsifry@warmstart.ai\", overrideLapsedAt set. The \"no current inputs\" precondition is not exotic and this PR makes it more likely, not less: mutation findings only exist when --mutation-report is passed (cmd/metareview/main.go:224,263,295), so run 1 with the flag files a survivor blocker, an override is granted, and the ordinary repair re-run `--previous-run <run-1>` without the flag lapses the override and immediately closes it as fixed. Damage: (a) fixedInRunId now asserts a fix that never happened, so post-merge learning counts an exception as a resolution - the exact confusion findings.go:142 exists to prevent; (b) internal/findings/override.go:170-186 overrideLines renders only override-pending and overridden, so the exception disappears from the \"Process Overrides\" section of docs/metareview/FINDINGS.md and from `override list` entirely, leaving no visible trail that a grant lapsed; (c) the operator gets no signal from UnresolvedBlocking that an exception has lapsed. The gate itself is not left open (a fixed record no longer suppresses rediscovery, so a later run that re-reports the fingerprint files a fresh blocker), which is why this is medium and not high. Suggested repair: exclude records carrying a non-empty OverrideGrantedAt (or OverrideLapsedAt set in this pass) from the open->fixed transition, or lapse to StatusOverridePending instead of \"open\" so the record keeps blocking and stays in the override ledger until someone re-grants or fixes it.",
+      "evidence": [
+        {"path": "internal/findings/bind.go", "line": 111},
+        {"path": "internal/findings/findings.go", "line": 115},
+        {"path": "internal/findings/findings.go", "line": 142},
+        {"path": "internal/findings/findings.go", "line": 150},
+        {"path": "internal/findings/override.go", "line": 172}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "A mistyped `--target` value makes `status --json` report blocked:false, so a host hook wired to that field fails open. cmd/metareview/main.go:117 passes the operator's raw string straight to status.EmitFor with no normalisation or existence check, and internal/status/status.go:186-196 matches it by exact string equality against reviewlog target ids (`s.Target != target -> continue`), so a target nobody has ever reviewed yields must_clear=[] and exit 0 - indistinguishable from a genuinely clean target. Failure scenario: a hook computes the target as \"./docs/plan.md\" or \"t_1\" where the log recorded \"docs/plan.md\" or \"t-1\", the gate that is supposed to enforce the Completion Rule silently permits the work, and nothing in the exit code or `blocked` says the scope matched nothing. Uncertainty stated: this is the documented and intended design (the comment at main.go:113-115 argues the unscoped alternative is a livelock, and tests/go/test-cli-baseline.sh:59 asserts exit 0 for an unreviewed target), and a caller can distinguish the two cases today by noticing that the scoped `reviews` array is empty - so this is a hardening request, not a defect: consider echoing a match count or a `target_known` boolean so a shell hook does not have to parse the reviews array to tell a typo from a clean corner. Kept low because the matching itself lives in internal/status/status.go, which is shard-4's subject, not this shard's.",
+      "evidence": [
+        {"path": "cmd/metareview/main.go", "line": 117},
+        {"path": "cmd/metareview/main.go", "line": 123}
+      ]
+    }
+  ],
+  "blockingCount": 1
+}

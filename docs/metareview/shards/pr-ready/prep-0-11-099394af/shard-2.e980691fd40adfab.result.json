@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2-e980691fd40adfab",
+  "kind": "shard",
+  "shardId": "shard-2",
+  "shardHash": "e980691fd40adfab",
+  "planHash": "22cbb3df197e8b3e",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "shard-2-reviewer",
+  "reviewedAt": "2026-08-30T00:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/run/fold.go", "line": 145, "note": "new PinResults/Pins fold branches reviewed against their producers and consumers"},
+    {"path": "internal/reviewers/mutation_test.go", "line": 26, "note": "cross-engine dedupe test checked against the real fingerprint construction"},
+    {"path": "internal/status/status_test.go", "line": 256, "note": "target scoping test checked against the Target strings the product actually writes"},
+    {"path": "internal/taskdone/mutationctx_test.go", "line": 12, "note": "unreadable-report guard verified against mutationContextFor and mutation.LoadAll; no defect found"},
+    {"note": "go test ./internal/status/... ./internal/reviewers/... ./internal/taskdone/... ./internal/fsm/run/... all pass; a temporary probe test in internal/fsm/kind proved agent-edit Reduce drops pins, and was removed afterwards"}
+  ],
+  "findings": [
+    {
+      "severity": "critical",
+      "disposition": "open",
+      "note": "The two new fold branches are dead code in the shipped pipeline, and the `prove` step they exist to feed cannot fail. `agentEdit.Reduce` (internal/fsm/kind/kind.go:879-881) returns `run.Delta{Commit: out.(editOut).Commit}` and never copies `editOut.Pins`, so `DeltaAppliedData.Delta.Pins` is always nil, `p.Pins != nil` at internal/fsm/run/fold.go:148 never fires, and `Snapshot.Pins` stays empty for the whole run. Verified empirically: a throwaway test calling the registered agent-edit kind's Decode+Reduce on `{\"commit\":\"abcdef1\",\"summary\":\"s\",\"pins\":[{...}]}` produced `Delta{... Pins:[] PinResults:[]}`. Concrete failure with workflows/sdlc-loop-proved.yaml (`fix: {kind: agent-edit, require_pins: true}` then `prove: {kind: mutation-verify}` behind gate `pins_proven`): DecodeFor (kind.go:809-816) forces the agent to declare at least one pin and checkPins validates it, Reduce then discards it, mutationVerifyExec calls `e.verify(ctx, in.Snap.Pins)` with an empty slice (kind.go:1014), mutation.Verifier.Verify returns zero results without even noticing a missing test command (internal/mutation/verify.go:88), the delta carries `Findings: []`, and `pins_proven` (internal/fsm/gate/gates.go:49-62) finds no unproven-fix finding and passes. The workflow advertised as 'sdlc-loop takes the fix agent's word; this one does not' therefore takes the fix agent's word, on every run, silently. The same break also makes `next.Unproven = foldUnproven(...)` (fold.go:145) unreachable: with no pins there are never any PinResults, so the accumulated-gap mechanism this shard adds never accumulates anything. Every pin test in the tree constructs `Delta{Pins: ...}` or `Snapshot{Pins: ...}` by hand (internal/fsm/run/fold_test.go:1211, internal/fsm/kind/kind_test.go:1169), so no test crosses the fix-node-output -> Delta seam and the gap is invisible to the suite.",
+      "evidence": [
+        {"path": "internal/fsm/run/fold.go", "line": 148, "note": "if p.Pins != nil — never true in production"},
+        {"path": "internal/fsm/kind/kind.go", "line": 879, "note": "agentEdit.Reduce drops editOut.Pins"},
+        {"path": "internal/fsm/kind/kind.go", "line": 1014, "note": "verify runs over in.Snap.Pins, always empty"},
+        {"path": "internal/fsm/gate/gates.go", "line": 49, "note": "pins_proven passes vacuously when no unproven-fix finding exists"},
+        {"path": "internal/fsm/run/fold.go", "line": 145, "note": "foldUnproven is also unreachable for the same reason"}
+      ]
+    },
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "`--target` scoping fails open, and the new tests lock that behaviour in with a Target vocabulary the product never emits. BuildFor matches `s.Target != target` by exact string (internal/status/status.go:88-96), and an unknown target yields `must_clear: []`, `blocked: false`, exit 0 — indistinguishable from a genuinely clean target, which internal/status/status_test.go:292-298 asserts as correct. But no review log records a source-file path as its Target: pr-ready writes the literal `current branch` (internal/prready/review.go:928), and task-done/epic-ready/artifact write the task id or plan/spec doc path. In this repository's own 66 logs the Target values are `current branch` (52 of them) and docs/ paths — never a .go file. Concrete failure: an operator follows cmd/metareview/main.go:57 ('--target narrows it to one path'), exports METAREVIEW_TARGET=internal/foo.go, and hooks/pre-finish.sh runs `metareview status --json --target internal/foo.go`; a NEEDS_REVISION pr-ready review with 3 blockers is present, BuildFor matches nothing, status exits 0, the hook exits 0, and the agent finishes over an unresolved blocking gate. The hook is described as the enforcement shim the model depends on, so its documented configuration disables it. The test fixtures at status_test.go:259 and :261 use `Target: internal/alpha/thing.go`, a string no metareview code path ever writes, which is why the suite does not catch this. A Report field distinguishing 'no review has this target' from 'this target is clean' (or matching pr-ready's branch target) is needed before the scoped form can be trusted by a hook.",
+      "evidence": [
+        {"path": "internal/status/status_test.go", "line": 292, "note": "an unknown target is asserted to be not blocked"},
+        {"path": "internal/status/status_test.go", "line": 259, "note": "fixture uses a source-path Target that no review ever writes"},
+        {"path": "internal/status/status.go", "line": 90, "note": "exact-string target filter, no unknown-target signal"},
+        {"path": "internal/prready/review.go", "line": 928, "note": "pr-ready logs Target: `current branch`"},
+        {"path": "hooks/pre-finish.sh", "line": 21, "note": "METAREVIEW_TARGET is passed straight through to status --target"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestTwoEnginesDoNotDoubleReportTheSameSite certifies a dedupe path that cannot fire for two real engines, and leaves the case where dedupe destroys information untested. The survived fingerprint is `mutation:survived:<operator>:<file>:<line>` (internal/mutation/report.go:129) and MutationContext.Findings collapses on it (internal/reviewers/mutation.go:43). The test makes both engines report the identical Operator string 'INVERT_NEGATIVES' (mutation_test.go:27, :30-31), but the operator is taken verbatim from each engine: gremlins uses its `Type` field (internal/mutation/gremlins.go:44, e.g. INVERT_NEGATIVES) and stryker/ooze its `MutatorName` (internal/mutation/stryker.go:53, e.g. EqualityOperator). Two engines agreeing on a site therefore produce different fingerprints and are NOT collapsed — the exact double-report the test claims to rule out still happens in production. Worse, the collapse that does fire loses data: the uncovered fingerprint is `mutation:uncovered:<file>` with no engine and no lines (report.go:154), so if gremlins reports a.go lines 10,11 uncovered and a second engine reports a.go lines 40,41 uncovered, only the first grouped finding survives and lines 40 and 41 are silently dropped from the review — a mutation gate passing because it looked at less, which is the failure the surrounding comments say must not happen. Neither the loss case nor a realistic engine pair is covered.",
+      "evidence": [
+        {"path": "internal/reviewers/mutation_test.go", "line": 27, "note": "both engines given the same operator string"},
+        {"path": "internal/mutation/report.go", "line": 129, "note": "survived fingerprint includes the engine-specific operator"},
+        {"path": "internal/mutation/report.go", "line": 154, "note": "uncovered fingerprint keyed only by file, so a second engine's distinct lines are dropped"},
+        {"path": "internal/reviewers/mutation.go", "line": 43, "note": "fingerprint dedupe across reports"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "An Unproven entry can effectively never be cleared once the fix rewrites the line it names. pinKey is file+from+to (internal/fsm/run/fold.go:601) and only a PinProven result with a byte-identical key removes an entry (fold.go:617-624). Realistic sequence: round 1's prove reports SURVIVED for {a.go, 'x > 1' -> 'x >= 1'}, so the gap is recorded; round 2 the agent adds the missing test and also tightens the line to 'x > threshold', and pins {a.go, 'x > threshold' -> 'x >= threshold'} which is proven. Different key, so the round-1 entry stays in Unproven for the rest of the run and every later fork. Because Unproven feeds the discover node's prompt as 'Lines no test protects' (internal/fsm/kind/kind.go:447-449, 461), later rounds are steered to a line that is now protected — the same misdirection the Snapshot.Unproven comment gives as the reason malformed and unverifiable outcomes are excluded. It costs review attention rather than a wrong gate verdict (no gate reads Unproven), and it is latent until the critical finding above is fixed, hence low. A key that survives a rewrite of the pinned text, or an entry that ages out with the tree hash, would settle it.",
+      "evidence": [
+        {"path": "internal/fsm/run/fold.go", "line": 601, "note": "pinKey binds the identity to the exact from/to text"},
+        {"path": "internal/fsm/kind/kind.go", "line": 447, "note": "Unproven is fed to the discover prompt as lines no test protects"}
+      ]
+    }
+  ],
+  "blockingCount": 3
+}

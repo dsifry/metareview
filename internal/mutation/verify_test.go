@@ -2,10 +2,12 @@ package mutation
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A real module with a real test, so the proof is end to end rather than against a fake runner.
@@ -336,5 +338,91 @@ func TestFindingSeverityFollowsTheOutcome(t *testing.T) {
 	}
 	if bySeverity["c.go"] != "medium/advisory" {
 		t.Errorf("a malformed pin is advisory, not a verdict on the code: %s", bySeverity["c.go"])
+	}
+}
+
+// A test run that is killed must never read as a caught mutation.
+//
+// exec returned (ExitCode(), out, nil) whenever ProcessState was non-nil, and a signal-killed
+// process HAS a ProcessState whose ExitCode() is -1. Step 4 treats any non-zero code as "the
+// mutation was caught", so a run killed by the timeout was recorded as Proven: true with a detail
+// sentence asserting that tests which never finished had failed. That is the same class of defect
+// as the engine bug this package exists to correct, pointing the other way: theirs drops timeouts
+// out of the score, ours counted them as kills.
+func TestAKilledTestRunIsNeverAnExitCode(t *testing.T) {
+	v := Verifier{Dir: t.TempDir(), TestCmd: []string{"sleep", "30"}, Timeout: 150 * time.Millisecond}
+	code, _, err := v.exec(context.Background(), v.Dir, v.TestCmd)
+	if err == nil {
+		t.Fatalf("a killed run must be an error, got code %d and no error", code)
+	}
+	if !strings.Contains(err.Error(), "did not finish") {
+		t.Errorf("the error must say the command did not finish: %v", err)
+	}
+	if code >= 0 {
+		t.Errorf("a killed run has no meaningful exit code, got %d", code)
+	}
+}
+
+// And the same thing through the whole verifier, which is where it actually mattered. The Run
+// seam lets the baseline and the build succeed and only the MUTATED run be killed, so this
+// reaches step 4 — the step that read a non-zero code as "the mutation was caught".
+func TestATimedOutMutationRunIsUnverifiableNotProven(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "calc.go"), []byte("package calc\n\nconst bound = 10\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pin := Pin{File: "calc.go", From: "10", To: "11", Test: "TestBound"}
+
+	var calls int
+	v := Verifier{Dir: dir, TestCmd: []string{"irrelevant"}, Run: func(context.Context, string, []string) (int, string, error) {
+		calls++
+		if calls <= 2 {
+			return 0, "", nil // baseline passes, mutation compiles
+		}
+		return -1, "", errors.New("the test command did not finish within 10m0s: context deadline exceeded")
+	}}
+	got := v.verifyOne(context.Background(), pin)
+	if got.Proven {
+		t.Fatalf("a run that never finished is not proof: %+v", got)
+	}
+	if got.Outcome != PinUnverifiable {
+		t.Errorf("outcome = %q, want %q: nothing was learned about this line", got.Outcome, PinUnverifiable)
+	}
+	if strings.Contains(got.Detail, "fails the tests") {
+		t.Errorf("the detail claims a result that was never obtained: %q", got.Detail)
+	}
+}
+
+// An ordinary non-zero exit is still an exit code. The timeout guard must not swallow the normal
+// case, or nothing could ever be proven.
+func TestAnOrdinaryFailureIsStillAnExitCode(t *testing.T) {
+	v := Verifier{Dir: t.TempDir(), TestCmd: []string{"false"}, Timeout: 30 * time.Second}
+	code, _, err := v.exec(context.Background(), v.Dir, v.TestCmd)
+	if err != nil {
+		t.Fatalf("a test that simply fails is not an execution error: %v", err)
+	}
+	if code == 0 {
+		t.Error("`false` must report a non-zero exit code")
+	}
+	v.TestCmd = []string{"true"}
+	if code, _, err := v.exec(context.Background(), v.Dir, v.TestCmd); err != nil || code != 0 {
+		t.Errorf("a passing command must be (0, nil), got (%d, %v)", code, err)
+	}
+}
+
+// A process killed by a signal that is not our deadline is still not an answer. ExitCode() is -1
+// for any signal death, and -1 is non-zero, which step 4 reads as "the mutation was caught" — so
+// an OOM kill, an operator's Ctrl-C, or a crashing runner would each have been recorded as proof.
+func TestASignalKilledRunIsNotAnExitCode(t *testing.T) {
+	v := Verifier{Dir: t.TempDir(), TestCmd: []string{"sh", "-c", "kill -9 $$"}, Timeout: 30 * time.Second}
+	code, _, err := v.exec(context.Background(), v.Dir, v.TestCmd)
+	if err == nil {
+		t.Fatalf("a signal death must be an error, got code %d and no error", code)
+	}
+	if !strings.Contains(err.Error(), "signal") {
+		t.Errorf("the error must say the command was killed: %v", err)
+	}
+	if code >= 0 {
+		t.Errorf("a signal-killed run has no meaningful exit code, got %d", code)
 	}
 }

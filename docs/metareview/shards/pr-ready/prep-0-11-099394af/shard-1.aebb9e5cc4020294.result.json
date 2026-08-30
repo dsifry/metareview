@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1.aebb9e5cc4020294",
+  "kind": "shard",
+  "shardId": "shard-1",
+  "shardHash": "aebb9e5cc4020294",
+  "planHash": "22cbb3df197e8b3e",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "shard-1-reviewer",
+  "reviewedAt": "2026-08-30T00:00:00Z",
+  "blockingCount": 4,
+  "evidence": [
+    {"path": "hooks/pre-finish.sh", "line": 34, "note": "Ran the hook from /Users/dsifry/Developer/metareview/internal/mutation with METAREVIEW_BIN pointed at a freshly built binary: it printed nothing and exited 0, while the same hook from the repository root printed decision=block."},
+    {"path": "hooks/pre-finish.sh", "line": 21, "note": "grep across the tracked tree shows METAREVIEW_TARGET appears only on this line (plus a generated review-context copy); nothing sets or documents it."},
+    {"path": "hooks/pre-finish.sh", "line": 46, "note": "Compared the sed output against the real status JSON: reviews[0].target is docs/specs/2026-05-27-fail-closed-artifact-review-gates.md while must_clear[0].target is issue-2-wu2-review-fix."},
+    {"path": "internal/mutation/report.go", "line": 107, "note": "grep for .Score() / .Complete() / Efficacy outside _test.go returns only report.go's own definitions; no production caller exists."},
+    {"path": "internal/fsm/cli/wiring.go", "line": 412, "note": "lookupEnv keys 'set' off the untrimmed value, so an explicitly empty METAREVIEW_TEST_CMD takes the Go default rather than the documented refusal."},
+    {"path": "hooks/hooks.json", "line": 9, "note": "Only CLAUDE_PLUGIN_ROOT is expanded; .codex-plugin/plugin.json declares no hooks, and package.json files omits hooks/ (npm pack --dry-run lists 0 hooks entries out of 255)."},
+    {"path": "internal/mutation/verify.go", "line": 82, "note": "Verified Verify returns exactly one result per pin in order, so the pins[i] indexing in wiring.go verifyPins cannot go out of range. Not a finding."},
+    {"path": "hooks/pre-finish.sh", "line": 36, "note": "Confirmed with a bash harness that CODE=$? after fi captures the command-substitution status of the taken branch's assignment (got 7). Not a finding."}
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "GATE BYPASS: the Stop hook silently passes whenever the session's cwd is not the repository root. hooks/pre-finish.sh:32,34 invokes `$BIN status --json` with whatever cwd it inherits, and cmd/metareview/main.go:123 resolves the report against mustCwd() with no walk up to the repo root, so reviewlog.Discover finds no logs, Blocked is false, EmitFor returns 0 and the hook exits 0 at hooks/pre-finish.sh:38-39 printing nothing at all. Demonstrated: from /Users/dsifry/Developer/metareview the hook emits {\"decision\":\"block\",...}; from /Users/dsifry/Developer/metareview/internal/mutation the identical invocation emits nothing and exits 0, with 90+ unresolved blockers still in the ledger. A Claude Code Stop hook runs with the session's cwd, and an agent that has cd'd into a package - or a session started inside one - is waved through. The script's own comment at lines 25-26 states the rule this violates: 'a check that did not run must not read as a check that found nothing wrong'. It guards only the missing-binary case. Fix: resolve the repository root in the hook (git rev-parse --show-toplevel) and cd there, or make `metareview status` walk up to the repo root, and add a test that runs the hook from a subdirectory of a blocked repository and asserts it still blocks.",
+      "evidence": [
+        {"path": "hooks/pre-finish.sh", "line": 34, "note": "status is invoked with the inherited cwd"},
+        {"path": "cmd/metareview/main.go", "line": 123, "note": "status.EmitFor(mustCwd(), ...) - no repo-root resolution"},
+        {"path": "hooks/pre-finish.sh", "line": 38, "note": "exit 0 on CODE==0, which a subdirectory always produces"}
+      ]
+    },
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "The shipped default is exactly the livelock the script's own comment says prevented this hook from shipping. hooks/pre-finish.sh:18-21 documents that without --target `blocked` spans the entire review history and 'the hook would refuse an agent because of work it never touched - a livelock, not a gate, and the reason this hook could not ship before' - and then defaults TARGET to empty. Nothing in the tracked tree sets METAREVIEW_TARGET (grep finds only this line plus a generated docs/metareview/context copy), no doc mentions it, and hooks/hooks.json:9 passes no environment. Demonstrated in this repository: `METAREVIEW_BIN=<built binary> ./hooks/pre-finish.sh` from the root blocks, citing a 2026-05 spec review, with must_clear holding 90+ entries including 30+ 'current branch' rows from unrelated past work. Concrete failure: install the plugin in any repository that has used metareview for a while, finish a one-line change, and the Stop hook refuses forever with no reachable remedy short of clearing every historical blocker or uninstalling - which is the 'operator who has to disable it to get anything done has no gate at all' case internal/status/status.go:BuildFor warns about. Fix: derive the target from the run in progress (or default to the current branch / the newest run) rather than defaulting to the whole history, and add a test asserting the hook does not block on unrelated historical blockers.",
+      "evidence": [
+        {"path": "hooks/pre-finish.sh", "line": 21, "note": "TARGET defaults to empty; nothing sets METAREVIEW_TARGET"},
+        {"path": "hooks/pre-finish.sh", "line": 18, "note": "the comment naming this exact configuration a livelock"},
+        {"path": "hooks/hooks.json", "line": 9, "note": "the registration passes no environment to the script"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The block reason names a target that has no unresolved blockers, sending the operator to the wrong work. hooks/pre-finish.sh:46 scrapes `\"target\": \"...\"` from the whole status document with `sed ... | head -1`, but internal/status/status.go emits Reviews (each reviewlog.Summary carrying its own json:\"target\") before MustClear and before the report's own Target field, so head -1 always picks reviews[0].target. Unscoped - which per the previous finding is the only mode that actually runs - reviews[0] is an arbitrary historical review, not a blocker. Demonstrated on this repository: the hook printed 'unresolved blockers on docs/specs/2026-05-27-fail-closed-artifact-review-gates.md', a target that does not appear anywhere in must_clear (must_clear[0].target is 'issue-2-wu2-review-fix'). The operator inspects a clean target, finds nothing to fix, and cannot clear the gate. Aggravating: OUT is captured with 2>&1 at lines 32/34, so any stderr line containing a target-shaped string can also win the match. Fix: read must_clear[0].target with a JSON parser, or emit the summary from `metareview status` itself rather than re-deriving it in sed.",
+      "evidence": [
+        {"path": "hooks/pre-finish.sh", "line": 46, "note": "sed + head -1 over the entire status document"},
+        {"path": "internal/status/status.go", "line": 40, "note": "Reviews is marshalled before MustClear and Target"},
+        {"path": "internal/reviewlog/reviewlog.go", "line": 21, "note": "Summary.Target uses the same json key the regex matches"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "A parseable-but-empty mutation report is indistinguishable from a clean mutation run, which is the failure internal/mutation/parse.go:33 says refusing an unreadable report exists to prevent ('a report this code cannot read must not become an empty report, which would score as a clean run'). A report it CAN read that is empty does exactly that. Concrete: gremlins dies after writing its header and leaves {\"go_module\":\"x\",\"files\":[]} (or the operator points --mutation-report at the wrong file that happens to have a `files` key). cmd/metareview/main.go:673 mustMutationReport calls mutation.Load, which succeeds; ParseGremlins returns Report{Engine:\"gremlins\", Mutants:nil}; report.go:107 Findings() iterates nothing and returns an empty slice; internal/reviewers/mutation.go MutationContext.Findings() returns nil - so the review log records that mutation input was supplied and raised nothing, reading exactly like a package with zero survivors. The machinery that would catch it is present but dead: Score (report.go:71), Score.Complete (report.go:68) and Score.Efficacy (report.go:63) - the package doc's headline claim that 'Totals are therefore computed here, from the per-mutant list, for every engine' - have no non-test callers anywhere in the tree, so the honest score never reaches a gate. Fix: raise a blocking finding when a supplied report contains zero mutants, and consult Score().Complete() in MutationContext.Findings() so an incomplete run is reported as such rather than only via the per-mutant unresolved path.",
+      "evidence": [
+        {"path": "internal/mutation/report.go", "line": 107, "note": "Findings() over an empty Mutants slice yields no findings"},
+        {"path": "internal/mutation/report.go", "line": 68, "note": "Complete() has no production caller"},
+        {"path": "internal/mutation/report.go", "line": 71, "note": "Score() has no production caller"},
+        {"path": "internal/mutation/parse.go", "line": 33, "note": "the stated rule an empty-but-parseable report violates"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "METAREVIEW_TEST_CMD set to the empty string silently runs `go test ./...` in a repository that may not be Go, contradicting the comment directly above it. internal/fsm/cli/wiring.go:422 keys 'set' off `v != \"\"` on the UNTRIMMED value, so METAREVIEW_TEST_CMD=\"\" reports unset and wiring.go:417 returns the Go default, while METAREVIEW_TEST_CMD=\" \" reports set and yields an empty command that internal/mutation/verify.go:87 refuses. The comment at wiring.go:413-415 promises the opposite for the natural spelling: 'An operator who sets it to whitespace has said \"no command\", and the verifier refuses rather than silently falling back to a Go default in a repository that may not be Go.' In a Node repository the operator's `export METAREVIEW_TEST_CMD=` therefore produces `go test ./...`, a nonzero baseline, and a wall of blocking 'Verification could not run' findings (verify.go FindingsForPins default branch) instead of the intended single configuration error. Uncertainty stated: os.Getenv cannot distinguish unset from set-to-empty at all, so the comment describes a distinction the Getenv seam cannot express; the fix is probably to drop the claim and treat empty as unset, or to switch the seam to os.LookupEnv.",
+      "evidence": [
+        {"path": "internal/fsm/cli/wiring.go", "line": 422, "note": "set is computed from the untrimmed value"},
+        {"path": "internal/fsm/cli/wiring.go", "line": 413, "note": "the comment the behaviour contradicts"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The hook is registered for Claude Code only, while its own comment claims three hosts, and it is excluded from the packaged release. hooks/pre-finish.sh:14-15 states 'Works under Claude Code, Codex and Gemini: each sets a different plugin-root variable' - but hooks/hooks.json:9 expands only ${CLAUDE_PLUGIN_ROOT}, .codex-plugin/plugin.json declares no hooks key, and there is no Gemini hook registration in the tree (grep for PLUGIN_ROOT finds only hooks/hooks.json). Separately, package.json `files` does not list hooks/: `npm pack --dry-run --json` yields 255 files and 0 under hooks/, so the npm-published artifact - the install path INSTALL.md:15 documents as `npm install -g metareview` - contains neither the shim nor its registration. Impact is limited because .claude-plugin/marketplace.json sources the plugin from './' (a git clone, which does carry hooks/), so the documented `claude plugin install` path works; the concrete loss is that Codex and Gemini users get no enforcement while the script tells them they do. Uncertainty stated: I could not confirm whether any distribution path uses the npm tarball as a plugin root. Also note tests/manifest/test-manifests.sh checks only that the hook is executable, mentions 'block', and blocks on a missing binary - it asserts nothing about the Codex/Gemini claim or about packaging.",
+      "evidence": [
+        {"path": "hooks/hooks.json", "line": 9, "note": "only CLAUDE_PLUGIN_ROOT is expanded"},
+        {"path": "hooks/pre-finish.sh", "line": 14, "note": "the three-host claim nothing in the tree implements"}
+      ]
+    }
+  ]
+}

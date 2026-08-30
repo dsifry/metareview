@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-7.b61fee4b7c3d5d6e",
+  "kind": "shard",
+  "shardId": "shard-7",
+  "shardHash": "b61fee4b7c3d5d6e",
+  "planHash": "22cbb3df197e8b3e",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "shard-7-reviewer",
+  "reviewedAt": "2026-08-30T15:05:00Z",
+  "evidence": [
+    {
+      "path": "internal/findings/override.go",
+      "line": 114,
+      "note": "Read the whole file plus internal/findings/bind.go, findings.go (Reconcile) and override_test.go/bind_test.go. The six added lines in GrantOverride were mutation-tested in an isolated copy of HEAD (git archive HEAD into a scratch tree): two of the three added statements are unverified by the suite."
+    },
+    {
+      "path": "internal/fsm/cli/escalation_test.go",
+      "line": 533,
+      "note": "Ran the five new tests: go test ./internal/fsm/cli -run 'TestVerifyPins|TestTestCommandComesFromTheOperator|TestOutcomeForIsTotal' -v — all pass (2.4s). Then mutation-tested the code they claim to pin, in a scratch copy of HEAD, with the full go test ./... as the oracle."
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 384,
+      "note": "Mutating the mock branch's Outcome from run.PinUnverifiable to run.PinSurvived leaves the ENTIRE repository green (go test ./... in the scratch copy, no failures). The new mock-run test asserts Proven and Detail but never Outcome."
+    },
+    {
+      "path": "docs/0.11.0-candidates.md",
+      "line": 4,
+      "note": "Cross-checked every status claim in the roadmap doc against the branch's own file list (git diff --name-status 266e73c..HEAD): internal/mutation/verify.go, internal/reviewers/mutation.go, the mutation-verify node in internal/fsm/kind/kind.go and workflows/sdlc-loop-proved.yaml are all ADDED in this same range."
+    },
+    {
+      "path": "CHANGELOG.md",
+      "line": 96,
+      "note": "The only CHANGELOG change on a branch named prep-0.11.0 is a two-line pointer fix inside the released 0.10.0 section; there is no 0.11.0 or Unreleased section for the ~2,500 lines of new behaviour this branch adds."
+    },
+    {
+      "path": "internal/findings/bind.go",
+      "line": 103,
+      "note": "Two probe tests written against a scratch copy of HEAD reproduce both override findings below; both were removed after the run and neither was left in the repository under review."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "A head-bound grant is bound to the head at which the finding was last OBSERVED, not the head at grant time, so a grant made after any intervening commit is voided by the very next run. GrantOverride passes record.GitHead into bindingFor (override.go:114); Reconcile only refreshes record.GitHead when the record is open AND its fingerprint is rediscovered AND sameRunTarget (findings.go:127-133), so after 'gate red at A -> agent commits fixes for the other findings -> head is B -> human grants an override on the remaining path-less finding (e.g. pr:missing-validation-evidence)', the record still carries GitHead=A and the grant stores OverrideBoundHash=A. lapseStaleOverrides then evaluates it at run.GitHead=B (bind.go:103-108), the hashes differ, and the finding returns to open on the first run the grant was meant to unblock. Reproduced against HEAD: seed an open head-bound record with GitHead=head-A, GrantOverride, Reconcile at head-B -> status=\"open\", overrideLapsedAt set, zero repository changes in between. In an unattended sdlc-loop this burns an attempt on a blocker a human explicitly cleared, and the record shows granted-then-lapsed with no actionable reason. Nothing tests which head is used: replacing record.GitHead with \"\" at override.go:114 leaves go test ./internal/findings/... green, because every fixture record (override_test.go:22-37 openBlocker) has GitHead == \"\" and TestAFindingThatNamesNoFileBindsToTheHead (bind_test.go:92-104) reconciles at rec.GitHead, so the assertion holds trivially. GrantOverride should take the current head from the caller (cmd/metareview/main.go:609 has a repo root and could resolve it) rather than trusting a possibly stale record field.",
+      "evidence": [
+        {
+          "path": "internal/findings/override.go",
+          "line": 114
+        },
+        {
+          "path": "internal/findings/bind.go",
+          "line": 103
+        },
+        {
+          "path": "internal/findings/override_test.go",
+          "line": 22
+        },
+        {
+          "path": "internal/findings/bind_test.go",
+          "line": 101
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "Every override granted by a pre-binding metareview is silently revoked by the first run after the upgrade. The new fields are written only on a NEW grant (override.go:114-116), so a record already at status=overridden carries OverrideBoundKind=\"\" and OverrideBoundHash=\"\"; lapseStaleOverrides computes a fresh binding and lapses on any mismatch (bind.go:107-113), and \"\" never matches either \"paths\" or \"head\". Reproduced against HEAD: seed a record with status=overridden, grantedBy/grantedAt set and no binding fields, then Reconcile at the SAME head with the named file byte-identical -> status=\"open\", overrideLapsedAt stamped. Concretely: a repository that carries three accepted exceptions in .metareview/findings.jsonl upgrades metareview, changes nothing, re-runs the gate, and gets three blockers back with no explanation anywhere in the review log — and CI (override list --pending stays empty because they are open, not pending) simply goes red. This may be the deliberate fail-toward-blocking choice, but it is a behaviour change to existing user state with no migration path, no CHANGELOG entry, and no rendering that would tell the operator a lapse is why (see the low finding on overrideLapsedAt). At minimum the upgrade case should be distinguished: bind a legacy overridden record on first sight rather than lapsing it, or say so in the release notes.",
+      "evidence": [
+        {
+          "path": "internal/findings/override.go",
+          "line": 114
+        },
+        {
+          "path": "internal/findings/bind.go",
+          "line": 107
+        },
+        {
+          "path": "CHANGELOG.md",
+          "line": 96
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "TestVerifyPinsRefusesEverythingOnAMockRun does not pin the field that carries the behaviour it is named for. It asserts !Proven and that Detail contains \"mock run\" (escalation_test.go:588-594) but never asserts Outcome. Mutating the mock branch at wiring.go:384 from run.PinUnverifiable to run.PinSurvived leaves the entire repository green — verified with go test ./... over a scratch copy of HEAD, zero failures. The mutation is not cosmetic: mutationVerifyExec branches on Outcome (kind/kind.go:1029-1039), so with PinSurvived every pin in a mock run becomes run.CategoryUnprovenFix with the text 'breaking \"X\" did not make the tests fail', i.e. exactly the 'blame a fix for a fixture' outcome the comment at wiring.go:379-386 says must not happen, instead of CategoryUnverifiable. A mock/dry run would then hand the fix agent a fabricated 'your test does not hold this line' finding for code no one executed. One extra assertion (got[0].Outcome != run.PinUnverifiable) closes it; the same test should also assert the outcome on the empty-pins path it already exercises.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/escalation_test.go",
+          "line": 588
+        },
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 384
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 1033
+        }
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The roadmap doc added by this branch asserts, about this branch's own contents, things the same commit range makes false — the precise defect ('a claim that outlived its truth') the file's header congratulates the project for removing. Line 4: 'Nothing here was built ... mutation testing exists only as 31 verifications a human ran by hand in scratch worktrees, and delegated-fix verification is \"measured, and NOT yet enforced anywhere\"'. Line 11: 'Order of work. The fix phase and mutation-verify come first'. Line 18: 'Status: TODO — deliberately out of 0.9.0' for mutation testing in the review harness. Line 536: 'Currently prose only. Nothing in the repo enforces it', followed at line 588 by 'A metareview verify-fix that re-runs a recorded mutation ... would make the protocol real instead of a paragraph', and line 611 proposes 'mutation-verify (new kind)' as future work. git diff --name-status 266e73c..HEAD shows this same range ADDS internal/mutation/verify.go (the Verifier that copies the tree, applies from->to, requires the test to fail and refuses a red baseline), internal/mutation/report.go + internal/reviewers/mutation.go (mutation findings in all four gates), the mutation-verify node at internal/fsm/kind/kind.go:1005-1050, its CLI wiring at internal/fsm/cli/wiring.go:377, and workflows/sdlc-loop-proved.yaml. Concrete failure: the next session opens the file the branch names as its plan of record, reads 'the fix phase and mutation-verify come first' plus 'nothing in the repo enforces it', and either rebuilds a node that already shipped or skips sdlc-loop-proved.yaml because the roadmap says the protocol is prose. Either update the statuses to what actually landed, or hold the doc out of this branch.",
+      "evidence": [
+        {
+          "path": "docs/0.11.0-candidates.md",
+          "line": 4
+        },
+        {
+          "path": "docs/0.11.0-candidates.md",
+          "line": 536
+        },
+        {
+          "path": "docs/0.11.0-candidates.md",
+          "line": 611
+        },
+        {
+          "path": "internal/fsm/kind/kind.go",
+          "line": 1005
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "record.OverrideLapsedAt = \"\" (override.go:116) is both unverified and unread. Deleting the line leaves go test ./internal/findings/... green (mutation run against a scratch copy of HEAD), and no consumer reads the field anywhere in internal/ or cmd/ — overrideLines (override.go:183-197) renders [pending]/[granted] and never mentions a lapse. Two consequences, both audit-only: a re-granted override that keeps a stale overrideLapsedAt would say 'granted 2026-08-30, lapsed 2026-08-29' in the JSONL and nothing would notice; and while an override IS lapsed the record's status is 'open', so ListOverrides (override.go:131-141) excludes it and it disappears from `override list` and from the 'Process Overrides' section of FINDINGS.md entirely. CLAUDE.md's new text promises 'an exception that keeps being needed leaves a visible trail instead of one forgotten record', and the only trail is a field nothing prints. Rendering lapsed grants (or including them in ListOverrides) would make the claim true and give the reset line an observable effect to test.",
+      "evidence": [
+        {
+          "path": "internal/findings/override.go",
+          "line": 116
+        },
+        {
+          "path": "internal/findings/override.go",
+          "line": 183
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestOutcomeForIsTotal claims a guarantee it does not provide. Its comment (escalation_test.go:631) states 'If a fifth outcome is ever added to the verifier this test fails, which is the point'. It does not: the map literal is fixed, Go has no exhaustiveness check on a switch over a string type, and outcomeFor's default already returns PinUnverifiable. Verified by adding a fifth constant (PinTimedOut Outcome = \"timed-out\") to internal/mutation/verify.go in a scratch copy of HEAD — go test ./internal/fsm/cli/ ./internal/mutation/ stayed green. The runtime behaviour is safe (an unmapped outcome degrades to unverifiable, which still blocks), so the harm is limited to the false assurance: a future author adding an outcome gets no signal that the FSM-side translation was never made, and the mapping the comment calls 'a decision, not a default' silently becomes a default. Either drop the claim or make it real (e.g. an exported slice of all outcomes in internal/mutation that the test ranges over).",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/escalation_test.go",
+          "line": 631
+        },
+        {
+          "path": "internal/fsm/cli/wiring.go",
+          "line": 431
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "On a branch named prep-0.11.0, the only CHANGELOG edit is a two-line pointer fix inside the already-released 0.10.0 'Known limits' section (CHANGELOG.md:96-98). There is no Unreleased or 0.11.0 section for what this range adds: mutation report ingestion wired into all four review scopes, the mutation-verify FSM node and sdlc-loop-proved.yaml, override binding/lapsing, hooks/pre-finish.sh, and the CLI surface for them. Concrete effect at release: an operator upgrading gets new blocking finding classes and the override revocation described in the medium finding above with nothing in the release notes to explain either. This is low on its own — release notes are often written at tag time — but it is what leaves finding 2's behaviour change unannounced.",
+      "evidence": [
+        {
+          "path": "CHANGELOG.md",
+          "line": 96
+        }
+      ]
+    }
+  ],
+  "blockingCount": 4
+}

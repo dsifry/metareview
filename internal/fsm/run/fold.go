@@ -551,6 +551,24 @@ func withinCaps(p any) bool {
 		if len(d.Findings) > MaxDeltaList || len(d.Confirmed) > MaxDeltaList || len(d.Status) > MaxDeltaList || !shortOK(d.Commit, d.OutputHash) {
 			return false
 		}
+		// Pins were added to the Delta without a clause here, so MaxPins was enforced by the
+		// agent-edit validator alone and not by the cap check every recorded event passes
+		// through. Each pin carries two source fragments, so an uncapped list is also the
+		// cheapest way to make a snapshot too large to serialise.
+
+		if len(d.Pins) > MaxPins || len(d.PinResults) > MaxPins {
+			return false
+		}
+		for _, p := range d.Pins {
+			if !pinOK(p) {
+				return false
+			}
+		}
+		for _, r := range d.PinResults {
+			if !pinOK(r.Pin) || canonLenStr(r.Detail) > MaxDetail || !shortOK(string(r.Outcome)) {
+				return false
+			}
+		}
 		for _, f := range d.Findings {
 			if !textOK(f.IssueText) || !shortOK(f.File, f.Severity, f.Category, f.Source) {
 				return false
@@ -641,4 +659,10 @@ func foldUnproven(current []Pin, results []PinResult) []Pin {
 		}
 	}
 	return out
+}
+
+// pinOK bounds one pin's text. The fragments are source, so they use the same allowance as a
+// finding's prose rather than the short-field one.
+func pinOK(p Pin) bool {
+	return shortOK(p.File, p.Test) && canonLenStr(p.From) <= MaxDesc && canonLenStr(p.To) <= MaxDesc
 }

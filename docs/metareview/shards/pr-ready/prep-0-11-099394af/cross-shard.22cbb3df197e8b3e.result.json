@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-22cbb3df197e8b3e",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "22cbb3df197e8b3e",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "cross-shard-reviewer",
+  "reviewedAt": "2026-08-30T00:00:00Z",
+  "evidence": [
+    {
+      "note": "Reviewed the integration seams only. The pins-dropped-in-agentEdit.Reduce defect (kind.go:879) was already raised as critical by shard-2, shard-5 and shard-6 independently, and the node_outputs half of the pin-redaction leak by shard-3; those are not repeated here. What follows is what no single shard could see."
+    },
+    {
+      "path": "internal/fsm/export/export.go",
+      "line": 372
+    },
+    {
+      "path": "internal/fsm/run/event.go",
+      "line": 89
+    },
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 994
+    },
+    {
+      "path": "internal/fsm/run/fold.go",
+      "line": 550
+    },
+    {
+      "path": "internal/mutation/report.go",
+      "line": 172
+    },
+    {
+      "path": "internal/mutation/parse.go",
+      "line": 45
+    },
+    {
+      "note": "Every claim below was reproduced with a throwaway probe test in the package under review, then the probe was deleted. redactor.event returned (nil, nil) for a delta_applied event carrying pin source fragments; mutationVerifyKind.Decode accepted a pin naming ../../../etc/hosts."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "A SECOND, DISTINCT leak channel for pin source fragments, which shard-3's node_outputs finding does not cover and which no shard could see on its own: the audit log emits delta_applied events completely unredacted. internal/fsm/export/export.go:372-434 is redactor.event's switch, and it has no `case run.TypeDeltaApplied`; when no field is marked, export.go:134-137 writes `lines[i]` — the ORIGINAL raw line — into audit.redacted.jsonl. internal/fsm/run/event.go:89-93 makes DeltaAppliedData EMBED run.Delta, and this diff added two fields to that struct which carry repository source: internal/fsm/run/types.go:186 (`Pins []Pin json:\"pins,omitempty\"`) and types.go:191 (`PinResults []PinResult json:\"pin_results,omitempty\"`, whose Pin holds from/to). Worse than the snapshot case, PinResult.Detail is generated at internal/mutation/verify.go:149-153 as `\"the mutation survived: %s -> %s in %s ...\"` and, on the proven branch, embeds tail(out) — up to 400 bytes of raw test-suite output, which routinely contains file paths, assertion diffs and literal expected values from the repository. Verified: I constructed a run.Event{Type: run.TypeDeltaApplied} whose data carried Pin{From: \"if key == expected { return true }\"} and called redactor.event; it returned an empty field list, meaning Export emits the untouched line. Concrete failure: an operator runs `metareview fsm export` on an sdlc-loop-proved run to hand a third party as evidence; snapshot.json faithfully shows `\"pins\":[{\"from\":\"sha256:...\"}]` exactly as TestExportHashesPinSourceFragments asserts, while audit.redacted.jsonl in the same bundle — the file whose name promises redaction — carries the same production source in the clear inside every delta_applied line. The bundle is documented at export.go:1-2 as 'a redacted, read-only bundle'. Note the interaction with the pins-dropped defect: today only pin_results leaks this way (Delta.Pins is never populated because agentEdit.Reduce discards it), so fixing that critical defect WIDENS this leak rather than narrowing it. Fix: add a `case run.TypeDeltaApplied` to redactor.event that hashes from/to on data[\"pins\"] and data[\"pin_results\"][].pin and blanks pin_results[].detail, reusing the same helper snapshot() uses; and extend redaction_test.go's structural guard to run.Delta's fields, not only run.Snapshot's, since Delta is what actually reaches the wire.",
+      "evidence": [
+        {"path": "internal/fsm/export/export.go", "line": 372},
+        {"path": "internal/fsm/export/export.go", "line": 136},
+        {"path": "internal/fsm/export/export.go", "line": 431},
+        {"path": "internal/fsm/run/event.go", "line": 89},
+        {"path": "internal/fsm/run/types.go", "line": 186},
+        {"path": "internal/fsm/run/types.go", "line": 191},
+        {"path": "internal/mutation/verify.go", "line": 149},
+        {"path": "internal/fsm/export/redaction_test.go", "line": 131}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "checkPins is the containment and cap guard for pin data, and it sits on exactly ONE of the three routes into Snapshot.Pins. internal/fsm/kind/kind.go:214-236 defines checkPins (MaxPins cap, empty/equal from/to, and pinPathEscapes containment), and kind.go:873 calls it from agentEdit.Decode. But internal/fsm/kind/kind.go:994-1003, mutationVerifyKind.Decode, strictDecodes the raw output into a whole run.Delta and validates only checkFindings — and run.Delta has a `pins` field (types.go:186), so pins arrive through the prove node completely unvalidated. Verified empirically: mutationVerifyKind.Decode accepted `{\"pins\":[{\"file\":\"../../../etc/hosts\",\"from\":\"a\",\"to\":\"b\",\"test\":\"T\"}]}` without error. mutationVerifyKind.Reduce returns that Delta whole, and internal/fsm/run/fold.go:148-153 assigns `next.Pins = p.Pins` with no validation of its own. The fold's structural cap check is no backstop either: fold.go:550-568, the `case *DeltaAppliedData` arm of withinCaps, bounds Findings, Confirmed and Status but has no clause for Pins or PinResults at all, so run.MaxPins (types.go:45-47) — declared there precisely because 'an unbounded list is a denial of service against the gate' — is unenforced on this route. The consequence lands in a different shard again: internal/mutation/verify.go:111 does `filepath.Join(work, filepath.FromSlash(p.File))` and verify.go:131 does os.WriteFile on that path, with NO containment re-check, because containment was assumed to have happened in kind. Concrete failure: on a looping workflow, a host records prove-node output containing a traversing pin (`metareview fsm record --node prove --data '{\"pins\":[{\"file\":\"../../../<some tracked file>\",\"from\":\"<text present once>\",\"to\":\"x\"}]}'`); fold stores it in Snapshot.Pins, nothing replaces it (agentEdit.Reduce never writes Pins), and the next iteration's mutation-verify calls internal/fsm/cli/wiring.go's verifyPins, which passes it straight to the Verifier — which then reads and REWRITES a file outside its temp working copy. Fix: call checkPins from mutationVerifyKind.Decode as well, add a Pins/PinResults clause to withinCaps' DeltaAppliedData arm, and re-assert containment inside Verifier.verifyOne (a package whose doc says 'It never modifies Dir' must enforce that itself rather than inherit it).",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 994},
+        {"path": "internal/fsm/kind/kind.go", "line": 873},
+        {"path": "internal/fsm/kind/kind.go", "line": 214},
+        {"path": "internal/fsm/run/fold.go", "line": 148},
+        {"path": "internal/fsm/run/fold.go", "line": 550},
+        {"path": "internal/fsm/run/types.go", "line": 47},
+        {"path": "internal/mutation/verify.go", "line": 111},
+        {"path": "internal/mutation/verify.go", "line": 131},
+        {"path": "internal/fsm/cli/wiring.go", "line": 388}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The one mutation finding that BLOCKS is fingerprinted on the report file's path, so its identity churns and a repair chain records a fix that never happened. internal/mutation/report.go:172 builds the unresolved finding's fingerprint as `\"mutation:unresolved:\" + r.engine() + \":\" + r.Target`, and Target is not a package or a target id — internal/mutation/parse.go:40-46 sets it from Load's `path` argument (`return Parse(data, path)`), i.e. the literal --mutation-report path the operator typed at cmd/metareview/main.go:223-224. The survived and uncovered fingerprints (report.go:129, report.go:154) are correctly keyed on the mutated source file; only this one is keyed on where the engine's JSON happened to be written. The consequence is in a third shard: internal/findings/findings.go:145-152 marks a record `fixed` (with FixedInRunID set) when the run is part of a --previous-run chain, the target matches, and the record's fingerprint is not in currentFingerprints. Concrete failure: CI writes gremlins output to \"$(mktemp -d)/report.json\" and the gate returns NEEDS_REVISION with 'Mutation run did not decide every mutant'. The operator does exactly what CLAUDE.md prescribes and re-runs with --previous-run; the new run writes its report to a different temp path, so the fingerprint differs, the old record is silently marked FIXED, and an identical new blocker opens. Nothing was fixed, the timeouts are still there, attempt counting never escalates because every attempt looks like a first, and post-merge learning is fed a false resolution — which is the precise analysis the override machinery was built to keep honest. It also means a granted override on this finding can never survive a re-run, independently of the lapse mechanism in internal/findings/bind.go:97-118. Fix: fingerprint the unresolved finding on something stable — the engine plus the go_module/package the report describes, or the first unresolved mutant's file — never the report file's path.",
+      "evidence": [
+        {"path": "internal/mutation/report.go", "line": 172},
+        {"path": "internal/mutation/report.go", "line": 129},
+        {"path": "internal/mutation/report.go", "line": 154},
+        {"path": "internal/mutation/parse.go", "line": 45},
+        {"path": "cmd/metareview/main.go", "line": 224},
+        {"path": "internal/findings/findings.go", "line": 145}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The 0.10.0 -> 0.11.0 candidates rename left one live dangling reference. This diff deletes docs/0.10.0-candidates.md and adds docs/0.11.0-candidates.md, and the pointer updates were done for internal/fsm/judge/diffselect.go:434 and CHANGELOG.md:97-98 — but docs/metareview/evidence-escalation-optin.md:14 still says the real fix 'is recorded in docs/0.10.0-candidates.md', a file that no longer exists on this branch. That file is untouched by the diff, so it is in no shard pack and no shard reviewer could have seen the break; it is only visible against the deletion carried in shard-6. Repoint it at docs/0.11.0-candidates.md.",
+      "evidence": [
+        {"path": "docs/metareview/evidence-escalation-optin.md", "line": 14},
+        {"path": "internal/fsm/judge/diffselect.go", "line": 434},
+        {"path": "CHANGELOG.md", "line": 97}
+      ]
+    }
+  ],
+  "blockingCount": 3
+}

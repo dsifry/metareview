@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3-fdfb9cd6597a7f50",
+  "kind": "shard",
+  "shardId": "shard-3",
+  "shardHash": "fdfb9cd6597a7f50",
+  "planHash": "22cbb3df197e8b3e",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "shard-3-reviewer",
+  "reviewedAt": "2026-08-30T15:05:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/kind/kind.go",
+      "line": 464,
+      "note": "Reproduced in a scratch test inside package kind: reviewLenses.Instructions for a node with require_verdicts:true emits the flat prompt/schema, and DecodeFor on the schema-conformant reply returns ERR_NODE_OUTPUT_INVALID: json: unknown field \"findings\"."
+    },
+    {
+      "path": "internal/fsm/export/export.go",
+      "line": 489,
+      "note": "Reproduced in a scratch test inside package export: snapshot() hashes snap.Pins from/to but node_outputs[\"fix@2\"].pins[].from/to came out verbatim (\"if key == expected { return true }\")."
+    },
+    {
+      "path": "internal/mutation/gremlins.go",
+      "line": 39,
+      "note": "Reproduced in a scratch test inside package mutation: Parse of {\"go_module\":\"m\",\"files\":[]} returns no error, 0 mutants, Score.Complete()==true and 0 findings."
+    },
+    {
+      "path": "internal/fsm/machine/machine.go",
+      "line": 1088,
+      "note": "decodeFor seam added here is used in runNode and Record but not in machine/fork.go:251, which still calls k.Decode."
+    },
+    {
+      "path": "tests/go/test-cli-baseline.sh",
+      "line": 45,
+      "note": "Ran the whole script: exits 0, so the new --target scoping assertions hold and set -euo pipefail does not trip on the negative grep."
+    },
+    {
+      "path": "internal/reviewers/taskdone.go",
+      "line": 99,
+      "note": "Verified the mutation wiring is complete end to end: RunTaskDone, RunPRReady and RunEpicReady all consume Mutation.Findings(), the three Options carry MutationReportPaths, and main.go parses --mutation-report for all three scopes; branchDiffFindings deliberately does not set Mutation, so pr-ready does not double-report."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "The newly shipped sdlc-loop-proved workflow's first node cannot ever succeed. workflows/sdlc-loop-proved.yaml:32 sets require_verdicts: true on the discover node, and internal/fsm/kind/kind.go:402-425 (DecodeFor) then strict-decodes the output into lensesOut, refusing any document containing a `findings` key. But reviewLenses.Instructions (internal/fsm/kind/kind.go:437-464) never looks at the node's params: it always writes 'Return ONLY {\"findings\":[{\"file\",\"line\",\"issue_text\",\"severity\"}...]}' and always sets OutputSchema to the flat findings shape (kind.go:464), which is what internal/fsm/cli/run.go:486 hands the agent as output_schema. Concrete failure: run `metareview fsm` on sdlc-loop-proved; the host agent is instructed to return {\"findings\":[...]}; it complies; `record` calls decodeFor (machine.go:1088, added by this diff) which routes to DecodeFor and fails with ERR_NODE_OUTPUT_INVALID: json: unknown field \"findings\". Every retry produces the same rejection, so the run cannot leave discover. I reproduced this exactly with a scratch test in package kind. This is precisely the trap the sibling test in this shard names for agent-edit ('A schema that demands what the instructions never mentioned is a trap: the agent fails for not supplying something nobody told it about', kind_test.go around TestAgentEditRequiresPinsWhenAsked) - the agent-edit path asserts the strict prompt and strict schema both change, the review-lenses path asserts neither, and the strict lens tests in this shard only exercise DecodeFor directly, never the prompt the agent is actually given.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind.go", "line": 402},
+        {"path": "internal/fsm/kind/kind.go", "line": 464},
+        {"path": "workflows/sdlc-loop-proved.yaml", "line": 32},
+        {"path": "internal/fsm/machine/machine.go", "line": 1088}
+      ]
+    },
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "The pin redaction this diff adds is defeated on the same export. internal/fsm/export/export.go:489-503 hashes from/to on the snapshot's `pins` and `unproven` because they are 'repository content by any definition', but the identical fragments are also stored in Snapshot.NodeOutputs under the agent-edit node's key (machine.Record canonicalises and stores the whole {commit, summary, pins:[{file,from,to,test}]} output), and node_outputs is only emptied for kinds the exporter does NOT know (export.go:514) - `agent-edit` is in knownKinds (export.go:369). The same hole exists for the event stream: export.go:427-430 keeps a node-output event's `output` whole for known kinds. Concrete failure: a run using agent-edit with pins is exported to hand to a third party; the export's `pins` array shows sha256 digests while node_outputs[\"fix@2\"].pins[0].from carries the literal production source the fix touched. I reproduced this with a scratch test in package export: the emitted snapshot contained \"from\":\"if key == expected { return true }\" in node_outputs while the top-level pins entry was hashed. The new TestExportHashesPinSourceFragments (redaction_test.go:131) asserts only on m[\"pins\"] and m[\"unproven\"], so it passes with the leak present, and the field-classification test only enumerates Snapshot fields, not node-output contents.",
+      "evidence": [
+        {"path": "internal/fsm/export/export.go", "line": 489},
+        {"path": "internal/fsm/export/export.go", "line": 514},
+        {"path": "internal/fsm/export/export.go", "line": 369},
+        {"path": "internal/fsm/export/export.go", "line": 427},
+        {"path": "internal/fsm/export/redaction_test.go", "line": 131}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The node-aware decode seam added at internal/fsm/machine/machine.go:1081-1093 is applied in runNode and Record but not in the fork path: internal/fsm/machine/fork.go:251 still calls k.Decode(nd.Output) even though it already holds the node `n` on the previous line. Concrete failure: once the prompt bug above is fixed and a discover node under require_verdicts:true records a valid {\"lenses\":[...]} output, a gate failure sends the operator to `resume_hint`, which per CLAUDE.md forks a child run. The fork's pre-write revalidation decodes that stored output with the permissive reviewLenses.Decode, which strict-decodes into findingsOut and errors on unknown field \"lenses\", so the fork aborts with ERR_COPY_INVALID 'copied node output no longer decodes'. The documented GATE_FAILED recovery path is therefore unusable for any workflow that sets require_verdicts, and nothing in this diff covers the fork path for a node-aware kind.",
+      "evidence": [
+        {"path": "internal/fsm/machine/fork.go", "line": 251},
+        {"path": "internal/fsm/machine/machine.go", "line": 1088},
+        {"path": "internal/fsm/kind/kind.go", "line": 402}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "A mutation report that measured nothing is accepted as a complete clean run, which is the exact hazard the surrounding code says it exists to prevent. internal/mutation/parse.go:34-36 refuses an unrecognised document because 'a report this code cannot read must not become an empty report, which would score as a clean run', and cmd/metareview/main.go:672-676 says a truncated report must not 'surface as a review that found nothing, which reads exactly like a clean one'. But ParseGremlins (internal/mutation/gremlins.go:31-52) applies no such check: it appends whatever mutations it finds and returns success with zero mutants. Verified by running Parse in-package: {\"go_module\":\"m\",\"files\":[]} and {\"files\":[{\"file_name\":\"a.go\",\"mutations\":[]}]} both return nil error, 0 mutants, Score.Complete()==true and 0 findings. Concrete failure: gremlins is killed (OOM, CI timeout, wrong target pattern) after writing its header, or a future gremlins release renames the per-file key; the operator passes --mutation-report to `metareview review pr-ready`; mustMutationReport accepts it, MutationContext.Findings() yields nothing, and the gate passes with a mutation report attached and no mutation finding at all - indistinguishable from a run where every mutant was killed. Related and lower-cost: gremlins.go declares GoModule but never reads or validates it, and a file entry with no recognised name field still yields mutants with File==\"\", producing findings whose Evidence.Path is empty and whose fingerprint is 'mutation:survived:T::9'.",
+      "evidence": [
+        {"path": "internal/mutation/gremlins.go", "line": 39},
+        {"path": "internal/mutation/parse.go", "line": 34},
+        {"path": "cmd/metareview/main.go", "line": 677},
+        {"path": "internal/mutation/report.go", "line": 68}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestDiscoverIsPointedAtLinesNoTestProtects (internal/fsm/kind/kind_test.go:1566) computes knownAt := strings.Index(got.Text, \"do not re-report verbatim\") and then asserts `gapAt < knownAt` must be false. If the do-not-re-report phrasing is ever reworded or removed, strings.Index returns -1, gapAt is >= 0, and the assertion passes unconditionally - so the test's central claim (that the unproven-pin section is NOT part of the do-not-report list, which the comment calls 'the framing is the substance') stops being checked at exactly the moment a change could break it. The assertion currently holds against the real prompt, so this is a durability defect in a new test rather than a live product bug; guard with `if knownAt < 0 { t.Fatal(...) }`.",
+      "evidence": [
+        {"path": "internal/fsm/kind/kind_test.go", "line": 1566}
+      ]
+    }
+  ],
+  "blockingCount": 4
+}

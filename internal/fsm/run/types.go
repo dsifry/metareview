@@ -176,7 +176,12 @@ type AllowedCmd struct {
 
 // Delta is what a node's Reduce produced; Fold applies it (§4.3). It carries no tokens.
 type Delta struct {
-	Findings  []Finding   `json:"findings,omitempty"`
+	// Findings has no omitempty: an EMPTY list must survive serialisation, because the fold
+	// replaces Findings only when the field is present, and omitempty made an empty list
+	// indistinguishable from an absent one. A node that had resolved everything therefore could
+	// not say so — the previous round's findings stood, and a gate reading them could never be
+	// cleared by fixing what it complained about.
+	Findings  []Finding   `json:"findings"`
 	Confirmed []Bug       `json:"confirmed,omitempty"`
 	Status    []BugStatus `json:"status,omitempty"`
 	Commit    string      `json:"commit,omitempty"`

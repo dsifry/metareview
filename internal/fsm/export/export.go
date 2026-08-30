@@ -427,11 +427,38 @@ func (r *redactor) event(ev run.Event) ([]byte, []string) {
 		if !knownKinds[r.kindOf(ev.Node)] {
 			data["output"] = map[string]any{}
 			mark("output")
+			break
+		}
+		// A known kind keeps its output whole — but agent-edit's output CARRIES pins, whose
+		// from/to are literal source. Hashing the snapshot's copy while leaving this one in the
+		// clear made that redaction cosmetic: the same fragments left on the same export, one
+		// field over.
+		if out, ok := data["output"].(map[string]any); ok && hashPinFragments(out) {
+			mark("output.pins")
 		}
 	case run.TypeTree:
 		status, _ := data["status"].(string)
 		data["status"] = statusPaths(status)
 		mark("status")
+	case run.TypeDeltaApplied:
+		// There was no case here at all, so the raw line went straight into the audit log. That
+		// was harmless while a Delta held only findings and ids; it stopped being harmless when
+		// the Delta gained pins and pin_results, and FIXING the dropped-pins defect is what
+		// makes this line actually carry source.
+		if hashPinFragments(data) {
+			mark("pins")
+		}
+		if results, ok := data["pin_results"].([]any); ok {
+			for _, r := range results {
+				result, _ := r.(map[string]any)
+				hashPinFragments(result)
+				// Detail quotes the mutation and up to 400 bytes of test output verbatim.
+				if _, present := result["detail"]; present {
+					result["detail"] = ""
+				}
+			}
+			mark("pin_results")
+		}
 	}
 	if len(fields) == 0 {
 		return nil, nil
@@ -529,3 +556,33 @@ func (OSFS) OpenFile(path string, flag int, perm os.FileMode) (io.WriteCloser, e
 }
 func (OSFS) Lstat(path string) (os.FileInfo, error)    { return os.Lstat(path) }
 func (OSFS) ReadDir(dir string) ([]os.DirEntry, error) { return os.ReadDir(dir) }
+
+// hashPinFragments replaces the literal source in every pin reachable from m, in place. It reads
+// both a "pins" list and a single embedded "pin", so one function covers the snapshot field, the
+// agent-edit node output and a pin result. Reports whether anything was rewritten.
+//
+// The path and the test name stay: they identify what was proven without reproducing the code,
+// which is the same bargain the snapshot redaction already makes.
+func hashPinFragments(m map[string]any) bool {
+	hashOne := func(pin map[string]any) bool {
+		var done bool
+		for _, field := range []string{"from", "to"} {
+			if v, ok := pin[field].(string); ok && v != "" {
+				pin[field] = sha(v)
+				done = true
+			}
+		}
+		return done
+	}
+	var any_ bool
+	if pin, ok := m["pin"].(map[string]any); ok {
+		any_ = hashOne(pin) || any_
+	}
+	if pins, ok := m["pins"].([]any); ok {
+		for _, p := range pins {
+			pin, _ := p.(map[string]any)
+			any_ = hashOne(pin) || any_
+		}
+	}
+	return any_
+}

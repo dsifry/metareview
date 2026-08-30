@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-4.e2ee68ceea91b4f4",
+  "kind": "shard",
+  "shardId": "shard-4",
+  "shardHash": "e2ee68ceea91b4f4",
+  "planHash": "22cbb3df197e8b3e",
+  "verdict": "NEEDS_REVISION",
+  "reviewer": "shard-4-reviewer",
+  "reviewedAt": "2026-08-30T00:00:00Z",
+  "blockingCount": 4,
+  "evidence": [
+    {"path": "internal/mutation/verify.go", "line": 183, "note": "Read verify.go in full on disk. exec() discards err whenever cmd.ProcessState != nil, returning ProcessState.ExitCode() with a nil error."},
+    {"path": "internal/mutation/verify.go", "line": 144, "note": "Step 4 treats every non-zero exit code as 'the mutation was caught' and returns Proven:true; there is no distinction between an exit status and a signal kill."},
+    {"path": "internal/mutation/parse.go", "line": 16, "note": "Parse's structural probe was checked against both parsers: '{' -> stryker, '[' -> gremlins, anything else (including a missing or string-valued `files`) refuses rather than yielding an empty report. Correct."},
+    {"path": "internal/mutation/verify_test.go", "line": 1, "note": "Read the whole test file. It exercises proven / survived / non-compiling / ambiguous-anchor / absent-anchor / missing-file / tree-untouched / build-command-configurable / no-test-command. It never exercises a timeout, a cancelled context, or any PinUnverifiable path."},
+    {"path": "internal/reviewers/mutation.go", "line": 28, "note": "MutationContext.Findings sorts a defensive copy (append([]mutation.Report(nil), ...)) so the caller's slice is not mutated; the `seen` map is declared outside the per-report loop so it also collapses duplicates WITHIN a single report."},
+    {"path": "internal/reviewers/prready.go", "line": 47, "note": "Mutation findings are appended without the finding() wrapper. Verified this is correct, not an omission: finding() (internal/reviewers/taskdone.go:266) unconditionally sets Classification=\"blocking\", which would destroy the deliberate advisory classification of uncovered-site and malformed-pin findings."},
+    {"path": "internal/status/status.go", "line": 65, "note": "BuildFor filters Reviews and MustClear consistently and sets Blocked from the filtered MustClear; the exact-string target match is the only matching rule."},
+    {"path": ".golangci.yml", "line": 7, "note": "Ran golangci-lint over ./internal/shardpack/... ./internal/mutation/... ./internal/status/... ./internal/reviewers/... with the new nolintlint block: 0 issues. The repo's single directive (internal/shardpack/shardpack.go:196, //nolint:errchkjson for a linter outside the standard set) is NOT flagged by allow-unused:false, so the new config does not break the build."},
+    {"note": "Empirically confirmed Go's exec semantics on this machine with a scratch program: exec.CommandContext + CombinedOutput on a command killed by the context deadline returns err='signal: killed', ProcessState != nil, ExitCode() == -1. This is the basis of finding 1."},
+    {"note": "Ran `go test ./...` over a copy of the tree with .git and node_modules stripped (what copyTree produces): everything passes, so the .git exclusion does not make metareview's own suite unverifiable. Suspicion checked and dropped."},
+    {"path": "tests/coverage.sh", "line": 99, "note": "check_pkg's default branch marks a package with no floor line 'no floor' and does NOT increment failures; only ./internal/fsm/... and ./workflows are in the must-be-present REQUIRED set."},
+    {"path": "tests/manifest/test-manifests.sh", "line": 129, "note": "The new hook assertions are sound: METAREVIEW_BIN=no-such-metareview-binary reaches the `command -v` branch of hooks/pre-finish.sh and needs no stdin, and `if !` protects the pipeline from set -e."},
+    {"note": "No TODO/FIXME markers, no eval or other unsafe execution, and no truncated chunks in this shard (all nine files are part 1/1). The untracked internal/fsm/export/zz_shard3_probe_test.go currently in the worktree is another shard reviewer's scratch file, not part of this diff, but it does break `golangci-lint run ./...` and `go build ./...` while it is present."}
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "disposition": "open",
+      "note": "A mutated test run that is KILLED rather than exited is scored as a proven kill. exec() (verify.go:183-186) returns ProcessState.ExitCode() and a nil error whenever the process was waited on, and a signal-killed process yields ExitCode() == -1 with err discarded (confirmed empirically: exec.CommandContext + CombinedOutput on a deadline-killed command returns 'signal: killed', ProcessState non-nil, ExitCode -1). Step 4 (verify.go:144-152) then sees err==nil and code!=0 and returns PinResult{Proven:true, Outcome:PinProven} with Detail claiming '... fails the tests and the restored code passes them'. Two concrete paths: (a) the mutation introduces a non-terminating loop (a classic mutation-testing timeout mutant) or merely pushes the suite past the deadline - the caller at internal/fsm/cli/wiring.go:391 sets no Timeout, so defaultVerifyTimeout of 10 minutes applies - and the fix agent's claim is recorded as PROVEN although no test ever failed; (b) the operator interrupts the run (cmd/metareview/main.go:106 passes context.Background(), so Ctrl-C/parent cancellation is the only bound) while a step-4 run is in flight, and that pin comes back Proven. PinUnverifiable, the outcome invented for exactly 'the tree could not answer', is unreachable for the killed case because err is nil. This defeats the single property the package exists to establish; the fix is to return the error (or a distinct killed signal) when ProcessState.Exited() is false, and treat it as PinUnverifiable.",
+      "evidence": [
+        {"path": "internal/mutation/verify.go", "line": 184, "note": "if cmd.ProcessState != nil { return cmd.ProcessState.ExitCode(), string(out), nil } - err dropped on the signal-killed path"},
+        {"path": "internal/mutation/verify.go", "line": 148, "note": "only code == 0 is PinSurvived; every other non-zero code, including -1 from a kill, falls through to Proven:true"},
+        {"path": "internal/mutation/verify.go", "line": 329, "note": "defaultVerifyTimeout = 10 * time.Minute is the only bound, and it is applied per command"},
+        {"path": "internal/fsm/cli/wiring.go", "line": 391, "note": "mutation.Verifier{Dir: root, TestCmd: c.testCommand()} - Timeout left zero, so the 10-minute default governs"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "internal/mutation is a brand-new package in this PR and is exempt from the repository's coverage gate, and the branches it leaves untested are the ones finding 1 lives on. tests/coverage-floor.txt has no internal/mutation line and is unmodified by this PR (git diff against the base is empty); tests/coverage.sh:99-101 gives such a package status 'no floor' without incrementing failures, and the must-be-present REQUIRED set is only ./internal/fsm/... and ./workflows - so the package can regress to 0% and the gate still says 'coverage gate passed'. Measured today: internal/mutation is at 85.6% of statements, and every single PinUnverifiable branch has zero coverage (verify.go:104 could-not-create-working-copy, :108 could-not-copy-tree, :125 baseline-failed-to-execute, :127 baseline-red, :132 could-not-write-mutation, :138 build-failed-to-execute, :146 mutated-run-failed-to-execute), as does exec's ProcessState==nil fallback (verify.go:187) and the entire `default:` arm of FindingsForPins (verify.go:262-267), which is the arm that turns 'verification could not run' into a high/blocking finding. TestFindingSeverityFollowsTheOutcome asserts Proven, Survived and Malformed and skips Unverifiable. Add internal/mutation to tests/coverage-floor.txt and pin the unverifiable paths (the Run seam already makes them trivial to drive).",
+      "evidence": [
+        {"path": "tests/coverage-floor.txt", "line": 1, "note": "no internal/mutation entry; file unchanged by this PR"},
+        {"path": "tests/coverage.sh", "line": 99, "note": "elif [ -z \"$floor\" ]; then status=\"no floor\" - failures is not incremented"},
+        {"path": "internal/mutation/verify.go", "line": 262, "note": "default: (PinUnverifiable) sets high/blocking and is never executed by any test"},
+        {"path": "internal/mutation/verify_test.go", "line": 858, "note": "TestFindingSeverityFollowsTheOutcome covers Proven/Survived/Malformed only"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "status.BuildFor reports blocked:false for a target that has never been reviewed, so the Stop hook this same PR ships passes for any work that was never gated - which is the exact failure the hook was written to prevent. BuildFor (status.go:65-105) matches s.Target == target by byte-exact string equality, sets MustClear from the survivors and Blocked = len(MustClear) > 0; a target that matches nothing is indistinguishable in the JSON from a target that was reviewed and came back clean. Real Target values in this repository are strings like `current branch` (docs/metareview/reviews/*-pr-ready-*.md:5) and `docs/specs/....md`, so any METAREVIEW_TARGET an operator sets that is not one of those - e.g. the path of the file the agent just edited - makes `metareview status --json --target ...` emit must_clear:[] and exit 0, and hooks/pre-finish.sh exits 0 on that. An agent that never runs a metareview gate at all therefore satisfies the Stop hook trivially. The hook's own doc states 'a check that did not run must not read as a check that passed'; this is that case. The report needs a way to say 'no review matched this target' (a matched/reviewed count, or a distinct exit code) so the hook can block or warn instead of waving through. Note the unscoped default is still fail-closed, which bounds the impact to operators who set METAREVIEW_TARGET.",
+      "evidence": [
+        {"path": "internal/status/status.go", "line": 92, "note": "if target != \"\" && s.Target != target { continue } - exact match, no record that nothing matched"},
+        {"path": "internal/status/status.go", "line": 103, "note": "r.Blocked = len(r.MustClear) > 0, so an unmatched target is reported identically to a clean one"},
+        {"path": "internal/status/status.go", "line": 116, "note": "EmitFor returns exit 0 whenever Blocked is false; hooks/pre-finish.sh branches on that code alone"},
+        {"path": "internal/status/status_test.go", "line": 292, "note": "BuildFor(root, \"internal/gamma/new.go\") - a target with no reviews is deliberately not blocked, so this is a tested design decision rather than an oversight, but the report gives the hook nothing to distinguish the two cases"}
+      ]
+    },
+    {
+      "severity": "medium",
+      "disposition": "open",
+      "note": "The fingerprint dedup drops genuinely distinct surviving mutants. MutationContext.Findings (internal/reviewers/mutation.go:34-40) keys `seen` on f.Fingerprint, and the survivor fingerprint is 'mutation:survived:<Operator>:<File>:<Line>' (internal/mutation/report.go:126) - Mutant.Column is parsed and stored by BOTH engines (internal/mutation/stryker.go:52, internal/mutation/gremlins.go:42) but is not in the fingerprint. Because `seen` is declared outside the per-report loop it also collapses within one report. Concretely, `return a < 10 && b < 20` on one line yields two CONDITIONALS_BOUNDARY mutants at the same file:line with different columns; if both survive, exactly one becomes a finding and the gate under-reports the work. The dangerous interaction is with overrides: per CLAUDE.md an `overridden` record suppresses rediscovery of the same fingerprint, so a human who reviews and grants an override for one survivor at that line silently silences a second, never-reviewed survivor at the same line and operator. Separately, the doc comment's stated purpose - 'running two engines over the same package must not double-report the site they agree on' - is not achieved, because gremlins operator names come from `type` (CONDITIONALS_BOUNDARY-style) and stryker's from `mutatorName` (ConditionalExpression-style), so cross-engine fingerprints for the same site never collide. Include Column in the survivor fingerprint, and either normalise operator vocabularies or drop the cross-engine claim from the comment.",
+      "evidence": [
+        {"path": "internal/reviewers/mutation.go", "line": 34, "note": "seen[f.Fingerprint] declared outside the report loop, so it dedups within a single report too"},
+        {"path": "internal/mutation/report.go", "line": 126, "note": "Fingerprint omits m.Column"},
+        {"path": "internal/mutation/gremlins.go", "line": 42, "note": "Column parsed and stored, Operator = m.Type"},
+        {"path": "internal/mutation/stryker.go", "line": 52, "note": "Column parsed and stored, Operator = m.MutatorName - a different vocabulary from gremlins"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Verify has no aggregate bound and re-does the expensive setup per pin. verifyOne copies the entire tree (verify.go:102-109, whole-file reads into memory, excluding only .git and node_modules) and re-runs the full baseline suite (verify.go:124) for every pin, so N pins cost N tree copies and up to 3N full test-suite runs. Timeout is per command, not per Verify, and the caller sets none (internal/fsm/cli/wiring.go:391) while cmd/metareview/main.go:106 passes context.Background(), so nothing bounds the whole node. The pin count is chosen by the fix agent - the untrusted party this node exists to check - so 20 pins is a legitimately reachable multi-hour hang. This compounds finding 1, because the operator's natural response to the hang (Ctrl-C) is the cancellation path that produces a false Proven. Copying and baselining once per Verify, and giving Verify an overall deadline, would fix both the cost and the blast radius.",
+      "evidence": [
+        {"path": "internal/mutation/verify.go", "line": 102, "note": "os.MkdirTemp + copyTree run inside verifyOne, i.e. once per pin"},
+        {"path": "internal/mutation/verify.go", "line": 124, "note": "the baseline run is inside verifyOne and repeats for every pin against an identical tree"},
+        {"path": "internal/mutation/verify.go", "line": 426, "note": "context.WithTimeout is applied per exec call, so the timeout does not bound the run"},
+        {"path": "cmd/metareview/main.go", "line": 106, "note": "fsmcli.Run(context.Background(), ...) - no deadline reaches the verifier"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "mutationContextFor is copied byte-for-byte into three packages, and so is its test. internal/epicready/review.go:785, internal/taskdone/review.go:761 and internal/prready/review.go:1154 hold the identical ten-line body, and `diff internal/epicready/mutationctx_test.go internal/taskdone/mutationctx_test.go` reports a single differing line (the package clause) across 54 lines - the third copy is the same. Any change to how reports are loaded (a strict mode where absent reports are an error, a warn-and-continue variant of LoadAll, a path-validation step) must be made three times, and the tests will not detect a two-of-three edit because each only exercises its own copy. This repository's own status.go comment records that exact failure ('one predicate updated at three call sites out of four'). The natural home is internal/reviewers, which already owns MutationContext, or internal/mutation next to LoadAll.",
+      "evidence": [
+        {"path": "internal/epicready/review.go", "line": 785, "note": "func mutationContextFor(paths []string) (reviewers.MutationContext, error)"},
+        {"path": "internal/taskdone/review.go", "line": 761, "note": "identical body"},
+        {"path": "internal/prready/review.go", "line": 1154, "note": "identical body"},
+        {"path": "internal/epicready/mutationctx_test.go", "line": 1, "note": "54 lines, identical to internal/taskdone/mutationctx_test.go and internal/prready/mutationctx_test.go apart from the package clause"}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The status package doc is falsified by this same PR. status.go:8-10 tells the reader 'no hook ships in this repository yet, so this is the surface they will sit on rather than a description of something already wired', while this PR adds hooks/pre-finish.sh, registers it as a Stop hook in hooks/hooks.json, and asserts both in tests/manifest/test-manifests.sh:129-138 - the very file in this shard. A maintainer reading the package doc before changing BuildFor's scoping or EmitFor's exit code would not know a shipped hook already branches on them. The diff edits this file, so the sentence should have been updated with it.",
+      "evidence": [
+        {"path": "internal/status/status.go", "line": 9, "note": "\"but no hook ships in this repository yet\""},
+        {"path": "tests/manifest/test-manifests.sh", "line": 133, "note": "test-manifests.sh in this shard now requires hooks/pre-finish.sh to exist, be executable, and block"},
+        {"path": "hooks/hooks.json", "line": 3, "note": "the Stop hook is registered"}
+      ]
+    }
+  ]
+}
