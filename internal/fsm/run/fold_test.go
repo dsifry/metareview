@@ -1188,3 +1188,39 @@ func TestWithinCapsGuardsEverySandboxEvidenceField(t *testing.T) {
 		})
 	}
 }
+
+// Pins are the fix node's checkable evidence, so they must reach the verify node through the
+// real fold, not through logic a test re-implements. The first version of this test rebuilt the
+// replacement inline and never executed fold.go at all — the coverage gate caught it.
+//
+// Replaced rather than accumulated: each fix round makes its own claims, and a pin from an
+// earlier iteration describes a tree that no longer exists, so verifying it would prove something
+// about code that has since changed.
+func TestFoldCarriesPinsForwardAndReplacesThem(t *testing.T) {
+	first := []Pin{{File: "a.go", From: "x > 1", To: "x >= 1", Test: "TestA"}}
+	second := []Pin{{File: "b.go", From: "y < 2", To: "y <= 2", Test: "TestB"}}
+
+	// A fresh, non-terminal log: happyLog ends in `done`, and appending past a terminal state is
+	// refused by the audit rules, correctly.
+	b := NewBuilder(runA)
+	b.Init(baseInit())
+	b.Event(TypeTree, TreeData{Head: "head0000", TreeHash: "t0", Status: ""})
+	raw1 := `{"commit":"c1","pins":[{"file":"a.go","from":"x > 1","to":"x >= 1","test":"TestA"}]}`
+	b.Event(TypeNodeOutput, out(raw1), WithNode("fix"))
+	b.Event(TypeDeltaApplied, deltaFor(raw1, Delta{Pins: first}), WithNode("fix"))
+	s := mustFold(t, b.Events())
+	if len(s.Pins) != 1 || s.Pins[0].File != "a.go" || s.Pins[0].From != "x > 1" {
+		t.Fatalf("the fold did not carry the fix node's pins: %+v", s.Pins)
+	}
+
+	// A later round's claims replace the earlier ones. A second output for the same node in the
+	// same iteration is refused by the audit rules (output_after_delta), so this is a second
+	// fixing node — which is the same fold path a later iteration takes.
+	raw2 := `{"commit":"c2","pins":[{"file":"b.go","from":"y < 2","to":"y <= 2","test":"TestB"}]}`
+	b.Event(TypeNodeOutput, out(raw2), WithNode("refix"))
+	b.Event(TypeDeltaApplied, deltaFor(raw2, Delta{Pins: second}), WithNode("refix"))
+	s = mustFold(t, b.Events())
+	if len(s.Pins) != 1 || s.Pins[0].File != "b.go" {
+		t.Errorf("pins = %+v, want only the newest round's claims", s.Pins)
+	}
+}

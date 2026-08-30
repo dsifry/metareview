@@ -1,6 +1,7 @@
 package export
 
 import (
+	"encoding/json"
 	"reflect"
 	"sort"
 	"strings"
@@ -31,6 +32,7 @@ var transformed = map[string]string{
 	"last_error":   "detail blanked",
 	"stop_reason":  "blanked when it names a cmd",
 	"node_outputs": "emptied for kinds the exporter does not know",
+	"pins":         "from/to source fragments hashed; file and test name kept",
 }
 
 // verbatim are the fields deliberately exported as they stand. Each entry is a
@@ -118,5 +120,49 @@ func TestEverySnapshotFieldIsClassifiedForExport(t *testing.T) {
 				t.Fatalf("%q is classified for export but is not a field of run.Snapshot", name)
 			}
 		}
+	}
+}
+
+// A pin's from/to are literal source fragments — repository content by the same definition that
+// makes tree_status get reduced to paths. The export keeps what identifies the proof (the file
+// and the test name) and hashes the code itself, so a holder of the source can still confirm the
+// export describes their tree without the export carrying that source.
+func TestExportHashesPinSourceFragments(t *testing.T) {
+	rd := &redactor{
+		snap: run.Snapshot{
+			RepoRoot: "/repo", WorkDir: "/repo",
+			Pins: []run.Pin{{
+				File: "internal/secret/algo.go",
+				From: "if key == expected { return true }",
+				To:   "if key != expected { return true }",
+				Test: "TestKeyComparison",
+			}},
+		},
+		repoRoot: "/repo",
+	}
+	var m map[string]any
+	if err := json.Unmarshal(rd.snapshot(), &m); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	pins, ok := m["pins"].([]any)
+	if !ok || len(pins) != 1 {
+		t.Fatalf("pins missing from the export: %v", m["pins"])
+	}
+	pin := pins[0].(map[string]any)
+	if pin["file"] != "internal/secret/algo.go" || pin["test"] != "TestKeyComparison" {
+		t.Errorf("the export must keep what identifies the proof: %v", pin)
+	}
+	for _, field := range []string{"from", "to"} {
+		got, _ := pin[field].(string)
+		if strings.Contains(got, "key") || strings.Contains(got, "expected") {
+			t.Errorf("%s still carries source: %q", field, got)
+		}
+		if !strings.HasPrefix(got, "sha256:") || len(got) != len("sha256:")+64 {
+			t.Errorf("%s = %q, want a sha256: prefixed digest", field, got)
+		}
+	}
+	// Distinct fragments must hash distinctly, or the export cannot distinguish two pins.
+	if pin["from"] == pin["to"] {
+		t.Error("from and to hashed to the same value")
 	}
 }

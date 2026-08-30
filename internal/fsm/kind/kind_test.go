@@ -1003,9 +1003,12 @@ func TestKindInfoDeclaresWhichKindsCallAJudge(t *testing.T) {
 		// Host-executed kinds carry no model of their own - review-lenses allows only inline and
 		// subagent, so the host agent does the work in its own session - and cmd runs a command.
 		// There is nothing for judge pre-flight to validate.
-		ReviewLenses: false,
-		AgentEdit:    false,
-		Cmd:          false,
+		// mutation-verify calls no model at all: whether a test fails when a line is broken is a
+		// fact about the repository, not an opinion, so there is no model for pre-flight to check.
+		MutationVerify: false,
+		ReviewLenses:   false,
+		AgentEdit:      false,
+		Cmd:            false,
 	}
 	info := r.Info()
 	for name, needs := range want {
@@ -1022,5 +1025,116 @@ func TestKindInfoDeclaresWhichKindsCallAJudge(t *testing.T) {
 		if _, covered := want[name]; !covered {
 			t.Errorf("kind %q is registered but this test does not say whether it calls a judge", name)
 		}
+	}
+}
+
+// The fix node's output used to be {commit, summary}, which the FSM accepted on trust — nothing
+// recorded what a fix pinned and nothing proved it held. Pins are the checkable half, so they are
+// validated like every other agent-supplied list: capped, non-empty where required, and bounded.
+func TestAgentEditDecodesAndBoundsPins(t *testing.T) {
+	// Decode lives on the KIND, not the executor. The first version of this test asked the
+	// executor for it, the assertion failed, and the whole test skipped in silence — vacuous, and
+	// caught by the coverage gate rather than by review. Registry.Kind is the accessor.
+	r := mustNew(t, &recordingJudge{}, false)
+	dec, ok := r.Kind(AgentEdit)
+	if !ok {
+		t.Fatal("agent-edit is not registered")
+	}
+	good := `{"commit":"abc1234","summary":"fixed it","pins":[{"file":"a.go","from":"x > 1","to":"x >= 1","test":"TestX"}]}`
+	out, err := dec.Decode(json.RawMessage(good))
+	if err != nil {
+		t.Fatalf("a well-formed pin must decode: %v", err)
+	}
+	e, ok := out.(editOut)
+	if !ok {
+		t.Fatalf("unexpected output type %T", out)
+	}
+	if len(e.Pins) != 1 || e.Pins[0].From != "x > 1" || e.Pins[0].To != "x >= 1" {
+		t.Fatalf("pin not carried through: %+v", e.Pins)
+	}
+
+	for _, tc := range []struct{ name, raw string }{
+		{"empty From cannot locate anything", `{"commit":"abc1234","summary":"s","pins":[{"file":"a.go","from":"","to":"y","test":"T"}]}`},
+		{"From equal to To mutates nothing", `{"commit":"abc1234","summary":"s","pins":[{"file":"a.go","from":"x","to":"x","test":"T"}]}`},
+		{"no file means nothing to mutate", `{"commit":"abc1234","summary":"s","pins":[{"file":"","from":"x","to":"y","test":"T"}]}`},
+		{"an absolute path escapes the tree", `{"commit":"abc1234","summary":"s","pins":[{"file":"/etc/passwd","from":"x","to":"y","test":"T"}]}`},
+		{"a traversing path escapes the tree", `{"commit":"abc1234","summary":"s","pins":[{"file":"../x.go","from":"x","to":"y","test":"T"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := dec.Decode(json.RawMessage(tc.raw)); err == nil {
+				t.Error("must be refused")
+			}
+		})
+	}
+
+	// Unbounded pins are a denial of service against the gate: each costs a build and two runs.
+	var many []string
+	for i := 0; i <= run.MaxPins; i++ {
+		many = append(many, `{"file":"a.go","from":"x","to":"y","test":"T"}`)
+	}
+	tooMany := `{"commit":"abc1234","summary":"s","pins":[` + strings.Join(many, ",") + `]}`
+	if _, err := dec.Decode(json.RawMessage(tooMany)); err == nil {
+		t.Errorf("more than %d pins must be refused", run.MaxPins)
+	}
+}
+
+// The oversized-field cases of pin validation, and the whole surface of the new kind. Both are
+// here because the coverage gate demands every statement in this package be executed — a rule
+// that already caught one vacuous test in this very feature.
+func TestPinCapsAndMutationVerifyKindSurface(t *testing.T) {
+	r := mustNew(t, &recordingJudge{}, false)
+	dec, _ := r.Kind(AgentEdit)
+	big := strings.Repeat("x", run.MaxDesc+1)
+	longName := strings.Repeat("t", run.MaxShort+1)
+	for _, tc := range []struct{ name, raw string }{
+		{"oversized from", `{"commit":"abc1234","summary":"s","pins":[{"file":"a.go","from":"` + big + `","to":"y","test":"T"}]}`},
+		{"oversized to", `{"commit":"abc1234","summary":"s","pins":[{"file":"a.go","from":"x","to":"` + big + `","test":"T"}]}`},
+		{"oversized test name", `{"commit":"abc1234","summary":"s","pins":[{"file":"a.go","from":"x","to":"y","test":"` + longName + `"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := dec.Decode(json.RawMessage(tc.raw)); err == nil {
+				t.Error("must be refused: agent-supplied data is bounded before it is acted on")
+			}
+		})
+	}
+
+	mv, ok := r.Kind(MutationVerify)
+	if !ok {
+		t.Fatal("mutation-verify is not registered")
+	}
+	if mv.Name() != MutationVerify {
+		t.Errorf("Name = %q", mv.Name())
+	}
+	info := mv.Info()
+	if info.NeedsJudge {
+		t.Error("mutation-verify must not need a judge: whether a test fails is a fact, not an opinion")
+	}
+	if info.DefaultExec != "fork" {
+		t.Errorf("DefaultExec = %q, want fork", info.DefaultExec)
+	}
+	// There is no prompt because there is no agent to instruct.
+	if _, err := mv.Instructions(run.Snapshot{}, nil, machine.Diff{}, "n"); err == nil {
+		t.Error("Instructions must be unsupported for a deterministic kind")
+	}
+	// It decodes the ordinary delta shape, and refuses a malformed one.
+	out, err := mv.Decode(json.RawMessage(`{"findings":[]}`))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	d, err := mv.Reduce(run.Snapshot{}, out)
+	if err != nil {
+		t.Fatalf("Reduce: %v", err)
+	}
+	if d.Findings == nil {
+		t.Error("Reduce must carry the decoded delta through")
+	}
+	if _, err := mv.Decode(json.RawMessage(`{"nope":1}`)); err == nil {
+		t.Error("an unknown field must be refused")
+	}
+	// And a delta whose findings are malformed is refused rather than folded: the verify node's
+	// output is agent-adjacent data like any other.
+	tooLong := strings.Repeat("f", run.MaxShort+1)
+	if _, err := mv.Decode(json.RawMessage(`{"findings":[{"issue_text":"x","file":"` + tooLong + `"}]}`)); err == nil {
+		t.Error("a finding that breaches the caps must be refused")
 	}
 }

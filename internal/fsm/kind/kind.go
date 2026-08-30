@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -28,6 +30,7 @@ const (
 	ReviewLenses        = "review-lenses"
 	MatchThenAdjudicate = "match-then-adjudicate"
 	AgentEdit           = "agent-edit"
+	MutationVerify      = "mutation-verify"
 	StillPresent        = "still-present"
 	Cmd                 = "cmd"
 )
@@ -120,6 +123,7 @@ func New(d Deps) (*Registry, error) {
 	r.kinds[AgentEdit] = agentEdit{}
 	r.kinds[StillPresent] = stillPresentKind{}
 	r.kinds[Cmd] = cmdKind{}
+	r.kinds[MutationVerify] = mutationVerifyKind{}
 	r.execs[MatchThenAdjudicate] = &adjudicateExec{judge: d.Judge, escalate: d.Escalate}
 	r.execs[StillPresent] = &stillPresentExec{judge: d.Judge}
 	r.execs[Cmd] = cmdExec{}
@@ -195,6 +199,47 @@ func checkFindings(fs []run.Finding) error {
 		}
 	}
 	return nil
+}
+
+// checkPins bounds the fix node's evidence. A pin is agent-supplied data that will be used to
+// modify a file and run a build, so every field is constrained before any of it is acted on.
+func checkPins(ps []run.Pin) error {
+	if len(ps) > run.MaxPins {
+		return invalid("cap", fmt.Sprintf("more than %d pins", run.MaxPins))
+	}
+	for i, p := range ps {
+		switch {
+		case p.File == "" || !shortOK(p.File):
+			return invalid("pin", fmt.Sprintf("pin %d: file is empty or too long", i))
+		case pinPathEscapes(p.File):
+			// The pin names a file to rewrite, so containment is checked before anything is
+			// written, not after. Same rule as the evidence tree: a ".." COMPONENT, not a prefix,
+			// so an ordinary directory called "..dir" is not refused.
+			return invalid("pin", fmt.Sprintf("pin %d: file escapes the repository: %q", i, p.File))
+		case p.From == "":
+			return invalid("pin", fmt.Sprintf("pin %d: from is empty, so it locates nothing", i))
+		case p.From == p.To:
+			return invalid("pin", fmt.Sprintf("pin %d: from equals to, so it mutates nothing", i))
+		case !within(p.From, run.MaxDesc) || !within(p.To, run.MaxDesc):
+			return invalid("cap", fmt.Sprintf("pin %d: from/to exceeds %d bytes", i, run.MaxDesc))
+		case !shortOK(p.Test):
+			return invalid("cap", fmt.Sprintf("pin %d: test name exceeds %d bytes", i, run.MaxShort))
+		}
+	}
+	return nil
+}
+
+func pinPathEscapes(p string) bool {
+	clean := path.Clean(filepath.ToSlash(p))
+	if clean == "." || strings.HasPrefix(clean, "/") {
+		return true
+	}
+	for _, part := range strings.Split(clean, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func checkBugs(list string, bs []run.Bug, descCap int) error {
@@ -637,8 +682,9 @@ func (agentEdit) Info() workflow.KindInfo {
 }
 
 type editOut struct {
-	Commit  string `json:"commit"`
-	Summary string `json:"summary"`
+	Commit  string    `json:"commit"`
+	Summary string    `json:"summary"`
+	Pins    []run.Pin `json:"pins,omitempty"`
 }
 
 func (agentEdit) Instructions(s run.Snapshot, _ *workflow.Node, d machine.Diff, nonce string) (machine.Instructions, error) {
@@ -662,6 +708,9 @@ func (agentEdit) Decode(raw json.RawMessage) (any, error) {
 	}
 	if !shortOK(o.Summary) {
 		return nil, invalid("cap", "summary exceeds 1 KB")
+	}
+	if err := checkPins(o.Pins); err != nil {
+		return nil, err
 	}
 	return o, nil
 }
@@ -735,6 +784,40 @@ func (e *stillPresentExec) Execute(ctx context.Context, in machine.ExecInput) (j
 }
 
 // ---------------------------------------------------------------- cmd
+
+// mutationVerifyKind proves the fix node's pins instead of believing them.
+//
+// It calls no judge, by design: whether a test fails when a line is broken is a fact about the
+// repository, not an opinion, and the answer must not vary with the model. The LLM still-present
+// check remains a COMPLEMENT for bugs no test can pin — it answers a question mutation cannot —
+// never a replacement for one that can.
+type mutationVerifyKind struct{}
+
+func (mutationVerifyKind) Name() string { return MutationVerify }
+func (mutationVerifyKind) Info() workflow.KindInfo {
+	// NeedsJudge false: nothing here calls a model, so judge pre-flight has nothing to validate.
+	return workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, ValidateParams: noParams}
+}
+
+func (mutationVerifyKind) Instructions(run.Snapshot, *workflow.Node, machine.Diff, string) (machine.Instructions, error) {
+	// Deterministic: there is no prompt, because there is no agent to instruct.
+	return unsupported(MutationVerify)
+}
+
+func (mutationVerifyKind) Decode(raw json.RawMessage) (any, error) {
+	var d run.Delta
+	if err := strictDecode(raw, &d); err != nil {
+		return nil, err
+	}
+	if err := checkFindings(d.Findings); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+func (mutationVerifyKind) Reduce(_ run.Snapshot, out any) (run.Delta, error) {
+	return out.(run.Delta), nil
+}
 
 type cmdKind struct{}
 

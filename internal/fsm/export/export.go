@@ -479,6 +479,22 @@ func (r *redactor) snapshot() []byte {
 	m["repo_root"] = r.rootPath(r.snap.RepoRoot)
 	m["work_dir"] = r.rootPath(r.snap.WorkDir)
 	m["tree_status"] = statusPaths(r.snap.TreeStatus)
+	// Pins carry literal source fragments in from/to, which is repository content by any
+	// definition — the same reason tree_status is reduced to paths. The path and the test name
+	// stay, because they identify what was proven without reproducing the code, and the fragments
+	// are hashed so a holder of the source can still verify the export describes their tree.
+	if pins, ok := m["pins"].([]any); ok {
+		for _, p := range pins {
+			// A nil map from a failed assertion is safe to index in Go and yields nothing, so the
+			// unreachable "not a map" branch is left out rather than written and never executed.
+			pin, _ := p.(map[string]any)
+			for _, field := range []string{"from", "to"} {
+				if v, ok := pin[field].(string); ok && v != "" {
+					pin[field] = sha(v)
+				}
+			}
+		}
+	}
 	if le, ok := m["last_error"].(map[string]any); ok {
 		le["detail"] = ""
 	}

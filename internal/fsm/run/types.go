@@ -38,10 +38,13 @@ const KindAgentEdit Kind = "agent-edit"
 
 // Caps (§2.3), all measured on canonical bytes.
 const (
-	MaxShort   = 1 << 10
-	MaxText    = 4 << 10
-	MaxDesc    = 2 << 10
-	MaxDetail  = 64 << 10
+	MaxShort  = 1 << 10
+	MaxText   = 4 << 10
+	MaxDesc   = 2 << 10
+	MaxDetail = 64 << 10
+	// MaxPins caps how many mutations one fix node may ask to have verified. Each pin costs a
+	// build and two test runs, so an unbounded list is a denial of service against the gate.
+	MaxPins    = 32
 	MaxStderr  = 8 << 10
 	MaxPayload = 256 << 10
 	MaxLine    = 1 << 20
@@ -177,6 +180,10 @@ type Delta struct {
 	Confirmed []Bug       `json:"confirmed,omitempty"`
 	Status    []BugStatus `json:"status,omitempty"`
 	Commit    string      `json:"commit,omitempty"`
+	// Pins is the fix node's checkable evidence: which mutation each fix claims a test now
+	// catches. It carries forward to the verify node, which proves or refuses each one. Empty
+	// means the fix made no claim, which a gate may treat as unproven.
+	Pins []Pin `json:"pins,omitempty"`
 }
 
 // Time marshals as UTC RFC3339Nano and unmarshals only the Z form (§2.2).
@@ -206,38 +213,41 @@ func (t *Time) UnmarshalJSON(b []byte) error {
 
 // Snapshot is the state derived by folding a run's events (§2.1). Never persisted as authority.
 type Snapshot struct {
-	SchemaVersion   int                        `json:"schemaVersion"`
-	RunID           string                     `json:"run_id"`
-	ParentRunID     string                     `json:"parent_run_id,omitempty"`
-	Lineage         []string                   `json:"lineage"`
-	ForkedAtSeq     int64                      `json:"forked_at_seq,omitempty"`
-	CreatedAt       Time                       `json:"created_at"`
-	Seq             int64                      `json:"seq"`
-	Workflow        string                     `json:"workflow"`
-	WorkflowHash    string                     `json:"workflow_hash"`
-	WorkflowSource  string                     `json:"workflow_source,omitempty"`
-	Vars            map[string]string          `json:"vars"`
-	Calibration     bool                       `json:"calibration"`
-	Mock            string                     `json:"mock,omitempty"`
-	MockTainted     bool                       `json:"mock_tainted"`
-	RepoMode        string                     `json:"repo_mode"`
-	AllowedCmds     []AllowedCmd               `json:"allowed_cmds"`
-	CmdsSHA256      string                     `json:"cmds_sha256,omitempty"`
-	RepoRoot        string                     `json:"repo_root"`
-	WorkDir         string                     `json:"work_dir"`
-	State           State                      `json:"state"`
-	StateKind       Kind                       `json:"state_kind,omitempty"`
-	Outcome         Outcome                    `json:"outcome,omitempty"`
-	Iteration       int                        `json:"iteration"`
-	BaseSHA         string                     `json:"base_sha"`
-	Head            string                     `json:"head"`
-	FixEntryHead    string                     `json:"fix_entry_head,omitempty"`
-	TreeHash        string                     `json:"tree_hash,omitempty"`
-	TreeStatus      string                     `json:"tree_status,omitempty"`
-	Goldens         []Golden                   `json:"goldens"`
-	Findings        []Finding                  `json:"findings"`
-	Confirmed       []Bug                      `json:"confirmed"`
-	AllFound        []Bug                      `json:"all_found"`
+	SchemaVersion  int               `json:"schemaVersion"`
+	RunID          string            `json:"run_id"`
+	ParentRunID    string            `json:"parent_run_id,omitempty"`
+	Lineage        []string          `json:"lineage"`
+	ForkedAtSeq    int64             `json:"forked_at_seq,omitempty"`
+	CreatedAt      Time              `json:"created_at"`
+	Seq            int64             `json:"seq"`
+	Workflow       string            `json:"workflow"`
+	WorkflowHash   string            `json:"workflow_hash"`
+	WorkflowSource string            `json:"workflow_source,omitempty"`
+	Vars           map[string]string `json:"vars"`
+	Calibration    bool              `json:"calibration"`
+	Mock           string            `json:"mock,omitempty"`
+	MockTainted    bool              `json:"mock_tainted"`
+	RepoMode       string            `json:"repo_mode"`
+	AllowedCmds    []AllowedCmd      `json:"allowed_cmds"`
+	CmdsSHA256     string            `json:"cmds_sha256,omitempty"`
+	RepoRoot       string            `json:"repo_root"`
+	WorkDir        string            `json:"work_dir"`
+	State          State             `json:"state"`
+	StateKind      Kind              `json:"state_kind,omitempty"`
+	Outcome        Outcome           `json:"outcome,omitempty"`
+	Iteration      int               `json:"iteration"`
+	BaseSHA        string            `json:"base_sha"`
+	Head           string            `json:"head"`
+	FixEntryHead   string            `json:"fix_entry_head,omitempty"`
+	TreeHash       string            `json:"tree_hash,omitempty"`
+	TreeStatus     string            `json:"tree_status,omitempty"`
+	Goldens        []Golden          `json:"goldens"`
+	Findings       []Finding         `json:"findings"`
+	Confirmed      []Bug             `json:"confirmed"`
+	AllFound       []Bug             `json:"all_found"`
+	// Pins carries the fix node's claims to the verify node. omitempty so a run that never
+	// records one serialises exactly as it did before pins existed.
+	Pins            []Pin                      `json:"pins,omitempty"`
 	Status          []BugStatus                `json:"status"`
 	Unfixed         int                        `json:"unfixed"`
 	PrevUnfixed     *int                       `json:"prev_unfixed"`
@@ -272,6 +282,9 @@ func (s Snapshot) Clone() Snapshot {
 	}
 	c.Confirmed = cloneBugs(s.Confirmed)
 	c.AllFound = cloneBugs(s.AllFound)
+	if s.Pins != nil {
+		c.Pins = append([]Pin{}, s.Pins...)
+	}
 	if s.Status != nil {
 		c.Status = make([]BugStatus, len(s.Status))
 		copy(c.Status, s.Status)
@@ -394,4 +407,26 @@ func ValidateRunID(id string) error {
 // RunID derives a run id for a workflow in the existing mrv-<stamp>-<scope>-<target>-<hash> shape.
 func RunID(workflow string, at time.Time) string {
 	return state.RunID("fsm-"+workflow, workflow, at)
+}
+
+// Pin is a fix agent's claim that one specific test holds one specific line of production code.
+//
+// It exists because `{commit, summary}` is not evidence. The FSM previously accepted a fix on the
+// orchestrator's word that it had happened; a pin is checkable: apply From->To at File, and the
+// named test must FAIL. Restore it, and the test must PASS. That is a proof a human can re-run.
+//
+// The agent declares what to break and never what to run: the command that runs the tests comes
+// from the workflow's consent-hashed cmds block, not from here. A pin that could name its own
+// verifier would be a fix agent grading its own homework with a command of its choosing.
+type Pin struct {
+	// File is the production file the fix touched, repo-relative.
+	File string `json:"file"`
+	// From is the exact text the mutation replaces. It must appear in File exactly once, so the
+	// mutation is unambiguous without carrying line numbers that drift.
+	From string `json:"from"`
+	// To is what From becomes: a compiling change that breaks the behaviour the fix introduced.
+	To string `json:"to"`
+	// Test names the test the fix claims pins this line, for the report and for a human re-running
+	// it by hand. It selects, it does not execute.
+	Test string `json:"test"`
 }

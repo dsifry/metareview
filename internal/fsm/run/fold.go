@@ -142,6 +142,12 @@ func Apply(st FoldState, ev Event) (FoldState, error) {
 				}
 			}
 		}
+		if p.Pins != nil {
+			// The fix node's claims carry forward to verify. Replaced rather than appended: each
+			// fix round makes its own claims, and a stale pin from an earlier iteration would be
+			// verified against a tree it no longer describes.
+			next.Pins = append([]Pin{}, p.Pins...)
+		}
 		if p.Status != nil {
 			if reason := checkStatus(next.AllFound, p.Status); reason != "" {
 				return FoldState{}, foldErr(reason, ev)
