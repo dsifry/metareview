@@ -568,7 +568,7 @@ func TestSummaryReadsHeadAndPathsFromTheCommittedLogAlone(t *testing.T) {
 	root := t.TempDir() // no .metareview/runs.jsonl at all, as in a fresh clone
 	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "one.md"),
 		"# metareview: pr-ready review\n\nRun ID: `mrv-1`\n\nTarget: `current branch`\n\n"+
-			"Head: `abc1234def`\n\nCovered paths: `internal/a.go, internal/b.go`\n\n## Verdict\n\nPASS\n")
+			"Head: `abc1234def`\n\nCovered paths: `[\"internal/a.go\",\"internal/b.go\"]`\n\n## Verdict\n\nPASS\n")
 
 	logs, err := Discover(root)
 	if err != nil {
@@ -585,18 +585,23 @@ func TestSummaryReadsHeadAndPathsFromTheCommittedLogAlone(t *testing.T) {
 	}
 }
 
-// "none" and absent are different answers. A review that examined no files can say so; one
-// written before the field existed cannot say anything, and must not be read as saying "none" —
-// that would let an old log answer for a path it never opened.
+// "none" and absent are different answers, and the type must be able to hold the difference.
+// The previous version of this test asserted that BOTH returned nil — it proved they were
+// identical while its name claimed the opposite, and three comments described a distinction no
+// code implemented. A review that examined no files can answer "no" for a path; one written
+// before the field existed cannot answer at all, and only the second must be barred from
+// vouching.
 func TestCoveredPathsDistinguishesNoneFromUnknown(t *testing.T) {
-	if got := splitCoveredPaths("none"); got != nil {
-		t.Errorf("none = %v, want nil", got)
+	if paths, known := DecodeCoveredPaths(NoCoveredPaths); !known || len(paths) != 0 {
+		t.Errorf(`"none" must decode as KNOWN and empty, got %v known=%v`, paths, known)
 	}
-	if got := splitCoveredPaths(""); got != nil {
-		t.Errorf("empty = %v, want nil", got)
+	if paths, known := DecodeCoveredPaths(""); known || paths != nil {
+		t.Errorf("an absent field must decode as UNKNOWN, got %v known=%v", paths, known)
 	}
-	if got := splitCoveredPaths("a.go,  b.go , "); len(got) != 2 || got[1] != "b.go" {
-		t.Errorf("got %v, want [a.go b.go] with whitespace and trailing separators handled", got)
+	// A legacy comma-joined line is not a path list. Refusing it is deliberate: guessing would
+	// silently mark files reviewed that nobody read.
+	if paths, known := DecodeCoveredPaths("a.go, b.go"); known || paths != nil {
+		t.Errorf("an unparseable legacy line must be unknown, not guessed: %v known=%v", paths, known)
 	}
 	// An unknown head is written as the literal `unknown` and must not become a SHA.
 	root := t.TempDir()
@@ -611,13 +616,16 @@ func TestCoveredPathsDistinguishesNoneFromUnknown(t *testing.T) {
 	}
 }
 
-// The committed log wins over the local run record: the run record is enrichment for a review
-// made on this machine, and must never blank a value the durable artifact already carried.
-func TestTheCommittedLogWinsOverTheLocalRunRecord(t *testing.T) {
+// The LOCAL RUN RECORD wins over the committed log, and the log is the fallback that lets a
+// clone answer at all. This assertion used to be the other way round, and that was a security
+// regression: the markdown travels in a pull request and is editable by anyone who can commit,
+// while .metareview/runs.jsonl is locally produced and gitignored — the only copy an attacker
+// cannot supply — and nothing verifies a log's self-asserted head against the commit containing it.
+func TestTheLocalRunRecordWinsOverTheCommittedLog(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "one.md"),
 		"# metareview: pr-ready review\n\nRun ID: `mrv-1`\n\nTarget: `t`\n\n"+
-			"Head: `fromlog`\n\nCovered paths: `log.go`\n\n## Verdict\n\nPASS\n")
+			"Head: `fromlog`\n\nCovered paths: `[\"log.go\"]`\n\n## Verdict\n\nPASS\n")
 	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
 		`{"id":"mrv-1","scope":"pr-ready","verdict":"PASS","headSha":"fromrun","coveredPaths":["run.go"]}`+"\n")
 
@@ -625,10 +633,11 @@ func TestTheCommittedLogWinsOverTheLocalRunRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if logs[0].HeadSHA != "fromlog" || len(logs[0].CoveredPaths) != 1 || logs[0].CoveredPaths[0] != "log.go" {
-		t.Errorf("the durable artifact must win: head=%q paths=%v", logs[0].HeadSHA, logs[0].CoveredPaths)
+	if logs[0].HeadSHA != "fromrun" || len(logs[0].CoveredPaths) != 1 || logs[0].CoveredPaths[0] != "run.go" {
+		t.Errorf("the local run record must win: head=%q paths=%v", logs[0].HeadSHA, logs[0].CoveredPaths)
 	}
-	// ...and a log with neither still takes them from the run record.
+	// ...and a log with no run record still answers from the committed artifact, which is the
+	// whole point of writing it there: a clone has no run record at all.
 	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "two.md"),
 		"# metareview: pr-ready review\n\nRun ID: `mrv-2`\n\nTarget: `t`\n\n## Verdict\n\nPASS\n")
 	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
@@ -638,9 +647,24 @@ func TestTheCommittedLogWinsOverTheLocalRunRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, l := range logs {
-		if l.RunID == "mrv-2" && (l.HeadSHA != "legacy" || len(l.CoveredPaths) != 1) {
-			t.Errorf("a log with no head must still take one from the run record: %+v", l)
+	// Looked up rather than filtered inside the loop. The previous form guarded its only
+	// assertion behind `if l.RunID == "mrv-2"`, so if two.md ever stopped being discovered or its
+	// Run ID stopped parsing, the body would never run and the test would pass having asserted
+	// nothing — a vacuous pass waiting to happen. It also checked only the LENGTH of the path
+	// list, so a fallback returning the wrong single path would have passed.
+	var legacy *Summary
+	for i := range logs {
+		if logs[i].RunID == "mrv-2" {
+			legacy = &logs[i]
 		}
+	}
+	if legacy == nil {
+		t.Fatalf("mrv-2 was not discovered, so the fallback was never exercised: %+v", logs)
+	}
+	if legacy.HeadSHA != "legacy" {
+		t.Errorf("HeadSHA = %q, want the run record's %q", legacy.HeadSHA, "legacy")
+	}
+	if len(legacy.CoveredPaths) != 1 || legacy.CoveredPaths[0] != "legacy.go" {
+		t.Errorf("CoveredPaths = %v, want [legacy.go] from the run record", legacy.CoveredPaths)
 	}
 }

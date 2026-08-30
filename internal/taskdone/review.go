@@ -3,6 +3,7 @@ package taskdone
 import (
 	"errors"
 	"fmt"
+	"github.com/dsifry/metareview/internal/reviewlog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -581,8 +582,8 @@ func reviewMarkdown(runID, target, contextRel, previousRun, gateEffect, verdict 
 		"Context pack: " + markdown.InlineCode(contextRel) + "\n\n" +
 		"Execution mode: " + markdown.InlineCode("deterministic-local") + "\n\n" +
 		"Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
-		"Head: " + markdown.InlineCode(firstNonEmpty(meta.HeadSHA, "unknown")) + "\n\n" +
-		"Covered paths: " + markdown.InlineCode(coveredPathsLine(meta.CoveredPaths)) + "\n\n" +
+		reviewlog.HeaderLine(reviewlog.HeadLabel, firstNonEmpty(meta.HeadSHA, reviewlog.UnknownHead)) +
+		reviewlog.HeaderLine(reviewlog.CoveredPathsLabel, reviewlog.EncodeCoveredPaths(meta.CoveredPaths)) +
 		"Previous run: " + markdown.InlineCode(firstNonEmpty(previousRun, "none")) + "\n\n" +
 		"## Verdict\n\n" + verdict + "\n\n" + shardedReview +
 		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n" +
@@ -802,15 +803,4 @@ func coveredPaths(g gitcontext.Context) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// coveredPathsLine renders the files a review read as one inline-code field. "none" is written
-// explicitly rather than left blank, so a reader can tell a review that examined nothing from one
-// written before this field existed — the difference between "covers no files" and "unknown",
-// which is what decides whether an old log may answer for a path.
-func coveredPathsLine(paths []string) string {
-	if len(paths) == 0 {
-		return "none"
-	}
-	return strings.Join(paths, ", ")
 }

@@ -39,7 +39,14 @@ func ResolveBranchScope(root, base string, run RunGit) (BranchScope, error) {
 	if run == nil {
 		run = realGit
 	}
-	ctx, err := gitcontext.Collect(root, base)
+	// The SAME exclusions the reviews use. A review's covered paths come from an exclude-filtered
+	// context, so metareview's own generated artifacts — .metareview/** and docs/metareview/** —
+	// can never appear in one. Enumerating the unfiltered set here meant every committed review
+	// log and context pack was permanently unreviewed, and each new review committed three more
+	// files that no future review could ever clear. On a repository that commits its review
+	// artifacts, which CLAUDE.md requires, the branch scope could never reach a clean state: the
+	// exact livelock this scoping exists to prevent, one level down.
+	ctx, err := gitcontext.CollectWithExcludes(root, base, GeneratedMetareviewPathExcludes())
 	if err != nil {
 		return BranchScope{}, err
 	}
@@ -99,4 +106,13 @@ func (s BranchScope) Unreviewed(logs []reviewlog.Summary) []string {
 		}
 	}
 	return out
+}
+
+// GeneratedMetareviewPathExcludes are the paths metareview itself writes. They are excluded from
+// a review's source context, so nothing can ever record having reviewed them, so they must be
+// excluded from the set a review is measured against too. Exported and defined once: it was
+// already duplicated privately in the review packages, and this file needing a fourth copy is
+// what made the divergence visible.
+func GeneratedMetareviewPathExcludes() []string {
+	return []string{".metareview", ".metareview/**", "docs/metareview", "docs/metareview/**"}
 }

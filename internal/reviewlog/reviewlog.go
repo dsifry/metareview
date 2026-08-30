@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/dsifry/metareview/internal/jsonl"
+	"github.com/dsifry/metareview/internal/markdown"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,16 +32,20 @@ type Summary struct {
 	AdvisoryFindingCount  int      `json:"advisoryFindingCount,omitempty"`
 	FollowUpFindingCount  int      `json:"followUpFindingCount,omitempty"`
 	WarningFindingCount   int      `json:"warningFindingCount,omitempty"`
-	// HeadSHA is the commit the review ran against, joined from the run record. It is what lets
+	// HeadSHA is the commit the review ran against. Read from the committed log's header so a
+	// clone can answer, and overridden by the local run record where one exists. It is what lets
 	// a caller ask "does this blocker belong to the branch in hand" instead of matching target
 	// strings — which never worked, because no review records a source path as its target.
 	HeadSHA string `json:"headSha,omitempty"`
-	// CoveredPaths are the source files the review actually looked at. Empty for every review
-	// recorded before this field existed, and a caller must treat empty as "unknown", never as
-	// "covers nothing" — the difference decides whether an old log can answer for a file.
-	CoveredPaths []string          `json:"coveredPaths,omitempty"`
-	RunChain     []runchain.Record `json:"runChain,omitempty"`
-	Warnings     []string          `json:"warnings,omitempty"`
+	// CoveredPaths are the source files the review actually looked at, and CoveredPathsKnown says
+	// whether the review answered that question AT ALL. Empty-and-known means "examined nothing";
+	// empty-and-unknown means the log predates the field. Only the second must be barred from
+	// vouching for a path, and without the flag the two were the same value — a distinction three
+	// comments claimed and no code implemented.
+	CoveredPaths      []string          `json:"coveredPaths,omitempty"`
+	CoveredPathsKnown bool              `json:"coveredPathsKnown,omitempty"`
+	RunChain          []runchain.Record `json:"runChain,omitempty"`
+	Warnings          []string          `json:"warnings,omitempty"`
 }
 
 type findingRecord struct {
@@ -109,7 +114,13 @@ func parseMarkdown(rel, text string) Summary {
 	summary := Summary{Path: rel}
 	var declaredLenses []string
 	lines := strings.Split(text, "\n")
+	inHeader := true
 	for i, line := range lines {
+		// Everything from the first section heading on is content — findings, evidence, and text
+		// copied from a pull request — and none of it may set a header field.
+		if strings.HasPrefix(line, "## ") {
+			inHeader = false
+		}
 		switch {
 		case strings.HasPrefix(line, "# metareview:"):
 			summary.Kind = reviewKind(line)
@@ -121,15 +132,23 @@ func parseMarkdown(rel, text string) Summary {
 			summary.PreviousRunID = previousRunID(firstInlineCode(line))
 		case strings.HasPrefix(line, "Context pack:"):
 			summary.ContextRel = firstInlineCode(line)
-		case strings.HasPrefix(line, "Head:"):
+		case inHeader && strings.HasPrefix(line, HeadLabel):
 			// Read from the COMMITTED log, so a clone, a fresh worktree or a CI checkout can
 			// still say which commit a review covered. This lived only in the untracked run
 			// record, so scoping evaporated the moment the review left the machine that made it.
-			if sha := firstInlineCode(line); sha != "unknown" {
+			//
+			// HEADER ONLY, and first match wins. Scanning the whole document with last-match-wins
+			// made reviewer prose authoritative over the gate: finding bodies are emitted at
+			// column 0, pr-ready embeds PR titles and comments verbatim, and the committed corpus
+			// already holds 126 lines shaped like a header field. One line of text could forge a
+			// head, push a review out of branch scope, and delete its blockers from must_clear.
+			if sha := markdown.FirstInlineCode(line); sha != UnknownHead && summary.HeadSHA == "" {
 				summary.HeadSHA = sha
 			}
-		case strings.HasPrefix(line, "Covered paths:"):
-			summary.CoveredPaths = splitCoveredPaths(firstInlineCode(line))
+		case inHeader && strings.HasPrefix(line, CoveredPathsLabel):
+			if !summary.CoveredPathsKnown {
+				summary.CoveredPaths, summary.CoveredPathsKnown = DecodeCoveredPaths(markdown.FirstInlineCode(line))
+			}
 		case strings.HasPrefix(line, "Required lenses:"):
 			declaredLenses = splitLenses(firstInlineCode(line))
 		case strings.TrimSpace(line) == "## Verdict":
@@ -407,13 +426,18 @@ func mergeRunMetadata(summary *Summary, runs []runchain.Record) {
 	if !ok {
 		return
 	}
-	// The committed log wins. The run record is local enrichment for a review made on this
-	// machine, and must not blank a value the durable artifact already carried.
-	if summary.HeadSHA == "" {
+	// The LOCAL RUN RECORD wins where it exists, and the committed log is the fallback that lets
+	// a clone answer at all. The precedence used to be the other way round, which was a
+	// regression in both directions: the markdown travels in a pull request and is editable by
+	// anyone who can commit, while .metareview/runs.jsonl is locally produced and gitignored —
+	// the only copy an attacker cannot supply. Nothing verifies a log's self-asserted head
+	// against the commit that actually contains it.
+	if current.HeadSHA != "" {
 		summary.HeadSHA = current.HeadSHA
 	}
-	if len(summary.CoveredPaths) == 0 {
+	if len(current.CoveredPaths) > 0 {
 		summary.CoveredPaths = append([]string(nil), current.CoveredPaths...)
+		summary.CoveredPathsKnown = true
 	}
 	summary.AttemptNumber = current.AttemptNumber
 	summary.MaxAttempts = current.MaxAttempts
@@ -498,20 +522,4 @@ func appendUnique(values []string, value string) []string {
 		}
 	}
 	return append(values, value)
-}
-
-// splitCoveredPaths reads the inline list a review log writes. "none" means the review examined
-// no files, which is NOT the same as a log written before the field existed and carrying nothing
-// at all — the first can answer for a path (with "no"), the second cannot answer at all.
-func splitCoveredPaths(text string) []string {
-	if text == "" || text == "none" {
-		return nil
-	}
-	out := []string{}
-	for _, p := range strings.Split(text, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }

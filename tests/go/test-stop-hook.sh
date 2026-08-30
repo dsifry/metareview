@@ -50,14 +50,14 @@ printf '%s' "$out" | grep -q "changed.go" || { echo "FAIL: the block must name t
 
 # 3. Once a passing review records that it read the file, the hook lets the session finish. A
 #    gate that cannot be satisfied is one an operator disables, which is worse than none.
-printf '# metareview: pr-ready review\n\nRun ID: `mrv-1`\n\nTarget: `current branch`\n\nHead: `%s`\n\nCovered paths: `base.go, changed.go`\n\n## Verdict\n\nPASS\n' \
+printf '# metareview: pr-ready review\n\nRun ID: `mrv-1`\n\nTarget: `current branch`\n\nHead: `%s`\n\nCovered paths: `["base.go","changed.go"]`\n\n## Verdict\n\nPASS\n' \
   "$head" > docs/metareview/reviews/mrv-1-pr-ready.md
 out="$(METAREVIEW_BIN="$TMP/mrv" bash "$HOOK")"
 if [ -n "$out" ]; then echo "FAIL: a reviewed branch must pass silently, got: $out"; exit 1; fi
 
 # 4. A blocking review of this branch's own commits blocks, and is reported as a verdict rather
 #    than as "never reviewed" — the two call for different things from whoever reads it.
-printf '# metareview: task-done review\n\nRun ID: `mrv-2`\n\nTarget: `t-2`\n\nHead: `%s`\n\nCovered paths: `changed.go`\n\n## Verdict\n\nNEEDS_REVISION\n' \
+printf '# metareview: task-done review\n\nRun ID: `mrv-2`\n\nTarget: `t-2`\n\nHead: `%s`\n\nCovered paths: `["changed.go"]`\n\n## Verdict\n\nNEEDS_REVISION\n' \
   "$head" > docs/metareview/reviews/mrv-2-task-done.md
 out="$(METAREVIEW_BIN="$TMP/mrv" bash "$HOOK")"
 assert_json_block "$out" "NEEDS_REVISION"

@@ -343,3 +343,56 @@ func TestBranchAnswerSurfacesAnUnreadableReviewLog(t *testing.T) {
 		t.Errorf("nothing may be emitted when the answer could not be built: code=%d out=%q", code, buf.String())
 	}
 }
+
+// metareview's own generated artifacts must not be counted as work needing review.
+//
+// A review's covered paths come from an exclude-filtered context, so .metareview/** and
+// docs/metareview/** can never appear in one. Enumerating the unfiltered set here made every
+// committed review log and context pack permanently unreviewed, and each new review committed
+// three more files no future review could clear — so on a repository that commits its review
+// artifacts, which CLAUDE.md requires, the branch could never reach a clean state. That is the
+// livelock this scoping exists to prevent, one level down.
+func TestBranchScopeIgnoresMetareviewsOwnArtifacts(t *testing.T) {
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	mustWriteFile(t, filepath.Join(root, "base.go"), "package p\n")
+	git("init", "-q", "-b", "main")
+	git("add", ".")
+	git("commit", "-qm", "base")
+	git("checkout", "-q", "-b", "work")
+	mustWriteFile(t, filepath.Join(root, "real.go"), "package p // real\n")
+	// Exactly what a review run commits alongside the source change.
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "mrv-1.md"), "# metareview: task-done review\n")
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "context", "mrv-1-context.md"), "context\n")
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "FINDINGS.md"), "findings\n")
+	git("add", ".")
+	git("commit", "-qm", "work")
+
+	scope, err := ResolveBranchScope(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range scope.Files {
+		if strings.HasPrefix(f, "docs/metareview/") || strings.HasPrefix(f, ".metareview/") {
+			t.Errorf("metareview's own artifact is in the branch scope and can never be cleared: %q", f)
+		}
+	}
+	var sawReal bool
+	for _, f := range scope.Files {
+		if f == "real.go" {
+			sawReal = true
+		}
+	}
+	if !sawReal {
+		t.Errorf("the actual source change must still be in scope: %v", scope.Files)
+	}
+}

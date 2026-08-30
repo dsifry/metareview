@@ -135,7 +135,7 @@ func manifestArgs(profile contextprofile.Profile) (reviewmanifest.Manifest, revi
 func TestReviewMarkdownRecordsHeadAndCoveredPaths(t *testing.T) {
 	meta := reviewMetadata{HeadSHA: "abc1234def", CoveredPaths: []string{"internal/a.go", "internal/b.go"}}
 	md := reviewMarkdown("mrv-1", "task-1", "ctx.md", "", "gate", "PASS", nil, "", meta)
-	for _, required := range []string{"Head: `abc1234def`", "Covered paths: `internal/a.go, internal/b.go`"} {
+	for _, required := range []string{"Head: `abc1234def`", "Covered paths: `[\"internal/a.go\",\"internal/b.go\"]`"} {
 		if !strings.Contains(md, required) {
 			t.Fatalf("review markdown missing %q:\n%s", required, md)
 		}

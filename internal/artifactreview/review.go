@@ -2,6 +2,7 @@ package artifactreview
 
 import (
 	"fmt"
+	"github.com/dsifry/metareview/internal/reviewlog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -128,6 +129,15 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
 		"Target: " + markdown.InlineCode(target) + "\n\n" +
 		"Context pack: " + markdown.InlineCode(ctx.ContextRel) + "\n\n" +
 		"Execution mode: `pending-parallel-subagents`\n\n" +
+		// The FOURTH writer of this artifact. The other three gained these fields and this one
+		// did not, which did not merely omit information — it inverted a gate. In a clone an
+		// artifact review had no head, so branch scope dropped it and its NOT_REVIEWED blocker
+		// never reached must_clear, while the other reviews now carried covered paths and
+		// satisfied the unreviewed check: the same repository at the same commit answered
+		// differently depending on an untracked file, and answered "clear" in the checkout that
+		// had less evidence. An artifact review reads no source files, so it says so.
+		reviewlog.HeaderLine(reviewlog.HeadLabel, firstNonEmptyString(head, reviewlog.UnknownHead)) +
+		reviewlog.HeaderLine(reviewlog.CoveredPathsLabel, reviewlog.EncodeCoveredPaths(nil)) +
 		"Previous run: " + markdown.InlineCode(prevDisplay) + "\n\n" +
 		// The lens set is recorded in the log itself so a completed review stays judged against the
 		// rubric that was required when it ran. Without it, adding a lens retroactively marks every
@@ -156,4 +166,14 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
 		return Result{}, err
 	}
 	return Result{RunID: runID, ReviewRel: reviewRel, ContextRel: ctx.ContextRel, PreviousRun: previousRun}, nil
+}
+
+// firstNonEmptyString returns the first value that is not empty.
+func firstNonEmptyString(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
