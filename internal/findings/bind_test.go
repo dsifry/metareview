@@ -174,6 +174,26 @@ func TestBindingEdges(t *testing.T) {
 		}
 	})
 
+	// A real fingerprint names several files: "pr:unresolved-review-blockers:CHANGELOG.md|docs/x.md".
+	// Binding to only the first would leave the exception alive when any of the others changed -
+	// found by mutation: FindAllString(raw, -1) -> (raw, 1) survived the whole suite, because every
+	// fixture named at most one path.
+	t.Run("every file the finding names is watched, not just the first", func(t *testing.T) {
+		seedFile(t, root, "docs/second.md", "second\n")
+		rec := openBlocker("mrvf-m")
+		rec.Fingerprint = "pr:unresolved-review-blockers:internal/x.go|docs/second.md"
+		got := bindablePaths(root, rec)
+		if len(got) != 2 {
+			t.Fatalf("bindablePaths = %v, want both files", got)
+		}
+		// And the binding must actually change when the SECOND one does.
+		_, _, before := bindingFor(root, rec, "head-1")
+		seedFile(t, root, "docs/second.md", "second, edited\n")
+		if _, _, after := bindingFor(root, rec, "head-1"); after == before {
+			t.Error("editing the second named file did not change the binding, so the override would not lapse")
+		}
+	})
+
 	t.Run("a traversing or absolute path is never watched", func(t *testing.T) {
 		rec := openBlocker("mrvf-t")
 		rec.Fingerprint = "pr:x:../outside/y.go|/etc/passwd.go"
