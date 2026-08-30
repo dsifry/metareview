@@ -186,6 +186,24 @@ type Delta struct {
 	Pins []Pin `json:"pins,omitempty"`
 }
 
+// Lens verdicts. ERROR is first-class and deliberately so: a lens that could not run has to be
+// able to say it did not run. An absent outcome must never read as a clean one — the same rule
+// that makes an unresolved mutant count against efficacy rather than disappear from it.
+const (
+	LensPass          = "PASS"
+	LensNeedsRevision = "NEEDS_REVISION"
+	LensError         = "ERROR"
+)
+
+// LensReport is one adversarial lens's result. Requiring one per declared lens is what stops a
+// flat findings list standing in for a review that never ran: `{"findings":[]}` cannot say which
+// lenses looked, and eight silent lenses are indistinguishable from none.
+type LensReport struct {
+	Name     string    `json:"name"`
+	Verdict  string    `json:"verdict"`
+	Findings []Finding `json:"findings,omitempty"`
+}
+
 // PinResult is the outcome of checking one Pin. Proven is the only value a gate accepts, and it
 // is true only when breaking the line failed the tests AND restoring it passed them.
 type PinResult struct {

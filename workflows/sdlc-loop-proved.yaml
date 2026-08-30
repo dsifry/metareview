@@ -25,7 +25,11 @@ transitions:                                  # ordered
   - {from: verify,     to: done,       gate: all_fixed,   outcome: fixed}
   - {from: verify,     to: discover,   gate: bugs_remain, loop: true}
 nodes:
-  discover:   {kind: review-lenses,        exec: subagent, lenses: 8, model: $REVIEWER, effort: $REV_EFFORT}
+  # require_verdicts: a flat findings list cannot say which lenses looked, so eight silent lenses
+  # and none at all are the same document. The strict form demands one verdict per declared lens,
+  # and ERROR is legal — a lens that could not run must be able to say so, because an incomplete
+  # review is not a clean one.
+  discover:   {kind: review-lenses,        exec: subagent, lenses: 8, require_verdicts: true, model: $REVIEWER, effort: $REV_EFFORT}
   adjudicate: {kind: match-then-adjudicate, exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
   fix:        {kind: agent-edit}                                   # exec inferred from the kind (inline)
   # prove is deterministic: it breaks each line the fix claims a test now holds, requires the

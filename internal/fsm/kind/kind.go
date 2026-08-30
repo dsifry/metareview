@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -350,8 +351,13 @@ func (reviewLenses) Info() workflow.KindInfo {
 
 func validateLenses(p map[string]any) error {
 	for k := range p {
-		if k != "lenses" {
+		if k != "lenses" && k != "require_verdicts" {
 			return errors.New("unknown param " + k)
+		}
+	}
+	if v, ok := p["require_verdicts"]; ok {
+		if _, isBool := v.(bool); !isBool {
+			return errors.New("require_verdicts must be true or false")
 		}
 	}
 	if v, ok := p["lenses"]; ok {
@@ -372,6 +378,60 @@ func lensCount(n *workflow.Node) int {
 
 type findingsOut struct {
 	Findings []run.Finding `json:"findings"`
+}
+
+// lensesOut is the strict shape: one report per declared lens. Requested per node with
+// `require_verdicts: true`, so the permissive default keeps working and a workflow that wants
+// proof of coverage can demand it.
+type lensesOut struct {
+	Lenses []run.LensReport `json:"lenses"`
+}
+
+// requireVerdicts reports whether this node demands a verdict per lens.
+func requireVerdicts(n *workflow.Node) bool {
+	if n == nil {
+		return false
+	}
+	v, _ := n.Params["require_verdicts"].(bool)
+	return v
+}
+
+// DecodeFor is Decode with the node in hand, so the contract can depend on what the node asked
+// for. A flat findings list cannot say which lenses looked, so eight silent lenses and none at
+// all are the same document; this makes them different.
+func (k reviewLenses) DecodeFor(n *workflow.Node, raw json.RawMessage) (any, error) {
+	if !requireVerdicts(n) {
+		return k.Decode(raw)
+	}
+	var o lensesOut
+	if err := strictDecode(raw, &o); err != nil {
+		return nil, err
+	}
+	want := Lenses[:lensCount(n)]
+	if len(o.Lenses) != len(want) {
+		return nil, invalid("lenses", fmt.Sprintf("%d lens reports for %d declared lenses", len(o.Lenses), len(want)))
+	}
+	seen := map[string]bool{}
+	for i, l := range o.Lenses {
+		switch l.Verdict {
+		case run.LensPass, run.LensNeedsRevision, run.LensError:
+		default:
+			return nil, invalid("lenses", fmt.Sprintf("lens %d (%q): verdict %q is not PASS, NEEDS_REVISION or ERROR", i, l.Name, l.Verdict))
+		}
+		if !slices.Contains(want, l.Name) {
+			return nil, invalid("lenses", fmt.Sprintf("lens %d: %q is not one of the declared lenses", i, l.Name))
+		}
+		if seen[l.Name] {
+			// A repeat must not stand in for a missing one, which is how a partial review would
+			// otherwise satisfy a count.
+			return nil, invalid("lenses", fmt.Sprintf("lens %q reported twice", l.Name))
+		}
+		seen[l.Name] = true
+		if err := checkFindings(l.Findings); err != nil {
+			return nil, err
+		}
+	}
+	return o, nil
 }
 
 func (reviewLenses) Instructions(s run.Snapshot, n *workflow.Node, d machine.Diff, nonce string) (machine.Instructions, error) {
@@ -401,6 +461,19 @@ func (reviewLenses) Decode(raw json.RawMessage) (any, error) {
 }
 
 func (reviewLenses) Reduce(_ run.Snapshot, out any) (run.Delta, error) {
+	if o, ok := out.(lensesOut); ok {
+		d := run.Delta{Findings: []run.Finding{}}
+		for _, l := range o.Lenses {
+			d.Findings = append(d.Findings, l.Findings...)
+			if l.Verdict == run.LensError {
+				// Surfaced as a finding rather than swallowed: a review missing a lens is an
+				// INCOMPLETE review, and an incomplete review must not be scored as a clean one.
+				text, _ := run.CapText("Lens did not complete: "+l.Name+". The review is incomplete, so its silence is not evidence.", run.MaxDesc)
+				d.Findings = append(d.Findings, run.Finding{IssueText: text})
+			}
+		}
+		return d, nil
+	}
 	return run.Delta{Findings: out.(findingsOut).Findings}, nil
 }
 

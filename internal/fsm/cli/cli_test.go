@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dsifry/metareview/internal/fsm/kind"
 	"github.com/dsifry/metareview/internal/fsm/machine"
 	"github.com/dsifry/metareview/internal/fsm/run"
 )
@@ -947,3 +948,57 @@ func TestOpenFailuresAndCraftedRuns(t *testing.T) {
 type failStore struct{ run.RunStore }
 
 func (failStore) Events(string) (run.Log, error) { return run.Log{}, errors.New("unreadable") }
+
+// End to end through the real CLI: sdlc-loop-proved's discover node requires a verdict per lens,
+// so the flat findings list that satisfies sdlc-loop is REFUSED here. This is the seam being
+// live rather than merely present — a contract the machine never consults is a comment.
+func TestProvedWorkflowRefusesAFlatLensReport(t *testing.T) {
+	h := newHarness(t)
+	h.env["ANTHROPIC_API_KEY"] = "k"
+	h.env["OPENAI_API_KEY"] = "k"
+	id := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop-proved",
+		"--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--base", "main")["run_id"].(string)
+	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
+
+	// The shape sdlc-loop accepts: no lens said anything, and nothing can tell whether any ran.
+	flat := h.file("flat.json", `{"findings":[{"issue_text":"x"}]}`)
+	h.mustErr(machine.CodeNodeOutputInvalid, 2, "record", "node-output", "--node", "discover", "--data", flat, "--run", id)
+
+	// A report missing a lens is refused for the same reason.
+	short := h.file("short.json", `{"lenses":[{"name":"Feasibility","verdict":"PASS"}]}`)
+	h.mustErr(machine.CodeNodeOutputInvalid, 2, "record", "node-output", "--node", "discover", "--data", short, "--run", id)
+
+	// The complete form is accepted, and an errored lens becomes a finding rather than silence.
+	var lenses []string
+	for i, name := range kind.Lenses {
+		verdict := "PASS"
+		if i == 2 {
+			verdict = "ERROR"
+		}
+		lenses = append(lenses, `{"name":"`+name+`","verdict":"`+verdict+`"}`)
+	}
+	full := h.file("full.json", `{"lenses":[`+strings.Join(lenses, ",")+`]}`)
+	h.must(StatusOK, 0, "record", "node-output", "--node", "discover", "--data", full, "--run", id)
+	env := h.must(machine.StatusAdvanced, 0, "advance", "--run", id)
+	if env["to"] != "adjudicate" {
+		t.Fatalf("→adjudicate: %v", env)
+	}
+	// That advance is itself the proof: every lens reported PASS with no findings except the one
+	// that ERRORed, so the only thing that could have satisfied findings_nonempty is the finding
+	// the errored lens produced. An incomplete review cannot read as a clean one.
+	//
+	// The other direction, on a second run: all eight PASS with nothing found exits clean.
+	id2 := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop-proved",
+		"--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--base", "main")["run_id"].(string)
+	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id2)
+	var allPass []string
+	for _, name := range kind.Lenses {
+		allPass = append(allPass, `{"name":"`+name+`","verdict":"PASS"}`)
+	}
+	clean := h.file("clean.json", `{"lenses":[`+strings.Join(allPass, ",")+`]}`)
+	h.must(StatusOK, 0, "record", "node-output", "--node", "discover", "--data", clean, "--run", id2)
+	done := h.must(machine.StatusDone, 0, "advance", "--run", id2)
+	if done["outcome"] != "clean" {
+		t.Fatalf("eight passing lenses with nothing found is a clean exit: %v", done)
+	}
+}

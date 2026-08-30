@@ -1198,3 +1198,117 @@ func TestMutationVerifyExecutorReportsOnlyUnprovenPins(t *testing.T) {
 		t.Error("a missing verifier must fail the node")
 	}
 }
+
+// The lens node's output was a flat findings list, so nothing distinguished "eight lenses ran and
+// found nothing" from "no lens ran": {"findings":[]} passed. The verdict-per-lens form closes
+// that, and it is opt-in per node so the permissive default keeps working and the strict workflow
+// gets teeth — which also makes the two runnable side by side as a comparison.
+func TestReviewLensesRequiresAVerdictPerLensWhenAsked(t *testing.T) {
+	r := mustNew(t, &recordingJudge{}, false)
+	k, _ := r.Kind(ReviewLenses)
+
+	// Permissive by default: the legacy flat form still decodes.
+	if _, err := k.Decode(json.RawMessage(`{"findings":[]}`)); err != nil {
+		t.Fatalf("the legacy shape must keep working: %v", err)
+	}
+
+	strict := &workflow.Node{Name: "discover", Kind: ReviewLenses, Params: map[string]any{"lenses": 3, "require_verdicts": true}}
+	dec, ok := k.(interface {
+		DecodeFor(*workflow.Node, json.RawMessage) (any, error)
+	})
+	if !ok {
+		t.Fatal("review-lenses does not expose a node-aware Decode")
+	}
+
+	good := `{"lenses":[
+		{"name":"Feasibility","verdict":"PASS"},
+		{"name":"Completeness","verdict":"NEEDS_REVISION","findings":[{"issue_text":"gap"}]},
+		{"name":"Scope and alignment","verdict":"PASS"}]}`
+	if _, err := dec.DecodeFor(strict, json.RawMessage(good)); err != nil {
+		t.Fatalf("a complete report must decode: %v", err)
+	}
+
+	for _, tc := range []struct{ name, raw string }{
+		{"the flat form is refused once verdicts are required",
+			`{"findings":[]}`},
+		{"a missing lens is refused",
+			`{"lenses":[{"name":"Feasibility","verdict":"PASS"},{"name":"Completeness","verdict":"PASS"}]}`},
+		{"an unknown lens name is refused",
+			`{"lenses":[{"name":"Feasibility","verdict":"PASS"},{"name":"Vibes","verdict":"PASS"},{"name":"Scope and alignment","verdict":"PASS"}]}`},
+		{"a duplicate lens cannot stand in for a missing one",
+			`{"lenses":[{"name":"Feasibility","verdict":"PASS"},{"name":"Feasibility","verdict":"PASS"},{"name":"Scope and alignment","verdict":"PASS"}]}`},
+		{"an unknown verdict is refused",
+			`{"lenses":[{"name":"Feasibility","verdict":"LGTM"},{"name":"Completeness","verdict":"PASS"},{"name":"Scope and alignment","verdict":"PASS"}]}`},
+		{"a lens with no verdict is refused",
+			`{"lenses":[{"name":"Feasibility"},{"name":"Completeness","verdict":"PASS"},{"name":"Scope and alignment","verdict":"PASS"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := dec.DecodeFor(strict, json.RawMessage(tc.raw)); err == nil {
+				t.Error("must be refused")
+			}
+		})
+	}
+
+	// ERROR is a first-class verdict, not an absence: a lens that could not run has to be able to
+	// say so. An incomplete review must never read as a clean one, which is the same rule that
+	// makes an unresolved mutant count against efficacy rather than vanish from it.
+	errored := `{"lenses":[
+		{"name":"Feasibility","verdict":"PASS"},
+		{"name":"Completeness","verdict":"ERROR"},
+		{"name":"Scope and alignment","verdict":"PASS"}]}`
+	out, err := dec.DecodeFor(strict, json.RawMessage(errored))
+	if err != nil {
+		t.Fatalf("ERROR must be a legal verdict: %v", err)
+	}
+	d, err := k.Reduce(run.Snapshot{}, out)
+	if err != nil {
+		t.Fatalf("Reduce: %v", err)
+	}
+	var texts []string
+	for _, f := range d.Findings {
+		texts = append(texts, f.IssueText)
+	}
+	joined := strings.Join(texts, " | ")
+	if !strings.Contains(joined, "Lens did not complete: Completeness") {
+		t.Errorf("an errored lens must surface as a finding a gate can see: %s", joined)
+	}
+}
+
+// The edges of the strict lens contract: the param validator, the nil-node and permissive paths
+// of DecodeFor, and findings inside a lens report being bounded like any other agent-supplied
+// list. Each is a decision, so each is stated.
+func TestReviewLensesStrictEdges(t *testing.T) {
+	r := mustNew(t, &recordingJudge{}, false)
+	k, _ := r.Kind(ReviewLenses)
+	dec := k.(interface {
+		DecodeFor(*workflow.Node, json.RawMessage) (any, error)
+	})
+
+	// A nil node cannot have asked for anything, so the permissive contract applies.
+	if _, err := dec.DecodeFor(nil, json.RawMessage(`{"findings":[]}`)); err != nil {
+		t.Errorf("a nil node must fall back to the flat form: %v", err)
+	}
+	// So does a node that did not ask.
+	lax := &workflow.Node{Name: "discover", Kind: ReviewLenses, Params: map[string]any{"lenses": 3}}
+	if _, err := dec.DecodeFor(lax, json.RawMessage(`{"findings":[]}`)); err != nil {
+		t.Errorf("without require_verdicts the flat form stands: %v", err)
+	}
+
+	// require_verdicts is a boolean, and a workflow that says otherwise is refused at parse time
+	// rather than silently ignored — an unreadable knob is a knob nobody set.
+	info := k.Info()
+	if err := info.ValidateParams(map[string]any{"require_verdicts": "yes"}); err == nil {
+		t.Error("a non-boolean require_verdicts must be refused")
+	}
+	if err := info.ValidateParams(map[string]any{"require_verdicts": true, "lenses": 8}); err != nil {
+		t.Errorf("the documented form must validate: %v", err)
+	}
+
+	// Findings inside a lens report are agent-supplied and bounded like any other.
+	strict := &workflow.Node{Name: "discover", Kind: ReviewLenses, Params: map[string]any{"lenses": 1, "require_verdicts": true}}
+	tooLong := strings.Repeat("f", run.MaxShort+1)
+	bad := `{"lenses":[{"name":"Feasibility","verdict":"NEEDS_REVISION","findings":[{"issue_text":"x","file":"` + tooLong + `"}]}]}`
+	if _, err := dec.DecodeFor(strict, json.RawMessage(bad)); err == nil {
+		t.Error("a finding that breaches the caps must be refused wherever it is nested")
+	}
+}

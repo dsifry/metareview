@@ -694,7 +694,7 @@ func (s *session) runNode(node *workflow.Node, head string) (AdvanceResult, bool
 		}
 	}
 	if !snap.Applied[k] {
-		out, err := kind.Decode(snap.NodeOutputs[k])
+		out, err := decodeFor(kind, node, snap.NodeOutputs[k])
 		var delta run.Delta
 		if err == nil {
 			delta, err = kind.Reduce(snap, out)
@@ -982,7 +982,7 @@ func (m *Machine) Record(ctx context.Context, o RecordOptions) (RecordResult, er
 			return RecordResult{}, errs.E(CodeNodeOutputExists, "output for "+k+" exists (use --replace)", "key", k)
 		}
 		kind, _ := m.deps.Kinds.Kind(node.Kind)
-		if _, err := kind.Decode(o.Data); err != nil {
+		if _, err := decodeFor(kind, node, o.Data); err != nil {
 			return RecordResult{}, errs.Wrap(errs.E(CodeNodeOutputInvalid, err.Error(), "key", k), err)
 		}
 		canon, err := run.Canonical(o.Data)
@@ -1076,4 +1076,18 @@ func (m *Machine) RecordLLMCall(ctx context.Context, call func(context.Context, 
 		return 0, err
 	}
 	return sess.st.Seq, cerr
+}
+
+// nodeAwareDecoder is implemented by kinds whose output contract depends on the node's params —
+// review-lenses requires a verdict per lens when the node asks for it. Decoding through this
+// seam is what makes that requirement real: a contract the machine never consults is a comment.
+type nodeAwareDecoder interface {
+	DecodeFor(*workflow.Node, json.RawMessage) (any, error)
+}
+
+func decodeFor(k NodeKind, n *workflow.Node, raw json.RawMessage) (any, error) {
+	if d, ok := k.(nodeAwareDecoder); ok {
+		return d.DecodeFor(n, raw)
+	}
+	return k.Decode(raw)
 }
