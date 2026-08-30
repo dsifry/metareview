@@ -22,14 +22,26 @@ import (
 // They were invisible, which is the part that matters. `status` read review logs only, so an
 // abandoned run looked exactly like no run at all, and the gate that exists to say "work is
 // unfinished" could not see the most direct evidence of unfinished work in the repository.
-// StoppedNote is the event name that closes a run on purpose. `metareview fsm record stopped
-// --data '{"reason":"..."}'` writes it, and a run carrying one is finished rather than abandoned.
+// StopNote is the event name an operator uses to say WHY a run was left where it is:
+// `metareview fsm record stopped --data '{"reason":"..."}'`.
 //
-// Without it every deliberate stop looked exactly like a loop nobody came back to, so the
-// abandoned-run report accumulated entries no one could ever clear — and a signal that only grows
-// stops being read. The distinction it draws is the honest one: abandoned means stopped with no
-// reason recorded.
-const StoppedNote = "stopped"
+// It ANNOTATES the run. It does not remove it from this report, and that is the whole design.
+//
+// The first version suppressed the run, which made this a gate the principal it constrains could
+// turn off: `fsm record <event>` is advertised to agents in the driver contract, so one append
+// flipped `status` from blocked to clean — and hooks/pre-finish.sh branches on exactly that exit
+// code. An empty payload sufficed. That is `override request` and `override grant` fused into a
+// single unprivileged append, when this repository deliberately separates them: a request does
+// not clear a gate, a grant must come from a different actor, it must carry a reason, and it
+// lapses when the code it excused changes.
+//
+// An annotation needs none of that machinery, because it takes nothing away. A reader learns why
+// a loop was abandoned; the loop still counts as abandoned and still blocks. There is nothing to
+// gain by forging one. If suppression is ever genuinely wanted it should arrive as an FSM
+// operation that makes the run terminal — the machine already owns run.Outcomes and StopReason —
+// carrying the override system's separation of actor, not as a string a consumer package greps
+// for.
+const StopNote = "stopped"
 
 type AbandonedRun struct {
 	RunID    string `json:"runId"`
@@ -38,6 +50,9 @@ type AbandonedRun struct {
 	// Node is the node the machine was waiting on, when it stopped at a handoff.
 	Node    string `json:"node,omitempty"`
 	Updated string `json:"updated,omitempty"`
+	// StopReason is what an operator recorded about why the run was left here, empty when they
+	// recorded nothing. It explains the entry; it never removes it.
+	StopReason string `json:"stopReason,omitempty"`
 }
 
 // DiscoverAbandonedRuns reports FSM runs left in a non-terminal state.
@@ -94,29 +109,33 @@ func abandonedRun(dir string, kinds map[string]workflow.KindInfo) (AbandonedRun,
 	}
 	got := AbandonedRun{RunID: filepath.Base(dir)}
 	var state, mock string
-	var stopped bool
 	for _, line := range strings.Split(string(audit), "\n") {
 		if line == "" {
 			continue
 		}
 		var ev struct {
-			Name  string `json:"name"`
 			Type  string `json:"type"`
 			At    string `json:"at"`
 			State string `json:"state"`
 			Data  struct {
-				Name     string `json:"name"`
-				Workflow string `json:"workflow"`
-				Mock     string `json:"mock"`
-				To       string `json:"to"`
-				ToKind   string `json:"to_kind"`
+				// RecordData's fields, read for TypeRecord ONLY. `name` is not unique to records:
+				// CmdCallData, GateData and OverflowHandlerData all serialise one, and a workflow
+				// may legally declare a command called "stopped" — so reading `name` without
+				// checking the type let a guarded command annotate every run of its workflow.
+				Name     string          `json:"name"`
+				Note     json.RawMessage `json:"data"`
+				Workflow string          `json:"workflow"`
+				Mock     string          `json:"mock"`
+				To       string          `json:"to"`
+				ToKind   string          `json:"to_kind"`
 			} `json:"data"`
 		}
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			continue
 		}
-		if ev.Name == StoppedNote || ev.Data.Name == StoppedNote {
-			stopped = true
+		if ev.Type == run.TypeRecord && ev.Data.Name == StopNote {
+			// Last note wins: an operator may record a stop, resume the run, and record another.
+			got.StopReason = noteReason(ev.Data.Note)
 		}
 		if ev.Data.Workflow != "" {
 			got.Workflow = ev.Data.Workflow
@@ -133,9 +152,9 @@ func abandonedRun(dir string, kinds map[string]workflow.KindInfo) (AbandonedRun,
 			state = ev.State
 		}
 	}
-	// A mock run proves nothing and is not work left undone, and a run stopped on purpose is
-	// finished — the operator said so and the reason is in the audit.
-	if state == "" || mock != "" || stopped {
+	// A mock run proves nothing and is not work left undone. A stop note does NOT exclude a run:
+	// it is reported with the operator's reason attached.
+	if state == "" || mock != "" {
 		return AbandonedRun{}, false
 	}
 	got.State = state
@@ -143,4 +162,20 @@ func abandonedRun(dir string, kinds map[string]workflow.KindInfo) (AbandonedRun,
 		return AbandonedRun{}, false
 	}
 	return got, true
+}
+
+// noteReason reads the `reason` a stop note carries. An absent or unreadable payload yields
+// nothing, reported as a run stopped without a stated reason rather than treated as an error: the
+// note is an annotation, and a malformed one is simply an annotation that says little.
+func noteReason(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var note struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(raw, &note); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(note.Reason)
 }

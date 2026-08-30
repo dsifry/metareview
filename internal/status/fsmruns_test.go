@@ -1,7 +1,9 @@
 package status
 
 import (
+	"encoding/json"
 	"github.com/dsifry/metareview/internal/fsm/kind"
+	"github.com/dsifry/metareview/internal/fsm/run"
 	"os"
 	"path/filepath"
 	"testing"
@@ -181,36 +183,121 @@ func TestAbandonedRunsAreReportedInAStableOrder(t *testing.T) {
 	}
 }
 
-// A run stopped on purpose is finished, not abandoned. Without this distinction every deliberate
-// stop looked exactly like a loop nobody came back to, so the report accumulated entries nobody
-// could ever clear — and a signal that only grows stops being read. Abandoned means stopped with
-// NO reason recorded.
-func TestARunStoppedOnPurposeIsNotAbandoned(t *testing.T) {
+// A stop note ANNOTATES a run; it never removes it from the report.
+//
+// The first version suppressed the run, which made this a gate the principal it constrains could
+// turn off: `fsm record <event>` is advertised to agents, so one append flipped `status` from
+// blocked to clean and hooks/pre-finish.sh branches on exactly that exit code. An annotation
+// cannot be used that way, which is why it needs none of the override system's actor separation —
+// it takes nothing away, so there is nothing to gain by forging one.
+func TestAStopNoteExplainsARunWithoutHidingIt(t *testing.T) {
 	root := t.TempDir()
 	const init = `{"seq":1,"type":"init","at":"2026-08-30T01:00:00Z","data":{"workflow":"t","run_id":"r"}}`
 	const moved = `{"seq":2,"type":"transition","at":"2026-08-30T01:05:00Z","state":"discover","data":{"from":"discover","to":"fix","to_kind":"agent-edit"}}`
 
-	writeRun(t, root, "run-left-open", init, moved)
-	writeRun(t, root, "run-stopped-by-name", init, moved,
-		`{"seq":3,"type":"record","name":"stopped","at":"2026-08-30T01:06:00Z","data":{"reason":"superseded"}}`)
-	writeRun(t, root, "run-stopped-in-data", init, moved,
-		`{"seq":3,"type":"record","at":"2026-08-30T01:06:00Z","data":{"name":"stopped","reason":"superseded"}}`)
-	// A note that is not the stop note leaves the run open.
-	writeRun(t, root, "run-other-note", init, moved,
-		`{"seq":3,"type":"record","name":"observation","at":"2026-08-30T01:06:00Z","data":{"reason":"just a note"}}`)
+	// Built by marshalling the REAL types: machine.Record appends run.RecordData as the payload,
+	// so the name lives at data.name and the note at data.data. A hand-written fixture would pin
+	// a shape the writer does not produce, and a change to RecordData's serialisation would then
+	// break `fsm record stopped` in production with the suite still green.
+	stop := func(seq int, reason string) string {
+		t.Helper()
+		note, err := json.Marshal(map[string]string{"reason": reason})
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := json.Marshal(run.RecordData{Name: StopNote, Data: note})
+		if err != nil {
+			t.Fatal(err)
+		}
+		line, err := json.Marshal(map[string]any{
+			"seq": seq, "type": run.TypeRecord, "at": "2026-08-30T01:06:00Z", "state": "fix",
+			"data": json.RawMessage(payload),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(line)
+	}
+
+	writeRun(t, root, "run-annotated", init, moved, stop(3, "superseded by a newer run"))
+	writeRun(t, root, "run-silent", init, moved)
 
 	got := DiscoverAbandonedRuns(root)
-	open := map[string]bool{}
-	for _, r := range got {
-		open[r.RunID] = true
-	}
-	if !open["run-left-open"] || !open["run-other-note"] {
-		t.Errorf("a run with no stop note is still abandoned: %+v", got)
-	}
-	if open["run-stopped-by-name"] || open["run-stopped-in-data"] {
-		t.Errorf("a run stopped on purpose must not be reported abandoned: %+v", got)
-	}
 	if len(got) != 2 {
-		t.Errorf("got %d abandoned runs, want 2: %+v", len(got), got)
+		t.Fatalf("a stop note must not remove a run from the report: got %d, want 2 (%+v)", len(got), got)
+	}
+	by := map[string]AbandonedRun{}
+	for _, r := range got {
+		by[r.RunID] = r
+	}
+	if by["run-annotated"].StopReason != "superseded by a newer run" {
+		t.Errorf("the operator's reason must be carried: %q", by["run-annotated"].StopReason)
+	}
+	if by["run-silent"].StopReason != "" {
+		t.Errorf("a run with no note has no reason: %q", by["run-silent"].StopReason)
+	}
+	// Still blocking. An annotation explains unfinished work; it does not finish it.
+	rep, err := Build(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Blocked || len(rep.Abandoned) != 2 {
+		t.Errorf("annotated or not, both runs must still block: %+v", rep)
+	}
+}
+
+// `name` is not unique to record events: CmdCallData, GateData and OverflowHandlerData all
+// serialise one and cmdPattern admits "stopped", so reading it without checking the type let a
+// workflow that declared a guarded command called `stopped` annotate — and, in the suppressing
+// version, HIDE — every run of that workflow.
+func TestOnlyARecordEventCarriesAStopNote(t *testing.T) {
+	root := t.TempDir()
+	const init = `{"seq":1,"type":"init","at":"2026-08-30T01:00:00Z","data":{"workflow":"t","run_id":"r"}}`
+	const moved = `{"seq":2,"type":"transition","at":"2026-08-30T01:05:00Z","state":"discover","data":{"from":"discover","to":"fix"}}`
+	// Each collision fixture carries a `data` payload holding a reason, so that if the type check
+	// were dropped the reason WOULD be read and the assertion below would fail. An earlier version
+	// omitted it: the mutation that removes `ev.Type == run.TypeRecord` then produced an empty
+	// StopReason and the test passed, so the control could not detect the thing it controls for.
+	for name, ev := range map[string]string{
+		"cmd-call":         `{"seq":3,"type":"cmd_call","data":{"name":"stopped","data":{"reason":"forged by a command name"}}}`,
+		"gate":             `{"seq":3,"type":"gate","data":{"name":"stopped","data":{"reason":"forged by a gate name"}}}`,
+		"overflow-handler": `{"seq":3,"type":"overflow_handler","data":{"name":"stopped","data":{"reason":"forged by a handler name"}}}`,
+		"a-different-note": `{"seq":3,"type":"record","data":{"name":"observation","data":{"reason":"just a note"}}}`,
+	} {
+		writeRun(t, root, "run-"+name, init, moved, ev)
+	}
+	got := DiscoverAbandonedRuns(root)
+	if len(got) != 4 {
+		t.Fatalf("every run must still be reported: got %d, want 4", len(got))
+	}
+	for _, r := range got {
+		if r.StopReason != "" {
+			t.Errorf("%s: only a record event named %q carries a stop note, got %q", r.RunID, StopNote, r.StopReason)
+		}
+	}
+}
+
+// A note whose payload says nothing is an annotation that says nothing — not an error, and not a
+// reason. The run is reported either way, so an empty note buys nothing.
+func TestAStopNoteWithNoReasonIsReportedWithoutOne(t *testing.T) {
+	root := t.TempDir()
+	const init = `{"seq":1,"type":"init","at":"2026-08-30T01:00:00Z","data":{"workflow":"t","run_id":"r"}}`
+	const moved = `{"seq":2,"type":"transition","at":"2026-08-30T01:05:00Z","state":"discover","data":{"from":"discover","to":"fix"}}`
+	for name, note := range map[string]string{
+		"empty-object": `{"name":"stopped","data":{}}`,
+		"blank-reason": `{"name":"stopped","data":{"reason":"   "}}`,
+		"no-payload":   `{"name":"stopped"}`,
+		"unparseable":  `{"name":"stopped","data":"not an object"}`,
+	} {
+		writeRun(t, root, "run-"+name, init, moved, `{"seq":3,"type":"record","data":`+note+`}`)
+	}
+	got := DiscoverAbandonedRuns(root)
+	if len(got) != 4 {
+		t.Fatalf("got %d runs, want 4", len(got))
+	}
+	for _, r := range got {
+		if r.StopReason != "" {
+			t.Errorf("%s: an empty note yields no reason, got %q", r.RunID, r.StopReason)
+		}
 	}
 }
