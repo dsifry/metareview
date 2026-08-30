@@ -126,6 +126,19 @@ fi
 grep -Eq '^go build -o "\$ROOT/bin/metareview"' "$fsm_script" || {
   echo "FAIL: test-fsm.sh must build bin/metareview unconditionally"; exit 1; }
 
+# The Stop hook is what makes the gate binding: metareview's transitions cannot be routed around
+# once a run is inside them, but ENTERING them was policy until this existed. It is tested here
+# rather than trusted, because a hook that silently stops blocking is worse than no hook - it
+# looks like enforcement.
+hook="$ROOT/hooks/pre-finish.sh"
+test -x "$hook" || { echo "FAIL: hooks/pre-finish.sh must exist and be executable"; exit 1; }
+grep -q '"decision":"block"' "$hook" || { echo "FAIL: the hook must be able to block"; exit 1; }
+# Absent tooling blocks rather than passing: a check that did not run is not a check that passed.
+if ! METAREVIEW_BIN=no-such-metareview-binary "$hook" | grep -q '"decision":"block"'; then
+  echo "FAIL: the hook must block when metareview is not installed, not wave the work through"; exit 1
+fi
+grep -q '"Stop"' "$ROOT/hooks/hooks.json" || { echo "FAIL: hooks.json must register the Stop hook"; exit 1; }
+
 npm run build >/tmp/metareview-build-test.out
 test -x "$ROOT/bin/metareview"
 "$ROOT/bin/metareview" --version | grep -q "^${VERSION}$"

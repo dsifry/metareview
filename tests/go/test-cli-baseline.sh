@@ -42,3 +42,28 @@ fi
 blocked_out="$( (cd "$clean" && ./mrv status --json 2>/dev/null) || true )"
 printf '%s' "$blocked_out" | grep -q 't-1' || { echo "FAIL: the blocker must be named in the output"; exit 1; }
 printf '%s' "$blocked_out" | grep -q '"blocked": true' || { echo "FAIL: blocked must be true"; exit 1; }
+
+# --target scopes that answer to the work in hand. Without it `blocked` spans the whole review
+# history, so a Stop hook wired to it refuses an agent because of work it never touched: a
+# livelock rather than a gate, and the reason the hooks could not ship before now.
+printf '# metareview: task-done review\n\nRun ID: `mrv-y`\nTarget: `t-2`\n\n## Verdict\n\nNEEDS_REVISION\n' \
+  > "$clean/docs/metareview/reviews/mrv-y-task-done-t-2.md"
+
+scoped="$( (cd "$clean" && ./mrv status --json --target t-1 2>/dev/null) || true )"
+printf '%s' "$scoped" | grep -q 't-1' || { echo "FAIL: the scoped report must name its own blocker"; exit 1; }
+printf '%s' "$scoped" | grep -q 't-2' && { echo "FAIL: scoping must not leak another target's blocker"; exit 1; }
+printf '%s' "$scoped" | grep -q '"target": "t-1"' || { echo "FAIL: the report must say what it was scoped to"; exit 1; }
+
+# A target with nothing against it is not blocked, which is what lets a hook pass work through
+# while the rest of the history is still red.
+if ! (cd "$clean" && ./mrv status --json --target t-untouched >/dev/null 2>&1); then
+  echo "FAIL: an untouched target must exit 0 even while other work is blocked"; exit 1
+fi
+# ...while the unscoped answer over the same tree still blocks.
+if (cd "$clean" && ./mrv status --json >/dev/null 2>&1); then
+  echo "FAIL: the unscoped answer must still block"; exit 1
+fi
+# A malformed invocation is refused rather than silently treated as unscoped.
+if (cd "$clean" && ./mrv status --json --target 2>/dev/null); then
+  echo "FAIL: --target with no value must be refused"; exit 1
+fi

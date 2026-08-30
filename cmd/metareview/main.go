@@ -53,9 +53,11 @@ Usage:
 Commands:
   setup --check              Detect repository mode and prerequisites without writing files
   setup --bootstrap-prereqs  Print or execute prerequisite bootstrap actions
-  status [--json]            Print repository review capability status; --json emits the
+  status [--json [--target <path>]]
+                             Print repository review capability status; --json emits the
                              machine-readable contract a host hook branches on (exit 1 when
-                             something must be cleared)
+                             something must be cleared). --target narrows it to one path, so a
+                             hook blocks on the work in hand rather than the whole history
   override request           Record an out-of-workflow escalation against a finding (still blocks)
   override grant             Acknowledge a process exception from outside the workflow (stops blocking)
   override list              List process exceptions; --pending exits 1 while any are unacknowledged
@@ -106,8 +108,18 @@ func main() {
 	// status --json is the contract a host hook branches on: one machine-readable answer to
 	// "may work proceed, and if not, what must be cleared". Exits 1 when something must be
 	// cleared, so a hook needs no parsing to make the common decision.
-	if len(args) == 2 && args[0] == "status" && args[1] == "--json" {
-		code, err := status.Emit(mustCwd(), os.Stdout)
+	if len(args) >= 2 && args[0] == "status" && args[1] == "--json" {
+		// --target narrows the answer to the work in hand. Unscoped, `blocked` spans the whole
+		// review history, so a hook wired to it refuses an agent because of work it never
+		// touched - a livelock rather than a gate.
+		target := ""
+		if len(args) == 4 && args[2] == "--target" {
+			target = args[3]
+		} else if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "Usage: metareview status --json [--target <path>]")
+			os.Exit(2)
+		}
+		code, err := status.EmitFor(mustCwd(), target, os.Stdout)
 		exitOnErr(err)
 		if code != 0 {
 			os.Exit(code)

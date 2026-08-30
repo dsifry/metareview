@@ -248,3 +248,82 @@ func TestEmitSurfacesWriteFailures(t *testing.T) {
 		t.Error("want the write failure surfaced")
 	}
 }
+
+// --target narrows the report to the work in hand. Without it `blocked` spans the whole review
+// history — 66 entries on this repository when this was written — so a Stop hook wired to it
+// would block an agent on work it never touched. That is a livelock, not a gate, and it is the
+// reason the hooks could not ship.
+func TestTargetScopingNarrowsWhatMustBeCleared(t *testing.T) {
+	root := t.TempDir()
+	writeLog(t, root, "mrv-a-task-done-alpha.md",
+		"# metareview: task-done review\n\nRun ID: `mrv-a`\nTarget: `internal/alpha/thing.go`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	writeLog(t, root, "mrv-b-task-done-beta.md",
+		"# metareview: task-done review\n\nRun ID: `mrv-b`\nTarget: `internal/beta/other.go`\n\n## Verdict\n\nNEEDS_REVISION\n")
+
+	all, err := Build(root)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(all.MustClear) != 2 || !all.Blocked {
+		t.Fatalf("unscoped must see both: %+v", all.MustClear)
+	}
+
+	scoped, err := BuildFor(root, "internal/alpha/thing.go")
+	if err != nil {
+		t.Fatalf("BuildFor: %v", err)
+	}
+	if len(scoped.MustClear) != 1 || scoped.MustClear[0].Target != "internal/alpha/thing.go" {
+		t.Fatalf("scoped must see only its own target: %+v", scoped.MustClear)
+	}
+	if !scoped.Blocked {
+		t.Error("a blocker on the target in hand must still block")
+	}
+
+	// The point of the flag: an agent working on beta is not held up by alpha's blocker.
+	other, err := BuildFor(root, "internal/beta/other.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(other.MustClear) != 1 || other.MustClear[0].Target != "internal/beta/other.go" {
+		t.Fatalf("scoping must not leak across targets: %+v", other.MustClear)
+	}
+
+	// A target with nothing against it is not blocked, which is what lets a hook let work through.
+	clean, err := BuildFor(root, "internal/gamma/new.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clean.Blocked || len(clean.MustClear) != 0 {
+		t.Errorf("an untouched target must not be blocked by other work: %+v", clean)
+	}
+	// And the scope is reported, so a reader knows whether they are seeing everything.
+	if clean.Target != "internal/gamma/new.go" || all.Target != "" {
+		t.Errorf("the report must say what it was scoped to: %q / %q", clean.Target, all.Target)
+	}
+}
+
+// Scoping narrows the whole report, not only must_clear: a document headed `"target": "t-1"` that
+// still lists every other target's reviews invites exactly the misreading the field exists to
+// prevent.
+func TestTargetScopingNarrowsTheReviewListToo(t *testing.T) {
+	root := t.TempDir()
+	writeLog(t, root, "mrv-a-task-done-alpha.md",
+		"# metareview: task-done review\n\nRun ID: `mrv-a`\nTarget: `alpha.go`\n\n## Verdict\n\nPASS\n")
+	writeLog(t, root, "mrv-b-task-done-beta.md",
+		"# metareview: task-done review\n\nRun ID: `mrv-b`\nTarget: `beta.go`\n\n## Verdict\n\nPASS\n")
+
+	all, err := Build(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Reviews) != 2 {
+		t.Fatalf("unscoped lists everything: %d", len(all.Reviews))
+	}
+	scoped, err := BuildFor(root, "alpha.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scoped.Reviews) != 1 || scoped.Reviews[0].Target != "alpha.go" {
+		t.Errorf("a scoped report must list only its own target's reviews: %+v", scoped.Reviews)
+	}
+}

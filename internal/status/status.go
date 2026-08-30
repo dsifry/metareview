@@ -43,6 +43,9 @@ type Report struct {
 	Reviews   []reviewlog.Summary `json:"reviews"`
 	MustClear []Blocker           `json:"must_clear"`
 	Blocked   bool                `json:"blocked"`
+	// Target is the scope this report was built for, empty when it covers everything. A reader
+	// has to be able to tell a clean repository from a clean corner of a blocked one.
+	Target string `json:"target,omitempty"`
 }
 
 // Build reads the repository's review logs and reports what remains unresolved.
@@ -50,7 +53,16 @@ type Report struct {
 // Blocking is taken from the review log's own HasUnresolvedBlockers, never re-derived here: a
 // second definition of "blocker" would drift from the first, and this branch has repeatedly
 // found exactly that failure - one predicate updated at three call sites out of four.
-func Build(root string) (Report, error) {
+// Build reports on everything. BuildFor narrows to one target.
+func Build(root string) (Report, error) { return BuildFor(root, "") }
+
+// BuildFor reports only what stands against `target`, or everything when target is empty.
+//
+// Scoping is what makes a host hook usable. Unscoped, `blocked` spans the entire review history -
+// 66 entries on this repository - so a Stop hook wired to it would refuse an agent because of
+// work it never touched. A gate that always says no is a livelock, and an operator who has to
+// disable it to get anything done has no gate at all.
+func BuildFor(root, target string) (Report, error) {
 	rep := repo.Detect(root)
 	r := Report{
 		Version:   version.Version,
@@ -59,14 +71,30 @@ func Build(root string) (Report, error) {
 		Beads:     rep.Capabilities.Beads,
 		Metaswarm: rep.Capabilities.Metaswarm,
 		MustClear: []Blocker{},
+		Target:    target,
 	}
 	logs, err := reviewlog.Discover(root)
 	if err != nil {
 		return r, err
 	}
+	// Scoping narrows the whole report, not just must_clear. A document that says
+	// `"target": "t-1"` while listing every other target's reviews invites the reader to think
+	// they are seeing everything, which is the misreading the field exists to prevent.
 	r.Reviews = logs
+	if target != "" {
+		scoped := make([]reviewlog.Summary, 0, len(logs))
+		for _, s := range logs {
+			if s.Target == target {
+				scoped = append(scoped, s)
+			}
+		}
+		r.Reviews = scoped
+	}
 	for _, s := range logs {
 		if !s.HasUnresolvedBlockers {
+			continue
+		}
+		if target != "" && s.Target != target {
 			continue
 		}
 		r.MustClear = append(r.MustClear, Blocker{
@@ -81,8 +109,12 @@ func Build(root string) (Report, error) {
 // Emit writes the report as JSON and returns the process exit code: 1 when something must be
 // cleared, 0 otherwise. It lives here rather than in main so the contract - including the exit
 // decision a hook depends on - is covered by tests.
-func Emit(root string, w io.Writer) (int, error) {
-	r, err := Build(root)
+// Emit writes the whole report. EmitFor narrows it to one target.
+func Emit(root string, w io.Writer) (int, error) { return EmitFor(root, "", w) }
+
+// EmitFor writes the report for one target and returns the process exit code.
+func EmitFor(root, target string, w io.Writer) (int, error) {
+	r, err := BuildFor(root, target)
 	if err != nil {
 		return 0, err
 	}
