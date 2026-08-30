@@ -142,6 +142,9 @@ func Apply(st FoldState, ev Event) (FoldState, error) {
 				}
 			}
 		}
+		if p.PinResults != nil {
+			next.Unproven = foldUnproven(next.Unproven, p.PinResults)
+		}
 		if p.Pins != nil {
 			// The fix node's claims carry forward to verify. Replaced rather than appended: each
 			// fix round makes its own claims, and a stale pin from an earlier iteration would be
@@ -590,4 +593,52 @@ func withinCaps(p any) bool {
 		return shortOK(d.ChildRunID)
 	}
 	return true
+}
+
+// pinKey identifies the mutation a pin describes. The test name is deliberately not part of it:
+// the same unprotected line reached by a different test is the same gap, and keying on the test
+// would let a fix round "clear" it by naming another one.
+func pinKey(p Pin) string { return p.File + "\x00" + p.From + "\x00" + p.To }
+
+// foldUnproven accumulates the mutations no test caught.
+//
+// Only PinProven clears an entry, and that asymmetry is the whole point. A survived pin adds or
+// refreshes the gap. A proven one closes it — the mutation now fails a test, which is the only
+// evidence that actually settles the question. Anything else (malformed, unverifiable) means the
+// round learned nothing, so a gap already established must stand: dropping it there would let a
+// fix round retire real evidence by submitting a pin that does not compile, which is both the
+// easiest thing to do by accident and the easiest to do on purpose.
+func foldUnproven(current []Pin, results []PinResult) []Pin {
+	out := append([]Pin(nil), current...)
+	index := make(map[string]int, len(out))
+	for i, p := range out {
+		index[pinKey(p)] = i
+	}
+	for _, r := range results {
+		key := pinKey(r.Pin)
+		switch r.Outcome {
+		case PinProven:
+			if i, ok := index[key]; ok {
+				out = append(out[:i], out[i+1:]...)
+				index = make(map[string]int, len(out))
+				for j, p := range out {
+					index[pinKey(p)] = j
+				}
+			}
+		case PinSurvived:
+			if i, ok := index[key]; ok {
+				out[i] = r.Pin
+				continue
+			}
+			// Bounded like every other list the snapshot carries. Beyond the cap the run has a
+			// problem no amount of extra evidence helps with, and an unbounded snapshot would
+			// eventually fail to serialise, which loses the whole audit rather than one entry.
+			if len(out) >= MaxDeltaList {
+				continue
+			}
+			index[key] = len(out)
+			out = append(out, r.Pin)
+		}
+	}
+	return out
 }

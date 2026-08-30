@@ -483,7 +483,14 @@ func (r *redactor) snapshot() []byte {
 	// definition — the same reason tree_status is reduced to paths. The path and the test name
 	// stay, because they identify what was proven without reproducing the code, and the fragments
 	// are hashed so a holder of the source can still verify the export describes their tree.
-	if pins, ok := m["pins"].([]any); ok {
+	// unproven holds the same Pin shape and is redacted identically. It is listed here rather
+	// than left to inherit the treatment, because a field that carries source fragments and is
+	// merely forgotten exports the repository's code in the clear.
+	for _, key := range []string{"pins", "unproven"} {
+		pins, ok := m[key].([]any)
+		if !ok {
+			continue
+		}
 		for _, p := range pins {
 			// A nil map from a failed assertion is safe to index in Go and yields nothing, so the
 			// unreachable "not a map" branch is left out rather than written and never executed.

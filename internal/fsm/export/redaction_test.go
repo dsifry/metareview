@@ -33,6 +33,7 @@ var transformed = map[string]string{
 	"stop_reason":  "blanked when it names a cmd",
 	"node_outputs": "emptied for kinds the exporter does not know",
 	"pins":         "from/to source fragments hashed; file and test name kept",
+	"unproven":     "same Pin shape as pins: from/to source fragments hashed, file and test kept",
 }
 
 // verbatim are the fields deliberately exported as they stand. Each entry is a
@@ -137,6 +138,16 @@ func TestExportHashesPinSourceFragments(t *testing.T) {
 				To:   "if key != expected { return true }",
 				Test: "TestKeyComparison",
 			}},
+			// Same Pin shape, carried across iterations rather than within one. It holds source
+			// fragments for exactly the same reason and must be redacted the same way: a field
+			// that merely inherits the treatment by resemblance is a field that exports the
+			// repository's code in the clear the day someone forgets.
+			Unproven: []run.Pin{{
+				File: "internal/secret/algo.go",
+				From: "for i := 0; i < len(secretTable); i++ {",
+				To:   "for i := 0; i < 0; i++ {",
+				Test: "TestTableWalk",
+			}},
 		},
 		repoRoot: "/repo",
 	}
@@ -144,25 +155,29 @@ func TestExportHashesPinSourceFragments(t *testing.T) {
 	if err := json.Unmarshal(rd.snapshot(), &m); err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	pins, ok := m["pins"].([]any)
-	if !ok || len(pins) != 1 {
-		t.Fatalf("pins missing from the export: %v", m["pins"])
-	}
-	pin := pins[0].(map[string]any)
-	if pin["file"] != "internal/secret/algo.go" || pin["test"] != "TestKeyComparison" {
-		t.Errorf("the export must keep what identifies the proof: %v", pin)
-	}
-	for _, field := range []string{"from", "to"} {
-		got, _ := pin[field].(string)
-		if strings.Contains(got, "key") || strings.Contains(got, "expected") {
-			t.Errorf("%s still carries source: %q", field, got)
+	for key, test := range map[string]string{"pins": "TestKeyComparison", "unproven": "TestTableWalk"} {
+		pins, ok := m[key].([]any)
+		if !ok || len(pins) != 1 {
+			t.Fatalf("%s missing from the export: %v", key, m[key])
 		}
-		if !strings.HasPrefix(got, "sha256:") || len(got) != len("sha256:")+64 {
-			t.Errorf("%s = %q, want a sha256: prefixed digest", field, got)
+		pin := pins[0].(map[string]any)
+		if pin["file"] != "internal/secret/algo.go" || pin["test"] != test {
+			t.Errorf("%s: the export must keep what identifies the proof: %v", key, pin)
 		}
-	}
-	// Distinct fragments must hash distinctly, or the export cannot distinguish two pins.
-	if pin["from"] == pin["to"] {
-		t.Error("from and to hashed to the same value")
+		for _, field := range []string{"from", "to"} {
+			got, _ := pin[field].(string)
+			for _, leak := range []string{"key", "expected", "secretTable"} {
+				if strings.Contains(got, leak) {
+					t.Errorf("%s.%s still carries source (%q): %q", key, field, leak, got)
+				}
+			}
+			if !strings.HasPrefix(got, "sha256:") || len(got) != len("sha256:")+64 {
+				t.Errorf("%s.%s = %q, want a sha256: prefixed digest", key, field, got)
+			}
+		}
+		// Distinct fragments must hash distinctly, or the export cannot distinguish two pins.
+		if pin["from"] == pin["to"] {
+			t.Errorf("%s: from and to hashed to the same value", key)
+		}
 	}
 }

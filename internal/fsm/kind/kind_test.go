@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1541,5 +1542,102 @@ func TestMutationVerifyTreatsAnUnsetOutcomeAsUnverifiable(t *testing.T) {
 	}
 	if len(d.Findings) != 1 || d.Findings[0].Category != run.CategoryUnverifiable {
 		t.Errorf("an unset outcome must be unverifiable, not a verdict: %+v", d.Findings)
+	}
+}
+
+// The whole point of carrying Unproven forward: on iteration 2, discovery must be TOLD which
+// lines no test protects, and told to look there — not told to stay away from them.
+//
+// The framing is the substance. Snapshot.AllFound is rendered as "do not re-report verbatim",
+// and a mutation nothing catches is precisely the place most worth reviewing, so putting it in
+// that list would have suppressed the strongest evidence the machine holds.
+func TestDiscoverIsPointedAtLinesNoTestProtects(t *testing.T) {
+	gap := run.Pin{File: "loose.go", From: "n < 10", To: "n < 11", Test: "TestBound"}
+	snap := run.Snapshot{
+		BaseSHA: "b", Head: "h", Iteration: 1,
+		AllFound: []run.Bug{{ID: "a", Desc: "a known bug"}},
+		Unproven: []run.Pin{gap},
+	}
+	node := &workflow.Node{Name: "discover", Kind: ReviewLenses, Params: map[string]any{"lenses": 3}}
+	got, err := reviewLenses{}.Instructions(snap, node, machine.Diff{Text: "+code"}, "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	knownAt := strings.Index(got.Text, "do not re-report verbatim")
+	gapAt := strings.Index(got.Text, "Lines no test protects")
+	if gapAt < 0 {
+		t.Fatalf("discovery was never told about the unprotected line:\n%s", got.Text)
+	}
+	if gapAt < knownAt {
+		t.Error("the gap must be its own section, not part of the do-not-report list")
+	}
+	// It has to arrive as somewhere to look. "Review these first" is the instruction that turns
+	// deterministic evidence into the next round's work.
+	if !strings.Contains(got.Text, "Review these first") {
+		t.Errorf("the gap is not framed as work to do:\n%s", got.Text)
+	}
+	if !strings.Contains(got.Text, "loose.go") {
+		t.Errorf("the gap does not name its file:\n%s", got.Text)
+	}
+	// Agent-authored content, so it is fenced as data like the diff and the findings.
+	var fenced bool
+	for _, u := range got.Untrusted {
+		if u == "unprotected_lines" {
+			fenced = true
+		}
+	}
+	if !fenced {
+		t.Errorf("pin text is written by the fix node and must be untrusted: %v", got.Untrusted)
+	}
+	if !reflect.DeepEqual(got.Input["unprotected_lines"], []run.Pin{gap}) {
+		t.Errorf("the structured input does not carry the gap: %+v", got.Input["unprotected_lines"])
+	}
+}
+
+// A run with nothing unproven must hash exactly as it did before this field existed. An
+// unconditional input key would change the InputHash of every discover call ever recorded,
+// invalidating every stored run and every mock.
+func TestDiscoverInputIsUnchangedWhenNothingIsUnproven(t *testing.T) {
+	snap := run.Snapshot{BaseSHA: "b", Head: "h", Iteration: 1}
+	node := &workflow.Node{Name: "discover", Kind: ReviewLenses, Params: map[string]any{"lenses": 3}}
+	got, err := reviewLenses{}.Instructions(snap, node, machine.Diff{Text: "+code"}, "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := got.Input["unprotected_lines"]; present {
+		t.Error("an empty gap list must not appear in the input at all")
+	}
+	if !reflect.DeepEqual(got.Untrusted, []string{"findings_so_far", "diff"}) {
+		t.Errorf("the untrusted set changed for a run with no pins: %v", got.Untrusted)
+	}
+	if strings.Contains(got.Text, "Lines no test protects") {
+		t.Error("nothing unproven must produce no section at all")
+	}
+}
+
+// The prove node must publish what it learned into the snapshot, not only into Findings. Findings
+// is replaced by the next discover node, so a result recorded only there is destroyed one node
+// later.
+func TestProveRecordsItsResultsForTheNextRound(t *testing.T) {
+	pins := []run.Pin{{File: "loose.go", From: "a", To: "b", Test: "T"}}
+	results := []run.PinResult{{Pin: pins[0], Outcome: run.PinSurvived, Detail: "survived"}}
+	r, err := New(Deps{VerifyPins: func(context.Context, []run.Pin) ([]run.PinResult, error) { return results, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex, _ := r.Executor(MutationVerify)
+	raw, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: run.Snapshot{Pins: pins},
+		Node: &workflow.Node{Name: "prove", Kind: MutationVerify},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d run.Delta
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.PinResults) != 1 || d.PinResults[0].Outcome != run.PinSurvived {
+		t.Fatalf("the round's results were not published for the fold: %+v", d.PinResults)
 	}
 }

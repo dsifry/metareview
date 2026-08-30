@@ -184,6 +184,11 @@ type Delta struct {
 	// catches. It carries forward to the verify node, which proves or refuses each one. Empty
 	// means the fix made no claim, which a gate may treat as unproven.
 	Pins []Pin `json:"pins,omitempty"`
+	// PinResults is what the prove node learned. It is carried separately from Findings because
+	// the two have different lifetimes: a finding describes this round, while "no test catches
+	// this mutation at this line" is a durable fact about the repository that the NEXT round's
+	// discovery should act on.
+	PinResults []PinResult `json:"pin_results,omitempty"`
 }
 
 // Lens verdicts. ERROR is first-class and deliberately so: a lens that could not run has to be
@@ -316,7 +321,18 @@ type Snapshot struct {
 	AllFound       []Bug             `json:"all_found"`
 	// Pins carries the fix node's claims to the verify node. omitempty so a run that never
 	// records one serialises exactly as it did before pins existed.
-	Pins            []Pin                      `json:"pins,omitempty"`
+	Pins []Pin `json:"pins,omitempty"`
+	// Unproven is every mutation a prove round applied that no test caught, accumulated across
+	// iterations. It is the strongest evidence the machine holds — located, deterministic, and
+	// established by running the tests rather than by asking a model — and before it existed the
+	// prove node wrote its result into Findings, which the next discover node overwrote. The
+	// evidence survived exactly one gate evaluation and was then destroyed, so every iteration
+	// after the first rediscovered the same unprotected lines from scratch.
+	//
+	// Only a SURVIVED pin lands here. A malformed or unverifiable one says the claim could not be
+	// evaluated, which is a fact about the pin, not about the code, and pointing the next round's
+	// reviewers at it would send them to a line where nothing is known to be wrong.
+	Unproven        []Pin                      `json:"unproven,omitempty"`
 	Status          []BugStatus                `json:"status"`
 	Unfixed         int                        `json:"unfixed"`
 	PrevUnfixed     *int                       `json:"prev_unfixed"`
@@ -351,6 +367,7 @@ func (s Snapshot) Clone() Snapshot {
 	}
 	c.Confirmed = cloneBugs(s.Confirmed)
 	c.AllFound = cloneBugs(s.AllFound)
+	c.Unproven = append([]Pin(nil), s.Unproven...)
 	if s.Pins != nil {
 		c.Pins = append([]Pin{}, s.Pins...)
 	}

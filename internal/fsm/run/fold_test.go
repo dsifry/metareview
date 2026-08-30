@@ -3,6 +3,7 @@ package run
 import (
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1222,5 +1223,112 @@ func TestFoldCarriesPinsForwardAndReplacesThem(t *testing.T) {
 	s = mustFold(t, b.Events())
 	if len(s.Pins) != 1 || s.Pins[0].File != "b.go" {
 		t.Errorf("pins = %+v, want only the newest round's claims", s.Pins)
+	}
+}
+
+// The evidence must outlive the round that produced it. Before Unproven existed, the prove node
+// wrote its result into Findings and the next discover node replaced Findings wholesale, so a
+// mutation no test caught was known for exactly one gate evaluation and then destroyed — and
+// every iteration after the first rediscovered the same unprotected lines from scratch.
+func TestUnprovenPinsSurviveTheIterationBoundary(t *testing.T) {
+	loose := Pin{File: "loose.go", From: "n < 10", To: "n < 11", Test: "TestBound"}
+	held := Pin{File: "held.go", From: "a", To: "b", Test: "TestHeld"}
+
+	s := foldUnproven(nil, []PinResult{
+		{Pin: loose, Outcome: PinSurvived},
+		{Pin: held, Proven: true, Outcome: PinProven},
+	})
+	if len(s) != 1 || s[0].File != "loose.go" {
+		t.Fatalf("only the mutation no test caught is a gap: %+v", s)
+	}
+	// A later round that says nothing about it must not lose it.
+	s = foldUnproven(s, []PinResult{{Pin: Pin{File: "other.go", From: "x", To: "y"}, Outcome: PinSurvived}})
+	if len(s) != 2 {
+		t.Fatalf("an unrelated round dropped a known gap: %+v", s)
+	}
+	// Proving it is the only thing that closes it.
+	s = foldUnproven(s, []PinResult{{Pin: loose, Proven: true, Outcome: PinProven}})
+	if len(s) != 1 || s[0].File != "other.go" {
+		t.Fatalf("a proven pin must close its gap and only its own: %+v", s)
+	}
+}
+
+// The asymmetry is the security-relevant half. If anything other than PinProven could clear a
+// gap, a fix round could retire real evidence by submitting a pin that does not compile — which
+// is both the easiest thing to do by accident and the easiest to do deliberately.
+func TestOnlyAProvenPinClearsAGap(t *testing.T) {
+	gap := Pin{File: "loose.go", From: "n < 10", To: "n < 11", Test: "T"}
+	for _, outcome := range []PinOutcome{PinMalformed, PinUnverifiable, PinSurvived, PinOutcome("from-the-future"), ""} {
+		got := foldUnproven([]Pin{gap}, []PinResult{{Pin: gap, Outcome: outcome}})
+		if len(got) != 1 {
+			t.Errorf("outcome %q retired a known gap without proving anything: %+v", outcome, got)
+		}
+	}
+	if got := foldUnproven([]Pin{gap}, []PinResult{{Pin: gap, Proven: true, Outcome: PinProven}}); len(got) != 0 {
+		t.Errorf("a proven pin must close the gap: %+v", got)
+	}
+}
+
+// The test name is not part of a gap's identity: the same unprotected line reached by a different
+// test is the same gap. Keying on the test would let a fix round "close" it by naming another one.
+func TestGapIdentityIgnoresTheTestName(t *testing.T) {
+	a := Pin{File: "loose.go", From: "n < 10", To: "n < 11", Test: "TestOne"}
+	b := Pin{File: "loose.go", From: "n < 10", To: "n < 11", Test: "TestTwo"}
+	if got := foldUnproven([]Pin{a}, []PinResult{{Pin: b, Outcome: PinSurvived}}); len(got) != 1 {
+		t.Errorf("the same line under a different test name is the same gap: %+v", got)
+	}
+	if got := foldUnproven([]Pin{a}, []PinResult{{Pin: b, Proven: true, Outcome: PinProven}}); len(got) != 0 {
+		t.Errorf("proving the line closes it whichever test caught it: %+v", got)
+	}
+	// A different mutation of the same line is a different gap.
+	c := Pin{File: "loose.go", From: "n < 10", To: "n > 10", Test: "TestOne"}
+	if got := foldUnproven([]Pin{a}, []PinResult{{Pin: c, Outcome: PinSurvived}}); len(got) != 2 {
+		t.Errorf("a different mutation is a different gap: %+v", got)
+	}
+}
+
+// Bounded like every other list in the snapshot. An unbounded one eventually fails to serialise,
+// which loses the whole audit rather than one entry.
+func TestUnprovenIsBounded(t *testing.T) {
+	var results []PinResult
+	for i := 0; i < MaxDeltaList+50; i++ {
+		results = append(results, PinResult{
+			Pin:     Pin{File: "f.go", From: strconv.Itoa(i), To: "x", Test: "T"},
+			Outcome: PinSurvived,
+		})
+	}
+	if got := foldUnproven(nil, results); len(got) != MaxDeltaList {
+		t.Errorf("got %d entries, want the cap of %d", len(got), MaxDeltaList)
+	}
+}
+
+// The gaps must reach the SNAPSHOT, not just the helper. A prove node publishes PinResults in its
+// delta and the fold turns them into Unproven, which is what the next discover node reads.
+func TestFoldRecordsUnprovenPinsInTheSnapshot(t *testing.T) {
+	gap := Pin{File: "loose.go", From: "n < 10", To: "n < 11", Test: "TestBound"}
+	held := Pin{File: "held.go", From: "a", To: "b", Test: "TestHeld"}
+	raw := `{"pin_results":[{"pin":{"file":"loose.go"},"outcome":"survived"}]}`
+	d := Delta{PinResults: []PinResult{
+		{Pin: gap, Outcome: PinSurvived, Detail: "the mutation survived"},
+		{Pin: held, Proven: true, Outcome: PinProven},
+	}}
+
+	b := NewBuilder(runA)
+	b.Init(baseInit())
+	b.Event(TypeTree, TreeData{Head: "head0000", TreeHash: "t0", Status: ""})
+	b.Event(TypeNeedsInput, EmptyData{}, WithNode("prove"))
+	b.Event(TypeNodeOutput, out(raw), WithNode("prove"))
+	b.Event(TypeDeltaApplied, deltaFor(raw, d), WithNode("prove"))
+
+	s, err := Fold(b.Events())
+	if err != nil {
+		t.Fatalf("Fold: %v", err)
+	}
+	if len(s.Unproven) != 1 || s.Unproven[0].File != "loose.go" {
+		t.Fatalf("the snapshot must carry the unprotected line into the next round: %+v", s.Unproven)
+	}
+	// Clone is what every node receives, so the gap has to survive that too.
+	if got := s.Clone().Unproven; len(got) != 1 || got[0].File != "loose.go" {
+		t.Errorf("the gap did not survive Clone: %+v", got)
 	}
 }

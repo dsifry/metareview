@@ -72,6 +72,7 @@ func TestCloneIsDeep(t *testing.T) {
 		LastError:   &GateError{Code: "c"},
 		Warnings:    []string{"w"},
 		Pins:        []Pin{{File: "a.go", From: "x", To: "y", Test: "T"}},
+		Unproven:    []Pin{{File: "u.go", From: "p", To: "q", Test: "U"}},
 	}
 	c := orig.Clone()
 	if !reflect.DeepEqual(c, orig) {
@@ -92,11 +93,13 @@ func TestCloneIsDeep(t *testing.T) {
 	c.LastError.Code = "changed"
 	c.Warnings[0] = "changed"
 	c.Pins[0].File = "changed"
+	c.Unproven[0].File = "changed"
 	if orig.Vars["k"] != "v" || orig.AllowedCmds[0].Argv[0] != "a" || orig.AllowedCmds[0].FileHashes["p"] != "h" ||
 		orig.Lineage[0] != "p" || orig.Goldens[0].Comment != "c" || orig.Findings[0].IssueText != "i" ||
 		*orig.Confirmed[0].GoldenIdx != 1 || *orig.AllFound[0].GoldenIdx != 1 || *orig.PrevUnfixed != 1 ||
 		string(orig.NodeOutputs["n@0"]) != `{"x":1}` || !orig.Applied["n@0"] || orig.NodesRun[0] != "n" ||
-		orig.LastError.Code != "c" || orig.Warnings[0] != "w" || orig.Pins[0].File != "a.go" {
+		orig.LastError.Code != "c" || orig.Warnings[0] != "w" || orig.Pins[0].File != "a.go" ||
+		orig.Unproven[0].File != "u.go" {
 		t.Fatalf("clone shares storage with original: %+v", orig)
 	}
 	// and the other direction
@@ -107,7 +110,7 @@ func TestCloneIsDeep(t *testing.T) {
 	}
 	// reflect walk: every slice/map/pointer/RawMessage field of Snapshot was exercised above
 	rt := reflect.TypeOf(Snapshot{})
-	exercised := map[string]bool{"Vars": true, "AllowedCmds": true, "Lineage": true, "Goldens": true, "Findings": true, "Confirmed": true, "AllFound": true, "Status": true, "PrevUnfixed": true, "NodeOutputs": true, "Applied": true, "NodesRun": true, "LastError": true, "Warnings": true, "Pins": true}
+	exercised := map[string]bool{"Vars": true, "AllowedCmds": true, "Lineage": true, "Goldens": true, "Findings": true, "Confirmed": true, "AllFound": true, "Status": true, "PrevUnfixed": true, "NodeOutputs": true, "Applied": true, "NodesRun": true, "LastError": true, "Warnings": true, "Pins": true, "Unproven": true}
 	for i := 0; i < rt.NumField(); i++ {
 		f := rt.Field(i)
 		switch f.Type.Kind() {
