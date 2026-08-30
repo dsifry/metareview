@@ -21,9 +21,13 @@ func TestScoreNeverCountsAnUnresolvedMutantAsAKill(t *testing.T) {
 	if s.Complete() {
 		t.Error("a run with unresolved mutants is not complete, whatever its efficacy looks like")
 	}
-	// The engine would call this 100%. It is not: 97 of 107 were never decided.
-	if s.Efficacy > 0.10 {
-		t.Errorf("efficacy = %.4f; unresolved mutants must count against the score, not vanish from it", s.Efficacy)
+	// The engine would call this 100%. It is not: 97 of 107 were never decided, so the honest
+	// number is 10/107. Asserted exactly, not as an upper bound: mutation testing this file found
+	// that "efficacy < 0.10" also passes when the denominator is computed as
+	// killed+survived-unresolved, which yields a NEGATIVE efficacy. A one-sided assertion on a
+	// number cannot constrain the arithmetic that produced it.
+	if diff := s.Efficacy - 10.0/107.0; diff > 0.0001 || diff < -0.0001 {
+		t.Errorf("efficacy = %.4f, want %.4f (10 killed of 107 attempted)", s.Efficacy, 10.0/107.0)
 	}
 }
 
@@ -150,7 +154,14 @@ func TestUnparseableEngineOutputIsAnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid empty report: %v", err)
 	}
-	if s := r.Score(); !s.Complete() || len(r.Findings()) != 0 {
+	s := r.Score()
+	if !s.Complete() || len(r.Findings()) != 0 {
 		t.Errorf("empty report: score=%+v findings=%d", s, len(r.Findings()))
+	}
+	// Zero mutants must give zero efficacy, not NaN. Found by mutating `denom > 0` to `denom >= 0`,
+	// which divides zero by zero: NaN compares false against every threshold, so a gate reading it
+	// would silently pass anything.
+	if s.Efficacy != 0 {
+		t.Errorf("empty report efficacy = %v, want 0 (a NaN here passes every threshold silently)", s.Efficacy)
 	}
 }
