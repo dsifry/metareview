@@ -56,3 +56,15 @@ if command -v shellcheck >/dev/null 2>&1; then
 else
   echo "shellcheck: SKIPPED (not installed; CI still enforces it)" >&2
 fi
+
+# The same gap again, and worth naming as a class rather than a second instance: CI runs checks
+# this suite does not, so a defect passes everything locally and fails on the PR. shellcheck was
+# added above on 2026-08-29 after SC2043 did exactly that; on 2026-08-30 golangci-lint did it
+# again (SA4004, a loop left unconditionally terminated by removing a dead branch). Every check in
+# .github/workflows/test.yml belongs here too.
+if command -v golangci-lint >/dev/null 2>&1; then
+  golangci-lint run
+  echo "golangci-lint: ok"
+else
+  echo "golangci-lint: SKIPPED (not installed; CI still enforces it)" >&2
+fi

@@ -21,10 +21,12 @@ func Parse(data []byte, target string) (Report, error) {
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return Report{}, fmt.Errorf("mutation: reading report: %w", err)
 	}
-	// No whitespace case: encoding/json hands back a RawMessage that begins at the first
-	// non-whitespace byte, so the first byte here is already the structural one.
-	for _, b := range probe.Files {
-		switch b {
+	// The format is decided by the FIRST byte of the `files` value: an object is Stryker's
+	// schema, an array is gremlins'. encoding/json hands back a RawMessage that begins at the
+	// first non-whitespace byte, so no whitespace skipping is needed — a loop that did it was
+	// unreachable. Structural, not by filename: engines are told to write anywhere.
+	if len(probe.Files) > 0 {
+		switch probe.Files[0] {
 		case '{':
 			r, err := ParseStryker(data, target)
 			if err != nil {
@@ -38,7 +40,6 @@ func Parse(data []byte, target string) (Report, error) {
 			}
 			return checkMeasured(r, target)
 		}
-		break
 	}
 	// No `files` at all, or something that is neither. Refusing is the point: a report this code
 	// cannot read must not become an empty report, which would score as a clean run.
