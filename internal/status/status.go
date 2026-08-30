@@ -85,7 +85,7 @@ func BuildFor(root, target string) (Report, error) {
 	if target != "" {
 		scoped := make([]reviewlog.Summary, 0, len(logs))
 		for _, s := range logs {
-			if s.Target == target {
+			if covers(s, target) {
 				scoped = append(scoped, s)
 			}
 		}
@@ -95,7 +95,7 @@ func BuildFor(root, target string) (Report, error) {
 		if !s.HasUnresolvedBlockers {
 			continue
 		}
-		if target != "" && s.Target != target {
+		if target != "" && !covers(s, target) {
 			continue
 		}
 		r.MustClear = append(r.MustClear, Blocker{
@@ -152,4 +152,27 @@ func EmitFor(root, target string, w io.Writer) (int, error) {
 		return 1, nil
 	}
 	return 0, nil
+}
+
+// covers reports whether a review can answer for target.
+//
+// Target-string equality was the only test, and it never worked for a source file: a review's
+// target is a task id, a document path, or the literal `current branch`, so asking about
+// internal/foo.go matched no review, produced an empty must_clear and reported the file clear.
+// The narrower the scope claimed, the more certainly the gate let work through.
+//
+// Two ways a review can answer now. It is still the named target — that is how a task id or a
+// spec path is asked about. Or it examined the file, which is what CoveredPaths records. A
+// review with no CoveredPaths is one written before the field existed: it cannot answer for a
+// path, and saying so is what keeps an old log from silently clearing a file it never read.
+func covers(s reviewlog.Summary, target string) bool {
+	if s.Target == target {
+		return true
+	}
+	for _, p := range s.CoveredPaths {
+		if p == target {
+			return true
+		}
+	}
+	return false
 }

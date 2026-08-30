@@ -2,6 +2,7 @@ package status
 
 import (
 	"encoding/json"
+	"github.com/dsifry/metareview/internal/reviewlog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -344,5 +345,31 @@ func TestTargetScopingNarrowsTheReviewListToo(t *testing.T) {
 	}
 	if len(scoped.Reviews) != 1 || scoped.Reviews[0].Target != "alpha.go" {
 		t.Errorf("a scoped report must list only its own target's reviews: %+v", scoped.Reviews)
+	}
+}
+
+// A review answers for a path when it EXAMINED that path, not only when the path happens to be
+// its target. Target strings are task ids, document paths, or the literal `current branch`, so a
+// source file matched no review at all — and an unmatched file used to report as clear.
+func TestCoversUsesTheFilesAReviewActuallyRead(t *testing.T) {
+	branch := reviewlog.Summary{Target: "current branch", CoveredPaths: []string{"internal/a.go", "internal/b.go"}}
+	if !covers(branch, "internal/a.go") {
+		t.Error("a review that read the file must be able to answer for it")
+	}
+	if covers(branch, "internal/c.go") {
+		t.Error("a review must not answer for a file it never read")
+	}
+	if !covers(branch, "current branch") {
+		t.Error("the named target still matches")
+	}
+	// A review recorded before CoveredPaths existed carries none. It cannot answer for a path,
+	// and must not: an old log silently clearing a file it never read is the failure this whole
+	// change is about.
+	legacy := reviewlog.Summary{Target: "task-1"}
+	if covers(legacy, "internal/a.go") {
+		t.Error("a review with no recorded paths cannot answer for a path")
+	}
+	if !covers(legacy, "task-1") {
+		t.Error("a legacy review still answers for its own target")
 	}
 }

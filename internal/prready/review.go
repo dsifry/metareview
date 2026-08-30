@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -66,6 +67,7 @@ type runRecord struct {
 	MaxAttempts          int                 `json:"maxAttempts"`
 	BaseSHA              string              `json:"baseSha"`
 	HeadSHA              string              `json:"headSha"`
+	CoveredPaths         []string            `json:"coveredPaths,omitempty"`
 	ContextPath          string              `json:"contextPackPath"`
 	ReviewPath           string              `json:"reviewLogPath"`
 	Reviewers            []string            `json:"reviewers"`
@@ -241,18 +243,22 @@ func Create(root string, options Options) (Result, error) {
 		result.Verdict = verdict
 		result.Blocking = blocking
 		record := runRecord{
-			SchemaVersion:        1,
-			ID:                   runID,
-			Scope:                "pr-ready",
-			Target:               targetRecord,
-			Status:               status,
-			Verdict:              verdict,
-			ExecutionMode:        "deterministic-local",
-			PreviousRunID:        options.PreviousRunID,
-			AttemptNumber:        chain.AttemptNumber,
-			MaxAttempts:          chain.MaxAttempts,
-			BaseSHA:              git.BaseSHA,
-			HeadSHA:              git.HeadSHA,
+			SchemaVersion: 1,
+			ID:            runID,
+			Scope:         "pr-ready",
+			Target:        targetRecord,
+			Status:        status,
+			Verdict:       verdict,
+			ExecutionMode: "deterministic-local",
+			PreviousRunID: options.PreviousRunID,
+			AttemptNumber: chain.AttemptNumber,
+			MaxAttempts:   chain.MaxAttempts,
+			BaseSHA:       git.BaseSHA,
+			HeadSHA:       git.HeadSHA,
+			// The files this review actually examined. Recorded so a later question about one
+			// path can be answered by the reviews that looked at it; target strings never
+			// carried a path, so scoping a source file matched nothing and read as clear.
+			CoveredPaths:         coveredPaths(reviewGit),
 			ContextPath:          contextRel,
 			ReviewPath:           reviewRel,
 			Reviewers:            reviewerNames,
@@ -1160,4 +1166,22 @@ func mutationContextFor(paths []string) (reviewers.MutationContext, error) {
 		return reviewers.MutationContext{}, err
 	}
 	return reviewers.MutationContext{Reports: reports}, nil
+}
+
+// coveredPaths is the source files a review examined, de-duplicated and ordered so the record is
+// stable between runs over the same tree. Empty means "this review looked at no files", which a
+// reader must not confuse with a review recorded before the field existed — those carry no value
+// at all, and are unknown rather than empty.
+func coveredPaths(g gitcontext.Context) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(g.ChangedFiles))
+	for _, p := range g.ChangedFiles {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
 }

@@ -519,3 +519,42 @@ func TestDuplicateLensDeclarationIsNotAShippedRubric(t *testing.T) {
 		t.Error("the current rubric must still be recognised")
 	}
 }
+
+// HeadSHA and CoveredPaths live on the run record and have to be joined onto the summary, or the
+// two questions that make scoping possible cannot be asked: "which commit was this review of"
+// and "which files did it actually read". Before this, status could only compare target strings —
+// and a review's target is a task id or the literal `current branch`, never a source path, so
+// asking about a file matched nothing and the file reported as clear.
+func TestSummaryCarriesHeadAndCoveredPathsFromTheRunRecord(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "one.md"), reviewMarkdown("mrv-1", "t-1", "PASS", ""))
+	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-1","scope":"task-done","verdict":"PASS","headSha":"abc1234def","coveredPaths":["internal/a.go","internal/b.go"]}`+"\n")
+
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("got %d summaries, want 1", len(logs))
+	}
+	if logs[0].HeadSHA != "abc1234def" {
+		t.Errorf("HeadSHA = %q, want the run record's", logs[0].HeadSHA)
+	}
+	if len(logs[0].CoveredPaths) != 2 || logs[0].CoveredPaths[0] != "internal/a.go" {
+		t.Errorf("CoveredPaths = %v, want the run record's", logs[0].CoveredPaths)
+	}
+	// A review recorded before these fields existed carries neither, and must report them empty
+	// rather than borrowing another run's — empty means "unknown", which is what stops an old log
+	// from answering for a file it never read.
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "zero.md"), reviewMarkdown("mrv-0", "t-0", "PASS", ""))
+	logs, err = Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range logs {
+		if l.RunID == "mrv-0" && (l.HeadSHA != "" || len(l.CoveredPaths) != 0) {
+			t.Errorf("a legacy review must carry nothing: %+v", l)
+		}
+	}
+}

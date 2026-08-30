@@ -16,23 +16,31 @@ import (
 )
 
 type Summary struct {
-	Path                  string            `json:"path"`
-	RunID                 string            `json:"runId"`
-	Target                string            `json:"target"`
-	Verdict               string            `json:"verdict"`
-	Kind                  string            `json:"kind"`
-	PreviousRunID         string            `json:"previousRunId,omitempty"`
-	ContextRel            string            `json:"contextRel,omitempty"`
-	FindingIDs            []string          `json:"findingIds"`
-	HasUnresolvedBlockers bool              `json:"hasUnresolvedBlockers"`
-	AttemptNumber         int               `json:"attemptNumber,omitempty"`
-	MaxAttempts           int               `json:"maxAttempts,omitempty"`
-	BlockingFindingCount  int               `json:"blockingFindingCount,omitempty"`
-	AdvisoryFindingCount  int               `json:"advisoryFindingCount,omitempty"`
-	FollowUpFindingCount  int               `json:"followUpFindingCount,omitempty"`
-	WarningFindingCount   int               `json:"warningFindingCount,omitempty"`
-	RunChain              []runchain.Record `json:"runChain,omitempty"`
-	Warnings              []string          `json:"warnings,omitempty"`
+	Path                  string   `json:"path"`
+	RunID                 string   `json:"runId"`
+	Target                string   `json:"target"`
+	Verdict               string   `json:"verdict"`
+	Kind                  string   `json:"kind"`
+	PreviousRunID         string   `json:"previousRunId,omitempty"`
+	ContextRel            string   `json:"contextRel,omitempty"`
+	FindingIDs            []string `json:"findingIds"`
+	HasUnresolvedBlockers bool     `json:"hasUnresolvedBlockers"`
+	AttemptNumber         int      `json:"attemptNumber,omitempty"`
+	MaxAttempts           int      `json:"maxAttempts,omitempty"`
+	BlockingFindingCount  int      `json:"blockingFindingCount,omitempty"`
+	AdvisoryFindingCount  int      `json:"advisoryFindingCount,omitempty"`
+	FollowUpFindingCount  int      `json:"followUpFindingCount,omitempty"`
+	WarningFindingCount   int      `json:"warningFindingCount,omitempty"`
+	// HeadSHA is the commit the review ran against, joined from the run record. It is what lets
+	// a caller ask "does this blocker belong to the branch in hand" instead of matching target
+	// strings — which never worked, because no review records a source path as its target.
+	HeadSHA string `json:"headSha,omitempty"`
+	// CoveredPaths are the source files the review actually looked at. Empty for every review
+	// recorded before this field existed, and a caller must treat empty as "unknown", never as
+	// "covers nothing" — the difference decides whether an old log can answer for a file.
+	CoveredPaths []string          `json:"coveredPaths,omitempty"`
+	RunChain     []runchain.Record `json:"runChain,omitempty"`
+	Warnings     []string          `json:"warnings,omitempty"`
 }
 
 type findingRecord struct {
@@ -390,6 +398,8 @@ func mergeRunMetadata(summary *Summary, runs []runchain.Record) {
 	if !ok {
 		return
 	}
+	summary.HeadSHA = current.HeadSHA
+	summary.CoveredPaths = append([]string(nil), current.CoveredPaths...)
 	summary.AttemptNumber = current.AttemptNumber
 	summary.MaxAttempts = current.MaxAttempts
 	summary.BlockingFindingCount = current.BlockingFindingCount
