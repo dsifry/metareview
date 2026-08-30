@@ -47,6 +47,9 @@ type Report struct {
 	// Target is the scope this report was built for, empty when it covers everything. A reader
 	// has to be able to tell a clean repository from a clean corner of a blocked one.
 	Target string `json:"target,omitempty"`
+	// Warnings say why an answer may be narrower or wider than asked for — a scope that could
+	// not be resolved reports unscoped rather than empty, and has to say so.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Build reads the repository's review logs and reports what remains unresolved.
@@ -133,17 +136,83 @@ const VerdictUnreviewed = "UNREVIEWED"
 // Emit writes the whole report. EmitFor narrows it to one target.
 func Emit(root string, w io.Writer) (int, error) { return EmitFor(root, "", w) }
 
+// BuildForBranch reports on the work in hand: blockers against this branch's own commits or the
+// files it changed, plus any changed file no passing review has read.
+//
+// This is the scope a Stop hook wants. Unscoped, the answer spans the whole review history and
+// refuses every session for work it never touched; scoped to a target string it could not match
+// a source file at all, so it cleared everything.
+func BuildForBranch(root, base string, run RunGit) (Report, error) {
+	r, err := Build(root)
+	if err != nil {
+		return r, err
+	}
+	scope, err := ResolveBranchScope(root, base, run)
+	if err != nil {
+		// The scope could not be worked out, so this cannot be narrowed. The unscoped answer is
+		// returned rather than an empty one: a gate that cannot tell what the work is must fail
+		// toward blocking, never toward "nothing to do".
+		r.Warnings = append(r.Warnings, "branch scope unavailable, reporting unscoped: "+err.Error())
+		return r, nil
+	}
+	all := r.Reviews
+	scoped := make([]reviewlog.Summary, 0, len(all))
+	for _, s := range all {
+		if scope.InScope(s) {
+			scoped = append(scoped, s)
+		}
+	}
+	r.Reviews, r.Target = scoped, "branch "+shortSHA(scope.Base)+".."+shortSHA(scope.Head)
+	r.MustClear = []Blocker{}
+	for _, s := range scoped {
+		if !s.HasUnresolvedBlockers {
+			continue
+		}
+		r.MustClear = append(r.MustClear, Blocker{
+			Target: s.Target, RunID: s.RunID, Verdict: s.Verdict, Kind: s.Kind, Path: s.Path,
+			BlockingCount: s.BlockingFindingCount, AttemptNumber: s.AttemptNumber, MaxAttempts: s.MaxAttempts,
+		})
+	}
+	for _, f := range scope.Unreviewed(all) {
+		r.MustClear = append(r.MustClear, Blocker{Target: f, Verdict: VerdictUnreviewed, Kind: "unreviewed"})
+	}
+	r.Blocked = len(r.MustClear) > 0
+	return r, nil
+}
+
+func shortSHA(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
+}
+
+// EmitForBranch writes the branch-scoped report and returns the process exit code.
+func EmitForBranch(root, base string, run RunGit, w io.Writer) (int, error) {
+	r, err := BuildForBranch(root, base, run)
+	if err != nil {
+		return 0, err
+	}
+	return emit(r, w)
+}
+
 // EmitFor writes the report for one target and returns the process exit code.
 func EmitFor(root, target string, w io.Writer) (int, error) {
 	r, err := BuildFor(root, target)
 	if err != nil {
 		return 0, err
 	}
-	// Report holds strings, bools, ints, slices of those, and []reviewlog.Summary, whose own
-	// fields bottom out in the same kinds - not "only strings, bools, ints and slices of the
-	// same", as this said before. What makes encoding/json fail is a channel, a func, a cyclic
-	// pointer graph or a failing custom Marshaler, and the type graph contains none, so a branch
-	// here would be unreachable and untestable.
+	return emit(r, w)
+}
+
+// emit is the one place a Report becomes bytes and an exit code, so every scope answers in the
+// same shape and with the same exit convention.
+//
+// Report holds strings, bools, ints, slices of those, and []reviewlog.Summary, whose own fields
+// bottom out in the same kinds. What makes encoding/json fail is a channel, a func, a cyclic
+// pointer graph or a failing custom Marshaler, and the type graph contains none, so an error
+// branch here would be unreachable and untestable.
+func emit(r Report, w io.Writer) (int, error) {
 	out, _ := json.MarshalIndent(r, "", "  ")
 	if _, err := fmt.Fprintln(w, string(out)); err != nil {
 		return 0, err

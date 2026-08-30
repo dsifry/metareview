@@ -113,12 +113,29 @@ func main() {
 		// --target narrows the answer to the work in hand. Unscoped, `blocked` spans the whole
 		// review history, so a hook wired to it refuses an agent because of work it never
 		// touched - a livelock rather than a gate.
-		target := ""
-		if len(args) == 4 && args[2] == "--target" {
+		target, scopeBranch, base := "", false, ""
+		switch {
+		case len(args) == 2:
+		case len(args) == 4 && args[2] == "--target":
 			target = args[3]
-		} else if len(args) != 2 {
-			fmt.Fprintln(os.Stderr, "Usage: metareview status --json [--target <path>]")
+		case len(args) == 3 && args[2] == "--scope=branch":
+			scopeBranch = true
+		case len(args) == 4 && args[2] == "--scope" && args[3] == "branch":
+			scopeBranch = true
+		case len(args) == 6 && args[2] == "--scope" && args[3] == "branch" && args[4] == "--base":
+			scopeBranch, base = true, args[5]
+		default:
+			fmt.Fprintln(os.Stderr, "Usage: metareview status --json [--target <path> | --scope branch [--base <ref>]]")
 			os.Exit(2)
+		}
+		if scopeBranch {
+			// The scope a Stop hook wants: this branch's own commits and the files it changed.
+			code, err := status.EmitForBranch(repo.RootOr(mustCwd()), base, nil, os.Stdout)
+			exitOnErr(err)
+			if code != 0 {
+				os.Exit(code)
+			}
+			return
 		}
 		// Resolved from the repository root, not the process cwd. A Stop hook inherits whatever
 		// directory the session is standing in, and resolving there found no review logs and
