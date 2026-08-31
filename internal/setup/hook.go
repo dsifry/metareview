@@ -59,7 +59,7 @@ func enforcementStatus(root, home, pluginRoot string) EnforcementStatus {
 	// installation this project ships and the one the settings files can say nothing about.
 	if pluginRoot != "" {
 		manifest := filepath.Join(pluginRoot, "hooks", "hooks.json")
-		if ours, _ := stopHookCommands(manifest, pluginRoot); ours {
+		if ours, _ := stopHookCommandsScoped(manifest, false, pluginRoot); ours {
 			s.Active, s.Source, s.Plugin = true, manifest, manifest
 			scriptRoot = pluginRoot
 		}
@@ -112,6 +112,10 @@ func enforcementStatus(root, home, pluginRoot string) EnforcementStatus {
 // heuristic, and it is deliberately reported rather than assumed: an unrecognised Stop hook
 // becomes Foreign, not Active.
 func stopHookCommands(path string, roots ...string) (ours bool, foreign string) {
+	return stopHookCommandsScoped(path, true, roots...)
+}
+
+func stopHookCommandsScoped(path string, allowProject bool, roots ...string) (ours bool, foreign string) {
 	data, err := os.ReadFile(path) // #nosec G304 -- a settings path this package constructs
 	if err != nil {
 		return false, ""
@@ -133,7 +137,7 @@ func stopHookCommands(path string, roots ...string) (ours bool, foreign string) 
 			if cmd == "" {
 				continue
 			}
-			if isOurs(cmd, roots...) {
+			if isOursScoped(cmd, allowProject, roots...) {
 				return true, ""
 			}
 			if foreign == "" {
@@ -145,64 +149,84 @@ func stopHookCommands(path string, roots ...string) (ours bool, foreign string) 
 }
 
 // isOurs reports whether a Stop-hook command runs metareview's gate, given the roots this check
-// is willing to accept a script from.
+// is willing to accept a script from. allowProject widens acceptance to the project-root forms;
+// the plugin-manifest caller passes false, because a manifest that runs a PROJECT script says
+// nothing about whether the plugin it lives in is metareview's.
 //
-// Two narrowings, each closing a way the previous version certified somebody else's hook:
+// The command is CLASSIFIED — only the program, or the script operand of a known interpreter, is
+// examined. Scanning every token is what let `echo hooks/pre-finish.sh` and `echo pre-finish.sh`
+// certify a hook that merely prints the path and never runs the gate. The narrowings, each
+// closing a way a previous version certified somebody else's hook:
 //
-//   - The script must be at hooks/pre-finish.sh, not merely named pre-finish.sh. A bare basename
-//     match meant `/tmp/pre-finish.sh` — or `echo pre-finish.sh` — reported a foreign Stop hook as
-//     metareview's enforcement.
-//   - And it must live under a root this check actually knows: the repository being reviewed, the
-//     plugin installation, or behind the host variables that expand to exactly those two. A path
-//     that satisfies neither is a script this check cannot vouch for, and vouching for it is the
-//     whole failure this function exists to prevent.
-//
-// The binary is accepted only as the PROGRAM being run, for the same reason: scanning every token
-// let `echo 'metareview is great'` through.
+//   - The hook script must be at hooks/pre-finish.sh (a path suffix, not a basename), and under a
+//     root this check knows: the accepted roots, the host variables that expand to them, or a
+//     relative path the host resolves against the project.
+//   - The binary is accepted only as the program being run.
 func isOurs(cmd string, roots ...string) bool {
+	return isOursScoped(cmd, true, roots...)
+}
+
+func isOursScoped(cmd string, allowProject bool, roots ...string) bool {
 	fields := strings.Fields(cmd)
+	if len(fields) == 0 {
+		return false
+	}
 	clean := func(t string) string {
 		return filepath.ToSlash(strings.Trim(t, "\"'`)"))
 	}
+
+	// The tokens that are actually EXECUTED, not every argument. The program is always one. If it
+	// is a known interpreter, its first non-flag operand is the script it runs; nothing else on
+	// the line is. This is what stops `echo hooks/pre-finish.sh` — echo's argument is data, not a
+	// program, so it is never classified.
+	executed := []string{fields[0]}
+	switch path.Base(clean(fields[0])) {
+	case "bash", "sh", "zsh", "dash":
+		for _, tok := range fields[1:] {
+			if strings.HasPrefix(tok, "-") {
+				continue
+			}
+			executed = append(executed, tok)
+			break
+		}
+	}
+
+	// The binary, as the program.
+	switch path.Base(clean(fields[0])) {
+	case "metareview", "metareview.exe":
+		return true
+	}
+
 	const rel = "hooks/pre-finish.sh"
-	for _, tok := range fields {
+	for _, tok := range executed {
 		p := clean(tok)
-		// The relative form is its OWN case. Letting it past the skip and then trimming
-		// "/"+rel left the whole path as the prefix, which matched no accepted root — so a hook
-		// registered as `hooks/pre-finish.sh` or `bash hooks/pre-finish.sh` reported the gate
-		// INACTIVE for a registration that does in fact run. The basename version accepted it;
-		// tightening the check quietly dropped a working install.
 		var prefix string
 		switch {
 		case p == rel:
 			prefix = ""
-		// The separator is required here, though the TrimSuffix below would also refuse a match
-		// without one (its prefix would then match no accepted root). Kept explicit because the
-		// two lines have to agree, and a reader should not have to derive the guarantee from the
-		// interaction of two separate string operations.
+		// The separator is required, though the TrimSuffix would also refuse a match without one
+		// (its prefix would then match no accepted root). Kept explicit because the two lines
+		// have to agree.
 		case strings.HasSuffix(p, "/"+rel):
 			prefix = strings.TrimSuffix(p, "/"+rel)
 		default:
 			continue
 		}
 		switch prefix {
-		case "$CLAUDE_PROJECT_DIR", "${CLAUDE_PROJECT_DIR}",
-			"$CLAUDE_PLUGIN_ROOT", "${CLAUDE_PLUGIN_ROOT}",
-			"", ".":
-			// The host variables expand to exactly the roots below, and a relative path is
-			// resolved by the host against the project it is registered in.
+		case "$CLAUDE_PLUGIN_ROOT", "${CLAUDE_PLUGIN_ROOT}":
 			return true
+		case "$CLAUDE_PROJECT_DIR", "${CLAUDE_PROJECT_DIR}", "", ".":
+			// The project-root forms: an absolute project variable, or a relative path the host
+			// resolves against the project it is registered in. Refused for plugin-manifest
+			// discovery, where a project script proves nothing about the plugin's identity.
+			if allowProject {
+				return true
+			}
 		}
 		for _, r := range roots {
 			if r != "" && prefix == filepath.ToSlash(r) {
 				return true
 			}
-		}
-	}
-	if len(fields) > 0 {
-		switch path.Base(clean(fields[0])) {
-		case "metareview", "metareview.exe":
-			return true
 		}
 	}
 	return false

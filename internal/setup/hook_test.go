@@ -235,6 +235,13 @@ func TestOnlyMetareviewsOwnCommandCertifiesTheGate(t *testing.T) {
 		"/opt/other/hooks/pre-finish.sh":   false,
 		"bash /tmp/evil/pre-finish.sh":     false,
 		"/tmp/hooks/pre-finish.sh --quiet": false,
+		// The path as DATA, not as a program. echo prints it; it never runs the gate. Accepting
+		// any token that looked like the path is what let these through — the relative-path fix
+		// reopened exactly the hole the token-scan fix had closed one commit earlier.
+		"echo hooks/pre-finish.sh":      false,
+		"echo 'hooks/pre-finish.sh'":    false,
+		"printf %s hooks/pre-finish.sh": false,
+		"true && hooks/pre-finish.sh":   false,
 	} {
 		if got := isOurs(cmd, repoRoot); got != want {
 			t.Errorf("isOurs(%q) = %v, want %v", cmd, got, want)
@@ -297,5 +304,42 @@ func TestPluginRootRequiresEvidenceOfAnActualInstall(t *testing.T) {
 	t.Setenv("CLAUDE_PLUGIN_ROOT", checkout)
 	if got := pluginRoot(emptyHome); got != checkout {
 		t.Errorf("CLAUDE_PLUGIN_ROOT is the host saying it loaded the plugin: %q", got)
+	}
+}
+
+// A plugin manifest that runs a PROJECT script is not evidence that the plugin is metareview's.
+//
+// stopHookCommands accepts the $CLAUDE_PROJECT_DIR forms, because in a settings.json those are how
+// metareview's own hook is written. But when the question is "which plugin under ~/.claude/plugins
+// is metareview", a manifest running $CLAUDE_PROJECT_DIR/hooks/pre-finish.sh proves nothing about
+// the plugin it sits in — the executed script is the project's, not the plugin's — so a foreign
+// plugin using that command could be selected as the metareview plugin root, and its script then
+// validated in metareview's name.
+func TestPluginDiscoveryRejectsProjectRootCommands(t *testing.T) {
+	home := t.TempDir()
+	foreign := filepath.Join(home, ".claude", "plugins", "not-metareview")
+	if err := os.MkdirAll(filepath.Join(foreign, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A plugin whose Stop hook runs a PROJECT script, not its own.
+	manifest := `{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"$CLAUDE_PROJECT_DIR/hooks/pre-finish.sh"}]}]}}`
+	if err := os.WriteFile(filepath.Join(foreign, "hooks", "hooks.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := pluginRoot(home); got != "" {
+		t.Errorf("a plugin running a project script is not the metareview plugin: %q", got)
+	}
+
+	// A plugin that runs its OWN hook IS metareview's, and is selected.
+	own := filepath.Join(home, ".claude", "plugins", "metareview")
+	if err := os.MkdirAll(filepath.Join(own, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ownManifest := `{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/pre-finish.sh"}]}]}}`
+	if err := os.WriteFile(filepath.Join(own, "hooks", "hooks.json"), []byte(ownManifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := pluginRoot(home); got != own {
+		t.Errorf("a plugin running its own hook is metareview's: got %q, want %q", got, own)
 	}
 }
