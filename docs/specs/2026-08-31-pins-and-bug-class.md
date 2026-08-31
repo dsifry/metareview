@@ -215,8 +215,9 @@ Delta.PinResults  []PinResult
 // derived, never persisted (recomputed by Fold): the open gaps that drive re-discover
 Snapshot.Unproven []Pin        // a pin CLEARS when a later PinResult with the same Pin.Finding is Proven
 Snapshot.Classes  []BugClass   // open classes; carries the MINTED id across rounds. A class clears only
-                               // when every member is RESOLVED (its finding pins_proven, or accounted
-                               // already-correct/out-of-scope) — never on a claimed Disposition alone (§3.2 redesign)
+                               // when every member is RESOLVED: pins_proven at the member's own file
+                               // (fixed) or the remedy file (fixed-elsewhere), or accounted
+                               // already-correct/out-of-scope — never on a claimed Disposition alone (§3.2)
 ```
 
 **`Unproven` lifecycle — add, clear, and re-add, in temporal fold order (review fix B5 + round-2 R4).**
@@ -381,9 +382,15 @@ session — the test must be shown red before it is trusted).
    side), never in the deterministic fold, which cannot generate ids.
 
 2. **Clearing only on a VALIDATED signal — composition with pins (fixes C3/R2).** A class member is
-   *resolved* only when its finding's fix is `pins_proven` (validated by the deterministic `prove`
-   node), or is accounted `already-correct`/`out-of-scope` with a reason. A class clears from
-   `Snapshot.Classes` only when **every** member is resolved. The fold never clears a class on the
+   *resolved* only when its fix is `pins_proven` — for a `fixed` member, a Proven pin in the
+   member's own `ClassMember.File`; for a **`fixed-elsewhere`** member, a Proven pin in the named
+   remedy file `FixInstance.File` (PR#31-cursor: `fixed-elsewhere` MUST be a resolving disposition,
+   validated the same way but at the remedy file — otherwise it clears `classes_enumerated` yet
+   never resolves, so the class never clears and `require_classes` re-demands it forever, the
+   dead-end this valve exists to open) — or the member is accounted `already-correct`/`out-of-scope`
+   with a reason, or its remedy file has no tests and it records "no pinnable change" (the same
+   auditable valve as pins). A class clears from `Snapshot.Classes` only when **every** member is
+   resolved. The fold never clears a class on the
    agent's *claimed* `Disposition` alone — the disposition is a claim; the pin proof is the
    validation. This is exactly how `Unproven` clears (only a `prove` result mutates it), lifted to
    the class layer, and it is what stops the class snapshot from self-clearing on the agent's word.
@@ -645,6 +652,7 @@ gate whose valve is *gameable* is a **safety valve** — kept simple now, tighte
 | `require_pins` on a fix | code change unproven | supply a pin, OR record "no pinnable change" | yes — the "none" path is always available | "none" is self-asserted → tighten later |
 | `pins_proven`: a pure-DELETION fix (no added line to pin) | the fix removed code, nothing to anchor | record "no pinnable line" with the deleted range as evidence | yes — added round-2 R3; this row was missing and was a real dead-end | machine-checks the fix is deletion-only → hard, not self-asserted |
 | `pins_proven` (a) own-file: the finding's remedy is genuinely in ANOTHER file | no pinnable added line in the finding's own file | record "no pinnable change" naming the actual fix file | yes — the same valve as deletion | self-asserted (the fix file is named and in the diff) → tighten-if-abused |
+| class member `fixed-elsewhere` (remedy in another file) | own-file pin impossible | resolves via a Proven pin in the REMEDY file `FixInstance.File` (or "no pinnable change" if it has no tests) | yes — invariant 2 makes `fixed-elsewhere` a resolving disposition (PR#31-cursor: without this it cleared the gate but never resolved → class re-demanded forever) | gameable/auditable → tighten-if-abused |
 | `classes_enumerated` member unanswered (B3) | a class member ignored | give it a disposition: `fixed`, `already-correct`, or `out-of-scope`+reason | yes — the non-`fixed` dispositions are the valve | reason unreviewed → tighten later |
 | `classify` over-groups | unrelated findings lumped | dissolve the class with a recorded reason (§4.5) | **only once dissolution is WIRED to a class id — see B7 fix** | reason unreviewed → tighten later |
 | convergence / `Unproven` (B5) | pins keep re-driving discover | a proven pin clears its `Unproven` entry | **only once Unproven has a clearing rule — see B5 fix; today it is a DEAD-END** | — |
