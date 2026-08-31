@@ -2,6 +2,7 @@ package status
 
 import (
 	"encoding/json"
+	"github.com/dsifry/metareview/internal/reviewlog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -246,5 +247,148 @@ func (failWriter) Write([]byte) (int, error) { return 0, os.ErrClosed }
 func TestEmitSurfacesWriteFailures(t *testing.T) {
 	if _, err := Emit(t.TempDir(), failWriter{}); err == nil {
 		t.Error("want the write failure surfaced")
+	}
+}
+
+// --target narrows the report to the work in hand. Without it `blocked` spans the whole review
+// history — 66 entries on this repository when this was written — so a Stop hook wired to it
+// would block an agent on work it never touched. That is a livelock, not a gate, and it is the
+// reason the hooks could not ship.
+func TestTargetScopingNarrowsWhatMustBeCleared(t *testing.T) {
+	root := t.TempDir()
+	writeLog(t, root, "mrv-a-task-done-alpha.md",
+		"# metareview: task-done review\n\nRun ID: `mrv-a`\nTarget: `internal/alpha/thing.go`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	writeLog(t, root, "mrv-b-task-done-beta.md",
+		"# metareview: task-done review\n\nRun ID: `mrv-b`\nTarget: `internal/beta/other.go`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	// A target that was reviewed and passed, so the gate can be shown to let work through.
+	const cleanTarget = "internal/delta/done.go"
+	writeLog(t, root, "mrv-c-task-done-delta.md",
+		"# metareview: task-done review\n\nRun ID: `mrv-c`\nTarget: `"+cleanTarget+"`\n\n## Verdict\n\nPASS\n")
+
+	all, err := Build(root)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(all.MustClear) != 2 || !all.Blocked {
+		t.Fatalf("unscoped must see both: %+v", all.MustClear)
+	}
+
+	scoped, err := BuildFor(root, "internal/alpha/thing.go")
+	if err != nil {
+		t.Fatalf("BuildFor: %v", err)
+	}
+	if len(scoped.MustClear) != 1 || scoped.MustClear[0].Target != "internal/alpha/thing.go" {
+		t.Fatalf("scoped must see only its own target: %+v", scoped.MustClear)
+	}
+	if !scoped.Blocked {
+		t.Error("a blocker on the target in hand must still block")
+	}
+
+	// The point of the flag: an agent working on beta is not held up by alpha's blocker.
+	other, err := BuildFor(root, "internal/beta/other.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(other.MustClear) != 1 || other.MustClear[0].Target != "internal/beta/other.go" {
+		t.Fatalf("scoping must not leak across targets: %+v", other.MustClear)
+	}
+
+	// A target NO REVIEW COVERS is blocked, and blocked as UNREVIEWED rather than as a finding.
+	// This assertion used to be the opposite, and that was the bug: the narrower the scope an
+	// agent claimed, the more certainly the gate let it through, because a target nothing had
+	// reviewed matched no log, produced an empty must_clear and reported blocked:false. Asking
+	// about a file that had never been reviewed was the reliable way to be told all was well.
+	unreviewed, err := BuildFor(root, "internal/gamma/new.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unreviewed.Blocked || len(unreviewed.MustClear) != 1 {
+		t.Fatalf("a target no review covers must not read as cleared: %+v", unreviewed)
+	}
+	if got := unreviewed.MustClear[0].Verdict; got != VerdictUnreviewed {
+		t.Errorf("verdict = %q, want %q: a hook must tell \"fix your findings\" from \"run a review\"", got, VerdictUnreviewed)
+	}
+	// A target that WAS reviewed and came back clean still passes, or the gate is a livelock.
+	passed, err := BuildFor(root, cleanTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if passed.Blocked {
+		t.Errorf("a reviewed, passing target must let work through: %+v", passed)
+	}
+	// And the scope is reported, so a reader knows whether they are seeing everything.
+	if unreviewed.Target != "internal/gamma/new.go" || all.Target != "" {
+		t.Errorf("the report must say what it was scoped to: %q / %q", unreviewed.Target, all.Target)
+	}
+}
+
+// Scoping narrows the whole report, not only must_clear: a document headed `"target": "t-1"` that
+// still lists every other target's reviews invites exactly the misreading the field exists to
+// prevent.
+func TestTargetScopingNarrowsTheReviewListToo(t *testing.T) {
+	root := t.TempDir()
+	writeLog(t, root, "mrv-a-task-done-alpha.md",
+		"# metareview: task-done review\n\nRun ID: `mrv-a`\nTarget: `alpha.go`\n\n## Verdict\n\nPASS\n")
+	writeLog(t, root, "mrv-b-task-done-beta.md",
+		"# metareview: task-done review\n\nRun ID: `mrv-b`\nTarget: `beta.go`\n\n## Verdict\n\nPASS\n")
+
+	all, err := Build(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Reviews) != 2 {
+		t.Fatalf("unscoped lists everything: %d", len(all.Reviews))
+	}
+	scoped, err := BuildFor(root, "alpha.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scoped.Reviews) != 1 || scoped.Reviews[0].Target != "alpha.go" {
+		t.Errorf("a scoped report must list only its own target's reviews: %+v", scoped.Reviews)
+	}
+}
+
+// A review answers for a path when it EXAMINED that path, not only when the path happens to be
+// its target. Target strings are task ids, document paths, or the literal `current branch`, so a
+// source file matched no review at all — and an unmatched file used to report as clear.
+func TestCoversUsesTheFilesAReviewActuallyRead(t *testing.T) {
+	// The review examined a commit this branch has: it may answer for what it read.
+	now := map[string]bool{"c1": true}
+	branch := reviewlog.Summary{Target: "current branch", HeadSHA: "c1", CoveredPaths: []string{"internal/a.go", "internal/b.go"}}
+	if !covers(branch, "internal/a.go", now) {
+		t.Error("a review that read the file must be able to answer for it")
+	}
+	if covers(branch, "internal/c.go", now) {
+		t.Error("a review must not answer for a file it never read")
+	}
+	if !covers(branch, "current branch", now) {
+		t.Error("the named target still matches")
+	}
+
+	// The same review, recorded on a commit this branch does not have. It read internal/a.go —
+	// but some other version of it. Crediting that returned blocked:false and exit 0 for work
+	// nothing current had reviewed, and the Stop hook reaches this path whenever
+	// METAREVIEW_TARGET is set, so it was reachable in enforcement.
+	stale := branch
+	stale.HeadSHA = "elsewhere"
+	if covers(stale, "internal/a.go", now) {
+		t.Error("a review of another commit must not answer for this branch's version of a file")
+	}
+	if !covers(stale, "current branch", now) {
+		t.Error("it still answers for its own named target, whatever commit it ran on")
+	}
+	// An unknown commit set is not permission to credit: unknown fails toward blocking.
+	if covers(branch, "internal/a.go", nil) {
+		t.Error("with no commit set established, a path claim cannot be credited")
+	}
+	// A review recorded before CoveredPaths existed carries none. It cannot answer for a path,
+	// and must not: an old log silently clearing a file it never read is the failure this whole
+	// change is about.
+	legacy := reviewlog.Summary{Target: "task-1"}
+	if covers(legacy, "internal/a.go", now) {
+		t.Error("a review with no recorded paths cannot answer for a path")
+	}
+	if !covers(legacy, "task-1", now) {
+		t.Error("a legacy review still answers for its own target")
 	}
 }

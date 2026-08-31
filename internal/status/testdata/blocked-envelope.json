@@ -1,0 +1,7 @@
+{
+  "subtype": "success",
+  "is_error": false,
+  "result": "",
+  "stop_reason": "end_turn",
+  "num_turns": 10
+}

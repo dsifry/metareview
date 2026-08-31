@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/hooks/pre-finish.sh",
+            "async": false,
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

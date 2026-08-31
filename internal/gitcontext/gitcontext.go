@@ -307,15 +307,35 @@ func resolveBase(root, requestedBase string) (string, error) {
 		}
 		return base, nil
 	}
-	for _, candidate := range [][]string{
-		{"merge-base", "HEAD", "main"},
-		{"merge-base", "HEAD", "master"},
-		{"rev-parse", "HEAD~1"},
-	} {
-		base, err := git(root, candidate...)
-		if err == nil && base != "" {
+	head, _ := git(root, "rev-parse", "HEAD")
+	branch, _ := git(root, "rev-parse", "--abbrev-ref", "HEAD")
+	for _, name := range []string{"main", "master"} {
+		base, err := git(root, "merge-base", "HEAD", name)
+		if err != nil || base == "" {
+			continue
+		}
+		if base != head {
 			return base, nil
 		}
+		// The merge base IS this commit, and the two cases that produce that are opposite.
+		//
+		// Standing ON the default branch, the merge base is useless — it answers "you are where
+		// you are" — and the scope spanned an empty range, so committed unreviewed work on main
+		// reported blocked:false and exit 0 while the identical commit on a feature branch
+		// blocked. Fall through to HEAD~1.
+		//
+		// On a feature branch that has NOT diverged, the same equality is the truth: the branch
+		// genuinely has no commits of its own, and an empty commit range is the correct answer.
+		// Falling through to HEAD~1 there would hand it the default branch's last commit as its
+		// own work, and the hook would block on files the session never touched — which is how a
+		// fix for one empty range becomes a false blocker in the other.
+		if branch == name {
+			break
+		}
+		return base, nil
+	}
+	if base, err := git(root, "rev-parse", "HEAD~1"); err == nil && base != "" {
+		return base, nil
 	}
 	return "", fmt.Errorf("invalid git base: unable to resolve default base")
 }

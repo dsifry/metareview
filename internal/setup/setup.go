@@ -28,6 +28,7 @@ type Report struct {
 	Files         repo.Files          `json:"files"`
 	Prerequisites Prerequisites       `json:"prerequisites"`
 	Install       InstallStatus       `json:"install"`
+	Enforcement   EnforcementStatus   `json:"enforcement"`
 	Standalone    StandaloneReadiness `json:"standalone"`
 }
 
@@ -97,6 +98,7 @@ func Check(root string, options Options) Report {
 		Files:         base.Files,
 		Prerequisites: prereqs,
 		Install:       InstallStatus{Path: options.ExecutablePath},
+		Enforcement:   enforcementStatus(root, home),
 		Standalone: StandaloneReadiness{
 			AdvisoryOnly:             len(missing) > 0,
 			FullMetaswarmReady:       len(missing) == 0,

@@ -54,9 +54,11 @@ Usage:
 Commands:
   setup --check              Detect repository mode and prerequisites without writing files
   setup --bootstrap-prereqs  Print or execute prerequisite bootstrap actions
-  status [--json]            Print repository review capability status; --json emits the
+  status [--json [--target <path> | --scope branch [--base <ref>]]]
+                             Print repository review capability status; --json emits the
                              machine-readable contract a host hook branches on (exit 1 when
-                             something must be cleared)
+                             something must be cleared). --target narrows it to one path, so a
+                             hook blocks on the work in hand rather than the whole history
   override request           Record an out-of-workflow escalation against a finding (still blocks)
   override grant             Acknowledge a process exception from outside the workflow (stops blocking)
   override list              List process exceptions; --pending exits 1 while any are unacknowledged
@@ -107,9 +109,39 @@ func main() {
 	// status --json is the contract a host hook branches on: one machine-readable answer to
 	// "may work proceed, and if not, what must be cleared". Exits 1 when something must be
 	// cleared, so a hook needs no parsing to make the common decision.
-	if len(args) == 2 && args[0] == "status" && args[1] == "--json" {
-		code, err := status.Emit(mustCwd(), os.Stdout)
-		exitOnErr(err)
+	if len(args) >= 2 && args[0] == "status" && args[1] == "--json" {
+		// --target narrows the answer to the work in hand. Unscoped, `blocked` spans the whole
+		// review history, so a hook wired to it refuses an agent because of work it never
+		// touched - a livelock rather than a gate.
+		target, scopeBranch, base := "", false, ""
+		switch {
+		case len(args) == 2:
+		case len(args) == 4 && args[2] == "--target":
+			target = args[3]
+		case len(args) == 3 && args[2] == "--scope=branch":
+			scopeBranch = true
+		case len(args) == 4 && args[2] == "--scope" && args[3] == "branch":
+			scopeBranch = true
+		case len(args) == 6 && args[2] == "--scope" && args[3] == "branch" && args[4] == "--base":
+			scopeBranch, base = true, args[5]
+		default:
+			fmt.Fprintln(os.Stderr, "Usage: metareview status --json [--target <path> | --scope branch [--base <ref>]]")
+			os.Exit(2)
+		}
+		if scopeBranch {
+			// The scope a Stop hook wants: this branch's own commits and the files it changed.
+			code, err := status.EmitForBranch(repo.RootOr(mustCwd()), base, nil, os.Stdout)
+			exitGateBroken(err)
+			if code != 0 {
+				os.Exit(code)
+			}
+			return
+		}
+		// Resolved from the repository root, not the process cwd. A Stop hook inherits whatever
+		// directory the session is standing in, and resolving there found no review logs and
+		// reported nothing to clear — the gate was bypassed by working in a subdirectory.
+		code, err := status.EmitFor(repo.RootOr(mustCwd()), target, os.Stdout)
+		exitGateBroken(err)
 		if code != 0 {
 			os.Exit(code)
 		}
@@ -433,6 +465,20 @@ func mustCwd() string {
 	return cwd
 }
 
+// exitGateBroken ends a `status` run that could not produce an answer at all.
+//
+// It exits 2, not 1. Exit 1 is the documented contract for "something must be cleared", and
+// hooks/pre-finish.sh branches on exactly that: reporting a gate that FAILED with the same code
+// told the operator they had review findings, while emitting no JSON and so no blockers to act
+// on — an unreadable review log became "you have work to do, and I cannot say what". A check that
+// did not run must never be reported as a check that found something.
+func exitGateBroken(err error) {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+}
+
 func exitOnErr(err error) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -442,7 +488,11 @@ func exitOnErr(err error) {
 
 func handleSetup(args []string) {
 	if len(args) == 1 && args[0] == "--check" {
-		report := setup.Check(mustCwd(), setup.Options{ExecutablePath: executablePath()})
+		// Resolved from the repository root, like status. Answering from the process cwd made
+		// `setup --check` report enforcement ACTIVE at the top of a checkout and INACTIVE two
+		// directories down — same repo, same commit, opposite answers — which is the exact
+		// inversion this layer exists to remove, left behind at one call site.
+		report := setup.Check(repo.RootOr(mustCwd()), setup.Options{ExecutablePath: executablePath()})
 		bytes, err := json.MarshalIndent(report, "", "  ")
 		exitOnErr(err)
 		fmt.Println(string(bytes))

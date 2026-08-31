@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# The Stop hook: the shim that makes the Completion Rule a gate rather than a sentence in
+# CLAUDE.md. It had no test at all, which is how it shipped defaulting to an UNSCOPED status
+# query — a livelock nobody could clear — while `--scope branch` already existed beside it.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+HOOK="$ROOT/hooks/pre-finish.sh"
+
+(cd "$ROOT" && go build -o "$TMP/mrv" ./cmd/metareview)
+
+repo="$TMP/repo"
+mkdir -p "$repo/docs/metareview/reviews"
+cd "$repo"
+git init -q -b main
+git config user.email t@e
+git config user.name t
+printf 'package p\n' > base.go
+git add base.go
+git -c commit.gpgsign=false commit -qm base
+git checkout -q -b work
+printf 'package p // changed\n' > changed.go
+git add changed.go
+git -c commit.gpgsign=false commit -qm work
+head="$(git rev-parse HEAD)"
+
+# A hook must always emit ONE line of valid JSON when it blocks, or the host cannot act on it.
+assert_json_block() {  # assert_json_block <output> <substring>
+  printf '%s' "$1" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["decision"] == "block", d
+assert d["reason"], d
+' || { echo "FAIL: hook did not emit a valid block decision: $1"; exit 1; }
+  printf '%s' "$1" | grep -q "$2" || { printf "FAIL: reason missing %s: %s\n" "" "" >&2; exit 1; }
+}
+
+# 1. Absent tooling blocks. A check that did not run must never read as a check that found
+#    nothing wrong.
+out="$(METAREVIEW_BIN=definitely-not-installed bash "$HOOK")"
+assert_json_block "$out" "not installed"
+
+# 2. The branch changed a file no review has read, so the hook blocks — and says so in the words
+#    that tell an operator what to do, distinctly from "you have findings to fix".
+out="$(METAREVIEW_BIN="$TMP/mrv" bash "$HOOK")"
+assert_json_block "$out" "never been reviewed"
+printf '%s' "$out" | grep -q "changed.go" || { echo "FAIL: the block must name the unreviewed file: $out"; exit 1; }
+
+# 3. Once a passing review records that it read the file, the hook lets the session finish. A
+#    gate that cannot be satisfied is one an operator disables, which is worse than none.
+printf '# metareview: pr-ready review\n\nRun ID: `mrv-1`\n\nTarget: `current branch`\n\nHead: `%s`\n\nCovered paths: `["base.go","changed.go"]`\n\n## Verdict\n\nPASS\n' \
+  "$head" > docs/metareview/reviews/mrv-1-pr-ready.md
+out="$(METAREVIEW_BIN="$TMP/mrv" bash "$HOOK")"
+if [ -n "$out" ]; then echo "FAIL: a reviewed branch must pass silently, got: $out"; exit 1; fi
+
+# 4. A blocking review of this branch's own commits blocks, and is reported as a verdict rather
+#    than as "never reviewed" — the two call for different things from whoever reads it.
+printf '# metareview: task-done review\n\nRun ID: `mrv-2`\n\nTarget: `t-2`\n\nHead: `%s`\n\nCovered paths: `["changed.go"]`\n\n## Verdict\n\nNEEDS_REVISION\n' \
+  "$head" > docs/metareview/reviews/mrv-2-task-done.md
+out="$(METAREVIEW_BIN="$TMP/mrv" bash "$HOOK")"
+assert_json_block "$out" "NEEDS_REVISION"
+
+# 5. METAREVIEW_TARGET still narrows to one target when the caller knows it.
+out="$(METAREVIEW_BIN="$TMP/mrv" METAREVIEW_TARGET=t-2 bash "$HOOK")"
+assert_json_block "$out" "t-2"
+
+# 6. The hook runs from wherever the session happens to be standing. Resolving against the
+#    process cwd found no review logs at all and exited 0 — the gate bypassed by the entirely
+#    ordinary act of working in a subdirectory, and bypassed silently.
+mkdir -p "$repo/internal/deep"
+out="$(cd "$repo/internal/deep" && METAREVIEW_BIN="$TMP/mrv" bash "$HOOK")"
+assert_json_block "$out" "NEEDS_REVISION"
+
+# 7. A gate that errors is broken, not clean, and says which of the two it is.
+cat > "$TMP/broken" <<'EOF'
+#!/bin/sh
+echo "boom" >&2
+exit 7
+EOF
+chmod +x "$TMP/broken"
+out="$(METAREVIEW_BIN="$TMP/broken" bash "$HOOK")"
+assert_json_block "$out" "could not answer"
+
+# 8. The response must be valid JSON even when a blocker's target is hostile.
+#    Targets are review targets — task ids and file paths — and a path may legally contain a
+#    double quote, a backslash or a newline. The reason was assembled with printf around a raw
+#    target, so such a path produced unparseable JSON and the host could not act on the block
+#    decision: the gate failed OPEN at the moment it was trying to close.
+cat > "$TMP/nasty" <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"blocked":true,"must_clear":[{"target":"src/say \"hi\"\\back\nnext.go","verdict":"UNREVIEWED"}]}'
+exit 1
+EOF
+chmod +x "$TMP/nasty"
+out="$(METAREVIEW_BIN="$TMP/nasty" bash "$HOOK")"
+printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["decision"] == "block", d
+assert "never been reviewed" in d["reason"], d
+' || { echo "FAIL: a hostile target produced unparseable JSON: $out" >&2; exit 1; }
+
+# 9. A blocking status whose body the summariser cannot read must still produce a valid block.
+#    Failing to DESCRIBE the blockers must never become failing to block, so the response is a
+#    static valid one rather than a broken string or an empty stdout the host reads as "allow".
+cat > "$TMP/garbage" <<'EOF'
+#!/bin/sh
+echo "not json at all {{{"
+exit 1
+EOF
+chmod +x "$TMP/garbage"
+out="$(METAREVIEW_BIN="$TMP/garbage" bash "$HOOK")"
+printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["decision"] == "block", d
+' || { echo "FAIL: unreadable status body did not produce a valid block: $out" >&2; exit 1; }
+
+# 10-12. The loop-prevention contract. These use their OWN stub rather than the fixture repo,
+#        because the assertions are about the hook's behaviour, not about whatever the previous
+#        test left in the tree — a fixture inherited from four tests ago is how a test ends up
+#        asserting something it does not exercise.
+cat > "$TMP/blocking" <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"blocked":true,"must_clear":[{"target":"internal/thing.go","verdict":"UNREVIEWED"}]}'
+exit 1
+EOF
+chmod +x "$TMP/blocking"
+
+# 10. The host says it is ALREADY continuing because of this hook. The gate yields — a gate that
+#     cannot be satisfied and cannot be exited is a hang, and this one was measured firing nine
+#     times in ten turns against a blocker the session could not clear by itself. It yields
+#     LOUDLY: standing down silently would be the failure this whole layer exists to remove.
+out="$(printf '{"stop_hook_active":true}' | METAREVIEW_BIN="$TMP/blocking" bash "$HOOK" 2>"$TMP/err")"
+if [ -n "$out" ]; then
+  echo "FAIL: yielding must not emit a block decision: $out" >&2; exit 1
+fi
+grep -q "yielding after a repeated block" "$TMP/err" || {
+  echo "FAIL: the yield must be announced, not silent:"; cat "$TMP/err" >&2; exit 1; }
+grep -q "internal/thing.go" "$TMP/err" || {
+  echo "FAIL: the yield must name what was left unresolved:"; cat "$TMP/err" >&2; exit 1; }
+grep -q "override request" "$TMP/err" || {
+  echo "FAIL: the yield must name the recorded way out:"; cat "$TMP/err" >&2; exit 1; }
+
+# 11. The FIRST pass still blocks, and so does an absent, false, or unparseable payload. Yielding
+#     is for a repeat; a gate that stands down on every session is bypassed by ignoring it once.
+for payload in '{"stop_hook_active":false}' '{}' 'not json at all' ''; do
+  out="$(printf '%s' "$payload" | METAREVIEW_BIN="$TMP/blocking" bash "$HOOK")"
+  assert_json_block "$out" "internal/thing.go"
+done
+
+# 12. A clean tree with stop_hook_active set is simply clean, and says nothing at all.
+cat > "$TMP/clean" <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"blocked":false,"must_clear":[]}'
+exit 0
+EOF
+chmod +x "$TMP/clean"
+out="$(printf '{"stop_hook_active":true}' | METAREVIEW_BIN="$TMP/clean" bash "$HOOK" 2>"$TMP/err2")"
+if [ -n "$out" ] || [ -s "$TMP/err2" ]; then
+  echo "FAIL: a clean tree must pass quietly: out=$out err=$(cat "$TMP/err2")" >&2; exit 1
+fi
+
+# 13. A BROKEN gate is never yielded past. Exit 1 means "something must be cleared"; any other
+#     nonzero code means the check itself failed. Yielding on every nonzero code meant a status
+#     that crashed on the second pass silently bypassed completion enforcement — the gate turning
+#     itself off precisely when it had stopped working.
+cat > "$TMP/crashing" <<'EOF'
+#!/bin/sh
+echo "internal error" >&2
+exit 2
+EOF
+chmod +x "$TMP/crashing"
+out="$(printf '{"stop_hook_active":true}' | METAREVIEW_BIN="$TMP/crashing" bash "$HOOK" 2>/dev/null)"
+assert_json_block "$out" "could not answer"
+
+# 14. A missing binary IS yielded past on the repeat, because it is the one blocker a session can
+#     never clear from inside: refusing forever there is the hang this yield exists to prevent.
+out="$(printf '{"stop_hook_active":true}' | METAREVIEW_BIN=definitely-not-installed bash "$HOOK" 2>"$TMP/err3")"
+if [ -n "$out" ]; then
+  echo "FAIL: an unclearable missing binary must yield on the repeat, not block: $out" >&2; exit 1
+fi
+grep -q "not installed" "$TMP/err3" || {
+  echo "FAIL: the yield must say why it stood down:"; cat "$TMP/err3" >&2; exit 1; }
+# ...and still blocks on the FIRST pass.
+out="$(printf '{}' | METAREVIEW_BIN=definitely-not-installed bash "$HOOK")"
+assert_json_block "$out" "not installed"
+
+# 15. A diagnostic on stderr must not corrupt the JSON the reason is built from. Capturing 2>&1
+#     merged them, json.load failed, and the message degraded to the static fallback — losing the
+#     blocker names exactly when something had gone wrong enough to warrant a diagnostic.
+cat > "$TMP/noisy" <<'EOF'
+#!/bin/sh
+echo "warning: something chatty" >&2
+printf '%s\n' '{"blocked":true,"must_clear":[{"target":"internal/noisy.go","verdict":"UNREVIEWED"}]}'
+exit 1
+EOF
+chmod +x "$TMP/noisy"
+out="$(printf '{}' | METAREVIEW_BIN="$TMP/noisy" bash "$HOOK" 2>/dev/null)"
+assert_json_block "$out" "internal/noisy.go"
+
+echo "test-stop-hook: ok"
