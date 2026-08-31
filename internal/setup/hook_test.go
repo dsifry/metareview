@@ -214,6 +214,14 @@ func TestOnlyMetareviewsOwnCommandCertifiesTheGate(t *testing.T) {
 		"/usr/local/bin/metareview status --json":     true,
 		"metareview status --json":                    true,
 		"bash /Users/dev/project/hooks/pre-finish.sh": true,
+		// The relative forms, which the host resolves against the project it is registered in.
+		// Tightening the check to a path suffix dropped these silently at first: `setup --check`
+		// reported the gate inactive for a registration that does run, which is the same class of
+		// wrong answer as certifying one that does not.
+		"hooks/pre-finish.sh":      true,
+		"bash hooks/pre-finish.sh": true,
+		"./hooks/pre-finish.sh":    true,
+		"sh ./hooks/pre-finish.sh": true,
 		// The trap: a command that merely lives under a directory called metareview.
 		"/Users/dev/Developer/metareview/node_modules/.bin/prettier --write .": false,
 		"npx prettier --write .":     false,

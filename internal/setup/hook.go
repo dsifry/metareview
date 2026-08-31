@@ -164,12 +164,27 @@ func isOurs(cmd string, roots ...string) bool {
 	clean := func(t string) string {
 		return filepath.ToSlash(strings.Trim(t, "\"'`)"))
 	}
+	const rel = "hooks/pre-finish.sh"
 	for _, tok := range fields {
 		p := clean(tok)
-		if !strings.HasSuffix(p, "/hooks/pre-finish.sh") && p != "hooks/pre-finish.sh" {
+		// The relative form is its OWN case. Letting it past the skip and then trimming
+		// "/"+rel left the whole path as the prefix, which matched no accepted root — so a hook
+		// registered as `hooks/pre-finish.sh` or `bash hooks/pre-finish.sh` reported the gate
+		// INACTIVE for a registration that does in fact run. The basename version accepted it;
+		// tightening the check quietly dropped a working install.
+		var prefix string
+		switch {
+		case p == rel:
+			prefix = ""
+		// The separator is required here, though the TrimSuffix below would also refuse a match
+		// without one (its prefix would then match no accepted root). Kept explicit because the
+		// two lines have to agree, and a reader should not have to derive the guarantee from the
+		// interaction of two separate string operations.
+		case strings.HasSuffix(p, "/"+rel):
+			prefix = strings.TrimSuffix(p, "/"+rel)
+		default:
 			continue
 		}
-		prefix := strings.TrimSuffix(p, "/hooks/pre-finish.sh")
 		switch prefix {
 		case "$CLAUDE_PROJECT_DIR", "${CLAUDE_PROJECT_DIR}",
 			"$CLAUDE_PLUGIN_ROOT", "${CLAUDE_PLUGIN_ROOT}",
