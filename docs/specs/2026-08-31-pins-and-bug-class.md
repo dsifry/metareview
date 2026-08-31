@@ -887,9 +887,15 @@ and fall back to the mutate-a-line pin otherwise. Both ride the same determinist
   non-`Proven` proof of any kind blocks. Clause (a)'s **own-file `File`-binding** (`File==Finding.File`)
   is the **`Kind:"pin"` case only**: a reproduction proof has `Pin==nil` (no pin `File`), so the
   binding is **retired for it and discharged by the §9.2 symptom reviewer** (per *Supersedes* above);
-  a deletion proof binds through `DeletionRef.File`==`Root.File` (§9.5), not `Finding.File`. So the
-  own-file guarantee is preserved for every kind, by the kind's own mechanism — never by demanding a
-  pin `File` a non-pin proof does not carry. ⧗ *Build-time:* the exact `ProofResult`
+  a deletion proof satisfies clause (a) when its `DeletionRef.File`==`Finding.File` — the deletion
+  removes code from the finding's **own** location, the same own-file guarantee a pin's `File` gives,
+  so the proven code and the class gate's touched line stay the *same* code and the C4 disjoint-code
+  hole stays closed (review #34 verify-2). This is **distinct from** §9.5's `DeletionRef.File`==
+  `Root.File` check, which is the structural-class Guard-and-Go gate (`Root` exists only on
+  `Remedy:"structural"` classes and may live in another file) — a separate gate, not clause (a). So
+  the own-file guarantee is preserved for every kind, by the kind's own mechanism — never by demanding
+  a pin `File` a non-pin proof does not carry, and never by substituting the class root for the
+  finding's own file. ⧗ *Build-time:* the exact `ProofResult`
   struct, the per-`Kind` pass predicate, and the generalized replay/clearing are the build contract;
   the spec requirement is that **no proof kind may be omitted or silently given pin-only semantics**.
 - **Execution contract for a committed reproduction/deletion test (PR#32-fix):** the test lives in the
@@ -1007,10 +1013,15 @@ two: coverage is a hard conjunct exactly when a signal exists, never otherwise.
    yields no coverage to attribute** — a single all-or-nothing invocation, not a per-test instrumented
    run. So the coverage conjunct **applies where a signal is available and is recorded *unavailable*
    otherwise** — never required on a capability §4.2 says may be absent — and mutation-kill (2) gates
-   alone in that case. A usable **coverage signal means per-test (or per-source-file contribution)
-   attribution** (review #34): the aggregate pass/fail an opaque cmd emits does **not** qualify — it
-   cannot tell you *which* test covered a line — and counts as *unavailable*, so mutation-kill gates
-   alone. ⧗ *Build-time:* detect whether per-test attribution exists and select the applicable layers.
+   alone in that case. A usable **coverage signal means a per-line/per-file coverage
+   *profile*** the cmd can emit (e.g. a Go `-coverprofile`) — measured once with the test present and
+   once with it deleted, then **diffed**: a production line that goes covered→uncovered is a
+   regression (review #34 verify-2). Per-*test* attribution is **not** required — a whole-suite
+   before/after profile diff answers "is the deleted test's coverage subsumed by the rest." What does
+   **not** qualify is the **aggregate pass/fail** an opaque cmd emits with no line profile at all
+   (§4.2's single all-or-nothing invocation): that counts as *unavailable*, so mutation-kill gates
+   alone. ⧗ *Build-time:* detect whether the cmd yields a line coverage profile and select the
+   applicable layers.
 2. **Mutation-kill non-regression** — no mutant killed before the deletion survives after it. The
    load-bearing half; fills coverage's blind spot (the R8 277/571 finding); reuses the pins' engine.
    **Mutant identity + deleted-target exclusion (PR#32, round 2):** a mutant needs a **unique,
