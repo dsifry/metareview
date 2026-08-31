@@ -163,6 +163,11 @@ distinct sites:
 
 - ✓ *Kept all four:* collapsing survived+malformed would report a real test gap and a typo the same
   way, sending the actor to the wrong work.
+- *`malformed` is "report" for triage, not "accept" (review #34):* the `Blocks?` column says it is
+  not a *test-gap* block like `survived` — but a fix that **supplied** a malformed pin still does not
+  satisfy `pins_proven`, because §3.1 clause (b) requires every supplied pin be `Proven`. The pin must
+  be rewritten to `Proven` (or, for a trivial pin the §9.8 AST pre-screen classifies malformed,
+  replaced with a real one) before the fix passes.
 - `unverifiable` **blocks** but is environment-owned and clearable only by a recorded override
   (§4.1): it must not be a silent way to escape proof, and must not livelock a genuinely broken tree.
 
@@ -659,7 +664,7 @@ gate whose valve is *gameable* is a **safety valve** — kept simple now, tighte
 | `pins_proven` = unverifiable | tree can't answer | recorded override (§4.1) | **only once the override is WIRED to the PinResult — see B7 fix below** | grant is self-servable → tighten later |
 | `pins_proven` anchor not in diff (B1) | pin doesn't touch the fix | move the pin onto a changed line | yes — a real fix always has a changed line | — |
 | `require_pins` on a fix | code change unproven | supply a pin, OR record "no pinnable change" | yes — the "none" path is always available | "none" is self-asserted → tighten later |
-| `pins_proven`: a pure-DELETION fix (no added line to pin) | the fix removed code, nothing to anchor | record "no pinnable line" with the deleted range as evidence | yes — added round-2 R3; this row was missing and was a real dead-end | machine-checks the fix is deletion-only → hard, not self-asserted |
+| `pins_proven`: a pure-DELETION fix (no added line to pin) | the fix removed code, nothing to anchor | **superseded by §9.4:** prove it as a `Kind:"deletion"` `DifferentialProof` — a reproduction test (fail-before/pass-after) plus a `DeletionRef`; deletion is now a first-class provable fix, no longer a "no pinnable line" valve-skip | yes | the reproduction test + the `DeletionRef`↔diff binding are machine-checked (§9.4) → hard, not self-asserted |
 | `pins_proven` (a) own-file: the finding's remedy is genuinely in ANOTHER file | no pinnable added line in the finding's own file | record "no pinnable change" naming the actual fix file | yes — the same valve as deletion | self-asserted (the fix file is named and in the diff) → tighten-if-abused |
 | class member `fixed-elsewhere` (remedy in another file) | own-file pin impossible | resolves via a Proven pin in the REMEDY file `FixInstance.File` (or "no pinnable change" if it has no tests) | yes — invariant 2 makes `fixed-elsewhere` a resolving disposition (PR#31-cursor: without this it cleared the gate but never resolved → class re-demanded forever) | gameable/auditable → tighten-if-abused |
 | `classes_enumerated` member unanswered (B3) | a class member ignored | give it a disposition: `fixed`, `already-correct`, or `out-of-scope`+reason | yes — the non-`fixed` dispositions are the valve | reason unreviewed → tighten later |
@@ -871,7 +876,16 @@ and fall back to the mutate-a-line pin otherwise. Both ride the same determinist
   (PR#32 fix):** now `DifferentialProof.ID`, NOT `Pin.ID` — `Pin` is nil for reproduction/deletion, so
   keying on `Pin.ID` would leave those proofs unclearable. `Delta.Pins`/`PinResults`/`Snapshot.Unproven`
   generalise to `DifferentialProof`/`ProofResult`; the four `PinOutcome` values and the clear-by-
-  `Finding` rule are unchanged; a `Pin` is the `Kind:"pin"` case, not a separate model.
+  `Finding` rule are unchanged; a `Pin` is the `Kind:"pin"` case, not a separate model. **This
+  supersession is the general contract, not a suggestion (review #34):** `ProofResult` is `PinResult`
+  with a `DifferentialProof` in place of `Pin` (same `Proven`/`Outcome`/`Detail`, same four
+  `PinOutcome` values); §2.4's `Delta.Pins`/`PinResults` and §3.1's `prove`/`pins_proven` **read as
+  their `DifferentialProof`/`ProofResult` generalizations** — the pin-only text there is the
+  `Kind:"pin"` special case, superseded as the general rule — and `pins_proven`'s (a)/(b) clauses hold
+  **per proof regardless of `Kind`** (a reproduction/deletion proof clears its `Finding` exactly as a
+  pin does; a supplied non-`Proven` proof of any kind blocks). ⧗ *Build-time:* the exact `ProofResult`
+  struct, the per-`Kind` pass predicate, and the generalized replay/clearing are the build contract;
+  the spec requirement is that **no proof kind may be omitted or silently given pin-only semantics**.
 - **Execution contract for a committed reproduction/deletion test (PR#32-fix):** the test lives in the
   reviewed diff (§9.3). `prove` (a) checks out the **pre-fix** tree, (b) **overlays only the test file**
   from the fix commit onto it — **all test-only files the fix adds or changes** (helpers included),
@@ -892,7 +906,9 @@ a mismatch raises a **blocking finding (NEEDS_REVISION)**, and a match adds noth
 produces a PASS. So an LLM can veto a proof, never certify one: the deterministic differential is the
 sole PASS path, and on LLM approval the outcome is exactly whatever that differential already
 returned. (The earlier "advisory-blocking" label is dropped — it collided with the model's
-`PASS_ADVISORY`, where *advisory* means the review *passes*; this reviewer only ever blocks.)
+`PASS_ADVISORY`, where *advisory* means the review *passes*; this reviewer only ever blocks.) **Fail-closed (review #34):** a reviewer timeout, error, or
+unusable/unparseable output is itself a **blocking `NEEDS_REVISION`** (or a bounded retry) — never
+treated as approval, so a missing veto can never become a silent pass.
 - Evidence: ablating this gate dropped F2P 56.88%→18.84% (ReProAgent).
 
 ### 9.3 Anti-gaming for the self-validating loop (R3)
@@ -985,8 +1001,10 @@ two: coverage is a hard conjunct exactly when a signal exists, never otherwise.
    yields no coverage to attribute** — a single all-or-nothing invocation, not a per-test instrumented
    run. So the coverage conjunct **applies where a signal is available and is recorded *unavailable*
    otherwise** — never required on a capability §4.2 says may be absent — and mutation-kill (2) gates
-   alone in that case. ⧗ *Build-time:* detect the coverage signal's presence and select the applicable
-   layers.
+   alone in that case. A usable **coverage signal means per-test (or per-source-file contribution)
+   attribution** (review #34): the aggregate pass/fail an opaque cmd emits does **not** qualify — it
+   cannot tell you *which* test covered a line — and counts as *unavailable*, so mutation-kill gates
+   alone. ⧗ *Build-time:* detect whether per-test attribution exists and select the applicable layers.
 2. **Mutation-kill non-regression** — no mutant killed before the deletion survives after it. The
    load-bearing half; fills coverage's blind spot (the R8 277/571 finding); reuses the pins' engine.
    **Mutant identity + deleted-target exclusion (PR#32, round 2):** a mutant needs a **unique,
@@ -1016,17 +1034,20 @@ non-regression where obtainable).
 Our final-state gates are blind to a whole hack class (test-oracle/harness tampering, answer-lookup,
 whitespace-touch). Add a monitor with two declared input sources, because the flags split by what the
 data model already produces:
-- **From the reviewed diff + the override log (both already on the wire):** whitespace/comment-only
-  "changes" (read from the diff), and self-served overrides (the §4.1/§4.5 override records keyed on
-  `DifferentialProof.ID`/`BugClass.ID` per §9.1 — `Pin.ID` is nil for reproduction/deletion proofs).
-  These ship with no new data.
+- **From existing artifacts — the reviewed git diff and the override records — NOT new `Delta` wire
+  fields (review #34):** whitespace/comment-only "changes" (read from the diff), and self-served
+  overrides (the §4.1/§4.5 override records keyed on `DifferentialProof.ID`/`BugClass.ID` per §9.1 —
+  `Pin.ID` is nil for reproduction/deletion proofs). These need no addition to §2.4's persisted
+  `Delta`; the monitor reads them from the diff and the override log directly.
 - **From a fix-node action/trajectory record — which §2.4's wire model does NOT yet carry:** edits to
   the oracle/harness *within the proving trajectory*, and answer-lookup (git-history / PR /
   upstream-diff / network fetches). The fix node today emits only `{commit, summary, pins[]}`, from
   which neither is recoverable. ⧗ *Build-time prerequisite:* capture a fix-trajectory record —
   minimally the ordered per-step edits (path + content delta) and any fetch/network attempt — and add
-  it to §2.4's additive-optional wire model as this monitor's declared input. The trajectory-dependent
-  flags are **blocked on that record**; the diff/override flags do not wait for it.
+  it to §2.4's additive-optional wire model as this monitor's declared input — its exact fields,
+  persistence, and replay/ordering are the ⧗ build-time schema contract, like every other
+  additive-optional field in §2.4. The trajectory-dependent flags are **blocked on that record**; the
+  diff/override flags do not wait for it.
 
 Feed newly-seen patterns back from post-merge recurrence — the co-evolution loop the literature says
 is mandatory.
