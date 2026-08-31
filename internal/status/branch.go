@@ -2,6 +2,7 @@ package status
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -53,7 +54,7 @@ func realGit(root string, args ...string) ([]byte, error) {
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("git %s timed out after %s", args[0], gitDeadline)
+		return nil, fmt.Errorf("git %s after %s: %w", args[0], gitDeadline, gitcontext.ErrTimeout)
 	}
 	return out, err
 }
@@ -102,7 +103,9 @@ func ResolveBranchScope(root, base string, run RunGit) (BranchScope, error) {
 		// answer with fewer commits than the branch has. Swallowing it made the deadline
 		// decorative: the error was discarded and the caller saw a partial scope with no error,
 		// exactly as if nothing had gone wrong.
-		if strings.Contains(err.Error(), "timed out") {
+		// The sentinel first; the text as a fallback because RunGit is an exported seam and an
+		// outside implementation cannot be expected to wrap our error type.
+		if errors.Is(err, gitcontext.ErrTimeout) || strings.Contains(err.Error(), "timed out") {
 			return BranchScope{}, err
 		}
 		return s, nil

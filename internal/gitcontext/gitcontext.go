@@ -3,6 +3,7 @@ package gitcontext
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -313,6 +314,14 @@ func resolveBase(root, requestedBase string) (string, error) {
 	branch, _ := git(root, "rev-parse", "--abbrev-ref", "HEAD")
 	for _, name := range []string{"main", "master"} {
 		base, err := git(root, "merge-base", "HEAD", name)
+		if errors.Is(err, ErrTimeout) {
+			// A stall aborts resolution rather than falling through to the next candidate. Every
+			// candidate would spend the full deadline — three of them, so a stale index.lock held
+			// the synchronous Stop gate for triple the bound it was given — and worse, a repo
+			// slow enough to time out on `merge-base main` but not on `HEAD~1` would resolve the
+			// WRONG base and silently scope the branch to one commit.
+			return "", err
+		}
 		if err != nil || base == "" {
 			continue
 		}
@@ -336,7 +345,11 @@ func resolveBase(root, requestedBase string) (string, error) {
 		}
 		return base, nil
 	}
-	if base, err := git(root, "rev-parse", "HEAD~1"); err == nil && base != "" {
+	base, err := git(root, "rev-parse", "HEAD~1")
+	if errors.Is(err, ErrTimeout) {
+		return "", err
+	}
+	if err == nil && base != "" {
 		return base, nil
 	}
 	return "", fmt.Errorf("invalid git base: unable to resolve default base")
@@ -401,6 +414,12 @@ func hasPrefixFlag(args []string, flag string) bool {
 // the real stall unbounded while the comment claimed otherwise.
 var Deadline = 20 * time.Second
 
+// ErrTimeout marks a git call that exceeded Deadline. It is a sentinel rather than a message so
+// callers can tell a stalled repository from an ordinary git failure without matching on text:
+// the two demand opposite responses, since an ordinary failure is often worth retrying with
+// another argument and a stall never is.
+var ErrTimeout = errors.New("git timed out")
+
 func git(root string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), Deadline)
 	defer cancel()
@@ -410,7 +429,7 @@ func git(root string, args ...string) (string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
-		return "", fmt.Errorf("git %s timed out after %s", args[0], Deadline)
+		return "", fmt.Errorf("git %s after %s: %w", args[0], Deadline, ErrTimeout)
 	}
 	if err != nil {
 		message := strings.TrimSpace(stderr.String())
