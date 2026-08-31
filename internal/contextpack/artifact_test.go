@@ -7,16 +7,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dsifry/metareview/internal/fsm/kind"
+	"github.com/dsifry/metareview/internal/lens"
 )
 
-// The Suggested Reviewers block must list exactly the canonical lens set (kind.Lenses), in order.
+// The Suggested Reviewers block must list exactly the canonical lens set (lens.Displays()), in order.
 // This is the guard that stops the list drifting: it silently sat at the original five names for
 // two releases (security / testing-quality / data-migration already required) because it was a
-// hard-coded copy divorced from the source. The block is now derived from kind.Lenses, so this
+// hard-coded copy divorced from the source. The block is now derived from lens.Displays(), so this
 // test fails if anyone re-hard-codes a divergent list, drops a lens, or lets the two get out of
-// sync — adding a lens to kind.Lenses updates the block by construction and keeps this green.
-func TestSuggestedReviewersDeriveFromKindLenses(t *testing.T) {
+// sync — adding a lens to lens.Displays() updates the block by construction and keeps this green.
+func TestSuggestedReviewersDeriveFromCanonicalLenses(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "A.md"), []byte("# artifact\n\nbody\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -39,12 +39,12 @@ func TestSuggestedReviewersDeriveFromKindLenses(t *testing.T) {
 			got = append(got, strings.TrimPrefix(line, "- "))
 		}
 	}
-	if len(got) != len(kind.Lenses) {
-		t.Fatalf("Suggested Reviewers lists %d lenses, kind.Lenses has %d: %v", len(got), len(kind.Lenses), got)
+	if len(got) != len(lens.Displays()) {
+		t.Fatalf("Suggested Reviewers lists %d lenses, lens.Displays() has %d: %v", len(got), len(lens.Displays()), got)
 	}
-	for i, want := range kind.Lenses {
+	for i, want := range lens.Displays() {
 		if got[i] != want {
-			t.Errorf("reviewer %d = %q, want %q (the block must derive from kind.Lenses, not a copy)", i, got[i], want)
+			t.Errorf("reviewer %d = %q, want %q (the block must derive from lens.Displays(), not a copy)", i, got[i], want)
 		}
 	}
 }

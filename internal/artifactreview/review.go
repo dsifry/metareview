@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dsifry/metareview/internal/contextpack"
+	"github.com/dsifry/metareview/internal/lens"
 	"github.com/dsifry/metareview/internal/markdown"
 	"github.com/dsifry/metareview/internal/state"
 )
@@ -109,7 +110,7 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
 		Target: map[string]string{"type": "path", "path": target},
 		Status: "open", Verdict: "NOT_REVIEWED", ExecutionMode: "pending-parallel-subagents",
 		PreviousRunID: prev, BaseSHA: head, HeadSHA: head, ContextPath: ctx.ContextRel, ReviewPath: reviewRel,
-		Reviewers:  []string{"feasibility", "completeness", "scope-alignment", "architecture", "intent-preservation", "security", "testing-quality", "data-migration", "mechanical-precision"},
+		Reviewers:  lens.Slugs(),
 		FindingIDs: []string{}, SourceRefs: []map[string]string{{"type": "path", "path": target}},
 		CreatedAt: now, UpdatedAt: now, RepoRoot: root, GitHead: head,
 	}

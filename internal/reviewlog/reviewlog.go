@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/dsifry/metareview/internal/findings"
+	"github.com/dsifry/metareview/internal/lens"
 	"github.com/dsifry/metareview/internal/runchain"
 )
 
@@ -225,13 +226,27 @@ func verdictIsUnresolved(verdict string) bool {
 	}
 }
 
-// currentLenses is the set an artifact review must cover today. v08Lenses is the eight required
-// from 2026-08-24 (security 0.7.0 + testing-quality / data-migration 0.8.0) until mechanical-precision
-// (0.9.0, 2026-08-31) was added; it is frozen so a log from that era stays judged against exactly
-// those eight. legacyLenses is the five required before security.
-var currentLenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation", "security", "testingquality", "datamigration", "mechanicalprecision"}
+// currentLenses is the set an artifact review must cover today: the normalized match keys of the
+// canonical lens set, derived from lens.All so it cannot drift from the scaffold marker (which
+// writes the Slugs) or the reviewer rows (which carry the Display names) — both normalize to these
+// same keys. v08Lenses is the eight required from 2026-08-24 (security 0.7.0 + testing-quality /
+// data-migration 0.8.0) until mechanical-precision (0.9.0, 2026-08-31) was added, and legacyLenses
+// the five before security. Those two are FROZEN literals, not derived: a historical era's required
+// set must never change when the canonical set grows — that is the whole point of the era table.
+var currentLenses = currentLensKeys()
 var v08Lenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation", "security", "testingquality", "datamigration"}
 var legacyLenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation"}
+
+// currentLensKeys is the normalized match key of each canonical lens, in order. Deriving via
+// normalizedReviewer (the same fold applied to reviewer-row text) guarantees a filled row matches
+// the required set for every lens, including any added later.
+func currentLensKeys() []string {
+	out := make([]string, len(lens.All))
+	for i, l := range lens.All {
+		out[i] = normalizedReviewer(l.Display)
+	}
+	return out
+}
 
 // lensEra records a rubric and the date it took effect. Adding a lens means appending an era, not
 // editing currentLenses: a log has to stay judged against the rubric of its own date, or every

@@ -8,7 +8,24 @@ import (
 	"testing"
 
 	"github.com/dsifry/metareview/internal/jsonl"
+	"github.com/dsifry/metareview/internal/lens"
 )
+
+// Every lens's marker Slug and its Display name must normalize to the SAME key. The scaffold writes
+// the Slugs into "Required lenses:" while the reviewer rows carry the Display names; if the two
+// normalize apart, a declared set and its completed rows refer to different lenses and the review
+// never reads as complete — the "scope-alignment" vs "Scope and alignment" trap. This guards it for
+// every lens in the canonical set, including any added later, and also proves currentLensKeys()
+// (derived from Display) matches what a reviewer row (Slug or Display) normalizes to.
+func TestEveryLensSlugAndDisplayNormalizeToSameKey(t *testing.T) {
+	for _, l := range lens.All {
+		fromSlug, fromDisplay := normalizedReviewer(l.Slug), normalizedReviewer(l.Display)
+		if fromSlug != fromDisplay {
+			t.Errorf("lens %q: slug %q normalizes to %q but display normalizes to %q — they must fold to one key (add a canonicalLens fold)",
+				l.Display, l.Slug, fromSlug, fromDisplay)
+		}
+	}
+}
 
 func TestDiscoverReviewLogsDeterministically(t *testing.T) {
 	root := t.TempDir()
