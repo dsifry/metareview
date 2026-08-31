@@ -54,9 +54,11 @@ Usage:
 Commands:
   setup --check              Detect repository mode and prerequisites without writing files
   setup --bootstrap-prereqs  Print or execute prerequisite bootstrap actions
-  status [--json]            Print repository review capability status; --json emits the
+  status [--json [--target <path>]]
+                             Print repository review capability status; --json emits the
                              machine-readable contract a host hook branches on (exit 1 when
-                             something must be cleared)
+                             something must be cleared). --target narrows it to one path, so a
+                             hook blocks on the work in hand rather than the whole history
   override request           Record an out-of-workflow escalation against a finding (still blocks)
   override grant             Acknowledge a process exception from outside the workflow (stops blocking)
   override list              List process exceptions; --pending exits 1 while any are unacknowledged
@@ -107,8 +109,38 @@ func main() {
 	// status --json is the contract a host hook branches on: one machine-readable answer to
 	// "may work proceed, and if not, what must be cleared". Exits 1 when something must be
 	// cleared, so a hook needs no parsing to make the common decision.
-	if len(args) == 2 && args[0] == "status" && args[1] == "--json" {
-		code, err := status.Emit(mustCwd(), os.Stdout)
+	if len(args) >= 2 && args[0] == "status" && args[1] == "--json" {
+		// --target narrows the answer to the work in hand. Unscoped, `blocked` spans the whole
+		// review history, so a hook wired to it refuses an agent because of work it never
+		// touched - a livelock rather than a gate.
+		target, scopeBranch, base := "", false, ""
+		switch {
+		case len(args) == 2:
+		case len(args) == 4 && args[2] == "--target":
+			target = args[3]
+		case len(args) == 3 && args[2] == "--scope=branch":
+			scopeBranch = true
+		case len(args) == 4 && args[2] == "--scope" && args[3] == "branch":
+			scopeBranch = true
+		case len(args) == 6 && args[2] == "--scope" && args[3] == "branch" && args[4] == "--base":
+			scopeBranch, base = true, args[5]
+		default:
+			fmt.Fprintln(os.Stderr, "Usage: metareview status --json [--target <path> | --scope branch [--base <ref>]]")
+			os.Exit(2)
+		}
+		if scopeBranch {
+			// The scope a Stop hook wants: this branch's own commits and the files it changed.
+			code, err := status.EmitForBranch(repo.RootOr(mustCwd()), base, nil, os.Stdout)
+			exitOnErr(err)
+			if code != 0 {
+				os.Exit(code)
+			}
+			return
+		}
+		// Resolved from the repository root, not the process cwd. A Stop hook inherits whatever
+		// directory the session is standing in, and resolving there found no review logs and
+		// reported nothing to clear — the gate was bypassed by working in a subdirectory.
+		code, err := status.EmitFor(repo.RootOr(mustCwd()), target, os.Stdout)
 		exitOnErr(err)
 		if code != 0 {
 			os.Exit(code)
