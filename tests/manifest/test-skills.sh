@@ -90,10 +90,10 @@ grep -q -- '--scaffold-only' skills/review-artifact/SKILL.md
 grep -q 'parallel subagents by default' skills/review-artifact/SKILL.md
 grep -q 'explicit authorization' skills/review-artifact/SKILL.md
 grep -q 'not independently adversarial' skills/review-artifact/SKILL.md
-# All EIGHT lens names, not the five-name prefix: the prefix matched whether the document
-# listed five or eight, so the assertion could not fail and the docs drifted to "five" while
-# reviewlog.artifactReviewComplete required eight. Eight passing artifact reviews were left
-# permanently unresolvable as a result.
+# All NINE lens names, not a shorter prefix: a prefix matched whether the document listed five
+# or the full set, so the assertion could not fail and the docs once drifted to "five" while
+# reviewlog.artifactReviewComplete required more. Eight passing artifact reviews were left
+# permanently unresolvable as a result. Mechanical-precision (0.9.0) is the ninth.
 # and against the ENUMERATION LINE, not the page. Every lens name also appears in prose on the
 # same page ("The Security lens uses rubrics/security-review-rubric.md"), so a whole-file grep
 # still passes when a name is deleted from the list agents are actually told to run: removing
@@ -105,7 +105,8 @@ test -n "$lens_line" || { echo "FAIL: skills/review-artifact/SKILL.md has no 'Ru
 lens_list="$(printf '%s' "$lens_line" | sed -n 's/.*by default: \([^.]*\)\..*/\1/p')"
 test -n "$lens_list" || { echo "FAIL: could not read the lens enumeration out of skills/review-artifact/SKILL.md"; exit 1; }
 for lens in 'Feasibility' 'Completeness' 'Scope and alignment' 'Architecture' \
-            'Intent preservation' 'Security' 'Testing-quality' 'Data-migration'; do
+            'Intent preservation' 'Security' 'Testing-quality' 'Data-migration' \
+            'Mechanical-precision'; do
   case "$lens_list" in
     *"$lens"*) ;;
     *) echo "FAIL: the required-lens enumeration in skills/review-artifact/SKILL.md omits $lens"; exit 1 ;;
@@ -114,7 +115,7 @@ done
 
 # and no user-facing document may claim a different count than the gate enforces
 for doc in README.md docs/quickstart.md docs/README.claude.md docs/README.codex.md commands/review-artifact.md; do
-  # Any claim of a lens count other than eight, not just the exact phrase "five required": none
+  # Any claim of a lens count other than nine, not just the exact phrase "five required": none
   # of these documents contains the word "five" at all today, so matching one phrase asserted
   # nothing. "Run the five lenses." could be appended to any of them and this stayed at exit 0.
   # Read the count and compare it, rather than trying to enumerate every wrong spelling: the
@@ -122,8 +123,8 @@ for doc in README.md docs/quickstart.md docs/README.claude.md docs/README.codex.
   # "8 lenses", while allowing "eight" only because that word had been left out of the list.
   while read -r count; do
     case "$(printf '%s' "$count" | tr '[:upper:]' '[:lower:]')" in
-      eight|8) ;;
-      *) echo "FAIL: $doc claims $count lenses; artifactReviewComplete enforces eight"; exit 1 ;;
+      nine|9) ;;
+      *) echo "FAIL: $doc claims $count lenses; artifactReviewComplete enforces nine"; exit 1 ;;
     esac
   done < <(grep -Eoi '\b(one|two|three|four|five|six|seven|eight|nine|ten|[0-9]+) (required )?lenses\b' "$doc" | awk '{print $1}')
 done

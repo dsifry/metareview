@@ -61,8 +61,9 @@ func TestArtifactNotReviewedIsUnresolved(t *testing.T) {
 	}
 }
 
-// allArtifactReviewerRows is the complete set of 8 required reviewer rows for a 0.8.0
-// artifact review (the baseline a completed review must have).
+// allArtifactReviewerRows is the complete set of 9 required reviewer rows for a current
+// (0.9.0) artifact review (the baseline a completed review must have). The fixtures below use
+// the dateless run ID "mrv-artifact", which is judged against the newest lens set.
 var allArtifactReviewerRows = []string{
 	"| Feasibility | PASS | 0 | 0 | ok |",
 	"| Completeness | PASS | 0 | 0 | ok |",
@@ -72,16 +73,19 @@ var allArtifactReviewerRows = []string{
 	"| Security | PASS | 0 | 0 | ok |",
 	"| Testing-quality | PASS | 0 | 0 | ok |",
 	"| Data-migration | PASS | 0 | 0 | ok |",
+	"| Mechanical-precision | PASS | 0 | 0 | ok |",
 }
 
 func TestArtifactMissingRequiredReviewerRowsIsUnresolved(t *testing.T) {
 	// Each required lens must be enforced: remove exactly one from the complete set and
 	// assert the review is unresolved. Covers the original 5 + the 3 new 0.8.0 lenses
-	// (Security, Testing-quality, Data-migration) — the prior 2-row fixture only omitted
-	// Feasibility/Completeness and so did not exercise the new enforcement.
+	// (Security, Testing-quality, Data-migration) + the 0.9.0 Mechanical-precision lens —
+	// the prior 2-row fixture only omitted Feasibility/Completeness and so did not exercise
+	// the new enforcement.
 	for _, omit := range []string{
 		"Feasibility", "Completeness", "Scope and alignment", "Architecture",
 		"Intent preservation", "Security", "Testing-quality", "Data-migration",
+		"Mechanical-precision",
 	} {
 		omit := omit
 		t.Run("missing_"+strings.ReplaceAll(strings.ReplaceAll(omit, " ", "_"), "-", "_"), func(t *testing.T) {
@@ -453,8 +457,11 @@ func TestLensErasAreKeyedByDate(t *testing.T) {
 	}{
 		{"mrv-20260705-1-artifact-a-1", legacyLenses},
 		{"mrv-20260823-1-artifact-a-1", legacyLenses},
-		{"mrv-20260824-1-artifact-a-1", currentLenses},
-		{"mrv-20260829-1-artifact-a-1", currentLenses},
+		{"mrv-20260824-1-artifact-a-1", v08Lenses},
+		{"mrv-20260829-1-artifact-a-1", v08Lenses},
+		{"mrv-20260830-1-artifact-a-1", v08Lenses},
+		{"mrv-20260831-1-artifact-a-1", currentLenses},
+		{"mrv-20260901-1-artifact-a-1", currentLenses},
 		{"mrv-notadate-1-artifact-a-1", currentLenses},
 	} {
 		got := eraLenses(tc.runID)
@@ -466,12 +473,12 @@ func TestLensErasAreKeyedByDate(t *testing.T) {
 	// "whatever the current set happens to be".
 	saved := lensEras
 	defer func() { lensEras = saved }()
-	ninth := append(append([]string{}, currentLenses...), "supplychain")
-	lensEras = append(append([]lensEra{}, lensEras...), lensEra{from: "20270101", lenses: ninth})
-	if !sameLensSet(eraLenses("mrv-20260829-1-artifact-a-1"), currentLenses) {
+	future := append(append([]string{}, currentLenses...), "supplychain")
+	lensEras = append(append([]lensEra{}, lensEras...), lensEra{from: "20270101", lenses: future})
+	if !sameLensSet(eraLenses("mrv-20260829-1-artifact-a-1"), v08Lenses) {
 		t.Error("adding a later era must not change what an earlier log is judged against")
 	}
-	if !sameLensSet(eraLenses("mrv-20270102-1-artifact-a-1"), ninth) {
+	if !sameLensSet(eraLenses("mrv-20270102-1-artifact-a-1"), future) {
 		t.Error("a log written in the new era must be judged against it")
 	}
 }
@@ -514,6 +521,9 @@ func TestDuplicateLensDeclarationIsNotAShippedRubric(t *testing.T) {
 	}
 	if known := knownRubric(legacyLenses); known == nil {
 		t.Error("the legacy rubric itself must still be recognised")
+	}
+	if known := knownRubric(v08Lenses); known == nil {
+		t.Error("the frozen 0.8.0 eight-lens rubric must still be recognised")
 	}
 	if known := knownRubric(currentLenses); known == nil {
 		t.Error("the current rubric must still be recognised")

@@ -225,9 +225,12 @@ func verdictIsUnresolved(verdict string) bool {
 	}
 }
 
-// currentLenses is the set an artifact review must cover today. legacyLenses is the set that was
-// required before security (0.7.0) and testing-quality / data-migration (0.8.0) were added.
-var currentLenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation", "security", "testingquality", "datamigration"}
+// currentLenses is the set an artifact review must cover today. v08Lenses is the eight required
+// from 2026-08-24 (security 0.7.0 + testing-quality / data-migration 0.8.0) until mechanical-precision
+// (0.9.0, 2026-08-31) was added; it is frozen so a log from that era stays judged against exactly
+// those eight. legacyLenses is the five required before security.
+var currentLenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation", "security", "testingquality", "datamigration", "mechanicalprecision"}
+var v08Lenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation", "security", "testingquality", "datamigration"}
 var legacyLenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation"}
 
 // lensEra records a rubric and the date it took effect. Adding a lens means appending an era, not
@@ -236,7 +239,8 @@ var legacyLenses = []string{"feasibility", "completeness", "scopeandalignment", 
 // Required lenses marker exists to prevent, returning exactly when it is needed.
 //
 // Eras are ordered oldest first and compared as YYYYMMDD strings. Security (0.7.0) and
-// testing-quality / data-migration (0.8.0) both shipped on 2026-08-24.
+// testing-quality / data-migration (0.8.0) both shipped on 2026-08-24; mechanical-precision
+// (0.9.0) shipped on 2026-08-31.
 type lensEra struct {
 	from   string
 	lenses []string
@@ -244,7 +248,8 @@ type lensEra struct {
 
 var lensEras = []lensEra{
 	{from: "", lenses: legacyLenses},
-	{from: "20260824", lenses: currentLenses},
+	{from: "20260824", lenses: v08Lenses},
+	{from: "20260831", lenses: currentLenses},
 }
 
 // eraLenses is the rubric in force when this run happened. A run ID with no parseable date is
@@ -318,7 +323,7 @@ func runDate(runID string) string {
 
 // knownRubric returns the shipped lens set the declaration names, or nil when it names none.
 func knownRubric(declared []string) []string {
-	for _, rubric := range [][]string{currentLenses, legacyLenses} {
+	for _, rubric := range [][]string{currentLenses, v08Lenses, legacyLenses} {
 		if sameLensSet(declared, rubric) {
 			return rubric
 		}

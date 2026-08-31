@@ -129,7 +129,7 @@ func Build(root, target string, at time.Time) (Result, error) {
 		"## Artifact Excerpt\n\n" + markdown.FencedCodeBlock("markdown", readLimited(targetPath, 4000)) + "\n\n" +
 		"## Service Inventory\n\n" + serviceInventory + "\n\n" +
 		"## Knowledge Facts\n\n" + factText + "\n\n" +
-		"## Suggested Reviewers\n\n- feasibility\n- completeness\n- scope/alignment\n- architecture\n- intent preservation\n"
+		"## Suggested Reviewers\n\n- feasibility\n- completeness\n- scope/alignment\n- architecture\n- intent preservation\n- security\n- testing-quality\n- data-migration\n- mechanical-precision\n"
 	if err := os.WriteFile(outputPath, []byte(content), 0o644); err != nil {
 		return Result{}, err
 	}

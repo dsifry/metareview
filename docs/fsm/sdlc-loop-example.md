@@ -19,7 +19,7 @@ $ metareview fsm advance --run mrv-…
  "record":"metareview fsm record node-output --run mrv-… --node discover --data <file>", …}
 → exit 3
 
-    host: exec is `subagent` — dispatch the eight lens sub-agents in this session, merge their findings,
+    host: exec is `subagent` — dispatch the nine lens sub-agents in this session, merge their findings,
     write findings.json = {"findings":[{"issue_text":"nil deref in f.go","file":"f.go","line":3,"severity":"high"}]}
 
 $ metareview fsm record node-output --run mrv-… --node discover --data findings.json
