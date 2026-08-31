@@ -56,4 +56,4 @@ Orchestrator context and synthesis go here (e.g. checkout sparse, filtered file-
 
 ## Findings
 
-No reviewer findings recorded yet.
+No unresolved reviewer findings remain. Round 1 raised ~10 blocking findings (two confirmed by three lenses each); all were addressed in the revision and confirmed resolved by the round-2 re-verify (see Orchestrator Notes for the trail). Verdict: PASS, zero unresolved blockers.

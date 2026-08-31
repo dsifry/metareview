@@ -61,7 +61,7 @@ before it lands).
 | T1.6 anti-gaming + trivial reject | T1.1, T1.3 | | 2 |
 | T2.1 test-deletion gate | T1.3 | | 1 |
 | T2.2 trajectory monitor | T1.3 | ⧗(part) | 1 |
-| T4.2 control-arm harness | T1.3 | | 1 |
+| T4.2 control-arm harness | T1.3, T0.1 | | 2 |
 | T4.5 escape-hatch probe | T1.3 | ⧗ | 1 |
 | T3.2 require_classes/enumerated | T3.1, T1.3 | ⧗ | 2 |
 | T3.4 class-merge tombstone | T3.1 | ⧗ | 1 |
@@ -117,7 +117,12 @@ got a *new* id never clears its old gap — a recall/false-split failure. The sp
   starting checklist but re-enumerate against the live code (line numbers drift), with a
   same-text/different-file regression over every path. **Override migration (§2.4 round-2, §3.3):**
   because this changes the id derivation, keyed overrides are **migrated or versioned on the change,
-  never silently** — an override keyed on a pre-change id must not orphan.
+  never silently** — an override keyed on a pre-change id must not orphan. **Golden identity domain
+  (review #35b):** the `(file, normalized-text)` key assumes a file, but `run.Golden` persists only
+  `Comment`/`Severity`/`Category` (no file) while `matched-golden` keys on `run.BugID(golden.Comment)`.
+  Define the golden identity explicitly — goldens either inherit the matched candidate's file, or carry
+  their own file, or use a separate golden-identity key — so a golden and a candidate compare on a
+  consistent domain; do not silently mix a file-keyed candidate id with a fileless golden id.
 - **Status:** OPEN (⧗). Not de-risked; the precision spike does not cover recall.
 
 ---
@@ -144,7 +149,9 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
   or won't-compile or compiles-but-null → `malformed`; copy-failed/baseline-red/exec-killed →
   `unverifiable`), so a *mapping* fault (same outcome for two causes) reddens — and a mutation that
   **merges two causes onto one outcome** must redden. (The `verify.go` port lives in this task per the
-  §6 chunk-1 status.)
+  §6 chunk-1 status.) **Persistence-cap tests (review #35b):** the new `Delta` list fields go through
+  `withinCaps`/`MaxDeltaList` after canonical decode — add canonical-byte **boundary** (a list *at* the
+  cap decodes) and **one-over-cap rejection** tests for `Pins`/`PinResults`/`Unproven`.
 - **Acceptance:** `Pin`/`DifferentialProof`/`PinResult`/`ProofResult`/`PinOutcome`/`Unproven` and
   `Finding.Source`/`Category` land; `SchemaVersion` stays 1, additive-optional (the 10 existing runs
   still `Fold`); `DifferentialProof.ID` is the override key. **One-way-door gate (§2.4):** the first
@@ -214,10 +221,14 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
 - **Depends-on:** T1.1, T1.3.
 - **DI:** `DeletionRef` verification uses **injected git access** (parent blob + diff parse). The
   fail-before/pass-after check **runs on T1.3's reproduction-execution engine** (target-test overlay).
-  The over-deletion scope check is a **distinct whole-suite phase**: run the **full consent-hashed test
-  cmd** (the opaque all-or-nothing suite, injected runner) on the post-deletion tree — if any test
-  outside the reproduction set breaks, redden. So T1.5 adds `DeletionRef` verification + the
-  whole-suite phase; the reproduction engine (target-test) is reused, not the whole-suite runner.
+  The over-deletion scope check is a **distinct whole-suite phase** that runs the **full consent-hashed
+  test cmd** (the opaque all-or-nothing suite, injected runner) on **BOTH** trees from identical
+  cmd/tree with stable test identities: a **pre-deletion baseline** (must be green — **fail closed if
+  the baseline is not green**) and the **post-deletion** tree. A test that **passed in the baseline but
+  breaks post-deletion** (outside the reproduction set) reddens; a failure already present in the
+  baseline is NOT attributed to the deletion. So T1.5 adds `DeletionRef` verification + this
+  baseline/post-deletion whole-suite phase; the reproduction engine (target-test) is reused, not the
+  whole-suite runner.
 - **TDD:** a `Kind:"deletion"` proof with a fail-before/pass-after reproduction test clears; the
   `DeletionRef`↔reviewed-diff binding (⧗ build contract) rejects a free-floating or mismatched span;
   clause (a) own-file for a deletion requires `DeletionRef.File == Finding.File` (NOT `Root.File` — that
@@ -297,8 +308,14 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
   deterministic signal independent of `classify`. A wrong `"local"` label must not let an additive
   guard pass. (This is the one place §4.5's "advisory, not binding" meets a hard gate; resolve it here,
   not by trusting the label.)
-- **TDD:** a `Remedy:"structural"` class requires a fix `DeletionRef` whose `File==Root.File` and whose
-  `Removed` contains `Root.Span`; an additive-only "guard around the root" fix does NOT close the class.
+- **Occurrence-precise root (review #35b):** `File==Root.File` + `Removed` *containing* `Root.Span` is
+  **not enough** — if the span text recurs, a fix could delete the *other* occurrence and leave the
+  real root. The match must be **occurrence-precise**: `Root` carries a **locator** (line/offset, from
+  T3.1) and the `DeletionRef`'s removed span must be **that occurrence**, not merely matching text
+  elsewhere; an **empty/missing `Root.Span` is rejected** (cannot clear a structural class).
+- **TDD:** a `Remedy:"structural"` class requires a fix `DeletionRef` whose `File==Root.File` and that
+  **removes the exact `Root` occurrence** (locator-matched, non-empty span); an additive-only "guard
+  around the root" fix — or a deletion of a *different* occurrence of the same text — does NOT close the class.
   A class with a **missing/uncertain `Remedy`** is treated as structural (the fail-closed case) and the
   additive fix still does NOT close it. Mutation: dropping the match — or defaulting an uncertain
   `Remedy` to `"local"` — lets the guard-around dodge pass and must redden.
@@ -342,13 +359,18 @@ fixer-grouping interim, §3.2 inv. 4).
   them). Gate it as recorded/no-downgrade, exactly as T1.1 gates the pins fields. The T3.4 tombstone
   map rides these class carriers and is covered by this same gate.
 - **Produces (consumed by T2.3/T3.2):** each `BugClass` tagged `Remedy` (`"structural"` | `"local"`);
-  for a structural class, a `BugClass.Root{File, Span}` where `Span` is **actual source text** read
-  from the member's file at its line (⧗ build-time data-availability — a line number is not enough).
+  for a structural class, a `BugClass.Root{File, Span, <locator>}` where `Span` is **non-empty actual
+  source text** read from the member's file at its line, plus a **locator (line/offset)** identifying
+  **which occurrence** — so T2.3's match is occurrence-precise, not text-contains (⧗ build-time
+  data-availability — a line number alone is not enough, and neither is span text if it recurs).
 - **TDD:** dedup-by-defect `(file, normalized-text)` collapses duplicates before the call; a blind
   classify pass over the locked L3 corpus (T4.1) meets the numeric bar; a structural class emits a
   non-empty `Root.Span` of real source text (a fixture finding with only file+line yields the span);
   dissolution keyed on `BugClass.ID`. **Mutation:** an id-minting mutant that re-mints an existing
-  class's id on carry (instead of continuing it) must redden the carry test.
+  class's id on carry (instead of continuing it) must redden the carry test. **Persistence-cap tests
+  (review #35b):** the class-carrier fields (`Delta.Classes`/`FixClasses`, and the T3.4 tombstone map)
+  go through `withinCaps` — add canonical-byte boundary + one-over-cap rejection tests, as T1.1 does
+  for the pins fields.
 - **Acceptance:** minted carried `BugClass.ID`s; `Remedy`/`Root` produced per above; errs toward
   splitting (safe) not lumping; advisory.
 - **Status:** OPEN (⧗).
@@ -414,7 +436,9 @@ fixer-grouping interim, §3.2 inv. 4).
 ### T4.2 — Control-arm efficacy harness
 
 - **Spec:** §8.
-- **Depends-on:** T1.3 (needs a working proved loop to compare).
+- **Depends-on:** T1.3 (needs a working proved loop to compare), **E0.T0.1** (metric 1 —
+  silent-regression re-discovery — needs the cross-round-stable identity, so this task must not be
+  scheduled before T0.1).
 - **Contract (measurement):** injected two-arm runner; falsifiable on a pre-locked fixture where the
   full arm proves a fix the control arm re-discovers — the per-bug identical-pre-fix-state replay is
   the injected seam that removes the §8 selection bias.
