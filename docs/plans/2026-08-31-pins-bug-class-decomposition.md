@@ -112,14 +112,16 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
   (b) **overlay only the test-only files** the fix adds/changes (helpers included, never production
   code), (c) run the target test — it must **FAIL with an assertion (not compile/import) error**,
   (d) apply the full fix, (e) re-run — it must **PASS**. This engine is **also what T1.5's deletion
-  proof runs on** (a deletion is a `Kind:"reproduction"`-shaped differential; T1.5 reuses it).
+  proof runs on** (a deletion is reproduction-execution-shaped — fail-before/pass-after via a committed
+  test — though its `Kind` is `"deletion"` per §2.1/§9.1; T1.5 reuses this engine).
 - **Pin path (FALLBACK):** added-line bind — reject a pin whose `From` is not a `+` line; mutate→fail,
   restore→pass.
 - **TDD:** L2 integration — (repro) a reproduction test that does NOT fail-before, or a pre-fix run
   that errors on **compile not assertion**, drives `prove` red; a genuine fail-before/pass-after
   clears. (pin) a fix emitting a pin that does NOT hold its line drives `pins_proven` **red**; the
   added-line bind rejects a non-`+` `From`. `Unproven` add/clear/re-add lifecycle has witnessed
-  transitions. Mutation-verify each gate predicate (incl. the assertion-vs-compile discriminator).
+  transitions. Mutation-verify each gate predicate — e.g. a mutant that **accepts a compile/import
+  error as a valid fail-before** must redden the assertion-vs-compile test.
 - **Acceptance:** the differential gate accepts a **reproduction proof (preferred)** via the execution
   engine above, and a **pin (fallback)**; owes-a-proof quantifier with **own-file clause (a)** per
   §9.1's per-kind rule (pin: `File==Finding.File`; reproduction: discharged by T1.4's §9.2 reviewer);
@@ -243,7 +245,12 @@ fixer-grouping interim, §3.2 inv. 4).
   grouping is **advisory with a recorded-reason override** (§4.5), not binding. Reading `Root.Span`
   source text from a finding's file+line uses **injected file/git access**.
 - **Also ports the class data model:** `BugClass`/`ClassMember`/`FixClass`/`FixInstance` (§2.3/§2.4),
-  additive-optional, `SchemaVersion` unchanged — the class-side analogue of T1.1.
+  additive-optional, `SchemaVersion` unchanged — the class-side analogue of T1.1. **One-way-door gate
+  (§2.4, review #2):** `Delta.Classes`/`FixClasses` first reach the wire HERE, in a Ship-2 deploy
+  separate from T1.1's — so the first deploy that persists them is its own irreversible one-way door
+  (a Ship-1 rollback binary cannot `Fold` a run carrying these fields; `DisallowUnknownFields` rejects
+  them). Gate it as recorded/no-downgrade, exactly as T1.1 gates the pins fields. The T3.4 tombstone
+  map rides these class carriers and is covered by this same gate.
 - **Produces (consumed by T2.3/T3.2):** each `BugClass` tagged `Remedy` (`"structural"` | `"local"`);
   for a structural class, a `BugClass.Root{File, Span}` where `Span` is **actual source text** read
   from the member's file at its line (⧗ build-time data-availability — a line number is not enough).
