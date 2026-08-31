@@ -98,7 +98,7 @@ func Check(root string, options Options) Report {
 		Files:         base.Files,
 		Prerequisites: prereqs,
 		Install:       InstallStatus{Path: options.ExecutablePath},
-		Enforcement:   enforcementStatus(root, home),
+		Enforcement:   enforcementStatus(root, home, pluginRoot(options.ExecutablePath)),
 		Standalone: StandaloneReadiness{
 			AdvisoryOnly:             len(missing) > 0,
 			FullMetaswarmReady:       len(missing) == 0,
@@ -271,4 +271,24 @@ func missingFullMetaswarmPrereqs(prereqs Prerequisites) []string {
 func isDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// pluginRoot locates the plugin installation this binary was run from, when there is one.
+//
+// The host sets CLAUDE_PLUGIN_ROOT for a plugin hook; outside that, the binary's own directory
+// tree is walked for the manifest, so `metareview setup --check` typed by hand finds the same
+// installation the host would use. Empty when neither applies, which is the ordinary source
+// checkout.
+func pluginRoot(executablePath string) string {
+	if env := strings.TrimSpace(os.Getenv("CLAUDE_PLUGIN_ROOT")); env != "" {
+		return env
+	}
+	dir := filepath.Dir(executablePath)
+	for i := 0; i < 4 && dir != "" && dir != string(filepath.Separator) && dir != "."; i++ {
+		if _, err := os.Stat(filepath.Join(dir, "hooks", "hooks.json")); err == nil {
+			return dir
+		}
+		dir = filepath.Dir(dir)
+	}
+	return ""
 }

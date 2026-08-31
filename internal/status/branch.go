@@ -1,8 +1,11 @@
 package status
 
 import (
+	"context"
+	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/reviewlog"
@@ -26,10 +29,29 @@ type BranchScope struct {
 // RunGit is the git seam; nil uses the real binary.
 type RunGit func(root string, args ...string) ([]byte, error)
 
+// gitDeadline bounds a single git invocation.
+//
+// The Stop gate runs SYNCHRONOUSLY: the host waits for it before ending the session. With no
+// deadline, a git subprocess that stalls — a stale index.lock, a filesystem that stops answering,
+// a repository large enough for rev-list to crawl — holds session end for the host's whole command
+// budget, and a hook the host then cancels renders no decision at all. Twenty seconds is far more
+// than rev-list needs on any repository this reviews, and failing fast is safe: ResolveBranchScope
+// treats a git error as an unresolvable scope, which now BLOCKS rather than passing.
+// A var rather than a const so the timeout path itself can be tested: it is the branch that only
+// runs when something has already gone wrong, which is exactly the branch that must not be taken
+// on trust.
+var gitDeadline = 20 * time.Second
+
 func realGit(root string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...) // #nosec G204 -- args are literals and validated refs
+	ctx, cancel := context.WithTimeout(context.Background(), gitDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- args are literals and validated refs
 	cmd.Dir = root
-	return cmd.Output()
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("git %s timed out after %s", args[0], gitDeadline)
+	}
+	return out, err
 }
 
 // ResolveBranchScope works out what this branch changed. base may be empty, in which case

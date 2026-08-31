@@ -3,6 +3,7 @@ package setup
 import (
 	"encoding/json"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -25,6 +26,11 @@ type EnforcementStatus struct {
 	// not enough: a checkout that lost the mode bit (an archive, a copy, a restrictive umask)
 	// reported the script as present while the host could not run it.
 	ScriptPresent bool `json:"scriptPresent"`
+	// Plugin names the plugin manifest that registers the hook, when that is how it is
+	// installed. A correct plugin install writes no settings.json entry at all, so reading only
+	// those files reported active:false and advised the operator to install as a plugin — which
+	// they had already done.
+	Plugin string `json:"pluginManifest,omitempty"`
 	// Foreign records a Stop hook that is registered but is not metareview's. It is reported
 	// rather than counted, because a linter's Stop hook says nothing about whether the review
 	// gate runs, and certifying enforcement on the strength of someone else's hook is the same
@@ -43,15 +49,29 @@ func hookSettingsFiles(root, home string) []string {
 	}
 }
 
-func enforcementStatus(root, home string) EnforcementStatus {
+func enforcementStatus(root, home, pluginRoot string) EnforcementStatus {
 	s := EnforcementStatus{}
+	scriptRoot := root
 	// Executable, not merely present: the host runs this file, and a script it cannot execute
 	// fails exactly like a missing one while reporting as installed.
-	if info, err := os.Stat(filepath.Join(root, "hooks", "pre-finish.sh")); err == nil &&
+	// A plugin install registers through hooks/hooks.json under the PLUGIN root, and its script
+	// lives there too, not in the repository being reviewed. Checked first, because it is the
+	// installation this project ships and the one the settings files can say nothing about.
+	if pluginRoot != "" {
+		manifest := filepath.Join(pluginRoot, "hooks", "hooks.json")
+		if ours, _ := stopHookCommands(manifest); ours {
+			s.Active, s.Source, s.Plugin = true, manifest, manifest
+			scriptRoot = pluginRoot
+		}
+	}
+	if info, err := os.Stat(filepath.Join(scriptRoot, "hooks", "pre-finish.sh")); err == nil &&
 		info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
 		s.ScriptPresent = true
 	}
 	for _, path := range hookSettingsFiles(root, home) {
+		if s.Active {
+			break
+		}
 		ours, foreign := stopHookCommands(path)
 		if ours {
 			s.Active, s.Source = true, path
@@ -73,7 +93,7 @@ func enforcementStatus(root, home string) EnforcementStatus {
 	}
 	if s.Active && !s.ScriptPresent {
 		// Overwrites the case above deliberately: an unreadable script is the more specific fact.
-		if info, err := os.Stat(filepath.Join(root, "hooks", "pre-finish.sh")); err == nil && info.Mode().IsRegular() {
+		if info, err := os.Stat(filepath.Join(scriptRoot, "hooks", "pre-finish.sh")); err == nil && info.Mode().IsRegular() {
 			s.Remediation = "hooks/pre-finish.sh exists but is not executable, so the host cannot run it and will report a hook error instead of a review verdict. chmod +x hooks/pre-finish.sh."
 		}
 	}
@@ -113,7 +133,7 @@ func stopHookCommands(path string) (ours bool, foreign string) {
 			if cmd == "" {
 				continue
 			}
-			if strings.Contains(cmd, "pre-finish.sh") || strings.Contains(cmd, "metareview") {
+			if isOurs(cmd) {
 				return true, ""
 			}
 			if foreign == "" {
@@ -122,4 +142,33 @@ func stopHookCommands(path string) (ours bool, foreign string) {
 		}
 	}
 	return false, foreign
+}
+
+// isOurs reports whether a Stop-hook command runs metareview's gate.
+//
+// The first version asked whether the command CONTAINED "metareview" anywhere, which any absolute
+// path under a directory of that name satisfies — a checkout at ~/src/metareview/ would have
+// certified a formatter's hook. It matches on whole path components now: a token whose base name
+// is the metareview binary, or that ends in the hook script this repository ships.
+func isOurs(cmd string) bool {
+	fields := strings.Fields(cmd)
+	clean := func(t string) string {
+		return path.Base(filepath.ToSlash(strings.Trim(t, "\"'`)")))
+	}
+	// The hook script, invoked however: directly, or through an interpreter.
+	for _, tok := range fields {
+		if clean(tok) == "pre-finish.sh" {
+			return true
+		}
+	}
+	// The binary, but only as the PROGRAM being run. Scanning every token for it made
+	// `echo 'metareview is great'` certify the gate, which is the same substring mistake one
+	// level in.
+	if len(fields) > 0 {
+		switch clean(fields[0]) {
+		case "metareview", "metareview.exe":
+			return true
+		}
+	}
+	return false
 }

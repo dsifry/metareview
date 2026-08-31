@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dsifry/metareview/internal/reviewlog"
 )
@@ -607,5 +608,48 @@ func TestBuildForBranchStillBlocksOnAnAbandonedRun(t *testing.T) {
 	if unscoped.Blocked != got.Blocked {
 		t.Errorf("scopes disagree about the same abandoned run: unscoped=%v branch=%v",
 			unscoped.Blocked, got.Blocked)
+	}
+}
+
+// The Stop gate runs synchronously, so an unbounded git call holds session end for the host's
+// whole command budget and a cancelled hook renders no decision at all. A stalled subprocess must
+// become a fast error instead — which ResolveBranchScope reports as an unresolvable scope, and an
+// unresolvable scope blocks.
+func TestGitIsBounded(t *testing.T) {
+	if gitDeadline <= 0 || gitDeadline > time.Minute {
+		t.Fatalf("the deadline must be set and short: %s", gitDeadline)
+	}
+	// A real invocation still works, and returns well inside the deadline.
+	root, _, _ := gitRepo(t)
+	start := time.Now()
+	out, err := realGit(root, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("an ordinary git call must still succeed: %v", err)
+	}
+	if len(bytes.TrimSpace(out)) == 0 {
+		t.Error("rev-parse returned nothing")
+	}
+	if elapsed := time.Since(start); elapsed > gitDeadline {
+		t.Errorf("an ordinary call took %s, longer than the deadline itself", elapsed)
+	}
+	// The timeout path itself. git is asked to do real work with no time to do it in, and the
+	// error must SAY it timed out — ResolveBranchScope turns that into an unresolvable scope,
+	// which blocks, so the difference between "timed out" and a generic failure is what an
+	// operator has to read to know the gate was starved rather than the branch broken.
+	restore := gitDeadline
+	gitDeadline = time.Nanosecond
+	_, err = realGit(root, "rev-list", "--all")
+	gitDeadline = restore
+	if err == nil {
+		t.Error("a call with no time to run must fail, not return an empty answer")
+	} else if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("the error must name the timeout: %v", err)
+	}
+
+	// A failing call is still an ordinary error, not a timeout report.
+	if _, err := realGit(root, "rev-parse", "definitely-not-a-ref"); err == nil {
+		t.Error("an invalid ref must error")
+	} else if strings.Contains(err.Error(), "timed out") {
+		t.Errorf("an invalid ref is not a timeout: %v", err)
 	}
 }
