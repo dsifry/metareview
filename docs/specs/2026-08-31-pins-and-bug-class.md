@@ -217,7 +217,9 @@ claim, and both are worth surfacing.
 Delta.Classes     []BugClass   // Snapshot.Classes accumulates the open ones
 // fix → classes_enumerated gate : the fix's account of each class
 Delta.FixClasses  []FixClass
-// fix → prove → gate : the pin claims and what proving them found
+// fix → prove → gate : the proof claims and what proving them found.
+// §9.1 GENERALIZES these: Pin→DifferentialProof and PinResult→ProofResult (a pin is the Kind:"pin"
+// case; reproduction/deletion proofs also ride here). The pin-only shape below is that special case.
 Delta.Pins        []Pin
 Delta.PinResults  []PinResult
 // derived, never persisted (recomputed by Fold): the open gaps that drive re-discover
@@ -613,7 +615,8 @@ to the first real round that actually approaches it (none of the 10 logged runs 
 
 1. **`unverifiable` blocks — environment-owned, override-clearable, and now WIRED (review fix B7).**
    It blocks `pins_proven` (so a fix cannot escape proof by breaking the tree), owned by the
-   **environment**, exit only via a **recorded override keyed on `Pin.ID`** — the id addition (§2.1)
+   **environment**, exit only via a **recorded override keyed on `Pin.ID`** (generalized to
+   `DifferentialProof.ID` per §9.1 — a reproduction/deletion proof has `Pin`==nil) — the id addition (§2.1)
    is what makes this exit physically pullable, which it was not before. A silent pass would be an
    escape hatch; a hard block with no key would livelock a broken tree (a dead-end). *Tighten-if-abused
    (deferred):* the grant is self-servable via `--by`; gate it behind an authenticated authority only
@@ -644,7 +647,7 @@ to the first real round that actually approaches it (none of the 10 logged runs 
    skips the call. When it runs, its grouping is the default the fix agent works to; the agent may
    dissolve a class **by recording a reason keyed on `BugClass.ID`** — the override the design leaned
    on could not previously be pulled, because a class had no id (that was a dead-end hiding in a
-   valve). Likewise an `unverifiable` pin's override is keyed on `Pin.ID` (§4.1). *Tighten-if-abused
+   valve). Likewise an `unverifiable` proof's override is keyed on `DifferentialProof.ID` (§4.1, per §9.1). *Tighten-if-abused
    (deferred per the maintainer's steer):* the dissolution reason is unreviewed free text and the
    grant is self-servable; post-merge recurrence (§3.2 link 4) is the abuse detector, and an
    authenticated out-of-workflow grant is the tightening if that detector ever fires.
@@ -661,11 +664,11 @@ gate whose valve is *gameable* is a **safety valve** — kept simple now, tighte
 | Gate / block | The strict block | The reachable exit | Reachable? | Gameable valve → tighten-later? |
 |---|---|---|---|---|
 | `pins_proven` = survived | a real test gap | write/strengthen the test | yes | — |
-| `pins_proven` = unverifiable | tree can't answer | recorded override (§4.1) | **only once the override is WIRED to the PinResult — see B7 fix below** | grant is self-servable → tighten later |
+| `pins_proven` = unverifiable | tree can't answer | recorded override (§4.1) | **only once the override is WIRED to the `ProofResult` (was `PinResult`, generalized per §9.1) — see B7 fix below** | grant is self-servable → tighten later |
 | `pins_proven` anchor not in diff (B1) | pin doesn't touch the fix | move the pin onto a changed line | yes — a real fix always has a changed line | — |
 | `require_pins` on a fix | code change unproven | supply a pin, OR record "no pinnable change" | yes — the "none" path is always available | "none" is self-asserted → tighten later |
 | `pins_proven`: a pure-DELETION fix (no added line to pin) | the fix removed code, nothing to anchor | **superseded by §9.4:** prove it as a `Kind:"deletion"` `DifferentialProof` — a reproduction test (fail-before/pass-after) plus a `DeletionRef`; deletion is now a first-class provable fix, no longer a "no pinnable line" valve-skip | yes | the reproduction test + the `DeletionRef`↔diff binding are machine-checked (§9.4) → hard, not self-asserted |
-| `pins_proven` (a) own-file: the finding's remedy is genuinely in ANOTHER file | no pinnable added line in the finding's own file | record "no pinnable change" naming the actual fix file | yes — the same valve as deletion | self-asserted (the fix file is named and in the diff) → tighten-if-abused |
+| `pins_proven` (a) own-file: the finding's remedy is genuinely in ANOTHER file | no pinnable added line in the finding's own file | record "no pinnable change" naming the actual fix file | yes — a `Kind:"pin"` valve (deletion is now provable per §9.4, no longer a valve) | self-asserted (the fix file is named and in the diff) → tighten-if-abused |
 | class member `fixed-elsewhere` (remedy in another file) | own-file pin impossible | resolves via a Proven pin in the REMEDY file `FixInstance.File` (or "no pinnable change" if it has no tests) | yes — invariant 2 makes `fixed-elsewhere` a resolving disposition (PR#31-cursor: without this it cleared the gate but never resolved → class re-demanded forever) | gameable/auditable → tighten-if-abused |
 | `classes_enumerated` member unanswered (B3) | a class member ignored | give it a disposition: `fixed`, `already-correct`, or `out-of-scope`+reason | yes — the non-`fixed` dispositions are the valve | reason unreviewed → tighten later |
 | `classify` over-groups | unrelated findings lumped | dissolve the class with a recorded reason (§4.5) | **only once dissolution is WIRED to a class id — see B7 fix** | reason unreviewed → tighten later |
