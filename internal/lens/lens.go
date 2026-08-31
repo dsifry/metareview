@@ -6,10 +6,17 @@
 //   - internal/reviewlog      derives its normalized match keys from the Display names
 //   - internal/contextpack    lists the Display names as Suggested Reviewers
 //
-// Adding a lens is a one-line edit to All and every call site updates by construction. This exists
-// because those four lists were once hand-maintained copies in three different spellings, and one
-// (the context pack) silently drifted — sitting at the original five names for two releases while
-// three more lenses were already required. A copy invites that; a single source removes it.
+// Adding a lens updates every NAME/COUNT call site by construction — it exists because those four
+// lists were once hand-maintained copies in three different spellings, and one (the context pack)
+// silently drifted, sitting at the original five names for two releases while three more lenses
+// were already required. A copy invites that; a single source removes it.
+//
+// It is NOT a one-line change overall: reviewlog's lens-era table must also be advanced, because
+// every era points at a FROZEN snapshot of the set required on its date, never at this live list.
+// After editing All you must cut a new frozen vNLenses literal in internal/reviewlog and append an
+// era for the new lens's ship date; otherwise older completed logs would be judged against a lens
+// that did not exist when they were written. reviewlog's TestLensErasAreKeyedByDate fails if you
+// skip that step. See also the rubric/skill/doc/workflow sync points noted there.
 //
 // This package is a leaf: it imports nothing from the rest of the tree, so any package can depend
 // on it without a cycle.

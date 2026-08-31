@@ -47,6 +47,7 @@ reasonable readings diverge into incompatible builds. "The artifact does not det
 correct build" is the bar; "I would have written it differently" is not.
 
 ### Undefined Referents
+
 - A type, field, function, artifact, or file referenced by a contract but defined nowhere in the
   artifact — the implementer must invent its shape.
 - A field used in one section that is absent from the data model the other section defines (a
@@ -54,6 +55,7 @@ correct build" is the bar; "I would have written it differently" is not.
 - Block on a contract that names something the artifact never defines.
 
 ### Unenforced Invariants
+
 - A "one-of" / "exactly one" / "mutually exclusive" constraint stated in prose with no field,
   discriminator, or structure that makes the illegal state unrepresentable — nothing stops an
   implementer from building a value that violates it.
@@ -61,6 +63,7 @@ correct build" is the bar; "I would have written it differently" is not.
 - Block on an invariant the data model permits violating.
 
 ### Ambiguous Operations (Divergent Literal Readings)
+
 - A concrete operation — a git query, a comparison, an execution step, an ID derivation —
   described so that two reasonable implementers build two incompatible things, and the difference
   is behavioral (not cosmetic).
@@ -71,6 +74,7 @@ correct build" is the bar; "I would have written it differently" is not.
   different behavior.
 
 ### Identity & Collision Gaps
+
 - An ID, key, or fingerprint scheme that is null/undefined for a case it must cover, or that
   collides across two instances it is required to tell apart.
 - A shared key derived so that two distinct records map to one (a proof keyed on a field that is
@@ -78,6 +82,7 @@ correct build" is the bar; "I would have written it differently" is not.
 - Block on an identity scheme that collides or is undefined where it must hold.
 
 ### Cross-Section Mechanism Contradictions
+
 - Two sections that each specify a concrete mechanism, where the mechanisms are incompatible: one
   section requires data or capability a *decision recorded elsewhere in the same artifact* says is
   not available (a per-test coverage attribution required by one section, forbidden by another's
@@ -86,6 +91,7 @@ correct build" is the bar; "I would have written it differently" is not.
 - Block on two contracts in the same artifact that cannot both be built.
 
 ### Undefined Execution / Verification Model
+
 - A check described by *what it concludes* but not by the operations that perform it — "execute
   the test in a tree with the deletion applied" without saying which tree, built how, or how its
   result is read back.

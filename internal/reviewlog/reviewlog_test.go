@@ -477,9 +477,14 @@ func TestLensErasAreKeyedByDate(t *testing.T) {
 		{"mrv-20260824-1-artifact-a-1", v08Lenses},
 		{"mrv-20260829-1-artifact-a-1", v08Lenses},
 		{"mrv-20260830-1-artifact-a-1", v08Lenses},
-		{"mrv-20260831-1-artifact-a-1", currentLenses},
-		{"mrv-20260901-1-artifact-a-1", currentLenses},
-		{"mrv-notadate-1-artifact-a-1", currentLenses},
+		// The newest era is pinned against the FROZEN v09Lenses, not the live currentLenses. That is
+		// what makes the era table's promise hold: growing lens.All (and with it currentLenses)
+		// without cutting a new frozen snapshot and era would make eraLenses("mrv-20260831-…")
+		// return more than nine and fail here, instead of silently expanding what every 2026-08-31+
+		// log must cover. A dateless id maps to the newest era, so it too is v09Lenses.
+		{"mrv-20260831-1-artifact-a-1", v09Lenses},
+		{"mrv-20260901-1-artifact-a-1", v09Lenses},
+		{"mrv-notadate-1-artifact-a-1", v09Lenses},
 	} {
 		got := eraLenses(tc.runID)
 		if !sameLensSet(got, tc.want) {
@@ -541,6 +546,9 @@ func TestDuplicateLensDeclarationIsNotAShippedRubric(t *testing.T) {
 	}
 	if known := knownRubric(v08Lenses); known == nil {
 		t.Error("the frozen 0.8.0 eight-lens rubric must still be recognised")
+	}
+	if known := knownRubric(v09Lenses); known == nil {
+		t.Error("the frozen 0.9.0 nine-lens rubric must still be recognised")
 	}
 	if known := knownRubric(currentLenses); known == nil {
 		t.Error("the current rubric must still be recognised")
