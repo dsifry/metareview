@@ -971,19 +971,22 @@ removable span, not a bare line number. A `fixed` FixInstance that only adds lin
 ### 9.6 Test-deletion gate — mutation non-regression (deterministic), coverage where obtainable (maintainer-directed)
 
 Deleting a **test** is a first-class reward-hack; a green suite afterward proves nothing. A test
-deletion is legitimate iff **mutation-kill non-regression holds** (the deterministic gate, always
-run) **and coverage non-regression holds where a coverage signal is obtainable** (an advisory
-strengthening layer):
-1. **Coverage non-regression (advisory, where a coverage signal exists).** Where the project exposes
+deletion is legitimate iff **mutation-kill non-regression holds** (always run) **and, wherever a
+coverage signal is obtainable, coverage non-regression also holds**. Where §4.2's opaque
+consent-hashed cmd yields no coverage signal, the coverage conjunct is simply **absent — not a
+block** (§4.2 says it may not exist), and mutation-kill alone gates. The rule is one predicate, not
+two: coverage is a hard conjunct exactly when a signal exists, never otherwise.
+1. **Coverage non-regression (a conjunct where a coverage signal exists).** Where the project exposes
    production coverage, the deleted test's coverage must be subsumed by remaining tests (or the
-   covered code was deleted in the same commit). Coverage is **necessary but not sufficient** *and
-   not always obtainable*: it measures *execution*, not *assertion* (it catches deleting the sole
-   *exerciser* of lines, blind to deleting the sole *detector* on already-covered lines), and **§4.2's
-   opaque consent-hashed test cmd yields no coverage to attribute** — there is a single all-or-nothing
-   test invocation, not a per-test instrumented run. So coverage non-regression is run **where a
-   signal is available and recorded as *unavailable* otherwise**; it is never a hard condition on a
-   capability §4.2 says may be absent. ⧗ *Build-time:* detect the coverage signal's presence and
-   select the applicable layers.
+   covered code was deleted in the same commit) — a **hard requirement when a signal is obtainable**.
+   Coverage is **necessary-where-obtainable but not sufficient**, and **not always obtainable**: it
+   measures *execution*, not *assertion* (it catches deleting the sole *exerciser* of lines, blind to
+   deleting the sole *detector* on already-covered lines), and **§4.2's opaque consent-hashed test cmd
+   yields no coverage to attribute** — a single all-or-nothing invocation, not a per-test instrumented
+   run. So the coverage conjunct **applies where a signal is available and is recorded *unavailable*
+   otherwise** — never required on a capability §4.2 says may be absent — and mutation-kill (2) gates
+   alone in that case. ⧗ *Build-time:* detect the coverage signal's presence and select the applicable
+   layers.
 2. **Mutation-kill non-regression** — no mutant killed before the deletion survives after it. The
    load-bearing half; fills coverage's blind spot (the R8 277/571 finding); reuses the pins' engine.
    **Mutant identity + deleted-target exclusion (PR#32, round 2):** a mutant needs a **unique,
@@ -1000,9 +1003,9 @@ Layered (each closes the prior's blind spot, attack surface shrinks each layer):
 obtainable) → mutation (the deterministic gate) → right-reason (9.2)**. Reconciliation: we reject
 coverage as a *proof of fix* (9.8) but embrace it as a *guard against test-deletion gaming* — used
 where necessary, not relied on where insufficient, and **run only where §4.2's opaque cmd actually
-yields a coverage signal**. That is why mutation-kill is the deterministic gate (it needs only
-per-mutant pass/fail from the same opaque cmd, so it is always available) and coverage strengthens it
-where a signal exists. A test deleted because its code was deleted is the legitimate paired case,
+yields a coverage signal**. That is why mutation-kill is the always-available gate (it needs only
+per-mutant pass/fail from the same opaque cmd) and coverage is a required conjunct wherever a signal
+exists (and simply absent, never a block, where it does not). A test deleted because its code was deleted is the legitimate paired case,
 accounted by one `DeletionRef` and proven safe by mutation-kill non-regression (plus coverage
 non-regression where obtainable).
 - Evidence: coverage ≪ mutation for fault detection (277/571, ACH §1); test-oracle tampering as a
@@ -1015,7 +1018,8 @@ whitespace-touch). Add a monitor with two declared input sources, because the fl
 data model already produces:
 - **From the reviewed diff + the override log (both already on the wire):** whitespace/comment-only
   "changes" (read from the diff), and self-served overrides (the §4.1/§4.5 override records keyed on
-  `Pin.ID`/`BugClass.ID`). These ship with no new data.
+  `DifferentialProof.ID`/`BugClass.ID` per §9.1 — `Pin.ID` is nil for reproduction/deletion proofs).
+  These ship with no new data.
 - **From a fix-node action/trajectory record — which §2.4's wire model does NOT yet carry:** edits to
   the oracle/harness *within the proving trajectory*, and answer-lookup (git-history / PR /
   upstream-diff / network fetches). The fix node today emits only `{commit, summary, pins[]}`, from
