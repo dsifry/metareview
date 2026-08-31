@@ -541,7 +541,18 @@ truncating a class member. Verified against the code, that was wrong on three co
   collapse with exactly this key, while line-region buckets split true duplicates and made it *worse*
   (24→11). Small correction to the existing dedup, not a new layer. Regression case: identical text
   in two **different files** must NOT collapse; identical text at two lines *within one file* is a
-  true duplicate and DOES collapse (per §4.4/§5). `classify` consumes the deduped confirmed set.
+  true duplicate and DOES collapse (per §4.4/§5).
+  - **Second collapse site (adversarial pass 4) — `dedupCandidates` is NOT the only text-only key.**
+    Every confirmed `Bug` is assigned `ID = run.BugID(IssueText)` (`canonical.go:103` — a hash of
+    issue text ALONE), and `dedupBugs` (`kind.go:615`, applied to the confirmed set at `kind.go:563`)
+    collapses on `Bug.ID`. So a same-text/different-file finding that survives the `dedupCandidates`
+    fix is **re-collapsed here**, and the class member is dropped before `classify` anyway — the
+    file-in-key discipline must extend to the Bug identity. Derive the confirmed `Bug.ID` from
+    `(File, normalized-text)` and key `dedupBugs` on the same, so the different-file guarantee holds
+    end-to-end. This changes the `BugID` derivation — exactly the frozen-derivation / override-key
+    hazard in §2.4 — so it is done as part of the Ship-1 ⧗ cross-round-stable finding-identity task,
+    with the keyed overrides migrated, never silently.
+  `classify` consumes the deduped confirmed set.
 - There is **no truncating 100-cap**. The only hard limit is `MaxDeltaList=256` (`kind.go:200`), a
   *reject*, not a truncate. A round producing >256 findings fails loudly (the whole delta is
   refused) — a real but visible backstop, not a silent class-hider.
