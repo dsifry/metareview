@@ -1,6 +1,12 @@
 # Spec: Pins & Bug.Class — proof of fix, and defect-class enumeration
 
 Status: **Round-2 revised. PINS: shippable (Ship 1). BUG.CLASS: validated path, gated on ⧗ spikes (Ship 2).**
+
+> **Acceptance (PR#30):** the two committed artifact reviews are `NEEDS_REVISION` by design — they are
+> the honest record of what the reviews caught, and every blocking finding is either addressed inline
+> (marked `review fix …` / `PR#30…`) or recorded as a known-open ⧗ item or an accepted tighten-later
+> decision. This spec is accepted by the maintainer as the agreed *design path*, not as a completed,
+> zero-open-item artifact. The code that implements it is separately task-done-gated per chunk.
 Date: 2026-08-31
 Supersedes the pins/`require_classes` work stranded on `prep-0.11.0` (never merged; see PR #23,
 closed).
@@ -152,9 +158,10 @@ distinct sites:
 
 ```go
 type FixClass struct {
+    BugClassID string       `json:"bug_class_id"`       // durable BugClass.ID this answers (PR#30-CR: fix-side carrier for the class id)
     Name      string        `json:"name"`               // the shared defect, stated once
     Findings  []string      `json:"findings,omitempty"` // reported ids that belong to this class
-    Instances []FixInstance `json:"instances"`          // EVERY site, reported or not — the work
+    Instances []FixInstance `json:"instances"`          // every DECLARED-OR-KNOWN member answered (PR#30: NOT "every site reported or not" — unreported siblings are detected post-merge, not gated; §3.2)
 }
 
 type FixInstance struct {
@@ -312,13 +319,13 @@ after fix.
   rejects any pin whose `From` is not a line the commit **added** (a `+` line in the diff) — outcome
   `malformed`, owner the fix agent. Diff-*presence* alone was defeated by context lines; requiring an
   *added* line ties the mutation to code the fix introduced.
-- **`pins_proven`** gate: passes iff every pin `Proven` **and** every confirmed finding that OWES a
-  pin has one whose `Finding` matches it. A finding **owes a pin** iff (round-2 R4/P1c, both machine-
-  determinable — no "behaviour-changing" narration): its fix touches a source file in a package that
-  **has test files** (the §4.2 trigger) **and** the fix added at least one line to pin. A finding
-  whose fix is a **pure deletion** (no added line) OWES no pin and records **"no pinnable line"** with
-  the deleted range as evidence — the reachable valve for the deletion case (round-2 R3; §4.6). The
-  gate selects on `Finding.Source`/`Category`, **never on issue text**.
+- **`pins_proven`** gate: passes iff every confirmed finding that OWES a pin has a **`Proven`** pin
+  whose `Finding` matches it (PR#30-cursor: a *matching* pin is not enough — it must be Proven, or a
+  malformed/context-line pin `prove` rejected would satisfy the conjunct while proving nothing). A
+  finding **owes a pin** iff (machine-determinable): its fix touches a source file in a package that
+  **has test files** (§4.2) **and** added at least one line to pin. A **pure-deletion** fix owes no
+  pin and records **"no pinnable line"** (§4.6). Selects on `Finding.Source`/`Category`, **never on
+  issue text**.
 
 **The seam fix, and the test that would have caught it.** `agentEdit.Reduce` must carry `Pins` into
 the Delta. The regression test that makes `pins_proven` non-vacuous: a fix emitting a pin that does
@@ -480,12 +487,11 @@ the **chain** it forces, each link of which *is* mechanical:
 2. The `fix` node receives **classes with members**, and `require_classes` obliges it to answer each
    member with a `FixInstance` — plus enumerate any *further* instances it found (the reviewer could
    not). Instance-only fixing is no longer expressible in the schema.
-3. `classes_enumerated` gate (corrected, review fix B3): **every `BugClass.Member` must have a
-   matching `FixInstance` (by `FixInstance.Member`)** — a class cannot be partly answered with members
-   silently dropped. Then, per instance: a `fixed` instance's `File` must appear in the commit diff;
-   a non-`fixed` instance (`already-correct`/`out-of-scope`) must carry a `Reason`. The member-match
-   is the load-bearing add: the old "file in diff" check ran the wrong direction and passed a class
-   whose members were never all accounted for.
+3. `classes_enumerated` gate (see §3.2 redesign invariant 3 — this supersedes any older wording):
+   **every `BugClass` member must have a matching `FixInstance` (by `FixInstance.Member`)**, and for a
+   `fixed` member the commit diff must touch **that member's own `ClassMember.File`** — NOT merely
+   "some file in the diff" (PR#30: the agent controls `FixInstance.File`, so one edit in file A must
+   not "answer" a member that lives in file B). A non-`fixed` member carries a `Reason`.
 4. Post-merge learning flags classes whose members' fixes touched **disjoint structural sites** —
    evidence the grouping was wrong (an over-group) and a calibration signal for the adjudicator.
 
@@ -501,9 +507,10 @@ one-offs) is what phase 2 exists to catch, and what post-merge learning measures
 | **Over-group** (lump unrelated findings to look thorough) | adjudicator | each member must be independently confirmed; post-merge flags disjoint-site classes; `Mechanism` must name a shared cause, not a category |
 | **Under-group** (keep everything as one-offs to avoid the class fix) | adjudicator / fix agent | phase 2's whole purpose; measured by post-merge recurrence — a defect re-discovered next round at a sibling site *was* a missed class |
 
-The honest tell of a real class, from the data: the **same fix resolves every member**. That is what
-`classes_enumerated` checks structurally (one mechanism site in the diff clears multiple member
-findings) and what post-merge recurrence checks over time.
+The honest tell of a real class, from the data, is that the **same fix resolves every member** — but
+that is a *heuristic about real classes*, NOT what the gate checks (PR#30: the gate checks each member
+against its OWN location, per invariant 3; "one site clears many" as a gate criterion is exactly the
+C4 hole the redesign closed). Post-merge recurrence checks the shared-cause claim over time.
 
 ### 3.3 Dedup and the cap — mostly already handled (corrected after review B6)
 
@@ -513,9 +520,11 @@ truncating a class member. Verified against the code, that was wrong on three co
 
 - The fold **replaces** findings wholesale (`fold.go:13-14`); there is no cross-lens accumulation to
   dedup at fold time.
-- Adjudicate **already** exact-dedups confirmed candidates by issue text (`dedupCandidates`,
-  `kind.go:621`) — which is essentially the spike-validated `(file, near-exact-text)` key. `classify`
-  consumes that already-deduped confirmed set. No new dedup layer is needed.
+- Adjudicate **already** dedups confirmed candidates. NOTE (PR#30-CR): the existing `dedupCandidates`
+  keys on exact issue text ALONE, so two real findings with identical text in different files collapse
+  — dropping a class member before `classify` sees it. The dedup key must include **location**:
+  `(file, normalized-text)`, the finding-identity signature (§5). This is a small correction to the
+  existing dedup, not a new layer. `classify` consumes the (correctly) deduped confirmed set.
 - There is **no truncating 100-cap**. The only hard limit is `MaxDeltaList=256` (`kind.go:200`), a
   *reject*, not a truncate. A round producing >256 findings fails loudly (the whole delta is
   refused) — a real but visible backstop, not a silent class-hider.
@@ -643,7 +652,13 @@ Safe-migration guard first (unchanged): keep `SchemaVersion=1`, additive-optiona
 `Delta.Pins/PinResults/Classes/FixClasses` touch the wire; the first pins-writing deploy is a one-way
 door — gate it.
 
-### Ship 1 — PINS (self-contained, shippable now)
+### Ship 1 — PINS (shippable, with ONE shared prerequisite)
+
+**Prerequisite (PR#30-CR):** cross-round-stable finding identity. `Unproven`'s clear/re-add keys on
+`Pin.Finding`, so a re-discovered finding that got a *new* id would never clear its old gap — PINS is
+not self-contained without it. The finding-identity spike is **done and passed** (§5: 0% false-merge
+over 611 findings), so this is a small, validated addition, not a blocker — but it ships *with* Ship 1,
+not deferred to Ship 2.
 
 1. Port the pins data model (§2): `Pin{ID,Finding,File,From,To,Test}`, `PinResult`, `PinOutcome`,
    `Snapshot.Unproven`, `Finding.Source`/`Category`. The types were sound; the ids were the hole.
