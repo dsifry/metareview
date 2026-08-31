@@ -88,8 +88,22 @@ func ResolveBranchScope(root, base string, run RunGit) (BranchScope, error) {
 // review clears current work — the failure this scoping exists to prevent, reintroduced one
 // level down. A review of this branch's own commits is the only thing that has seen this code.
 func (s BranchScope) InScope(r reviewlog.Summary) bool {
+	inScope, _ := s.scopeRoute(r)
+	return inScope
+}
+
+// InScopeByCommit reports whether the review examined one of THIS branch's commits, as opposed to
+// merely naming a file the branch also touched. Only the first can vouch for a file's current
+// contents, and keeping the two apart is the whole difference between a review and a coincidence.
+func (s BranchScope) InScopeByCommit(r reviewlog.Summary) bool {
+	_, byCommit := s.scopeRoute(r)
+	return byCommit
+}
+
+// scopeRoute returns whether the review is in scope, and whether it got there by commit identity.
+func (s BranchScope) scopeRoute(r reviewlog.Summary) (inScope, byCommit bool) {
 	if r.HeadSHA != "" && s.Commits[r.HeadSHA] {
-		return true
+		return true, true
 	}
 	// A review OF a document this branch changed also speaks to this branch, whatever commit it
 	// names. Commit identity alone silently dropped every artifact review: the scaffold is
@@ -99,14 +113,14 @@ func (s BranchScope) InScope(r reviewlog.Summary) bool {
 	// commit giving opposite answers, which is exactly the inversion this scoping was meant to
 	// end.
 	if r.Target == "" {
-		return false
+		return false, false
 	}
 	for _, f := range s.Files {
 		if f == r.Target {
-			return true
+			return true, false
 		}
 	}
-	return false
+	return false, false
 }
 
 // Unreviewed lists the branch's changed files that no review in scope has read.
@@ -117,7 +131,8 @@ func (s BranchScope) InScope(r reviewlog.Summary) bool {
 func (s BranchScope) Unreviewed(logs []reviewlog.Summary) []string {
 	reviewed := map[string]bool{}
 	for _, r := range logs {
-		if !s.InScope(r) || r.HasUnresolvedBlockers {
+		inScope, byCommit := s.scopeRoute(r)
+		if !inScope || r.HasUnresolvedBlockers {
 			// A review that is itself blocked has not cleared anything it read.
 			continue
 		}
@@ -125,6 +140,17 @@ func (s BranchScope) Unreviewed(logs []reviewlog.Summary) []string {
 			// It never said what it read, so it vouches for nothing. This is the flag's reason to
 			// exist: "examined nothing" is an answer and "cannot say" is not, and treating them
 			// alike is what let a log predating the field clear a file it never opened.
+			continue
+		}
+		if !byCommit {
+			// In scope only because it NAMES a file this branch changed — the artifact-review
+			// route. Such a review examined some other commit, so it may answer for the document
+			// it is about and for nothing else. Crediting its whole CoveredPaths set here is how a
+			// stale review cleared current work: a PASS on another branch that had read
+			// internal/foo.go marked this branch's rewritten internal/foo.go as reviewed, which is
+			// precisely the failure the comment above says commit identity exists to prevent,
+			// reintroduced by the exception added beneath it.
+			reviewed[r.Target] = true
 			continue
 		}
 		for _, p := range r.CoveredPaths {

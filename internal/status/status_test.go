@@ -352,24 +352,43 @@ func TestTargetScopingNarrowsTheReviewListToo(t *testing.T) {
 // its target. Target strings are task ids, document paths, or the literal `current branch`, so a
 // source file matched no review at all — and an unmatched file used to report as clear.
 func TestCoversUsesTheFilesAReviewActuallyRead(t *testing.T) {
-	branch := reviewlog.Summary{Target: "current branch", CoveredPaths: []string{"internal/a.go", "internal/b.go"}}
-	if !covers(branch, "internal/a.go") {
+	// The review examined a commit this branch has: it may answer for what it read.
+	now := map[string]bool{"c1": true}
+	branch := reviewlog.Summary{Target: "current branch", HeadSHA: "c1", CoveredPaths: []string{"internal/a.go", "internal/b.go"}}
+	if !covers(branch, "internal/a.go", now) {
 		t.Error("a review that read the file must be able to answer for it")
 	}
-	if covers(branch, "internal/c.go") {
+	if covers(branch, "internal/c.go", now) {
 		t.Error("a review must not answer for a file it never read")
 	}
-	if !covers(branch, "current branch") {
+	if !covers(branch, "current branch", now) {
 		t.Error("the named target still matches")
+	}
+
+	// The same review, recorded on a commit this branch does not have. It read internal/a.go —
+	// but some other version of it. Crediting that returned blocked:false and exit 0 for work
+	// nothing current had reviewed, and the Stop hook reaches this path whenever
+	// METAREVIEW_TARGET is set, so it was reachable in enforcement.
+	stale := branch
+	stale.HeadSHA = "elsewhere"
+	if covers(stale, "internal/a.go", now) {
+		t.Error("a review of another commit must not answer for this branch's version of a file")
+	}
+	if !covers(stale, "current branch", now) {
+		t.Error("it still answers for its own named target, whatever commit it ran on")
+	}
+	// An unknown commit set is not permission to credit: unknown fails toward blocking.
+	if covers(branch, "internal/a.go", nil) {
+		t.Error("with no commit set established, a path claim cannot be credited")
 	}
 	// A review recorded before CoveredPaths existed carries none. It cannot answer for a path,
 	// and must not: an old log silently clearing a file it never read is the failure this whole
 	// change is about.
 	legacy := reviewlog.Summary{Target: "task-1"}
-	if covers(legacy, "internal/a.go") {
+	if covers(legacy, "internal/a.go", now) {
 		t.Error("a review with no recorded paths cannot answer for a path")
 	}
-	if !covers(legacy, "task-1") {
+	if !covers(legacy, "task-1", now) {
 		t.Error("a legacy review still answers for its own target")
 	}
 }

@@ -307,15 +307,26 @@ func resolveBase(root, requestedBase string) (string, error) {
 		}
 		return base, nil
 	}
+	head, _ := git(root, "rev-parse", "HEAD")
 	for _, candidate := range [][]string{
 		{"merge-base", "HEAD", "main"},
 		{"merge-base", "HEAD", "master"},
 		{"rev-parse", "HEAD~1"},
 	} {
 		base, err := git(root, candidate...)
-		if err == nil && base != "" {
-			return base, nil
+		if err != nil || base == "" {
+			continue
 		}
+		// A base equal to HEAD is an empty range, and an empty range is not "no work" — it is a
+		// question that could not be asked. Standing ON the default branch, `merge-base HEAD main`
+		// returns HEAD itself, so the scope spanned nothing: `status --scope branch` reported no
+		// changed files, blocked:false and exit 0 for committed, unreviewed work, while the same
+		// commit on a feature branch blocked. The fallbacks below were never reached because this
+		// candidate did not fail — it succeeded, uselessly. Keep looking instead.
+		if head != "" && base == head {
+			continue
+		}
+		return base, nil
 	}
 	return "", fmt.Errorf("invalid git base: unable to resolve default base")
 }

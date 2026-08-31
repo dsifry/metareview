@@ -36,10 +36,24 @@ func TestInScopeAcceptsBothRoutes(t *testing.T) {
 		"read the same file on another branch": {reviewlog.Summary{HeadSHA: "othersha", CoveredPaths: []string{"internal/b.go"}}, false},
 		"paths but no commit at all":           {reviewlog.Summary{CoveredPaths: []string{"internal/b.go"}}, false},
 		"legacy review, no data":               {reviewlog.Summary{Target: "task-1"}, false},
+		// In scope by the TARGET route: it is a review OF a document this branch changed. This
+		// case previously carried no Target, so it returned false for the trivial reason that
+		// InScope never reads CoveredPaths — the test asserted a guarantee the code did not
+		// provide and could not have failed. What the target route actually admits is asserted
+		// here, and what it is allowed to CLEAR is asserted in Unreviewed below.
+		"a review of a file this branch changed": {reviewlog.Summary{HeadSHA: "othersha", Target: "internal/b.go"}, true},
 	} {
 		if got := s.InScope(tc.r); got != tc.want {
 			t.Errorf("%s: InScope = %v, want %v", name, got, tc.want)
 		}
+	}
+	// Being in scope and having examined this branch's code are different facts, and only the
+	// second can vouch for a file's current contents.
+	if !s.InScopeByCommit(reviewlog.Summary{HeadSHA: "c1"}) {
+		t.Error("a review of a branch commit is in scope BY COMMIT")
+	}
+	if s.InScopeByCommit(reviewlog.Summary{HeadSHA: "othersha", Target: "internal/b.go"}) {
+		t.Error("the target route is not commit identity, and must not be reported as it")
 	}
 }
 
@@ -58,20 +72,34 @@ func TestUnreviewedNamesFilesNoPassingReviewRead(t *testing.T) {
 		{HeadSHA: "c1", CoveredPaths: []string{"b.go"}, CoveredPathsKnown: true, HasUnresolvedBlockers: true},
 		// Passing, and it read c.go — but on another branch, so at a version this branch has
 		// since changed. It clears nothing here.
-		{HeadSHA: "elsewhere", CoveredPaths: []string{"c.go"}, CoveredPathsKnown: true},
+		//
+		// This case carried no Target before, so it was excluded for the trivial reason that
+		// InScope refuses a review with neither a matching commit nor a target — the assertion
+		// could not fail whatever Unreviewed did with CoveredPaths. It now takes the TARGET
+		// route into scope, which is the case that was actually broken: the review is a
+		// legitimate artifact review of c.go, it belongs in scope, and it still must not clear
+		// c.go, because it examined some other commit's version of it.
+		{HeadSHA: "elsewhere", Target: "c.go", CoveredPaths: []string{"c.go", "b.go"}, CoveredPathsKnown: true},
 	}
+	// c.go is cleared: it is what that review is OF, and the target route exists so an artifact
+	// review can answer for its own document. b.go is NOT cleared, though the same review lists
+	// it among the paths it read — reading a file on another commit is not reviewing this one.
+	// That distinction is the fix: crediting the whole CoveredPaths set here let a PASS on
+	// another branch clear this branch's rewritten files.
 	got := s.Unreviewed(logs)
-	if len(got) != 2 || got[0] != "b.go" || got[1] != "c.go" {
-		t.Errorf("Unreviewed = %v, want [b.go c.go]", got)
+	if len(got) != 1 || got[0] != "b.go" {
+		t.Errorf("Unreviewed = %v, want [b.go]: a review of c.go clears c.go and nothing else", got)
 	}
 	// A file an in-scope passing review read is not reported.
 	s.Files = []string{"a.go"}
 	if got := s.Unreviewed(logs); len(got) != 0 {
 		t.Errorf("a reviewed file must not be reported unreviewed: %v", got)
 	}
-	// Order follows the branch's file list, so the answer is stable between runs.
-	s.Files = []string{"c.go", "b.go"}
-	if got := s.Unreviewed(logs); len(got) != 2 || got[0] != "c.go" || got[1] != "b.go" {
+	// Order follows the branch's file list, so the answer is stable between runs. Both files here
+	// are genuinely unreviewed: d.go no review mentions at all, b.go only a blocked review and a
+	// non-current one list.
+	s.Files = []string{"d.go", "b.go"}
+	if got := s.Unreviewed(logs); len(got) != 2 || got[0] != "d.go" || got[1] != "b.go" {
 		t.Errorf("the order must follow the branch's files: %v", got)
 	}
 }
@@ -191,21 +219,57 @@ func TestBuildForBranchAnswersAboutTheWorkInHand(t *testing.T) {
 	}
 }
 
-// A scope that cannot be resolved reports the UNSCOPED answer with a warning, never an empty
-// one. A gate that cannot work out what the work is must fail toward blocking.
+// A scope that cannot be resolved reports the UNSCOPED answer with a warning, never an empty one,
+// and it BLOCKS. A gate that cannot work out what the work is must fail toward blocking.
+//
+// This test used to seed a NEEDS_REVISION review before asking, so `Blocked` was true because of
+// that pre-existing blocker and would have stayed true however the unresolvable scope was
+// handled. It certified a guarantee the code did not provide: with a clean log, an unresolvable
+// scope returned blocked:false and exit 0, warning into JSON that nothing branches on. The
+// repository is clean here for exactly that reason — the scope failure has to be the only thing
+// that can block.
 func TestBuildForBranchFailsTowardBlockingWhenTheScopeIsUnknown(t *testing.T) {
-	root := t.TempDir() // not a git repository
-	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "old.md"),
-		"# metareview: task-done review\n\nRun ID: `mrv-old`\nTarget: `ancient`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	root := t.TempDir() // not a git repository, and no reviews at all
+
 	got, err := BuildForBranch(root, "", nil)
 	if err != nil {
 		t.Fatalf("an unresolvable scope is reported, not an error: %v", err)
 	}
-	if !got.Blocked || len(got.MustClear) != 1 {
-		t.Errorf("the unscoped answer must stand: %+v", got)
+	if !got.Blocked {
+		t.Fatal("a gate that cannot tell what the work is must block, not pass")
+	}
+	var scopeBlocker bool
+	for _, b := range got.MustClear {
+		if b.Verdict == VerdictUnscoped && b.Kind == "scope" {
+			scopeBlocker = true
+		}
+	}
+	if !scopeBlocker {
+		t.Errorf("must_clear must name the unresolved scope as the reason: %+v", got.MustClear)
 	}
 	if len(got.Warnings) == 0 {
 		t.Error("an answer wider than asked for must say so")
+	}
+
+	// And the exit code, which is the only part a Stop hook reads.
+	var buf bytes.Buffer
+	code, err := EmitForBranch(root, "", nil, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1: an unresolvable scope must not read as a clean tree", code)
+	}
+
+	// A pre-existing blocker must still be reported alongside it, not replaced by it.
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "old.md"),
+		"# metareview: task-done review\n\nRun ID: `mrv-old`\nTarget: `ancient`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	got, err = BuildForBranch(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.MustClear) != 2 {
+		t.Errorf("both the old blocker and the scope failure must be reported: %+v", got.MustClear)
 	}
 }
 

@@ -474,7 +474,11 @@ func exitOnErr(err error) {
 
 func handleSetup(args []string) {
 	if len(args) == 1 && args[0] == "--check" {
-		report := setup.Check(mustCwd(), setup.Options{ExecutablePath: executablePath()})
+		// Resolved from the repository root, like status. Answering from the process cwd made
+		// `setup --check` report enforcement ACTIVE at the top of a checkout and INACTIVE two
+		// directories down — same repo, same commit, opposite answers — which is the exact
+		// inversion this layer exists to remove, left behind at one call site.
+		report := setup.Check(repo.RootOr(mustCwd()), setup.Options{ExecutablePath: executablePath()})
 		bytes, err := json.MarshalIndent(report, "", "  ")
 		exitOnErr(err)
 		fmt.Println(string(bytes))

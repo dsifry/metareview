@@ -87,10 +87,17 @@ func BuildFor(root, target string) (Report, error) {
 	// `"target": "t-1"` while listing every other target's reviews invites the reader to think
 	// they are seeing everything, which is the misreading the field exists to prevent.
 	r.Reviews = logs
+	// The branch's own commits, so a review can be checked for currency before it is allowed to
+	// answer for a path. Best effort: where this cannot be worked out the set is nil, and covers
+	// then refuses to credit CoveredPaths at all rather than crediting them blindly.
+	current := map[string]bool{}
+	if scope, err := ResolveBranchScope(root, "", nil); err == nil {
+		current = scope.Commits
+	}
 	if target != "" {
 		scoped := make([]reviewlog.Summary, 0, len(logs))
 		for _, s := range logs {
-			if covers(s, target) {
+			if covers(s, target, current) {
 				scoped = append(scoped, s)
 			}
 		}
@@ -100,7 +107,7 @@ func BuildFor(root, target string) (Report, error) {
 		if !s.HasUnresolvedBlockers {
 			continue
 		}
-		if target != "" && !covers(s, target) {
+		if target != "" && !covers(s, target, current) {
 			continue
 		}
 		r.MustClear = append(r.MustClear, Blocker{
@@ -144,6 +151,12 @@ const VerdictAbandoned = "ABANDONED"
 // "you have not run a review", which call for different things from the operator.
 const VerdictUnreviewed = "UNREVIEWED"
 
+// VerdictUnscoped is the verdict when the branch scope itself could not be resolved. It is not a
+// statement about any review; it says the gate could not work out what the work IS, and a gate
+// that cannot see the work has not cleared it. This existed as a warning first, which nothing
+// branched on, so the answer was "exit 0 with a note attached".
+const VerdictUnscoped = "UNSCOPED"
+
 // Emit writes the report as JSON and returns the process exit code: 1 when something must be
 // cleared, 0 otherwise. It lives here rather than in main so the contract - including the exit
 // decision a hook depends on - is covered by tests.
@@ -166,7 +179,20 @@ func BuildForBranch(root, base string, run RunGit) (Report, error) {
 		// The scope could not be worked out, so this cannot be narrowed. The unscoped answer is
 		// returned rather than an empty one: a gate that cannot tell what the work is must fail
 		// toward blocking, never toward "nothing to do".
+		//
+		// And it BLOCKS, which this used to only claim. A warning nothing branches on is not a
+		// gate: a repository with no resolvable base — a branch with no main/master, a shallow
+		// clone, a detached head — returned blocked:false and exit 0 with committed, unreviewed
+		// work in the tree, while emitting a warning into JSON that the Stop hook does not read.
+		// Not knowing what the work is is precisely the state in which finishing must not be
+		// allowed.
 		r.Warnings = append(r.Warnings, "branch scope unavailable, reporting unscoped: "+err.Error())
+		r.MustClear = append(r.MustClear, Blocker{
+			Target:  "branch scope could not be resolved: " + err.Error(),
+			Verdict: VerdictUnscoped,
+			Kind:    "scope",
+		})
+		r.Blocked = true
 		return r, nil
 	}
 	all := r.Reviews
@@ -265,9 +291,22 @@ func emit(r Report, w io.Writer) (int, error) {
 // spec path is asked about. Or it examined the file, which is what CoveredPaths records. A
 // review with no CoveredPaths is one written before the field existed: it cannot answer for a
 // path, and saying so is what keeps an old log from silently clearing a file it never read.
-func covers(s reviewlog.Summary, target string) bool {
+func covers(s reviewlog.Summary, target string, current map[string]bool) bool {
 	if s.Target == target {
 		return true
+	}
+	// Answering for a PATH requires having examined a version of it this branch still has.
+	//
+	// CoveredPaths crediting had no commit test at all, so a PASS recorded on an unrelated
+	// commit answered for a file that branch had since rewritten: `status --json --target
+	// internal/foo.go` returned blocked:false and exit 0 for work nothing current had read. The
+	// hook takes this path whenever METAREVIEW_TARGET is set, so it was reachable in enforcement,
+	// and it is the same defect as the branch-scope one — a review vouching for code it never saw.
+	//
+	// A nil `current` means the commit set could not be established. That is not permission to
+	// credit: an unknown answer must fail toward blocking, exactly as an unresolvable scope does.
+	if s.HeadSHA == "" || !current[s.HeadSHA] {
+		return false
 	}
 	for _, p := range s.CoveredPaths {
 		if p == target {
