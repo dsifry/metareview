@@ -576,13 +576,15 @@ truncating a class member. Verified against the code, that was wrong on three co
   in two **different files** must NOT collapse; identical text at two lines *within one file* is a
   true duplicate and DOES collapse (per §4.4/§5).
   - **Second collapse site (adversarial pass 4) — `dedupCandidates` is NOT the only text-only key.**
-    Every confirmed `Bug` is assigned `ID = run.BugID(IssueText)` (`canonical.go:103` — a hash of
-    issue text ALONE), and `dedupBugs` (`kind.go:615`, applied to the confirmed set at `kind.go:563`)
-    collapses on `Bug.ID`. So a same-text/different-file finding that survives the `dedupCandidates`
-    fix is **re-collapsed here**, and the class member is dropped before `classify` anyway — the
-    file-in-key discipline must extend to the Bug identity. Derive the confirmed `Bug.ID` from
-    `(File, normalized-text)` and key `dedupBugs` on the same, so the different-file guarantee holds
-    end-to-end. This changes the `BugID` derivation — exactly the frozen-derivation / override-key
+    `run.BugID(IssueText)` (`canonical.go:103`) hashes issue text ALONE, and it is used at **every**
+    adjudication path in `kind.go` — `dedupCandidates` (the candidate key), the `allIDs` preflight
+    (`kind.go:489`), `dedupBugs` on the confirmed/rejected sets (`kind.go:563`), the matched-golden
+    branch (`kind.go:517`, `BugID(golden.Comment)`), and the second-opinion branches
+    (`kind.go:594/602/605`). So a same-text/different-file finding can be dropped, undercounted, or
+    collapsed at any of them before `classify`. The file-in-key discipline must extend to the Bug
+    identity at **every one of these sites**: derive `Bug.ID` from `(File, normalized-text)` (and the
+    golden path from its own file) so the different-file guarantee holds end-to-end, with a
+    same-text/different-file regression over all paths. This changes the `BugID` derivation — exactly the frozen-derivation / override-key
     hazard in §2.4 — so it is done as part of the Ship-1 ⧗ cross-round-stable finding-identity task,
     with the keyed overrides migrated, never silently.
   `classify` consumes the deduped confirmed set.
