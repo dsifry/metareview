@@ -108,11 +108,14 @@ got a *new* id never clears its old gap — a recall/false-split failure. The sp
   findings merge; a same-text/different-file regression test guards the 0%-false-merge property.
 - **Acceptance:** BOTH floors (recall on paraphrase set, precision on the 611-corpus) are met and the
   algorithm is **frozen** only then. Embeddings are advisory-only, never the id (§9.8 — deterministic
-  id is mandatory). The `(file, normalized-text)` key is applied at **every `run.BugID`-deriving
-  site** — enumerated at build time by grepping `run.BugID` in the current `internal/fsm/kind`
-  (the main adjudication flow AND `secondOpinion`), not by copying the spec §3.3 line numbers, which
-  may drift — with a same-text/different-file regression over every path (define whether the scope is
-  direct derivations only or all identity-sensitive paths, and cover it). **Override migration (§2.4 round-2, §3.3):**
+  id is mandatory). The `(file, normalized-text)` key is applied at **every identity-sensitive
+  site** — enumerated at build time in the current `internal/fsm/kind`, covering **both** kinds: (a)
+  every `run.BugID` derivation (main adjudication flow + `secondOpinion`), **and** (b) every
+  **same-text collapse that keys on raw text directly** — e.g. `dedupCandidates`, which keys on raw
+  `IssueText` and never calls `run.BugID`, so a `run.BugID`-only grep would miss it. The scope is **all
+  identity-sensitive paths, not just direct `BugID` derivations**; use the spec §3.3 sites as a
+  starting checklist but re-enumerate against the live code (line numbers drift), with a
+  same-text/different-file regression over every path. **Override migration (§2.4 round-2, §3.3):**
   because this changes the id derivation, keyed overrides are **migrated or versioned on the change,
   never silently** — an override keyed on a pre-change id must not orphan.
 - **Status:** OPEN (⧗). Not de-risked; the precision spike does not cover recall.
