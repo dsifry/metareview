@@ -29,6 +29,37 @@ set -uo pipefail
 TARGET="${METAREVIEW_TARGET:-}"
 BASE="${METAREVIEW_BASE:-}"
 
+# The host's payload arrives on stdin. The only field read is `stop_hook_active`, which the host
+# sets when the session is ALREADY continuing because of a Stop hook — its documented purpose is
+# loop prevention.
+#
+# Ignoring it is what produced the measured failure: on 2026-08-30 this hook fired NINE times in
+# ten turns against a blocker the session could not clear by itself, and the run ended with
+# is_error false and an empty result. A gate that cannot be satisfied and cannot be exited is not
+# enforcement, it is a hang, and a hang teaches operators to remove the hook.
+#
+# So the gate yields on the second pass — and says so, on stderr, naming what it yielded on. A
+# gate that stands down SILENTLY is the failure this whole layer exists to remove; one that stands
+# down loudly leaves the evidence in the transcript, where the next reviewer and post-merge
+# learning can both find it. Clearing the blockers, or recording a process override, remain the
+# ways to finish without one.
+# The read is BOUNDED. `cat` here blocks forever when stdin is an open pipe that never sends
+# anything — which is any host that does not write a payload, and any manual invocation. A hook
+# that hangs is worse than one that fails: the host waits, the session stops, and nothing says
+# why. One second is far longer than a host needs to write a small JSON object, and the gate
+# behaves exactly as before when nothing arrives.
+PAYLOAD=""
+if [ ! -t 0 ]; then
+  IFS= read -r -d "" -t 1 PAYLOAD || true
+fi
+LOOPING="$(printf '%s' "$PAYLOAD" | python3 -c '
+import json, sys
+try:
+    print("yes" if json.load(sys.stdin).get("stop_hook_active") else "")
+except Exception:
+    print("")
+' 2>/dev/null || true)"
+
 BIN="${METAREVIEW_BIN:-metareview}"
 if ! command -v "$BIN" >/dev/null 2>&1; then
   # Absent tooling is reported, never treated as a pass: a check that did not run must not read
@@ -45,6 +76,26 @@ else
   OUT="$("$BIN" status --json --scope branch 2>&1)"
 fi
 CODE=$?
+
+if [ "$CODE" -ne 0 ] && [ -n "$LOOPING" ]; then
+  # Second pass: the host is already continuing because of this hook. Yield, loudly.
+  printf 'metareview: yielding after a repeated block — the gate was not satisfied.\n' >&2
+  printf '%s' "$OUT" | python3 -c '
+import json, sys
+try:
+    items = json.load(sys.stdin).get("must_clear") or []
+except Exception:
+    items = []
+if items:
+    print("metareview: %d blocker(s) remain unresolved:" % len(items), file=sys.stderr)
+    for i in items[:10]:
+        print("  - %s [%s]" % (i.get("target", "?"), i.get("verdict", "?")), file=sys.stderr)
+    if len(items) > 10:
+        print("  … and %d more" % (len(items) - 10), file=sys.stderr)
+print("metareview: clear them, or record one with `metareview override request`.", file=sys.stderr)
+' || true
+  exit 0
+fi
 
 if [ "$CODE" -eq 0 ]; then
   exit 0   # nothing to clear: the host proceeds

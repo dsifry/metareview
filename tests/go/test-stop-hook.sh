@@ -118,4 +118,49 @@ d = json.load(sys.stdin)
 assert d["decision"] == "block", d
 ' || { echo "FAIL: unreadable status body did not produce a valid block: $out" >&2; exit 1; }
 
+# 10-12. The loop-prevention contract. These use their OWN stub rather than the fixture repo,
+#        because the assertions are about the hook's behaviour, not about whatever the previous
+#        test left in the tree — a fixture inherited from four tests ago is how a test ends up
+#        asserting something it does not exercise.
+cat > "$TMP/blocking" <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"blocked":true,"must_clear":[{"target":"internal/thing.go","verdict":"UNREVIEWED"}]}'
+exit 1
+EOF
+chmod +x "$TMP/blocking"
+
+# 10. The host says it is ALREADY continuing because of this hook. The gate yields — a gate that
+#     cannot be satisfied and cannot be exited is a hang, and this one was measured firing nine
+#     times in ten turns against a blocker the session could not clear by itself. It yields
+#     LOUDLY: standing down silently would be the failure this whole layer exists to remove.
+out="$(printf '{"stop_hook_active":true}' | METAREVIEW_BIN="$TMP/blocking" bash "$HOOK" 2>"$TMP/err")"
+if [ -n "$out" ]; then
+  echo "FAIL: yielding must not emit a block decision: $out" >&2; exit 1
+fi
+grep -q "yielding after a repeated block" "$TMP/err" || {
+  echo "FAIL: the yield must be announced, not silent:"; cat "$TMP/err" >&2; exit 1; }
+grep -q "internal/thing.go" "$TMP/err" || {
+  echo "FAIL: the yield must name what was left unresolved:"; cat "$TMP/err" >&2; exit 1; }
+grep -q "override request" "$TMP/err" || {
+  echo "FAIL: the yield must name the recorded way out:"; cat "$TMP/err" >&2; exit 1; }
+
+# 11. The FIRST pass still blocks, and so does an absent, false, or unparseable payload. Yielding
+#     is for a repeat; a gate that stands down on every session is bypassed by ignoring it once.
+for payload in '{"stop_hook_active":false}' '{}' 'not json at all' ''; do
+  out="$(printf '%s' "$payload" | METAREVIEW_BIN="$TMP/blocking" bash "$HOOK")"
+  assert_json_block "$out" "internal/thing.go"
+done
+
+# 12. A clean tree with stop_hook_active set is simply clean, and says nothing at all.
+cat > "$TMP/clean" <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"blocked":false,"must_clear":[]}'
+exit 0
+EOF
+chmod +x "$TMP/clean"
+out="$(printf '{"stop_hook_active":true}' | METAREVIEW_BIN="$TMP/clean" bash "$HOOK" 2>"$TMP/err2")"
+if [ -n "$out" ] || [ -s "$TMP/err2" ]; then
+  echo "FAIL: a clean tree must pass quietly: out=$out err=$(cat "$TMP/err2")" >&2; exit 1
+fi
+
 echo "test-stop-hook: ok"
