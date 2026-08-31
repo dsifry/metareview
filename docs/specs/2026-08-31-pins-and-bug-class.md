@@ -1,7 +1,16 @@
 # Spec: Pins & Bug.Class — proof of fix, and defect-class enumeration
 
-Status: **Round-2 revised. PINS: shippable (Ship 1). BUG.CLASS: validated path, gated on ⧗ spikes (Ship 2).**
+Status: **Adversarially converged (7 passes, 2 consecutive dry). PINS: shippable (Ship 1, one ⧗ recall-floor prerequisite). BUG.CLASS: validated path (Ship 2, ⧗ spikes).**
 
+> **Adversarial convergence (2026-08-31):** a 7-pass convergent adversarial-review loop (6 lenses →
+> refute-verify → synthesize per pass) ran over this spec until two consecutive passes found zero
+> critical items. It resolved 7 verified criticals that six manual review rounds had missed —
+> including two sections specifying the rollout oppositely, a dedup key that contradicted its own
+> spike, the deep root where `pins_proven` and `classes_enumerated` checked disjoint code (now bound
+> to the finding's own file), a second text-only collapse site in the real code (`BugID`/`dedupBugs`),
+> and a finding-identity spike that measured precision when the blocker was recall. None were
+> regressions of a prior fix. Passes 6 and 7 were dry.
+>
 > **Acceptance (PR#30):** the two committed artifact reviews are `NEEDS_REVISION` by design — they are
 > the honest record of what the reviews caught, and every blocking finding is either addressed inline
 > (marked `review fix …` / `PR#30…`) or recorded as a known-open ⧗ item or an accepted tighten-later
@@ -167,7 +176,7 @@ type FixClass struct {
 type FixInstance struct {
     Member      string `json:"member,omitempty"`  // the BugClass member (finding id) this answers, when answering a declared class
     File        string `json:"file"`
-    Disposition string `json:"disposition"`       // fixed | already-correct | out-of-scope
+    Disposition string `json:"disposition"`       // fixed | fixed-elsewhere | already-correct | out-of-scope
     Reason      string `json:"reason,omitempty"`  // required for anything but "fixed"
 }
 ```
@@ -206,8 +215,9 @@ Delta.PinResults  []PinResult
 // derived, never persisted (recomputed by Fold): the open gaps that drive re-discover
 Snapshot.Unproven []Pin        // a pin CLEARS when a later PinResult with the same Pin.Finding is Proven
 Snapshot.Classes  []BugClass   // open classes; carries the MINTED id across rounds. A class clears only
-                               // when every member is RESOLVED (its finding pins_proven, or accounted
-                               // already-correct/out-of-scope) — never on a claimed Disposition alone (§3.2 redesign)
+                               // when every member is RESOLVED: pins_proven at the member's own file
+                               // (fixed) or the remedy file (fixed-elsewhere), or accounted
+                               // already-correct/out-of-scope — never on a claimed Disposition alone (§3.2)
 ```
 
 **`Unproven` lifecycle — add, clear, and re-add, in temporal fold order (review fix B5 + round-2 R4).**
@@ -273,13 +283,14 @@ before it can be seen), and classify must never be handed raw echoes (it would g
    (review-lenses,                (judge fan-out,                  (ONE set-level               (agent-edit,                             (mutation-verify,
     subagent fan-out)              phase-1 confirm)                 LLM call: group)             emits pins + fix instances)              deterministic)
         │
-        └── DEDUP already exists in `adjudicate` (dedupCandidates, exact issue-text). `classify`
-            consumes that already-deduped confirmed set. No new dedup layer (see §3.3, review B6).
+        └── DEDUP exists in `adjudicate` (`dedupCandidates`), keyed on exact issue-text TODAY but
+            CORRECTED to `(file, normalized-text)` per §3.3 (and `BugID`/`dedupBugs` likewise). No new
+            dedup *layer* — a key correction. `classify` consumes the deduped confirmed set.
 ```
 
 | Operation | Placement | Why there | Exec | Kind |
 |---|---|---|---|---|
-| **Dedup** (collapse echoes) | **already in `adjudicate`** (`dedupCandidates`, exact issue-text) — nothing new to add (review B6) | the exact-text collapse the spike validated (24→8) is what adjudicate already does; `classify` reads the deduped confirmed set | adjudicate | **deterministic (exists)** |
+| **Dedup** (collapse echoes) | **in `adjudicate`** (`dedupCandidates` + `BugID`/`dedupBugs`), key CORRECTED to `(file, normalized-text)` per §3.3 | file-in-key so a cross-file class member is not collapsed; the spike validated the 24→8 collapse with this key | adjudicate | **deterministic** |
 | **Classify** (group into classes) | a **new node between `adjudicate` and `fix`** | it must read **all confirmed findings together**, and the adjudicate fan-out's completion barrier is exactly where the full confirmed set first exists in one place | node | **judgement (LLM)** |
 
 **Why classify is its own node and not a phase of `adjudicate`.** A node has one exec kind. `adjudicate`
@@ -294,14 +305,14 @@ makes the judgement checkable: `classes_sound` (every member is a confirmed find
 dressed as classes) after classify, and `classes_enumerated` (each `fixed` instance is in the diff)
 after fix.
 
-**Two-step rollout of the placement** (matches §6):
-1. **Near-term (steps 4–5):** *no classify node yet.* The `fix` agent groups, forced by
-   `require_classes`; dedup already runs in the fold. This forces the enumeration step immediately,
-   but the fix agent can only group what it was handed.
-2. **Structural (step 6):** *add the classify node.* The grouping judgement moves **upstream** to a
-   node that sees the entire confirmed set at the barrier — including instances the fix agent would
-   never have been shown. Same reason the whole design exists: the one who fixes has the instance
+**Rollout of the placement** (matches §6): `classify` is present from the FIRST shipped version of
+Bug.Class — there is **no** interim where the fix agent groups its own classes (§3.2 invariant 4).
+1. **Step 4:** *add the `classify` node* (stateful over open `Snapshot.Classes`). The grouping
+   judgement lives **upstream**, in a node that sees the entire confirmed set at the barrier —
+   including instances the fix agent would never have been shown. The one who fixes has the instance
    blind spot, so the class call is made before the work reaches them, not by them.
+2. **Step 5:** `require_classes` + `classes_enumerated` with the own-location member check; a class
+   clears only on validated member resolution.
 
 ### 3.1 Pins / prove (the deterministic sandwich)
 
@@ -319,17 +330,30 @@ after fix.
   rejects any pin whose `From` is not a line the commit **added** (a `+` line in the diff) — outcome
   `malformed`, owner the fix agent. Diff-*presence* alone was defeated by context lines; requiring an
   *added* line ties the mutation to code the fix introduced.
-- **`pins_proven`** gate: passes iff **both** — (a) every confirmed finding that OWES a pin has a
-  `Proven` pin whose `Finding` matches it, AND (b) every pin the fix SUPPLIED is `Proven` (a
-  `survived` pin — a real test gap — blocks even on a finding that did not owe one; a `malformed`
-  pin is returned to the agent to rewrite). (a) without (b) let a supplied `survived`/`malformed`
-  pin ride through on a non-owing finding (PR#30-CR); (b) without (a) let an agent dodge by pinning
-  an easy line and not its own finding (PR#30-cursor). A finding **owes a pin** iff
-  (machine-determinable): its fix touches a source file in a package that **has test files** (§4.2)
-  **and** added a line to pin. A **pure-deletion** fix, or a fix to a **package with no test files**,
-  owes no pin and records **"no pinnable change"** (§4.2/§4.6) — but if it nonetheless supplies a
-  pin, conjunct (b) still holds it to `Proven`. Selects on `Finding.Source`/`Category`, **never on
-  issue text**.
+- **`pins_proven`** gate: passes iff **both** —
+  (a) every confirmed finding that OWES a pin has a `Proven` pin whose `Finding` matches it **and
+  whose `File` equals that finding's own location** (`Finding.File`, i.e. the member's
+  `ClassMember.File`); AND (b) every pin the fix SUPPLIED is `Proven`.
+  The **own-file clause in (a) is load-bearing** (adversarial pass 2): without it `pins_proven` and
+  `classes_enumerated` check *disjoint* code — a sham added edit in the finding's file satisfies the
+  class gate's own-location touch (§3.2 inv. 3), while one real tested line in a *different* file,
+  pinned under this finding's agent-written `Finding` label, satisfies the proof. Both gates then go
+  green on an unproven finding — the #24 self-clearing shape, amplified when one tested line is
+  relabeled across many findings. Binding the pin's `File` to the finding's own file makes the
+  proven line and the class-gate's touched line the SAME code. (b) independently blocks a supplied
+  `survived`/`malformed` pin.
+  A finding **owes a pin** iff (machine-determinable): its fix touches a source file in a package
+  that **has test files** (§4.2) **and** added a line to pin **in the finding's OWN file
+  (`Finding.File`)** (PR#31-CR: the trigger is scoped to `Finding.File`, matching (a)'s pin-file
+  requirement — so a cross-file remedy never creates an owed pin no valid pin can satisfy). A
+  **pure-deletion** fix,
+  a **no-test-package** fix, or a fix whose remedy genuinely lies in a **different file than the
+  finding** (no pinnable added line in the finding's own file) owes no pin and records **"no pinnable
+  change"** naming the actual fix file (§4.6) — auditable, never a silent pass; a supplied pin is
+  still held to `Proven` by (b). This own-file binding is the **tightest achievable**: that a proven
+  line is *causally* the fix is unprovable, so the gate binds to **co-location in the finding's own
+  file**, consistent with invariant 3. Selects on `Finding.Source`/`Category`, **never on issue
+  text**.
 
 **The seam fix, and the test that would have caught it.** `agentEdit.Reduce` must carry `Pins` into
 the Delta. The regression test that makes `pins_proven` non-vacuous: a fix emitting a pin that does
@@ -358,9 +382,15 @@ session — the test must be shown red before it is trusted).
    side), never in the deterministic fold, which cannot generate ids.
 
 2. **Clearing only on a VALIDATED signal — composition with pins (fixes C3/R2).** A class member is
-   *resolved* only when its finding's fix is `pins_proven` (validated by the deterministic `prove`
-   node), or is accounted `already-correct`/`out-of-scope` with a reason. A class clears from
-   `Snapshot.Classes` only when **every** member is resolved. The fold never clears a class on the
+   *resolved* only when its fix is `pins_proven` — for a `fixed` member, a Proven pin in the
+   member's own `ClassMember.File`; for a **`fixed-elsewhere`** member, a Proven pin in the named
+   remedy file `FixInstance.File` (PR#31-cursor: `fixed-elsewhere` MUST be a resolving disposition,
+   validated the same way but at the remedy file — otherwise it clears `classes_enumerated` yet
+   never resolves, so the class never clears and `require_classes` re-demands it forever, the
+   dead-end this valve exists to open) — or the member is accounted `already-correct`/`out-of-scope`
+   with a reason, or its remedy file has no tests and it records "no pinnable change" (the same
+   auditable valve as pins). A class clears from `Snapshot.Classes` only when **every** member is
+   resolved. The fold never clears a class on the
    agent's *claimed* `Disposition` alone — the disposition is a claim; the pin proof is the
    validation. This is exactly how `Unproven` clears (only a `prove` result mutates it), lifted to
    the class layer, and it is what stops the class snapshot from self-clearing on the agent's word.
@@ -411,10 +441,16 @@ spike before either is built.
 
 - ⧗ **Durable-identity / continuity spike:** over a multi-round replay, can `classify`, given the open
   classes, reliably continue the right class rather than minting duplicates? Measure id churn.
-- ✓ **Finding-identity spike — DONE (2026-08-31):** a `(file, top-6-normalized-words)` signature gives
-  **0% within-run false-merges over all 611 real findings** (never collapses two distinct findings) and
-  matches 66% cross-run recurrence. Viable cross-round identity; use the simple key. Caveat: measured
-  on real data, one scheme — holds under paraphrase is the build-time check.
+- ⧗ **Finding-identity spike — PRECISION half done, RECALL half open (2026-08-31):** a
+  `(file, top-6-normalized-words)` signature gives **0% within-run false-merges over all 611 real
+  findings** — that is *precision* (distinct findings never collapse to one id). It is only the
+  false-merge half. The property this prerequisite actually needs is *recall under paraphrase*: a
+  re-discovered finding, reworded by the LLM next round, must keep its id or the `Unproven` gap never
+  clears. That direction is **unmeasured** — 66% is cross-run recurrence, which cannot separate "did
+  not recur" from "recurred but the signature minted a new id" (a paraphrase that shifts the top-6
+  words is invisible in it). Before freeze (§6): build a paraphrase ground-truth set (the same
+  finding reworded across rounds) and meet a **recall floor**. Use the simple key provisionally; it
+  is not yet a proven cross-round identity.
 - ✓ **Grouping viability:** done (§5) — classify recovers classes, errs toward splitting, no dangerous merges.
 - ⧗ **End-to-end replay:** a class created → partially fixed → carried with stable id → cleared only
   when the last member is `pins_proven`. This is the acceptance test for the whole Bug.Class path.
@@ -427,8 +463,9 @@ whatever the fix agent happens to notice.
 
 #### Why adjudication cannot be deterministic clustering
 
-The obvious cheap design is to cluster confirmed findings by the §3.3 key
-`(file, region, normalized-defect)`. It is the right key for collapsing **lens echoes** (the 24→8
+The obvious cheap design is to cluster confirmed findings by the §3.3 dedup key
+`(file, normalized-text)` (NO region bucketing — §4.4/§5). It is the right key for collapsing **lens
+echoes** (the 24→8
 on `fsmruns.go`: many lenses, one defect, one site). But it is the *wrong* tool for the case the
 user named — **"two instances, one at the top and one at the bottom, are actually one class bug."**
 Those two sit in different regions, often different files; co-location splits them precisely when
@@ -495,7 +532,13 @@ the **chain** it forces, each link of which *is* mechanical:
    **every `BugClass` member must have a matching `FixInstance` (by `FixInstance.Member`)**, and for a
    `fixed` member the commit diff must touch **that member's own `ClassMember.File`** — NOT merely
    "some file in the diff" (PR#30: the agent controls `FixInstance.File`, so one edit in file A must
-   not "answer" a member that lives in file B). A non-`fixed` member carries a `Reason`.
+   not "answer" a member that lives in file B). **Cross-file remedy (PR#31-CR, symmetric with the
+   `pins_proven` valve):** a member whose genuine remedy is in ANOTHER file uses disposition
+   `fixed-elsewhere`, naming the remedy file in `FixInstance.File`; the gate then requires that named
+   file in the diff. This is the auditable exception — gameable (the agent can point it anywhere) but
+   RECORDED and flagged for post-merge, *tighten-if-abused* — so the tight own-file default holds for
+   the ordinary case while a real elsewhere-fix has a valid path. A non-`fixed` member carries a
+   `Reason`.
 4. Post-merge learning flags classes whose members' fixes touched **disjoint structural sites** —
    evidence the grouping was wrong (an over-group) and a calibration signal for the adjudicator.
 
@@ -525,11 +568,26 @@ truncating a class member. Verified against the code, that was wrong on three co
 - The fold **replaces** findings wholesale (`fold.go:13-14`); there is no cross-lens accumulation to
   dedup at fold time.
 - Adjudicate **already** dedups confirmed candidates. NOTE (PR#30-CR): the existing `dedupCandidates`
-  keys on exact issue text ALONE, so two real findings with identical text in different files collapse
-  — dropping a class member before `classify` sees it. The dedup key must include the **authoritative
-  site**: `(file, line-region, normalized-text)` — file alone still collapses two identical-text
-  findings at different lines in one file (PR#30-CR). Small correction to the existing dedup, not a
-  new layer; regression case: identical text at two different sites must NOT collapse. `classify` consumes the (correctly) deduped confirmed set.
+  keys on exact issue text ALONE, so two real findings with identical text in **different files**
+  collapse — dropping a class member before `classify` sees it. The fix is to add the file to the
+  key: `(file, normalized-text)`, **NO region bucketing** — the spike (§4.4/§5) reproduced the 24→8
+  collapse with exactly this key, while line-region buckets split true duplicates and made it *worse*
+  (24→11). Small correction to the existing dedup, not a new layer. Regression case: identical text
+  in two **different files** must NOT collapse; identical text at two lines *within one file* is a
+  true duplicate and DOES collapse (per §4.4/§5).
+  - **Second collapse site (adversarial pass 4) — `dedupCandidates` is NOT the only text-only key.**
+    `run.BugID(IssueText)` (`canonical.go:103`) hashes issue text ALONE, and it is used at **every**
+    adjudication path in `kind.go` — `dedupCandidates` (the candidate key), the `allIDs` preflight
+    (`kind.go:489`), `dedupBugs` on the confirmed/rejected sets (`kind.go:563`), the matched-golden
+    branch (`kind.go:517`, `BugID(golden.Comment)`), and the second-opinion branches
+    (`kind.go:594/602/605`). So a same-text/different-file finding can be dropped, undercounted, or
+    collapsed at any of them before `classify`. The file-in-key discipline must extend to the Bug
+    identity at **every one of these sites**: derive `Bug.ID` from `(File, normalized-text)` (and the
+    golden path from its own file) so the different-file guarantee holds end-to-end, with a
+    same-text/different-file regression over all paths. This changes the `BugID` derivation — exactly the frozen-derivation / override-key
+    hazard in §2.4 — so it is done as part of the Ship-1 ⧗ cross-round-stable finding-identity task,
+    with the keyed overrides migrated, never silently.
+  `classify` consumes the deduped confirmed set.
 - There is **no truncating 100-cap**. The only hard limit is `MaxDeltaList=256` (`kind.go:200`), a
   *reject*, not a truncate. A round producing >256 findings fails loudly (the whole delta is
   refused) — a real but visible backstop, not a silent class-hider.
@@ -595,6 +653,8 @@ gate whose valve is *gameable* is a **safety valve** — kept simple now, tighte
 | `pins_proven` anchor not in diff (B1) | pin doesn't touch the fix | move the pin onto a changed line | yes — a real fix always has a changed line | — |
 | `require_pins` on a fix | code change unproven | supply a pin, OR record "no pinnable change" | yes — the "none" path is always available | "none" is self-asserted → tighten later |
 | `pins_proven`: a pure-DELETION fix (no added line to pin) | the fix removed code, nothing to anchor | record "no pinnable line" with the deleted range as evidence | yes — added round-2 R3; this row was missing and was a real dead-end | machine-checks the fix is deletion-only → hard, not self-asserted |
+| `pins_proven` (a) own-file: the finding's remedy is genuinely in ANOTHER file | no pinnable added line in the finding's own file | record "no pinnable change" naming the actual fix file | yes — the same valve as deletion | self-asserted (the fix file is named and in the diff) → tighten-if-abused |
+| class member `fixed-elsewhere` (remedy in another file) | own-file pin impossible | resolves via a Proven pin in the REMEDY file `FixInstance.File` (or "no pinnable change" if it has no tests) | yes — invariant 2 makes `fixed-elsewhere` a resolving disposition (PR#31-cursor: without this it cleared the gate but never resolved → class re-demanded forever) | gameable/auditable → tighten-if-abused |
 | `classes_enumerated` member unanswered (B3) | a class member ignored | give it a disposition: `fixed`, `already-correct`, or `out-of-scope`+reason | yes — the non-`fixed` dispositions are the valve | reason unreviewed → tighten later |
 | `classify` over-groups | unrelated findings lumped | dissolve the class with a recorded reason (§4.5) | **only once dissolution is WIRED to a class id — see B7 fix** | reason unreviewed → tighten later |
 | convergence / `Unproven` (B5) | pins keep re-driving discover | a proven pin clears its `Unproven` entry | **only once Unproven has a clearing rule — see B5 fix; today it is a DEAD-END** | — |
@@ -660,12 +720,17 @@ door — gate it.
 ### Ship 1 — PINS (shippable, with ONE shared prerequisite)
 
 **Prerequisite ⧗ (PR#30-CR):** cross-round-stable finding identity. `Unproven`'s clear/re-add keys on
-`Pin.Finding`, so a re-discovered finding that got a *new* id would never clear its old gap — PINS is
-not self-contained without it. The spike **de-risked** it (§5: `(file, line-region, normalized-text)`
-gave 0% false-merge over 611 findings — that is the *precision* that matters here; the 66% figure is
-recurrence rate, not the identity invariant), but the algorithm is **not yet frozen**: Ship 1 must
-define and freeze it with an acceptance threshold (precision floor + a same-text/different-site
-regression) before PINS can claim self-containment. It is a Ship-1 task, spike-validated but open —
+`Pin.Finding`, so a re-discovered finding that got a *new* id would never clear its old gap — a
+**recall / false-split** failure, and the one PINS is not self-contained without. The spike measured
+only the **opposite** direction: `(file, normalized-text)` (the SAME key as the dedup §3.3, no region
+bucketing) gave **0% false-merge** over 611 findings — that is *precision* (distinct findings never
+collapse), NOT the recall property this prerequisite needs; the 66% figure is recurrence rate, not
+the identity invariant, and cannot separate "did not recur" from "recurred but got a new id." The
+**recall-under-paraphrase** direction — the actual blocker — is **unmeasured** (no paraphrase ground
+truth in the corpus, no protocol in §5/§7/§8). Before PINS can claim self-containment, Ship 1 must
+(a) build a paraphrase ground-truth set and define a **recall floor** on it, alongside the precision
+floor + same-text/different-file regression; and (b) freeze the algorithm only once BOTH floors are
+met. This is **not** de-risked — it is a Ship-1 task, open (⧗) —
 the same ⧗ status §3.2 and Ship 2 carry, not "done."
 
 1. Port the pins data model (§2): `Pin{ID,Finding,File,From,To,Test}`, `PinResult`, `PinOutcome`,
