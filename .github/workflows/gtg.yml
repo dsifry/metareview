@@ -70,6 +70,9 @@ jobs:
           # assignment from a failed `gh api` ends the step under `bash -e`,
           # before any of the retry budget has been spent.
           SHA=""
+          # Counts only the iterations spent waiting for an ABSENT review bot, after every other
+          # check has finished. See the grace window below.
+          BOTWAIT=0
           # 132 * 10s = 22 minutes, which clears the Test job's own 20-minute
           # ceiling. A shorter wait would start gtg while CI was still pending
           # and report a false CI_FAILING.
@@ -83,16 +86,50 @@ jobs:
               echo "  head SHA $SHA"
             fi
             RUNS="$(gh api "repos/$REPO/commits/$SHA/check-runs" --paginate \
-              --jq '.check_runs[] | select(.name != "Merge Ready (gtg)" and .name != "CodeRabbit" and .name != "Cursor Bugbot") | .status' || echo "api-error")"
+              --jq '.check_runs[] | select(.name != "Merge Ready (gtg)") | "\(.name)\t\(.status)"' || echo "api-error")"
             if [ "$RUNS" = "api-error" ]; then
               echo "  API error, retrying in 10s... ($i/132)"; sleep 10; continue
             fi
             TOTAL="$(printf '%s\n' "$RUNS" | grep -c . || true)"
-            PENDING="$(printf '%s\n' "$RUNS" | grep -vc completed || true)"
-            # No checks at all yet is "not ready", not "all done".
-            if [ "$TOTAL" -gt 0 ] && [ "$PENDING" -eq 0 ]; then
-              echo "All CI checks complete ($TOTAL)."
+            if [ "$TOTAL" -eq 0 ]; then
+              # printf of an empty string still emits one blank line, which grep -vc counted as a
+              # pending check: the log read "1 of 0 check(s) still running". It waits either way,
+              # but a gate whose own diagnostics are wrong is hard to trust when it matters.
+              PENDING=0
+            else
+              PENDING="$(printf '%s\n' "$RUNS" | grep -vc 'completed$' || true)"
+            fi
+            # The review bots are WAITED FOR here, and excluded only from the pass/fail judgement
+            # below. Excluding them from the wait as well is what made this gate report on a
+            # moment before the reviewers had spoken: on #27 it asked "Threads: 0/0 resolved"
+            # 3m10s before the first thread existed, and passed. One exclusion list was serving
+            # two incompatible purposes — do not fail on a bot's check state (wanted), and do not
+            # wait for it (not wanted).
+            MISSING=""
+            for bot in "CodeRabbit" "Cursor Bugbot"; do
+              printf '%s\n' "$RUNS" | cut -f1 | grep -qxF "$bot" || MISSING="$MISSING $bot"
+            done
+            if [ "$TOTAL" -gt 0 ] && [ "$PENDING" -eq 0 ] && [ -z "$MISSING" ]; then
+              echo "All CI checks complete ($TOTAL), reviewers included."
               exit 0
+            fi
+            # A bot that has not posted a check yet is INVISIBLE to a "wait for what is present"
+            # loop, so waiting on presence alone would still exit before it arrived. It is also
+            # legitimately absent when a bot is uninstalled, rate-limited, or skipped on a fork —
+            # so absence is given a grace period and then proceeds loudly rather than hanging for
+            # the full budget.
+            if [ "$TOTAL" -gt 0 ] && [ "$PENDING" -eq 0 ] && [ -n "$MISSING" ]; then
+              # The grace window is counted from the moment the OTHER checks finished, not from
+              # the start of the wait. Measuring it with $i spent the window on `test`: after five
+              # minutes of ordinary CI an absent bot proceeded on the very first look, which is
+              # the same too-early snapshot this change exists to fix, wearing the fix's clothes.
+              BOTWAIT=$((BOTWAIT + 1))
+              if [ "$BOTWAIT" -ge 30 ]; then
+                echo "::warning::Proceeding without review bot check(s):$MISSING — thread state may be incomplete"
+                exit 0
+              fi
+              echo "  waiting for review bot(s) to report:$MISSING ($BOTWAIT/30 before proceeding)"
+              sleep 10; continue
             fi
             echo "  $PENDING of $TOTAL check(s) still running, waiting 10s... ($i/132)"
             sleep 10
