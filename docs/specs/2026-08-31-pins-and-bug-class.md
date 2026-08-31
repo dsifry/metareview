@@ -319,17 +319,27 @@ Bug.Class — there is **no** interim where the fix agent groups its own classes
   rejects any pin whose `From` is not a line the commit **added** (a `+` line in the diff) — outcome
   `malformed`, owner the fix agent. Diff-*presence* alone was defeated by context lines; requiring an
   *added* line ties the mutation to code the fix introduced.
-- **`pins_proven`** gate: passes iff **both** — (a) every confirmed finding that OWES a pin has a
-  `Proven` pin whose `Finding` matches it, AND (b) every pin the fix SUPPLIED is `Proven` (a
-  `survived` pin — a real test gap — blocks even on a finding that did not owe one; a `malformed`
-  pin is returned to the agent to rewrite). (a) without (b) let a supplied `survived`/`malformed`
-  pin ride through on a non-owing finding (PR#30-CR); (b) without (a) let an agent dodge by pinning
-  an easy line and not its own finding (PR#30-cursor). A finding **owes a pin** iff
-  (machine-determinable): its fix touches a source file in a package that **has test files** (§4.2)
-  **and** added a line to pin. A **pure-deletion** fix, or a fix to a **package with no test files**,
-  owes no pin and records **"no pinnable change"** (§4.2/§4.6) — but if it nonetheless supplies a
-  pin, conjunct (b) still holds it to `Proven`. Selects on `Finding.Source`/`Category`, **never on
-  issue text**.
+- **`pins_proven`** gate: passes iff **both** —
+  (a) every confirmed finding that OWES a pin has a `Proven` pin whose `Finding` matches it **and
+  whose `File` equals that finding's own location** (`Finding.File`, i.e. the member's
+  `ClassMember.File`); AND (b) every pin the fix SUPPLIED is `Proven`.
+  The **own-file clause in (a) is load-bearing** (adversarial pass 2): without it `pins_proven` and
+  `classes_enumerated` check *disjoint* code — a sham added edit in the finding's file satisfies the
+  class gate's own-location touch (§3.2 inv. 3), while one real tested line in a *different* file,
+  pinned under this finding's agent-written `Finding` label, satisfies the proof. Both gates then go
+  green on an unproven finding — the #24 self-clearing shape, amplified when one tested line is
+  relabeled across many findings. Binding the pin's `File` to the finding's own file makes the
+  proven line and the class-gate's touched line the SAME code. (b) independently blocks a supplied
+  `survived`/`malformed` pin.
+  A finding **owes a pin** iff (machine-determinable): its fix touches a source file in a package
+  that **has test files** (§4.2) **and** added a line to pin in that file. A **pure-deletion** fix,
+  a **no-test-package** fix, or a fix whose remedy genuinely lies in a **different file than the
+  finding** (no pinnable added line in the finding's own file) owes no pin and records **"no pinnable
+  change"** naming the actual fix file (§4.6) — auditable, never a silent pass; a supplied pin is
+  still held to `Proven` by (b). This own-file binding is the **tightest achievable**: that a proven
+  line is *causally* the fix is unprovable, so the gate binds to **co-location in the finding's own
+  file**, consistent with invariant 3. Selects on `Finding.Source`/`Category`, **never on issue
+  text**.
 
 **The seam fix, and the test that would have caught it.** `agentEdit.Reduce` must carry `Pins` into
 the Delta. The regression test that makes `pins_proven` non-vacuous: a fix emitting a pin that does
@@ -597,6 +607,7 @@ gate whose valve is *gameable* is a **safety valve** — kept simple now, tighte
 | `pins_proven` anchor not in diff (B1) | pin doesn't touch the fix | move the pin onto a changed line | yes — a real fix always has a changed line | — |
 | `require_pins` on a fix | code change unproven | supply a pin, OR record "no pinnable change" | yes — the "none" path is always available | "none" is self-asserted → tighten later |
 | `pins_proven`: a pure-DELETION fix (no added line to pin) | the fix removed code, nothing to anchor | record "no pinnable line" with the deleted range as evidence | yes — added round-2 R3; this row was missing and was a real dead-end | machine-checks the fix is deletion-only → hard, not self-asserted |
+| `pins_proven` (a) own-file: the finding's remedy is genuinely in ANOTHER file | no pinnable added line in the finding's own file | record "no pinnable change" naming the actual fix file | yes — the same valve as deletion | self-asserted (the fix file is named and in the diff) → tighten-if-abused |
 | `classes_enumerated` member unanswered (B3) | a class member ignored | give it a disposition: `fixed`, `already-correct`, or `out-of-scope`+reason | yes — the non-`fixed` dispositions are the valve | reason unreviewed → tighten later |
 | `classify` over-groups | unrelated findings lumped | dissolve the class with a recorded reason (§4.5) | **only once dissolution is WIRED to a class id — see B7 fix** | reason unreviewed → tighten later |
 | convergence / `Unproven` (B5) | pins keep re-driving discover | a proven pin clears its `Unproven` entry | **only once Unproven has a clearing rule — see B5 fix; today it is a DEAD-END** | — |
