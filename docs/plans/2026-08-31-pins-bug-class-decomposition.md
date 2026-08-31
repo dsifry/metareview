@@ -151,7 +151,9 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
   **merges two causes onto one outcome** must redden. (The `verify.go` port lives in this task per the
   §6 chunk-1 status.) **Persistence-cap tests (review #35b):** the new `Delta` list fields go through
   `withinCaps`/`MaxDeltaList` after canonical decode — add canonical-byte **boundary** (a list *at* the
-  cap decodes) and **one-over-cap rejection** tests for `Pins`/`PinResults`/`Unproven`.
+  cap decodes) and **one-over-cap rejection** tests for the **persisted** `Delta` lists `Pins`/`PinResults`.
+  (`Snapshot.Unproven` is Snapshot-derived and **never persisted** — recomputed by `Fold`, §2.4 — so it
+  has no persistence cap and no such test.)
 - **Acceptance:** `Pin`/`DifferentialProof`/`PinResult`/`ProofResult`/`PinOutcome`/`Unproven` and
   `Finding.Source`/`Category` land; `SchemaVersion` stays 1, additive-optional (the 10 existing runs
   still `Fold`); `DifferentialProof.ID` is the override key. **One-way-door gate (§2.4):** the first
@@ -222,13 +224,15 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
 - **DI:** `DeletionRef` verification uses **injected git access** (parent blob + diff parse). The
   fail-before/pass-after check **runs on T1.3's reproduction-execution engine** (target-test overlay).
   The over-deletion scope check is a **distinct whole-suite phase** that runs the **full consent-hashed
-  test cmd** (the opaque all-or-nothing suite, injected runner) on **BOTH** trees from identical
-  cmd/tree with stable test identities: a **pre-deletion baseline** (must be green — **fail closed if
-  the baseline is not green**) and the **post-deletion** tree. A test that **passed in the baseline but
-  breaks post-deletion** (outside the reproduction set) reddens; a failure already present in the
-  baseline is NOT attributed to the deletion. So T1.5 adds `DeletionRef` verification + this
-  baseline/post-deletion whole-suite phase; the reproduction engine (target-test) is reused, not the
-  whole-suite runner.
+  test cmd** (opaque — **whole-suite pass/fail only, no per-test attribution**, matching §4.2) on
+  **BOTH** trees with the same cmd: a **pre-deletion baseline** and the **post-deletion** tree. Because
+  the cmd is all-or-nothing, the check is a **whole-suite green→green** comparison: the baseline **must
+  be green** (**fail closed** otherwise — a pre-existing red suite can't attribute blame), and the
+  post-deletion suite must **also be green**; a **green→red** transition means the deletion regressed
+  an existing test and reddens. No per-test identity is needed — a baseline-green / post-red delta is
+  attributable to the deletion by construction. So T1.5 adds `DeletionRef` verification + this
+  baseline/post whole-suite phase; the reproduction engine (target-test) is reused, not the whole-suite
+  runner.
 - **TDD:** a `Kind:"deletion"` proof with a fail-before/pass-after reproduction test clears; the
   `DeletionRef`↔reviewed-diff binding (⧗ build contract) rejects a free-floating or mismatched span;
   clause (a) own-file for a deletion requires `DeletionRef.File == Finding.File` (NOT `Root.File` — that
