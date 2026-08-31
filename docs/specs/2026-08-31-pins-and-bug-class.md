@@ -176,7 +176,7 @@ type FixClass struct {
 type FixInstance struct {
     Member      string `json:"member,omitempty"`  // the BugClass member (finding id) this answers, when answering a declared class
     File        string `json:"file"`
-    Disposition string `json:"disposition"`       // fixed | already-correct | out-of-scope
+    Disposition string `json:"disposition"`       // fixed | fixed-elsewhere | already-correct | out-of-scope
     Reason      string `json:"reason,omitempty"`  // required for anything but "fixed"
 }
 ```
@@ -282,13 +282,14 @@ before it can be seen), and classify must never be handed raw echoes (it would g
    (review-lenses,                (judge fan-out,                  (ONE set-level               (agent-edit,                             (mutation-verify,
     subagent fan-out)              phase-1 confirm)                 LLM call: group)             emits pins + fix instances)              deterministic)
         │
-        └── DEDUP already exists in `adjudicate` (dedupCandidates, exact issue-text). `classify`
-            consumes that already-deduped confirmed set. No new dedup layer (see §3.3, review B6).
+        └── DEDUP exists in `adjudicate` (`dedupCandidates`), keyed on exact issue-text TODAY but
+            CORRECTED to `(file, normalized-text)` per §3.3 (and `BugID`/`dedupBugs` likewise). No new
+            dedup *layer* — a key correction. `classify` consumes the deduped confirmed set.
 ```
 
 | Operation | Placement | Why there | Exec | Kind |
 |---|---|---|---|---|
-| **Dedup** (collapse echoes) | **already in `adjudicate`** (`dedupCandidates`, exact issue-text) — nothing new to add (review B6) | the exact-text collapse the spike validated (24→8) is what adjudicate already does; `classify` reads the deduped confirmed set | adjudicate | **deterministic (exists)** |
+| **Dedup** (collapse echoes) | **in `adjudicate`** (`dedupCandidates` + `BugID`/`dedupBugs`), key CORRECTED to `(file, normalized-text)` per §3.3 | file-in-key so a cross-file class member is not collapsed; the spike validated the 24→8 collapse with this key | adjudicate | **deterministic** |
 | **Classify** (group into classes) | a **new node between `adjudicate` and `fix`** | it must read **all confirmed findings together**, and the adjudicate fan-out's completion barrier is exactly where the full confirmed set first exists in one place | node | **judgement (LLM)** |
 
 **Why classify is its own node and not a phase of `adjudicate`.** A node has one exec kind. `adjudicate`
@@ -341,7 +342,10 @@ Bug.Class — there is **no** interim where the fix agent groups its own classes
   proven line and the class-gate's touched line the SAME code. (b) independently blocks a supplied
   `survived`/`malformed` pin.
   A finding **owes a pin** iff (machine-determinable): its fix touches a source file in a package
-  that **has test files** (§4.2) **and** added a line to pin in that file. A **pure-deletion** fix,
+  that **has test files** (§4.2) **and** added a line to pin **in the finding's OWN file
+  (`Finding.File`)** (PR#31-CR: the trigger is scoped to `Finding.File`, matching (a)'s pin-file
+  requirement — so a cross-file remedy never creates an owed pin no valid pin can satisfy). A
+  **pure-deletion** fix,
   a **no-test-package** fix, or a fix whose remedy genuinely lies in a **different file than the
   finding** (no pinnable added line in the finding's own file) owes no pin and records **"no pinnable
   change"** naming the actual fix file (§4.6) — auditable, never a silent pass; a supplied pin is
@@ -452,8 +456,9 @@ whatever the fix agent happens to notice.
 
 #### Why adjudication cannot be deterministic clustering
 
-The obvious cheap design is to cluster confirmed findings by the §3.3 key
-`(file, region, normalized-defect)`. It is the right key for collapsing **lens echoes** (the 24→8
+The obvious cheap design is to cluster confirmed findings by the §3.3 dedup key
+`(file, normalized-text)` (NO region bucketing — §4.4/§5). It is the right key for collapsing **lens
+echoes** (the 24→8
 on `fsmruns.go`: many lenses, one defect, one site). But it is the *wrong* tool for the case the
 user named — **"two instances, one at the top and one at the bottom, are actually one class bug."**
 Those two sit in different regions, often different files; co-location splits them precisely when
@@ -520,7 +525,13 @@ the **chain** it forces, each link of which *is* mechanical:
    **every `BugClass` member must have a matching `FixInstance` (by `FixInstance.Member`)**, and for a
    `fixed` member the commit diff must touch **that member's own `ClassMember.File`** — NOT merely
    "some file in the diff" (PR#30: the agent controls `FixInstance.File`, so one edit in file A must
-   not "answer" a member that lives in file B). A non-`fixed` member carries a `Reason`.
+   not "answer" a member that lives in file B). **Cross-file remedy (PR#31-CR, symmetric with the
+   `pins_proven` valve):** a member whose genuine remedy is in ANOTHER file uses disposition
+   `fixed-elsewhere`, naming the remedy file in `FixInstance.File`; the gate then requires that named
+   file in the diff. This is the auditable exception — gameable (the agent can point it anywhere) but
+   RECORDED and flagged for post-merge, *tighten-if-abused* — so the tight own-file default holds for
+   the ordinary case while a real elsewhere-fix has a valid path. A non-`fixed` member carries a
+   `Reason`.
 4. Post-merge learning flags classes whose members' fixes touched **disjoint structural sites** —
    evidence the grouping was wrong (an over-group) and a calibration signal for the adjudicator.
 
