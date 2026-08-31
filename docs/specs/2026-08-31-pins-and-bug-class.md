@@ -1,6 +1,7 @@
 # Spec: Pins & Bug.Class — proof of fix, and defect-class enumeration
 
-Status: **Adversarially converged (7 passes, 2 consecutive dry). PINS: shippable (Ship 1, one ⧗ recall-floor prerequisite). BUG.CLASS: validated path (Ship 2, ⧗ spikes).**
+Status: **Literature-grounded refinements approved (§9, evidence in docs/research/). Re-converging.**
+Prior: adversarially converged (7 passes). PINS: shippable (Ship 1). BUG.CLASS: validated path (Ship 2).
 
 > **Adversarial convergence (2026-08-31):** a 7-pass convergent adversarial-review loop (6 lenses →
 > refute-verify → synthesize per pass) ran over this spec until two consecutive passes found zero
@@ -804,3 +805,129 @@ Run the new loop on those pre-fix states; if `classify` groups the class and `re
 
 ### Falsifiable success/failure.
 Succeeded iff, on real runs vs the control arm: silent-regression re-discovery → ~0, sibling-recurrence ≤ ½ control, convergence in fewer rounds, guardrails never regress, cost bounded. **Failed** — reconsider, don't patch — if recurrence doesn't fall, or if a guardrail had to be loosened to keep the loop moving.
+
+---
+
+## 9. Literature-grounded refinements (APPROVED 2026-08-31)
+
+These are approved from a deep read of the 2025–26 literature (full evidence + citations:
+`docs/research/2026-08-31-pins-bugclass-literature.md`). Where a refinement conflicts with earlier
+prose, **this section wins**; the earlier text is superseded and will be reconciled. Each carries a
+one-line evidence pointer; the research note has the exact quotes, sections, and URLs.
+
+### 9.1 `prove` is ONE differential-test gate; a reproduction test is preferred, the mutate-a-line pin is the fallback (R1)
+
+A reproduction test and a pin are the same gate — "a test that changes outcome across two
+tree-states" — differing only in the "mutation": a reproduction test uses the **real fault**
+(fail on the pre-fix tree, pass on the post-fix tree); a pin uses a **synthetic** one (fail on the
+mutated line, pass on restore). **Prefer the reproduction test when a real failing input can be
+constructed** — it strictly dominates, because it also proves the assertion targets the finding —
+and fall back to the mutate-a-line pin otherwise. Both ride the same deterministic machinery.
+- *Supersedes:* §2.1 (`Pin` becomes one form of a differential-test artifact — a `{test, target}`
+  reproduction test OR a `{File,From,To}` pin), §3.1 (the own-file-binding apparatus is retired for
+  the reproduction form — see 9.2 for where it migrates), and the honest-claim text (now: a proven
+  reproduction test says the *behavior* is under test; a proven pin says the *added line* is).
+- Evidence: fail-before/pass-after F2P is the identical gate (TDD-Bench-Java §2.1); coverage is an
+  unreliable proxy for it (§8); reproduction = "a mutant whose mutation is the real fault" (ACH §5.2).
+
+### 9.2 Mandatory "fails for the right reason" gate — where the own-file binding MIGRATES (R2)
+
+Bare fail→pass is insufficient: the pre-fix failure must be **the finding's own symptom**, not an
+unrelated error. After the mechanical differential check, an LLM judge confirms the pre-fix failure
+matches the finding (assertion/exception/reported symptom). LLM-judged ⇒ **advisory-blocking**
+(NEEDS_REVISION), never a hard deterministic PASS. This is the reproduction-form reincarnation of the
+own-file binding — it is what stops the agent proving an unrelated behavior.
+- Evidence: ablating this gate dropped F2P 56.88%→18.84% (ReProAgent).
+
+### 9.3 Anti-gaming for the self-validating loop (R3)
+
+We validate against the agent's own fix (the weak "candidateBRT" bar), which is co-adaptable. Three
+deterministic guards: (a) the test is a **durable committed artifact** in the reviewed diff — it
+cannot be silently deleted (the #1 documented failure — the agent deleted its own test in 77% of
+failure cases); (b) the pre-fix run must be an **assertion failure, not a compile/import error**;
+(c) capture the failing test on the **untouched tree first**.
+- Evidence: Cogeneration §6 (our exact single-agent-emits-fix+test setting).
+
+### 9.4 Deletion as a first-class, provable, ENCOURAGED fix (maintainer-directed)
+
+The original mutate-a-line pin structurally **penalized** deletion (no added line to pin → unproven),
+rewarding the additive Guard-and-Go dodge instead. Fix:
+- **R1 removes the disincentive:** a deletion that fixes a bug has a reproduction test that is
+  fail-before/pass-after (the pre-fix tree still has the code → bug reproduces → fail; the post-fix
+  tree removed it → pass). The deletion *is* the mutation; no added line needed.
+- **`DeletionRef{File, BlobSHA, ParentSHA}`** — a durable, content-addressed identity for removed
+  code (gone from HEAD, immortal in history). `BlobSHA` is git's content hash of the removed text
+  (byte-stable, idempotent — the deletion analogue of `Pin.ID`). The gate verifies it
+  **deterministically**: the blob exists in `ParentSHA:File` AND is absent from HEAD's `File`.
+- **Encouragement levers:** stop punishing it (R1); post-merge learning **rewards** a class resolved
+  by a `DeletionRef` (structural simplification — the inverse of the verbosity flag, 9.7); hand
+  **exact deletion spans** in the fix prompt, not prose (R10: spans move models 6.5–31.5 pts, prose
+  does nothing).
+- **Honest limits:** a proven deletion means "removing this fixed the reported bug and broke no
+  *existing* test" — NOT "globally safe" (removal risk is in *untested* behavior); over-deletion
+  (~26%) needs a paired whole-suite scope check.
+- Adversarial: the reproduction test is the behavioral anchor (a bogus `DeletionRef` won't hold F2P);
+  the `DeletionRef` is the durable audit trail. Neither alone.
+- *Supersedes:* §4.2/§4.6 — deletion moves from a "no pinnable change" valve-skip to a first-class
+  provable fix.
+- Evidence: additive bias is large and named (*To Add Is Machine, To Delete Is Human*).
+
+### 9.5 Guard-and-Go: reject the additive dodge of a required deletion (R4)
+
+The dominant real-world failure — fixing a should-be-*deleted* bug by *adding a guard* around the
+root cause, leaving it live (29% of passing patches; 40.2% of those keep the removed logic as the
+default path). It passes both `pins_proven` (the guard is pinnable) and `classes_enumerated` (the
+reported member is "answered").
+- `classes_enumerated` gains a per-member **removes-vs-guards-around** distinction: when a class's
+  mechanism is a redundant/duplicated structure, a guard-around answer **does not close the class**
+  for its siblings — the gate looks for a `DeletionRef` at the root, not an added guard at each leaf.
+- Evidence: same paper as 9.4.
+
+### 9.6 Test-deletion gate — coverage AND mutation non-regression (maintainer-directed)
+
+Deleting a **test** is a first-class reward-hack; a green suite afterward proves nothing. A test
+deletion is legitimate iff **neither regresses** on the branch diff:
+1. **Coverage non-regression** — the deleted test's production coverage is subsumed by remaining
+   tests (or the covered code was deleted in the same commit). Coverage is **necessary but not
+   sufficient**: it measures *execution*, not *assertion* — it catches deleting the sole *exerciser*
+   of lines, blind to deleting the sole *detector* on already-covered lines.
+2. **Mutation-kill non-regression** — no mutant killed before the deletion survives after it. The
+   load-bearing half; fills coverage's blind spot (the R8 277/571 finding); reuses the pins' engine.
+
+Layered (each closes the prior's blind spot, attack surface shrinks each layer): **coverage →
+mutation → right-reason (9.2)**. Reconciliation: we reject coverage as a *proof of fix* (9.8) but
+embrace it as a *necessary guard against test-deletion gaming* — used where necessary, not relied on
+where insufficient. A test deleted because its code was deleted is the legitimate paired case,
+accounted by one `DeletionRef` and proven safe by the two non-regressions.
+- Evidence: coverage ≪ mutation for fault detection (277/571, ACH §1); test-oracle tampering as a
+  named hack (Verification Horizon).
+
+### 9.7 Trajectory monitor — watch HOW the fix was produced, not just the end state (R5)
+
+Our final-state gates are blind to a whole hack class (test-oracle/harness tampering, answer-lookup,
+whitespace-touch). Add a monitor over the fix agent's action log — flag whitespace/comment-only
+"changes," edits to the oracle/harness within the proving trajectory, answer-lookup
+(git-history/PR/upstream-diff/network fetches), and self-served overrides. Feed newly-seen patterns
+back from post-merge recurrence — the co-evolution loop the literature says is mandatory.
+- Evidence: a trajectory monitor drove hacked-resolved 28.57%→0.56% (Verification Horizon); **caveat:
+  that magnitude is a training-time penalty — the signal transfers to an inference gate, the number
+  does not.**
+
+### 9.8 Smaller, evidence-backed
+
+- **Finding-identity: KEEP the lexical `(file, normalized-text)` key (R6) — do NOT switch to
+  embeddings.** A tuned lexical method beat deep-embeddings by 22.3% Recall@10, and embeddings are
+  *non-deterministic* across runs — fatal for a *stable id*. Embeddings only as advisory suggestions,
+  never the id. Recall floor set empirically, bucketing out the "same fault, different symptom" class
+  (unsolvable by any content method). *Supersedes §5's implication that embeddings are the answer.*
+- **Reject trivial pins (R7):** comment/whitespace/dead-code pins are rejected by the break step;
+  add explicit reject-tests + a cheap AST pre-screen before the expensive test run.
+- **Cite 277/571 (R8)** as the external validation for rejecting line-coverage as proof-of-fix.
+- **Verbosity/convention dimension in "acceptable" (R9):** a fix materially larger than the minimal
+  change (Guard-and-Go median 1.67×) is flagged. Exact merge-rate is in Whitfill et al. 2026 (cited,
+  not fetched) — a gap, not invented.
+- **"Machine-generated vs agent-declared pin" is the wrong axis:** LLM mutants are quantifiably
+  worse-formed, so the deterministic *gate* is the authority, not the generator — keep pins
+  agent-declared.
+- **"No silver bullet" (R11)** ratifies the honest-limits stance (a pin proves a line/behavior under
+  test, not correctness — an undecidable property) and endorses the layered, co-evolving defense.
