@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -173,10 +174,89 @@ type AllowedCmd struct {
 
 // Delta is what a node's Reduce produced; Fold applies it (§4.3). It carries no tokens.
 type Delta struct {
-	Findings  []Finding   `json:"findings,omitempty"`
-	Confirmed []Bug       `json:"confirmed,omitempty"`
-	Status    []BugStatus `json:"status,omitempty"`
-	Commit    string      `json:"commit,omitempty"`
+	Findings   []Finding   `json:"findings,omitempty"`
+	Confirmed  []Bug       `json:"confirmed,omitempty"`
+	Status     []BugStatus `json:"status,omitempty"`
+	Commit     string      `json:"commit,omitempty"`
+	Pins       []Pin       `json:"pins,omitempty"`        // fix node → prove node: the claims to check
+	PinResults []PinResult `json:"pin_results,omitempty"` // prove node → gate: what was learned
+}
+
+// MaxPins caps how many mutations one fix node may ask to have verified. Each pin is a full
+// build+test cycle in an isolated copy, so this bounds the cost of one fix round.
+const MaxPins = 32
+
+// Finding provenance for pin-derived findings. A gate selects on these, never on issue text.
+const (
+	SourceMutationVerify = "mutation-verify"
+	CategoryUnprovenFix  = "unproven-fix"  // a fix whose pin the tests did not catch: blocks
+	CategoryMalformedPin = "malformed-pin" // a pin that could not be evaluated: reported, does not block
+	CategoryUnverifiable = "unverifiable"  // the tree could not answer at all
+)
+
+// Pin is a fix agent's claim that one specific test holds one specific line of production code.
+//
+// {commit, summary} is not evidence; a pin is checkable: apply From→To at File and the tests must
+// FAIL, restore and they must PASS. The agent declares what to break, never what to run — the test
+// command comes from the workflow's consent-hashed cmds block, not from here.
+//
+// What a proven pin HONESTLY establishes: "this added line is exercised by a test that fails when
+// the line is broken." Not that the fix is correct, nor complete — stronger than the agent's word,
+// weaker than proof.
+type Pin struct {
+	// ID is an idempotent content hash of {Finding,File,From,To} — the reference/override key. Same
+	// pin content always yields the same id; a redone fix that rewords From/To mints a new one.
+	ID string `json:"id"`
+	// Finding is the confirmed-finding id this pin proves a fix for: the chain link, and the key
+	// Snapshot.Unproven clears by (stable across a reworded From/To, unlike ID).
+	Finding string `json:"finding"`
+	// File is the production file the fix touched, repo-relative.
+	File string `json:"file"`
+	// From is the exact text to replace; it must appear in File exactly once, and (enforced in the
+	// prove wiring, not here) be a line the commit ADDED.
+	From string `json:"from"`
+	// To is what From becomes: a compiling change that breaks the behaviour the fix introduced.
+	To string `json:"to"`
+	// Test names the test the fix claims pins this line — for the report and a by-hand re-run. It
+	// selects, it does not execute.
+	Test string `json:"test"`
+}
+
+// PinID derives a pin's idempotent id from its defining content. Pure — no timestamp, no
+// randomness — so it is stable across machines and replays.
+func PinID(finding, file, from, to string) string {
+	h := sha256.Sum256([]byte(finding + "\x00" + file + "\x00" + from + "\x00" + to))
+	return fmt.Sprintf("%x", h[:16])
+}
+
+// PinOutcome is the schema's vocabulary for what checking a pin found. Typed and persisted here
+// because it is folded into snapshots: the durable shape belongs to the durable package.
+type PinOutcome string
+
+const (
+	PinProven       PinOutcome = "proven"       // break failed the tests, restore passed them
+	PinSurvived     PinOutcome = "survived"     // mutation compiled, tests still passed → a test gap
+	PinMalformed    PinOutcome = "malformed"    // the claim could not be evaluated → says nothing about the fix
+	PinUnverifiable PinOutcome = "unverifiable" // the tree itself could not answer → nothing learned
+)
+
+// Valid reports whether o is one of the four outcomes. An unrecognised value is never a success.
+func (o PinOutcome) Valid() bool {
+	switch o {
+	case PinProven, PinSurvived, PinMalformed, PinUnverifiable:
+		return true
+	}
+	return false
+}
+
+// PinResult is the outcome of checking one Pin. Proven is the only value a gate accepts, true only
+// when breaking the line failed the tests AND restoring it passed them. The embedded Pin.ID is the
+// reference/override key — there is no separate PinID field (review fix R8).
+type PinResult struct {
+	Pin     Pin        `json:"pin"`
+	Proven  bool       `json:"proven"`
+	Outcome PinOutcome `json:"outcome,omitempty"`
+	Detail  string     `json:"detail,omitempty"`
 }
 
 // Time marshals as UTC RFC3339Nano and unmarshals only the Z form (§2.2).
@@ -237,6 +317,7 @@ type Snapshot struct {
 	Goldens        []Golden          `json:"goldens"`
 	Findings       []Finding         `json:"findings"`
 	Confirmed      []Bug             `json:"confirmed"`
+	Unproven       []Pin             `json:"unproven,omitempty"` // pins no round has proven; drives re-discover. Derived, never persisted.
 	AllFound       []Bug             `json:"all_found"`
 	Status         []BugStatus       `json:"status"`
 	Unfixed        int               `json:"unfixed"`
@@ -268,6 +349,7 @@ type Snapshot struct {
 // Clone returns a deep copy: every slice element, map value, pointer target and RawMessage is fresh.
 func (s Snapshot) Clone() Snapshot {
 	c := s
+	c.Unproven = append([]Pin(nil), s.Unproven...)
 	c.Lineage = cloneStrings(s.Lineage)
 	c.Vars = cloneStringMap(s.Vars)
 	if s.AllowedCmds != nil {
