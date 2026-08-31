@@ -34,20 +34,25 @@ type Decision struct {
 }
 
 type Record struct {
-	ID                   string            `json:"id"`
-	Scope                string            `json:"scope"`
-	Target               map[string]string `json:"target"`
-	Status               string            `json:"status"`
-	Verdict              string            `json:"verdict"`
-	PreviousRunID        string            `json:"previousRunId"`
-	AttemptNumber        int               `json:"attemptNumber"`
-	MaxAttempts          int               `json:"maxAttempts"`
-	HeadSHA              string            `json:"headSha"`
-	BlockingFindingCount int               `json:"blockingFindingCount"`
-	AdvisoryFindingCount int               `json:"advisoryFindingCount"`
-	FollowUpFindingCount int               `json:"followUpFindingCount"`
-	WarningFindingCount  int               `json:"warningFindingCount"`
-	EscalationReason     string            `json:"escalationReason"`
+	ID            string            `json:"id"`
+	Scope         string            `json:"scope"`
+	Target        map[string]string `json:"target"`
+	Status        string            `json:"status"`
+	Verdict       string            `json:"verdict"`
+	PreviousRunID string            `json:"previousRunId"`
+	AttemptNumber int               `json:"attemptNumber"`
+	MaxAttempts   int               `json:"maxAttempts"`
+	HeadSHA       string            `json:"headSha"`
+	// CoveredPaths are the source files this review examined. Recorded so a later question about
+	// one file can be answered by the reviews that actually looked at it: target strings are
+	// things like `current branch` or a task id, never a path, so scoping by target matched
+	// nothing for a source file and reported it clear.
+	CoveredPaths         []string `json:"coveredPaths,omitempty"`
+	BlockingFindingCount int      `json:"blockingFindingCount"`
+	AdvisoryFindingCount int      `json:"advisoryFindingCount"`
+	FollowUpFindingCount int      `json:"followUpFindingCount"`
+	WarningFindingCount  int      `json:"warningFindingCount"`
+	EscalationReason     string   `json:"escalationReason"`
 }
 
 func Resolve(root string, options Options) (Decision, error) {
