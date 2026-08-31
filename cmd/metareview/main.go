@@ -131,7 +131,7 @@ func main() {
 		if scopeBranch {
 			// The scope a Stop hook wants: this branch's own commits and the files it changed.
 			code, err := status.EmitForBranch(repo.RootOr(mustCwd()), base, nil, os.Stdout)
-			exitOnErr(err)
+			exitGateBroken(err)
 			if code != 0 {
 				os.Exit(code)
 			}
@@ -141,7 +141,7 @@ func main() {
 		// directory the session is standing in, and resolving there found no review logs and
 		// reported nothing to clear — the gate was bypassed by working in a subdirectory.
 		code, err := status.EmitFor(repo.RootOr(mustCwd()), target, os.Stdout)
-		exitOnErr(err)
+		exitGateBroken(err)
 		if code != 0 {
 			os.Exit(code)
 		}
@@ -463,6 +463,20 @@ func mustCwd() string {
 	cwd, err := os.Getwd()
 	exitOnErr(err)
 	return cwd
+}
+
+// exitGateBroken ends a `status` run that could not produce an answer at all.
+//
+// It exits 2, not 1. Exit 1 is the documented contract for "something must be cleared", and
+// hooks/pre-finish.sh branches on exactly that: reporting a gate that FAILED with the same code
+// told the operator they had review findings, while emitting no JSON and so no blockers to act
+// on — an unreadable review log became "you have work to do, and I cannot say what". A check that
+// did not run must never be reported as a check that found something.
+func exitGateBroken(err error) {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 }
 
 func exitOnErr(err error) {
