@@ -15,7 +15,7 @@ transitions:                                  # ordered
   - {from: verify,     to: done,       gate: all_fixed,   outcome: fixed}
   - {from: verify,     to: discover,   gate: bugs_remain, loop: true}
 nodes:
-  discover:   {kind: review-lenses,        exec: subagent, lenses: 8, model: $REVIEWER, effort: $REV_EFFORT}
+  discover:   {kind: review-lenses,        exec: subagent, model: $REVIEWER, effort: $REV_EFFORT}
   adjudicate: {kind: match-then-adjudicate, exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
   fix:        {kind: agent-edit}                                   # exec inferred from the kind (inline)
   verify:     {kind: still-present,         model: $JUDGE, effort: $JUDGE_EFFORT}   # exec inferred (fork)

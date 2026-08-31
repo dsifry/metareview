@@ -64,6 +64,9 @@ persona-anti-overlap pattern.
   safety.
 - Testing-quality does NOT flag security vulns, architecture soundness, or migration safety.
 - Data-migration does NOT flag security vulns, test quality, or architecture soundness.
+- Mechanical-precision does NOT flag whether the approach is sound (defer to Feasibility),
+  whether the model is well-designed (defer to Architecture), or missing requirements (defer to
+  Completeness); it flags only contracts that are present but not buildable exactly as written.
 
 ## Required Lenses
 
@@ -285,6 +288,36 @@ persona-anti-overlap pattern.
   expand+contract violations that break rolling deploys, silent data loss, or orphaned refs.
 - Does NOT flag: security vulnerabilities (defer to Security); test quality (defer to
   Testing-quality); architecture soundness beyond migration safety (defer to Architecture).
+
+### Mechanical-Precision
+
+- Ask one question: can an implementer build *exactly* what is written, without inventing a
+  detail the artifact left undefined? Read every contract as a hostile implementer taking the
+  most literal reading. Use `rubrics/mechanical-precision-rubric.md`.
+- Hunt for **undefined referents**: a type, field, function, or artifact referenced by a contract
+  but defined nowhere — a root that references a member's `span` when the member type has no span.
+- Hunt for **unenforced invariants**: a "one-of" / "exactly one" / "mutually exclusive" rule
+  stated in prose with no field or discriminator that makes the illegal state unrepresentable.
+- Hunt for **ambiguous operations**: a concrete operation (a git query, a comparison, an ID
+  derivation, an execution step) whose most literal reading is wrong, or whose reasonable readings
+  diverge into different behavior — "verify the deleted code existed" whose literal reading is
+  trivially true for any input, or checks a whole-file blob when the claim is about a removed span.
+- Hunt for **identity & collision gaps**: an ID or key that is null/undefined for a case it must
+  cover, or collides across two instances it must tell apart (a proof keyed on a field empty for
+  one of its own kinds; two paired mutants with identical identity).
+- Hunt for **cross-section mechanism contradictions**: one section requiring data or capability a
+  decision recorded elsewhere in the same artifact says is not available (per-test coverage
+  required by one section, forbidden by another's "the test command is opaque").
+- Hunt for **undefined execution / verification models**: a check described by what it concludes
+  but not by the operations that perform it, or a monitor that consumes data (an action log, a
+  trajectory) the artifact's persisted model never produces.
+- Block on any contract that does not determine one correct build: an undefined referent, an
+  unenforced invariant, an operation whose literal reading is wrong or whose readings diverge, a
+  colliding/undefined identity, two sections that cannot both be built, or a check whose inputs
+  the artifact never says how to produce.
+- Does NOT flag: whether the approach is sound (defer to Feasibility); whether the model is
+  well-designed (defer to Architecture); a *missing* requirement (defer to Completeness — absent
+  is Completeness, present-but-not-buildable is Mechanical-precision).
 
 ## Evidence Rules
 

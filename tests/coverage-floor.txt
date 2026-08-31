@@ -22,6 +22,7 @@ internal/jsonl 100.0
 internal/knowledge 77.8
 internal/learning 90.8
 internal/learnsource 70.8
+internal/lens 100.0
 internal/markdown 86.7
 internal/mutation 94.2
 internal/prready 89.2

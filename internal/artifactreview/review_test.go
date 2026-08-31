@@ -22,7 +22,7 @@ func TestScaffoldDeclaresItsLensSet(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "A.md"), []byte("# artifact\n\nbody\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res, err := Create(root, "A.md", "", time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC))
+	res, err := Create(root, "A.md", "", time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestScaffoldDeclaresItsLensSet(t *testing.T) {
 	if marker == "" {
 		t.Fatal("the artifact scaffold must record the lens set it was written under")
 	}
-	for _, lens := range []string{"feasibility", "completeness", "scope-alignment", "architecture", "intent-preservation", "security", "testing-quality", "data-migration"} {
+	for _, lens := range []string{"feasibility", "completeness", "scope-alignment", "architecture", "intent-preservation", "security", "testing-quality", "data-migration", "mechanical-precision"} {
 		if !strings.Contains(marker, lens) {
 			t.Errorf("declared lens set is missing %q: %s", lens, marker)
 		}
@@ -67,7 +67,7 @@ func TestCompletedScaffoldReadsAsCompleteInReviewLog(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "A.md"), []byte("# artifact\n\nbody\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res, err := Create(root, "A.md", "", time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC))
+	res, err := Create(root, "A.md", "", time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestCompletedScaffoldReadsAsCompleteInReviewLog(t *testing.T) {
 	// scaffold's own Reviewer Prompts list.
 	text := strings.Replace(string(body), "## Verdict\n\nNOT_REVIEWED", "## Verdict\n\nPASS", 1)
 	rows := ""
-	for _, lens := range []string{"Feasibility", "Completeness", "Scope and alignment", "Architecture", "Intent preservation", "Security", "Testing-quality", "Data-migration"} {
+	for _, lens := range []string{"Feasibility", "Completeness", "Scope and alignment", "Architecture", "Intent preservation", "Security", "Testing-quality", "Data-migration", "Mechanical-precision"} {
 		rows += "| " + lens + " | PASS | 0 | 0 | ok |\n"
 	}
 	text = strings.Replace(text, "| --- | --- | ---: | ---: | --- |\n", "| --- | --- | ---: | ---: | --- |\n"+rows, 1)

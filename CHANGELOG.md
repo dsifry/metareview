@@ -4,6 +4,23 @@
 
 ### Added
 
+- **Mechanical-precision lens (9th required artifact-review lens).** Artifact review now runs a
+  ninth lens whose only question is: can an implementer build *exactly* what is written, without
+  inventing a detail the artifact left undefined? It is the "hostile implementer" lens —
+  undefined referents, invariants stated in prose with nothing to enforce them, operations whose
+  literal reading is wrong or whose reasonable readings diverge, colliding identities, and two
+  sections of one artifact that cannot both be built. It is deliberately distinct from Feasibility
+  (is the approach sound) and Architecture (is the model right): it takes both as granted and asks
+  whether the design is *specified precisely enough to build one correct thing*. Added because a
+  multi-pass adversarial design review passed a spec clean twice while diff-level bots caught a
+  git-object-model verification error in it; a blind spike confirmed a dedicated mechanical lens
+  recovers that class. New rubric: `rubrics/mechanical-precision-rubric.md`. The lens-era table
+  freezes the prior eight-lens rubric at its 2026-08-24 date, so reviews written before this
+  addition stay judged against the eight they were required to cover. The FSM `sdlc-loop` and
+  `review-loop` discover node no longer hard-codes a lens count: it defaults to the full
+  `kind.Lenses` set (now nine) and auto-tracks any lens added later, guarded by a test that
+  refuses a re-introduced `lenses:` cap.
+
 - **Mutation reports as review input (`--mutation-report`).** `review task-done`, `review
   epic-ready` and `review pr-ready` accept one or more mutation-testing reports and turn them into
   findings. `review artifact` does not: it reviews a document, with no code to mutate. The input contract is Stryker's

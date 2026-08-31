@@ -12,6 +12,6 @@ transitions:
   - {from: adjudicate, to: done,       gate: confirmed_empty,    outcome: clean}
   - {from: adjudicate, to: done,       gate: confirmed_nonempty, outcome: reviewed}
 nodes:
-  discover:   {kind: review-lenses,        exec: subagent, lenses: 8, model: $REVIEWER, effort: $REV_EFFORT}
+  discover:   {kind: review-lenses,        exec: subagent, model: $REVIEWER, effort: $REV_EFFORT}
   adjudicate: {kind: match-then-adjudicate, exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
 repo_mode: advisory

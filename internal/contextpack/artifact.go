@@ -9,10 +9,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dsifry/metareview/internal/lens"
 	"github.com/dsifry/metareview/internal/markdown"
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/state"
 )
+
+// suggestedReviewers renders the "Suggested Reviewers" block from the single canonical lens set
+// (lens.All, the "review-artifact step 4" set). Deriving it rather than hard-coding a copy is what
+// stops this list from drifting: for two releases it silently sat at the original five while
+// security/testing-quality/data-migration were already required, because it was a literal divorced
+// from the source. Adding a lens to lens.All now updates this block by construction.
+func suggestedReviewers() string {
+	var b strings.Builder
+	b.WriteString("## Suggested Reviewers\n\n")
+	for _, l := range lens.Displays() {
+		b.WriteString("- " + l + "\n")
+	}
+	return b.String()
+}
 
 type Result struct {
 	RunID      string
@@ -129,7 +144,7 @@ func Build(root, target string, at time.Time) (Result, error) {
 		"## Artifact Excerpt\n\n" + markdown.FencedCodeBlock("markdown", readLimited(targetPath, 4000)) + "\n\n" +
 		"## Service Inventory\n\n" + serviceInventory + "\n\n" +
 		"## Knowledge Facts\n\n" + factText + "\n\n" +
-		"## Suggested Reviewers\n\n- feasibility\n- completeness\n- scope/alignment\n- architecture\n- intent preservation\n"
+		suggestedReviewers()
 	if err := os.WriteFile(outputPath, []byte(content), 0o644); err != nil {
 		return Result{}, err
 	}

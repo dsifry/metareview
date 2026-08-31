@@ -21,6 +21,7 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/machine"
 	"github.com/dsifry/metareview/internal/fsm/run"
 	"github.com/dsifry/metareview/internal/fsm/workflow"
+	"github.com/dsifry/metareview/internal/lens"
 )
 
 // Kind names.
@@ -46,8 +47,10 @@ const envelopeMargin = 128
 // AdjudicateThreshold is the reference's real-bug confidence bar.
 const AdjudicateThreshold = 0.7
 
-// Lenses is the review-lenses dispatch list (skills/review-artifact step 4).
-var Lenses = []string{"Feasibility", "Completeness", "Scope and alignment", "Architecture", "Intent preservation", "Security", "Testing-quality", "Data-migration"}
+// Lenses is the review-lenses dispatch list (skills/review-artifact step 4), the Display names of
+// the canonical lens set. Derived from lens.All so it cannot drift from the artifact scaffold's
+// declared set or the context pack — add a lens in internal/lens and this updates by construction.
+var Lenses = lens.Displays()
 
 // Rubric is the code-review rubric the host applies.
 const Rubric = "rubrics/task-done-review-rubric.md"
