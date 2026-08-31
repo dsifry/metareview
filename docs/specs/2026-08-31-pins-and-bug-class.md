@@ -145,7 +145,7 @@ type PinOutcome string
 const (
     PinProven       PinOutcome = "proven"       // break failed the tests, restore passed them
     PinSurvived     PinOutcome = "survived"     // mutation compiled, tests still passed → test gap
-    PinMalformed    PinOutcome = "malformed"    // anchor absent/ambiguous, or won't compile → bad pin
+    PinMalformed    PinOutcome = "malformed"    // anchor absent/ambiguous, won't compile, OR compiles-but-semantically-null (comment/whitespace/dead-code) → bad pin
     PinUnverifiable PinOutcome = "unverifiable" // tree/baseline could not answer → environment
 )
 ```
@@ -158,7 +158,7 @@ distinct sites:
 |---|---|---|---|---|
 | proven | break→fail, restore→pass | — | — | no (clears) |
 | survived | compiled, tests passed | implementer | write/strengthen a test | **yes** |
-| malformed | anchor ≠ 1 match, or won't compile | the fix agent | rewrite the pin | no (report) |
+| malformed | anchor ≠ 1 match, won't compile, or compiles-but-null (comment/whitespace/dead-code, caught by the §9.8 AST pre-screen) | the fix agent | rewrite the pin | no (report) |
 | unverifiable | copy failed, baseline red, exec killed | environment | fix the tree | **yes — override-clearable** (§4.1) |
 
 - ✓ *Kept all four:* collapsing survived+malformed would report a real test gap and a typo the same
@@ -319,7 +319,7 @@ Bug.Class — there is **no** interim where the fix agent groups its own classes
 
 ### 3.1 Pins / prove (the deterministic sandwich)
 
-> **→ Refined by §9 (approved 2026-08-31): `prove` is ONE differential-test gate — reproduction test preferred, pin fallback (§9.1) — plus a mandatory *fails-for-the-right-reason* gate (§9.2, where the own-file binding migrates) and self-validating-loop anti-gaming (§9.3).** Read §9 as authoritative where it conflicts with the text below.
+> **→ Refined by §9 (approved 2026-08-31): `prove` is ONE differential-test gate — reproduction test preferred, pin fallback (§9.1) — plus a mandatory *fails-for-the-right-reason* check (§9.2, a veto-only reviewer, where the own-file binding migrates) and self-validating-loop anti-gaming (§9.3).** Read §9 as authoritative where it conflicts with the text below.
 
 ```
 … → fix ──[commit_exists]──> prove ──[pins_proven]──> verify → …
@@ -646,7 +646,7 @@ to the first real round that actually approaches it (none of the 10 logged runs 
 
 ### 4.6 Safety valves & dead-end analysis (the loop must never be unable to proceed)
 
-> **→ Refined by §9 (approved 2026-08-31): deletion is no longer a valve-skip — it is a first-class, provable, *encouraged* fix (§9.4), the additive Guard-and-Go dodge is rejected (§9.5), and test deletion is policed by coverage AND mutation non-regression (§9.6).** Read §9 as authoritative where it conflicts with the text below.
+> **→ Refined by §9 (approved 2026-08-31): deletion is no longer a valve-skip — it is a first-class, provable, *encouraged* fix (§9.4), the additive Guard-and-Go dodge is rejected (§9.5), and test deletion is policed by mutation non-regression, coverage where obtainable (§9.6).** Read §9 as authoritative where it conflicts with the text below.
 
 Design rule, from the maintainer's steer: **strict gates are fine; a gate with no reachable exit is
 not.** A blocking gate is acceptable when the actor can always *either* fix the thing *or* pull a
@@ -823,6 +823,14 @@ Succeeded iff, on real runs vs the control arm: silent-regression re-discovery �
 > mutant-identity scheme, and the schema-decode invariants are settled by code + tests, not by prose.
 > Two review rounds showed that specifying those algorithms in prose reliably introduces subtle
 > errors; the honest boundary is: *what must be true* here, *how it is checked* at build.
+>
+> **Residuals pass (mechanical-precision lens, 2026-08-31).** A dedicated buildability review found
+> four residual defects the earlier passes missed and they are fixed here: §9.6 no longer requires
+> per-test coverage that §4.2's opaque cmd cannot yield (coverage is now an advisory layer, mutation-
+> kill is the deterministic gate); §9.2's LLM check is reframed as a **veto-only reviewer**, not an
+> "advisory-blocking gate" (the term collided with `PASS_ADVISORY`); §9.7 names its trajectory/action-
+> log input and marks it a ⧗ capture prerequisite absent from §2.4; and §9.8 R7 is corrected — a
+> trivial pin *survives* the break step and is rejected earlier as `malformed` (§2.2, widened).
 
 These are approved from a deep read of the 2025–26 literature (full evidence + citations:
 `docs/research/2026-08-31-pins-bugclass-literature.md`). Where a refinement conflicts with earlier
@@ -873,13 +881,18 @@ and fall back to the mutate-a-line pin otherwise. Both ride the same determinist
   change. ⧗ Build-time: the test-vs-production file partition is a determinable contract (test paths /
   package membership), with a case for a fix whose test needs a new helper.
 
-### 9.2 Mandatory "fails for the right reason" gate — where the own-file binding MIGRATES (R2)
+### 9.2 Mandatory "fails for the right reason" check — a veto-only reviewer; where the own-file binding MIGRATES (R2)
 
 Bare fail→pass is insufficient: the pre-fix failure must be **the finding's own symptom**, not an
-unrelated error. After the mechanical differential check, an LLM judge confirms the pre-fix failure
-matches the finding (assertion/exception/reported symptom). LLM-judged ⇒ **advisory-blocking**
-(NEEDS_REVISION), never a hard deterministic PASS. This is the reproduction-form reincarnation of the
-own-file binding — it is what stops the agent proving an unrelated behavior.
+unrelated error. This is the reproduction-form reincarnation of the own-file binding — it is what
+stops the agent proving an unrelated behavior. Its shape respects §3.0 ("gates are deterministic
+predicates"): the mechanical differential check (fail-before/pass-after) is the **deterministic
+gate**; the symptom match is an **LLM reviewer, not a second gate**. That reviewer is **veto-only** —
+a mismatch raises a **blocking finding (NEEDS_REVISION)**, and a match adds nothing and never
+produces a PASS. So an LLM can veto a proof, never certify one: the deterministic differential is the
+sole PASS path, and on LLM approval the outcome is exactly whatever that differential already
+returned. (The earlier "advisory-blocking" label is dropped — it collided with the model's
+`PASS_ADVISORY`, where *advisory* means the review *passes*; this reviewer only ever blocks.)
 - Evidence: ablating this gate dropped F2P 56.88%→18.84% (ReProAgent).
 
 ### 9.3 Anti-gaming for the self-validating loop (R3)
@@ -946,20 +959,31 @@ reported member is "answered").
   For a `Remedy:"structural"` class, `classify` declares the **root** as a `BugClass.Root
   struct{ File string; Span string }` (a `ClassMember` has no span field — PR#32 fix), and
   `classes_enumerated` requires a fix `DeletionRef` whose `File`==`Root.File` and whose `Removed`
-  contains `Root.Span`, verified by §9.4. A `fixed` FixInstance that only adds lines and carries no
+  contains `Root.Span`, verified by §9.4. ⧗ *Build-time data-availability:* `classify` must produce
+`Root.Span` as actual source text from findings that carry only file+line — reading the span from the
+file at that line is a build-time task; the requirement is that a structural class names a concrete
+removable span, not a bare line number. A `fixed` FixInstance that only adds lines and carries no
   matching root `DeletionRef` **does not close** a structural class — the guard-around dodge. A
   `local`-remedy class is unaffected. The match (`DeletionRef` ↔ `Root`) is the machine-checkable
   relation; ⧗ its exact form (equality + containment) is a build-time contract.
 - Evidence: same paper as 9.4.
 
-### 9.6 Test-deletion gate — coverage AND mutation non-regression (maintainer-directed)
+### 9.6 Test-deletion gate — mutation non-regression (deterministic), coverage where obtainable (maintainer-directed)
 
 Deleting a **test** is a first-class reward-hack; a green suite afterward proves nothing. A test
-deletion is legitimate iff **neither regresses** on the branch diff:
-1. **Coverage non-regression** — the deleted test's production coverage is subsumed by remaining
-   tests (or the covered code was deleted in the same commit). Coverage is **necessary but not
-   sufficient**: it measures *execution*, not *assertion* — it catches deleting the sole *exerciser*
-   of lines, blind to deleting the sole *detector* on already-covered lines.
+deletion is legitimate iff **mutation-kill non-regression holds** (the deterministic gate, always
+run) **and coverage non-regression holds where a coverage signal is obtainable** (an advisory
+strengthening layer):
+1. **Coverage non-regression (advisory, where a coverage signal exists).** Where the project exposes
+   production coverage, the deleted test's coverage must be subsumed by remaining tests (or the
+   covered code was deleted in the same commit). Coverage is **necessary but not sufficient** *and
+   not always obtainable*: it measures *execution*, not *assertion* (it catches deleting the sole
+   *exerciser* of lines, blind to deleting the sole *detector* on already-covered lines), and **§4.2's
+   opaque consent-hashed test cmd yields no coverage to attribute** — there is a single all-or-nothing
+   test invocation, not a per-test instrumented run. So coverage non-regression is run **where a
+   signal is available and recorded as *unavailable* otherwise**; it is never a hard condition on a
+   capability §4.2 says may be absent. ⧗ *Build-time:* detect the coverage signal's presence and
+   select the applicable layers.
 2. **Mutation-kill non-regression** — no mutant killed before the deletion survives after it. The
    load-bearing half; fills coverage's blind spot (the R8 277/571 finding); reuses the pins' engine.
    **Mutant identity + deleted-target exclusion (PR#32, round 2):** a mutant needs a **unique,
@@ -972,21 +996,36 @@ deletion is legitimate iff **neither regresses** on the branch diff:
    gone). Every *other* previously-killed mutant must still be killed — this is what lets a paired
    code+test deletion pass.
 
-Layered (each closes the prior's blind spot, attack surface shrinks each layer): **coverage →
-mutation → right-reason (9.2)**. Reconciliation: we reject coverage as a *proof of fix* (9.8) but
-embrace it as a *necessary guard against test-deletion gaming* — used where necessary, not relied on
-where insufficient. A test deleted because its code was deleted is the legitimate paired case,
-accounted by one `DeletionRef` and proven safe by the two non-regressions.
+Layered (each closes the prior's blind spot, attack surface shrinks each layer): **coverage (where
+obtainable) → mutation (the deterministic gate) → right-reason (9.2)**. Reconciliation: we reject
+coverage as a *proof of fix* (9.8) but embrace it as a *guard against test-deletion gaming* — used
+where necessary, not relied on where insufficient, and **run only where §4.2's opaque cmd actually
+yields a coverage signal**. That is why mutation-kill is the deterministic gate (it needs only
+per-mutant pass/fail from the same opaque cmd, so it is always available) and coverage strengthens it
+where a signal exists. A test deleted because its code was deleted is the legitimate paired case,
+accounted by one `DeletionRef` and proven safe by mutation-kill non-regression (plus coverage
+non-regression where obtainable).
 - Evidence: coverage ≪ mutation for fault detection (277/571, ACH §1); test-oracle tampering as a
   named hack (Verification Horizon).
 
 ### 9.7 Trajectory monitor — watch HOW the fix was produced, not just the end state (R5)
 
 Our final-state gates are blind to a whole hack class (test-oracle/harness tampering, answer-lookup,
-whitespace-touch). Add a monitor over the fix agent's action log — flag whitespace/comment-only
-"changes," edits to the oracle/harness within the proving trajectory, answer-lookup
-(git-history/PR/upstream-diff/network fetches), and self-served overrides. Feed newly-seen patterns
-back from post-merge recurrence — the co-evolution loop the literature says is mandatory.
+whitespace-touch). Add a monitor with two declared input sources, because the flags split by what the
+data model already produces:
+- **From the reviewed diff + the override log (both already on the wire):** whitespace/comment-only
+  "changes" (read from the diff), and self-served overrides (the §4.1/§4.5 override records keyed on
+  `Pin.ID`/`BugClass.ID`). These ship with no new data.
+- **From a fix-node action/trajectory record — which §2.4's wire model does NOT yet carry:** edits to
+  the oracle/harness *within the proving trajectory*, and answer-lookup (git-history / PR /
+  upstream-diff / network fetches). The fix node today emits only `{commit, summary, pins[]}`, from
+  which neither is recoverable. ⧗ *Build-time prerequisite:* capture a fix-trajectory record —
+  minimally the ordered per-step edits (path + content delta) and any fetch/network attempt — and add
+  it to §2.4's additive-optional wire model as this monitor's declared input. The trajectory-dependent
+  flags are **blocked on that record**; the diff/override flags do not wait for it.
+
+Feed newly-seen patterns back from post-merge recurrence — the co-evolution loop the literature says
+is mandatory.
 - Evidence: a trajectory monitor drove hacked-resolved 28.57%→0.56% (Verification Horizon); **caveat:
   that magnitude is a training-time penalty — the signal transfers to an inference gate, the number
   does not.**
@@ -998,8 +1037,12 @@ back from post-merge recurrence — the co-evolution loop the literature says is
   *non-deterministic* across runs — fatal for a *stable id*. Embeddings only as advisory suggestions,
   never the id. Recall floor set empirically, bucketing out the "same fault, different symptom" class
   (unsolvable by any content method). *Supersedes §5's implication that embeddings are the answer.*
-- **Reject trivial pins (R7):** comment/whitespace/dead-code pins are rejected by the break step;
-  add explicit reject-tests + a cheap AST pre-screen before the expensive test run.
+- **Reject trivial pins (R7):** a comment/whitespace/dead-code pin *compiles and breaks no test*, so
+  the break step would return **`survived`** (§2.2) — the wrong signal, since it sends the actor to
+  "write/strengthen a test" for a comment. Reject such pins **before** the break step with a cheap
+  **AST pre-screen** (plus explicit reject-tests), classifying them **`malformed`** (§2.2, widened to
+  cover a compiles-but-semantically-null mutation) so the fix agent rewrites the pin rather than
+  chasing a phantom test gap.
 - **Cite 277/571 (R8)** as the external validation for rejecting line-coverage as proof-of-fix.
 - **Verbosity/convention dimension in "acceptable" (R9):** a fix materially larger than the minimal
   change (Guard-and-Go median 1.67×) is flagged. Exact merge-rate is in Whitfill et al. 2026 (cited,
