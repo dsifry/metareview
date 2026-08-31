@@ -319,12 +319,16 @@ after fix.
   rejects any pin whose `From` is not a line the commit **added** (a `+` line in the diff) — outcome
   `malformed`, owner the fix agent. Diff-*presence* alone was defeated by context lines; requiring an
   *added* line ties the mutation to code the fix introduced.
-- **`pins_proven`** gate: passes iff every confirmed finding that OWES a pin has a **`Proven`** pin
-  whose `Finding` matches it (PR#30-cursor: a *matching* pin is not enough — it must be Proven, or a
-  malformed/context-line pin `prove` rejected would satisfy the conjunct while proving nothing). A
-  finding **owes a pin** iff (machine-determinable): its fix touches a source file in a package that
-  **has test files** (§4.2) **and** added at least one line to pin. A **pure-deletion** fix owes no
-  pin and records **"no pinnable line"** (§4.6). Selects on `Finding.Source`/`Category`, **never on
+- **`pins_proven`** gate: passes iff **both** — (a) every confirmed finding that OWES a pin has a
+  `Proven` pin whose `Finding` matches it, AND (b) every pin the fix SUPPLIED is `Proven` (a
+  `survived` pin — a real test gap — blocks even on a finding that did not owe one; a `malformed`
+  pin is returned to the agent to rewrite). (a) without (b) let a supplied `survived`/`malformed`
+  pin ride through on a non-owing finding (PR#30-CR); (b) without (a) let an agent dodge by pinning
+  an easy line and not its own finding (PR#30-cursor). A finding **owes a pin** iff
+  (machine-determinable): its fix touches a source file in a package that **has test files** (§4.2)
+  **and** added a line to pin. A **pure-deletion** fix, or a fix to a **package with no test files**,
+  owes no pin and records **"no pinnable change"** (§4.2/§4.6) — but if it nonetheless supplies a
+  pin, conjunct (b) still holds it to `Proven`. Selects on `Finding.Source`/`Category`, **never on
   issue text**.
 
 **The seam fix, and the test that would have caught it.** `agentEdit.Reduce` must carry `Pins` into
@@ -522,9 +526,10 @@ truncating a class member. Verified against the code, that was wrong on three co
   dedup at fold time.
 - Adjudicate **already** dedups confirmed candidates. NOTE (PR#30-CR): the existing `dedupCandidates`
   keys on exact issue text ALONE, so two real findings with identical text in different files collapse
-  — dropping a class member before `classify` sees it. The dedup key must include **location**:
-  `(file, normalized-text)`, the finding-identity signature (§5). This is a small correction to the
-  existing dedup, not a new layer. `classify` consumes the (correctly) deduped confirmed set.
+  — dropping a class member before `classify` sees it. The dedup key must include the **authoritative
+  site**: `(file, line-region, normalized-text)` — file alone still collapses two identical-text
+  findings at different lines in one file (PR#30-CR). Small correction to the existing dedup, not a
+  new layer; regression case: identical text at two different sites must NOT collapse. `classify` consumes the (correctly) deduped confirmed set.
 - There is **no truncating 100-cap**. The only hard limit is `MaxDeltaList=256` (`kind.go:200`), a
   *reject*, not a truncate. A round producing >256 findings fails loudly (the whole delta is
   refused) — a real but visible backstop, not a silent class-hider.
@@ -654,11 +659,14 @@ door — gate it.
 
 ### Ship 1 — PINS (shippable, with ONE shared prerequisite)
 
-**Prerequisite (PR#30-CR):** cross-round-stable finding identity. `Unproven`'s clear/re-add keys on
+**Prerequisite ⧗ (PR#30-CR):** cross-round-stable finding identity. `Unproven`'s clear/re-add keys on
 `Pin.Finding`, so a re-discovered finding that got a *new* id would never clear its old gap — PINS is
-not self-contained without it. The finding-identity spike is **done and passed** (§5: 0% false-merge
-over 611 findings), so this is a small, validated addition, not a blocker — but it ships *with* Ship 1,
-not deferred to Ship 2.
+not self-contained without it. The spike **de-risked** it (§5: `(file, line-region, normalized-text)`
+gave 0% false-merge over 611 findings — that is the *precision* that matters here; the 66% figure is
+recurrence rate, not the identity invariant), but the algorithm is **not yet frozen**: Ship 1 must
+define and freeze it with an acceptance threshold (precision floor + a same-text/different-site
+regression) before PINS can claim self-containment. It is a Ship-1 task, spike-validated but open —
+the same ⧗ status §3.2 and Ship 2 carry, not "done."
 
 1. Port the pins data model (§2): `Pin{ID,Finding,File,From,To,Test}`, `PinResult`, `PinOutcome`,
    `Snapshot.Unproven`, `Finding.Source`/`Category`. The types were sound; the ids were the hole.
