@@ -881,9 +881,15 @@ and fall back to the mutate-a-line pin otherwise. Both ride the same determinist
   with a `DifferentialProof` in place of `Pin` (same `Proven`/`Outcome`/`Detail`, same four
   `PinOutcome` values); §2.4's `Delta.Pins`/`PinResults` and §3.1's `prove`/`pins_proven` **read as
   their `DifferentialProof`/`ProofResult` generalizations** — the pin-only text there is the
-  `Kind:"pin"` special case, superseded as the general rule — and `pins_proven`'s (a)/(b) clauses hold
-  **per proof regardless of `Kind`** (a reproduction/deletion proof clears its `Finding` exactly as a
-  pin does; a supplied non-`Proven` proof of any kind blocks). ⧗ *Build-time:* the exact `ProofResult`
+  `Kind:"pin"` special case, superseded as the general rule. `pins_proven` then generalizes **by
+  clause, not wholesale** (review #34 verify): **`Finding`-clearing and clause (b)** hold for every
+  `Kind` — a reproduction/deletion proof clears its `Finding` exactly as a pin does, and a supplied
+  non-`Proven` proof of any kind blocks. Clause (a)'s **own-file `File`-binding** (`File==Finding.File`)
+  is the **`Kind:"pin"` case only**: a reproduction proof has `Pin==nil` (no pin `File`), so the
+  binding is **retired for it and discharged by the §9.2 symptom reviewer** (per *Supersedes* above);
+  a deletion proof binds through `DeletionRef.File`==`Root.File` (§9.5), not `Finding.File`. So the
+  own-file guarantee is preserved for every kind, by the kind's own mechanism — never by demanding a
+  pin `File` a non-pin proof does not carry. ⧗ *Build-time:* the exact `ProofResult`
   struct, the per-`Kind` pass predicate, and the generalized replay/clearing are the build contract;
   the spec requirement is that **no proof kind may be omitted or silently given pin-only semantics**.
 - **Execution contract for a committed reproduction/deletion test (PR#32-fix):** the test lives in the
