@@ -37,6 +37,55 @@ a Ship-1 task, open (⧗), not "done" (spec §6 corrects the earlier "de-risked"
 
 ---
 
+## Dependency analysis — ready set & build waves
+
+Task-level DAG (verified acyclic in the round-2 Architecture review). Each task lists its **direct**
+dependencies; `⧗` marks a task gated on an unmet spike/decision (buildable, but its gate must clear
+before it lands).
+
+| Task | Direct deps | ⧗ | In-degree |
+|---|---|---|---:|
+| **T0.1** finding identity | — | ⧗ | **0** |
+| **T1.1** pins+DifferentialProof model | — | | **0** |
+| **T4.1** L3 corpus + numeric bar | — | | **0** |
+| T1.2 seam + gate-can-fail test | T1.1 | | 1 |
+| T3.0 continuity/replay spikes | T0.1 | ⧗ | 1 |
+| T1.3 unified differential gate | T1.1, T1.2, T0.1 | | 3 |
+| T3.1 classify + Remedy/Root | T3.0, T4.1 | ⧗ | 2 |
+| T1.4 right-reason reviewer | T1.3 | | 1 |
+| T1.5 deletion proof | T1.1, T1.3 | | 2 |
+| T1.6 anti-gaming + trivial reject | T1.1, T1.3 | | 2 |
+| T2.1 test-deletion gate | T1.3 | | 1 |
+| T2.2 trajectory monitor | T1.3 | ⧗(part) | 1 |
+| T4.2 control-arm harness | T1.3 | | 1 |
+| T4.5 escape-hatch probe | T1.3 | ⧗ | 1 |
+| T3.2 require_classes/enumerated | T3.1, T1.3 | ⧗ | 2 |
+| T3.4 class-merge tombstone | T3.1 | ⧗ | 1 |
+| T3.3 post-merge recurrence | T3.2, `learn` | ⧗ | 1 |
+| T4.3 cross-region sibling oracle | T3.2 | | 1 |
+| T2.3 Guard-and-Go | T1.5, T3.1, T3.2 | | 3 |
+| T4.4 gold replay #24–#28 | E1 done, E3 done | | — |
+
+**Ready set (in-degree 0 — startable now, in parallel): `T0.1`, `T1.1`, `T4.1`.** Of these, **T1.1
+and T4.1 carry NO ⧗ gate** (immediately buildable to done); **T0.1 is a ⧗ spike** (buildable, but it
+sets a recall/precision floor — research-shaped, and it gates T1.3/T3.0). Nothing else can start
+until one of these completes.
+
+**Build waves (topological layers — everything in a wave can run concurrently once the prior wave is done):**
+- **Wave 0 (ready):** T0.1 ⧗, **T1.1**, T4.1
+- **Wave 1:** T1.2 (←T1.1), T3.0 ⧗ (←T0.1)
+- **Wave 2:** T1.3 (←T1.1,T1.2,T0.1) — *Ship 1's spine*; T3.1 ⧗ (←T3.0,T4.1)
+- **Wave 3:** T1.4, T1.5, T1.6, T2.1, T2.2, T4.2, T4.5 (all ←T1.3); T3.2 ⧗, T3.4 ⧗ (←T3.1)
+  — **Ship 1 is releasable at the end of this wave** (T1.3–T1.6 done)
+- **Wave 4:** T2.3 (←T1.5,T3.1,T3.2), T4.3 (←T3.2), T3.3 ⧗ (←T3.2)
+- **Wave 5:** T4.4 (←E1,E3 complete)
+
+**So the first task to build is `T1.1`** — in-degree 0, no ⧗ gate, and already partway on
+`pins-proof-of-fix` (pins subset done; the `DifferentialProof`/`ProofResult` generalization remains).
+`T4.1` (numeric bar) and `T0.1` (finding-identity floors, ⧗) can proceed in parallel with it.
+
+---
+
 ## Epic E0 — Cross-round-stable finding identity (⧗ prerequisite, gates E1 and E3)
 
 **Why an epic of its own:** `Unproven` clears/re-adds on `Pin.Finding`; a re-discovered finding that
