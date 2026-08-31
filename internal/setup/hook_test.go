@@ -223,3 +223,61 @@ func TestOnlyMetareviewsOwnCommandCertifiesTheGate(t *testing.T) {
 		}
 	}
 }
+
+// A source checkout must NOT be mistaken for a live plugin install, and a real one must be found.
+//
+// The first version walked up from the executable looking for hooks/hooks.json. This repository
+// ships that manifest, so `./bin/metareview setup --check` in an ordinary checkout certified
+// enforcement as active although no host had ever loaded the plugin — reporting a gate live
+// because its manifest exists on disk, which is the mistake this check exists to stop. The same
+// walk never looked under ~/.claude/plugins, so a genuine install plus a PATH binary still
+// reported inactive and advised installing the plugin the operator already had.
+func TestPluginRootRequiresEvidenceOfAnActualInstall(t *testing.T) {
+	// A source checkout: the manifest is present, but nothing loaded it.
+	checkout := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(checkout, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"${CLAUDE_PLUGIN_ROOT}/hooks/pre-finish.sh"}]}]}}`
+	if err := os.WriteFile(filepath.Join(checkout, "hooks", "hooks.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_PLUGIN_ROOT", "")
+	emptyHome := t.TempDir()
+	if got := pluginRoot(emptyHome); got != "" {
+		t.Errorf("a checkout carrying the manifest is not an install: %q", got)
+	}
+
+	// A real install under ~/.claude/plugins is found.
+	home := t.TempDir()
+	installed := filepath.Join(home, ".claude", "plugins", "metareview")
+	if err := os.MkdirAll(filepath.Join(installed, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installed, "hooks", "hooks.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := pluginRoot(home); got != installed {
+		t.Errorf("pluginRoot = %q, want the installed plugin %q", got, installed)
+	}
+
+	// Another plugin's Stop hook is not metareview's enforcement.
+	other := t.TempDir()
+	stranger := filepath.Join(other, ".claude", "plugins", "someone-else")
+	if err := os.MkdirAll(filepath.Join(stranger, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stranger, "hooks", "hooks.json"),
+		[]byte(`{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"npx prettier ."}]}]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := pluginRoot(other); got != "" {
+		t.Errorf("another plugin's Stop hook is not ours: %q", got)
+	}
+
+	// The host's own signal wins, because it means a hook is actually running from there.
+	t.Setenv("CLAUDE_PLUGIN_ROOT", checkout)
+	if got := pluginRoot(emptyHome); got != checkout {
+		t.Errorf("CLAUDE_PLUGIN_ROOT is the host saying it loaded the plugin: %q", got)
+	}
+}

@@ -653,3 +653,39 @@ func TestGitIsBounded(t *testing.T) {
 		t.Errorf("an invalid ref is not a timeout: %v", err)
 	}
 }
+
+// A rev-list TIMEOUT must make the scope unresolvable, where an ordinary rev-list failure does
+// not. The distinction matters: ordinary failure is tolerated because the changed files, not
+// rev-list, are the authority on what the work is — but a timeout means git is stalled, so the
+// commit set is not merely narrow, it is unknown. Swallowing it made the deadline decorative,
+// because the caller saw a partial scope with a nil error exactly as if nothing had gone wrong.
+func TestARevListTimeoutMakesTheScopeUnresolvable(t *testing.T) {
+	root, _, _ := gitRepo(t)
+
+	timedOut := func(_ string, _ ...string) ([]byte, error) {
+		return nil, errors.New("git rev-list timed out after 20s")
+	}
+	if _, err := ResolveBranchScope(root, "", timedOut); err == nil {
+		t.Error("a stalled git must leave the scope unresolvable, not partially answered")
+	}
+	// And an unresolvable scope blocks, which is the whole point of propagating it.
+	rep, err := BuildForBranch(root, "", timedOut)
+	if err != nil {
+		t.Fatalf("it is reported, not returned as an error: %v", err)
+	}
+	if !rep.Blocked {
+		t.Error("a scope that could not be resolved must block")
+	}
+
+	// An ORDINARY rev-list failure is still tolerated: the changed files remain the authority.
+	failed := func(_ string, _ ...string) ([]byte, error) {
+		return nil, errors.New("fatal: bad revision")
+	}
+	scope, err := ResolveBranchScope(root, "", failed)
+	if err != nil {
+		t.Errorf("an ordinary rev-list failure is not fatal to the scope: %v", err)
+	}
+	if scope.Head == "" || !scope.Commits[scope.Head] {
+		t.Error("HEAD is in scope even when rev-list failed")
+	}
+}

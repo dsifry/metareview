@@ -2,6 +2,7 @@ package gitcontext
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -390,12 +392,26 @@ func hasPrefixFlag(args []string, flag string) bool {
 	return false
 }
 
+// Deadline bounds a single git invocation. Exported as a var so a caller running under a
+// synchronous host hook can shorten it, and so the timeout path can be tested.
+//
+// This package is where the risk actually lives: CollectWithExcludes runs several git commands
+// and is called BEFORE anything else in the branch scope, so these are the calls that sit on a
+// stale index.lock or an unresponsive filesystem. Bounding only the caller's later rev-list left
+// the real stall unbounded while the comment claimed otherwise.
+var Deadline = 20 * time.Second
+
 func git(root string, args ...string) (string, error) {
-	cmd := exec.Command("git", hardenDiff(args)...)
+	ctx, cancel := context.WithTimeout(context.Background(), Deadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", hardenDiff(args)...)
 	cmd.Dir = root
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("git %s timed out after %s", args[0], Deadline)
+	}
 	if err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {

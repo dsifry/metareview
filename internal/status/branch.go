@@ -29,6 +29,10 @@ type BranchScope struct {
 // RunGit is the git seam; nil uses the real binary.
 type RunGit func(root string, args ...string) ([]byte, error)
 
+// gitDeadline bounds this package's own git invocations. gitcontext bounds its own with
+// gitcontext.Deadline, and that is where the stall risk actually is: CollectWithExcludes runs
+// first and does the work that waits on index.lock.
+//
 // gitDeadline bounds a single git invocation.
 //
 // The Stop gate runs SYNCHRONOUSLY: the host waits for it before ending the session. With no
@@ -91,8 +95,16 @@ func ResolveBranchScope(root, base string, run RunGit) (BranchScope, error) {
 	// what lets an earlier attempt in the same chain still count.
 	out, err := run(root, "rev-list", "--no-merges", ctx.BaseSHA+".."+ctx.HeadSHA)
 	if err != nil {
+		// A TIMEOUT is not an ordinary rev-list failure. Ordinary failure is tolerated because
 		// rev-list is not the authority on whether the scope is usable — the changed files are,
-		// and they came from gitcontext above.
+		// and they came from gitcontext above. A timeout means git is stalled, so the commit set
+		// is not merely narrow but unknown, and an unknown scope must block rather than quietly
+		// answer with fewer commits than the branch has. Swallowing it made the deadline
+		// decorative: the error was discarded and the caller saw a partial scope with no error,
+		// exactly as if nothing had gone wrong.
+		if strings.Contains(err.Error(), "timed out") {
+			return BranchScope{}, err
+		}
 		return s, nil
 	}
 	for _, line := range strings.Fields(string(out)) {
