@@ -70,6 +70,9 @@ jobs:
           # assignment from a failed `gh api` ends the step under `bash -e`,
           # before any of the retry budget has been spent.
           SHA=""
+          # Counts only the iterations spent waiting for an ABSENT review bot, after every other
+          # check has finished. See the grace window below.
+          BOTWAIT=0
           # 132 * 10s = 22 minutes, which clears the Test job's own 20-minute
           # ceiling. A shorter wait would start gtg while CI was still pending
           # and report a false CI_FAILING.
@@ -116,11 +119,16 @@ jobs:
             # so absence is given a grace period and then proceeds loudly rather than hanging for
             # the full budget.
             if [ "$TOTAL" -gt 0 ] && [ "$PENDING" -eq 0 ] && [ -n "$MISSING" ]; then
-              if [ "$i" -ge 30 ]; then
+              # The grace window is counted from the moment the OTHER checks finished, not from
+              # the start of the wait. Measuring it with $i spent the window on `test`: after five
+              # minutes of ordinary CI an absent bot proceeded on the very first look, which is
+              # the same too-early snapshot this change exists to fix, wearing the fix's clothes.
+              BOTWAIT=$((BOTWAIT + 1))
+              if [ "$BOTWAIT" -ge 30 ]; then
                 echo "::warning::Proceeding without review bot check(s):$MISSING — thread state may be incomplete"
                 exit 0
               fi
-              echo "  waiting for review bot(s) to report:$MISSING ($i/30 before proceeding)"
+              echo "  waiting for review bot(s) to report:$MISSING ($BOTWAIT/30 before proceeding)"
               sleep 10; continue
             fi
             echo "  $PENDING of $TOTAL check(s) still running, waiting 10s... ($i/132)"
