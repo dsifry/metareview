@@ -135,7 +135,7 @@ func TestK7Registry(t *testing.T) {
 	}
 	// params
 	rl := info[ReviewLenses].ValidateParams
-	for v, ok := range map[any]bool{nil: true, 1: true, 8: true, 0: false, 9: false, "8": false, 8.5: false} {
+	for v, ok := range map[any]bool{nil: true, 1: true, 8: true, 9: true, 0: false, 10: false, "8": false, 8.5: false} {
 		p := map[string]any{}
 		if v != nil {
 			p["lenses"] = v
@@ -583,8 +583,8 @@ func TestK5Instructions(t *testing.T) {
 		t.Fatalf("input: %+v", ins)
 	}
 	ins, _ = rl.Instructions(snap, &workflow.Node{Name: "discover", Params: map[string]any{}}, d, "n1")
-	if ins.Input["lenses"] != 8 || !strings.Contains(ins.Text, "Data-migration") {
-		t.Fatal("default 8 lenses")
+	if ins.Input["lenses"] != 9 || !strings.Contains(ins.Text, "Mechanical-precision") {
+		t.Fatal("default 9 lenses")
 	}
 	ae, _ := r.Kind(AgentEdit)
 	ins, err = ae.Instructions(snap, &workflow.Node{Name: "fix"}, d, "n2")

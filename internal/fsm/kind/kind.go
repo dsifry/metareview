@@ -47,7 +47,7 @@ const envelopeMargin = 128
 const AdjudicateThreshold = 0.7
 
 // Lenses is the review-lenses dispatch list (skills/review-artifact step 4).
-var Lenses = []string{"Feasibility", "Completeness", "Scope and alignment", "Architecture", "Intent preservation", "Security", "Testing-quality", "Data-migration"}
+var Lenses = []string{"Feasibility", "Completeness", "Scope and alignment", "Architecture", "Intent preservation", "Security", "Testing-quality", "Data-migration", "Mechanical-precision"}
 
 // Rubric is the code-review rubric the host applies.
 const Rubric = "rubrics/task-done-review-rubric.md"

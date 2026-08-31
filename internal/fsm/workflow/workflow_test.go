@@ -117,6 +117,16 @@ func TestW1Shipped(t *testing.T) {
 	if rl.LoopTransition() != nil || rl.Convergence != nil || len(rl.Outgoing("adjudicate")) != 2 {
 		t.Fatal("review-loop shape")
 	}
+	// The built-in loops must NOT hard-code a lens count: the discover node relies on the
+	// review-lenses default (len(kind.Lenses)) so the full lens set — and every lens added later —
+	// runs without editing the YAML. A stray "lenses: 8" here silently drops the newest lens, which
+	// is exactly the drift the lens-set machinery exists to prevent.
+	if _, capped := sdlc.Nodes["discover"].Params["lenses"]; capped {
+		t.Fatal("sdlc-loop discover hard-codes a lens count; it must default to the full set")
+	}
+	if _, capped := rl.Nodes["discover"].Params["lenses"]; capped {
+		t.Fatal("review-loop discover hard-codes a lens count; it must default to the full set")
+	}
 
 	ex := mustParse(t, example)
 	if ex.Nodes["fix"].Exec != "inline" || ex.Nodes["verify"].Exec != "fork" {

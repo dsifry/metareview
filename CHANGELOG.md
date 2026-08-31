@@ -16,7 +16,10 @@
   git-object-model verification error in it; a blind spike confirmed a dedicated mechanical lens
   recovers that class. New rubric: `rubrics/mechanical-precision-rubric.md`. The lens-era table
   freezes the prior eight-lens rubric at its 2026-08-24 date, so reviews written before this
-  addition stay judged against the eight they were required to cover.
+  addition stay judged against the eight they were required to cover. The FSM `sdlc-loop` and
+  `review-loop` discover node no longer hard-codes a lens count: it defaults to the full
+  `kind.Lenses` set (now nine) and auto-tracks any lens added later, guarded by a test that
+  refuses a re-introduced `lenses:` cap.
 
 - **Mutation reports as review input (`--mutation-report`).** `review task-done`, `review
   epic-ready` and `review pr-ready` accept one or more mutation-testing reports and turn them into
