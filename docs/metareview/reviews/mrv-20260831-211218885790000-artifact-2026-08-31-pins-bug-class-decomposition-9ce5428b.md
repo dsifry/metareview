@@ -6,7 +6,7 @@ Target: `docs/plans/2026-08-31-pins-bug-class-decomposition.md`
 
 Context pack: `docs/metareview/context/mrv-20260831-211218885790000-artifact-2026-08-31-pins-bug-class-decomposition-9ce5428b-context.md`
 
-Execution mode: `pending-parallel-subagents`
+Execution mode: `completed-parallel-subagents` (9 lens subagents, 2 rounds — see Orchestrator Notes for the round-1→revision→round-2 re-verify trail; zero unresolved findings remain)
 
 Previous run: `none`
 

@@ -21,10 +21,14 @@ slug-identified (no BEADS in this repo — see the metaswarm-integration note in
   runner, git access, and the AI judge/agent are **injected**; the AI is **mock-AI** in every unit
   and integration test (`mockai`). A `mock:true` FSM row never satisfies a gate.
 - **⧗ = unresolved prerequisite** (a spike or a design decision) that gates the tasks depending on it.
+- **Spike & measurement tasks** (T3.0, T3.3, T4.1–T4.5) carry an **equivalent contract** in place of a
+  code TDD contract: what is **injected** (corpus loader, fixture runs, `learn --post-merge` output),
+  and a **falsifiable check** run against a **pre-locked** fixture (a known-answer input that would
+  fail if the measurement were wrong), so the result is verifiable, not merely asserted.
 
 ## Dependency spine (the critical path)
 
-```
+```text
 E0 finding-identity (⧗ recall+precision floors)
    └─> E1 Ship 1: Pins  ── shippable, honest "added lines are test-guarded under mutation"
           └─> E2 enforcement hardening (§9.5 also needs E3.classify)
@@ -94,6 +98,7 @@ got a *new* id never clears its old gap — a recall/false-split failure. The sp
 **unmeasured** and is the actual blocker (spec §6, §5).
 
 ### T0.1 — Paraphrase ground-truth set + recall/precision floors
+
 - **Spec:** §6 Ship-1 prerequisite, §5, §9.8.
 - **Depends-on:** — (first task).
 - **DI:** the identity function is pure `(file, normalized-text) -> key`; no AI. The corpus loader is
@@ -103,10 +108,11 @@ got a *new* id never clears its old gap — a recall/false-split failure. The sp
   findings merge; a same-text/different-file regression test guards the 0%-false-merge property.
 - **Acceptance:** BOTH floors (recall on paraphrase set, precision on the 611-corpus) are met and the
   algorithm is **frozen** only then. Embeddings are advisory-only, never the id (§9.8 — deterministic
-  id is mandatory). The `(file, normalized-text)` key is applied at **all six `BugID`-deriving sites**
-  (§3.3: `dedupCandidates`, the `allIDs` preflight `kind.go:489`, `dedupBugs` `kind.go:563`,
-  matched-golden `kind.go:517`, and the second-opinion branches `kind.go:594/602/605`) with a
-  same-text/different-file regression over every path. **Override migration (§2.4 round-2, §3.3):**
+  id is mandatory). The `(file, normalized-text)` key is applied at **every `run.BugID`-deriving
+  site** — enumerated at build time by grepping `run.BugID` in the current `internal/fsm/kind`
+  (the main adjudication flow AND `secondOpinion`), not by copying the spec §3.3 line numbers, which
+  may drift — with a same-text/different-file regression over every path (define whether the scope is
+  direct derivations only or all identity-sensitive paths, and cover it). **Override migration (§2.4 round-2, §3.3):**
   because this changes the id derivation, keyed overrides are **migrated or versioned on the change,
   never silently** — an override keyed on a pre-change id must not orphan.
 - **Status:** OPEN (⧗). Not de-risked; the precision spike does not cover recall.
@@ -123,13 +129,19 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
 (spec §6 Ship 1). Depends on E0 for self-containment.
 
 ### T1.1 — Port the pins + DifferentialProof data model (§2, §9.1)
+
 - **Spec:** §2.1–§2.4, §9.1.
 - **Depends-on:** —.
 - **DI:** pure types + a `Reduce`/`Fold` over injected `Delta`; no external deps.
 - **TDD:** table tests for each `PinOutcome` value and the `DifferentialProof` one-of invariant
   (`Kind:"pin"` ⇒ `Pin` set/`Deletes` nil; `"deletion"` ⇒ `Deletes` set; `"reproduction"` ⇒ both nil);
   a decode test rejects a malformed record (one-of violated). Mutation: dropping the one-of check must
-  redden a test.
+  redden a test. **Four-cause decision table through `verify.go` (§7 L1):** a case per *distinct cause*
+  → its outcome (break-fail/restore-pass → `proven`; compiled+tests-pass → `survived`; anchor≠1-match
+  or won't-compile or compiles-but-null → `malformed`; copy-failed/baseline-red/exec-killed →
+  `unverifiable`), so a *mapping* fault (same outcome for two causes) reddens — and a mutation that
+  **merges two causes onto one outcome** must redden. (The `verify.go` port lives in this task per the
+  §6 chunk-1 status.)
 - **Acceptance:** `Pin`/`DifferentialProof`/`PinResult`/`ProofResult`/`PinOutcome`/`Unproven` and
   `Finding.Source`/`Category` land; `SchemaVersion` stays 1, additive-optional (the 10 existing runs
   still `Fold`); `DifferentialProof.ID` is the override key. **One-way-door gate (§2.4):** the first
@@ -141,6 +153,7 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
   generalization (Kind/one-of) per §9.1.
 
 ### T1.2 — Fix the `agentEdit.Reduce` seam + the gate-can-fail regression test
+
 - **Spec:** §6 chunk 2; the #24 vacuous-pass (`Reduce` dropped `Pins` → `pins_proven` vacuously true).
 - **Depends-on:** T1.1.
 - **DI:** `Reduce` is a pure function of `(prev, delta)`; tested directly.
@@ -151,6 +164,7 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
 - **Status:** OPEN.
 
 ### T1.3 — Build the unified `prove`/`pins_proven` differential gate (BOTH proof forms) + wire into `sdlc-loop-proved`
+
 - **Spec:** §6 chunk 3, §3.1, §9.1 (ONE differential-test gate: reproduction preferred, pin fallback),
   §9.1 execution contract for a committed reproduction/deletion test.
 - **Depends-on:** T1.1, T1.2, E0 (for `Unproven` clear-by-`Finding`).
@@ -179,6 +193,7 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
 - **Status:** OPEN.
 
 ### T1.4 — Right-reason veto-only reviewer (§9.2)
+
 - **Spec:** §9.2, §9.1 (own-file binding migration for the reproduction form).
 - **Depends-on:** T1.3.
 - **DI:** the symptom-match reviewer is an **injected AI judge** (mock-AI in tests); it is NOT a
@@ -191,11 +206,15 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
 - **Status:** OPEN.
 
 ### T1.5 — Deletion as a first-class provable fix (§9.4)
+
 - **Spec:** §9.4, §9.1 (`Kind:"deletion"`), §4.6 (deletion is no longer a valve).
 - **Depends-on:** T1.1, T1.3.
 - **DI:** `DeletionRef` verification uses **injected git access** (parent blob + diff parse). The
-  fail-before/pass-after check **runs on T1.3's reproduction-execution engine** — this task adds
-  `DeletionRef` verification + the over-deletion scope check, NOT a second execution engine.
+  fail-before/pass-after check **runs on T1.3's reproduction-execution engine** (target-test overlay).
+  The over-deletion scope check is a **distinct whole-suite phase**: run the **full consent-hashed test
+  cmd** (the opaque all-or-nothing suite, injected runner) on the post-deletion tree — if any test
+  outside the reproduction set breaks, redden. So T1.5 adds `DeletionRef` verification + the
+  whole-suite phase; the reproduction engine (target-test) is reused, not the whole-suite runner.
 - **TDD:** a `Kind:"deletion"` proof with a fail-before/pass-after reproduction test clears; the
   `DeletionRef`↔reviewed-diff binding (⧗ build contract) rejects a free-floating or mismatched span;
   clause (a) own-file for a deletion requires `DeletionRef.File == Finding.File` (NOT `Root.File` — that
@@ -209,6 +228,7 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
 - **Status:** OPEN.
 
 ### T1.6 — Self-validating-loop anti-gaming guards (§9.3) + trivial-pin reject (§9.8 R7)
+
 - **Spec:** §9.3, §9.8 R7, §2.2 (`malformed` widened).
 - **Depends-on:** T1.1, T1.3.
 - **DI:** AST pre-screen is pure; the "capture failing test on the untouched tree first" step uses the
@@ -226,6 +246,7 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
 ## Epic E2 — Enforcement hardening (attaches after E1 core)
 
 ### T2.1 — Test-deletion gate (§9.6)
+
 - **Spec:** §9.6.
 - **Depends-on:** T1.3 (reuses the pins/mutation engine).
 - **DI:** injected runner; a **coverage-profile probe** that reports whether the cmd yields a per-line
@@ -241,6 +262,7 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
 - **Status:** OPEN.
 
 ### T2.2 — Trajectory monitor (§9.7) + verbosity flag (§9.8 R9)
+
 - **Spec:** §9.7, §9.8 R9.
 - **Depends-on:** T1.3.
 - **DI:** the monitor reads the **injected diff + override records** for the derivable flags; the
@@ -259,15 +281,26 @@ never "proof"/"correct." Complete, standalone improvement over the fix node taki
 - **Status:** OPEN (partly ⧗).
 
 ### T2.3 — Guard-and-Go rejection (§9.5) — **gated on E3 classify**
+
 - **Spec:** §9.5, §9.4.
 - **Depends-on:** T1.5, **E3.T3.1** (produces `classify`'s `Remedy` tag + `BugClass.Root`), **and
   E3.T3.2** (§9.5 is a tightening clause ON `classes_enumerated` + the class-closing path, which T3.2
   builds — there is no gate for it to attach to until then).
 - **DI:** the `DeletionRef`↔`Root` match is deterministic; `classify` supplies `Remedy`/`Root`.
+- **Advisory→enforcement soundness (review #35):** `classify`'s `Remedy` is an **advisory LLM label**,
+  yet it gates a hard enforcement (a `"local"` label exempts a class from the deletion requirement).
+  This must **fail closed**: a missing, unverified, or low-confidence `Remedy` is treated as
+  `"structural"` (deletion required) — never silently exempting — OR `Remedy`/`Root` are validated by a
+  deterministic signal independent of `classify`. A wrong `"local"` label must not let an additive
+  guard pass. (This is the one place §4.5's "advisory, not binding" meets a hard gate; resolve it here,
+  not by trusting the label.)
 - **TDD:** a `Remedy:"structural"` class requires a fix `DeletionRef` whose `File==Root.File` and whose
   `Removed` contains `Root.Span`; an additive-only "guard around the root" fix does NOT close the class.
-  Mutation: dropping the match lets the guard-around dodge pass.
-- **Acceptance:** the additive dodge of a required deletion is rejected for structural classes.
+  A class with a **missing/uncertain `Remedy`** is treated as structural (the fail-closed case) and the
+  additive fix still does NOT close it. Mutation: dropping the match — or defaulting an uncertain
+  `Remedy` to `"local"` — lets the guard-around dodge pass and must redden.
+- **Acceptance:** the additive dodge of a required deletion is rejected for structural classes, and an
+  advisory mislabel cannot exempt a class (fail-closed).
 - **Status:** BLOCKED on E3.T3.1 and E3.T3.2.
 
 ---
@@ -281,13 +314,18 @@ acceptance test for the whole path. `classify` is present from the first shipped
 fixer-grouping interim, §3.2 inv. 4).
 
 ### T3.0 — ⧗ Continuity + end-to-end-replay spikes
+
 - **Spec:** §5, §6 Ship-2 prerequisites, §3.2.
 - **Depends-on:** E0.
+- **Contract (spike):** injected multi-round fixture snapshots; the falsifiable check is a pre-locked
+  fixture where a correct continuity keeps one `BugClass.ID` across rounds and the replay reaches
+  `cleared` only on member `pins_proven` — a churned id or a class cleared without member proof fails it.
 - **Acceptance:** continuity spike shows classify continues an open class across rounds without id
   churn; replay spike demonstrates the full create→carry→clear path on fixture data. Both **pre-locked**.
 - **Status:** OPEN (⧗).
 
 ### T3.1 — `classify` node (+ class data model + `Remedy`/`Root` production)
+
 - **Spec:** §2.3/§2.4 (class types), §3.2, §6 chunk 4, §4.4/§4.5, **§9.5** (`Remedy` tag + `BugClass.Root`).
 - **Depends-on:** T3.0, **T4.1** (the numeric bar its acceptance test measures against must be locked first).
 - **DI:** `classify` is a set-level **injected AI** call (mock-AI in tests) over open `Snapshot.Classes`;
@@ -313,6 +351,7 @@ fixer-grouping interim, §3.2 inv. 4).
 - **Status:** OPEN (⧗).
 
 ### T3.2 — `require_classes` + `classes_enumerated`
+
 - **Spec:** §3.2, §6 chunk 5.
 - **Depends-on:** T3.1, T1.3.
 - **DI:** deterministic gates over the enumerated members + the diff.
@@ -325,6 +364,7 @@ fixer-grouping interim, §3.2 inv. 4).
 - **Status:** OPEN (⧗).
 
 ### T3.4 — ⧗ Class-merge tombstone rule
+
 - **Spec:** §3.2 edge cases ("two open classes merge … one id continued, the other marked merged-into
   (a tombstone carrying the surviving id) so overrides keyed on the retired id still resolve — ⧗ needs
   the tombstone rule specified").
@@ -337,6 +377,7 @@ fixer-grouping interim, §3.2 inv. 4).
 - **Status:** OPEN (⧗ — the rule must be specified before code, per §3.2).
 
 ### T3.3 — Post-merge recurrence abuse detector
+
 - **Spec:** §3.2, §6 chunk 6.
 - **Depends-on:** T3.2, `learn --post-merge`.
 - **Verification:** on a fixture pair of runs, a sibling recurrence after a class fix is counted; a
@@ -353,43 +394,66 @@ fixer-grouping interim, §3.2 inv. 4).
 ## Epic E4 — Validation & efficacy (parallel; gates the efficacy claim, not the loop)
 
 ### T4.1 — L3 behavioural corpus + the numeric bar
+
 - **Spec:** §7 L3.
 - **Depends-on:** —.
+- **Contract (measurement task):** injected corpus loader + a pre-lock step; the falsifiable check is
+  that the guardrail assertions run against the corpus and the bar values are recorded before any
+  consumer (T3.1) reads them. **This task's deliverable IS the numeric bar** — recall floor, max
+  dangerous-merge rate, corpus size, and evaluation protocol are **set when the L3 corpus is built and
+  pre-locked here** (they are not yet knowable and are NOT invented in this plan); "defined here, not
+  deferred" means *set at this task*, before T3.1's blind run, so T3.1 has a deterministic pass/fail.
 - **Acceptance:** planted-defect fixtures with **pre-locked** ground truth; absolute guardrails (a
   proven fix never blocked; a confirmed finding never dropped by grouping; a planted unproven fix never
-  passed) at 100%; the numeric bar (recall floor, max dangerous-merge rate, corpus size, protocol) is
-  **defined here, not deferred** (the classify spike was viability-only, N=1, post-hoc ground truth).
+  passed) at 100%; the four bar values above are recorded and frozen as this task's output.
 - **Status:** OPEN.
 
 ### T4.2 — Control-arm efficacy harness
+
 - **Spec:** §8.
 - **Depends-on:** T1.3 (needs a working proved loop to compare).
+- **Contract (measurement):** injected two-arm runner; falsifiable on a pre-locked fixture where the
+  full arm proves a fix the control arm re-discovers — the per-bug identical-pre-fix-state replay is
+  the injected seam that removes the §8 selection bias.
 - **Acceptance:** full arm vs control arm (post-Stop-hook, pins+classify disabled); both arms replayed
   from an **identical pre-fix confirmed-finding state per bug** (the isolation §8 flags as unsolved via
   post-hoc intersection). Metrics 1–4 reported; metric-1 needs E0's stable identity.
 - **Status:** OPEN (design gap called out in §8 — resolve before claiming efficacy).
 
 ### T4.3 — Cross-region sibling oracle (metric 2)
+
 - **Spec:** §8 (open caveat), §4.4.
 - **Depends-on:** T3.2.
+- **Contract (measurement):** injected oracle over fixture class pairs; a pre-locked cross-file
+  "top and bottom" fixture that the §4.4 same-file signature misses but this oracle must catch.
 - **Acceptance:** a cross-file-capable sibling oracle (the §4.4 same-file signature cannot see the
   cross-file "top and bottom" class that is classify's reason to exist) measures metric 2.
 - **Status:** OPEN.
 
 ### T4.4 — Gold acceptance: replay #24–#28
+
 - **Spec:** §8 "the gold acceptance test."
 - **Depends-on:** E1 (and E3 for the class claims).
+- **Contract (measurement):** injected fixture replays of #24–#28; deterministic pass/fail despite
+  non-deterministic grouping because **`N` and the required `BugClass.Members` hit-rate are fixed and
+  pre-locked as part of this task** (spec §8 leaves the exact `N`/threshold open — they are set here,
+  not invented in this plan).
 - **Precondition (§8):** per fixture, verify both siblings **co-exist at one base ref** (they surfaced
   across five sequential PRs and may not) before asserting a class; and because grouping is
-  **non-deterministic**, run each fixture **N times with a required hit-rate over `BugClass.Members`**
-  rather than a single pass. Without these the gold test is silently un-runnable or flaky.
+  **non-deterministic**, run each fixture **`N` times with the pre-locked hit-rate over
+  `BugClass.Members`** rather than a single pass. Without these the gold test is silently un-runnable
+  or flaky.
 - **Acceptance:** replaying #24–#28 through the proved loop reproduces the expected proven/blocked
   outcomes end-to-end, with the precondition satisfied.
 - **Status:** OPEN.
 
 ### T4.5 — ⧗ Escape-hatch probe (`unverifiable` blocks)
+
 - **Spec:** §5 remaining spike, §4.1.
 - **Depends-on:** T1.3.
+- **Contract (spike):** injected fault (delete/break the test cmd) drives `unverifiable`; the
+  falsifiable check is that decision #1's semantics **blocks** it and the `DifferentialProof.ID`-keyed
+  override **clears** it — a silent pass-through or an unpullable override fails the probe.
 - **Acceptance:** a fix that deliberately makes a pin `unverifiable` (delete the test cmd) is blocked
   by decision #1's semantics, and the override keyed on `DifferentialProof.ID` is physically pullable.
 - **Status:** OPEN (⧗).
@@ -403,11 +467,13 @@ fixer-grouping interim, §3.2 inv. 4).
    T1.4/T1.5/T1.6 (parallelizable after T1.3; T1.5's deletion proof runs on T1.3's reproduction
    engine). Ship 1 is releasable here.
 3. **E2** T2.1/T2.2 after T1.3; **T2.3 waits on E3.T3.1 AND E3.T3.2** (it tightens the T3.2 gate).
-4. **E3** T3.0 spikes → **T4.1 (numeric bar) →** T3.1 (builds classify + class types + Remedy/Root) →
-   T3.2 → {T3.4 tombstone (after T3.1), T3.3 post-merge}.
-5. **E4** runs alongside; **T4.1 precedes T3.1**; T4.2/T4.4 need a working proved loop; T4.4's §8
-   precondition (sibling co-existence + N-runs hit-rate) is checked first; the efficacy **isolation
-   design gap (§8) is resolved before any efficacy number is claimed**.
+4. **E3** — **T3.0 spikes and T4.1 (numeric bar) are INDEPENDENT, parallel prerequisites of T3.1**
+   (T3.0←T0.1 is wave 1; T4.1 is wave 0; neither depends on the other): both must complete → T3.1
+   (builds classify + class types + Remedy/Root) → T3.2 → {T3.4 tombstone (after T3.1), T3.3 post-merge}.
+5. **E4** runs alongside; **T4.1 must be locked before T3.1's blind run** (but runs in parallel with the
+   T3.0 spikes, not after them); T4.2/T4.4 need a working proved loop; T4.4's §8 precondition (sibling
+   co-existence + N-runs hit-rate) is checked first; the efficacy **isolation design gap (§8) is
+   resolved before any efficacy number is claimed**.
 
 **Current state:** E1.T1.1 is PARTIAL on `pins-proof-of-fix` (pins subset, chunks 1–2). Everything
 else is OPEN; ⧗ tasks carry an unresolved spike/decision and must not be built past their gate.
