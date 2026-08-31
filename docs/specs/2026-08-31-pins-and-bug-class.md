@@ -1,7 +1,16 @@
 # Spec: Pins & Bug.Class — proof of fix, and defect-class enumeration
 
-Status: **Round-2 revised. PINS: shippable (Ship 1). BUG.CLASS: validated path, gated on ⧗ spikes (Ship 2).**
+Status: **Adversarially converged (7 passes, 2 consecutive dry). PINS: shippable (Ship 1, one ⧗ recall-floor prerequisite). BUG.CLASS: validated path (Ship 2, ⧗ spikes).**
 
+> **Adversarial convergence (2026-08-31):** a 7-pass convergent adversarial-review loop (6 lenses →
+> refute-verify → synthesize per pass) ran over this spec until two consecutive passes found zero
+> critical items. It resolved 7 verified criticals that six manual review rounds had missed —
+> including two sections specifying the rollout oppositely, a dedup key that contradicted its own
+> spike, the deep root where `pins_proven` and `classes_enumerated` checked disjoint code (now bound
+> to the finding's own file), a second text-only collapse site in the real code (`BugID`/`dedupBugs`),
+> and a finding-identity spike that measured precision when the blocker was recall. None were
+> regressions of a prior fix. Passes 6 and 7 were dry.
+>
 > **Acceptance (PR#30):** the two committed artifact reviews are `NEEDS_REVISION` by design — they are
 > the honest record of what the reviews caught, and every blocking finding is either addressed inline
 > (marked `review fix …` / `PR#30…`) or recorded as a known-open ⧗ item or an accepted tighten-later
