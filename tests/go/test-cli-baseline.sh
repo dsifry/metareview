@@ -102,8 +102,18 @@ printf '%s' "$branch_out" | grep -q '"target": "branch ' || {
 # t-1's blocker is not on this branch's commits, so it must not appear in the branch answer.
 printf '%s' "$branch_out" | grep -q '"run_id": "mrv-x"' && {
   echo "FAIL: an unrelated blocker leaked into the branch-scoped answer"; exit 1; }
-# The spelling with an equals sign works too, and so does an explicit base.
-(cd "$clean" && ./mrv status --json --scope=branch >/dev/null 2>&1) || true
+# The spelling with an equals sign works too. The `|| true` this used to carry discarded the
+# result, so the form was invoked and never actually asserted.
+eq_out="$( (cd "$clean" && ./mrv status --json --scope=branch 2>/dev/null) || true )"
+printf '%s' "$eq_out" | grep -q '"target": "branch ' || {
+  echo "FAIL: --scope=branch must scope the same way --scope branch does: $eq_out"; exit 1; }
+# And an explicit base, which had no end-to-end coverage at all.
+base_sha="$( (cd "$clean" && git rev-parse HEAD~1) 2>/dev/null || true )"
+if [ -n "$base_sha" ]; then
+  base_out="$( (cd "$clean" && ./mrv status --json --scope branch --base "$base_sha" 2>/dev/null) || true )"
+  printf '%s' "$base_out" | grep -q "\"target\": \"branch $(printf '%s' "$base_sha" | cut -c1-8)" || {
+    echo "FAIL: --base must set the base the report names: $base_out"; exit 1; }
+fi
 # A malformed scope is refused rather than silently treated as unscoped.
 if (cd "$clean" && ./mrv status --json --scope 2>/dev/null); then
   echo "FAIL: --scope with no value must be refused"; exit 1

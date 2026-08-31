@@ -147,6 +147,28 @@ func TestDiscoverAbandonedRunsWithAnUnusableRegistry(t *testing.T) {
 
 // The state can also come from an event's own state field rather than a transition's target —
 // a run stopped mid-node has recorded where it was without recording an arrival.
+// The node belongs to the state it arrived with. A later event that moves the state without
+// carrying a node kind used to leave Node naming the PREVIOUS node, so the report told an
+// operator the run was waiting on something it had already left — a confident wrong answer about
+// where a run is stuck, which is worse than no answer.
+func TestNodeDoesNotOutliveTheStateItArrivedWith(t *testing.T) {
+	root := t.TempDir()
+	writeRun(t, root, "run-moved",
+		`{"seq":1,"type":"init","at":"2026-08-28T01:00:00Z","data":{"workflow":"t","run_id":"r"}}`,
+		`{"seq":2,"type":"transition","at":"2026-08-28T01:01:00Z","state":"discover","data":{"from":"discover","to":"fix","to_kind":"agent-edit"}}`,
+		`{"seq":3,"type":"record","at":"2026-08-28T01:02:00Z","state":"discover","data":{"name":"x"}}`)
+	got := DiscoverAbandonedRuns(root)
+	if len(got) != 1 {
+		t.Fatalf("want one abandoned run, got %d", len(got))
+	}
+	if got[0].State != "discover" {
+		t.Errorf("state = %q, want discover", got[0].State)
+	}
+	if got[0].Node != "" {
+		t.Errorf("Node = %q, but the run left the node that kind belonged to", got[0].Node)
+	}
+}
+
 func TestAbandonedRunReadsStateFromANonTransitionEvent(t *testing.T) {
 	root := t.TempDir()
 	writeRun(t, root, "run-mid-node", `{"seq":1,"type":"init","at":"2026-08-28T01:00:00Z","data":{"workflow":"t"}}`,

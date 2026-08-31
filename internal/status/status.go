@@ -69,6 +69,18 @@ func Build(root string) (Report, error) { return BuildFor(root, "") }
 // work it never touched. A gate that always says no is a livelock, and an operator who has to
 // disable it to get anything done has no gate at all.
 func BuildFor(root, target string) (Report, error) {
+	return buildFor(root, target, nil)
+}
+
+// buildFor is BuildFor with the branch's commit set supplied by the caller.
+//
+// BuildForBranch resolves that scope itself, with the caller's base and the injected git seam.
+// Having BuildFor resolve its own with a fixed empty base and a nil runner meant every
+// branch-scoped status ran gitcontext collection and rev-list TWICE and discarded the inner
+// result, and — worse than the waste — a test injecting a fake RunGit still shelled out to the
+// real git here, and an explicit --base never reached the currency check at all. Threading it
+// through keeps one answer to "what are this branch's commits" instead of two that can disagree.
+func buildFor(root, target string, current map[string]bool) (Report, error) {
 	rep := repo.Detect(root)
 	r := Report{
 		Version:   version.Version,
@@ -88,11 +100,13 @@ func BuildFor(root, target string) (Report, error) {
 	// they are seeing everything, which is the misreading the field exists to prevent.
 	r.Reviews = logs
 	// The branch's own commits, so a review can be checked for currency before it is allowed to
-	// answer for a path. Best effort: where this cannot be worked out the set is nil, and covers
-	// then refuses to credit CoveredPaths at all rather than crediting them blindly.
-	current := map[string]bool{}
-	if scope, err := ResolveBranchScope(root, "", nil); err == nil {
-		current = scope.Commits
+	// answer for a path. Resolved here only when the caller had no scope of its own; where it
+	// cannot be worked out the set stays nil, and covers then refuses to credit CoveredPaths at
+	// all rather than crediting them blindly.
+	if current == nil && target != "" {
+		if scope, err := ResolveBranchScope(root, "", nil); err == nil {
+			current = scope.Commits
+		}
 	}
 	if target != "" {
 		scoped := make([]reviewlog.Summary, 0, len(logs))
@@ -170,12 +184,19 @@ func Emit(root string, w io.Writer) (int, error) { return EmitFor(root, "", w) }
 // refuses every session for work it never touched; scoped to a target string it could not match
 // a source file at all, so it cleared everything.
 func BuildForBranch(root, base string, run RunGit) (Report, error) {
-	r, err := Build(root)
+	// The scope is resolved BEFORE the report is built, so the commit set the report needs for
+	// currency checks is the same one the scoping uses — resolved once, with this caller's base
+	// and its injected git seam rather than a second guess made with neither.
+	scope, scopeErr := ResolveBranchScope(root, base, run)
+	commits := map[string]bool(nil)
+	if scopeErr == nil {
+		commits = scope.Commits
+	}
+	r, err := buildFor(root, "", commits)
 	if err != nil {
 		return r, err
 	}
-	scope, err := ResolveBranchScope(root, base, run)
-	if err != nil {
+	if err := scopeErr; err != nil {
 		// The scope could not be worked out, so this cannot be narrowed. The unscoped answer is
 		// returned rather than an empty one: a gate that cannot tell what the work is must fail
 		// toward blocking, never toward "nothing to do".

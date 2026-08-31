@@ -148,8 +148,11 @@ func abandonedRun(dir string, kinds map[string]workflow.KindInfo) (AbandonedRun,
 		}
 		if ev.Data.To != "" {
 			state, got.Node = ev.Data.To, ev.Data.ToKind
-		} else if ev.State != "" {
-			state = ev.State
+		} else if ev.State != "" && ev.State != state {
+			// The state moved without a transition carrying a node kind. Node belongs to the
+			// state it arrived with, so carrying it forward makes the report name a node the
+			// machine is not waiting on — a confident wrong answer about where a run is stuck.
+			state, got.Node = ev.State, ""
 		}
 	}
 	// A mock run proves nothing and is not work left undone. A stop note does NOT exclude a run:

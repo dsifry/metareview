@@ -421,3 +421,35 @@ func TestResolveBaseRefusesWhenThereIsNoBase(t *testing.T) {
 		t.Errorf("a root commit has no base; got %q with no error", base)
 	}
 }
+
+// An UNDIVERGED feature branch has no commits of its own, and that empty range is the truth.
+//
+// The fix for "standing on the default branch sees nothing" skipped any base equal to HEAD. The
+// same equality arises on a branch that has not yet committed anything, where it is correct — so
+// skipping it there handed the branch the default branch's last commit as its own work, and the
+// Stop hook blocked on files the session never touched. The hook runs in exactly that state: an
+// agent has written files and not yet committed.
+func TestResolveBaseLeavesAnUndivergedBranchEmpty(t *testing.T) {
+	r := newRepo(t)
+	r.write("a.go", "package p\n")
+	r.git("add", ".")
+	r.commit("second")
+	head := strings.TrimSpace(r.git("rev-parse", "HEAD"))
+
+	r.git("checkout", "-q", "-b", "feat") // branched, nothing committed on it yet
+	base, err := resolveBase(r.root, "")
+	if err != nil {
+		t.Fatalf("an undiverged branch still resolves: %v", err)
+	}
+	if base != head {
+		t.Errorf("an undiverged branch owns no commits, so its base is HEAD (%s), got %s", head, base)
+	}
+
+	// Committing on it gives it work, and the base becomes the branch point.
+	r.write("b.go", "package p\n")
+	r.git("add", ".")
+	r.commit("third")
+	if got, _ := resolveBase(r.root, ""); got != head {
+		t.Errorf("once it has a commit the base is the branch point %s, got %s", head, got)
+	}
+}

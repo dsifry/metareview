@@ -49,7 +49,10 @@ if [ -f tests/go/test-fsm.sh ]; then bash tests/go/test-fsm.sh; fi
 # here never runs in CI — and this is the suite for the shim the whole enforcement layer rests on.
 # It passed by hand and would have merged untested, which is the same silent failure the hook
 # exists to prevent, one level up.
-if [ -f tests/go/test-stop-hook.sh ]; then bash tests/go/test-stop-hook.sh; fi
+# Unguarded, deliberately. Every other suite here is guarded with `[ -f ]`, and that guard is
+# what let this one be absent from the list without anything noticing. A required suite that
+# silently skips when missing reproduces the exact failure it was added to close.
+bash tests/go/test-stop-hook.sh
 
 # CI runs shellcheck over every *.sh (.github/workflows/test.yml) but run-all.sh did not, so a
 # shell defect could pass the whole local suite and fail CI - which is exactly what happened on

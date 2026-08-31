@@ -34,7 +34,7 @@ d = json.load(sys.stdin)
 assert d["decision"] == "block", d
 assert d["reason"], d
 ' || { echo "FAIL: hook did not emit a valid block decision: $1"; exit 1; }
-  printf '%s' "$1" | grep -q "$2" || { echo "FAIL: reason missing %s: $1" "$2"; exit 1; }
+  printf '%s' "$1" | grep -q "$2" || { printf "FAIL: reason missing %s: %s\n" "" "" >&2; exit 1; }
 }
 
 # 1. Absent tooling blocks. A check that did not run must never read as a check that found
@@ -162,5 +162,43 @@ out="$(printf '{"stop_hook_active":true}' | METAREVIEW_BIN="$TMP/clean" bash "$H
 if [ -n "$out" ] || [ -s "$TMP/err2" ]; then
   echo "FAIL: a clean tree must pass quietly: out=$out err=$(cat "$TMP/err2")" >&2; exit 1
 fi
+
+# 13. A BROKEN gate is never yielded past. Exit 1 means "something must be cleared"; any other
+#     nonzero code means the check itself failed. Yielding on every nonzero code meant a status
+#     that crashed on the second pass silently bypassed completion enforcement — the gate turning
+#     itself off precisely when it had stopped working.
+cat > "$TMP/crashing" <<'EOF'
+#!/bin/sh
+echo "internal error" >&2
+exit 2
+EOF
+chmod +x "$TMP/crashing"
+out="$(printf '{"stop_hook_active":true}' | METAREVIEW_BIN="$TMP/crashing" bash "$HOOK" 2>/dev/null)"
+assert_json_block "$out" "could not answer"
+
+# 14. A missing binary IS yielded past on the repeat, because it is the one blocker a session can
+#     never clear from inside: refusing forever there is the hang this yield exists to prevent.
+out="$(printf '{"stop_hook_active":true}' | METAREVIEW_BIN=definitely-not-installed bash "$HOOK" 2>"$TMP/err3")"
+if [ -n "$out" ]; then
+  echo "FAIL: an unclearable missing binary must yield on the repeat, not block: $out" >&2; exit 1
+fi
+grep -q "not installed" "$TMP/err3" || {
+  echo "FAIL: the yield must say why it stood down:"; cat "$TMP/err3" >&2; exit 1; }
+# ...and still blocks on the FIRST pass.
+out="$(printf '{}' | METAREVIEW_BIN=definitely-not-installed bash "$HOOK")"
+assert_json_block "$out" "not installed"
+
+# 15. A diagnostic on stderr must not corrupt the JSON the reason is built from. Capturing 2>&1
+#     merged them, json.load failed, and the message degraded to the static fallback — losing the
+#     blocker names exactly when something had gone wrong enough to warrant a diagnostic.
+cat > "$TMP/noisy" <<'EOF'
+#!/bin/sh
+echo "warning: something chatty" >&2
+printf '%s\n' '{"blocked":true,"must_clear":[{"target":"internal/noisy.go","verdict":"UNREVIEWED"}]}'
+exit 1
+EOF
+chmod +x "$TMP/noisy"
+out="$(printf '{}' | METAREVIEW_BIN="$TMP/noisy" bash "$HOOK" 2>/dev/null)"
+assert_json_block "$out" "internal/noisy.go"
 
 echo "test-stop-hook: ok"

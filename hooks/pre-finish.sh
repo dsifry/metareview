@@ -64,20 +64,33 @@ BIN="${METAREVIEW_BIN:-metareview}"
 if ! command -v "$BIN" >/dev/null 2>&1; then
   # Absent tooling is reported, never treated as a pass: a check that did not run must not read
   # as a check that found nothing wrong.
+  if [ -n "$LOOPING" ]; then
+    # The repeat pass. A missing binary is the ONE blocker a session can never clear from inside,
+    # so refusing forever here is precisely the hang this yield exists to prevent.
+    printf 'metareview: yielding after a repeated block — metareview is not installed, so the gate could not run.\n' >&2
+    exit 0
+  fi
   printf '{"decision":"block","reason":"metareview is not installed, so the review gate could not run. Install it or unset the hook deliberately."}\n'
   exit 0
 fi
 
+# stdout ONLY. Capturing 2>&1 merged any diagnostic the CLI writes into the JSON, so json.load
+# failed and the reason degraded silently to the static fallback — losing the blocker names the
+# message exists to supply, exactly when something had gone wrong enough to warrant a diagnostic.
+# stderr is kept, on stderr, where an operator still sees it.
 if [ -n "$TARGET" ]; then
-  OUT="$("$BIN" status --json --target "$TARGET" 2>&1)"
+  OUT="$("$BIN" status --json --target "$TARGET")"
 elif [ -n "$BASE" ]; then
-  OUT="$("$BIN" status --json --scope branch --base "$BASE" 2>&1)"
+  OUT="$("$BIN" status --json --scope branch --base "$BASE")"
 else
-  OUT="$("$BIN" status --json --scope branch 2>&1)"
+  OUT="$("$BIN" status --json --scope branch)"
 fi
 CODE=$?
 
-if [ "$CODE" -ne 0 ] && [ -n "$LOOPING" ]; then
+# Exit 1 means "something must be cleared". Any other nonzero code means the gate itself failed,
+# and a broken gate must NEVER be yielded past: yielding on every nonzero code meant a status that
+# crashed on the second pass silently bypassed completion enforcement altogether.
+if [ "$CODE" -eq 1 ] && [ -n "$LOOPING" ]; then
   # Second pass: the host is already continuing because of this hook. Yield, loudly.
   printf 'metareview: yielding after a repeated block — the gate was not satisfied.\n' >&2
   printf '%s' "$OUT" | python3 -c '

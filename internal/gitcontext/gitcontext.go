@@ -308,24 +308,33 @@ func resolveBase(root, requestedBase string) (string, error) {
 		return base, nil
 	}
 	head, _ := git(root, "rev-parse", "HEAD")
-	for _, candidate := range [][]string{
-		{"merge-base", "HEAD", "main"},
-		{"merge-base", "HEAD", "master"},
-		{"rev-parse", "HEAD~1"},
-	} {
-		base, err := git(root, candidate...)
+	branch, _ := git(root, "rev-parse", "--abbrev-ref", "HEAD")
+	for _, name := range []string{"main", "master"} {
+		base, err := git(root, "merge-base", "HEAD", name)
 		if err != nil || base == "" {
 			continue
 		}
-		// A base equal to HEAD is an empty range, and an empty range is not "no work" — it is a
-		// question that could not be asked. Standing ON the default branch, `merge-base HEAD main`
-		// returns HEAD itself, so the scope spanned nothing: `status --scope branch` reported no
-		// changed files, blocked:false and exit 0 for committed, unreviewed work, while the same
-		// commit on a feature branch blocked. The fallbacks below were never reached because this
-		// candidate did not fail — it succeeded, uselessly. Keep looking instead.
-		if head != "" && base == head {
-			continue
+		if base != head {
+			return base, nil
 		}
+		// The merge base IS this commit, and the two cases that produce that are opposite.
+		//
+		// Standing ON the default branch, the merge base is useless — it answers "you are where
+		// you are" — and the scope spanned an empty range, so committed unreviewed work on main
+		// reported blocked:false and exit 0 while the identical commit on a feature branch
+		// blocked. Fall through to HEAD~1.
+		//
+		// On a feature branch that has NOT diverged, the same equality is the truth: the branch
+		// genuinely has no commits of its own, and an empty commit range is the correct answer.
+		// Falling through to HEAD~1 there would hand it the default branch's last commit as its
+		// own work, and the hook would block on files the session never touched — which is how a
+		// fix for one empty range becomes a false blocker in the other.
+		if branch == name {
+			break
+		}
+		return base, nil
+	}
+	if base, err := git(root, "rev-parse", "HEAD~1"); err == nil && base != "" {
 		return base, nil
 	}
 	return "", fmt.Errorf("invalid git base: unable to resolve default base")

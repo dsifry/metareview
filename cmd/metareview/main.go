@@ -54,7 +54,7 @@ Usage:
 Commands:
   setup --check              Detect repository mode and prerequisites without writing files
   setup --bootstrap-prereqs  Print or execute prerequisite bootstrap actions
-  status [--json [--target <path>]]
+  status [--json [--target <path> | --scope branch [--base <ref>]]]
                              Print repository review capability status; --json emits the
                              machine-readable contract a host hook branches on (exit 1 when
                              something must be cleared). --target narrows it to one path, so a
