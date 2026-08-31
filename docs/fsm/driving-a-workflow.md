@@ -33,7 +33,7 @@ go to stderr and never carry secrets.
 | `exec` | what the host does |
 |---|---|
 | `inline` | you do it, in this session, with the context you already have — do not delegate it to a sub-agent. `fix` is inline on purpose: the session that discovered the bugs carries the context to fix them. |
-| `subagent` | spawn parallel sub-agents in this session (`lenses: 8` on `discover`) and merge their findings into the recorded output |
+| `subagent` | spawn parallel sub-agents in this session (one sub-agent per review lens on `discover`) and merge their findings into the recorded output |
 | `fork` | the CLI does it: the judge kinds (`match-then-adjudicate`, `still-present`) and `cmd` nodes run inside `advance` — never re-spawn a cold `claude -p` |
 
 ## Exit codes
