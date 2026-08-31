@@ -837,6 +837,26 @@ and fall back to the mutate-a-line pin otherwise. Both ride the same determinist
   reproduction test says the *behavior* is under test; a proven pin says the *added line* is).
 - Evidence: fail-before/pass-after F2P is the identical gate (TDD-Bench-Java §2.1); coverage is an
   unreliable proxy for it (§8); reproduction = "a mutant whose mutation is the real fault" (ACH §5.2).
+- **The tagged wire contract (PR#32-fix — integrate with the pin state/result model):**
+  ```go
+  type DifferentialProof struct {
+      Finding string       // the confirmed finding this proves (the clear key, as Pin.Finding)
+      Kind    string       // "reproduction" | "pin" | "deletion"
+      Test    string       // reproduction/deletion: the committed test id in the reviewed diff
+      Pin     *Pin         // pin: the {File,From,To} mutation (nil otherwise)
+      Deletes *DeletionRef // deletion: the removed-span evidence (nil otherwise)
+  }
+  ```
+  `Delta.Pins`/`Delta.PinResults`/`Snapshot.Unproven` generalise to `DifferentialProof`/`ProofResult`;
+  `ProofResult.Outcome` keeps the four `PinOutcome` values; the `Unproven` clear-by-`Finding` rule is
+  unchanged. A `Pin` is the `Kind:"pin"` case — the existing schema is the fallback branch, not a
+  separate model.
+- **Execution contract for a committed reproduction/deletion test (PR#32-fix):** the test lives in the
+  reviewed diff (§9.3). `prove` (a) checks out the **pre-fix** tree, (b) **overlays only the test file**
+  from the fix commit onto it (production code stays pre-fix), (c) runs the target test — it must
+  **FAIL** with an assertion (not compile/import) error, (d) applies the full fix, (e) re-runs — it
+  must **PASS**. Capture order is fixed: the failing run is on the pre-fix tree with the test
+  overlaid, before any production change.
 
 ### 9.2 Mandatory "fails for the right reason" gate — where the own-file binding MIGRATES (R2)
 
@@ -863,10 +883,23 @@ rewarding the additive Guard-and-Go dodge instead. Fix:
 - **R1 removes the disincentive:** a deletion that fixes a bug has a reproduction test that is
   fail-before/pass-after (the pre-fix tree still has the code → bug reproduces → fail; the post-fix
   tree removed it → pass). The deletion *is* the mutation; no added line needed.
-- **`DeletionRef{File, BlobSHA, ParentSHA}`** — a durable, content-addressed identity for removed
-  code (gone from HEAD, immortal in history). `BlobSHA` is git's content hash of the removed text
-  (byte-stable, idempotent — the deletion analogue of `Pin.ID`). The gate verifies it
-  **deterministically**: the blob exists in `ParentSHA:File` AND is absent from HEAD's `File`.
+- **`DeletionRef` — a whole-file blob PLUS the removed span (PR#32-fix).** The removed text is NOT a
+  git blob (blobs are whole files), so hashing "the removed text" as a blob and verifying it against
+  `ParentSHA:File` was wrong — a legitimate partial deletion would fail while any file edit
+  (including Guard-and-Go) would pass. The evidence is two separate identities:
+  ```go
+  type DeletionRef struct {
+      File      string // repo-relative path the code was removed from
+      ParentSHA string // a commit where the pre-deletion file still exists (durable in history)
+      FileBlob  string // git blob hash of the WHOLE ParentSHA:File — the durable, content-addressed container
+      Removed   string // the exact removed SPAN (the deleted text) — the deletion's own identity
+  }
+  // idempotent deletion id = hash(File + "\x00" + Removed); FileBlob+ParentSHA anchor it in real history
+  ```
+  Deterministic verification: (1) `FileBlob` equals the blob of `ParentSHA:File` (the anchor is a real
+  historical file); (2) `Removed` occurs as a contiguous substring of that file's content (the span
+  really existed there); (3) `Removed` is **absent** from HEAD's `File` (it really was removed). The
+  file blob is the durable container; the span is what was deleted — neither alone proves a deletion.
 - **Encouragement levers:** stop punishing it (R1); post-merge learning **rewards** a class resolved
   by a `DeletionRef` (structural simplification — the inverse of the verbosity flag, 9.7); hand
   **exact deletion spans** in the fix prompt, not prose (R10: spans move models 6.5–31.5 pts, prose
@@ -886,9 +919,14 @@ The dominant real-world failure — fixing a should-be-*deleted* bug by *adding 
 root cause, leaving it live (29% of passing patches; 40.2% of those keep the removed logic as the
 default path). It passes both `pins_proven` (the guard is pinnable) and `classes_enumerated` (the
 reported member is "answered").
-- `classes_enumerated` gains a per-member **removes-vs-guards-around** distinction: when a class's
-  mechanism is a redundant/duplicated structure, a guard-around answer **does not close the class**
-  for its siblings — the gate looks for a `DeletionRef` at the root, not an added guard at each leaf.
+- **Made machine-checkable (PR#32-fix).** `classify` tags each `BugClass` with a `Remedy`
+  (`"structural"` — mechanism is a redundant/wrong structure whose fix is removal — or `"local"`).
+  For a `Remedy:"structural"` class, `classes_enumerated` requires the fix to carry a `DeletionRef`
+  at the class's declared **root site** (a new `BugClass.Root ClassMember` naming the file+span to
+  remove), verified by §9.4. A `fixed` FixInstance that only adds lines and carries no `DeletionRef`
+  for a structural class **does not close it** — the guard-around dodge. A `local`-remedy class is
+  unaffected. So the gate mechanically distinguishes a required deletion from a legitimate guard: the
+  presence of a verified root `DeletionRef` on a `structural` class.
 - Evidence: same paper as 9.4.
 
 ### 9.6 Test-deletion gate — coverage AND mutation non-regression (maintainer-directed)
@@ -901,6 +939,12 @@ deletion is legitimate iff **neither regresses** on the branch diff:
    of lines, blind to deleting the sole *detector* on already-covered lines.
 2. **Mutation-kill non-regression** — no mutant killed before the deletion survives after it. The
    load-bearing half; fills coverage's blind spot (the R8 277/571 finding); reuses the pins' engine.
+   **Mutant identity + deleted-target exclusion (PR#32-fix):** a mutant is identified by
+   `(File, mutated-span-content)`, not a line number, so the killed-set is comparable across the diff.
+   A mutant whose target span was **removed** in the same commit — provable because it is covered by a
+   `DeletionRef` (§9.4) — has no post-change target and is **excluded** from the non-regression set
+   (not a "lost kill"; the code it tested is legitimately gone). Every *other* previously-killed
+   mutant must still be killed — this is what lets a paired code+test deletion pass.
 
 Layered (each closes the prior's blind spot, attack surface shrinks each layer): **coverage →
 mutation → right-reason (9.2)**. Reconciliation: we reject coverage as a *proof of fix* (9.8) but

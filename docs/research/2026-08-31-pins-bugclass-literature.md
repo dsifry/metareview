@@ -6,10 +6,13 @@ This note is the evidence trail from a deep read of the recent (2025–26) liter
 parallel deep-read subagents (full-text reads, not skims), used to approve or revise the design.
 
 Reading discipline: each subagent was told a **clean discard is as valuable as a finding**, and to
-cite an exact quote + section + URL so a human can verify the source directly. Two WebFetch
-*summarizer* hallucinations were caught and re-derived from raw text (a fake "Opus 4.8" stat →
-Opus-4.5; a mis-attributed 28.6→0.6 number). Treat quotes as high-fidelity paraphrase; raw extracts
-were saved under the session scratchpad at read time.
+cite an exact quote + section + URL so a human can verify the source directly. **Provenance of the
+extracts below:** most were pulled by WebFetch's summarizer from the arXiv HTML/PDF; text in
+"double quotes" tracks the source closely but is summarizer-mediated, so **verify verbatim wording
+against the cited section before quoting it externally**. Two summarizer errors were caught and
+re-derived from raw text: a fabricated "Opus 4.8" stat (actually Opus-4.5) and a mis-attributed
+28.6→0.6 number (actually 28.57→0.56, from The Verification Horizon). The one figure triple-confirmed
+(two fetches + a search) is 28.57%→0.56%.
 
 ---
 
@@ -157,11 +160,14 @@ added line to pin → unproven → the additive Guard-and-Go patch was the pinna
 - **R1 removes the disincentive.** A deletion that fixes a bug has a reproduction test that is
   fail-before / pass-after: the "before" tree still contains the code (bug reproduces → fail), the
   "after" tree has it removed (→ pass). No added line required; the deletion *is* the "mutation."
-- **`DeletionRef` — a durable, content-addressed identity for removed code.** The removed lines are
-  gone from HEAD but immortal in git history. `DeletionRef{File, BlobSHA, ParentSHA}` gives a
-  deletion the same kind of idempotent identity `Pin.ID` gives a fix: `BlobSHA` (git blob hash of the
-  removed content) is content-addressed and byte-stable across machines; the gate verifies the claim
-  **deterministically** — the blob exists in `ParentSHA:File` AND is absent from HEAD's `File`.
+- **`DeletionRef` — a whole-file blob PLUS the removed span (corrected per PR#32 review).** The
+  removed text is NOT a git blob (blobs are whole files), so the deletion evidence is *two* identities:
+  `FileBlob` (git blob hash of the whole `ParentSHA:File` — the durable, content-addressed container)
+  and `Removed` (the exact deleted span — the deletion's own identity; idempotent id =
+  hash(File, Removed)). Deterministic verification: `FileBlob` equals the blob of `ParentSHA:File`;
+  `Removed` occurs as a contiguous substring of that file; `Removed` is absent from HEAD's `File`.
+  (The prior draft hashed "the removed text" as a blob and checked it against the whole-file blob —
+  which a partial deletion fails and any file edit passes; corrected in spec §9.4.)
 - **Composes with Bug.Class.** `classify` finds the data-model class; the right fix simplifies the
   root (a `DeletionRef`), and R4's guard-vs-remove rule rejects the additive dodge.
 - **Encouragement levers:** (1) stop punishing it (R1); (2) post-merge learning rewards a class
