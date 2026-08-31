@@ -1,6 +1,7 @@
 # Spec: Pins & Bug.Class — proof of fix, and defect-class enumeration
 
-Status: **Adversarially converged (7 passes, 2 consecutive dry). PINS: shippable (Ship 1, one ⧗ recall-floor prerequisite). BUG.CLASS: validated path (Ship 2, ⧗ spikes).**
+Status: **Literature-grounded refinements approved (§9, evidence in docs/research/). Re-converging.**
+Prior: adversarially converged (7 passes). PINS: shippable (Ship 1). BUG.CLASS: validated path (Ship 2).
 
 > **Adversarial convergence (2026-08-31):** a 7-pass convergent adversarial-review loop (6 lenses →
 > refute-verify → synthesize per pass) ran over this spec until two consecutive passes found zero
@@ -83,6 +84,8 @@ machine.** Every field below is justified against that bar; simplifications cons
 are marked ✗, accepted ones ✓.
 
 ### 2.1 Pin — a checkable claim that one test holds one line
+
+> **→ Refined by §9 (approved 2026-08-31): a `Pin` is one form of a differential-test artifact; a *reproduction test* is preferred, this mutate-a-line pin is the fallback (§9.1). A deletion is proven the same way and carries a `DeletionRef` (§9.4).** Read §9 as authoritative where it conflicts with the text below.
 
 ```go
 type Pin struct {
@@ -315,6 +318,8 @@ Bug.Class — there is **no** interim where the fix agent groups its own classes
    clears only on validated member resolution.
 
 ### 3.1 Pins / prove (the deterministic sandwich)
+
+> **→ Refined by §9 (approved 2026-08-31): `prove` is ONE differential-test gate — reproduction test preferred, pin fallback (§9.1) — plus a mandatory *fails-for-the-right-reason* gate (§9.2, where the own-file binding migrates) and self-validating-loop anti-gaming (§9.3).** Read §9 as authoritative where it conflicts with the text below.
 
 ```
 … → fix ──[commit_exists]──> prove ──[pins_proven]──> verify → …
@@ -641,6 +646,8 @@ to the first real round that actually approaches it (none of the 10 logged runs 
 
 ### 4.6 Safety valves & dead-end analysis (the loop must never be unable to proceed)
 
+> **→ Refined by §9 (approved 2026-08-31): deletion is no longer a valve-skip — it is a first-class, provable, *encouraged* fix (§9.4), the additive Guard-and-Go dodge is rejected (§9.5), and test deletion is policed by coverage AND mutation non-regression (§9.6).** Read §9 as authoritative where it conflicts with the text below.
+
 Design rule, from the maintainer's steer: **strict gates are fine; a gate with no reachable exit is
 not.** A blocking gate is acceptable when the actor can always *either* fix the thing *or* pull a
 valve. A gate that can block with no possible resolution is a **dead-end** — a bug, fixed here. A
@@ -667,6 +674,8 @@ carry a **tighten-if-abused** note rather than a hard fix now.
 ---
 
 ## 5. Spikes
+
+> **→ Refined by §9 (approved 2026-08-31): finding-identity KEEPS the deterministic lexical `(file, normalized-text)` key — NOT embeddings (§9.8); the recall floor is set empirically, bucketing out the unsolvable same-fault/different-symptom class.** Read §9 as authoritative where it conflicts with the text below.
 
 **Done (this spec is built on them):**
 - Pins closed a full proved loop end-to-end — the model works. ✓
@@ -804,3 +813,199 @@ Run the new loop on those pre-fix states; if `classify` groups the class and `re
 
 ### Falsifiable success/failure.
 Succeeded iff, on real runs vs the control arm: silent-regression re-discovery → ~0, sibling-recurrence ≤ ½ control, convergence in fewer rounds, guardrails never regress, cost bounded. **Failed** — reconsider, don't patch — if recurrence doesn't fall, or if a guardrail had to be loosened to keep the loop moving.
+
+---
+
+## 9. Literature-grounded refinements (APPROVED 2026-08-31)
+
+> **Altitude (added after PR#32 review).** §9 states design-level **requirements and contracts** and
+> **defers exact enforcement algorithms to build-time** (marked ⧗) — the git-object verification, the
+> mutant-identity scheme, and the schema-decode invariants are settled by code + tests, not by prose.
+> Two review rounds showed that specifying those algorithms in prose reliably introduces subtle
+> errors; the honest boundary is: *what must be true* here, *how it is checked* at build.
+
+These are approved from a deep read of the 2025–26 literature (full evidence + citations:
+`docs/research/2026-08-31-pins-bugclass-literature.md`). Where a refinement conflicts with earlier
+prose, **this section wins**; the earlier text is superseded and will be reconciled. Each carries a
+one-line evidence pointer; the research note has the exact quotes, sections, and URLs.
+
+### 9.1 `prove` is ONE differential-test gate; a reproduction test is preferred, the mutate-a-line pin is the fallback (R1)
+
+A reproduction test and a pin are the same gate — "a test that changes outcome across two
+tree-states" — differing only in the "mutation": a reproduction test uses the **real fault**
+(fail on the pre-fix tree, pass on the post-fix tree); a pin uses a **synthetic** one (fail on the
+mutated line, pass on restore). **Prefer the reproduction test when a real failing input can be
+constructed** — it strictly dominates, because it also proves the assertion targets the finding —
+and fall back to the mutate-a-line pin otherwise. Both ride the same deterministic machinery.
+- *Supersedes:* §2.1 (`Pin` becomes one form of a differential-test artifact — a `{test, target}`
+  reproduction test OR a `{File,From,To}` pin), §3.1 (the own-file-binding apparatus is retired for
+  the reproduction form — see 9.2 for where it migrates), and the honest-claim text (now: a proven
+  reproduction test says the *behavior* is under test; a proven pin says the *added line* is).
+- Evidence: fail-before/pass-after F2P is the identical gate (TDD-Bench-Java §2.1); coverage is an
+  unreliable proxy for it (§8); reproduction = "a mutant whose mutation is the real fault" (ACH §5.2).
+- **The tagged wire contract (PR#32-fix — integrate with the pin state/result model):**
+
+  ```go
+  type DifferentialProof struct {
+      ID      string       // idempotent content hash of the proof — the reference/override key (was Pin.ID)
+      Finding string       // the confirmed finding this proves (the clear key, as Pin.Finding)
+      Kind    string       // "reproduction" | "pin" | "deletion"
+      Test    string       // reproduction/deletion: the committed test id in the reviewed diff
+      Pin     *Pin         // set iff Kind=="pin"    (exactly one of Pin/Deletes per Kind)
+      Deletes *DeletionRef // set iff Kind=="deletion"
+  }
+  ```
+
+  **One-of invariant (PR#32 review):** exactly one shape is populated for each `Kind` —
+  `Kind=="pin"` ⇒ `Pin` set, `Deletes` nil; `Kind=="deletion"` ⇒ `Deletes` set, `Pin` nil;
+  `Kind=="reproduction"` ⇒ both nil (the `Test` is the whole artifact). ⧗ *Build-time:* enforced at
+  decode (a malformed record is rejected, not silently accepted). **Override/`unverifiable` key
+  (PR#32 fix):** now `DifferentialProof.ID`, NOT `Pin.ID` — `Pin` is nil for reproduction/deletion, so
+  keying on `Pin.ID` would leave those proofs unclearable. `Delta.Pins`/`PinResults`/`Snapshot.Unproven`
+  generalise to `DifferentialProof`/`ProofResult`; the four `PinOutcome` values and the clear-by-
+  `Finding` rule are unchanged; a `Pin` is the `Kind:"pin"` case, not a separate model.
+- **Execution contract for a committed reproduction/deletion test (PR#32-fix):** the test lives in the
+  reviewed diff (§9.3). `prove` (a) checks out the **pre-fix** tree, (b) **overlays only the test file**
+  from the fix commit onto it — **all test-only files the fix adds or changes** (helpers included),
+  never production code — (c) runs the target test — it must **FAIL** with an assertion (not
+  compile/import) error, (d) applies the full fix, (e) re-runs — it must **PASS**. Capture order is
+  fixed: the failing run is on the pre-fix tree with the test files overlaid, before any production
+  change. ⧗ Build-time: the test-vs-production file partition is a determinable contract (test paths /
+  package membership), with a case for a fix whose test needs a new helper.
+
+### 9.2 Mandatory "fails for the right reason" gate — where the own-file binding MIGRATES (R2)
+
+Bare fail→pass is insufficient: the pre-fix failure must be **the finding's own symptom**, not an
+unrelated error. After the mechanical differential check, an LLM judge confirms the pre-fix failure
+matches the finding (assertion/exception/reported symptom). LLM-judged ⇒ **advisory-blocking**
+(NEEDS_REVISION), never a hard deterministic PASS. This is the reproduction-form reincarnation of the
+own-file binding — it is what stops the agent proving an unrelated behavior.
+- Evidence: ablating this gate dropped F2P 56.88%→18.84% (ReProAgent).
+
+### 9.3 Anti-gaming for the self-validating loop (R3)
+
+We validate against the agent's own fix (the weak "candidateBRT" bar), which is co-adaptable. Three
+deterministic guards: (a) the test is a **durable committed artifact** in the reviewed diff — it
+cannot be silently deleted (the #1 documented failure — the agent deleted its own test in 77% of
+failure cases); (b) the pre-fix run must be an **assertion failure, not a compile/import error**;
+(c) capture the failing test on the **untouched tree first**.
+- Evidence: Cogeneration §6 (our exact single-agent-emits-fix+test setting).
+
+### 9.4 Deletion as a first-class, provable, ENCOURAGED fix (maintainer-directed)
+
+The original mutate-a-line pin structurally **penalized** deletion (no added line to pin → unproven),
+rewarding the additive Guard-and-Go dodge instead. Fix:
+- **R1 removes the disincentive:** a deletion that fixes a bug has a reproduction test that is
+  fail-before/pass-after (the pre-fix tree still has the code → bug reproduces → fail; the post-fix
+  tree removed it → pass). The deletion *is* the mutation; no added line needed.
+- **`DeletionRef` — a whole-file blob PLUS the removed span (PR#32-fix).** The removed text is NOT a
+  git blob (blobs are whole files), so hashing "the removed text" as a blob and verifying it against
+  `ParentSHA:File` was wrong — a legitimate partial deletion would fail while any file edit
+  (including Guard-and-Go) would pass. The evidence is two separate identities:
+
+  ```go
+  type DeletionRef struct {
+      File      string // repo-relative path the code was removed from
+      ParentSHA string // a commit where the pre-deletion file still exists (durable in history)
+      FileBlob  string // git blob hash of the WHOLE ParentSHA:File — the durable, content-addressed container
+      Removed   string // the exact removed SPAN (the deleted text) — the deletion's own identity
+  }
+  // idempotent deletion id = hash(File + "\x00" + Removed); FileBlob+ParentSHA anchor it in real history
+  ```
+
+  **What proves a deletion (PR#32 round 2): the REVIEWED DIFF, anchored durably — not free-floating
+  history.** Containment-in-some-parent + absent-from-HEAD is necessary but NOT sufficient (a rewrite
+  or an unrelated edit satisfies it). The binding requirement: `ParentSHA` is **this fix commit's
+  parent**, and the commit's own diff for `File` **removes exactly `Removed`** (`Removed` appears as
+  deleted `-` lines in the reviewed change). `FileBlob` (the whole `ParentSHA:File` blob) is the
+  durable, content-addressed anchor so the removed span stays referenceable forever; `Removed` is the
+  deletion's identity. ⧗ *Build-time contract:* the exact diff-parse + containment + one-match check
+  (and rejecting a same-span reappearance elsewhere in the file) is an implementation task with tests
+  — the requirement is "the reviewed commit deletes this span from this file, anchored at its parent."
+- **Encouragement levers:** stop punishing it (R1); post-merge learning **rewards** a class resolved
+  by a `DeletionRef` (structural simplification — the inverse of the verbosity flag, 9.7); hand
+  **exact deletion spans** in the fix prompt, not prose (R10: spans move models 6.5–31.5 pts, prose
+  does nothing).
+- **Honest limits:** a proven deletion means "removing this fixed the reported bug and broke no
+  *existing* test" — NOT "globally safe" (removal risk is in *untested* behavior); over-deletion
+  (~26%) needs a paired whole-suite scope check.
+- Adversarial: the reproduction test is the behavioral anchor (a bogus `DeletionRef` won't hold F2P);
+  the `DeletionRef` is the durable audit trail. Neither alone.
+- *Supersedes:* §4.2/§4.6 — deletion moves from a "no pinnable change" valve-skip to a first-class
+  provable fix.
+- Evidence: additive bias is large and named (*To Add Is Machine, To Delete Is Human*).
+
+### 9.5 Guard-and-Go: reject the additive dodge of a required deletion (R4)
+
+The dominant real-world failure — fixing a should-be-*deleted* bug by *adding a guard* around the
+root cause, leaving it live (29% of passing patches; 40.2% of those keep the removed logic as the
+default path). It passes both `pins_proven` (the guard is pinnable) and `classes_enumerated` (the
+reported member is "answered").
+- **Made machine-checkable (PR#32-fix).** `classify` tags each `BugClass` with a `Remedy`
+  (`"structural"` — mechanism is a redundant/wrong structure whose fix is removal — or `"local"`).
+  For a `Remedy:"structural"` class, `classify` declares the **root** as a `BugClass.Root
+  struct{ File string; Span string }` (a `ClassMember` has no span field — PR#32 fix), and
+  `classes_enumerated` requires a fix `DeletionRef` whose `File`==`Root.File` and whose `Removed`
+  contains `Root.Span`, verified by §9.4. A `fixed` FixInstance that only adds lines and carries no
+  matching root `DeletionRef` **does not close** a structural class — the guard-around dodge. A
+  `local`-remedy class is unaffected. The match (`DeletionRef` ↔ `Root`) is the machine-checkable
+  relation; ⧗ its exact form (equality + containment) is a build-time contract.
+- Evidence: same paper as 9.4.
+
+### 9.6 Test-deletion gate — coverage AND mutation non-regression (maintainer-directed)
+
+Deleting a **test** is a first-class reward-hack; a green suite afterward proves nothing. A test
+deletion is legitimate iff **neither regresses** on the branch diff:
+1. **Coverage non-regression** — the deleted test's production coverage is subsumed by remaining
+   tests (or the covered code was deleted in the same commit). Coverage is **necessary but not
+   sufficient**: it measures *execution*, not *assertion* — it catches deleting the sole *exerciser*
+   of lines, blind to deleting the sole *detector* on already-covered lines.
+2. **Mutation-kill non-regression** — no mutant killed before the deletion survives after it. The
+   load-bearing half; fills coverage's blind spot (the R8 277/571 finding); reuses the pins' engine.
+   **Mutant identity + deleted-target exclusion (PR#32, round 2):** a mutant needs a **unique,
+   stable id across the diff** — `(File, mutated-span-content)` alone collides when the same content
+   recurs or two operators hit one span, so the id must also fold in the site and operator. ⧗ The
+   exact scheme (e.g. `(File, normalized-site, operator, span)`) is a build-time contract with a
+   collision test. A mutant whose target span was **removed** in the same commit — provable because
+   it lies within a fix `DeletionRef`'s `Removed` (§9.4) — has no post-change target and is
+   **excluded** from the non-regression set (not a "lost kill"; the code it tested is legitimately
+   gone). Every *other* previously-killed mutant must still be killed — this is what lets a paired
+   code+test deletion pass.
+
+Layered (each closes the prior's blind spot, attack surface shrinks each layer): **coverage →
+mutation → right-reason (9.2)**. Reconciliation: we reject coverage as a *proof of fix* (9.8) but
+embrace it as a *necessary guard against test-deletion gaming* — used where necessary, not relied on
+where insufficient. A test deleted because its code was deleted is the legitimate paired case,
+accounted by one `DeletionRef` and proven safe by the two non-regressions.
+- Evidence: coverage ≪ mutation for fault detection (277/571, ACH §1); test-oracle tampering as a
+  named hack (Verification Horizon).
+
+### 9.7 Trajectory monitor — watch HOW the fix was produced, not just the end state (R5)
+
+Our final-state gates are blind to a whole hack class (test-oracle/harness tampering, answer-lookup,
+whitespace-touch). Add a monitor over the fix agent's action log — flag whitespace/comment-only
+"changes," edits to the oracle/harness within the proving trajectory, answer-lookup
+(git-history/PR/upstream-diff/network fetches), and self-served overrides. Feed newly-seen patterns
+back from post-merge recurrence — the co-evolution loop the literature says is mandatory.
+- Evidence: a trajectory monitor drove hacked-resolved 28.57%→0.56% (Verification Horizon); **caveat:
+  that magnitude is a training-time penalty — the signal transfers to an inference gate, the number
+  does not.**
+
+### 9.8 Smaller, evidence-backed
+
+- **Finding-identity: KEEP the lexical `(file, normalized-text)` key (R6) — do NOT switch to
+  embeddings.** A tuned lexical method beat deep-embeddings by 22.3% Recall@10, and embeddings are
+  *non-deterministic* across runs — fatal for a *stable id*. Embeddings only as advisory suggestions,
+  never the id. Recall floor set empirically, bucketing out the "same fault, different symptom" class
+  (unsolvable by any content method). *Supersedes §5's implication that embeddings are the answer.*
+- **Reject trivial pins (R7):** comment/whitespace/dead-code pins are rejected by the break step;
+  add explicit reject-tests + a cheap AST pre-screen before the expensive test run.
+- **Cite 277/571 (R8)** as the external validation for rejecting line-coverage as proof-of-fix.
+- **Verbosity/convention dimension in "acceptable" (R9):** a fix materially larger than the minimal
+  change (Guard-and-Go median 1.67×) is flagged. Exact merge-rate is in Whitfill et al. 2026 (cited,
+  not fetched) — a gap, not invented.
+- **"Machine-generated vs agent-declared pin" is the wrong axis:** LLM mutants are quantifiably
+  worse-formed, so the deterministic *gate* is the authority, not the generator — keep pins
+  agent-declared.
+- **"No silver bullet" (R11)** ratifies the honest-limits stance (a pin proves a line/behavior under
+  test, not correctness — an undecidable property) and endorses the layered, co-evolving defense.
