@@ -309,7 +309,7 @@ func pluginRoot(home string) string {
 		for _, m := range matches {
 			// It must be METAREVIEW's manifest, not any plugin that happens to register a Stop
 			// hook: another plugin's gate says nothing about whether this one runs.
-			if ours, _ := stopHookCommands(m); ours {
+			if ours, _ := stopHookCommands(m, filepath.Dir(filepath.Dir(m))); ours {
 				return filepath.Dir(filepath.Dir(m))
 			}
 		}

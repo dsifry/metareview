@@ -59,7 +59,7 @@ func enforcementStatus(root, home, pluginRoot string) EnforcementStatus {
 	// installation this project ships and the one the settings files can say nothing about.
 	if pluginRoot != "" {
 		manifest := filepath.Join(pluginRoot, "hooks", "hooks.json")
-		if ours, _ := stopHookCommands(manifest); ours {
+		if ours, _ := stopHookCommands(manifest, pluginRoot); ours {
 			s.Active, s.Source, s.Plugin = true, manifest, manifest
 			scriptRoot = pluginRoot
 		}
@@ -72,7 +72,7 @@ func enforcementStatus(root, home, pluginRoot string) EnforcementStatus {
 		if s.Active {
 			break
 		}
-		ours, foreign := stopHookCommands(path)
+		ours, foreign := stopHookCommands(path, root, pluginRoot)
 		if ours {
 			s.Active, s.Source = true, path
 			break
@@ -111,7 +111,7 @@ func enforcementStatus(root, home, pluginRoot string) EnforcementStatus {
 // A command counts as ours if it invokes the hook script or the binary by name. That is a
 // heuristic, and it is deliberately reported rather than assumed: an unrecognised Stop hook
 // becomes Foreign, not Active.
-func stopHookCommands(path string) (ours bool, foreign string) {
+func stopHookCommands(path string, roots ...string) (ours bool, foreign string) {
 	data, err := os.ReadFile(path) // #nosec G304 -- a settings path this package constructs
 	if err != nil {
 		return false, ""
@@ -133,7 +133,7 @@ func stopHookCommands(path string) (ours bool, foreign string) {
 			if cmd == "" {
 				continue
 			}
-			if isOurs(cmd) {
+			if isOurs(cmd, roots...) {
 				return true, ""
 			}
 			if foreign == "" {
@@ -144,28 +144,48 @@ func stopHookCommands(path string) (ours bool, foreign string) {
 	return false, foreign
 }
 
-// isOurs reports whether a Stop-hook command runs metareview's gate.
+// isOurs reports whether a Stop-hook command runs metareview's gate, given the roots this check
+// is willing to accept a script from.
 //
-// The first version asked whether the command CONTAINED "metareview" anywhere, which any absolute
-// path under a directory of that name satisfies — a checkout at ~/src/metareview/ would have
-// certified a formatter's hook. It matches on whole path components now: a token whose base name
-// is the metareview binary, or that ends in the hook script this repository ships.
-func isOurs(cmd string) bool {
+// Two narrowings, each closing a way the previous version certified somebody else's hook:
+//
+//   - The script must be at hooks/pre-finish.sh, not merely named pre-finish.sh. A bare basename
+//     match meant `/tmp/pre-finish.sh` — or `echo pre-finish.sh` — reported a foreign Stop hook as
+//     metareview's enforcement.
+//   - And it must live under a root this check actually knows: the repository being reviewed, the
+//     plugin installation, or behind the host variables that expand to exactly those two. A path
+//     that satisfies neither is a script this check cannot vouch for, and vouching for it is the
+//     whole failure this function exists to prevent.
+//
+// The binary is accepted only as the PROGRAM being run, for the same reason: scanning every token
+// let `echo 'metareview is great'` through.
+func isOurs(cmd string, roots ...string) bool {
 	fields := strings.Fields(cmd)
 	clean := func(t string) string {
-		return path.Base(filepath.ToSlash(strings.Trim(t, "\"'`)")))
+		return filepath.ToSlash(strings.Trim(t, "\"'`)"))
 	}
-	// The hook script, invoked however: directly, or through an interpreter.
 	for _, tok := range fields {
-		if clean(tok) == "pre-finish.sh" {
+		p := clean(tok)
+		if !strings.HasSuffix(p, "/hooks/pre-finish.sh") && p != "hooks/pre-finish.sh" {
+			continue
+		}
+		prefix := strings.TrimSuffix(p, "/hooks/pre-finish.sh")
+		switch prefix {
+		case "$CLAUDE_PROJECT_DIR", "${CLAUDE_PROJECT_DIR}",
+			"$CLAUDE_PLUGIN_ROOT", "${CLAUDE_PLUGIN_ROOT}",
+			"", ".":
+			// The host variables expand to exactly the roots below, and a relative path is
+			// resolved by the host against the project it is registered in.
 			return true
 		}
+		for _, r := range roots {
+			if r != "" && prefix == filepath.ToSlash(r) {
+				return true
+			}
+		}
 	}
-	// The binary, but only as the PROGRAM being run. Scanning every token for it made
-	// `echo 'metareview is great'` certify the gate, which is the same substring mistake one
-	// level in.
 	if len(fields) > 0 {
-		switch clean(fields[0]) {
+		switch path.Base(clean(fields[0])) {
 		case "metareview", "metareview.exe":
 			return true
 		}

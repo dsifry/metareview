@@ -490,8 +490,16 @@ func TestResolveBaseAbortsOnAStalledGit(t *testing.T) {
 	// fell through to HEAD~1 and only the last guard caught it. The first version of this test
 	// asserted only errors.Is(ErrTimeout), which the downstream guard satisfies either way, so it
 	// passed with the abort removed.
-	if !strings.Contains(err.Error(), "merge-base") {
-		t.Errorf("resolution continued past the stalled candidate: %v", err)
+	// The FIRST git call in the function is `rev-parse HEAD`, so that is where a stall must stop
+	// it. Naming the command is the only signal that separates "aborted here" from "kept going
+	// and something later caught it" — see the note above.
+	// `rev-parse HEAD` is the FIRST git call in the function, so that is where a stall must stop
+	// it. The full command is asserted, not just the subcommand: the next call is also a
+	// rev-parse (--abbrev-ref), so "rev-parse" alone cannot tell "aborted at the first" from
+	// "kept going and the second caught it" — which is exactly how the earlier version of this
+	// assertion passed with the guard removed.
+	if !strings.Contains(err.Error(), "rev-parse HEAD after") {
+		t.Errorf("resolution continued past the first stalled call: %v", err)
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("resolution took %s, far beyond a nanosecond deadline", elapsed)

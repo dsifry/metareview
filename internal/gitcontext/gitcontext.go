@@ -310,8 +310,19 @@ func resolveBase(root, requestedBase string) (string, error) {
 		}
 		return base, nil
 	}
-	head, _ := git(root, "rev-parse", "HEAD")
-	branch, _ := git(root, "rev-parse", "--abbrev-ref", "HEAD")
+	// These two run BEFORE the loop, and discarding their errors undid the guard below twice
+	// over: a stuck git burned two more full deadlines before the abort could fire, and — worse —
+	// a timed-out `rev-parse HEAD` left head empty, so `base != head` was trivially true and
+	// standing on the default branch resolved to an empty range again. The bug the empty-range
+	// check exists to prevent, restored by the very stall the deadline exists to catch.
+	head, err := git(root, "rev-parse", "HEAD")
+	if errors.Is(err, ErrTimeout) {
+		return "", err
+	}
+	branch, err := git(root, "rev-parse", "--abbrev-ref", "HEAD")
+	if errors.Is(err, ErrTimeout) {
+		return "", err
+	}
 	for _, name := range []string{"main", "master"} {
 		base, err := git(root, "merge-base", "HEAD", name)
 		if errors.Is(err, ErrTimeout) {
@@ -429,7 +440,10 @@ func git(root string, args ...string) (string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
-		return "", fmt.Errorf("git %s after %s: %w", args[0], Deadline, ErrTimeout)
+		// The FULL command, not just args[0]. Two different calls here are both `rev-parse`, so
+		// the subcommand alone cannot say which one stalled — for an operator reading the message
+		// or a test distinguishing "aborted at the first call" from "kept going".
+		return "", fmt.Errorf("git %s after %s: %w", strings.Join(args, " "), Deadline, ErrTimeout)
 	}
 	if err != nil {
 		message := strings.TrimSpace(stderr.String())

@@ -207,18 +207,28 @@ func TestAPluginInstallCountsAsEnforcement(t *testing.T) {
 // name — and this project is developed in ~/Developer/metareview, so a formatter's Stop hook in
 // this very checkout would have certified the gate as active.
 func TestOnlyMetareviewsOwnCommandCertifiesTheGate(t *testing.T) {
+	const repoRoot = "/Users/dev/project"
 	for cmd, want := range map[string]bool{
-		"$CLAUDE_PROJECT_DIR/hooks/pre-finish.sh":   true,
-		"${CLAUDE_PLUGIN_ROOT}/hooks/pre-finish.sh": true,
-		"/usr/local/bin/metareview status --json":   true,
-		"metareview status --json":                  true,
+		"$CLAUDE_PROJECT_DIR/hooks/pre-finish.sh":     true,
+		"${CLAUDE_PLUGIN_ROOT}/hooks/pre-finish.sh":   true,
+		"/usr/local/bin/metareview status --json":     true,
+		"metareview status --json":                    true,
+		"bash /Users/dev/project/hooks/pre-finish.sh": true,
 		// The trap: a command that merely lives under a directory called metareview.
 		"/Users/dev/Developer/metareview/node_modules/.bin/prettier --write .": false,
 		"npx prettier --write .":     false,
 		"echo 'metareview is great'": false,
 		"":                           false,
+		// Named like ours, belonging to nobody we know. Matching the basename alone meant any of
+		// these certified a foreign Stop hook as metareview's enforcement — the failure this
+		// function exists to prevent, reached through the fix for it.
+		"/tmp/pre-finish.sh":               false,
+		"echo pre-finish.sh":               false,
+		"/opt/other/hooks/pre-finish.sh":   false,
+		"bash /tmp/evil/pre-finish.sh":     false,
+		"/tmp/hooks/pre-finish.sh --quiet": false,
 	} {
-		if got := isOurs(cmd); got != want {
+		if got := isOurs(cmd, repoRoot); got != want {
 			t.Errorf("isOurs(%q) = %v, want %v", cmd, got, want)
 		}
 	}
