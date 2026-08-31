@@ -294,14 +294,14 @@ makes the judgement checkable: `classes_sound` (every member is a confirmed find
 dressed as classes) after classify, and `classes_enumerated` (each `fixed` instance is in the diff)
 after fix.
 
-**Two-step rollout of the placement** (matches §6):
-1. **Near-term (steps 4–5):** *no classify node yet.* The `fix` agent groups, forced by
-   `require_classes`; dedup already runs in the fold. This forces the enumeration step immediately,
-   but the fix agent can only group what it was handed.
-2. **Structural (step 6):** *add the classify node.* The grouping judgement moves **upstream** to a
-   node that sees the entire confirmed set at the barrier — including instances the fix agent would
-   never have been shown. Same reason the whole design exists: the one who fixes has the instance
+**Rollout of the placement** (matches §6): `classify` is present from the FIRST shipped version of
+Bug.Class — there is **no** interim where the fix agent groups its own classes (§3.2 invariant 4).
+1. **Step 4:** *add the `classify` node* (stateful over open `Snapshot.Classes`). The grouping
+   judgement lives **upstream**, in a node that sees the entire confirmed set at the barrier —
+   including instances the fix agent would never have been shown. The one who fixes has the instance
    blind spot, so the class call is made before the work reaches them, not by them.
+2. **Step 5:** `require_classes` + `classes_enumerated` with the own-location member check; a class
+   clears only on validated member resolution.
 
 ### 3.1 Pins / prove (the deterministic sandwich)
 
@@ -525,11 +525,13 @@ truncating a class member. Verified against the code, that was wrong on three co
 - The fold **replaces** findings wholesale (`fold.go:13-14`); there is no cross-lens accumulation to
   dedup at fold time.
 - Adjudicate **already** dedups confirmed candidates. NOTE (PR#30-CR): the existing `dedupCandidates`
-  keys on exact issue text ALONE, so two real findings with identical text in different files collapse
-  — dropping a class member before `classify` sees it. The dedup key must include the **authoritative
-  site**: `(file, line-region, normalized-text)` — file alone still collapses two identical-text
-  findings at different lines in one file (PR#30-CR). Small correction to the existing dedup, not a
-  new layer; regression case: identical text at two different sites must NOT collapse. `classify` consumes the (correctly) deduped confirmed set.
+  keys on exact issue text ALONE, so two real findings with identical text in **different files**
+  collapse — dropping a class member before `classify` sees it. The fix is to add the file to the
+  key: `(file, normalized-text)`, **NO region bucketing** — the spike (§4.4/§5) reproduced the 24→8
+  collapse with exactly this key, while line-region buckets split true duplicates and made it *worse*
+  (24→11). Small correction to the existing dedup, not a new layer. Regression case: identical text
+  in two **different files** must NOT collapse; identical text at two lines *within one file* is a
+  true duplicate and DOES collapse (per §4.4/§5). `classify` consumes the deduped confirmed set.
 - There is **no truncating 100-cap**. The only hard limit is `MaxDeltaList=256` (`kind.go:200`), a
   *reject*, not a truncate. A round producing >256 findings fails loudly (the whole delta is
   refused) — a real but visible backstop, not a silent class-hider.
@@ -661,8 +663,8 @@ door — gate it.
 
 **Prerequisite ⧗ (PR#30-CR):** cross-round-stable finding identity. `Unproven`'s clear/re-add keys on
 `Pin.Finding`, so a re-discovered finding that got a *new* id would never clear its old gap — PINS is
-not self-contained without it. The spike **de-risked** it (§5: `(file, line-region, normalized-text)`
-gave 0% false-merge over 611 findings — that is the *precision* that matters here; the 66% figure is
+not self-contained without it. The spike **de-risked** it (§5: `(file, normalized-text)` — the SAME key as the dedup (§3.3),
+no region bucketing — gave 0% false-merge over 611 findings — that is the *precision* that matters here; the 66% figure is
 recurrence rate, not the identity invariant), but the algorithm is **not yet frozen**: Ship 1 must
 define and freeze it with an acceptance threshold (precision floor + a same-text/different-site
 regression) before PINS can claim self-containment. It is a Ship-1 task, spike-validated but open —
