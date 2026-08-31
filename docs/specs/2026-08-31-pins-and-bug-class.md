@@ -85,6 +85,8 @@ are marked ✗, accepted ones ✓.
 
 ### 2.1 Pin — a checkable claim that one test holds one line
 
+> **→ Refined by §9 (approved 2026-08-31): a `Pin` is one form of a differential-test artifact; a *reproduction test* is preferred, this mutate-a-line pin is the fallback (§9.1). A deletion is proven the same way and carries a `DeletionRef` (§9.4).** Read §9 as authoritative where it conflicts with the text below.
+
 ```go
 type Pin struct {
     ID      string `json:"id"`      // idempotent content hash of {Finding,File,From,To} — the reference/override key
@@ -316,6 +318,8 @@ Bug.Class — there is **no** interim where the fix agent groups its own classes
    clears only on validated member resolution.
 
 ### 3.1 Pins / prove (the deterministic sandwich)
+
+> **→ Refined by §9 (approved 2026-08-31): `prove` is ONE differential-test gate — reproduction test preferred, pin fallback (§9.1) — plus a mandatory *fails-for-the-right-reason* gate (§9.2, where the own-file binding migrates) and self-validating-loop anti-gaming (§9.3).** Read §9 as authoritative where it conflicts with the text below.
 
 ```
 … → fix ──[commit_exists]──> prove ──[pins_proven]──> verify → …
@@ -642,6 +646,8 @@ to the first real round that actually approaches it (none of the 10 logged runs 
 
 ### 4.6 Safety valves & dead-end analysis (the loop must never be unable to proceed)
 
+> **→ Refined by §9 (approved 2026-08-31): deletion is no longer a valve-skip — it is a first-class, provable, *encouraged* fix (§9.4), the additive Guard-and-Go dodge is rejected (§9.5), and test deletion is policed by coverage AND mutation non-regression (§9.6).** Read §9 as authoritative where it conflicts with the text below.
+
 Design rule, from the maintainer's steer: **strict gates are fine; a gate with no reachable exit is
 not.** A blocking gate is acceptable when the actor can always *either* fix the thing *or* pull a
 valve. A gate that can block with no possible resolution is a **dead-end** — a bug, fixed here. A
@@ -668,6 +674,8 @@ carry a **tighten-if-abused** note rather than a hard fix now.
 ---
 
 ## 5. Spikes
+
+> **→ Refined by §9 (approved 2026-08-31): finding-identity KEEPS the deterministic lexical `(file, normalized-text)` key — NOT embeddings (§9.8); the recall floor is set empirically, bucketing out the unsolvable same-fault/different-symptom class.** Read §9 as authoritative where it conflicts with the text below.
 
 **Done (this spec is built on them):**
 - Pins closed a full proved loop end-to-end — the model works. ✓
