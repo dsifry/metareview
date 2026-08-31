@@ -171,8 +171,13 @@ func isOursScoped(cmd string, allowProject bool, roots ...string) bool {
 	if len(fields) == 0 {
 		return false
 	}
+	// Quotes are STRIPPED throughout, not just trimmed from the ends. A shell-form command like
+	// `bash "${CLAUDE_PLUGIN_ROOT}"/hooks/pre-finish.sh` concatenates a quoted variable to an
+	// unquoted path, so strings.Fields yields one token with an embedded quote that a
+	// trim-the-ends clean left in the middle — and the prefix then failed to match the variable.
 	clean := func(t string) string {
-		return filepath.ToSlash(strings.Trim(t, "\"'`)"))
+		t = strings.NewReplacer(`"`, "", "'", "", "`", "", ")", "").Replace(t)
+		return filepath.ToSlash(t)
 	}
 
 	// The tokens that are actually EXECUTED, not every argument. The program is always one. If it

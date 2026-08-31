@@ -214,6 +214,12 @@ func TestOnlyMetareviewsOwnCommandCertifiesTheGate(t *testing.T) {
 		"/usr/local/bin/metareview status --json":     true,
 		"metareview status --json":                    true,
 		"bash /Users/dev/project/hooks/pre-finish.sh": true,
+		// Shell-form command with a quoted variable concatenated to an unquoted path. Fields
+		// yields one token with a quote in the MIDDLE, which trimming only the ends left in place,
+		// so the prefix did not match the variable and a working plugin hook classified as
+		// foreign.
+		`bash "${CLAUDE_PLUGIN_ROOT}"/hooks/pre-finish.sh`: true,
+		`sh '${CLAUDE_PROJECT_DIR}'/hooks/pre-finish.sh`:   true,
 		// The relative forms, which the host resolves against the project it is registered in.
 		// Tightening the check to a path suffix dropped these silently at first: `setup --check`
 		// reported the gate inactive for a registration that does run, which is the same class of
