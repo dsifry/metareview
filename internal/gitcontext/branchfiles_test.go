@@ -2,12 +2,14 @@ package gitcontext
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // repo is a throwaway git repository used by the branch-measurement tests.
@@ -451,5 +453,60 @@ func TestResolveBaseLeavesAnUndivergedBranchEmpty(t *testing.T) {
 	r.commit("third")
 	if got, _ := resolveBase(r.root, ""); got != head {
 		t.Errorf("once it has a commit the base is the branch point %s, got %s", head, got)
+	}
+}
+
+// A stalled git aborts base resolution instead of falling through to the next candidate.
+//
+// resolveBase tries merge-base main, then merge-base master, then HEAD~1, treating any error as
+// "try the next one". A timeout is not "this ref is missing": every candidate would then spend
+// the full deadline, so a stale index.lock held the synchronous Stop gate for three times the
+// bound it was given — and a repository slow enough to time out on `merge-base main` but not on
+// `HEAD~1` would resolve the WRONG base and silently scope the branch to a single commit.
+func TestResolveBaseAbortsOnAStalledGit(t *testing.T) {
+	r := newRepo(t)
+	r.write("a.go", "package p\n")
+	r.git("add", ".")
+	r.commit("second")
+
+	restore := Deadline
+	Deadline = time.Nanosecond
+	start := time.Now()
+	_, err := resolveBase(r.root, "")
+	elapsed := time.Since(start)
+	Deadline = restore
+
+	if err == nil {
+		t.Fatal("a stalled git must fail resolution, not return a guessed base")
+	}
+	if !errors.Is(err, ErrTimeout) {
+		t.Errorf("the error must carry ErrTimeout so callers can tell a stall from a missing ref: %v", err)
+	}
+	// It aborted on the FIRST candidate rather than trying all three.
+	//
+	// Elapsed time cannot show this: the deadline is a nanosecond here, so every attempt returns
+	// instantly and three of them look like one. The error names the command that timed out, and
+	// that is the signal — `merge-base` means it stopped where it should, `rev-parse` means it
+	// fell through to HEAD~1 and only the last guard caught it. The first version of this test
+	// asserted only errors.Is(ErrTimeout), which the downstream guard satisfies either way, so it
+	// passed with the abort removed.
+	// The FIRST git call in the function is `rev-parse HEAD`, so that is where a stall must stop
+	// it. Naming the command is the only signal that separates "aborted here" from "kept going
+	// and something later caught it" — see the note above.
+	// `rev-parse HEAD` is the FIRST git call in the function, so that is where a stall must stop
+	// it. The full command is asserted, not just the subcommand: the next call is also a
+	// rev-parse (--abbrev-ref), so "rev-parse" alone cannot tell "aborted at the first" from
+	// "kept going and the second caught it" — which is exactly how the earlier version of this
+	// assertion passed with the guard removed.
+	if !strings.Contains(err.Error(), "rev-parse HEAD after") {
+		t.Errorf("resolution continued past the first stalled call: %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("resolution took %s, far beyond a nanosecond deadline", elapsed)
+	}
+
+	// An ordinary missing ref is still tolerated, and resolution continues to the fallback.
+	if base, err := resolveBase(r.root, ""); err != nil || base == "" {
+		t.Errorf("an ordinary repository still resolves: %q %v", base, err)
 	}
 }

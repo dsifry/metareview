@@ -3,6 +3,7 @@ package setup
 import (
 	"encoding/json"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -25,6 +26,11 @@ type EnforcementStatus struct {
 	// not enough: a checkout that lost the mode bit (an archive, a copy, a restrictive umask)
 	// reported the script as present while the host could not run it.
 	ScriptPresent bool `json:"scriptPresent"`
+	// Plugin names the plugin manifest that registers the hook, when that is how it is
+	// installed. A correct plugin install writes no settings.json entry at all, so reading only
+	// those files reported active:false and advised the operator to install as a plugin — which
+	// they had already done.
+	Plugin string `json:"pluginManifest,omitempty"`
 	// Foreign records a Stop hook that is registered but is not metareview's. It is reported
 	// rather than counted, because a linter's Stop hook says nothing about whether the review
 	// gate runs, and certifying enforcement on the strength of someone else's hook is the same
@@ -43,16 +49,30 @@ func hookSettingsFiles(root, home string) []string {
 	}
 }
 
-func enforcementStatus(root, home string) EnforcementStatus {
+func enforcementStatus(root, home, pluginRoot string) EnforcementStatus {
 	s := EnforcementStatus{}
+	scriptRoot := root
 	// Executable, not merely present: the host runs this file, and a script it cannot execute
 	// fails exactly like a missing one while reporting as installed.
-	if info, err := os.Stat(filepath.Join(root, "hooks", "pre-finish.sh")); err == nil &&
+	// A plugin install registers through hooks/hooks.json under the PLUGIN root, and its script
+	// lives there too, not in the repository being reviewed. Checked first, because it is the
+	// installation this project ships and the one the settings files can say nothing about.
+	if pluginRoot != "" {
+		manifest := filepath.Join(pluginRoot, "hooks", "hooks.json")
+		if ours, _ := stopHookCommandsScoped(manifest, false, pluginRoot); ours {
+			s.Active, s.Source, s.Plugin = true, manifest, manifest
+			scriptRoot = pluginRoot
+		}
+	}
+	if info, err := os.Stat(filepath.Join(scriptRoot, "hooks", "pre-finish.sh")); err == nil &&
 		info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
 		s.ScriptPresent = true
 	}
 	for _, path := range hookSettingsFiles(root, home) {
-		ours, foreign := stopHookCommands(path)
+		if s.Active {
+			break
+		}
+		ours, foreign := stopHookCommands(path, root, pluginRoot)
 		if ours {
 			s.Active, s.Source = true, path
 			break
@@ -73,7 +93,7 @@ func enforcementStatus(root, home string) EnforcementStatus {
 	}
 	if s.Active && !s.ScriptPresent {
 		// Overwrites the case above deliberately: an unreadable script is the more specific fact.
-		if info, err := os.Stat(filepath.Join(root, "hooks", "pre-finish.sh")); err == nil && info.Mode().IsRegular() {
+		if info, err := os.Stat(filepath.Join(scriptRoot, "hooks", "pre-finish.sh")); err == nil && info.Mode().IsRegular() {
 			s.Remediation = "hooks/pre-finish.sh exists but is not executable, so the host cannot run it and will report a hook error instead of a review verdict. chmod +x hooks/pre-finish.sh."
 		}
 	}
@@ -91,7 +111,11 @@ func enforcementStatus(root, home string) EnforcementStatus {
 // A command counts as ours if it invokes the hook script or the binary by name. That is a
 // heuristic, and it is deliberately reported rather than assumed: an unrecognised Stop hook
 // becomes Foreign, not Active.
-func stopHookCommands(path string) (ours bool, foreign string) {
+func stopHookCommands(path string, roots ...string) (ours bool, foreign string) {
+	return stopHookCommandsScoped(path, true, roots...)
+}
+
+func stopHookCommandsScoped(path string, allowProject bool, roots ...string) (ours bool, foreign string) {
 	data, err := os.ReadFile(path) // #nosec G304 -- a settings path this package constructs
 	if err != nil {
 		return false, ""
@@ -113,7 +137,7 @@ func stopHookCommands(path string) (ours bool, foreign string) {
 			if cmd == "" {
 				continue
 			}
-			if strings.Contains(cmd, "pre-finish.sh") || strings.Contains(cmd, "metareview") {
+			if isOursScoped(cmd, allowProject, roots...) {
 				return true, ""
 			}
 			if foreign == "" {
@@ -122,4 +146,93 @@ func stopHookCommands(path string) (ours bool, foreign string) {
 		}
 	}
 	return false, foreign
+}
+
+// isOurs reports whether a Stop-hook command runs metareview's gate, given the roots this check
+// is willing to accept a script from. allowProject widens acceptance to the project-root forms;
+// the plugin-manifest caller passes false, because a manifest that runs a PROJECT script says
+// nothing about whether the plugin it lives in is metareview's.
+//
+// The command is CLASSIFIED — only the program, or the script operand of a known interpreter, is
+// examined. Scanning every token is what let `echo hooks/pre-finish.sh` and `echo pre-finish.sh`
+// certify a hook that merely prints the path and never runs the gate. The narrowings, each
+// closing a way a previous version certified somebody else's hook:
+//
+//   - The hook script must be at hooks/pre-finish.sh (a path suffix, not a basename), and under a
+//     root this check knows: the accepted roots, the host variables that expand to them, or a
+//     relative path the host resolves against the project.
+//   - The binary is accepted only as the program being run.
+func isOurs(cmd string, roots ...string) bool {
+	return isOursScoped(cmd, true, roots...)
+}
+
+func isOursScoped(cmd string, allowProject bool, roots ...string) bool {
+	fields := strings.Fields(cmd)
+	if len(fields) == 0 {
+		return false
+	}
+	// Quotes are STRIPPED throughout, not just trimmed from the ends. A shell-form command like
+	// `bash "${CLAUDE_PLUGIN_ROOT}"/hooks/pre-finish.sh` concatenates a quoted variable to an
+	// unquoted path, so strings.Fields yields one token with an embedded quote that a
+	// trim-the-ends clean left in the middle — and the prefix then failed to match the variable.
+	clean := func(t string) string {
+		t = strings.NewReplacer(`"`, "", "'", "", "`", "", ")", "").Replace(t)
+		return filepath.ToSlash(t)
+	}
+
+	// The tokens that are actually EXECUTED, not every argument. The program is always one. If it
+	// is a known interpreter, its first non-flag operand is the script it runs; nothing else on
+	// the line is. This is what stops `echo hooks/pre-finish.sh` — echo's argument is data, not a
+	// program, so it is never classified.
+	executed := []string{fields[0]}
+	switch path.Base(clean(fields[0])) {
+	case "bash", "sh", "zsh", "dash":
+		for _, tok := range fields[1:] {
+			if strings.HasPrefix(tok, "-") {
+				continue
+			}
+			executed = append(executed, tok)
+			break
+		}
+	}
+
+	// The binary, as the program.
+	switch path.Base(clean(fields[0])) {
+	case "metareview", "metareview.exe":
+		return true
+	}
+
+	const rel = "hooks/pre-finish.sh"
+	for _, tok := range executed {
+		p := clean(tok)
+		var prefix string
+		switch {
+		case p == rel:
+			prefix = ""
+		// The separator is required, though the TrimSuffix would also refuse a match without one
+		// (its prefix would then match no accepted root). Kept explicit because the two lines
+		// have to agree.
+		case strings.HasSuffix(p, "/"+rel):
+			prefix = strings.TrimSuffix(p, "/"+rel)
+		default:
+			continue
+		}
+		switch prefix {
+		case "$CLAUDE_PLUGIN_ROOT", "${CLAUDE_PLUGIN_ROOT}":
+			return true
+		case "$CLAUDE_PROJECT_DIR", "${CLAUDE_PROJECT_DIR}", "", ".":
+			// The project-root forms: an absolute project variable, or a relative path the host
+			// resolves against the project it is registered in. Refused for plugin-manifest
+			// discovery, where a project script proves nothing about the plugin's identity.
+			if allowProject {
+				return true
+			}
+		}
+		for _, r := range roots {
+			if r != "" && prefix == filepath.ToSlash(r) {
+				return true
+			}
+		}
+	}
+	return false
 }

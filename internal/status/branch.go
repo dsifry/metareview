@@ -1,8 +1,12 @@
 package status
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/reviewlog"
@@ -26,10 +30,33 @@ type BranchScope struct {
 // RunGit is the git seam; nil uses the real binary.
 type RunGit func(root string, args ...string) ([]byte, error)
 
+// gitDeadline bounds this package's own git invocations. gitcontext bounds its own with
+// gitcontext.Deadline, and that is where the stall risk actually is: CollectWithExcludes runs
+// first and does the work that waits on index.lock.
+//
+// gitDeadline bounds a single git invocation.
+//
+// The Stop gate runs SYNCHRONOUSLY: the host waits for it before ending the session. With no
+// deadline, a git subprocess that stalls — a stale index.lock, a filesystem that stops answering,
+// a repository large enough for rev-list to crawl — holds session end for the host's whole command
+// budget, and a hook the host then cancels renders no decision at all. Twenty seconds is far more
+// than rev-list needs on any repository this reviews, and failing fast is safe: ResolveBranchScope
+// treats a git error as an unresolvable scope, which now BLOCKS rather than passing.
+// A var rather than a const so the timeout path itself can be tested: it is the branch that only
+// runs when something has already gone wrong, which is exactly the branch that must not be taken
+// on trust.
+var gitDeadline = 20 * time.Second
+
 func realGit(root string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...) // #nosec G204 -- args are literals and validated refs
+	ctx, cancel := context.WithTimeout(context.Background(), gitDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- args are literals and validated refs
 	cmd.Dir = root
-	return cmd.Output()
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("git %s after %s: %w", args[0], gitDeadline, gitcontext.ErrTimeout)
+	}
+	return out, err
 }
 
 // ResolveBranchScope works out what this branch changed. base may be empty, in which case
@@ -69,8 +96,18 @@ func ResolveBranchScope(root, base string, run RunGit) (BranchScope, error) {
 	// what lets an earlier attempt in the same chain still count.
 	out, err := run(root, "rev-list", "--no-merges", ctx.BaseSHA+".."+ctx.HeadSHA)
 	if err != nil {
+		// A TIMEOUT is not an ordinary rev-list failure. Ordinary failure is tolerated because
 		// rev-list is not the authority on whether the scope is usable — the changed files are,
-		// and they came from gitcontext above.
+		// and they came from gitcontext above. A timeout means git is stalled, so the commit set
+		// is not merely narrow but unknown, and an unknown scope must block rather than quietly
+		// answer with fewer commits than the branch has. Swallowing it made the deadline
+		// decorative: the error was discarded and the caller saw a partial scope with no error,
+		// exactly as if nothing had gone wrong.
+		// The sentinel first; the text as a fallback because RunGit is an exported seam and an
+		// outside implementation cannot be expected to wrap our error type.
+		if errors.Is(err, gitcontext.ErrTimeout) || strings.Contains(err.Error(), "timed out") {
+			return BranchScope{}, err
+		}
 		return s, nil
 	}
 	for _, line := range strings.Fields(string(out)) {

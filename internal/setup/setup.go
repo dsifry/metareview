@@ -98,7 +98,7 @@ func Check(root string, options Options) Report {
 		Files:         base.Files,
 		Prerequisites: prereqs,
 		Install:       InstallStatus{Path: options.ExecutablePath},
-		Enforcement:   enforcementStatus(root, home),
+		Enforcement:   enforcementStatus(root, home, pluginRoot(home)),
 		Standalone: StandaloneReadiness{
 			AdvisoryOnly:             len(missing) > 0,
 			FullMetaswarmReady:       len(missing) == 0,
@@ -271,4 +271,48 @@ func missingFullMetaswarmPrereqs(prereqs Prerequisites) []string {
 func isDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// pluginRoot locates a plugin installation of metareview, when there is one.
+//
+// It does NOT walk up from the executable. That walk asked "is there a hooks/hooks.json above
+// me", which is true in an ordinary source checkout — this repository ships that manifest — so
+// `./bin/metareview setup --check` certified enforcement as active although no host had ever
+// loaded the plugin. Reporting a gate as live because its manifest exists on disk is the same
+// mistake as reporting it live because a script exists on disk, which this check was written to
+// stop.
+//
+// Two things are evidence, and both mean a host really loaded it:
+//
+//   - CLAUDE_PLUGIN_ROOT, which the host sets for a plugin hook.
+//   - An installed plugin under ~/.claude/plugins. The walk never looked there, so a genuine
+//     plugin install combined with a metareview on PATH still reported inactive and advised the
+//     operator to install the plugin they had already installed.
+func pluginRoot(home string) string {
+	if env := strings.TrimSpace(os.Getenv("CLAUDE_PLUGIN_ROOT")); env != "" {
+		return env
+	}
+	if home == "" {
+		return ""
+	}
+	// Installed plugins live one or two levels down (<plugins>/<name> or
+	// <plugins>/<marketplace>/<name>), so both shapes are checked rather than guessing one.
+	base := filepath.Join(home, ".claude", "plugins")
+	for _, pattern := range []string{
+		filepath.Join(base, "*", "hooks", "hooks.json"),
+		filepath.Join(base, "*", "*", "hooks", "hooks.json"),
+	} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			// It must be METAREVIEW's manifest, not any plugin that happens to register a Stop
+			// hook: another plugin's gate says nothing about whether this one runs.
+			if ours, _ := stopHookCommandsScoped(m, false, filepath.Dir(filepath.Dir(m))); ours {
+				return filepath.Dir(filepath.Dir(m))
+			}
+		}
+	}
+	return ""
 }

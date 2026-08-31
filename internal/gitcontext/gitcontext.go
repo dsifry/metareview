@@ -2,6 +2,8 @@ package gitcontext
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -307,10 +310,29 @@ func resolveBase(root, requestedBase string) (string, error) {
 		}
 		return base, nil
 	}
-	head, _ := git(root, "rev-parse", "HEAD")
-	branch, _ := git(root, "rev-parse", "--abbrev-ref", "HEAD")
+	// These two run BEFORE the loop, and discarding their errors undid the guard below twice
+	// over: a stuck git burned two more full deadlines before the abort could fire, and — worse —
+	// a timed-out `rev-parse HEAD` left head empty, so `base != head` was trivially true and
+	// standing on the default branch resolved to an empty range again. The bug the empty-range
+	// check exists to prevent, restored by the very stall the deadline exists to catch.
+	head, err := git(root, "rev-parse", "HEAD")
+	if errors.Is(err, ErrTimeout) {
+		return "", err
+	}
+	branch, err := git(root, "rev-parse", "--abbrev-ref", "HEAD")
+	if errors.Is(err, ErrTimeout) {
+		return "", err
+	}
 	for _, name := range []string{"main", "master"} {
 		base, err := git(root, "merge-base", "HEAD", name)
+		if errors.Is(err, ErrTimeout) {
+			// A stall aborts resolution rather than falling through to the next candidate. Every
+			// candidate would spend the full deadline — three of them, so a stale index.lock held
+			// the synchronous Stop gate for triple the bound it was given — and worse, a repo
+			// slow enough to time out on `merge-base main` but not on `HEAD~1` would resolve the
+			// WRONG base and silently scope the branch to one commit.
+			return "", err
+		}
 		if err != nil || base == "" {
 			continue
 		}
@@ -334,7 +356,11 @@ func resolveBase(root, requestedBase string) (string, error) {
 		}
 		return base, nil
 	}
-	if base, err := git(root, "rev-parse", "HEAD~1"); err == nil && base != "" {
+	base, err := git(root, "rev-parse", "HEAD~1")
+	if errors.Is(err, ErrTimeout) {
+		return "", err
+	}
+	if err == nil && base != "" {
 		return base, nil
 	}
 	return "", fmt.Errorf("invalid git base: unable to resolve default base")
@@ -390,12 +416,35 @@ func hasPrefixFlag(args []string, flag string) bool {
 	return false
 }
 
+// Deadline bounds a single git invocation. Exported as a var so a caller running under a
+// synchronous host hook can shorten it, and so the timeout path can be tested.
+//
+// This package is where the risk actually lives: CollectWithExcludes runs several git commands
+// and is called BEFORE anything else in the branch scope, so these are the calls that sit on a
+// stale index.lock or an unresponsive filesystem. Bounding only the caller's later rev-list left
+// the real stall unbounded while the comment claimed otherwise.
+var Deadline = 20 * time.Second
+
+// ErrTimeout marks a git call that exceeded Deadline. It is a sentinel rather than a message so
+// callers can tell a stalled repository from an ordinary git failure without matching on text:
+// the two demand opposite responses, since an ordinary failure is often worth retrying with
+// another argument and a stall never is.
+var ErrTimeout = errors.New("git timed out")
+
 func git(root string, args ...string) (string, error) {
-	cmd := exec.Command("git", hardenDiff(args)...)
+	ctx, cancel := context.WithTimeout(context.Background(), Deadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", hardenDiff(args)...)
 	cmd.Dir = root
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		// The FULL command, not just args[0]. Two different calls here are both `rev-parse`, so
+		// the subcommand alone cannot say which one stalled — for an operator reading the message
+		// or a test distinguishing "aborted at the first call" from "kept going".
+		return "", fmt.Errorf("git %s after %s: %w", strings.Join(args, " "), Deadline, ErrTimeout)
+	}
 	if err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
