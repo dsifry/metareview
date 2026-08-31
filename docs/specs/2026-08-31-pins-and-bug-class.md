@@ -421,10 +421,16 @@ spike before either is built.
 
 - ⧗ **Durable-identity / continuity spike:** over a multi-round replay, can `classify`, given the open
   classes, reliably continue the right class rather than minting duplicates? Measure id churn.
-- ✓ **Finding-identity spike — DONE (2026-08-31):** a `(file, top-6-normalized-words)` signature gives
-  **0% within-run false-merges over all 611 real findings** (never collapses two distinct findings) and
-  matches 66% cross-run recurrence. Viable cross-round identity; use the simple key. Caveat: measured
-  on real data, one scheme — holds under paraphrase is the build-time check.
+- ⧗ **Finding-identity spike — PRECISION half done, RECALL half open (2026-08-31):** a
+  `(file, top-6-normalized-words)` signature gives **0% within-run false-merges over all 611 real
+  findings** — that is *precision* (distinct findings never collapse to one id). It is only the
+  false-merge half. The property this prerequisite actually needs is *recall under paraphrase*: a
+  re-discovered finding, reworded by the LLM next round, must keep its id or the `Unproven` gap never
+  clears. That direction is **unmeasured** — 66% is cross-run recurrence, which cannot separate "did
+  not recur" from "recurred but the signature minted a new id" (a paraphrase that shifts the top-6
+  words is invisible in it). Before freeze (§6): build a paraphrase ground-truth set (the same
+  finding reworded across rounds) and meet a **recall floor**. Use the simple key provisionally; it
+  is not yet a proven cross-round identity.
 - ✓ **Grouping viability:** done (§5) — classify recovers classes, errs toward splitting, no dangerous merges.
 - ⧗ **End-to-end replay:** a class created → partially fixed → carried with stable id → cleared only
   when the last member is `pins_proven`. This is the acceptance test for the whole Bug.Class path.
@@ -684,12 +690,17 @@ door — gate it.
 ### Ship 1 — PINS (shippable, with ONE shared prerequisite)
 
 **Prerequisite ⧗ (PR#30-CR):** cross-round-stable finding identity. `Unproven`'s clear/re-add keys on
-`Pin.Finding`, so a re-discovered finding that got a *new* id would never clear its old gap — PINS is
-not self-contained without it. The spike **de-risked** it (§5: `(file, normalized-text)` — the SAME key as the dedup (§3.3),
-no region bucketing — gave 0% false-merge over 611 findings — that is the *precision* that matters here; the 66% figure is
-recurrence rate, not the identity invariant), but the algorithm is **not yet frozen**: Ship 1 must
-define and freeze it with an acceptance threshold (precision floor + a same-text/different-site
-regression) before PINS can claim self-containment. It is a Ship-1 task, spike-validated but open —
+`Pin.Finding`, so a re-discovered finding that got a *new* id would never clear its old gap — a
+**recall / false-split** failure, and the one PINS is not self-contained without. The spike measured
+only the **opposite** direction: `(file, normalized-text)` (the SAME key as the dedup §3.3, no region
+bucketing) gave **0% false-merge** over 611 findings — that is *precision* (distinct findings never
+collapse), NOT the recall property this prerequisite needs; the 66% figure is recurrence rate, not
+the identity invariant, and cannot separate "did not recur" from "recurred but got a new id." The
+**recall-under-paraphrase** direction — the actual blocker — is **unmeasured** (no paraphrase ground
+truth in the corpus, no protocol in §5/§7/§8). Before PINS can claim self-containment, Ship 1 must
+(a) build a paraphrase ground-truth set and define a **recall floor** on it, alongside the precision
+floor + same-text/different-file regression; and (b) freeze the algorithm only once BOTH floors are
+met. This is **not** de-risked — it is a Ship-1 task, open (⧗) —
 the same ⧗ status §3.2 and Ship 2 carry, not "done."
 
 1. Port the pins data model (§2): `Pin{ID,Finding,File,From,To,Test}`, `PinResult`, `PinOutcome`,
