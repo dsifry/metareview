@@ -642,6 +642,10 @@ func (agentEdit) Info() workflow.KindInfo {
 type editOut struct {
 	Commit  string `json:"commit"`
 	Summary string `json:"summary"`
+	// Pins carries the differential proofs the fix declares (§9.1; a mutate-a-line pin is the
+	// Kind:"pin" case). Reduce MUST propagate these to Delta.Pins — dropping them is the #24
+	// vacuous-pass, where pins_proven passed on evidence it never saw.
+	Pins []run.DifferentialProof `json:"pins,omitempty"`
 }
 
 func (agentEdit) Instructions(s run.Snapshot, _ *workflow.Node, d machine.Diff, nonce string) (machine.Instructions, error) {
@@ -666,11 +670,30 @@ func (agentEdit) Decode(raw json.RawMessage) (any, error) {
 	if !shortOK(o.Summary) {
 		return nil, invalid("cap", "summary exceeds 1 KB")
 	}
+	// A fix may declare at most MaxPins proofs — each is a full build+test cycle in an isolated
+	// copy at prove time. The one-of invariant of each proof was already enforced at decode by
+	// DifferentialProof.UnmarshalJSON; here we bound the count and the canonical size.
+	if len(o.Pins) > run.MaxPins {
+		return nil, invalid("cap", fmt.Sprintf("a fix may declare at most %d proofs", run.MaxPins))
+	}
+	// Apply the SAME per-field caps the fold enforces (run.ProofWithinCaps), so an over-cap pin
+	// From/To or deletion Removed fails here rather than passing decode+reduce and then being
+	// rejected as oversize at fold — after the executor already reported success (the sibling-decode
+	// failure mode this node's own comment warns about).
+	for _, p := range o.Pins {
+		if !run.ProofWithinCaps(p) {
+			return nil, invalid("cap", "a declared proof exceeds a per-field cap")
+		}
+	}
+	if err := checkPayload(o); err != nil {
+		return nil, err
+	}
 	return o, nil
 }
 
 func (agentEdit) Reduce(_ run.Snapshot, out any) (run.Delta, error) {
-	return run.Delta{Commit: out.(editOut).Commit}, nil
+	o := out.(editOut)
+	return run.Delta{Commit: o.Commit, Pins: o.Pins}, nil
 }
 
 // ---------------------------------------------------------------- still-present

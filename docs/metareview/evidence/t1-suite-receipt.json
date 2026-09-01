@@ -1,0 +1,1 @@
+{"schemaVersion":1,"kind":"validation","command":["go","test","./..."],"cwd":".","exitCode":0,"startedAt":"2026-09-01T00:40:53.285184Z","finishedAt":"2026-09-01T00:41:12.987864Z","stdoutSha256":"9d5f05e4d3d9bfb3e4da316be7e2b353b1f2413a0e320b797015b773b6e642c5","stderrSha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","summary":"go test ./... exited 0"}

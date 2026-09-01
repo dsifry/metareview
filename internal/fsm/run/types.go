@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -177,7 +178,88 @@ type Delta struct {
 	Confirmed []Bug       `json:"confirmed,omitempty"`
 	Status    []BugStatus `json:"status,omitempty"`
 	Commit    string      `json:"commit,omitempty"`
+	// Pins/PinResults keep their §2.4 names but carry the §9.1 generalization: the elements are
+	// DifferentialProof/ProofResult, of which a mutate-a-line pin is the Kind=="pin" case. The
+	// field names are retained because §2.4 keeps them ("§9.1 GENERALIZES these") — a reproduction
+	// or deletion proof rides the same carrier, so no proof kind is omitted.
+	Pins       []DifferentialProof `json:"pins,omitempty"`        // fix node → prove node: the claims to check
+	PinResults []ProofResult       `json:"pin_results,omitempty"` // prove node → gate: what was learned
 }
+
+// MaxPins caps how many mutations one fix node may ask to have verified. Each pin is a full
+// build+test cycle in an isolated copy, so this bounds the cost of one fix round.
+const MaxPins = 32
+
+// Finding provenance for pin-derived findings. A gate selects on these, never on issue text.
+const (
+	SourceMutationVerify = "mutation-verify"
+	CategoryUnprovenFix  = "unproven-fix"  // a fix whose pin the tests did not catch: blocks
+	CategoryMalformedPin = "malformed-pin" // a pin that could not be evaluated: reported, does not block
+	CategoryUnverifiable = "unverifiable"  // the tree could not answer at all
+)
+
+// Pin is a fix agent's claim that one specific test holds one specific line of production code.
+//
+// {commit, summary} is not evidence; a pin is checkable: apply From→To at File and the tests must
+// FAIL, restore and they must PASS. The agent declares what to break, never what to run — the test
+// command comes from the workflow's consent-hashed cmds block, not from here.
+//
+// What a proven pin HONESTLY establishes: "this added line is exercised by a test that fails when
+// the line is broken." Not that the fix is correct, nor complete — stronger than the agent's word,
+// weaker than proof.
+type Pin struct {
+	// ID is an idempotent content hash of {Finding,File,From,To} — the reference/override key. Same
+	// pin content always yields the same id; a redone fix that rewords From/To mints a new one.
+	ID string `json:"id"`
+	// Finding is the confirmed-finding id this pin proves a fix for: the chain link, and the key
+	// Snapshot.Unproven clears by (stable across a reworded From/To, unlike ID).
+	Finding string `json:"finding"`
+	// File is the production file the fix touched, repo-relative.
+	File string `json:"file"`
+	// From is the exact text to replace; it must appear in File exactly once, and (enforced in the
+	// prove wiring, not here) be a line the commit ADDED.
+	From string `json:"from"`
+	// To is what From becomes: a compiling change that breaks the behaviour the fix introduced.
+	To string `json:"to"`
+	// Test names the test the fix claims pins this line — for the report and a by-hand re-run. It
+	// selects, it does not execute.
+	Test string `json:"test"`
+}
+
+// PinID derives a pin's idempotent id from its defining content. Pure — no timestamp, no
+// randomness — so it is stable across machines and replays.
+func PinID(finding, file, from, to string) string {
+	h := sha256.Sum256([]byte(finding + "\x00" + file + "\x00" + from + "\x00" + to))
+	return fmt.Sprintf("%x", h[:16])
+}
+
+// PinOutcome is the schema's vocabulary for what checking a pin found. Typed and persisted here
+// because it is folded into snapshots: the durable shape belongs to the durable package.
+type PinOutcome string
+
+const (
+	PinProven   PinOutcome = "proven"   // break failed the tests, restore passed them
+	PinSurvived PinOutcome = "survived" // mutation compiled, tests still passed → a test gap
+	// PinMalformed: the claim could not be evaluated → says nothing about the fix. Widened per
+	// §2.2/§9.8 R7 to cover a compiles-but-semantically-null mutation (a comment/whitespace/
+	// dead-code pin, caught by the §9.8 AST pre-screen) as well as an absent/ambiguous anchor and a
+	// mutation that won't compile — all "bad pin, rewrite it," never a verdict on the code.
+	PinMalformed    PinOutcome = "malformed"
+	PinUnverifiable PinOutcome = "unverifiable" // the tree itself could not answer → nothing learned
+)
+
+// Valid reports whether o is one of the four outcomes. An unrecognised value is never a success.
+func (o PinOutcome) Valid() bool {
+	switch o {
+	case PinProven, PinSurvived, PinMalformed, PinUnverifiable:
+		return true
+	}
+	return false
+}
+
+// PinResult is superseded by ProofResult (§9.1): the outcome of checking one Pin generalizes to the
+// outcome of checking a DifferentialProof of any kind. See proof.go. The mutate-a-line engine keeps
+// its own pin-only result type in internal/mutation.
 
 // Time marshals as UTC RFC3339Nano and unmarshals only the Z form (§2.2).
 type Time struct{ time.Time }
@@ -206,40 +288,41 @@ func (t *Time) UnmarshalJSON(b []byte) error {
 
 // Snapshot is the state derived by folding a run's events (§2.1). Never persisted as authority.
 type Snapshot struct {
-	SchemaVersion  int               `json:"schemaVersion"`
-	RunID          string            `json:"run_id"`
-	ParentRunID    string            `json:"parent_run_id,omitempty"`
-	Lineage        []string          `json:"lineage"`
-	ForkedAtSeq    int64             `json:"forked_at_seq,omitempty"`
-	CreatedAt      Time              `json:"created_at"`
-	Seq            int64             `json:"seq"`
-	Workflow       string            `json:"workflow"`
-	WorkflowHash   string            `json:"workflow_hash"`
-	WorkflowSource string            `json:"workflow_source,omitempty"`
-	Vars           map[string]string `json:"vars"`
-	Calibration    bool              `json:"calibration"`
-	Mock           string            `json:"mock,omitempty"`
-	MockTainted    bool              `json:"mock_tainted"`
-	RepoMode       string            `json:"repo_mode"`
-	AllowedCmds    []AllowedCmd      `json:"allowed_cmds"`
-	CmdsSHA256     string            `json:"cmds_sha256,omitempty"`
-	RepoRoot       string            `json:"repo_root"`
-	WorkDir        string            `json:"work_dir"`
-	State          State             `json:"state"`
-	StateKind      Kind              `json:"state_kind,omitempty"`
-	Outcome        Outcome           `json:"outcome,omitempty"`
-	Iteration      int               `json:"iteration"`
-	BaseSHA        string            `json:"base_sha"`
-	Head           string            `json:"head"`
-	FixEntryHead   string            `json:"fix_entry_head,omitempty"`
-	TreeHash       string            `json:"tree_hash,omitempty"`
-	TreeStatus     string            `json:"tree_status,omitempty"`
-	Goldens        []Golden          `json:"goldens"`
-	Findings       []Finding         `json:"findings"`
-	Confirmed      []Bug             `json:"confirmed"`
-	AllFound       []Bug             `json:"all_found"`
-	Status         []BugStatus       `json:"status"`
-	Unfixed        int               `json:"unfixed"`
+	SchemaVersion  int                 `json:"schemaVersion"`
+	RunID          string              `json:"run_id"`
+	ParentRunID    string              `json:"parent_run_id,omitempty"`
+	Lineage        []string            `json:"lineage"`
+	ForkedAtSeq    int64               `json:"forked_at_seq,omitempty"`
+	CreatedAt      Time                `json:"created_at"`
+	Seq            int64               `json:"seq"`
+	Workflow       string              `json:"workflow"`
+	WorkflowHash   string              `json:"workflow_hash"`
+	WorkflowSource string              `json:"workflow_source,omitempty"`
+	Vars           map[string]string   `json:"vars"`
+	Calibration    bool                `json:"calibration"`
+	Mock           string              `json:"mock,omitempty"`
+	MockTainted    bool                `json:"mock_tainted"`
+	RepoMode       string              `json:"repo_mode"`
+	AllowedCmds    []AllowedCmd        `json:"allowed_cmds"`
+	CmdsSHA256     string              `json:"cmds_sha256,omitempty"`
+	RepoRoot       string              `json:"repo_root"`
+	WorkDir        string              `json:"work_dir"`
+	State          State               `json:"state"`
+	StateKind      Kind                `json:"state_kind,omitempty"`
+	Outcome        Outcome             `json:"outcome,omitempty"`
+	Iteration      int                 `json:"iteration"`
+	BaseSHA        string              `json:"base_sha"`
+	Head           string              `json:"head"`
+	FixEntryHead   string              `json:"fix_entry_head,omitempty"`
+	TreeHash       string              `json:"tree_hash,omitempty"`
+	TreeStatus     string              `json:"tree_status,omitempty"`
+	Goldens        []Golden            `json:"goldens"`
+	Findings       []Finding           `json:"findings"`
+	Confirmed      []Bug               `json:"confirmed"`
+	Unproven       []DifferentialProof `json:"unproven,omitempty"` // proofs no round has proven; drives re-discover. Derived, never persisted.
+	AllFound       []Bug               `json:"all_found"`
+	Status         []BugStatus         `json:"status"`
+	Unfixed        int                 `json:"unfixed"`
 	// PrevUnfixed is retained for the wire schema and operator diagnostics ONLY. No predicate
 	// reads it: measuring progress by comparing unfixed totals is the defect UnfixedAtEntry
 	// exists to replace, and a consumer reaching for this field would reproduce it.
@@ -268,6 +351,7 @@ type Snapshot struct {
 // Clone returns a deep copy: every slice element, map value, pointer target and RawMessage is fresh.
 func (s Snapshot) Clone() Snapshot {
 	c := s
+	c.Unproven = cloneProofs(s.Unproven)
 	c.Lineage = cloneStrings(s.Lineage)
 	c.Vars = cloneStringMap(s.Vars)
 	if s.AllowedCmds != nil {
@@ -341,6 +425,28 @@ func cloneBugs(in []Bug) []Bug {
 	for i, b := range in {
 		out[i] = b
 		out[i].GoldenIdx = cloneInt(b.GoldenIdx)
+	}
+	return out
+}
+
+// cloneProofs deep-copies a proof slice INCLUDING each element's Pin/Deletes pointer targets, so a
+// mutation through the clone can never reach the original's payload. A shallow copy would share
+// those pointers and quietly break the Clone contract for a pin or deletion proof.
+func cloneProofs(in []DifferentialProof) []DifferentialProof {
+	if in == nil {
+		return nil
+	}
+	out := make([]DifferentialProof, len(in))
+	for i, p := range in {
+		out[i] = p
+		if p.Pin != nil {
+			pin := *p.Pin
+			out[i].Pin = &pin
+		}
+		if p.Deletes != nil {
+			del := *p.Deletes
+			out[i].Deletes = &del
+		}
 	}
 	return out
 }
