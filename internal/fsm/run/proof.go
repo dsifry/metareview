@@ -125,6 +125,12 @@ func (r *ProofResult) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	pr := ProofResult(a)
+	// The embedded proof must itself be valid. An OMITTED "proof" leaves a zero-value
+	// DifferentialProof whose own UnmarshalJSON never ran, so the one-of invariant must be checked
+	// here too — a result with no provable proof is meaningless.
+	if err := pr.Proof.Valid(); err != nil {
+		return fmt.Errorf("proof result carries an invalid proof: %w", err)
+	}
 	if pr.Outcome != "" && !pr.Outcome.Valid() {
 		return fmt.Errorf("unknown proof outcome %q", pr.Outcome)
 	}

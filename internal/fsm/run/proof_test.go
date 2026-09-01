@@ -115,6 +115,8 @@ func TestProofResultDecodeRejectsContradiction(t *testing.T) {
 		`{"proof":{"kind":"reproduction","test":"T"},"proven":true}`,                      // proven but no proven outcome
 		`{"proof":{"kind":"reproduction","test":"T"},"proven":false,"outcome":"bogus"}`,   // unknown outcome
 		`{"proof":{"kind":"reproduction","test":"T"},"proven":false,"zzz":1}`,             // unknown field
+		`{"proven":false}`,                        // no proof at all → invalid embedded proof
+		`{"proof":{"kind":"pin"},"proven":false}`, // proof kind:pin with no pin payload
 	}
 	for _, s := range bad {
 		var r ProofResult
