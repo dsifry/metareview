@@ -556,4 +556,23 @@ func TestSemanticallyNull(t *testing.T) {
 	if semanticallyNull("package p\nvar x = `unterminated", "package p\nvar x = 1\n") {
 		t.Fatal("an unscannable original must not be null")
 	}
+	// A Go DIRECTIVE comment is semantically meaningful — a change to one is NOT null.
+	if semanticallyNull("//go:build linux\npackage p\n", "//go:build windows\npackage p\n") {
+		t.Fatal("a //go:build directive change must NOT be null")
+	}
+	if semanticallyNull("package p\n//go:noinline\nfunc f() {}\n", "package p\n//go:noescape\nfunc f() {}\n") {
+		t.Fatal("a //go: directive change must NOT be null")
+	}
+	// Adding/removing a directive is not null.
+	if semanticallyNull("package p\nfunc f() {}\n", "package p\n//go:noinline\nfunc f() {}\n") {
+		t.Fatal("adding a directive must NOT be null")
+	}
+	// An ordinary comment that merely CONTAINS a colon is not a directive → still null.
+	if !semanticallyNull("package p\n// note: one\nvar x = 1\n", "package p\n// note: two\nvar x = 1\n") {
+		t.Fatal("an ordinary comment with a colon is still null")
+	}
+	// A block comment is never a directive → still null.
+	if !semanticallyNull("package p\n/* one */\nvar x = 1\n", "package p\n/* two */\nvar x = 1\n") {
+		t.Fatal("a block comment change is still null")
+	}
 }

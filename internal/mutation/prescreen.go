@@ -3,6 +3,7 @@ package mutation
 import (
 	"go/scanner"
 	"go/token"
+	"strings"
 )
 
 // semanticallyNull reports whether orig and mutated are the SAME Go program ignoring comments and
@@ -36,19 +37,27 @@ func semanticallyNull(orig, mutated string) bool {
 	return true
 }
 
-// goTokens scans src into its Go token stream with comments OFF, returning one "tok lit" string per
-// token (the literal distinguishes identifiers/literals whose token class is the same). ok is false if
-// the source did not scan cleanly.
+// goTokens scans src into its Go token stream, returning one "tok lit" string per token (the literal
+// distinguishes identifiers/literals whose token class is the same). Ordinary comments are dropped
+// (they are semantically null), but a comment DIRECTIVE (//go:build, //go:embed, //line, …) is KEPT:
+// it affects build selection, embedded data, or linker behaviour, so a change to one is NOT null.
+// ok is false if the source did not scan cleanly.
 func goTokens(src string) (toks []string, ok bool) {
 	var fset token.FileSet
 	file := fset.AddFile("", fset.Base(), len(src))
 	var s scanner.Scanner
 	ok = true
-	s.Init(file, []byte(src), func(token.Position, string) { ok = false }, 0) // mode 0 → comments dropped
+	s.Init(file, []byte(src), func(token.Position, string) { ok = false }, scanner.ScanComments)
 	for {
 		_, tok, lit := s.Scan()
 		if tok == token.EOF {
 			break
+		}
+		if tok == token.COMMENT {
+			if d, isDir := directive(lit); isDir {
+				toks = append(toks, "//dir "+d)
+			}
+			continue
 		}
 		if lit != "" {
 			toks = append(toks, tok.String()+" "+lit)
@@ -57,4 +66,31 @@ func goTokens(src string) (toks []string, ok bool) {
 		}
 	}
 	return toks, ok
+}
+
+// directive reports whether a line comment is a Go compiler directive (returning its text without the
+// leading //). It mirrors go/ast's unexported isDirective: a "//line " directive, or "//name:arg" with
+// a lowercase/digit name and no space before the colon (e.g. //go:build, //go:embed, //go:noescape).
+// A directive must be a // line comment with no space after the slashes, so an ordinary comment — even
+// one containing a colon like "// note: x" — is not a directive.
+func directive(comment string) (string, bool) {
+	if !strings.HasPrefix(comment, "//") {
+		return "", false // block comments are never directives
+	}
+	c := comment[2:]
+	if strings.HasPrefix(c, "line ") {
+		return c, true
+	}
+	colon := strings.Index(c, ":")
+	if colon <= 0 || colon+1 >= len(c) {
+		return "", false
+	}
+	for i := 0; i < colon; i++ {
+		b := c[i]
+		lowerOrDigit := b >= 'a' && b <= 'z' || b >= '0' && b <= '9'
+		if !lowerOrDigit {
+			return "", false
+		}
+	}
+	return c, true
 }
