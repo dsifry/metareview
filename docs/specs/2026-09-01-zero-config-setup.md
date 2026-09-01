@@ -60,7 +60,14 @@ handles co-located / `tests/**` / subdir transparently:
 
 - `pytest --collect-only -q` → every nodeid
 - `jest --listTests` → every test file
+- `vitest list --json` → every test (Vitest's discovery subcommand; JSON array of
+  `{file, name, …}`, mapped to test ids the same way `vitestConvention.ParseReport` maps run results —
+  discovery reuses the convention's id derivation, it does not invent a second one)
 - `go test -list '.*' ./...` → every test
+
+Each convention owns **both** a run contract (`RunArgs`/`ParseReport`, already built) **and** a discovery
+contract (`DiscoverArgs`/`ParseDiscovery`) added here; discovery ids MUST agree with run ids (same
+derivation), so a discovered test and a failing test are the same identity.
 
 By invoking the runner we inherit its config resolution *for free* — the same "the tool is the source of
 truth" move used to read `--json` / JUnit results. Layout variance lives entirely inside the runner, not
@@ -78,9 +85,28 @@ Route = { Path (manifest root, most-specific-wins), Convention (testconv name), 
 A pure single-language repo is the **N=1** case; a multi-provider monorepo is N rows. This subsumes the
 single-language model — single-language is not a separate code path, it is a one-row table.
 
-**Per-finding selection.** `prove` / reproduction look up the finding's file against the table
-(most-specific path wins) → use that row's `Convention` + `TestCmd`. A file matched by **no** row owes no
-proof — an *auditable exemption*, the same shape as today's "no added lines ⇒ owes no pin."
+**Per-finding selection.** `prove` / reproduction look up the finding's file against the table → use that
+row's `Convention` + `TestCmd`. A file matched by **no** row owes no proof — an *auditable exemption*, the
+same shape as today's "no added lines ⇒ owes no pin."
+
+### 3.1 Route-matching semantics (fully specified — no ambiguity at selection time)
+
+`Route.Path` is a **directory prefix**, expressed as the manifest's directory relative to the repo root
+(e.g. `frontend`, `server`, `pkg`). A finding's file (repo-relative, forward slashes) **matches** a route
+iff the file path is lexically within that directory: `file == Path` or `file` has `Path + "/"` as a
+prefix, compared **segment-wise** (so `serverx/a.py` does NOT match route `server`). The `**` glob form in
+the human-facing examples is sugar for "this directory and everything under it" — it desugars to the same
+prefix; metareview does not implement general glob matching, and a `config check` error is raised if a
+`Path` contains glob metacharacters other than a trailing `/**` (§8: no bespoke matcher).
+
+- **Specificity = number of path segments in `Path`.** The matching route with the **most segments** wins
+  (nearest-enclosing-manifest, the same rule ecosystems use for nested projects).
+- **Deterministic tie-breaker.** Two matching routes with equal segment count is a **configuration
+  error**, not a silent pick: the analyzer never emits overlapping equal-specificity roots (manifests nest,
+  they don't collide), and a hand-written `.metareview.yml` that does is rejected by `config check` with
+  both offending `Path`s named. There is therefore no runtime "pick one of two equal routes" path — the
+  ambiguity is resolved at config-validation time, before any finding is selected.
+- **No-match** is the auditable exemption above (owes no proof), recorded so it is visible, not silent.
 
 **Per-subtree scope.** The whole-suite check and `IsTestFile` use the *finding's row's* convention, and
 the runner is invoked rooted at that row's manifest directory. A single fix touching two subtrees
@@ -134,14 +160,35 @@ pkg/**      → go     : ✗ `go test ./pkg/...` found no tests — check path
 Same don't-trust-verify spine as the rest of metareview: a maintainer writes it and metareview *proves*
 it resolves. On any ✗, exit nonzero (CI-usable).
 
+**Execution contract — `config check` *runs commands*, so it is gated exactly like a run.** The dry-run
+label means "no fix is attempted and no finding is filed," **not** "no subprocess executes": it invokes
+each route's `cmd` (plus the convention's discovery args) against the real tree. Therefore it (a) requires
+**run consent** — the same `--allow-custom-cmds <sha>` / config-file-hash gate as §6, refusing with the
+consent error if the commands are not consented; (b) runs each command in a throwaway worktree, never
+mutating the source tree; (c) documents that it executes project test/discovery commands (side effect:
+whatever those commands do). It is not a passive parse. An implementation that only wants to validate
+*shape* (schema, path existence, glob-metacharacter rejection) without executing is a separate
+`config check --no-exec` that makes no consent demand and discovers nothing — the executing form is the
+default and is consent-gated.
+
 ## 6. Consent — two distinct surfaces
 
 Running is not writing; keep the gates separate.
 
-- **Run consent** — approving the detected/declared *commands*. This is the existing consent gate
-  (`--allow-custom-cmds <sha>`), extended to cover *all* the table's commands. When a committed
-  `.metareview.yml` exists, key consent on the **config-file hash** ⇒ consent-once, stable in CI until
-  the file changes.
+- **Run consent** — approving the detected/declared *commands*, via the **existing
+  `workflow.CmdsSHA256` contract** — do not invent a new digest. Today `CmdsSHA256` hashes the canonical
+  `AllowedCmd` list and refuses a changed digest; here the canonical input is **the resolved route table's
+  commands** — i.e. every route's `TestCmd` (and discovery args) in canonical order. Two consequences,
+  specified so no-config consent is not left undefined:
+  - **No-config run:** the analyzer's synthesized table is reduced to its resolved command list, hashed
+    with the *same* `CmdsSHA256` routine, and consent is required for that digest exactly as for a
+    hand-declared `cmds:` block. Re-detection that yields the *same* commands yields the *same* digest ⇒
+    no re-consent; a manifest change that changes a command changes the digest ⇒ re-consent (the intended
+    guard). The digest's canonical input **includes the route `Path`s**, not only the command strings, so
+    moving a command to a different subtree is itself a consent-relevant change.
+  - **Committed `.metareview.yml`:** the digest is taken over the same canonicalized route table the file
+    resolves to (equivalently, the file's content hash, since the file *is* the canonical source) ⇒
+    consent-once, stable in CI until the file changes.
 - **Write consent** — writing `.metareview.yml` **mutates the repo**, so it happens **only** on an
   explicit `--write-config` and **only** after affirmative consent: an interactive `[y/N]` by default,
   and a **`--consent` / `--yes` flag** so an agent or CI can pre-authorize it headlessly. **Never a side
