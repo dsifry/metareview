@@ -575,4 +575,14 @@ func TestSemanticallyNull(t *testing.T) {
 	if !semanticallyNull("package p\n/* one */\nvar x = 1\n", "package p\n/* two */\nvar x = 1\n") {
 		t.Fatal("a block comment change is still null")
 	}
+	// cgo //export, gccgo //extern, and the legacy // +build constraint are meaningful → NOT null.
+	if semanticallyNull("package p\n//export One\nfunc f() {}\n", "package p\n//export Two\nfunc f() {}\n") {
+		t.Fatal("a //export change must NOT be null")
+	}
+	if semanticallyNull("package p\n//extern one\nfunc f()\n", "package p\n//extern two\nfunc f()\n") {
+		t.Fatal("a //extern change must NOT be null")
+	}
+	if semanticallyNull("// +build linux\npackage p\n", "// +build windows\npackage p\n") {
+		t.Fatal("a legacy // +build change must NOT be null")
+	}
 }

@@ -68,19 +68,24 @@ func goTokens(src string) (toks []string, ok bool) {
 	return toks, ok
 }
 
-// directive reports whether a line comment is a Go compiler directive (returning its text without the
-// leading //). It mirrors go/ast's unexported isDirective: a "//line " directive, or "//name:arg" with
-// a lowercase/digit name and no space before the colon (e.g. //go:build, //go:embed, //go:noescape).
-// A directive must be a // line comment with no space after the slashes, so an ordinary comment — even
-// one containing a colon like "// note: x" — is not a directive.
+// directive reports whether a line comment is a meaningful Go comment directive (returning its text
+// without the leading //). It covers go/ast's isDirective form — a "//line " directive, or "//name:arg"
+// with a lowercase/digit name and no space before the colon (e.g. //go:build, //go:embed, //go:noescape)
+// — PLUS the other comments that change linkage or build selection: cgo "//export Name", gccgo
+// "//extern name", and the legacy "// +build" constraint. A change to any of these is NOT semantically
+// null, so it must not be classified a trivial pin. An ordinary comment (even one with a colon like
+// "// note: x", or a block comment) is not a directive.
 func directive(comment string) (string, bool) {
 	if !strings.HasPrefix(comment, "//") {
 		return "", false // block comments are never directives
 	}
 	c := comment[2:]
-	if strings.HasPrefix(c, "line ") {
+	// //line (line directive), //export (cgo), //extern (gccgo), and the legacy "// +build" constraint
+	// (whose // is followed by a space, so c begins " +build") all change linkage or build selection.
+	if strings.HasPrefix(c, "line ") || strings.HasPrefix(c, "export ") || strings.HasPrefix(c, "extern ") || strings.HasPrefix(c, " +build") {
 		return c, true
 	}
+	// //name:arg — a lowercase/digit name, no space before the colon (e.g. //go:build).
 	colon := strings.Index(c, ":")
 	if colon <= 0 || colon+1 >= len(c) {
 		return "", false
