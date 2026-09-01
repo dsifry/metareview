@@ -78,7 +78,7 @@ func RunPostMerge(root string, options ReviewOptions) (ReviewResult, error) {
 	if err != nil {
 		return ReviewResult{}, err
 	}
-	candidateResult := ExtractCandidates(Input{Findings: records, GitHub: source.GitHub, Session: session})
+	candidateResult := ExtractCandidates(Input{Findings: records, GitHub: source.GitHub, Session: session, Diff: source.Git.Diff})
 	pruned := PruneCandidates(PruneInput{Candidates: candidateResult.Knowledge, Knowledge: source.Knowledge})
 
 	runID, acceptedRel, discardRel := learningPaths(options.PostMergePR, now)
@@ -103,7 +103,7 @@ func RunPostMerge(root string, options ReviewOptions) (ReviewResult, error) {
 		if err := os.MkdirAll(filepath.Dir(acceptedPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(acceptedPath, []byte(acceptedMarkdown(runID, options, source, session, pruned.Accepted, candidateResult.Calibration)), 0o644); err != nil {
+		if err := os.WriteFile(acceptedPath, []byte(acceptedMarkdown(runID, options, source, session, pruned.Accepted, candidateResult.Calibration, candidateResult.Flags)), 0o644); err != nil {
 			return err
 		}
 		if err := os.WriteFile(discardPath, []byte(discardMarkdown(runID, pruned.Discarded)), 0o644); err != nil {
@@ -156,7 +156,7 @@ func learningPaths(prNumber string, at time.Time) (string, string, string) {
 	return runID, base + "-accepted.md", base + "-discarded.md"
 }
 
-func acceptedMarkdown(runID string, options ReviewOptions, source learnsource.Context, session sessionhistory.Context, accepted []Candidate, calibration []Candidate) string {
+func acceptedMarkdown(runID string, options ReviewOptions, source learnsource.Context, session sessionhistory.Context, accepted []Candidate, calibration []Candidate, flags []Candidate) string {
 	var builder strings.Builder
 	builder.WriteString("# metareview Accepted Learning\n\n")
 	builder.WriteString("Run ID: " + markdown.InlineCode(runID) + "\n\n")
@@ -188,6 +188,16 @@ func acceptedMarkdown(runID string, options ReviewOptions, source learnsource.Co
 	} else {
 		for _, candidate := range calibration {
 			builder.WriteString("- " + candidate.Disposition + ": " + candidate.Text + "\n")
+		}
+	}
+	builder.WriteString("\n## Trajectory Flags\n\n")
+	if len(flags) == 0 {
+		builder.WriteString("No trajectory flags.\n")
+	} else {
+		for _, flag := range flags {
+			builder.WriteString("- " + flag.Text + "\n")
+			builder.WriteString("  - Provenance: " + flag.Provenance + "\n")
+			builder.WriteString("  - Source refs: " + sourceRefText(flag.SourceRefs) + "\n")
 		}
 	}
 	return builder.String()

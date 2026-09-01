@@ -98,7 +98,7 @@ func TestAcceptedMarkdownUsesCompactLearningSummary(t *testing.T) {
 		Now:         time.Date(2026, 5, 27, 3, 20, 34, 0, time.UTC),
 	}
 
-	rendered := acceptedMarkdown("mrv-run", options, source, session, nil, nil)
+	rendered := acceptedMarkdown("mrv-run", options, source, session, nil, nil, nil)
 
 	assertContains(t, rendered, "- GitHub: unavailable (remote-unavailable)")
 	assertContains(t, rendered, "- Session history: unavailable (session-root-missing)")
