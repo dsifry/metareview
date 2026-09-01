@@ -453,6 +453,14 @@ func TestProveKindContract(t *testing.T) {
 	if validateProve(map[string]any{"test_cmd": 7}) == nil {
 		t.Fatal("non-string test_cmd must be rejected")
 	}
+	// The test_convention param must be accepted (a workflow selecting a language must load), and
+	// type-checked as a string.
+	if err := validateProve(map[string]any{"test_cmd": "go-test", "test_convention": "go"}); err != nil {
+		t.Fatalf("valid test_convention rejected: %v", err)
+	}
+	if validateProve(map[string]any{"test_convention": 7}) == nil {
+		t.Fatal("non-string test_convention must be rejected")
+	}
 	// Reduce passes the decoded Delta through.
 	d, err := k.Decode(json.RawMessage(`{}`))
 	if err != nil {

@@ -69,7 +69,15 @@ func (goConvention) ParseReport(code int, stdout, stderr string) (TestReport, er
 		sawEvent = true
 		switch ev.Action {
 		case "pass":
-			if ev.Test != "" {
+			// A FAILED instance is authoritative and must never be masked. Under `go test ./... -run
+			// ^Name$`, a same-named test in a second package also runs; keying by name alone with
+			// last-write-wins would let a later package's pass hide an earlier failure. So a recorded
+			// Failed sticks — a pass only sets the outcome when nothing (or a prior pass) is there. The
+			// residual (a sibling's unrelated failure making a pass-after conservative, or a fail-before
+			// look valid) never mints a false proof: it can only refuse to prove, and the §9.2 symptom
+			// reviewer independently checks the fail-before against the bug. Qualify the test name to
+			// avoid the collision entirely.
+			if ev.Test != "" && rep.Tests[ev.Test] != Failed {
 				rep.Tests[ev.Test] = Passed
 			}
 		case "fail":

@@ -120,6 +120,16 @@ func TestGoParseReport(t *testing.T) {
 	if Classify(must(2, "# p\n./a_test.go:1:1: syntax error\nFAIL\tp [build failed]\n"), "TestX") != ClsCompile {
 		t.Fatal("a non-JSON build-failure line must set BuildFailed")
 	}
+	// Same-named test in two packages: a FAILED instance must never be masked by a same-named pass,
+	// in EITHER event order (Bugbot: last-write-wins could hide a failure across packages).
+	failThenPass := `{"Action":"fail","Package":"a","Test":"TestX"}` + "\n" + `{"Action":"pass","Package":"b","Test":"TestX"}` + "\n"
+	passThenFail := `{"Action":"pass","Package":"a","Test":"TestX"}` + "\n" + `{"Action":"fail","Package":"b","Test":"TestX"}` + "\n"
+	if Classify(must(1, failThenPass), "TestX") != ClsAssert {
+		t.Fatal("a later same-named pass must not mask an earlier failure")
+	}
+	if Classify(must(1, passThenFail), "TestX") != ClsAssert {
+		t.Fatal("a later same-named failure must override an earlier pass")
+	}
 }
 
 func TestGoParseReportUnreadable(t *testing.T) {

@@ -69,12 +69,20 @@ func (proveKind) Info() workflow.KindInfo {
 
 // validateProve accepts an optional test_cmd param naming the consent-hashed AllowedCmd to run.
 func validateProve(p map[string]any) error {
-	for k := range p {
-		if k != "test_cmd" {
+	for k, v := range p {
+		switch k {
+		case "test_cmd":
+			if _, ok := v.(string); !ok {
+				return fmt.Errorf("test_cmd must be a string")
+			}
+		case "test_convention":
+			// The language seam selector (default "go" when absent). Validated as a string here;
+			// an unknown NAME is caught at Execute time (conventionParam), which fails the node closed.
+			if _, ok := v.(string); !ok {
+				return fmt.Errorf("test_convention must be a string")
+			}
+		default:
 			return fmt.Errorf("unknown param %s", k)
-		}
-		if _, ok := p["test_cmd"].(string); !ok {
-			return fmt.Errorf("test_cmd must be a string")
 		}
 	}
 	return nil
