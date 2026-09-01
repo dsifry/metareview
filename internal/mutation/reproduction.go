@@ -183,7 +183,16 @@ func (r Reproducer) reproduceOne(ctx context.Context, p Proof, part partition) R
 	} else if code != 0 {
 		return fail(PinUnverifiable, "git worktree add exited %d for %s", code, r.PreFixSHA)
 	}
-	defer func() { _, _, _ = r.git(ctx, "worktree", "remove", "--force", "--end-of-options", wt) }()
+	// Cleanup must survive a cancelled run: if the proof's ctx is already cancelled, passing it here
+	// makes git exit before deleting the .git/worktrees entry, and os.RemoveAll(parent) below then
+	// leaves stale metadata in the MAIN repo. Use a cancellation-independent context, and prune if the
+	// remove could not complete.
+	defer func() {
+		clean := context.WithoutCancel(ctx)
+		if _, code, err := r.git(clean, "worktree", "remove", "--force", "--end-of-options", wt); err != nil || code != 0 {
+			_, _, _ = r.git(clean, "worktree", "prune")
+		}
+	}()
 
 	// (b) put the fix's TEST state onto the pre-fix tree: overlay the test files it adds or changes,
 	//     and remove the ones it deletes (so a renamed test does not redeclare its moved function).

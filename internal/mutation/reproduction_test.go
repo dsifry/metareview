@@ -30,6 +30,9 @@ type fakeGit struct {
 	showErr         error
 	showErrOnce     map[string]bool // paths whose first show returns showErr
 	removedWorktree bool
+	removeCode      int   // exit code returned by `worktree remove`
+	removeErr       error // error returned by `worktree remove`
+	pruned          bool  // set when `worktree prune` is issued
 }
 
 // gitVerb returns the subcommand and its following args, skipping leading `-c <value>` config pairs
@@ -54,6 +57,9 @@ func (f *fakeGit) run(_ context.Context, args ...string) (string, int, error) {
 		return "", f.addCode, f.addErr
 	case verb == "worktree" && rest[0] == "remove":
 		f.removedWorktree = true
+		return "", f.removeCode, f.removeErr
+	case verb == "worktree" && rest[0] == "prune":
+		f.pruned = true
 		return "", 0, nil
 	case verb == "show":
 		spec := args[len(args)-1]
@@ -165,6 +171,9 @@ func TestReproduceProvenPath(t *testing.T) {
 	if !g.removedWorktree {
 		t.Fatalf("the throwaway worktree must be removed")
 	}
+	if g.pruned {
+		t.Fatalf("a successful worktree remove must not fall back to prune")
+	}
 }
 
 // The deleted file the fix removes must be gone from the worktree after step (d).
@@ -217,6 +226,24 @@ func TestReproduceDeletionRemoveError(t *testing.T) {
 	mustOutcome(t, got, PinUnverifiable)
 	if !strings.Contains(got.Detail, "could not remove deleted file") {
 		t.Fatalf("detail must name the removal failure: %s", got.Detail)
+	}
+}
+
+// When `worktree remove` cannot complete (e.g. a cancelled run), the engine prunes the orphaned
+// .git/worktrees metadata rather than leaving it stale in the main repo.
+func TestReproducePrunesWhenRemoveFails(t *testing.T) {
+	g := &fakeGit{
+		partition:  "A\tpkg/new_test.go\n",
+		showBody:   map[string]string{"pkg/new_test.go": "t"},
+		removeCode: 1, // remove could not complete
+	}
+	run := &seqRunner{resp: []runResp{
+		{code: 1, out: "=== RUN   TestX\n--- FAIL: TestX\n"},
+		{code: 0, out: "=== RUN   TestX\n--- PASS: TestX\nok\n"},
+	}}
+	mustOutcome(t, reproduceOne(t, newReproducer(t, g, run.run), "TestX"), PinProven)
+	if !g.pruned {
+		t.Fatal("a failed worktree remove must fall back to prune")
 	}
 }
 
