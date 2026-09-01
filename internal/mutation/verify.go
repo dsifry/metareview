@@ -140,8 +140,21 @@ func (v Verifier) verifyOne(ctx context.Context, p Pin) PinResult {
 		return fail(PinUnverifiable, "the tests do not pass before mutating, so nothing can be concluded: %s", tail(out))
 	}
 
+	mutated := strings.Replace(body, p.From, p.To, 1)
+
+	// 1b. Trivial-pin pre-screen (spec §9.8 R7): a mutation that changes only a comment or whitespace is
+	//     semantically null — it compiles and breaks no test, so the break step would score it `survived`
+	//     and send the actor to write a test for a comment. Reject it as malformed here, before the break
+	//     step, so the fix agent rewrites the pin rather than chasing a phantom test gap. (Dead-code
+	//     triviality is out of scope: no pure syntactic method detects reachability, and the spec states
+	//     no reachability contract; the compile-then-break steps handle everything the token check does
+	//     not.)
+	if semanticallyNull(body, mutated) {
+		return fail(PinMalformed, "the mutation %q -> %q changes only comments or whitespace; it is semantically null, so no test could catch it — rewrite the pin to mutate real behaviour", p.From, p.To)
+	}
+
 	// 2. Mutate.
-	if err := os.WriteFile(target, []byte(strings.Replace(body, p.From, p.To, 1)), 0o644); err != nil {
+	if err := os.WriteFile(target, []byte(mutated), 0o644); err != nil {
 		return fail(PinUnverifiable, "could not write the mutation: %v", err)
 	}
 
