@@ -365,7 +365,11 @@ func TestOutcomesDistinguishAMalformedPinFromAnUnheldFix(t *testing.T) {
 		want Outcome
 	}{
 		{"a mutation the test catches", Pin{File: "calc.go", From: "n < 10", To: "n <= 10", Test: "T"}, PinProven},
-		{"a mutation nothing catches", Pin{File: "calc.go", From: "// Allow reports", To: "// allow reports", Test: "T"}, PinSurvived},
+		// A genuinely SEMANTIC mutation the boundary-at-10 test does not exercise (it only checks
+		// Allow(10)); n<10→n<9 changes behaviour at n=9 but not at n=10, so the test passes → survived.
+		// (A comment/whitespace mutation is NOT a legitimate "survived" example — §9.8 R7 rejects it as
+		// malformed via the pre-screen; see TestVerifyRejectsATrivialCommentPin.)
+		{"a mutation nothing catches", Pin{File: "calc.go", From: "n < 10", To: "n < 9", Test: "T"}, PinSurvived},
 		{"a mutation that does not compile", Pin{File: "calc.go", From: "n < 10", To: "n <<< 10", Test: "T"}, PinMalformed},
 		{"an anchor that appears twice", Pin{File: "calc.go", From: "n", To: "m", Test: "T"}, PinMalformed},
 		{"an anchor that appears nowhere", Pin{File: "calc.go", From: "not here", To: "x", Test: "T"}, PinMalformed},
@@ -498,5 +502,94 @@ func TestASignalKilledRunIsNotAnExitCode(t *testing.T) {
 	}
 	if code >= 0 {
 		t.Errorf("a signal-killed run has no meaningful exit code, got %d", code)
+	}
+}
+
+// A pin whose To changes only a COMMENT is semantically null: it compiles and breaks no test, so
+// without the §9.8 R7 pre-screen it would surface as a phantom `survived`. It must be `malformed`.
+func TestVerifyRejectsATrivialCommentPin(t *testing.T) {
+	dir := fixtureRepo(t, "n < 10", "func TestBoundary(t *testing.T) {\n\tif Allow(10) {\n\t\tt.Fatal(\"10 must not be allowed\")\n\t}\n}\n")
+	v := Verifier{Dir: dir, TestCmd: []string{"go", "test", "./..."}}
+	res, err := v.Verify(context.Background(), []Pin{{File: "calc.go", From: "// Allow reports whether n is within the limit.", To: "// Allow reports whether n is within LIMIT.", Test: "TestBoundary"}})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if res[0].Outcome != PinMalformed {
+		t.Fatalf("a comment-only pin must be malformed (never survived): %+v", res[0])
+	}
+}
+
+// A whitespace-only pin is likewise semantically null → malformed.
+func TestVerifyRejectsATrivialWhitespacePin(t *testing.T) {
+	dir := fixtureRepo(t, "n < 10", "func TestBoundary(t *testing.T) {\n\tif Allow(10) {\n\t\tt.Fatal(\"10 must not be allowed\")\n\t}\n}\n")
+	v := Verifier{Dir: dir, TestCmd: []string{"go", "test", "./..."}}
+	res, err := v.Verify(context.Background(), []Pin{{File: "calc.go", From: "n < 10", To: "n  <  10", Test: "TestBoundary"}})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if res[0].Outcome != PinMalformed {
+		t.Fatalf("a whitespace-only pin must be malformed (never survived): %+v", res[0])
+	}
+}
+
+func TestSemanticallyNull(t *testing.T) {
+	// comment-only and whitespace-only changes are null.
+	if !semanticallyNull("package p\n// one\nvar x = 1\n", "package p\n// two\nvar x = 1\n") {
+		t.Fatal("a comment-only change must be null")
+	}
+	if !semanticallyNull("package p\nvar x = 1\n", "package p\nvar   x =  1\n") {
+		t.Fatal("a whitespace-only change must be null")
+	}
+	// a value change is NOT null (same token count, differing literal).
+	if semanticallyNull("package p\nvar x = 1\n", "package p\nvar x = 2\n") {
+		t.Fatal("a value change must not be null")
+	}
+	// a token-count change is NOT null.
+	if semanticallyNull("package p\nvar x = 1\n", "package p\nvar x = 1 + y\n") {
+		t.Fatal("added tokens must not be null")
+	}
+	// an unscannable mutation (unterminated string) is NOT treated as null — the compile step handles it.
+	if semanticallyNull("package p\nvar x = 1\n", "package p\nvar x = \"unterminated\n") {
+		t.Fatal("an unscannable mutation must not be null")
+	}
+	// an unscannable ORIGINAL is likewise not null.
+	if semanticallyNull("package p\nvar x = `unterminated", "package p\nvar x = 1\n") {
+		t.Fatal("an unscannable original must not be null")
+	}
+	// A Go DIRECTIVE comment is semantically meaningful — a change to one is NOT null.
+	if semanticallyNull("//go:build linux\npackage p\n", "//go:build windows\npackage p\n") {
+		t.Fatal("a //go:build directive change must NOT be null")
+	}
+	if semanticallyNull("package p\n//go:noinline\nfunc f() {}\n", "package p\n//go:noescape\nfunc f() {}\n") {
+		t.Fatal("a //go: directive change must NOT be null")
+	}
+	// Adding/removing a directive is not null.
+	if semanticallyNull("package p\nfunc f() {}\n", "package p\n//go:noinline\nfunc f() {}\n") {
+		t.Fatal("adding a directive must NOT be null")
+	}
+	// An ordinary comment that merely CONTAINS a colon is not a directive → still null.
+	if !semanticallyNull("package p\n// note: one\nvar x = 1\n", "package p\n// note: two\nvar x = 1\n") {
+		t.Fatal("an ordinary comment with a colon is still null")
+	}
+	// A block comment is never a directive → still null.
+	if !semanticallyNull("package p\n/* one */\nvar x = 1\n", "package p\n/* two */\nvar x = 1\n") {
+		t.Fatal("a block comment change is still null")
+	}
+	// cgo //export, gccgo //extern, and the legacy // +build constraint are meaningful → NOT null.
+	if semanticallyNull("package p\n//export One\nfunc f() {}\n", "package p\n//export Two\nfunc f() {}\n") {
+		t.Fatal("a //export change must NOT be null")
+	}
+	if semanticallyNull("package p\n//extern one\nfunc f()\n", "package p\n//extern two\nfunc f()\n") {
+		t.Fatal("a //extern change must NOT be null")
+	}
+	if semanticallyNull("// +build linux\npackage p\n", "// +build windows\npackage p\n") {
+		t.Fatal("a legacy // +build change must NOT be null")
+	}
+	// The Go toolchain tolerates extra whitespace (or a tab) between // and +build.
+	if semanticallyNull("//   +build linux\npackage p\n", "//   +build windows\npackage p\n") {
+		t.Fatal("a // +build with extra spaces must NOT be null")
+	}
+	if semanticallyNull("//\t+build linux\npackage p\n", "//\t+build windows\npackage p\n") {
+		t.Fatal("a // +build after a tab must NOT be null")
 	}
 }
