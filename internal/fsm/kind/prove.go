@@ -64,7 +64,9 @@ type proveKind struct{}
 
 func (proveKind) Name() string { return Prove }
 func (proveKind) Info() workflow.KindInfo {
-	return workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, ValidateParams: validateProve}
+	// FixScopedDiff: prove binds its pins and owed-pin check against the FIX's diff (FixEntryHead..head),
+	// not base..head — a loop fix that restores code nets out against the original base otherwise.
+	return workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}, ValidateParams: validateProve, FixScopedDiff: true}
 }
 
 // validateProve accepts an optional test_cmd param naming the consent-hashed AllowedCmd to run.

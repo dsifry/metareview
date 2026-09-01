@@ -2223,3 +2223,41 @@ func TestSdlcLoopProvedGatesOnDeletions(t *testing.T) {
 		})
 	}
 }
+
+// A kind whose Info().FixScopedDiff is set must be handed the FIX's own diff (FixEntryHead..head),
+// not the reviewed change (base..head) — the machine picks the diff baseline per kind. This is the
+// fix for the base..head net-out the first live shakedown found (a restore-type fix vanished against
+// the original base). still-present stands in as a fix-scoped kind here; the machine keys generically
+// on Info().FixScopedDiff, not on any specific kind.
+func TestRunNodeFixScopedDiffUsesFixEntryHead(t *testing.T) {
+	h := newHarness(t)
+	h.git.def.Diffs[shaBase+".."+shaHead] = "BASEDIFF"             // the reviewed change (base..head)
+	h.git.def.Diffs[shaHead+".."+shaHead] = "FIXDIFF"              // the fix's own diff (FixEntryHead..head)
+	h.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1} // so commit_exists sees the fix's commit
+	h.reg.kinds["still-present"].info.FixScopedDiff = true
+	m := h.mustInit(InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, Base: "main"})
+	h.advance(m)
+	h.record(m, "discover", findings(1))
+	if r := h.advance(m); r.To != "adjudicate" {
+		t.Fatalf("→adjudicate: %+v", r)
+	}
+	if r := h.advance(m); r.To != "fix" {
+		t.Fatalf("→fix: %+v", r)
+	}
+	if m.View().Snapshot.FixEntryHead != shaHead {
+		t.Fatalf("FixEntryHead must be set on fix entry: %+v", m.View().Snapshot)
+	}
+	h.advance(m) // fix needs input
+	h.record(m, "fix", `{"commit":"`+shaFix+`","summary":"fixed"}`)
+	if r := h.advance(m); r.To != "verify" {
+		t.Fatalf("→verify: %+v", r)
+	}
+	h.advance(m) // runs the still-present (verify) executor
+	// The review node (adjudicate) saw base..head; the fix-scoped node (verify) saw FixEntryHead..head.
+	if got := h.reg.execs["match-then-adjudicate"].calls[0].Diff.Text; got != "BASEDIFF" {
+		t.Fatalf("a review kind must see the base..head diff, got %q", got)
+	}
+	if got := h.reg.execs["still-present"].calls[0].Diff.Text; got != "FIXDIFF" {
+		t.Fatalf("a fix-scoped kind must see the FixEntryHead..head diff, got %q", got)
+	}
+}
