@@ -277,11 +277,13 @@ func deletesATest(diff string) bool {
 }
 
 // testDeletionRegressions runs the §9.6 mutation-kill non-regression check. It is a no-op unless the
-// fix deleted a test. Then it re-verifies every previously-PROVEN pin (excluding one whose mutated
-// line the fix itself removed) on the current post-deletion tree; a pin that now SURVIVES (the mutation
-// still applies but the tests no longer catch it) means the deleted test was its sole detector — a
-// blocking regression. A pin that comes back malformed/unverifiable (its target moved/changed) is NOT
-// a clean test-deletion signal and is not counted (that is a different concern).
+// fix deleted a test. Then it re-verifies every previously-PROVEN pin on the current post-deletion
+// tree; a pin that now SURVIVES (the mutation still applies but the tests no longer catch it) means the
+// deleted test was its sole detector — a blocking regression. The paired code+test deletion needs no
+// special-case exclusion: when the pinned line was itself removed, its From no longer anchors, so the
+// Verifier returns MALFORMED, not SURVIVED — and only SURVIVED counts. (An explicit "was the target
+// removed" pre-filter was tried and removed: a substring match on removed lines dropped still-live pins
+// like From "n < 10" against a removed "n < 100", silently bypassing the gate.)
 func (e *proveExec) testDeletionRegressions(ctx context.Context, in machine.ExecInput, spec ProveSpec) ([]run.Finding, error) {
 	if !deletesATest(in.Diff.Text) {
 		return nil, nil
@@ -290,9 +292,6 @@ func (e *proveExec) testDeletionRegressions(ctx context.Context, in machine.Exec
 	for _, p := range in.Snap.Proven {
 		if p.Kind != run.ProofPin || p.Pin == nil {
 			continue
-		}
-		if isRemovedLineInFile(in.Diff.Text, p.Pin.File, p.Pin.From) {
-			continue // the pin's mutated line was removed in this commit → its target is legitimately gone
 		}
 		recheck = append(recheck, p)
 	}
@@ -310,21 +309,6 @@ func (e *proveExec) testDeletionRegressions(ctx context.Context, in machine.Exec
 		}
 	}
 	return out, nil
-}
-
-// isRemovedLineInFile reports whether from appears within a line the fix REMOVED from file's own diff
-// section (the mirror of isAddedLineInFile, via judge.RemovedLinesInFile). An empty from or file binds
-// to nothing.
-func isRemovedLineInFile(diff, file, from string) bool {
-	if from == "" || file == "" {
-		return false
-	}
-	for _, removed := range judge.RemovedLinesInFile(diff, file) {
-		if strings.Contains(removed, from) {
-			return true
-		}
-	}
-	return false
 }
 
 // testDeletionMarker is the blocking finding for a previously-proven pin the test deletion un-killed

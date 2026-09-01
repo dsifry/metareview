@@ -675,19 +675,31 @@ func TestProveNoTestDeletionIsInert(t *testing.T) {
 	}
 }
 
-// A proven pin whose mutated line the fix itself removed is EXCLUDED from the non-regression set (its
-// target is legitimately gone), even when a test is also deleted in the same commit.
-func TestProveTestDeletionExcludesRemovedTarget(t *testing.T) {
+// The paired code+test deletion: when the pinned line was itself removed, re-verification returns
+// MALFORMED (From no longer anchors), which is NOT counted as a regression — no special-case exclusion,
+// so a still-live pin can never be dropped by a substring match on removed lines.
+func TestProveTestDeletionRemovedTargetIsMalformedNotRegression(t *testing.T) {
 	pin := pinDP("f1", "guardLine") // File a.go
-	mp := &mockProver{results: []run.ProofResult{{Proof: pin, Proven: false, Outcome: run.PinSurvived}}}
+	mp := &mockProver{results: []run.ProofResult{{Proof: pin, Proven: false, Outcome: run.PinMalformed, Detail: "anchor absent (line removed)"}}}
 	diff := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,1 @@\n-guardLine\n context\n" +
 		"diff --git a/x_test.go b/x_test.go\n--- a/x_test.go\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-package x\n-func TestX(t *testing.T) {}\n"
 	d := runProve(t, run.Snapshot{Proven: []run.DifferentialProof{pin}}, diff, mp)
 	if len(d.Findings) != 0 {
-		t.Fatalf("a pin whose mutated line was removed must be excluded: %+v", d.Findings)
+		t.Fatalf("a removed-target pin re-verifies malformed and must not block: %+v", d.Findings)
 	}
-	if len(mp.gotProofs) != 0 {
-		t.Fatalf("an excluded pin must not be re-verified: %+v", mp.gotProofs)
+	if len(mp.gotProofs) != 1 {
+		t.Fatalf("the pin is re-verified (no pre-filter); the Verifier's malformed result is what spares it: %+v", mp.gotProofs)
+	}
+}
+
+// A test deletion when the run has no proven PINS (only a reproduction) has nothing to re-verify —
+// no finding, no re-verification call.
+func TestProveTestDeletionNoProvenPins(t *testing.T) {
+	mp := &mockProver{results: []run.ProofResult{{Proof: pinDP("f1", "guard"), Proven: false, Outcome: run.PinSurvived}}}
+	diff := "diff --git a/x_test.go b/x_test.go\n--- a/x_test.go\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-package x\n-func TestX(t *testing.T) {}\n"
+	d := runProve(t, run.Snapshot{Proven: []run.DifferentialProof{reproDP("f1")}}, diff, mp)
+	if len(d.Findings) != 0 || len(mp.gotProofs) != 0 {
+		t.Fatalf("no proven pins → nothing to re-verify: findings %+v proofs %+v", d.Findings, mp.gotProofs)
 	}
 }
 
@@ -718,13 +730,5 @@ func TestDeletesATestAndRemovedLine(t *testing.T) {
 	// A removed non-test func, and the "--- a/foo_test.go" header, must NOT count.
 	if deletesATest("--- a/x_test.go\n-func helper() {}\n") {
 		t.Fatal("a removed non-test func (and the --- header) must not count")
-	}
-	// isRemovedLineInFile
-	rd := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,1 @@\n-gone()\n kept\n"
-	if !isRemovedLineInFile(rd, "a.go", "gone()") {
-		t.Fatal("a removed line must bind")
-	}
-	if isRemovedLineInFile(rd, "a.go", "kept") || isRemovedLineInFile(rd, "", "x") || isRemovedLineInFile(rd, "a.go", "") {
-		t.Fatal("a context line, or an empty file/from, must not bind")
 	}
 }
