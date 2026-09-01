@@ -113,6 +113,71 @@ func TestSameFault(t *testing.T) {
 	}
 }
 
+// --- §5.2 identity-scheme migration (versioned derivation, migrate-on-read) ---
+
+// FindingKeyForScheme must reproduce each historical derivation exactly, so a persisted id minted
+// under an older scheme can be recognized and translated forward from the retained (file,text).
+func TestFindingKeyForSchemeReproducesHistory(t *testing.T) {
+	// Scheme 0 is the pre-T0.1 text-only sha1 — file IGNORED — so its value is pinned to the
+	// historical BugID output and is identical across files.
+	if got := FindingKeyForScheme(0, "any/file.go", "x"); got != "11f6ad8ec52a" {
+		t.Fatalf("scheme 0 must reproduce the historical text-only id, got %q", got)
+	}
+	if FindingKeyForScheme(0, "a.go", "x") != FindingKeyForScheme(0, "b.go", "x") {
+		t.Error("scheme 0 ignores the file (text-only), so two files share the id")
+	}
+	// The current scheme is file-aware and equals FindingKey.
+	if FindingKeyForScheme(FindingScheme, "a.go", "x") != FindingKey("a.go", "x") {
+		t.Error("the current scheme must equal FindingKey")
+	}
+	if FindingKeyForScheme(FindingScheme, "a.go", "x") == FindingKeyForScheme(FindingScheme, "b.go", "x") {
+		t.Error("the current scheme is file-aware")
+	}
+	// The change of derivation is real: the same finding hashes differently under 0 and the current.
+	if FindingKeyForScheme(0, "a.go", "x") == FindingKeyForScheme(FindingScheme, "a.go", "x") {
+		t.Error("scheme 0 and the current scheme must differ, or there is nothing to migrate")
+	}
+}
+
+// MigrateFindingID translates a persisted id forward and reports whether it moved, so an override or
+// Unproven gap keyed on the old id is re-found by translation, never orphaned (§5.2(a)). Dropping the
+// scheme switch (FindingKeyForScheme ignoring the scheme) makes changed always false and orphans the
+// override — the mutation this test kills.
+func TestMigrateFindingIDResolvesAnOldKeyedOverride(t *testing.T) {
+	file, text := "internal/fsm/kind/kind.go", "the guard is unpinned"
+	// A run persisted under scheme 0 recorded an override keyed on the old finding id.
+	oldID := FindingKeyForScheme(0, file, text)
+	override := map[string]string{oldID: "granted: accepted risk"}
+	// The new binary computes the current id; looking the override up under it would orphan it,
+	// unless the migration translates the old id space forward from the retained (file,text).
+	newID, changed := MigrateFindingID(0, file, text)
+	if !changed {
+		t.Fatal("migrating a scheme-0 id to the current file-aware scheme must report a change")
+	}
+	if newID != FindingKey(file, text) {
+		t.Fatalf("migration must yield the current-scheme id, got %q", newID)
+	}
+	if _, orphaned := override[newID]; orphaned {
+		t.Fatal("test bug: the new id must not already be present in the old-keyed map")
+	}
+	// Migrate-on-read: rebuild the override under the current id space from the retained (file,text).
+	migrated := map[string]string{}
+	for old, reason := range override {
+		if FindingKeyForScheme(0, file, text) != old {
+			t.Fatalf("the persisted old id must reproduce from retained text")
+		}
+		cur, _ := MigrateFindingID(0, file, text)
+		migrated[cur] = reason
+	}
+	if _, ok := migrated[newID]; !ok {
+		t.Fatal("the override must resolve under the current id after migration")
+	}
+	// An id already at the current scheme does not move.
+	if _, changed := MigrateFindingID(FindingScheme, file, text); changed {
+		t.Error("an id already at the current scheme must not report a change")
+	}
+}
+
 // --- The T0.1 frozen-floor gate over the pre-locked labeled set ---
 
 type variant struct {

@@ -321,13 +321,15 @@ func bugs(from, to int) []run.Bug {
 
 func TestK3Composition(t *testing.T) {
 	ctx := context.Background()
-	fs := findings("c0", "c1", "c2")
-	goldens := []run.Golden{{Comment: "g0"}, {Comment: "g1"}}
+	// Candidate/golden texts are digit-free and mutually distinct: the frozen finding identity
+	// (T0.1) collapses digit runs, so "c0"/"c1"/"c2" would normalize to one identity and dedup away.
+	fs := findings("cx", "cy", "cz")
+	goldens := []run.Golden{{Comment: "gx"}, {Comment: "gy"}}
 	script := judge.Script{Calls: map[judge.ScriptKey]judge.ScriptRow{}}
 	key := func(kind string, idx int) judge.ScriptKey {
 		return judge.ScriptKey{Kind: kind, Node: "adjudicate", Iter: 2, Index: idx}
 	}
-	// g0: c0 0.5 (provisional), c1 0.9 wins, c2 no. g1: c0 no, c1 0.9 wins again (equal to nothing else), c2 match:false 0.99 never
+	// gx: cx 0.5 (provisional), cy 0.9 wins, cz no. gy: cx 0.0 no, cy 0.9 wins again, cz match:false 0.99 never
 	script.Calls[key(judge.KindMatch, 5)] = rowFor(true, 0.5)
 	script.Calls[key(judge.KindMatch, 6)] = rowFor(true, 0.9)
 	script.Calls[key(judge.KindMatch, 7)] = rowFor(false, 0.99)
@@ -354,10 +356,10 @@ func TestK3Composition(t *testing.T) {
 	}
 	var out adjudicateOut
 	_ = json.Unmarshal(raw, &out)
-	if len(out.Confirmed) != 3 || out.Confirmed[0].Desc != "g0" || out.Confirmed[0].Verdict != run.VerdictMatched || *out.Confirmed[0].GoldenIdx != 0 || out.Confirmed[0].Confidence != 0.9 || out.Confirmed[0].File != "f.go" || out.Confirmed[0].Line != 2 || out.Confirmed[0].ID != run.BugID("g0") {
-		t.Fatalf("matched g0: %+v", out.Confirmed)
+	if len(out.Confirmed) != 3 || out.Confirmed[0].Desc != "gx" || out.Confirmed[0].Verdict != run.VerdictMatched || *out.Confirmed[0].GoldenIdx != 0 || out.Confirmed[0].Confidence != 0.9 || out.Confirmed[0].File != "f.go" || out.Confirmed[0].Line != 2 || out.Confirmed[0].ID != run.FindingKey("f.go", "gx") {
+		t.Fatalf("matched gx: %+v", out.Confirmed)
 	}
-	if out.Confirmed[1].Desc != "g1" || *out.Confirmed[1].GoldenIdx != 1 || out.Confirmed[2].Verdict != run.VerdictRealButUngold || out.Confirmed[2].Desc != "c2" || out.Confirmed[2].ID != run.BugID("c2") || out.Confirmed[2].Confidence != 0.7 {
+	if out.Confirmed[1].Desc != "gy" || *out.Confirmed[1].GoldenIdx != 1 || out.Confirmed[2].Verdict != run.VerdictRealButUngold || out.Confirmed[2].Desc != "cz" || out.Confirmed[2].ID != run.FindingKey("f.go", "cz") || out.Confirmed[2].Confidence != 0.7 {
 		t.Fatalf("confirmed: %+v", out.Confirmed)
 	}
 	if len(out.Rejected) != 0 {
@@ -382,13 +384,14 @@ func TestK3Composition(t *testing.T) {
 	r = mustNew(t, judge.NewMock(script), true)
 	ex, _ = r.Executor(MatchThenAdjudicate)
 	a = &audits{}
-	raw, err = ex.Execute(ctx, execInput(run.Snapshot{Iteration: 2, Findings: findings("c0", "c1"), Goldens: goldens[:1]}, adjNode, 0, a))
+	raw, err = ex.Execute(ctx, execInput(run.Snapshot{Iteration: 2, Findings: findings("cx", "cy"), Goldens: goldens[:1]}, adjNode, 0, a))
 	_ = json.Unmarshal(raw, &out)
 	if err != nil || len(a.events) != 2 || len(out.Confirmed) != 1 || out.Confirmed[0].Line != 2 || len(out.Rejected) != 0 {
 		t.Fatalf("supersession: %v %d %+v", err, len(a.events), out)
 	}
-	// ties keep the first; duplicate texts collapse (first location kept); rejected hallucination;
-	// a parse error is NOT a judgment, so that candidate is kept as checked_but_unverified
+	// ties keep the first; a same-(file,text) duplicate collapses (first location kept) — a same text
+	// in a DIFFERENT file would NOT (T0.1); rejected hallucination; a parse error is NOT a judgment,
+	// so that candidate is kept as checked_but_unverified
 	script = judge.Script{Calls: map[judge.ScriptKey]judge.ScriptRow{
 		key(judge.KindMatch, 0):      rowFor(true, 0.6),
 		key(judge.KindMatch, 1):      rowFor(true, 0.6),
@@ -399,13 +402,13 @@ func TestK3Composition(t *testing.T) {
 	r = mustNew(t, judge.NewMock(script), true)
 	ex, _ = r.Executor(MatchThenAdjudicate)
 	a = &audits{}
-	dup := []run.Finding{{IssueText: "c0", File: "a.go", Line: 1}, {IssueText: "c1", File: "b.go", Line: 2}, {IssueText: "c0", File: "z.go", Line: 9}, {IssueText: "c2"}}
+	dup := []run.Finding{{IssueText: "cx", File: "a.go", Line: 1}, {IssueText: "cy", File: "b.go", Line: 2}, {IssueText: "cx", File: "a.go", Line: 9}, {IssueText: "cz"}}
 	raw, err = ex.Execute(ctx, execInput(run.Snapshot{Iteration: 2, Findings: dup, Goldens: goldens[:1]}, adjNode, 0, a))
 	_ = json.Unmarshal(raw, &out)
 	if err != nil || len(out.Confirmed) != 2 || out.Confirmed[0].File != "a.go" || len(out.Rejected) != 1 || out.Rejected[0].Verdict != run.VerdictHallucination || out.Rejected[0].Confidence != 0.69 {
 		t.Fatalf("tie/dedup/reject: %v %+v", err, out)
 	}
-	if out.Confirmed[1].Desc != "c2" || out.Confirmed[1].Verdict != run.VerdictCheckedButUnverified {
+	if out.Confirmed[1].Desc != "cz" || out.Confirmed[1].Verdict != run.VerdictCheckedButUnverified {
 		t.Fatalf("an unparseable reply must be kept as checked_but_unverified, not dropped: %+v", out.Confirmed[1])
 	}
 	if a.events[2].Error == "" || !strings.HasPrefix(a.events[2].Error, "parse: ") || string(a.events[2].Verdict) != "null" || a.events[4].Error == "" {
@@ -472,7 +475,7 @@ func TestK3Composition(t *testing.T) {
 	script = judge.Script{Calls: map[judge.ScriptKey]judge.ScriptRow{key(judge.KindMatch, 0): rowFor(true, 0.9)}}
 	r = mustNew(t, judge.NewMock(script), true)
 	ex, _ = r.Executor(MatchThenAdjudicate)
-	raw, err = ex.Execute(ctx, execInput(run.Snapshot{Iteration: 2, Findings: findings("g0"), Goldens: goldens[:1]}, adjNode, 0, &audits{}))
+	raw, err = ex.Execute(ctx, execInput(run.Snapshot{Iteration: 2, Findings: findings("gx"), Goldens: goldens[:1]}, adjNode, 0, &audits{}))
 	_ = json.Unmarshal(raw, &out)
 	if err != nil || len(out.Confirmed) != 1 {
 		t.Fatalf("golden-equal candidate: %v %+v", err, out)
@@ -480,7 +483,9 @@ func TestK3Composition(t *testing.T) {
 	// pre-flight refusals: too many candidates+goldens, union cliff, worst-case size
 	big := make([]run.Finding, 250)
 	for i := range big {
-		big[i] = run.Finding{IssueText: fmt.Sprint("t", i)}
+		// Distinct file per finding: a bare numeric suffix collapses under the identity's digit-run
+		// normalization, so text alone would dedup 250 candidates to one and never trip the cap.
+		big[i] = run.Finding{IssueText: "t", File: fmt.Sprintf("f%d.go", i)}
 	}
 	var gs []run.Golden
 	for i := 0; i < 10; i++ {
@@ -495,7 +500,7 @@ func TestK3Composition(t *testing.T) {
 	}
 	fat := make([]run.Finding, 130)
 	for i := range fat {
-		fat[i] = run.Finding{IssueText: strings.Repeat("x", run.MaxDesc) + fmt.Sprint(i)}
+		fat[i] = run.Finding{IssueText: strings.Repeat("x", run.MaxDesc), File: fmt.Sprintf("f%d.go", i)}
 	}
 	if _, err := ex.Execute(ctx, execInput(run.Snapshot{Findings: fat}, adjNode, 0, a)); !errs.Is(err, CodeTooManyBugs) || errs.As(err).Field("reason") != "preflight" || len(a.events) != 0 {
 		t.Fatalf("preflight size: %v", err)
@@ -688,6 +693,121 @@ func (r *recordingJudge) Call(_ context.Context, req judge.Request) (judge.Verdi
 		r.diffs = append(r.diffs, in.Diff)
 	}
 	return judge.Verdict{Decision: true, Confidence: 0.9}, nil
+}
+
+// S2 (T0.1): dedupCandidates must key on the file-aware finding identity, not raw issue text. The
+// same sentence about two different files is two distinct faults; collapsing them on text alone
+// drops a real bug (the precision the file component adds). A genuine same-(file,text) repeat still
+// collapses.
+func TestDedupCandidatesIsFileAware(t *testing.T) {
+	in := []run.Finding{
+		{IssueText: "same text", File: "a.go", Line: 1},
+		{IssueText: "same text", File: "b.go", Line: 2},
+		{IssueText: "same text", File: "a.go", Line: 9}, // a real same-(file,text) duplicate → collapses
+	}
+	out := dedupCandidates(in)
+	if len(out) != 2 {
+		t.Fatalf("file-aware dedup must keep a.go and b.go but collapse the a.go repeat, got %d: %+v", len(out), out)
+	}
+	if out[0].File != "a.go" || out[0].Line != 1 || out[1].File != "b.go" {
+		t.Fatalf("dedup must keep the first occurrence of each (file,text): %+v", out)
+	}
+}
+
+// S3 (T0.1): dedupBugs keys on Bug.ID, which is now the file-aware FindingKey. Two confirmed bugs
+// with the same text in different files carry distinct ids and must both survive; a genuine repeat
+// (a golden a candidate also won, or two goldens sharing a comment+file) collapses to the first.
+func TestDedupBugsKeysOnFileAwareID(t *testing.T) {
+	a := run.Bug{ID: run.FindingKey("a.go", "same"), Desc: "same", File: "a.go", Verdict: run.VerdictRealButUngold}
+	b := run.Bug{ID: run.FindingKey("b.go", "same"), Desc: "same", File: "b.go", Verdict: run.VerdictRealButUngold}
+	if a.ID == b.ID {
+		t.Fatal("precondition: same-text/different-file bugs must derive distinct ids")
+	}
+	out := dedupBugs([]run.Bug{a, b, a})
+	if len(out) != 2 || out[0].File != "a.go" || out[1].File != "b.go" {
+		t.Fatalf("dedupBugs must keep the two distinct-id bugs and collapse the repeat: %+v", out)
+	}
+}
+
+// S2+S4+S6 (T0.1) end-to-end: the same finding text about two DIFFERENT files is two faults. Every
+// identity-sensitive site on the confirm path — dedupCandidates, the known-id cap set, and the mint
+// itself — must keep them distinct through to two confirmed bugs with different file-aware ids.
+func TestAdjudicateKeepsSameTextInDifferentFilesDistinct(t *testing.T) {
+	ctx := context.Background()
+	text := "the guard is unpinned"
+	key := func(idx int) judge.ScriptKey {
+		return judge.ScriptKey{Kind: judge.KindAdjudicate, Node: "adjudicate", Iter: 2, Index: idx}
+	}
+	script := judge.Script{Calls: map[judge.ScriptKey]judge.ScriptRow{key(0): adjRow(true, 0.9), key(1): adjRow(true, 0.9)}}
+	r := mustNew(t, judge.NewMock(script), true)
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	cands := []run.Finding{{IssueText: text, File: "a.go", Line: 1}, {IssueText: text, File: "b.go", Line: 2}}
+	raw, err := ex.Execute(ctx, execInput(run.Snapshot{Iteration: 2, Findings: cands}, adjNode, 0, &audits{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out adjudicateOut
+	_ = json.Unmarshal(raw, &out)
+	if len(out.Confirmed) != 2 {
+		t.Fatalf("same text in two files must yield two confirmed bugs, got %+v", out.Confirmed)
+	}
+	if out.Confirmed[0].ID == out.Confirmed[1].ID {
+		t.Fatalf("the two bugs must carry distinct file-aware ids: %+v", out.Confirmed)
+	}
+	if out.Confirmed[0].ID != run.FindingKey("a.go", text) || out.Confirmed[1].ID != run.FindingKey("b.go", text) {
+		t.Fatalf("confirmed ids must be the file-aware FindingKey: %+v", out.Confirmed)
+	}
+}
+
+// S5 (§5.1(a)): a matched golden's id lives in the WINNING candidate's (file, text) domain — the
+// golden text keyed under the winner's file — closing the review #35b split where a fileless golden id
+// mixed with file-keyed candidate ids. The winner here is b.go, so the golden id is
+// FindingKey("b.go", comment), never FindingKey("", comment).
+func TestMatchedGoldenInheritsWinnerFileDomain(t *testing.T) {
+	ctx := context.Background()
+	comment := "the loader runs twice on init"
+	key := func(idx int) judge.ScriptKey {
+		return judge.ScriptKey{Kind: judge.KindMatch, Node: "adjudicate", Iter: 2, Index: idx}
+	}
+	// Both candidates match the golden (so neither is re-adjudicated); b.go wins on confidence.
+	script := judge.Script{Calls: map[judge.ScriptKey]judge.ScriptRow{key(0): rowFor(true, 0.3), key(1): rowFor(true, 0.9)}}
+	r := mustNew(t, judge.NewMock(script), true)
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	cands := []run.Finding{{IssueText: "alpha", File: "a.go", Line: 1}, {IssueText: "beta", File: "b.go", Line: 2}}
+	snap := run.Snapshot{Iteration: 2, Findings: cands, Goldens: []run.Golden{{Comment: comment}}}
+	raw, err := ex.Execute(ctx, execInput(snap, adjNode, 0, &audits{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out adjudicateOut
+	_ = json.Unmarshal(raw, &out)
+	if len(out.Confirmed) != 1 || out.Confirmed[0].Verdict != run.VerdictMatched {
+		t.Fatalf("expected one matched golden: %+v", out.Confirmed)
+	}
+	got := out.Confirmed[0]
+	if got.File != "b.go" || got.ID != run.FindingKey("b.go", comment) {
+		t.Fatalf("matched golden must inherit the winner's file domain: %+v", got)
+	}
+	if got.ID == run.FindingKey("", comment) {
+		t.Fatal("the golden id must not live in the fileless domain (the review #35b split)")
+	}
+}
+
+// S4 (T0.1): the known-id cap set keys each candidate on its file-aware id, so the same text in two
+// files counts as TWO known ids. Keying on text alone would undercount and let an over-cap set of
+// known bugs slip past the union pre-flight.
+func TestAdjudicatePreflightCountsSameTextDifferentFilesAsTwo(t *testing.T) {
+	ctx := context.Background()
+	r := mustNew(t, judge.NewMock(judge.Script{Calls: map[judge.ScriptKey]judge.ScriptRow{}}), true)
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	text := "the guard is unpinned"
+	cands := []run.Finding{{IssueText: text, File: "a.go", Line: 1}, {IssueText: text, File: "b.go", Line: 2}}
+	a := &audits{}
+	// 255 already-known bugs + 2 distinct-file candidates = 257 > MaxDeltaList: refuse before any spend.
+	_, err := ex.Execute(ctx, execInput(run.Snapshot{Iteration: 2, Findings: cands, AllFound: bugs(0, 255)}, adjNode, 0, a))
+	if !errs.Is(err, CodeTooManyBugs) || len(a.events) != 0 {
+		t.Fatalf("two distinct-file candidates over the cap must refuse at the union pre-flight: %v (%d events)", err, len(a.events))
+	}
 }
 
 // Each candidate must be judged against its OWN file's hunks. A single cut shared by the
@@ -894,6 +1014,10 @@ func TestEscalationFailureKeepsTheFinding(t *testing.T) {
 	for _, b := range out.Confirmed {
 		if strings.Contains(b.Desc, "deploy.py") && b.Verdict == run.VerdictCheckedButUnverified {
 			kept = true
+			// S7 (T0.1): the secondOpinion path mints its bug id with the file-aware FindingKey too.
+			if b.ID != run.FindingKey("server.go", "server.go disagrees with scripts/deploy.py") {
+				t.Errorf("escalation-kept bug id must be the file-aware FindingKey: %q", b.ID)
+			}
 		}
 	}
 	if !kept {

@@ -2,7 +2,6 @@ package run
 
 import (
 	"bytes"
-	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -97,12 +96,6 @@ func OutputHash(raw []byte) string {
 func LineHash(line []byte) string {
 	sum := sha256.Sum256(line)
 	return hex.EncodeToString(sum[:])
-}
-
-// BugID is the stable identity of a finding: hex(sha1(issueText))[:12].
-func BugID(issueText string) string {
-	sum := sha1.Sum([]byte(issueText))
-	return hex.EncodeToString(sum[:])[:12]
 }
 
 // Key builds the node@iter key used by NodeOutputs/Applied.

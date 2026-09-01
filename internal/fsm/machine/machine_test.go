@@ -624,10 +624,10 @@ func TestM4Convergence(t *testing.T) {
 		t.Fatalf("loop 1: %+v", r)
 	}
 	// iteration 1: fix its own new bug and one old one → 7 of 9 remain: progress, not fixed, loop again
-	newBug := run.BugID("bug 8")
-	present = func(id string) bool { return id != newBug && id != run.BugID("bug 0") }
+	newBug := run.FindingKey("", "bug new") // the iter-1 discover finding carries no file
+	present = func(id string) bool { return id != newBug && id != run.FindingKey("f.go", "bug a") }
 	h.advance(m)
-	h.record(m, "discover", string(run.MarshalCanonical(run.Delta{Findings: []run.Finding{{IssueText: "bug 8"}}})))
+	h.record(m, "discover", string(run.MarshalCanonical(run.Delta{Findings: []run.Finding{{IssueText: "bug new"}}})))
 	h.advance(m)
 	h.advance(m)
 	h.advance(m)

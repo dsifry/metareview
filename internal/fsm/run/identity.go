@@ -62,6 +62,32 @@ func FindingKey(file, text string) string {
 // old scheme are MIGRATED forward from the retained source text — never silently orphaned.
 const FindingScheme = 1
 
+// FindingKeyForScheme derives a finding id under a specific historical FindingScheme, so a persisted
+// id minted under an older scheme can be reproduced from the retained (file, text) and translated
+// forward (spike §5.2 migrate-on-read). Scheme ≤ 0 is the pre-T0.1 derivation — hex(sha1(text))[:12],
+// the file IGNORED — reproduced here rather than via a public BugID (which T0.1 removes). Any current
+// scheme is the file-aware FindingKey.
+//
+// When FindingScheme is next bumped and FindingKey's derivation changes, this switch must gain a case
+// that reproduces the retiring scheme's exact bytes; until then scheme 1 is FindingKey by identity.
+func FindingKeyForScheme(scheme int, file, text string) string {
+	if scheme <= 0 {
+		sum := sha1.Sum([]byte(text)) // #nosec G401 -- identity digest, not security
+		return hex.EncodeToString(sum[:])[:12]
+	}
+	return FindingKey(file, text)
+}
+
+// MigrateFindingID translates a finding id minted under fromScheme forward to the current
+// FindingScheme, recomputing from the retained (file, text), and reports whether the id moved. A pin
+// or override keyed on the old id is re-found by looking it up under the returned current id rather
+// than orphaning it (spike §5.2(a)). changed is false when the id was already current — the no-op
+// case — which is exactly when fromScheme's derivation already equals the current one.
+func MigrateFindingID(fromScheme int, file, text string) (current string, changed bool) {
+	current = FindingKey(file, text)
+	return current, FindingKeyForScheme(fromScheme, file, text) != current
+}
+
 // ContinuityThreshold (τ) is the frozen Jaccard bar at/above which two SAME-FILE findings are the
 // same fault for continuity (Unproven clear, class carry). Frozen 2026-09-01 against the pre-locked
 // ground truth: T4 recall 92% (≥90% floor) and precision 100% on 274 real same-file distinct-fault
