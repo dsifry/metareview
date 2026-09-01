@@ -39,6 +39,7 @@ func (rp ReproductionProver) engine(spec ProveSpec) (mutation.Reproducer, gitFn)
 	return mutation.Reproducer{
 		Dir: spec.Dir, PreFixSHA: spec.PreFixSHA, PostFixSHA: spec.PostFixSHA,
 		TestCmd: spec.TestCmd, Timeout: spec.Timeout, Git: git, Run: rp.Run,
+		Convention: spec.Convention,
 	}, git
 }
 

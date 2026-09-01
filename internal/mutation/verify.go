@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dsifry/metareview/internal/findings"
+	"github.com/dsifry/metareview/internal/testconv"
 )
 
 // Pin is a claim that one test holds one line of production code: replacing From with To at File
@@ -75,9 +76,14 @@ type Verifier struct {
 	// questions, and a language whose build check is not a test invocation needs to say so.
 	BuildCmd []string
 	Timeout  time.Duration
+	// Convention is the language seam (spec §4.2); here it supplies the trivial-pin pre-screen. Nil
+	// defaults to Go — the FSM path always sets it explicitly.
+	Convention testconv.Convention
 	// Now and Run are seams for tests; nil means the real thing.
 	Run func(ctx context.Context, dir string, argv []string) (int, string, error)
 }
+
+func (v Verifier) conv() testconv.Convention { return convOrGo(v.Convention) }
 
 const defaultVerifyTimeout = 10 * time.Minute
 
@@ -149,7 +155,7 @@ func (v Verifier) verifyOne(ctx context.Context, p Pin) PinResult {
 	//     triviality is out of scope: no pure syntactic method detects reachability, and the spec states
 	//     no reachability contract; the compile-then-break steps handle everything the token check does
 	//     not.)
-	if semanticallyNull(body, mutated) {
+	if v.conv().SemanticallyNull(body, mutated) {
 		return fail(PinMalformed, "the mutation %q -> %q changes only comments or whitespace; it is semantically null, so no test could catch it — rewrite the pin to mutate real behaviour", p.From, p.To)
 	}
 
