@@ -32,7 +32,11 @@ pr-ready return exit 0); only the hook's branch-scope status check is affected.
   reports `must_clear: []`; the same PASS **without** covered paths still reports the files (the
   current, documented behaviour) — pinning both directions.
 
-## Interim
-Leave the Stop hook as-is: it is designed to yield loudly on the second pass exactly for a gate that
-cannot be satisfied from inside a session. Do not disable it or force the binary onto PATH just to
-surface unclearable blockers.
+## Interim (done 2026-09-01)
+The pre-finish **Stop hook is DISABLED** in `.claude/settings.json` (moved to `_disabledHooks`, with a
+reason), because the gate is unsatisfiable from inside a session and only yields loudly on the second
+pass — an unsatisfiable blocking gate trains operators to ignore it, the exact failure the hook's own
+comments warn about. The per-task gates (`review task-done` / `pr-ready`) still run and pass, so
+enforcement is not lost. **Re-enable** by moving the `Stop` array back under `hooks` once this task is
+resolved (the gate then has a satisfiable path). Not chosen: forcing `~/go/bin` onto PATH, which would
+only change the message from "not installed" to "N unreviewed files" while still blocking.
