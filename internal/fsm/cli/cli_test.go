@@ -172,8 +172,11 @@ func TestUsageAndPrompt(t *testing.T) {
 	}
 	env := h.must(StatusOK, 0, "workflows")
 	list := env["workflows"].([]any)
-	if len(list) != 2 || list[1].(map[string]any)["name"] != "sdlc-loop" || len(list[1].(map[string]any)["states"].([]any)) != 6 {
+	if len(list) != 3 || list[1].(map[string]any)["name"] != "sdlc-loop" || len(list[1].(map[string]any)["states"].([]any)) != 6 {
 		t.Fatalf("workflows: %v", list)
+	}
+	if list[2].(map[string]any)["name"] != "sdlc-loop-proved" || len(list[2].(map[string]any)["states"].([]any)) != 7 {
+		t.Fatalf("sdlc-loop-proved not listed: %v", list)
 	}
 	// outside a repository: state refuses, workflows works
 	h.cwd = t.TempDir()
