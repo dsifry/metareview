@@ -328,9 +328,14 @@ type Snapshot struct {
 	Findings       []Finding           `json:"findings"`
 	Confirmed      []Bug               `json:"confirmed"`
 	Unproven       []DifferentialProof `json:"unproven,omitempty"` // proofs no round has proven; drives re-discover. Derived, never persisted.
-	AllFound       []Bug               `json:"all_found"`
-	Status         []BugStatus         `json:"status"`
-	Unfixed        int                 `json:"unfixed"`
+	// Proven is every differential proof a round has PROVEN, in temporal fold order, deduped by proof
+	// identity. It is the run's set of "killed mutants" — the §9.6 test-deletion gate re-verifies these
+	// on the post-deletion tree, so a test deletion that un-kills an earlier proof is caught. Derived
+	// (driven only by a Proven PinResult folded here), so re-folding the log reproduces it.
+	Proven   []DifferentialProof `json:"proven,omitempty"`
+	AllFound []Bug               `json:"all_found"`
+	Status   []BugStatus         `json:"status"`
+	Unfixed  int                 `json:"unfixed"`
 	// PrevUnfixed is retained for the wire schema and operator diagnostics ONLY. No predicate
 	// reads it: measuring progress by comparing unfixed totals is the defect UnfixedAtEntry
 	// exists to replace, and a consumer reaching for this field would reproduce it.
@@ -360,6 +365,7 @@ type Snapshot struct {
 func (s Snapshot) Clone() Snapshot {
 	c := s
 	c.Unproven = cloneProofs(s.Unproven)
+	c.Proven = cloneProofs(s.Proven)
 	c.Lineage = cloneStrings(s.Lineage)
 	c.Vars = cloneStringMap(s.Vars)
 	if s.AllowedCmds != nil {

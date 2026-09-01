@@ -64,6 +64,7 @@ func TestCloneIsDeep(t *testing.T) {
 		Findings:       []Finding{{IssueText: "i"}},
 		Confirmed:      []Bug{{ID: "b", GoldenIdx: &one}},
 		Unproven:       []DifferentialProof{{ID: "p1", Finding: "f1", Kind: ProofPin, Pin: &Pin{ID: "p1", Finding: "f1", File: "a.go", From: "+x", To: "y", Test: "T"}}},
+		Proven:         []DifferentialProof{{ID: "p2", Finding: "f2", Kind: ProofPin, Pin: &Pin{ID: "p2", Finding: "f2", File: "b.go", From: "+x", To: "y", Test: "T"}}},
 		AllFound:       []Bug{{ID: "b", GoldenIdx: &one}},
 		Status:         []BugStatus{{ID: "b"}},
 		PrevUnfixed:    &one,
@@ -94,7 +95,8 @@ func TestCloneIsDeep(t *testing.T) {
 	c.LastError.Code = "changed"
 	c.Warnings[0] = "changed"
 	c.Unproven[0].ID = "changed"
-	if orig.Unproven[0].ID != "p1" || orig.Vars["k"] != "v" || orig.AllowedCmds[0].Argv[0] != "a" || orig.AllowedCmds[0].FileHashes["p"] != "h" ||
+	c.Proven[0].ID = "changed"
+	if orig.Proven[0].ID != "p2" || orig.Unproven[0].ID != "p1" || orig.Vars["k"] != "v" || orig.AllowedCmds[0].Argv[0] != "a" || orig.AllowedCmds[0].FileHashes["p"] != "h" ||
 		orig.Lineage[0] != "p" || orig.Goldens[0].Comment != "c" || orig.Findings[0].IssueText != "i" ||
 		*orig.Confirmed[0].GoldenIdx != 1 || *orig.AllFound[0].GoldenIdx != 1 || *orig.PrevUnfixed != 1 || orig.UnfixedAtEntry[0] != "bug-1" ||
 		string(orig.NodeOutputs["n@0"]) != `{"x":1}` || !orig.Applied["n@0"] || orig.NodesRun[0] != "n" ||
@@ -109,7 +111,7 @@ func TestCloneIsDeep(t *testing.T) {
 	}
 	// reflect walk: every slice/map/pointer/RawMessage field of Snapshot was exercised above
 	rt := reflect.TypeOf(Snapshot{})
-	exercised := map[string]bool{"Vars": true, "AllowedCmds": true, "Lineage": true, "Goldens": true, "Findings": true, "Confirmed": true, "AllFound": true, "Status": true, "PrevUnfixed": true, "UnfixedAtEntry": true, "NodeOutputs": true, "Applied": true, "NodesRun": true, "LastError": true, "Warnings": true, "Unproven": true}
+	exercised := map[string]bool{"Vars": true, "AllowedCmds": true, "Lineage": true, "Goldens": true, "Findings": true, "Confirmed": true, "AllFound": true, "Status": true, "PrevUnfixed": true, "UnfixedAtEntry": true, "NodeOutputs": true, "Applied": true, "NodesRun": true, "LastError": true, "Warnings": true, "Unproven": true, "Proven": true}
 	for i := 0; i < rt.NumField(); i++ {
 		f := rt.Field(i)
 		switch f.Type.Kind() {

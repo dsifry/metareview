@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -240,11 +241,96 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 			delta.Findings = append(delta.Findings, owedPinMarker(b))
 		}
 	}
+	// §9.6 test-deletion gate — mutation-kill non-regression (the always-run deterministic half). If
+	// this fix DELETED a test, a green suite proves nothing: no mutant killed before the deletion may
+	// survive after it. Re-verify the run's PROVEN pins on the post-deletion tree; a pin that now
+	// SURVIVES means the deleted test was its detector → block. A pin whose mutated line the fix itself
+	// removed is excluded (its target is legitimately gone).
+	stale, err := e.testDeletionRegressions(ctx, in, spec)
+	if err != nil {
+		return nil, err
+	}
+	delta.Findings = append(delta.Findings, stale...)
+
 	raw := json.RawMessage(run.MarshalCanonical(delta))
 	if _, err := (proveKind{}).Decode(raw); err != nil {
 		return nil, err
 	}
 	return raw, nil
+}
+
+// testFuncRemovedRe matches a removed Go test declaration, following the testing package's naming
+// rule: TestXxx/BenchmarkXxx/FuzzXxx/ExampleXxx where Xxx is EMPTY or starts with a non-lowercase rune
+// (so `Test`/`TestFoo`/`Test_x`/`TestÜ` match but `Testhelper` does not), with optional whitespace
+// before the parameter list (`func TestFoo (t ...)` is legal). Suffix runes are Unicode identifier
+// characters, not ASCII-only.
+var testFuncRemovedRe = regexp.MustCompile(`^-func (Test|Benchmark|Fuzz|Example)([^\p{Ll}\s(][\p{L}\p{N}_]*)?\s*\(`)
+
+// deletesATest reports whether the diff removes a Go test function — a removed `func Test.../
+// Benchmark.../Fuzz.../Example...` line, which covers both a deleted *_test.go file (its func lines
+// appear as removed) and a test removed from a surviving file. Header lines ("--- a/…") are skipped.
+func deletesATest(diff string) bool {
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "---") {
+			continue
+		}
+		if testFuncRemovedRe.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// testDeletionRegressions runs the §9.6 mutation-kill non-regression check. It is a no-op unless the
+// fix deleted a test. Then it re-verifies every previously-PROVEN pin on the current post-deletion
+// tree; a pin that now SURVIVES (the mutation still applies but the tests no longer catch it) means the
+// deleted test was its sole detector — a blocking regression. The paired code+test deletion needs no
+// special-case exclusion: when the pinned line was itself removed, its From no longer anchors, so the
+// Verifier returns MALFORMED, not SURVIVED — and only SURVIVED counts. (An explicit "was the target
+// removed" pre-filter was tried and removed: a substring match on removed lines dropped still-live pins
+// like From "n < 10" against a removed "n < 100", silently bypassing the gate.)
+func (e *proveExec) testDeletionRegressions(ctx context.Context, in machine.ExecInput, spec ProveSpec) ([]run.Finding, error) {
+	if !deletesATest(in.Diff.Text) {
+		return nil, nil
+	}
+	var recheck []run.DifferentialProof
+	for _, p := range in.Snap.Proven {
+		if p.Kind != run.ProofPin || p.Pin == nil {
+			continue
+		}
+		recheck = append(recheck, p)
+	}
+	if len(recheck) == 0 {
+		return nil, nil
+	}
+	results, err := e.prover.ProvePins(ctx, recheck, spec)
+	if err != nil {
+		return nil, err
+	}
+	var out []run.Finding
+	for _, r := range results {
+		if r.Outcome == run.PinSurvived {
+			out = append(out, testDeletionMarker(r))
+		}
+	}
+	return out, nil
+}
+
+// testDeletionMarker is the blocking finding for a previously-proven pin the test deletion un-killed
+// (§9.6). Like the other prove markers it selects on structural provenance (Source mutation-verify +
+// a blocking Category), so pins_proven reddens on it.
+func testDeletionMarker(r run.ProofResult) run.Finding {
+	file := ""
+	if r.Proof.Pin != nil {
+		file = r.Proof.Pin.File
+	}
+	return run.Finding{
+		IssueText: fmt.Sprintf("prove: deleting a test un-killed a proven fix — pin for finding %s now survives (§9.6 mutation-kill non-regression)", r.Proof.Finding),
+		File:      file,
+		Severity:  "high",
+		Category:  run.CategoryUnprovenFix,
+		Source:    run.SourceMutationVerify,
+	}
 }
 
 // proveDir is the directory the prover runs in: the run's work dir, falling back to the repo root.
