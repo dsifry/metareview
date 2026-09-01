@@ -55,7 +55,8 @@ delete-a-function rung once the above pass.
 ## Driving the loop (the `--agent-prompt` contract)
 
 `init` → then repeat: `advance` → on **exit 3 (NEEDS_INPUT)** do the node's work → `record node-output
---node <n> --data <file>` → `advance`. Node execs: `subagent` = *you* spawn real review agents (discover);
+--run <run-id> --node <n> --data <file>` → `advance` (the `--run <run-id>` is required — it is the id
+`init` returned; see `tests/go/test-fsm.sh` for the executable form). Node execs: `subagent` = *you* spawn real review agents (discover);
 `inline` = *you* do it in-session (fix); `fork` = the CLI runs it (adjudicate, prove, verify). At `fix`,
 the node now **elicits a proof** — return `{commit, summary, pins:[…]}` (the fix-node proof elicitation).
 `prove` runs the real test command deterministically; a proven reproduction/pin clears `pins_proven`.
@@ -80,16 +81,20 @@ appends the convention's flags, so:
 
 ## Per-language cheat sheet
 
-| Language | `test_convention` | Runner (in `run-tests.sh`) | Report path | Mutation tool |
-| --- | --- | --- | --- | --- |
-| Go | `go` (default) | `go test ./... -json` | test2json on stdout | gremlins (`go install`) |
-| TS / Jest | `typescript` | `npx jest --json` | Jest `--json` on stdout | Stryker (`@stryker-mutator`) |
-| TS / Vitest | `vitest` | `npx vitest run --reporter=json` | Vitest json on stdout | Stryker |
-| Python / pytest | `python` | `pytest -o junit_family=xunit1 --junit-xml=/dev/stdout` | JUnit XML on stdout | mutmut (`pip install`) |
+The **Base runner** column is the *only* thing `run-tests.sh` invokes — the convention appends the report
+flags itself, so the wrapper must **not** repeat them (they arrive as the script's `"$@"`; duplicating
+them double-passes the flag). The **Report flags (convention-appended)** column shows what the convention
+adds on top, for reference only — do not put it in the wrapper.
 
-Notes: the convention appends the report flags itself (Go `-json`; Jest/Vitest `--json`/`--reporter=json`;
-pytest `-o junit_family=xunit1 --junit-xml=/dev/stdout`), so `run-tests.sh` supplies only the base runner
-invocation. pytest **must** pin `xunit1` (its ≥6.1 default xunit2 drops the `file` attribute the convention
+| Language | `test_convention` | Base runner (in `run-tests.sh`) | Report flags (convention-appended) | Report path | Mutation tool |
+| --- | --- | --- | --- | --- | --- |
+| Go | `go` (default) | `go test ./...` | `-json` | test2json on stdout | gremlins (`go install`) |
+| TS / Jest | `typescript` | `npx jest` | `--json` | Jest `--json` on stdout | Stryker (`@stryker-mutator`) |
+| TS / Vitest | `vitest` | `npx vitest run` | `--reporter=json` | Vitest json on stdout | Stryker |
+| Python / pytest | `python` | `pytest` | `-o junit_family=xunit1 --junit-xml=/dev/stdout` | JUnit XML on stdout | mutmut (`pip install`) |
+
+Notes: because the convention appends the report flags, `run-tests.sh` supplies only the base runner
+invocation (the third column). pytest **must** pin `xunit1` (its ≥6.1 default xunit2 drops the `file` attribute the convention
 needs for nodeids). Mutation is Go-first via gremlins (metareview ingests gremlins JSON); Stryker's
 cross-language schema covers TS, and mutmut covers Python.
 
