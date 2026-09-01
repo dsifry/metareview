@@ -105,10 +105,12 @@ to the `prove` node. Everything else (transitions, gates, convergence) is unchan
 - **Go** (`spf13/cast`): full ladder — recall on obvious, subtle-latent, and real-historical bugs (2/2
   cold reviewers each, reproduction proofs); hidden-gold review returned zero confirmed bugs with the
   judge rejecting one tested false positive; a mutation survivor found + closed with a killing test.
-- **Python / pytest**: end-to-end via Docker — planted latent bug, codex-confirmed, **reproduction proof
-  PROVEN**, `DONE(fixed)`. First non-Go proof that the seam works live.
-- **TS / Jest, TS / Vitest**: conventions built + unit-tested (100%, mutation-verified); end-to-end runs
-  pending (same Docker pattern as pytest).
+- **Python / pytest, TS / Jest, TS / Vitest**: all validated **end-to-end via Docker** — a planted
+  latent clamp bug, codex-confirmed, **reproduction proof PROVEN**, `DONE(fixed)`, each running its real
+  runner (pytest JUnit-XML / `jest --json` / `vitest run --reporter=json`) in a container against
+  metareview's worktree. Wiring smoke → recall(obvious) → fix → reproduction proof passes for all four
+  languages; the deeper rungs (subtle-latent, real-historical, hidden-gold, mutation) are exercised on Go
+  and are the natural next escalation for the three non-Go stacks.
 
 ## Mixed-language projects (after all singles pass)
 
