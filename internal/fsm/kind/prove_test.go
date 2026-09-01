@@ -20,10 +20,14 @@ import (
 var proveNode = &workflow.Node{Name: "prove", Kind: Prove, Exec: "fork"}
 
 type mockProver struct {
-	results   []run.ProofResult
-	err       error
-	gotProofs []run.DifferentialProof
-	gotSpec   ProveSpec
+	results      []run.ProofResult
+	err          error
+	gotProofs    []run.DifferentialProof
+	gotSpec      ProveSpec
+	reproResults []run.ProofResult
+	reproErr     error
+	gotRepro     []run.DifferentialProof
+	gotReproSpec ProveSpec
 }
 
 func (m *mockProver) ProvePins(_ context.Context, proofs []run.DifferentialProof, spec ProveSpec) ([]run.ProofResult, error) {
@@ -32,6 +36,14 @@ func (m *mockProver) ProvePins(_ context.Context, proofs []run.DifferentialProof
 		return nil, m.err
 	}
 	return m.results, nil
+}
+
+func (m *mockProver) ProveReproductions(_ context.Context, proofs []run.DifferentialProof, spec ProveSpec) ([]run.ProofResult, error) {
+	m.gotRepro, m.gotReproSpec = proofs, spec
+	if m.reproErr != nil {
+		return nil, m.reproErr
+	}
+	return m.reproResults, nil
 }
 
 func pinDP(finding, from string) run.DifferentialProof {
@@ -123,17 +135,67 @@ func TestProveAddedLineBindRejectsNonAddedFrom(t *testing.T) {
 	}
 }
 
-// A reproduction/deletion proof has no engine in this build: it is unverifiable (blocking), never a
-// silent pass.
-func TestProveReproductionIsUnverifiableInThisBuild(t *testing.T) {
+// A reproduction proof is routed to the reproduction engine (ProveReproductions), never the pin
+// prover, and the pre/post-fix anchors reach the engine through the spec. A proven reproduction emits
+// no marker, so pins_proven passes.
+func TestProveReproductionRoutesToReproductionEngine(t *testing.T) {
 	p := reproDP("f1")
+	mp := &mockProver{reproResults: []run.ProofResult{provenResult(p)}}
+	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, FixEntryHead: "preSHA", Head: "postSHA"}
+	d := runProve(t, snap, "@@\n+whatever\n", mp)
+	if len(mp.gotProofs) != 0 {
+		t.Fatalf("a reproduction proof must NOT reach the pin prover: %+v", mp.gotProofs)
+	}
+	if len(mp.gotRepro) != 1 || mp.gotRepro[0].Finding != "f1" {
+		t.Fatalf("a reproduction proof must reach the reproduction engine: %+v", mp.gotRepro)
+	}
+	if mp.gotReproSpec.PreFixSHA != "preSHA" || mp.gotReproSpec.PostFixSHA != "postSHA" {
+		t.Fatalf("the pre/post-fix anchors must reach the engine: %+v", mp.gotReproSpec)
+	}
+	if len(d.PinResults) != 1 || !d.PinResults[0].Proven {
+		t.Fatalf("expected one proven reproduction result: %+v", d.PinResults)
+	}
+	if len(d.Findings) != 0 {
+		t.Fatalf("a proven reproduction must emit no marker finding: %+v", d.Findings)
+	}
+}
+
+// A survived reproduction (the fix's test does not exercise the fault) emits a blocking unproven-fix
+// marker the pins_proven gate reddens on — the reproduction form is gated exactly as a pin.
+func TestProveSurvivedReproductionBlocks(t *testing.T) {
+	p := reproDP("f1")
+	mp := &mockProver{reproResults: []run.ProofResult{{Proof: p, Proven: false, Outcome: run.PinSurvived, Detail: "passes pre-fix"}}}
+	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, FixEntryHead: "pre", Head: "post"}
+	d := runProve(t, snap, "@@\n+whatever\n", mp)
+	if len(d.Findings) != 1 || d.Findings[0].Source != run.SourceMutationVerify || d.Findings[0].Category != run.CategoryUnprovenFix {
+		t.Fatalf("a survived reproduction must emit an unproven-fix marker: %+v", d.Findings)
+	}
+}
+
+// A reproduction engine error aborts the run rather than being swallowed as a pass.
+func TestProveReproductionErrorAborts(t *testing.T) {
+	p := reproDP("f1")
+	mp := &mockProver{reproErr: errors.New("worktree exploded")}
+	r := mustNew(t, judge.NewMock(judge.Script{}), true)
+	r.execs[Prove] = &proveExec{prover: mp}
+	ex, _ := r.Executor(Prove)
+	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, FixEntryHead: "pre", Head: "post"}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{Snap: snap, Node: proveNode, Diff: machine.Diff{Text: "@@\n+x\n"}, Audit: (&audits{}).fn}); err == nil {
+		t.Fatal("a reproduction engine error must abort the run")
+	}
+}
+
+// A deletion proof still has no engine in this build: it is unverifiable (blocking), never a silent
+// pass, and never reaches either prover.
+func TestProveDeletionIsUnverifiableInThisBuild(t *testing.T) {
+	p := run.DifferentialProof{ID: "d1", Finding: "f1", Kind: run.ProofDeletion, Deletes: &run.DeletionRef{File: "a.go", Removed: "gone"}}
 	mp := &mockProver{}
 	d := runProve(t, run.Snapshot{Unproven: []run.DifferentialProof{p}}, "@@\n+whatever\n", mp)
-	if len(mp.gotProofs) != 0 {
-		t.Fatalf("a reproduction proof must not reach the pin prover: %+v", mp.gotProofs)
+	if len(mp.gotProofs) != 0 || len(mp.gotRepro) != 0 {
+		t.Fatalf("a deletion proof must reach no prover: pins %+v repro %+v", mp.gotProofs, mp.gotRepro)
 	}
 	if len(d.PinResults) != 1 || d.PinResults[0].Outcome != run.PinUnverifiable {
-		t.Fatalf("a reproduction proof must be unverifiable here: %+v", d.PinResults)
+		t.Fatalf("a deletion proof must be unverifiable here: %+v", d.PinResults)
 	}
 	if len(d.Findings) != 1 || d.Findings[0].Category != run.CategoryUnverifiable {
 		t.Fatalf("an unverifiable proof must emit an unverifiable marker: %+v", d.Findings)
@@ -246,6 +308,15 @@ func TestProveClauseAOwedPin(t *testing.T) {
 	if advisory != 1 || blocking != 1 {
 		t.Fatalf("a malformed (advisory) pin must not let an owed finding escape clause (a): %+v", d.Findings)
 	}
+
+	// (6) a Proven REPRODUCTION for the finding discharges clause (a) exactly as a Proven pin does —
+	// the reproduction form satisfies its finding via a committed test, not an owned pin, so the
+	// owed-pin marker must not fire (settled keys on ANY Proven proof kind; spec §9.1).
+	repro := reproDP("owed")
+	d = runProve(t, run.Snapshot{WorkDir: dir, Confirmed: []run.Bug{owed}, FixEntryHead: "pre", Head: "post", Unproven: []run.DifferentialProof{repro}}, diffTouchesPkg, &mockProver{reproResults: []run.ProofResult{provenResult(repro)}})
+	if len(d.Findings) != 0 {
+		t.Fatalf("a finding backed by a Proven reproduction owes no owed-pin marker: %+v", d.Findings)
+	}
 }
 
 // The prove kind's host contract: it is fork-only, host-unsupported (Instructions), decodes and
@@ -332,7 +403,8 @@ func TestProveUnconsentedTestCmdResolvesToNothing(t *testing.T) {
 func TestProveOutputOverCapFailsClosed(t *testing.T) {
 	open := make([]run.DifferentialProof, run.MaxDeltaList+1)
 	for i := range open {
-		open[i] = reproDP(fmt.Sprint(i)) // each is unverifiable → one result + one finding
+		// Deletion has no engine in this build, so each is unverifiable → one result + one finding.
+		open[i] = run.DifferentialProof{ID: fmt.Sprint(i), Finding: fmt.Sprint(i), Kind: run.ProofDeletion, Deletes: &run.DeletionRef{File: "a.go", Removed: "x"}}
 	}
 	r := mustNew(t, judge.NewMock(judge.Script{}), true)
 	r.execs[Prove] = &proveExec{prover: &mockProver{}}

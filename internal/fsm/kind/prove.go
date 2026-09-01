@@ -26,20 +26,27 @@ func errNoProver() error {
 
 // ProveSpec is everything a Prover needs to run a proof against the tree, resolved per execution from
 // the run's snapshot: the consent-hashed test command (never the agent's), the optional build check,
-// the working directory, and the timeout.
+// the working directory, the timeout, and — for the reproduction form — the pre/post-fix anchors the
+// engine checks out and materializes (Snapshot.FixEntryHead / Snapshot.Head).
 type ProveSpec struct {
-	TestCmd  []string
-	BuildCmd []string
-	Dir      string
-	Timeout  time.Duration
+	TestCmd    []string
+	BuildCmd   []string
+	Dir        string
+	Timeout    time.Duration
+	PreFixSHA  string // Snapshot.FixEntryHead — the pre-fix tree for reproduction/deletion proofs
+	PostFixSHA string // Snapshot.Head — the post-fix tree
 }
 
-// Prover verifies pin-kind differential proofs by mutation — apply From→To, the tests must FAIL;
-// restore, they must PASS — and returns one ProofResult per input proof, in order, each carrying its
-// originating proof. Injected so the node is testable with a mock; production wraps
-// internal/mutation.Verifier. The proofs handed here have already passed the added-line bind.
+// Prover verifies a fix's differential proofs and returns one ProofResult per input proof, in order,
+// each carrying its originating proof. It is injected so the node is testable with a mock. The two
+// forms are proven by different mechanisms so they are separate methods:
+//   - ProvePins mutates a line (apply From→To, the tests must FAIL; restore, they must PASS). The
+//     pins handed here have already passed the added-line bind.
+//   - ProveReproductions replays a committed test across the pre/post-fix trees (fail-before with an
+//     assertion, pass-after) — the preferred form (spec §9.1).
 type Prover interface {
 	ProvePins(ctx context.Context, proofs []run.DifferentialProof, spec ProveSpec) ([]run.ProofResult, error)
+	ProveReproductions(ctx context.Context, proofs []run.DifferentialProof, spec ProveSpec) ([]run.ProofResult, error)
 }
 
 type proveKind struct{}
@@ -116,7 +123,7 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 	if e.prover == nil {
 		return nil, errNoProver()
 	}
-	var toProve []run.DifferentialProof
+	var toProve, toReproduce []run.DifferentialProof
 	var results []run.ProofResult
 	for _, proof := range in.Snap.Unproven {
 		switch proof.Kind {
@@ -131,18 +138,30 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 				continue
 			}
 			toProve = append(toProve, proof)
+		case run.ProofReproduction:
+			// The preferred form (spec §9.1): a committed test replayed across the pre/post-fix trees.
+			// It carries no added-line bind — that binding is retired for reproduction and discharged by
+			// the §9.2 symptom reviewer (T1.4). The engine checks out the pre-fix tree, overlays the
+			// fix's test-only files, and requires an assertion fail-before / pass-after.
+			toReproduce = append(toReproduce, proof)
 		default:
-			// Reproduction/deletion proving is not wired in this build (the execution engine lands in a
-			// follow-up). Fail closed: unverifiable blocks, it never silently passes.
+			// Deletion (T1.5) and any unknown kind have no engine here. Fail closed: unverifiable
+			// blocks, it never silently passes.
 			results = append(results, proofResult(proof, run.PinUnverifiable, "differential proving for kind "+proof.Kind+" is not available in this build"))
 		}
 	}
 	dir := proveDir(in.Snap)
-	verified, err := e.prover.ProvePins(ctx, toProve, ProveSpec{TestCmd: testCmdParam(in.Snap, in.Node), Dir: dir})
+	spec := ProveSpec{TestCmd: testCmdParam(in.Snap, in.Node), Dir: dir, PreFixSHA: in.Snap.FixEntryHead, PostFixSHA: in.Snap.Head}
+	verified, err := e.prover.ProvePins(ctx, toProve, spec)
 	if err != nil {
 		return nil, err
 	}
 	results = append(results, verified...)
+	reproved, err := e.prover.ProveReproductions(ctx, toReproduce, spec)
+	if err != nil {
+		return nil, err
+	}
+	results = append(results, reproved...)
 
 	delta := run.Delta{PinResults: results}
 	// A finding is settled iff a Proven proof cleared it; a finding whose only supplied proofs were
