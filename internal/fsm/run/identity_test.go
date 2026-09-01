@@ -1,8 +1,6 @@
 package run
 
 import (
-	"fmt"
-	"sort"
 	"testing"
 )
 
@@ -60,7 +58,32 @@ func TestSimilarityBounds(t *testing.T) {
 	}
 }
 
-// --- The T0.1 spike measurement: how far the exact key and a similarity match carry each class ---
+func TestSameFault(t *testing.T) {
+	src := "the mock-scenario refusal is a duplicated guard only one test pins"
+	// Exact identity (T1–T3) is the same fault regardless of file-similarity math.
+	if !SameFault("a.go", "Deleting a.go:12 passes", "a.go", "[shard-1] deleting a.go:99 passes") {
+		t.Error("a T2/T3 rewording in the same file must be the same fault via the exact key")
+	}
+	// Same file + a genuine rewording above τ is the same fault (continuity).
+	reword := "a duplicated guard that only one test pins the mock-scenario refusal"
+	if !SameFault("a.go", src, "a.go", reword) {
+		t.Errorf("a same-file rewording at/above τ must be the same fault (sim=%.2f)", Similarity(src, reword))
+	}
+	// Same file but a DIFFERENT fault below τ is not (precision).
+	if SameFault("a.go", src, "a.go", "the loader runs twice on init, doubling startup cost") {
+		t.Error("a different fault below τ must not be merged")
+	}
+	// A similar rewording in a DIFFERENT file is not the same fault (the file component binds).
+	if SameFault("a.go", src, "b.go", reword) {
+		t.Error("continuity must be scoped to the same file")
+	}
+	// Two fileless findings never match by similarity alone (only by exact key).
+	if SameFault("", src, "", reword) {
+		t.Error("a fileless finding must not match by similarity")
+	}
+}
+
+// --- The T0.1 frozen-floor gate over the pre-locked labeled set ---
 
 type variant struct {
 	class string // T1,T2,T3,T4 (faithful) or T5 (negative)
@@ -102,87 +125,87 @@ func labeledGroups() []group {
 				{"T4", "internal/markdown/inline.go", "inline.go allocates a fence string via strings.Repeat then throws it away (_ = fence); the closing-fence scan only compares run lengths, so the allocation is dead on every review-log header parse."},
 				{"T5", "internal/markdown/inline.go", "inline.go's closing-fence search compares run lengths numerically and misses a fence one backtick longer than the opener."},
 			}},
+		// G4–G12: nine more real findings, each with one faithful T4 rewording (recall samples). These
+		// broaden the T4 recall estimate to 12 sources; precision is measured at scale on the 274 real
+		// same-file corpus pairs (see docs/specs/2026-09-01-t0.1-*; that data is local/gitignored).
+		g4T4("G4", "docs/specs/2026-08-27-metareview-0.9.0-fsm-fork.md",
+			"Shipped fsm diff JSON carries a dead field whose doc comment asserts a property it does not have, and the spec's CallRow contract does not declare it. machine.CallRow.Index (diff.go:29-33) is exported.",
+			"The shipped fsm diff JSON exposes machine.CallRow.Index (diff.go:29-33), an exported field the spec's CallRow contract never declares and whose doc comment claims a property it lacks, a dead field on the wire."),
+		g4T4("G5", "docs/tasks/m0-fsm-run-persistence.md",
+			"Both task documents in this shard assert an acceptance criterion that is false at the reviewed head. m0-fsm-run-persistence.md:11 says bash tests/coverage.sh passes: internal/fsm/run and workflows at 100%.",
+			"At the reviewed head the acceptance criterion in both task docs is untrue: m0-fsm-run-persistence.md:11 claims bash tests/coverage.sh passes with internal/fsm/run and workflows at 100%, but that does not hold."),
+		g4T4("G6", "internal/fsm/export/export.go",
+			"export.go:37 claims FS is the destination seam: every write goes through it so tests assert flags and perms literally. No test asserts the flags. The only assertion over the recorded opens is export_test.go:348.",
+			"The doc at export.go:37 says every write goes through the FS seam so tests check flags and perms literally, yet no test actually asserts the flags; export_test.go:348 is the sole check over recorded opens and it does not."),
+		g4T4("G7", "internal/fsm/kind/kind.go",
+			"match-then-adjudicate's executor omits the spec-mandated self-Decode (spec 4.2 step 3) and justifies the omission with a false claim: validity by construction: the pre-flight bounds the size.",
+			"The match-then-adjudicate executor skips the self-Decode that spec 4.2 step 3 requires, defending the skip with an incorrect validity by construction claim about the pre-flight bounding the size."),
+		g4T4("G8", "internal/reviewers/taskdone.go",
+			"The docs/ lint exemption is bypassable by a filename containing a space, which is the exact blind spot the change claims to have closed. Real git emits +++ b/<path> trailing TAB whenever the path contains a space.",
+			"A path with a space slips past the docs/ lint exemption, the very gap the change says it fixed, because git appends a trailing TAB to +++ b/<path> for spaced paths."),
+		g4T4("G9", "internal/reviewlog/reviewlog.go",
+			"Four user-facing docs changed on this branch tell an agent to run FIVE artifact-review lenses; the shipped code requires EIGHT and the gate that reads the resulting log fails until all eight are present.",
+			"Four docs on this branch instruct an agent to run five artifact-review lenses, but the code demands eight and the log gate stays red until all eight appear; the docs and the gate disagree."),
+		g4T4("G10", "0,",
+			"A stray, empty, tracked file named 0, sits at the repository root and is part of this branch's diff. It was committed in cde8d0a alongside real fixes and is almost certainly the residue of a mistyped shell redirect.",
+			"An empty tracked file called 0, was committed at the repo root in cde8d0a bundled with real fixes, almost certainly a fat-fingered shell redirect, and it rides in this branch's diff."),
+		g4T4("G11", "cli/metareview.js",
+			"The npm launcher's go-run fallback silently reviews the wrong repository. cli/metareview.js:15 sets options = cwd: process.cwd(), stdio: inherit and the packaged-binary branch at :17-19 keeps it, but the fallback differs.",
+			"In the npm launcher, the go-run fallback reviews the wrong repo without warning: metareview.js:15 sets cwd to process.cwd() and the packaged-binary path at :17-19 keeps it, but the fallback branch does not."),
+		g4T4("G12", "cmd/metareview/main.go",
+			"A relative --shard-result / --cross-shard-result path is accepted by the CLI and then silently thrown away by the ingester, producing a misleading missing shard result failure. main.go:619-633 mustResult.",
+			"The CLI accepts a relative --shard-result / --cross-shard-result path but the ingester quietly drops it (main.go:619-633), yielding a confusing missing shard result error."),
 	}
 }
 
-// This is the load-bearing spike result. It is a measurement (t.Log), not yet a floor assertion: it
-// reports, per class, what the EXACT (file, normalized-text) key merges, and the similarity of each
-// faithful (T4) vs negative (T5) variant to its source — the numbers the freeze decision needs.
-func TestT0IdentityMeasurement(t *testing.T) {
-	groups := labeledGroups()
+// g4T4 builds a source-plus-one-T4 recall group.
+func g4T4(name, file, source, t4 string) group {
+	return group{name, file, source, []variant{{"T4", file, t4}}}
+}
+
+// The frozen-floor gate (spike §7; τ=0.35 signed off 2026-09-01). It asserts, over the pre-locked
+// labeled set, that the frozen algorithm still meets every floor: the exact key canonicalizes
+// T1–T3 at 100%, SameFault (identity ∨ same-file Jaccard≥τ) carries T4 recall ≥ 90%, and no T5
+// different-fault negative is ever merged (precision). A regression in NormalizeText, FindingKey, or
+// τ reddens here. (Precision at scale — 274 real same-file pairs, max 0.30 — is documented evidence;
+// that corpus is local/gitignored so cannot be a committed assertion.)
+func TestT0IdentityMeetsFrozenFloors(t *testing.T) {
 	exact := map[string]struct{ hit, total int }{}
-	var t4sims, t5sims []float64
-	for _, g := range groups {
-		srcKey := FindingKey(g.file, g.source)
+	t4hit, t4total, t5neg := 0, 0, 0
+	for _, g := range labeledGroups() {
 		for _, v := range g.vars {
-			same := FindingKey(v.file, v.text) == srcKey
-			if v.class != "T5" { // faithful: exact key SHOULD merge
+			switch v.class {
+			case "T1", "T2", "T3": // canonicalized by the exact key
 				e := exact[v.class]
 				e.total++
-				if same {
+				if FindingKey(v.file, v.text) == FindingKey(g.file, g.source) {
 					e.hit++
 				}
 				exact[v.class] = e
-			} else if same { // negative: exact key must NOT merge (precision)
-				t.Errorf("PRECISION FAIL: negative %s-%s shares the exact key with its source", g.name, v.class)
+			case "T4": // genuine rewording — caught by the continuity relation, not the exact key
+				t4total++
+				if SameFault(g.file, g.source, v.file, v.text) {
+					t4hit++
+				}
+			case "T5": // different fault sharing vocabulary — must NEVER merge (precision)
+				if SameFault(g.file, g.source, v.file, v.text) {
+					t5neg++
+					t.Errorf("PRECISION FAIL: negative %s-%s was merged with its source", g.name, v.class)
+				}
 			}
-			sim := Similarity(g.source, v.text)
-			switch v.class {
-			case "T4":
-				t4sims = append(t4sims, sim)
-			case "T5":
-				t5sims = append(t5sims, sim)
-			}
 		}
 	}
-	classes := []string{"T1", "T2", "T3", "T4"}
-	t.Log("=== EXACT (file, normalized-text) key — recall per class ===")
-	for _, c := range classes {
-		e := exact[c]
-		if e.total > 0 {
-			t.Logf("  %s: %d/%d merged by the exact key", c, e.hit, e.total)
+	for _, c := range []string{"T1", "T2", "T3"} {
+		if e := exact[c]; e.hit != e.total {
+			t.Errorf("%s recall floor: exact key merged %d/%d, want 100%%", c, e.hit, e.total)
 		}
 	}
-	sort.Float64s(t4sims)
-	sort.Float64s(t5sims)
-	t.Logf("=== SIMILARITY to source ===")
-	t.Logf("  T4 (true rewordings, want HIGH): %v  min=%.2f", round2(t4sims), min(t4sims))
-	t.Logf("  T5 (different faults,  want LOW): %v  max=%.2f", round2(t5sims), max(t5sims))
-	gap := min(t4sims) - max(t5sims)
-	t.Logf("  separation (min T4 − max T5): %.2f  → %s", gap, verdict(gap))
-}
-
-func round2(xs []float64) []float64 {
-	out := make([]float64, len(xs))
-	for i, x := range xs {
-		out[i] = float64(int(x*100+0.5)) / 100
+	// T4 recall floor: ≥ 90% (Dave-set). With 12 samples that is ≥ 11.
+	if t4hit*100 < 90*t4total {
+		t.Errorf("T4 recall floor: SameFault caught %d/%d = %.0f%%, want ≥ 90%%", t4hit, t4total, float64(t4hit)/float64(t4total)*100)
 	}
-	return out
-}
-func min(xs []float64) float64 {
-	if len(xs) == 0 {
-		return 0
+	if t5neg != 0 {
+		t.Errorf("precision floor: %d negative(s) merged, want 0", t5neg)
 	}
-	m := xs[0]
-	for _, x := range xs {
-		if x < m {
-			m = x
-		}
-	}
-	return m
-}
-func max(xs []float64) float64 {
-	m := 0.0
-	for _, x := range xs {
-		if x > m {
-			m = x
-		}
-	}
-	return m
-}
-func verdict(gap float64) string {
-	if gap > 0 {
-		return fmt.Sprintf("SEPARABLE: a threshold in (%.2f) window catches every T4 and rejects every T5", gap)
-	}
-	return "OVERLAP: no single threshold separates T4 from T5 on this sample"
+	t.Logf("frozen floors met: T1–T3 exact=100%%, T4 recall=%d/%d, precision negatives=%d", t4hit, t4total, t5neg)
 }

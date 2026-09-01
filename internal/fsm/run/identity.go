@@ -48,6 +48,31 @@ func FindingKey(file, text string) string {
 	return hex.EncodeToString(h[:])[:12]
 }
 
+// FindingScheme is the identity-derivation version (spike §5.2). Bump it whenever NormalizeText,
+// FindingKey, or the continuity rule below changes, so ids/overrides/Unproven gaps keyed under an
+// old scheme are MIGRATED forward from the retained source text — never silently orphaned.
+const FindingScheme = 1
+
+// ContinuityThreshold (τ) is the frozen Jaccard bar at/above which two SAME-FILE findings are the
+// same fault for continuity (Unproven clear, class carry). Frozen 2026-09-01 against the pre-locked
+// ground truth: T4 recall 92% (≥90% floor) and precision 100% on 274 real same-file distinct-fault
+// pairs (whose max was 0.30, a 0.05 margin). Do not retune without re-running the §7 floors.
+const ContinuityThreshold = 0.35
+
+// SameFault reports whether two findings are the same fault for CONTINUITY. It is true when their
+// exact identity matches — the whitespace/case/line/prefix rewordings NormalizeText canonicalizes
+// (T1–T3) — OR when they are in the same (non-empty) file and their normalized-token Jaccard is at
+// least τ — a genuine lexical rewording (T4) that no exact key can canonicalize. Deterministic: the
+// frozen realization of §9.8 R6's lexical Recall@10, never an embedding. Identity (FindingKey) stays
+// an exact hash; this is the separate continuity relation the exact key cannot express.
+func SameFault(aFile, aText, bFile, bText string) bool {
+	if FindingKey(aFile, aText) == FindingKey(bFile, bText) {
+		return true
+	}
+	af, bf := normalizePath(aFile), normalizePath(bFile)
+	return af != "" && af == bf && Similarity(aText, bText) >= ContinuityThreshold
+}
+
 // SimTokens is the set of normalized tokens of a finding's text — the unit Similarity compares.
 func simTokens(text string) map[string]struct{} {
 	set := map[string]struct{}{}
@@ -72,9 +97,7 @@ func Similarity(a, b string) float64 {
 			inter++
 		}
 	}
+	// Not both empty (guarded above), so the union has at least one element.
 	union := len(A) + len(B) - inter
-	if union == 0 {
-		return 0
-	}
 	return float64(inter) / float64(union)
 }
