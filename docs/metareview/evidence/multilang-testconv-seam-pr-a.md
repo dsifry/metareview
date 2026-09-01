@@ -63,6 +63,17 @@ sets it explicitly and fails closed on an unknown name upstream.
   clean of mutations afterward.
 - `gofmt`/`go vet` clean; full `go test ./...` green.
 
+## Shepherding round 1 (Cursor Bugbot — 2× High, fixed)
+
+- **`validateProve` rejected `test_convention`.** The param was read at Execute but the validator
+  accepted only `test_cmd`, so a workflow selecting a language would fail to load. Fixed: the validator
+  accepts and type-checks `test_convention` (an unknown NAME still aborts at Execute, fail closed).
+- **`ParseReport` same-named tests across packages could mask a failure.** Keyed by test name with
+  last-write-wins, a same-named test in a second package (both matched by `-run ^Name$`) could let a
+  later pass hide an earlier failure. Fixed: a recorded `Failed` sticks; a pass only sets an
+  absent/passed entry. A failure is never hidden; the residual can only refuse to prove, never mint a
+  false proof, and §9.2 independently checks the fail-before. Both fixed with tests; mutation-verified.
+
 ## Scope / follow-ups (deferred, with rationale)
 
 - **PR-B** adds `TypeScriptConvention` (Jest/Vitest `--json`) + per-target selection, and the runner
