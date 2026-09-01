@@ -32,10 +32,24 @@ func TestPinOutcomeValid(t *testing.T) {
 }
 
 func TestSnapshotCloneCopiesUnproven(t *testing.T) {
-	s := Snapshot{Unproven: []Pin{{ID: "a", Finding: "f1"}}}
+	s := Snapshot{Unproven: []DifferentialProof{{ID: "a", Finding: "f1", Kind: ProofPin, Pin: &Pin{ID: "a", From: "+x"}}}}
 	c := s.Clone()
 	c.Unproven[0].ID = "mutated"
 	if s.Unproven[0].ID != "a" {
-		t.Error("Clone must deep-copy Unproven, not alias it")
+		t.Error("Clone must deep-copy Unproven, not alias the slice")
+	}
+	// The Pin pointer must be fresh too: a shallow slice copy would share it, and a mutation
+	// through the clone would reach the original's payload.
+	c.Unproven[0].Pin.From = "+mutated"
+	if s.Unproven[0].Pin.From != "+x" {
+		t.Error("Clone must deep-copy the proof's Pin pointer, not alias it")
+	}
+
+	// The Deletes pointer of a deletion proof must be fresh for the same reason.
+	d := Snapshot{Unproven: []DifferentialProof{{ID: "b", Finding: "f2", Kind: ProofDeletion, Deletes: &DeletionRef{File: "a.go", Removed: "gone"}}}}
+	dc := d.Clone()
+	dc.Unproven[0].Deletes.Removed = "mutated"
+	if d.Unproven[0].Deletes.Removed != "gone" {
+		t.Error("Clone must deep-copy the proof's Deletes pointer, not alias it")
 	}
 }

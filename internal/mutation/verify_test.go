@@ -190,6 +190,61 @@ func TestEndToEndAClaimIsProvenOrRefused(t *testing.T) {
 	}
 }
 
+// The four-cause decision table (spec §7 L1 / T1.1): verify.go must produce all FOUR PinOutcome
+// values, each from its own distinct cause, and the mapping must be exact. A gate reads only
+// proven-vs-not, but the actor needs the other three kept apart — survived sends them to write a
+// test, malformed to rewrite the pin, unverifiable to fix the tree — so collapsing any two causes
+// onto one outcome sends the actor to the wrong work. This pins the whole mapping through
+// verifyOne: the Run seam scripts each cause precisely (call 1 = baseline, 2 = build, 3 = mutated
+// run), so a mutation that MERGES two causes onto one outcome reddens at least one row.
+func TestVerifyDecisionTableMapsEachCauseToItsOutcome(t *testing.T) {
+	type resp struct {
+		code int
+		err  error
+	}
+	for _, tc := range []struct {
+		name  string
+		from  string // "AAA" is present exactly once; "ZZZ" is absent
+		resps []resp // scripted Run responses, consumed in call order
+		want  Outcome
+	}{
+		{"break-fails then restore-passes", "AAA", []resp{{0, nil}, {0, nil}, {1, nil}}, PinProven},
+		{"compiled and the tests still pass", "AAA", []resp{{0, nil}, {0, nil}, {0, nil}}, PinSurvived},
+		{"the mutation does not compile", "AAA", []resp{{0, nil}, {1, nil}}, PinMalformed},
+		{"the anchor is not a single match", "ZZZ", nil, PinMalformed},
+		{"the baseline is red", "AAA", []resp{{1, nil}}, PinUnverifiable},
+		{"the baseline will not execute", "AAA", []resp{{-1, errors.New("boom")}}, PinUnverifiable},
+		{"the build will not execute", "AAA", []resp{{0, nil}, {-1, errors.New("boom")}}, PinUnverifiable},
+		{"the mutated run is killed", "AAA", []resp{{0, nil}, {0, nil}, {-1, errors.New("killed")}}, PinUnverifiable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fx\n\ngo 1.22\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "t.go"), []byte("package fx\n\nconst V = \"AAA\"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var i int
+			v := Verifier{Dir: dir, TestCmd: []string{"x"}, Run: func(context.Context, string, []string) (int, string, error) {
+				if i >= len(tc.resps) {
+					t.Fatalf("unexpected Run call %d for %q — the cause should have short-circuited", i+1, tc.name)
+				}
+				r := tc.resps[i]
+				i++
+				return r.code, "", r.err
+			}}
+			got := v.verifyOne(context.Background(), Pin{File: "t.go", From: tc.from, To: "BBB", Test: "T"})
+			if got.Outcome != tc.want {
+				t.Fatalf("Outcome = %q, want %q (%s)", got.Outcome, tc.want, got.Detail)
+			}
+			if (got.Outcome == PinProven) != got.Proven {
+				t.Errorf("Proven must agree with Outcome: %+v", got)
+			}
+		})
+	}
+}
+
 // tail() trims a command's output for a finding. Its boundary and its truncation branch were both
 // unpinned — mutating `len(s) > 400` to `>=` survived, and the truncating path was never executed
 // at all. Found by running our own mutation standard against this package.
@@ -325,8 +380,9 @@ func TestFindingSeverityFollowsTheOutcome(t *testing.T) {
 		{Pin: Pin{File: "a.go"}, Outcome: PinProven, Proven: true},
 		{Pin: Pin{File: "b.go"}, Outcome: PinSurvived, Detail: "the mutation survived"},
 		{Pin: Pin{File: "c.go"}, Outcome: PinMalformed, Detail: "does not compile"},
+		{Pin: Pin{File: "d.go"}, Outcome: PinUnverifiable, Detail: "the baseline is red"},
 	})
-	if len(got) != 2 {
+	if len(got) != 3 {
 		t.Fatalf("a proven pin produces nothing, got %d findings", len(got))
 	}
 	bySeverity := map[string]string{}
@@ -338,6 +394,10 @@ func TestFindingSeverityFollowsTheOutcome(t *testing.T) {
 	}
 	if bySeverity["c.go"] != "medium/advisory" {
 		t.Errorf("a malformed pin is advisory, not a verdict on the code: %s", bySeverity["c.go"])
+	}
+	// A tree that could not answer blocks: a gate must not read silence as success.
+	if bySeverity["d.go"] != "high/blocking" {
+		t.Errorf("an unverifiable pin must block, nothing was learned: %s", bySeverity["d.go"])
 	}
 }
 

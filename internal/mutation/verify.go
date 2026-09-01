@@ -35,7 +35,10 @@ const (
 	// the test, and the finding this whole node exists to raise.
 	PinSurvived Outcome = "survived"
 	// Malformed: the pin could not be evaluated — the anchor is absent or ambiguous, the file is
-	// unreadable, or the mutation does not compile. Says nothing about the fix.
+	// unreadable, or the mutation does not compile. Widened per §2.2/§9.8 R7 to also cover a
+	// compiles-but-semantically-null mutation (a comment/whitespace/dead-code pin) once the §9.8
+	// AST pre-screen (T1.6) classifies it here rather than letting it reach `survived`. Says
+	// nothing about the fix: the CLAIM is bad, rewrite the pin.
 	PinMalformed Outcome = "malformed"
 	// Unverifiable: the tree itself could not answer — the baseline is red, or a command would not
 	// run. Neither the pin nor the fix is implicated, and nothing may be concluded from the run.

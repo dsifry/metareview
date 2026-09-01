@@ -63,7 +63,7 @@ func TestCloneIsDeep(t *testing.T) {
 		Goldens:        []Golden{{Comment: "c"}},
 		Findings:       []Finding{{IssueText: "i"}},
 		Confirmed:      []Bug{{ID: "b", GoldenIdx: &one}},
-		Unproven:       []Pin{{ID: "p1", Finding: "f1"}},
+		Unproven:       []DifferentialProof{{ID: "p1", Finding: "f1", Kind: ProofPin, Pin: &Pin{ID: "p1", Finding: "f1", File: "a.go", From: "+x", To: "y", Test: "T"}}},
 		AllFound:       []Bug{{ID: "b", GoldenIdx: &one}},
 		Status:         []BugStatus{{ID: "b"}},
 		PrevUnfixed:    &one,

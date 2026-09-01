@@ -174,12 +174,16 @@ type AllowedCmd struct {
 
 // Delta is what a node's Reduce produced; Fold applies it (§4.3). It carries no tokens.
 type Delta struct {
-	Findings   []Finding   `json:"findings,omitempty"`
-	Confirmed  []Bug       `json:"confirmed,omitempty"`
-	Status     []BugStatus `json:"status,omitempty"`
-	Commit     string      `json:"commit,omitempty"`
-	Pins       []Pin       `json:"pins,omitempty"`        // fix node → prove node: the claims to check
-	PinResults []PinResult `json:"pin_results,omitempty"` // prove node → gate: what was learned
+	Findings  []Finding   `json:"findings,omitempty"`
+	Confirmed []Bug       `json:"confirmed,omitempty"`
+	Status    []BugStatus `json:"status,omitempty"`
+	Commit    string      `json:"commit,omitempty"`
+	// Pins/PinResults keep their §2.4 names but carry the §9.1 generalization: the elements are
+	// DifferentialProof/ProofResult, of which a mutate-a-line pin is the Kind=="pin" case. The
+	// field names are retained because §2.4 keeps them ("§9.1 GENERALIZES these") — a reproduction
+	// or deletion proof rides the same carrier, so no proof kind is omitted.
+	Pins       []DifferentialProof `json:"pins,omitempty"`        // fix node → prove node: the claims to check
+	PinResults []ProofResult       `json:"pin_results,omitempty"` // prove node → gate: what was learned
 }
 
 // MaxPins caps how many mutations one fix node may ask to have verified. Each pin is a full
@@ -234,9 +238,13 @@ func PinID(finding, file, from, to string) string {
 type PinOutcome string
 
 const (
-	PinProven       PinOutcome = "proven"       // break failed the tests, restore passed them
-	PinSurvived     PinOutcome = "survived"     // mutation compiled, tests still passed → a test gap
-	PinMalformed    PinOutcome = "malformed"    // the claim could not be evaluated → says nothing about the fix
+	PinProven   PinOutcome = "proven"   // break failed the tests, restore passed them
+	PinSurvived PinOutcome = "survived" // mutation compiled, tests still passed → a test gap
+	// PinMalformed: the claim could not be evaluated → says nothing about the fix. Widened per
+	// §2.2/§9.8 R7 to cover a compiles-but-semantically-null mutation (a comment/whitespace/
+	// dead-code pin, caught by the §9.8 AST pre-screen) as well as an absent/ambiguous anchor and a
+	// mutation that won't compile — all "bad pin, rewrite it," never a verdict on the code.
+	PinMalformed    PinOutcome = "malformed"
 	PinUnverifiable PinOutcome = "unverifiable" // the tree itself could not answer → nothing learned
 )
 
@@ -249,15 +257,9 @@ func (o PinOutcome) Valid() bool {
 	return false
 }
 
-// PinResult is the outcome of checking one Pin. Proven is the only value a gate accepts, true only
-// when breaking the line failed the tests AND restoring it passed them. The embedded Pin.ID is the
-// reference/override key — there is no separate PinID field (review fix R8).
-type PinResult struct {
-	Pin     Pin        `json:"pin"`
-	Proven  bool       `json:"proven"`
-	Outcome PinOutcome `json:"outcome,omitempty"`
-	Detail  string     `json:"detail,omitempty"`
-}
+// PinResult is superseded by ProofResult (§9.1): the outcome of checking one Pin generalizes to the
+// outcome of checking a DifferentialProof of any kind. See proof.go. The mutate-a-line engine keeps
+// its own pin-only result type in internal/mutation.
 
 // Time marshals as UTC RFC3339Nano and unmarshals only the Z form (§2.2).
 type Time struct{ time.Time }
@@ -317,7 +319,7 @@ type Snapshot struct {
 	Goldens        []Golden          `json:"goldens"`
 	Findings       []Finding         `json:"findings"`
 	Confirmed      []Bug             `json:"confirmed"`
-	Unproven       []Pin             `json:"unproven,omitempty"` // pins no round has proven; drives re-discover. Derived, never persisted.
+	Unproven       []DifferentialProof `json:"unproven,omitempty"` // proofs no round has proven; drives re-discover. Derived, never persisted.
 	AllFound       []Bug             `json:"all_found"`
 	Status         []BugStatus       `json:"status"`
 	Unfixed        int               `json:"unfixed"`
@@ -349,7 +351,7 @@ type Snapshot struct {
 // Clone returns a deep copy: every slice element, map value, pointer target and RawMessage is fresh.
 func (s Snapshot) Clone() Snapshot {
 	c := s
-	c.Unproven = append([]Pin(nil), s.Unproven...)
+	c.Unproven = cloneProofs(s.Unproven)
 	c.Lineage = cloneStrings(s.Lineage)
 	c.Vars = cloneStringMap(s.Vars)
 	if s.AllowedCmds != nil {
@@ -423,6 +425,28 @@ func cloneBugs(in []Bug) []Bug {
 	for i, b := range in {
 		out[i] = b
 		out[i].GoldenIdx = cloneInt(b.GoldenIdx)
+	}
+	return out
+}
+
+// cloneProofs deep-copies a proof slice INCLUDING each element's Pin/Deletes pointer targets, so a
+// mutation through the clone can never reach the original's payload. A shallow copy would share
+// those pointers and quietly break the Clone contract for a pin or deletion proof.
+func cloneProofs(in []DifferentialProof) []DifferentialProof {
+	if in == nil {
+		return nil
+	}
+	out := make([]DifferentialProof, len(in))
+	for i, p := range in {
+		out[i] = p
+		if p.Pin != nil {
+			pin := *p.Pin
+			out[i].Pin = &pin
+		}
+		if p.Deletes != nil {
+			del := *p.Deletes
+			out[i].Deletes = &del
+		}
 	}
 	return out
 }

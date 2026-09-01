@@ -841,6 +841,28 @@ func TestFoldCaps(t *testing.T) {
 			b.Event(TypeDeltaApplied, deltaFor(`{}`, Delta{Findings: fs}), WithNode("n"))
 			return b.Events()
 		}, MaxDeltaList},
+		{"Delta-pins-count", func(n int) []Event {
+			b := NewBuilder(runA)
+			b.Init(baseInit())
+			b.Event(TypeNodeOutput, out(`{}`), WithNode("n"))
+			ps := make([]DifferentialProof, n)
+			for i := range ps {
+				ps[i] = DifferentialProof{Kind: ProofReproduction, Test: "t"}
+			}
+			b.Event(TypeDeltaApplied, deltaFor(`{}`, Delta{Pins: ps}), WithNode("n"))
+			return b.Events()
+		}, MaxDeltaList},
+		{"Delta-pinresults-count", func(n int) []Event {
+			b := NewBuilder(runA)
+			b.Init(baseInit())
+			b.Event(TypeNodeOutput, out(`{}`), WithNode("n"))
+			rs := make([]ProofResult, n)
+			for i := range rs {
+				rs[i] = ProofResult{Proof: DifferentialProof{Kind: ProofReproduction, Test: "t"}, Outcome: PinProven, Proven: true}
+			}
+			b.Event(TypeDeltaApplied, deltaFor(`{}`, Delta{PinResults: rs}), WithNode("n"))
+			return b.Events()
+		}, MaxDeltaList},
 		{"Payload", func(n int) []Event {
 			b := NewBuilder(runA)
 			b.Init(baseInit())

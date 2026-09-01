@@ -508,6 +508,26 @@ func argvOK(argv []string) bool {
 	return len(argv) <= MaxArgv && textOK(argv...)
 }
 
+// proofWithinCaps enforces the per-field caps on a DifferentialProof and its payload. The short
+// fields (ids, kind, file paths, blob/sha, test name) are MaxShort; the pin's From/To and the
+// deletion's Removed span are MaxText, the same bound the finding IssueText carries.
+func proofWithinCaps(p DifferentialProof) bool {
+	if !shortOK(p.ID, p.Finding, p.Kind, p.Test) {
+		return false
+	}
+	if p.Pin != nil {
+		if !shortOK(p.Pin.ID, p.Pin.Finding, p.Pin.File, p.Pin.Test) || !textOK(p.Pin.From, p.Pin.To) {
+			return false
+		}
+	}
+	if p.Deletes != nil {
+		if !shortOK(p.Deletes.File, p.Deletes.ParentSHA, p.Deletes.FileBlob) || !textOK(p.Deletes.Removed) {
+			return false
+		}
+	}
+	return true
+}
+
 // withinCaps enforces every per-field cap of §2.3 on a decoded payload.
 func withinCaps(p any) bool {
 	switch d := p.(type) {
@@ -541,7 +561,8 @@ func withinCaps(p any) bool {
 	case *TreeData:
 		return shortOK(d.Head, d.TreeHash) && canonLenStr(d.Status) <= MaxDetail
 	case *DeltaAppliedData:
-		if len(d.Findings) > MaxDeltaList || len(d.Confirmed) > MaxDeltaList || len(d.Status) > MaxDeltaList || !shortOK(d.Commit, d.OutputHash) {
+		if len(d.Findings) > MaxDeltaList || len(d.Confirmed) > MaxDeltaList || len(d.Status) > MaxDeltaList ||
+			len(d.Pins) > MaxDeltaList || len(d.PinResults) > MaxDeltaList || !shortOK(d.Commit, d.OutputHash) {
 			return false
 		}
 		for _, f := range d.Findings {
@@ -556,6 +577,16 @@ func withinCaps(p any) bool {
 		}
 		for _, s := range d.Status {
 			if !shortOK(s.ID) {
+				return false
+			}
+		}
+		for _, p := range d.Pins {
+			if !proofWithinCaps(p) {
+				return false
+			}
+		}
+		for _, r := range d.PinResults {
+			if !proofWithinCaps(r.Proof) || !shortOK(string(r.Outcome)) || canonLenStr(r.Detail) > MaxDetail {
 				return false
 			}
 		}
