@@ -259,7 +259,12 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 	return raw, nil
 }
 
-var testFuncRemovedRe = regexp.MustCompile(`^-func (Test|Benchmark|Fuzz|Example)\w*\(`)
+// testFuncRemovedRe matches a removed Go test declaration, following the testing package's naming
+// rule: TestXxx/BenchmarkXxx/FuzzXxx/ExampleXxx where Xxx is EMPTY or starts with a non-lowercase rune
+// (so `Test`/`TestFoo`/`Test_x`/`TestÜ` match but `Testhelper` does not), with optional whitespace
+// before the parameter list (`func TestFoo (t ...)` is legal). Suffix runes are Unicode identifier
+// characters, not ASCII-only.
+var testFuncRemovedRe = regexp.MustCompile(`^-func (Test|Benchmark|Fuzz|Example)([^\p{Ll}\s(][\p{L}\p{N}_]*)?\s*\(`)
 
 // deletesATest reports whether the diff removes a Go test function — a removed `func Test.../
 // Benchmark.../Fuzz.../Example...` line, which covers both a deleted *_test.go file (its func lines

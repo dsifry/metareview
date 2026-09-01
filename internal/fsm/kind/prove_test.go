@@ -727,8 +727,17 @@ func TestDeletesATestAndRemovedLine(t *testing.T) {
 			t.Fatalf("a removed %s func must be detected", kind)
 		}
 	}
-	// A removed non-test func, and the "--- a/foo_test.go" header, must NOT count.
-	if deletesATest("--- a/x_test.go\n-func helper() {}\n") {
-		t.Fatal("a removed non-test func (and the --- header) must not count")
+	// Go-legal forms that must be DETECTED: whitespace before the paren, an empty suffix (`Test`),
+	// an underscore/Unicode suffix.
+	for _, ok := range []string{"-func TestFoo (t *testing.T) {", "-func Test(t *testing.T){", "-func Test_x(t *testing.T){", "-func TestÜ(t *testing.T){", "-func TestMain(m *testing.M){"} {
+		if !deletesATest(ok) {
+			t.Fatalf("a Go-legal removed test decl must be detected: %q", ok)
+		}
+	}
+	// Must NOT count: a lowercase suffix (not a test per Go's rule), a non-test func, the "---" header.
+	for _, no := range []string{"-func Testhelper(t *testing.T) {", "-func helper() {}", "--- a/x_test.go"} {
+		if deletesATest(no) {
+			t.Fatalf("a non-test removed line must not count: %q", no)
+		}
 	}
 }
