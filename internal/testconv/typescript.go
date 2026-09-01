@@ -10,14 +10,20 @@ import (
 
 func init() { register(typeScriptConvention{}) }
 
-// typeScriptConvention supports TypeScript/JavaScript repositories driven by Jest or Vitest. Like the
-// Go convention it reads the runner's OWN structured output — Jest `--json` (Vitest's `--reporter=json`
-// is the same shape) — and normalizes it; it parses no source. It carries no state.
+// typeScriptConvention supports TypeScript/JavaScript repositories driven by JEST. Like the Go
+// convention it reads the runner's OWN structured output — Jest `--json` — and normalizes it; it parses
+// no source. It carries no state.
+//
+// It is scoped to Jest on purpose: Vitest's flags and output differ (its results reporter is
+// `--reporter=json`, not the bare `--json` Jest uses), so a correct Vitest convention is a separate
+// registration with its own report fixtures — a follow-up, not a claim made here. A Vitest repo that
+// selected this convention would run the wrong flag and fail closed (ParseReport finds no Jest report),
+// never silently wrong.
 type typeScriptConvention struct{}
 
 func (typeScriptConvention) Name() string { return "typescript" }
 
-// testFileSuffixes are the Jest/Vitest conventional test-file endings.
+// testFileSuffixes are the conventional TS/JS test-file endings (shared across Jest and Vitest).
 var testFileSuffixes = []string{
 	".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".test.mts", ".test.cts",
 	".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx", ".spec.mts", ".spec.cts",
@@ -33,21 +39,21 @@ func (typeScriptConvention) IsTestFile(path string) bool {
 	return false
 }
 
-// RunArgs narrows the base runner command to the single named test and asks for the JSON report. The
-// test identity is the full `describe > it` name (space-joined), matched by Jest/Vitest
-// `--testNamePattern`; it is anchored and regexp-quoted so it selects one test and cannot inject a flag.
+// RunArgs narrows the base Jest command to the single named test and asks for the JSON report. The test
+// identity is the full `describe > it` name (space-joined), matched by Jest's `--testNamePattern`; it is
+// anchored and regexp-quoted so it selects one test and cannot inject a flag.
 func (typeScriptConvention) RunArgs(base []string, test string) []string {
 	return append(append([]string(nil), base...), "--testNamePattern", "^"+regexp.QuoteMeta(test)+"$", "--json")
 }
 
-// SuiteArgs runs the whole suite (no name filter) with the JSON report.
+// SuiteArgs runs the whole suite (no name filter) with Jest's JSON report.
 func (typeScriptConvention) SuiteArgs(base []string) []string {
 	return append(append([]string(nil), base...), "--json")
 }
 
-// jestReport is the subset of Jest's `--json` output this reads (Vitest's json reporter matches). Each
-// assertionResult is one test (`fullName` = ancestorTitles + title); a testResult with no assertions
-// but a failed status is a suite that failed to transpile/execute — a build failure, not an assertion.
+// jestReport is the subset of Jest's `--json` output this reads. Each assertionResult is one test
+// (`fullName` = ancestorTitles + title); a testResult with no assertions but a failed status is a suite
+// that failed to transpile/execute — a build failure, not an assertion.
 type jestReport struct {
 	NumRuntimeErrorTestSuites int `json:"numRuntimeErrorTestSuites"`
 	TestResults               []struct {
@@ -61,15 +67,15 @@ type jestReport struct {
 	} `json:"testResults"`
 }
 
-// ParseReport normalizes a Jest/Vitest `--json` run. A build/transpile failure (a suite Jest could not
+// ParseReport normalizes a Jest `--json` run. A build/transpile failure (a suite Jest could not
 // run: numRuntimeErrorTestSuites, or a failed suite with zero assertions) sets BuildFailed — the same
 // assertion-vs-compile distinction the Go convention draws. As with the mutation-report readers, output
 // it cannot decode is an error (the caller fails closed), never an empty report scored as a clean run.
 // A FAILED test is authoritative and is never masked by a same-named pass (matching the Go convention).
 func (typeScriptConvention) ParseReport(code int, stdout, stderr string) (TestReport, error) {
-	data, ok := extractJSONObject(stdout)
+	data, ok := findJestReport(stdout)
 	if !ok {
-		return TestReport{}, fmt.Errorf("testconv(typescript): no JSON report object in the runner output (exit %d)", code)
+		return TestReport{}, fmt.Errorf("testconv(typescript): no Jest --json report line in the runner output (exit %d)", code)
 	}
 	var raw jestReport
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -103,16 +109,26 @@ func (typeScriptConvention) ParseReport(code int, stdout, stderr string) (TestRe
 	return rep, nil
 }
 
-// extractJSONObject returns the outermost `{…}` in s. Jest normally writes clean JSON to stdout under
-// --json, but a stray console.log or ts diagnostic can precede it; taking the first `{` through the last
-// `}` recovers the report without a bespoke parser. It reports false when there is no object at all.
-func extractJSONObject(s string) ([]byte, bool) {
-	i := strings.IndexByte(s, '{')
-	j := strings.LastIndexByte(s, '}')
-	if i < 0 || j < i {
-		return nil, false
+// findJestReport locates Jest's `--json` report line in the runner output. Jest prints that report as a
+// SINGLE-LINE JSON object to stdout, but its default (pretty) reporter also prints failing-test blocks
+// full of braces to stderr — and the engine feeds combined stdout+stderr here, so a "first `{` to last
+// `}`" span would splice pretty output into the JSON. Instead this scans line by line and returns the
+// one line that is a Jest aggregated result, identified by the always-present `numTotalTestSuites`
+// field (a brace from pretty output never has it). No bespoke parser — the runner's own JSON, isolated.
+func findJestReport(s string) ([]byte, bool) {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var probe struct {
+			N *int `json:"numTotalTestSuites"`
+		}
+		if json.Unmarshal([]byte(line), &probe) == nil && probe.N != nil {
+			return []byte(line), true
+		}
 	}
-	return []byte(s[i : j+1]), true
+	return nil, false
 }
 
 // DeletesATest reports whether the diff removes test content from a TS/JS test file. TypeScript has no

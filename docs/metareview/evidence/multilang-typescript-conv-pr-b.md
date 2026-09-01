@@ -11,16 +11,20 @@ A `typeScriptConvention` registered as `"typescript"`, implementing the seam ent
 own machine-readable report — no source parsing, no regex over test syntax, no dependency:
 
 - **`IsTestFile` / `DirHasTests`** — the `*.test.*` / `*.spec.*` suffixes (`ts`/`tsx`/`js`/`jsx`/`mts`/`cts`).
-- **`RunArgs` / `SuiteArgs`** — `--testNamePattern ^<name>$ --json` (one test) / `--json` (whole suite).
-  Test identity is the full `describe > it` name (space-joined), anchored and quoted so it selects one
-  test and cannot inject a flag. Vitest's `--reporter=json` emits the same shape.
+- **`RunArgs` / `SuiteArgs`** — `--testNamePattern ^<name>$ --json` (one test) / `--json` (whole suite),
+  **Jest's** flags. Test identity is the full `describe > it` name (space-joined), anchored and quoted so
+  it selects one test and cannot inject a flag. **Scoped to Jest on purpose** (see round 2): Vitest's
+  results reporter is `--reporter=json`, not bare `--json`, so a correct Vitest convention is a separate
+  registration — a follow-up, not claimed here.
 - **`ParseReport`** — normalizes Jest `--json` into the shared `TestReport`: each `assertionResult`
   (`fullName`, or `ancestorTitles + title`) → `Passed`/`Failed`; a suite Jest could not run
   (`numRuntimeErrorTestSuites > 0`, or a failed suite with zero assertions — a transpile/collection
-  error) → `BuildFailed`. Classification then uses the **same generic `Classify`** as Go. Output with no
-  decodable JSON object is an error (fail closed), never an empty report scored clean. A `Failed` result
-  **sticks** — a same-named test in another suite can never mask a failure (matching the Go convention's
-  fix). A stray log line before the JSON is tolerated (first `{` … last `}`).
+  error) → `BuildFailed`. Classification then uses the **same generic `Classify`** as Go. A `Failed`
+  result **sticks** — a same-named test in another suite can never mask a failure (matching the Go
+  convention's fix). The report line is found by its always-present `numTotalTestSuites` sentinel, so
+  pretty-reporter braces merged in from stderr can't corrupt extraction (see round 2); output with no
+  such report line, or one that does not decode, is an error (fail closed), never an empty report scored
+  clean.
 - **`DeletesATest`** — TS has no single-line test-declaration rule (`it`/`test`/`describe` are
   aliasable), and a bespoke parser/regex is out (Dave's steer). So this is a **conservative structural
   signal**: a removed content line inside a hunk of a file whose path `IsTestFile` (either side of the
@@ -52,6 +56,22 @@ aborts the node (fail closed). Nothing Go-specific changed.
   build-fail disabled; transpile (no-assertions) build-fail disabled; the sticky-`Failed` guard;
   `DeletesATest` test-file gate forced true; `IsTestFile` forced false. Tree confirmed clean afterward.
 - `gofmt`/`go vet` clean; full `go test ./...` green.
+
+## Shepherding round 2 (Cursor Bugbot — 2× High, fixed)
+
+- **JSON extractor broke on failing tests.** `runTest` feeds combined stdout+stderr, and Jest's default
+  pretty reporter prints brace-laden failure blocks to stderr; the original "first `{` to last `}`"
+  span spliced those into the JSON. Fixed: `findJestReport` scans line by line and returns the one line
+  that is a Jest aggregated result, identified by the always-present `numTotalTestSuites` field — a
+  pretty-output brace never has it. Regression test added (pretty braces before the report).
+- **Overclaimed Vitest.** `RunArgs`/`SuiteArgs` emit Jest's `--json`; Vitest's results reporter is
+  `--reporter=json` (bare `--json` is a different flag) and its report differs. Fixed by **scoping the
+  convention to Jest** explicitly (docs + comments); a Vitest repo selecting it runs the wrong flag and
+  fails closed (no Jest report line → unverifiable), never silently wrong. A dedicated Vitest convention
+  is a follow-up with its own report fixtures.
+
+Both fixed with tests; `internal/testconv` stays 100%; the `numTotalTestSuites` sentinel gate is
+mutation-verified.
 
 ## Follow-ups (deferred)
 

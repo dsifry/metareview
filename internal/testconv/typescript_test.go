@@ -33,13 +33,15 @@ func TestTSBasics(t *testing.T) {
 	}
 }
 
+// Fixtures carry numTotalTestSuites — the sentinel findJestReport requires to distinguish the real
+// report line from pretty-reporter braces in the combined output.
 const (
-	jestPass = `{"numRuntimeErrorTestSuites":0,"testResults":[{"status":"passed","assertionResults":[{"fullName":"Calculator adds","status":"passed"}]}]}`
-	jestFail = `{"numRuntimeErrorTestSuites":0,"testResults":[{"status":"failed","assertionResults":[{"ancestorTitles":["Calculator"],"title":"adds","status":"failed"}]}]}`
+	jestPass = `{"numTotalTestSuites":1,"numRuntimeErrorTestSuites":0,"testResults":[{"status":"passed","assertionResults":[{"fullName":"Calculator adds","status":"passed"}]}]}`
+	jestFail = `{"numTotalTestSuites":1,"numRuntimeErrorTestSuites":0,"testResults":[{"status":"failed","assertionResults":[{"ancestorTitles":["Calculator"],"title":"adds","status":"failed"}]}]}`
 	// A suite that failed to transpile/collect: a failed testResult with no assertions.
-	jestTranspile = `{"numRuntimeErrorTestSuites":0,"testResults":[{"status":"failed","message":"SyntaxError: x","assertionResults":[]}]}`
+	jestTranspile = `{"numTotalTestSuites":1,"numRuntimeErrorTestSuites":0,"testResults":[{"status":"failed","message":"SyntaxError: x","assertionResults":[]}]}`
 	// numRuntimeErrorTestSuites marks a suite that errored at collection time.
-	jestRuntimeErr = `{"numRuntimeErrorTestSuites":1,"testResults":[]}`
+	jestRuntimeErr = `{"numTotalTestSuites":1,"numRuntimeErrorTestSuites":1,"testResults":[]}`
 )
 
 func TestTSParseReport(t *testing.T) {
@@ -69,20 +71,27 @@ func TestTSParseReport(t *testing.T) {
 		t.Fatal("a JSON report preceded by log noise must still parse")
 	}
 	// A FAILED test must never be masked by a same-named pass in another suite.
-	mixed := `{"testResults":[{"status":"failed","assertionResults":[{"fullName":"T","status":"failed"}]},{"status":"passed","assertionResults":[{"fullName":"T","status":"passed"}]}]}`
+	mixed := `{"numTotalTestSuites":2,"testResults":[{"status":"failed","assertionResults":[{"fullName":"T","status":"failed"}]},{"status":"passed","assertionResults":[{"fullName":"T","status":"passed"}]}]}`
 	if Classify(must(1, mixed), "T") != ClsAssert {
 		t.Fatal("a same-named pass must not mask a failure")
+	}
+	// Pretty-reporter braces on stderr (merged into the stream) must NOT be mistaken for the report:
+	// the report line is found by its numTotalTestSuites sentinel, not by brace position.
+	pretty := "  ● Calculator › adds\n    expect(received).toBe(expected)\n    { a: 1 }\n" + jestFail + "\n"
+	if Classify(must(1, pretty), "Calculator adds") != ClsAssert {
+		t.Fatal("pretty-reporter braces must not corrupt report extraction")
 	}
 }
 
 func TestTSParseReportUnreadable(t *testing.T) {
 	c := typeScriptConvention{}
-	if _, err := c.ParseReport(1, "no json here at all\n", ""); err == nil {
-		t.Fatal("output with no JSON object must be an error")
+	// No line carries the Jest report sentinel → no report found.
+	if _, err := c.ParseReport(1, "no json here at all\n{ \"other\": 1 }\n", ""); err == nil {
+		t.Fatal("output with no Jest report line must be an error")
 	}
-	// Has an outer {…} but is invalid JSON inside → the Unmarshal error path.
-	if _, err := c.ParseReport(1, "prefix { not: valid, json } suffix", ""); err == nil {
-		t.Fatal("an unparseable JSON object must be an error")
+	// A line WITH the sentinel but a type-mismatched body → the Unmarshal error path.
+	if _, err := c.ParseReport(1, `{"numTotalTestSuites":1,"testResults":"not-an-array"}`, ""); err == nil {
+		t.Fatal("a report line that does not decode must be an error")
 	}
 }
 
