@@ -125,3 +125,27 @@ func TestProofResultDecodeRejectsContradiction(t *testing.T) {
 		}
 	}
 }
+
+// DeriveProofID fills the id the fix node's agent is told not to hand-compute. A pin reuses PinID so
+// the killed-mutant set dedupes as before; a reproduction/deletion hashes its identifying content.
+func TestDeriveProofID(t *testing.T) {
+	pin := DifferentialProof{Finding: "f", Kind: ProofPin, Pin: &Pin{File: "a.go", From: "g", To: "b"}}
+	if got, want := DeriveProofID(pin), PinID("f", "a.go", "g", "b"); got != want {
+		t.Fatalf("a pin id must equal PinID: %q != %q", got, want)
+	}
+	// A pin with a nil payload (never valid, but must not panic) falls through to the content hash.
+	if DeriveProofID(DifferentialProof{Finding: "f", Kind: ProofPin}) == "" {
+		t.Fatal("a pin with nil payload must still derive a non-empty id")
+	}
+	repro := DifferentialProof{Finding: "f", Kind: ProofReproduction, Test: "T"}
+	id := DeriveProofID(repro)
+	if id == "" || DeriveProofID(repro) != id {
+		t.Fatal("a reproduction id must be non-empty and stable")
+	}
+	// A deletion folds its file+removed span into the id, so two deletions differing only there differ.
+	del1 := DifferentialProof{Finding: "f", Kind: ProofDeletion, Test: "T", Deletes: &DeletionRef{File: "a.go", Removed: "x"}}
+	del2 := DifferentialProof{Finding: "f", Kind: ProofDeletion, Test: "T", Deletes: &DeletionRef{File: "a.go", Removed: "y"}}
+	if DeriveProofID(del1) == "" || DeriveProofID(del1) == DeriveProofID(del2) {
+		t.Fatal("a deletion id must be non-empty and distinguish the removed span")
+	}
+}
