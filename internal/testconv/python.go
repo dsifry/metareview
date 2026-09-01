@@ -28,16 +28,25 @@ func (pythonConvention) IsTestFile(path string) bool {
 	return strings.HasSuffix(base, "_test.py") || (strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py"))
 }
 
+// pinXunit1 forces the xunit1 JUnit family. pytest ≥6.1 defaults to xunit2, which OMITS the `file`
+// attribute on `<testcase>` — and without `file` the nodeid cannot be reconstructed, so `Classify`
+// would never match the id `RunArgs` selects by. xunit1 carries `file` (and `line`), so pinning it on
+// the command line (overriding any repo ini/pyproject setting) makes test identity reliable. It is not
+// a dependency — just the format variant that reports the identity this seam needs.
+var pinXunit1 = []string{"-o", "junit_family=xunit1"}
+
 // RunArgs narrows the base pytest command to exactly one test by its nodeid (the unambiguous selector
-// pytest accepts as a positional — never `-k`, which is a substring match), and writes the JUnit XML to
-// stdout. The nodeid is passed verbatim as one argv element, so it cannot inject a flag.
+// pytest accepts as a positional — never `-k`, which is a substring match), pins xunit1, and writes the
+// JUnit XML to stdout. The nodeid is passed verbatim as one argv element, so it cannot inject a flag.
 func (pythonConvention) RunArgs(base []string, test string) []string {
-	return append(append([]string(nil), base...), "--junit-xml=/dev/stdout", test)
+	out := append(append([]string(nil), base...), pinXunit1...)
+	return append(out, "--junit-xml=/dev/stdout", test)
 }
 
-// SuiteArgs runs the whole suite with the JUnit XML on stdout.
+// SuiteArgs runs the whole suite (xunit1, JUnit XML on stdout).
 func (pythonConvention) SuiteArgs(base []string) []string {
-	return append(append([]string(nil), base...), "--junit-xml=/dev/stdout")
+	out := append(append([]string(nil), base...), pinXunit1...)
+	return append(out, "--junit-xml=/dev/stdout")
 }
 
 // junit* mirror the subset of pytest's JUnit XML this reads. The root is `<testsuites>` (classic) or a

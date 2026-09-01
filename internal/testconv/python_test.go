@@ -3,6 +3,7 @@ package testconv
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -19,16 +20,21 @@ func TestPyBasics(t *testing.T) {
 		}
 	}
 	run := c.RunArgs([]string{"pytest"}, "tests/test_mod.py::TestC::test_x")
+	// pytest ≥6.1's default (xunit2) drops the file attr, so we pin xunit1 to keep nodeid identity.
+	if !strings.Contains(strings.Join(run, " "), "junit_family=xunit1") {
+		t.Fatalf("RunArgs must pin xunit1 (for the file attr), got %v", run)
+	}
 	if got := run[len(run)-2:]; got[0] != "--junit-xml=/dev/stdout" || got[1] != "tests/test_mod.py::TestC::test_x" {
-		t.Fatalf("RunArgs must add junit-xml=/dev/stdout and the nodeid positional, got %v", run)
+		t.Fatalf("RunArgs must add junit-xml=/dev/stdout and the nodeid positional last, got %v", run)
 	}
 	base := []string{"pytest"}
 	_ = c.RunArgs(base, "x")
 	if len(base) != 1 {
 		t.Fatal("RunArgs must not mutate the base command")
 	}
-	if suite := c.SuiteArgs([]string{"pytest"}); suite[len(suite)-1] != "--junit-xml=/dev/stdout" || len(suite) != 2 {
-		t.Fatalf("SuiteArgs must append only the junit flag, got %v", suite)
+	suite := c.SuiteArgs([]string{"pytest"})
+	if !strings.Contains(strings.Join(suite, " "), "junit_family=xunit1") || suite[len(suite)-1] != "--junit-xml=/dev/stdout" {
+		t.Fatalf("SuiteArgs must pin xunit1 and end with the junit flag, got %v", suite)
 	}
 }
 

@@ -53,6 +53,16 @@ If the XML does not reach stdout (e.g. a repo config redirects it to a file), `P
   dropping the junit flag, and the `<testsuites>` extraction branch.
 - `gofmt`/`go vet`/golangci-lint clean; full `go test ./...` green.
 
+## Shepherding round 1 (Cursor Bugbot — 1× High, fixed)
+
+- **Default xunit2 omits `file`, breaking nodeid identity.** Bugbot flagged (and the pytest docs
+  confirm) that pytest ≥6.1 defaults to the **xunit2** family, which drops the `<testcase file=…>`
+  attribute — so `pytestNodeID` would degrade to `classname::name`, never matching the nodeid `RunArgs`
+  selects by, and every pytest reproduction proof would fail to match. Fixed: `RunArgs`/`SuiteArgs` now
+  **pin `-o junit_family=xunit1`** (which restores `file`/`line`), overriding any repo ini setting. Not
+  a dependency — just the format variant that carries the identity this seam needs. Test asserts the
+  pin; mutation-verified.
+
 ## Honest limits
 The JUnit XML **shape** is verified against docs and the parser is unit-tested against captured
 fixtures, exactly as the other three conventions are. End-to-end delivery via `--junit-xml=/dev/stdout`
