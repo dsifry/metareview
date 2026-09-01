@@ -54,6 +54,16 @@ test:
 **The manifest's *location* is the routing boundary.** Every ecosystem already defines its manifest as
 "a project root," so the routing table is *derived from where manifests sit*, not from globs we invent.
 
+**A manifest only makes a route if it actually configures a test runner.** The **provider comes from the
+test-runner dependency**, never from the mere presence of the manifest or of a `scripts.test` — and a
+manifest with no recognized runner yields **no route** (its files fall to another route or to the
+auditable no-proof exemption). Found dogfooding metareview on itself (2026-09-01): its root
+`package.json` has **no** jest/vitest dependency yet a `scripts.test: "bash tests/coverage.sh"` that runs
+the **Go** suite. A detector keying a JS route off "package.json exists" or "has a `scripts.test`" would
+fabricate a bogus JS route running Go tests under a JS convention. Correct result: **no JS route** — the
+root `go.mod` is the only test route (a single-language `Path:""` table, §3.1). Symmetrically, a
+`pyproject.toml`/`setup.cfg` with no `[tool.pytest…]` and no pytest dependency is not a python route.
+
 **B. The runner's own discovery → layout + test ids.** We never parse directories to find tests. The
 runner respects its own config (`jest.config`, `pytest.ini`, `vitest.config`) and therefore already
 handles co-located / `tests/**` / subdir transparently:
@@ -298,6 +308,13 @@ shepherded through the bots — the standard methodology.
 > codex-confirmed, reproduction proof **PROVEN**, `DONE(fixed)`), confirming per-subtree proof in a mixed
 > tree is identical to single-language. Findings folded back into this spec: the root-route rule (§3.1),
 > same-directory manifests (§3.1), Jest file-level discovery (§2), the per-convention proof selector (§8).
+
+> **Dogfood on metareview itself (2026-09-01).** metareview is Go-only (root `go.mod`, 875 tests via
+> `go test -list ./...`) with a `package.json` that is a launcher shim — **no** jest/vitest dep, but a
+> `scripts.test` delegating to a bash script that runs the Go suite. The detector must therefore yield a
+> **one-row `Path:""` Go table** and **no** JS route (§2 "a manifest only makes a route if it configures a
+> test runner"; §3.1 root-route `Path:""`). This is the case a naive "package.json ⇒ JS route" detector
+> gets wrong, and the reason provider detection keys on the runner dependency, not the manifest's presence.
 - A constructed **multi-provider** repo (Vitest subtree + Jest subtree + pytest subtree + Go module),
   with **no config file**, runs the loop with each finding verified by its own runner — the runbook's
   mixed-language rung, now configurable.
