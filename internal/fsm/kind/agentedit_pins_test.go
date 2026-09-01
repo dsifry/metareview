@@ -114,6 +114,14 @@ func TestAgentEditReduceDerivesIDs(t *testing.T) {
 	if d.Pins[0].Deletes.ParentSHA != "prefixsha" {
 		t.Fatalf("a deletion's ParentSHA must be filled from FixEntryHead: %q", d.Pins[0].Deletes.ParentSHA)
 	}
+	// ParentSHA has exactly one valid value (the pre-fix commit), so a stray agent-supplied value is
+	// OVERWRITTEN authoritatively, not left to be rejected by the prover as malformed.
+	delWrong := `{"commit":"abc1234","summary":"s","pins":[{"finding":"f","kind":"deletion","test":"T","deletes":{"file":"a.go","removed":"gone()","parent_sha":"wrongsha"}}]}`
+	out, _ = k.Decode(json.RawMessage(delWrong))
+	d, _ = k.Reduce(run.Snapshot{FixEntryHead: "prefixsha"}, out)
+	if d.Pins[0].Deletes.ParentSHA != "prefixsha" {
+		t.Fatalf("a supplied ParentSHA must be overwritten with FixEntryHead: %q", d.Pins[0].Deletes.ParentSHA)
+	}
 }
 
 // Decode bounds and validates the declared proofs before they can reach the wire: a malformed proof

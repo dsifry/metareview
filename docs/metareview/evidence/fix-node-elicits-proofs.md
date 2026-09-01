@@ -60,6 +60,10 @@ evidence it never saw."
   now fills `Deletes.ParentSHA` from `Snapshot.FixEntryHead` (set on entry to the fix node; the same
   value `prove` uses as `PreFixSHA`), a machine-known SHA the agent cannot name. It is not part of
   `DeriveProofID`, so filling it does not shift the proof id. Regression test + mutation-verified.
+- **`ParentSHA` set authoritatively, not just when empty** (round 2, Bugbot Medium). Unlike the proof
+  id (a legitimate author idempotency key), `ParentSHA` has exactly ONE valid value — the pre-fix
+  commit — so a stray agent-supplied value is now OVERWRITTEN rather than left to be rejected as
+  malformed. Test asserts a supplied value is corrected; mutation-verified.
 - (Also: a CI-only staticcheck SA4000 in a test's stability check, fixed.)
 
 ## What this unlocks

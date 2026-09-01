@@ -746,9 +746,11 @@ func (agentEdit) Reduce(s run.Snapshot, out any) (run.Delta, error) {
 		}
 		// A deletion's ParentSHA is the fix's pre-fix commit (FixEntryHead, set on entry to the fix
 		// node): a system-known SHA the agent cannot name, which the prover REQUIRES (proveDeletion
-		// rejects a proof whose ParentSHA != the pre-fix commit). Fill it so a deletion proof is not
-		// dead on arrival. It is not part of DeriveProofID, so filling it does not shift the id.
-		if p.Kind == run.ProofDeletion && p.Deletes != nil && p.Deletes.ParentSHA == "" {
+		// rejects a proof whose ParentSHA != the pre-fix commit). Unlike the proof id (a legitimate
+		// author-supplied idempotency key), ParentSHA has exactly ONE valid value, so it is set
+		// AUTHORITATIVELY here — a stray agent-supplied value is corrected, not left to be rejected as
+		// malformed. It is not part of DeriveProofID, so setting it does not shift the id.
+		if p.Kind == run.ProofDeletion && p.Deletes != nil {
 			p.Deletes.ParentSHA = s.FixEntryHead
 		}
 		if p.ID == "" {
