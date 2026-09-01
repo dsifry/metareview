@@ -2,6 +2,7 @@ package mutation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,6 +16,35 @@ type runResp struct {
 	code int
 	out  string
 	err  error
+}
+
+// go test -json event-stream builders. reproduceOne runs a mock's output through
+// GoConvention.ParseReport, so mocks emit test2json events, not console text.
+func jRun(test string) string { return `{"Action":"run","Package":"pkg","Test":"` + test + `"}` + "\n" }
+func jTerm(action, test string) string {
+	return `{"Action":"` + action + `","Package":"pkg","Test":"` + test + `"}` + "\n"
+}
+func jOut(test, s string) string {
+	b, _ := json.Marshal(s)
+	return `{"Action":"output","Package":"pkg","Test":"` + test + `","Output":` + string(b) + `}` + "\n"
+}
+
+// jFailBefore is a target that ran and failed an assertion (a valid fail-before); its output carries a
+// recognizable "assertion failed" line for the FailBefore checks. jPassAfter is a target that passed.
+func jFailBefore(test string) string {
+	return jRun(test) + jOut(test, "    x_test.go:1: assertion failed\n") + jTerm("fail", test)
+}
+func jPassAfter(test string) string { return jRun(test) + jTerm("pass", test) }
+
+// jBuildFail is a package that failed to build (no per-test events). jNoTests is a run in which only a
+// sibling package appeared and the target never ran.
+func jBuildFail() string {
+	return `{"Action":"output","Package":"pkg","Output":"# pkg [pkg.test]\n"}` + "\n" +
+		`{"Action":"output","Package":"pkg","Output":"FAIL\tpkg [build failed]\n"}` + "\n" +
+		`{"Action":"fail","Package":"pkg"}` + "\n"
+}
+func jNoTests() string {
+	return `{"Action":"output","Package":"sib","Output":"testing: warning: no tests to run\n"}` + "\n"
 }
 
 // fakeGit answers the exact git verbs the engine issues. Every response is a field so a test dials
@@ -150,25 +180,25 @@ func TestReproduceProvenPath(t *testing.T) {
 		calls++
 		if calls == 1 {
 			argvAtFailBefore = argv
-			return 1, "=== RUN   TestX\n--- FAIL: TestX (0.00s)\nFAIL\tpkg\t0.1s\n", nil // fail-before: assertion
+			return 1, jFailBefore("TestX"), nil // fail-before: assertion
 		}
 		_, err := os.Stat(filepath.Join(dir, "pkg", "prod.go"))
 		prodPresent = err == nil
 		prodAtPassAfter = argv
-		return 0, "=== RUN   TestX\n--- PASS: TestX (0.00s)\nok  \tpkg\t0.1s\n", nil // pass-after
+		return 0, jPassAfter("TestX"), nil // pass-after
 	}
 	r := newReproducer(t, g, run)
 	res := reproduceOne(t, r, "TestX")
 	mustOutcome(t, res, PinProven)
 	// A Proven result must carry the pre-fix assertion output for the §9.2 symptom reviewer.
-	if !strings.Contains(res.FailBefore, "--- FAIL: TestX") {
+	if !strings.Contains(res.FailBefore, "assertion failed") {
 		t.Fatalf("Proven result must carry the fail-before output: %q", res.FailBefore)
 	}
 
-	// The pre-fix run must be narrowed to the target test with an anchored -run, verbosely (-v so the
-	// target's own markers appear).
-	if !hasFlagValue(argvAtFailBefore, "-run", "^TestX$") || argvAtFailBefore[len(argvAtFailBefore)-1] != "-v" {
-		t.Fatalf("target test must be selected with an anchored -run and -v: %v", argvAtFailBefore)
+	// The pre-fix run must be narrowed to the target test with an anchored -run, and request the
+	// structured report (-json) that classification reads.
+	if !hasFlagValue(argvAtFailBefore, "-run", "^TestX$") || argvAtFailBefore[len(argvAtFailBefore)-1] != "-json" {
+		t.Fatalf("target test must be selected with an anchored -run and -json: %v", argvAtFailBefore)
 	}
 	if !prodPresent {
 		t.Fatalf("the fix's production file must be applied before the pass-after run (argv %v)", prodAtPassAfter)
@@ -184,15 +214,17 @@ func TestReproduceProvenPath(t *testing.T) {
 // A Proven result stores only a bounded, copied tail of the pre-fix output — a test that logs a lot
 // before its assertion must not keep the whole buffer alive for the §9.2 reviewer.
 func TestReproduceCapsFailBefore(t *testing.T) {
-	huge := "=== RUN   T\n" + strings.Repeat("x", maxFailBeforeBytes+5000) + "\n--- FAIL: T\n"
+	// A huge output event, then a late "assertion failed" line and the terminal fail — so the assertion
+	// lives in the tail the cap keeps.
+	huge := jRun("T") + jOut("T", strings.Repeat("x", maxFailBeforeBytes+5000)) + jOut("T", "assertion failed\n") + jTerm("fail", "T")
 	g := &fakeGit{partition: "A\tpkg/new_test.go\n", showBody: map[string]string{"pkg/new_test.go": "t"}}
-	run := &seqRunner{resp: []runResp{{code: 1, out: huge}, {code: 0, out: "=== RUN   T\n--- PASS: T\nok\n"}}}
+	run := &seqRunner{resp: []runResp{{code: 1, out: huge}, {code: 0, out: jPassAfter("T")}}}
 	res := reproduceOne(t, newReproducer(t, g, run.run), "T")
 	mustOutcome(t, res, PinProven)
 	if len(res.FailBefore) > maxFailBeforeBytes {
 		t.Fatalf("FailBefore must be capped to its tail: %d > %d", len(res.FailBefore), maxFailBeforeBytes)
 	}
-	if !strings.Contains(res.FailBefore, "--- FAIL: T") {
+	if !strings.Contains(res.FailBefore, "assertion failed") {
 		t.Fatal("the cap must keep the tail (where the assertion is)")
 	}
 }
@@ -209,11 +241,11 @@ func TestReproduceAppliesDeletion(t *testing.T) {
 	run := func(_ context.Context, dir string, _ []string) (int, string, error) {
 		calls++
 		if calls == 1 {
-			return 1, "=== RUN   TestX\n--- FAIL: TestX\n", nil
+			return 1, jFailBefore("TestX"), nil
 		}
 		_, err := os.Stat(filepath.Join(dir, "pkg", "gone.go"))
 		goneAbsent = os.IsNotExist(err)
-		return 0, "=== RUN   TestX\n--- PASS: TestX\nok\n", nil
+		return 0, jPassAfter("TestX"), nil
 	}
 	r := newReproducer(t, g, run)
 	// Pre-create the file the fix deletes so step (d) has something to remove.
@@ -234,7 +266,7 @@ func TestReproduceAppliesDeletion(t *testing.T) {
 // A deletion whose target is a non-empty directory cannot be removed: unverifiable, not a crash.
 func TestReproduceDeletionRemoveError(t *testing.T) {
 	g := &fakeGit{partition: "A\tpkg/new_test.go\nD\tpkg/busy\n", showBody: map[string]string{"pkg/new_test.go": "t"}}
-	run := &seqRunner{resp: []runResp{{code: 1, out: "=== RUN   TestX\n--- FAIL: TestX\n"}}}
+	run := &seqRunner{resp: []runResp{{code: 1, out: jFailBefore("TestX")}}}
 	r := newReproducer(t, g, run.run)
 	wtParent := t.TempDir()
 	r.MkWork = func() (string, error) { return wtParent, nil }
@@ -278,8 +310,8 @@ func TestReproducePrunesWhenRemoveFails(t *testing.T) {
 		return "", 0, nil
 	}
 	run := &seqRunner{resp: []runResp{
-		{code: 1, out: "=== RUN   TestX\n--- FAIL: TestX\n"},
-		{code: 0, out: "=== RUN   TestX\n--- PASS: TestX\nok\n"},
+		{code: 1, out: jFailBefore("TestX")},
+		{code: 0, out: jPassAfter("TestX")},
 	}}
 	r := Reproducer{Dir: t.TempDir(), PreFixSHA: "pre", PostFixSHA: "post", TestCmd: []string{"go", "test", "./..."},
 		Git: git, Run: run.run, MkWork: func() (string, error) { return parent, nil }}
@@ -301,10 +333,10 @@ func TestReproduceFailBeforeClassification(t *testing.T) {
 		want Outcome
 		hint string
 	}{
-		{"pass-before is a test gap", runResp{code: 0, out: "=== RUN   TestX\n--- PASS: TestX\nok\tpkg\t0.1s\n"}, PinSurvived, "does not exercise the fault"},
-		{"filter matched nothing", runResp{code: 0, out: "testing: warning: no tests to run\nPASS\n"}, PinMalformed, "was not found"},
-		{"compile error is not an assertion", runResp{code: 1, out: "# pkg\n./x_test.go:1:1: undefined: Z\nFAIL\tpkg [build failed]\n"}, PinMalformed, "compile/import error"},
-		{"non-assertion failure fails closed", runResp{code: 1, out: "some unexpected failure\n"}, PinMalformed, "not a recognizable test assertion"},
+		{"pass-before is a test gap", runResp{code: 0, out: jPassAfter("TestX")}, PinSurvived, "does not exercise the fault"},
+		{"filter matched nothing", runResp{code: 0, out: jNoTests()}, PinMalformed, "was not found"},
+		{"compile error is not an assertion", runResp{code: 1, out: jBuildFail()}, PinMalformed, "compile/import error"},
+		{"unreadable failing output is unverifiable", runResp{code: 1, out: "some unexpected failure\n"}, PinUnverifiable, "failed to execute"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &fakeGit{partition: "A\tpkg/new_test.go\n", showBody: map[string]string{"pkg/new_test.go": "t"}}
@@ -327,13 +359,13 @@ func TestReproducePassAfterClassification(t *testing.T) {
 		want  Outcome
 		hint  string
 	}{
-		{"still failing means the fix did not hold", runResp{code: 1, out: "=== RUN   TestX\n--- FAIL: TestX\nFAIL\n"}, PinSurvived, "did not make the test pass"},
-		{"vanished test is unverifiable", runResp{code: 0, out: "no tests to run\n"}, PinUnverifiable, "vanished"},
-		{"post-fix build failure is unverifiable", runResp{code: 1, out: "FAIL\tpkg [build failed]\n"}, PinUnverifiable, "did not build"},
+		{"still failing means the fix did not hold", runResp{code: 1, out: jFailBefore("TestX")}, PinSurvived, "did not make the test pass"},
+		{"vanished test is unverifiable", runResp{code: 0, out: jNoTests()}, PinUnverifiable, "vanished"},
+		{"post-fix build failure is unverifiable", runResp{code: 1, out: jBuildFail()}, PinUnverifiable, "did not build"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &fakeGit{partition: "A\tpkg/new_test.go\n", showBody: map[string]string{"pkg/new_test.go": "t"}}
-			run := &seqRunner{resp: []runResp{{code: 1, out: "=== RUN   TestX\n--- FAIL: TestX\n"}, tc.after}}
+			run := &seqRunner{resp: []runResp{{code: 1, out: jFailBefore("TestX")}, tc.after}}
 			got := reproduceOne(t, newReproducer(t, g, run.run), "TestX")
 			mustOutcome(t, got, tc.want)
 			if !strings.Contains(got.Detail, tc.hint) {
@@ -461,7 +493,7 @@ func TestReproduceFailBeforeRunError(t *testing.T) {
 
 func TestReproducePassAfterRunError(t *testing.T) {
 	g := &fakeGit{partition: "A\tpkg/new_test.go\n", showBody: map[string]string{"pkg/new_test.go": "t"}}
-	run := &seqRunner{resp: []runResp{{code: 1, out: "=== RUN   T\n--- FAIL: T\n"}, {err: errors.New("exec failed")}}}
+	run := &seqRunner{resp: []runResp{{code: 1, out: jFailBefore("T")}, {err: errors.New("exec failed")}}}
 	got := reproduceOne(t, newReproducer(t, g, run.run), "T")
 	mustOutcome(t, got, PinUnverifiable)
 	if !strings.Contains(got.Detail, "post-fix test run failed to execute") {
@@ -478,49 +510,11 @@ func TestReproduceProdOverlayFailsClosed(t *testing.T) {
 		showErrOnce: map[string]bool{"pkg/prod.go": true},
 		showErr:     errors.New("boom"),
 	}
-	run := &seqRunner{resp: []runResp{{code: 1, out: "=== RUN   T\n--- FAIL: T\n"}}}
+	run := &seqRunner{resp: []runResp{{code: 1, out: jFailBefore("T")}}}
 	got := reproduceOne(t, newReproducer(t, g, run.run), "T")
 	mustOutcome(t, got, PinUnverifiable)
 	if !strings.Contains(got.Detail, "could not apply the fix") {
 		t.Fatalf("detail must name the fix-application failure: %s", got.Detail)
-	}
-}
-
-func TestClassifyAndPredicates(t *testing.T) {
-	if !isTestFile("a/b_test.go") || isTestFile("a/b.go") {
-		t.Fatal("isTestFile must key on the _test.go suffix")
-	}
-	const run = "=== RUN   TestX\n"
-	// Keyed on the target: exit 0 WITH the target's RUN marker is passed; without it the target never
-	// ran, so it is absent (clsNoTest) — even amid sibling-package "no test files"/"no tests to run".
-	if classify("TestX", 0, run+"--- PASS: TestX\nok\n") != clsPassed {
-		t.Fatal("zero exit with the target's RUN marker is passed")
-	}
-	if classify("TestX", 0, "?   sibling [no test files]\nok  other\ttesting: warning: no tests to run\n") != clsNoTest {
-		t.Fatal("zero exit without the target's RUN marker is clsNoTest, ignoring sibling-package noise")
-	}
-	// A build/setup/vet failure is compile — before the assertion check.
-	if classify("TestX", 1, "FAIL [build failed]") != clsCompile || classify("TestX", 1, "[setup failed]") != clsCompile || classify("TestX", 1, "[vet failed]") != clsCompile {
-		t.Fatal("a build/setup/vet failure is clsCompile")
-	}
-	// Compile beats assertion: a build-failed run that also prints the target's --- FAIL is still compile.
-	if classify("TestX", 1, run+"--- FAIL: TestX\nFAIL\tpkg [build failed]\n") != clsCompile {
-		t.Fatal("a compile failure must win over an assertion marker")
-	}
-	if classify("TestX", 1, run+"--- FAIL: TestX\n") != clsAssert {
-		t.Fatal("the target's assertion failure is clsAssert")
-	}
-	// A non-zero exit whose target neither ran nor failed (e.g. a sibling package failed) is clsOther.
-	if classify("TestX", 1, "mystery\n") != clsOther {
-		t.Fatal("a nonzero exit with no target marker is clsOther")
-	}
-	// Ran but no target FAIL line (an odd non-assertion failure) is also clsOther, not a valid assertion.
-	if classify("TestX", 1, run+"panic: boom\n") != clsOther {
-		t.Fatal("ran but no target --- FAIL line is clsOther")
-	}
-	// A SIBLING test's failure is not the target's assertion: the FAIL check is keyed on the target.
-	if classify("TestX", 1, run+"--- FAIL: TestOther (0.00s)\n") != clsOther {
-		t.Fatal("a non-target --- FAIL line must not count as the target's assertion")
 	}
 }
 

@@ -103,6 +103,22 @@ func (f *fakeReviewer) Call(_ context.Context, r judge.Request) (judge.Verdict, 
 	return judge.Verdict{Kind: r.Kind, Decision: f.decision}, nil
 }
 
+// An unknown test_convention aborts the node (fail closed): a non-Go repository must never be scored by
+// Go's rules via a silent default. The default (absent param) is exercised by every other prove test.
+func TestProveUnknownConventionAborts(t *testing.T) {
+	r := mustNew(t, judge.NewMock(judge.Script{}), true)
+	r.execs[Prove] = &proveExec{prover: &mockProver{}, symptom: &fakeReviewer{decision: true}}
+	ex, _ := r.Executor(Prove)
+	node := &workflow.Node{Name: "prove", Kind: Prove, Exec: "fork", Params: map[string]any{"test_convention": "ruby"}}
+	_, err := ex.Execute(context.Background(), machine.ExecInput{Snap: run.Snapshot{}, Node: node, Diff: machine.Diff{Text: "@@\n+x\n"}, Audit: (&audits{}).fn})
+	if err == nil {
+		t.Fatal("an unknown test_convention must abort the node, not fall through to Go")
+	}
+	if !strings.Contains(err.Error(), "unknown test_convention") {
+		t.Fatalf("the abort must name the unknown convention: %v", err)
+	}
+}
+
 func runProve(t *testing.T, snap run.Snapshot, diff string, prover Prover) run.Delta {
 	t.Helper()
 	// A matches-by-default reviewer: it runs only on a Proven reproduction and lets it stand, so a
@@ -714,30 +730,5 @@ func TestProveTestDeletionRecheckErrorAborts(t *testing.T) {
 	snap := run.Snapshot{Proven: []run.DifferentialProof{pin}}
 	if _, err := ex.Execute(context.Background(), machine.ExecInput{Snap: snap, Node: proveNode, Diff: machine.Diff{Text: diff}, Audit: (&audits{}).fn}); err == nil {
 		t.Fatal("a re-verification error must abort the run")
-	}
-}
-
-func TestDeletesATestAndRemovedLine(t *testing.T) {
-	yes := "diff --git a/x_test.go b/x_test.go\n--- a/x_test.go\n+++ b/x_test.go\n@@ -1,1 +0,0 @@\n-func TestFoo(t *testing.T) {}\n"
-	if !deletesATest(yes) {
-		t.Fatal("a removed test func must be detected")
-	}
-	for _, kind := range []string{"Benchmark", "Fuzz", "Example"} {
-		if !deletesATest("@@\n-func " + kind + "Bar(") {
-			t.Fatalf("a removed %s func must be detected", kind)
-		}
-	}
-	// Go-legal forms that must be DETECTED: whitespace before the paren, an empty suffix (`Test`),
-	// an underscore/Unicode suffix.
-	for _, ok := range []string{"-func TestFoo (t *testing.T) {", "-func Test(t *testing.T){", "-func Test_x(t *testing.T){", "-func TestÜ(t *testing.T){", "-func TestMain(m *testing.M){"} {
-		if !deletesATest(ok) {
-			t.Fatalf("a Go-legal removed test decl must be detected: %q", ok)
-		}
-	}
-	// Must NOT count: a lowercase suffix (not a test per Go's rule), a non-test func, the "---" header.
-	for _, no := range []string{"-func Testhelper(t *testing.T) {", "-func helper() {}", "--- a/x_test.go"} {
-		if deletesATest(no) {
-			t.Fatalf("a non-test removed line must not count: %q", no)
-		}
 	}
 }

@@ -29,7 +29,7 @@ func (mp MutationProver) ProvePins(ctx context.Context, proofs []run.Differentia
 	for i, p := range proofs {
 		pins[i] = mutation.Pin{File: p.Pin.File, From: p.Pin.From, To: p.Pin.To, Test: p.Pin.Test}
 	}
-	v := mutation.Verifier{Dir: spec.Dir, TestCmd: spec.TestCmd, BuildCmd: spec.BuildCmd, Timeout: spec.Timeout, Run: mp.Run}
+	v := mutation.Verifier{Dir: spec.Dir, TestCmd: spec.TestCmd, BuildCmd: spec.BuildCmd, Timeout: spec.Timeout, Run: mp.Run, Convention: spec.Convention}
 	mrs, err := v.Verify(ctx, pins)
 	if err != nil {
 		return nil, err

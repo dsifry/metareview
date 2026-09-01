@@ -52,9 +52,9 @@ func TestReproductionProverMapsProven(t *testing.T) {
 		Run: func(_ context.Context, _ string, _ []string) (int, string, error) {
 			calls++
 			if calls == 1 {
-				return 1, "=== RUN   T\n--- FAIL: T\n", nil
+				return 1, "{\"Action\":\"run\",\"Test\":\"T\"}\n{\"Action\":\"output\",\"Test\":\"T\",\"Output\":\"assertion failed\\n\"}\n{\"Action\":\"fail\",\"Test\":\"T\"}\n", nil
 			}
-			return 0, "=== RUN   T\n--- PASS: T\nok\n", nil
+			return 0, "{\"Action\":\"run\",\"Test\":\"T\"}\n{\"Action\":\"pass\",\"Test\":\"T\"}\n", nil
 		},
 	}
 	spec := ProveSpec{Dir: t.TempDir(), TestCmd: []string{"go", "test", "./..."}, PreFixSHA: "pre", PostFixSHA: "post"}
@@ -91,9 +91,9 @@ func TestProversRoutesByKind(t *testing.T) {
 			Run: func(_ context.Context, _ string, _ []string) (int, string, error) {
 				reproCalls++
 				if reproCalls == 1 {
-					return 1, "=== RUN   T\n--- FAIL: T\n", nil
+					return 1, "{\"Action\":\"run\",\"Test\":\"T\"}\n{\"Action\":\"output\",\"Test\":\"T\",\"Output\":\"assertion failed\\n\"}\n{\"Action\":\"fail\",\"Test\":\"T\"}\n", nil
 				}
-				return 0, "=== RUN   T\n--- PASS: T\nok\n", nil
+				return 0, "{\"Action\":\"run\",\"Test\":\"T\"}\n{\"Action\":\"pass\",\"Test\":\"T\"}\n", nil
 			},
 		},
 	}
@@ -160,9 +160,9 @@ func delReviewerRun() (func(context.Context, string, []string) (int, string, err
 		if hasRun {
 			repro++
 			if repro == 1 {
-				return 1, "=== RUN   T\n--- FAIL: T\n", nil
+				return 1, "{\"Action\":\"run\",\"Test\":\"T\"}\n{\"Action\":\"output\",\"Test\":\"T\",\"Output\":\"assertion failed\\n\"}\n{\"Action\":\"fail\",\"Test\":\"T\"}\n", nil
 			}
-			return 0, "=== RUN   T\n--- PASS: T\nok\n", nil
+			return 0, "{\"Action\":\"run\",\"Test\":\"T\"}\n{\"Action\":\"pass\",\"Test\":\"T\"}\n", nil
 		}
 		return 0, "ok\n", nil // whole-suite scope run: green
 	}
@@ -196,7 +196,7 @@ func TestProveDeletionProven(t *testing.T) {
 	if len(rs) != 1 || !rs[0].Proven || rs[0].Outcome != run.PinProven {
 		t.Fatalf("a well-formed deletion must be proven: %+v", rs)
 	}
-	if !strings.Contains(rs[0].FailBefore, "--- FAIL: T") {
+	if !strings.Contains(rs[0].FailBefore, "assertion failed") {
 		t.Fatalf("a proven deletion must carry the fail-before output for the §9.2 reviewer: %q", rs[0].FailBefore)
 	}
 }
@@ -260,7 +260,7 @@ func TestProveDeletionReproductionNotProven(t *testing.T) {
 	runFn := func(_ context.Context, _ string, argv []string) (int, string, error) {
 		for _, x := range argv {
 			if x == "-run" {
-				return 0, "=== RUN   T\n--- PASS: T\nok\n", nil // passes pre-fix → survived
+				return 0, "{\"Action\":\"run\",\"Test\":\"T\"}\n{\"Action\":\"pass\",\"Test\":\"T\"}\n", nil // passes pre-fix → survived
 			}
 		}
 		return 0, "ok\n", nil
@@ -279,9 +279,9 @@ func TestProveDeletionScopeRegresses(t *testing.T) {
 			if x == "-run" { // reproduction: fail-before then pass-after
 				repro++
 				if repro == 1 {
-					return 1, "=== RUN   T\n--- FAIL: T\n", nil
+					return 1, "{\"Action\":\"run\",\"Test\":\"T\"}\n{\"Action\":\"output\",\"Test\":\"T\",\"Output\":\"assertion failed\\n\"}\n{\"Action\":\"fail\",\"Test\":\"T\"}\n", nil
 				}
-				return 0, "=== RUN   T\n--- PASS: T\nok\n", nil
+				return 0, "{\"Action\":\"run\",\"Test\":\"T\"}\n{\"Action\":\"pass\",\"Test\":\"T\"}\n", nil
 			}
 		}
 		scope++ // whole suite: baseline green, post-fix RED → over-deletion regression

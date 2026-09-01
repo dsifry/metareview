@@ -39,3 +39,4 @@ internal/state 84.9
 internal/status 100.0
 internal/taskdone 89.4
 internal/tasksource 100.0
+internal/testconv 100.0

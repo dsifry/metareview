@@ -6,9 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
+
+	"github.com/dsifry/metareview/internal/testconv"
 )
 
 // Proof is a reproduction-form differential claim (spec §9.1): one committed test that must FAIL on
@@ -57,6 +58,10 @@ type Reproducer struct {
 	PostFixSHA string        // the post-fix tree (run.Snapshot.Head)
 	TestCmd    []string      // the consent-hashed base test command, e.g. [go test ./...]; never the agent's
 	Timeout    time.Duration // per test run; <=0 uses defaultVerifyTimeout
+	// Convention is the language seam (spec §4.2): which files are tests, how to run one and read the
+	// result, and the trivial-pin pre-screen. Nil defaults to Go — the FSM path always sets it
+	// explicitly, so nil is only ever the in-package/test default, never a production fall-through.
+	Convention testconv.Convention
 	// Git runs a hardened git in Dir and returns stdout, the exit code, and a non-nil error only
 	// when the process could not be run at all. nil uses a real shell-out. A seam for tests.
 	Git func(ctx context.Context, args ...string) (stdout string, code int, err error)
@@ -134,9 +139,16 @@ type partition struct {
 	delFiles  []string // non-test files the fix deletes — removed in step (d)
 }
 
-// isTestFile is the test-vs-production predicate (spec §9.1): the Go `*_test.go` convention, the same
-// one packageHasTests keys on. A non-Go partition would key on its own test convention here.
-func isTestFile(path string) bool { return strings.HasSuffix(path, "_test.go") }
+// convOrGo returns c, or the Go convention when c is nil. A nil Convention is the in-package/test
+// default only; the FSM path always sets one explicitly (and fails closed on an unknown name upstream).
+func convOrGo(c testconv.Convention) testconv.Convention {
+	if c == nil {
+		c, _ = testconv.For("go")
+	}
+	return c
+}
+
+func (r Reproducer) conv() testconv.Convention { return convOrGo(r.Convention) }
 
 // changedPartition lists the fix's changed files (PreFixSHA→PostFixSHA) split by role. Rename
 // detection is disabled so a rename is a delete plus an add, which materialize correctly.
@@ -161,7 +173,7 @@ func (r Reproducer) changedPartition(ctx context.Context) (partition, error) {
 			continue
 		}
 		status, path := fields[0][0], fields[1]
-		test := isTestFile(path)
+		test := r.conv().IsTestFile(path)
 		switch status {
 		case 'D':
 			if test {
@@ -232,20 +244,19 @@ func (r Reproducer) reproduceOne(ctx context.Context, p Proof, part partition) R
 	}
 
 	// (c) fail-before: the target test must FAIL with an assertion, not a compile/import, error.
-	code, before, err := r.runTest(ctx, wt, p.Test)
+	rep, before, err := r.runTest(ctx, wt, p.Test)
 	if err != nil {
 		return fail(PinUnverifiable, "the pre-fix test run failed to execute: %v", err)
 	}
-	switch classify(p.Test, code, before) {
-	case clsPassed:
+	switch testconv.Classify(rep, p.Test) {
+	case testconv.ClsPassed:
 		return fail(PinSurvived, "the test passes on the pre-fix tree, so it does not exercise the fault: %s", tail(before))
-	case clsNoTest:
+	case testconv.ClsNoTest:
 		return fail(PinMalformed, "the target test %q was not found in the pre-fix tree", p.Test)
-	case clsCompile:
+	case testconv.ClsCompile:
 		return fail(PinMalformed, "the pre-fix failure is a compile/import error, not an assertion, so it proves nothing: %s", tail(before))
-	case clsOther:
-		return fail(PinMalformed, "the pre-fix failure was not a recognizable test assertion: %s", tail(before))
 	}
+	// testconv.ClsAssert: a valid assertion fail-before — continue to (d).
 
 	// (d) apply the full fix: bring every changed production file to its post-fix content and remove
 	//     what the fix deletes. Test files are already overlaid, so the tree now equals PostFixSHA.
@@ -261,23 +272,24 @@ func (r Reproducer) reproduceOne(ctx context.Context, p Proof, part partition) R
 	}
 
 	// (e) pass-after: the target test must now PASS.
-	code, after, err := r.runTest(ctx, wt, p.Test)
+	rep, after, err := r.runTest(ctx, wt, p.Test)
 	if err != nil {
 		return fail(PinUnverifiable, "the post-fix test run failed to execute: %v", err)
 	}
-	switch classify(p.Test, code, after) {
-	case clsPassed:
+	switch testconv.Classify(rep, p.Test) {
+	case testconv.ClsPassed:
 		return ReproResult{Proof: p, Proven: true, Outcome: PinProven,
 			Detail: fmt.Sprintf("%q fails on the pre-fix tree (assertion) and passes once the fix is applied", p.Test),
 			// Store a COPIED tail, not the whole output: a test that logs a lot before its assertion
 			// would otherwise keep the full buffer alive through post-fix execution and symptom review,
 			// and several proofs could exhaust memory. strings.Clone frees the original backing array.
 			FailBefore: tailClone(before, maxFailBeforeBytes)}
-	case clsNoTest:
+	case testconv.ClsNoTest:
 		return fail(PinUnverifiable, "the target test %q vanished from the post-fix tree", p.Test)
-	case clsCompile:
+	case testconv.ClsCompile:
 		return fail(PinUnverifiable, "the post-fix tree did not build, so nothing can be concluded: %s", tail(after))
 	default:
+		// testconv.ClsAssert: the test still fails an assertion, so the differential did not hold.
 		return fail(PinSurvived, "applying the fix did not make the test pass; the differential did not hold: %s", tail(after))
 	}
 }
@@ -374,16 +386,30 @@ func removeInTree(wt, path string) error {
 	return nil
 }
 
-// runTest runs the consent-hashed test command narrowed to the single target test, verbosely. The
-// test name is regexp-quoted and anchored so -run selects exactly that test and cannot inject a flag
-// (it is one argv element, never a shell string); -v makes the target's own `=== RUN`/`--- PASS`/
-// `--- FAIL` markers appear, so classify keys on the target rather than inferring from suite noise.
-func (r Reproducer) runTest(ctx context.Context, dir, test string) (int, string, error) {
-	argv := append(append([]string(nil), r.TestCmd...), "-run", "^"+regexp.QuoteMeta(test)+"$", "-v")
+// runTest runs the consent-hashed test command narrowed to the single target test (the convention
+// builds the argv, so the test name cannot inject a flag and the runner emits its structured report),
+// then normalizes the run to a testconv.TestReport for classification. It returns the raw combined
+// output too — reproduceOne uses it for the human-readable Detail tail and the §9.2 FailBefore. A run
+// whose output the convention cannot read is an error (the caller reports unverifiable), never an
+// empty report scored as a clean run.
+func (r Reproducer) runTest(ctx context.Context, dir, test string) (testconv.TestReport, string, error) {
+	argv := r.conv().RunArgs(r.TestCmd, test)
+	var code int
+	var out string
+	var err error
 	if r.Run != nil {
-		return r.Run(ctx, dir, argv)
+		code, out, err = r.Run(ctx, dir, argv)
+	} else {
+		code, out, err = runProc(ctx, dir, argv, r.Timeout)
 	}
-	return runProc(ctx, dir, argv, r.Timeout)
+	if err != nil {
+		return testconv.TestReport{}, out, err
+	}
+	rep, perr := r.conv().ParseReport(code, out, "")
+	if perr != nil {
+		return testconv.TestReport{}, out, perr
+	}
+	return rep, out, nil
 }
 
 func (r Reproducer) mkWork() (string, error) {
@@ -430,50 +456,6 @@ func asExitErr(err error, target **exec.ExitError) bool {
 		*target = ee
 	}
 	return ok
-}
-
-// failClass is how a test run's exit code and output classify against the assertion-vs-compile axis.
-type failClass int
-
-const (
-	clsAssert  failClass = iota // exited non-zero with a real "--- FAIL:" assertion — a valid fail-before
-	clsPassed                   // exited zero with tests actually run
-	clsNoTest                   // exited zero but the -run filter matched nothing — the test is absent
-	clsCompile                  // a compile/import/setup failure — NOT an assertion, so it proves nothing
-	clsOther                    // exited non-zero but no assertion marker — fail closed on the assertion axis
-)
-
-// classify reads a verbose `go test -run ^<test>$ -v` run, keyed on the TARGET test's own markers.
-// Because TestCmd is the repo-wide command (e.g. `go test ./...`), sibling packages print
-// "[no test files]" and "no tests to run" for reasons unrelated to the target — so inferring the
-// target's fate from those strings misfires in any multi-package repo. Instead:
-//   - `=== RUN   <test>` proves the target actually ran;
-//   - the compile check comes BEFORE the assertion check, so a build-failed run that still prints a
-//     `--- FAIL:` from another package is compile, not a valid fail-before (the hole spec §9.3(b) closes);
-//   - `--- FAIL: <test>` proves the target itself failed an assertion.
-func classify(test string, code int, out string) failClass {
-	ran := strings.Contains(out, "=== RUN   "+test)
-	if code == 0 {
-		if ran {
-			return clsPassed
-		}
-		return clsNoTest // exit 0 but the target never ran → it is absent from the tree
-	}
-	if isCompileError(out) {
-		return clsCompile
-	}
-	if ran && strings.Contains(out, "--- FAIL: "+test) {
-		return clsAssert
-	}
-	return clsOther
-}
-
-// isCompileError reports a `go test` build/setup/vet failure — the failure modes that make a
-// non-zero exit mean "the code did not compile", never "an assertion failed".
-func isCompileError(out string) bool {
-	return strings.Contains(out, "[build failed]") ||
-		strings.Contains(out, "[setup failed]") ||
-		strings.Contains(out, "[vet failed]")
 }
 
 // runProc runs argv in dir with a timeout, returning the exit code and combined output. A run killed

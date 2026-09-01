@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -14,6 +12,7 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/machine"
 	"github.com/dsifry/metareview/internal/fsm/run"
 	"github.com/dsifry/metareview/internal/fsm/workflow"
+	"github.com/dsifry/metareview/internal/testconv"
 )
 
 // Prove is the mutation-verify node kind (spec §3.1 / §9.1): the only deterministic non-gate node.
@@ -40,6 +39,10 @@ type ProveSpec struct {
 	Timeout    time.Duration
 	PreFixSHA  string // Snapshot.FixEntryHead — the pre-fix tree for reproduction/deletion proofs
 	PostFixSHA string // Snapshot.Head — the post-fix tree
+	// Convention is the language seam (spec §4.2): the test-file predicate, the test runner and its
+	// report reader, the removed-test rule, and the trivial-pin pre-screen. It is resolved from the
+	// node's `test_convention` param (default "go"); an unknown name aborts the node (fail closed).
+	Convention testconv.Convention
 }
 
 // Prover verifies a fix's differential proofs and returns one ProofResult per input proof, in order,
@@ -132,6 +135,22 @@ func testCmdParam(snap run.Snapshot, node *workflow.Node) []string {
 	return nil
 }
 
+// conventionParam resolves the node's `test_convention` param to a language convention. An absent or
+// empty param defaults to "go", so every existing workflow keeps working unchanged. An unknown name is
+// a configuration error that ABORTS the node (fail closed) — never a silent fall-through to Go, which
+// would score a non-Go repository by Go rules.
+func conventionParam(node *workflow.Node) (testconv.Convention, error) {
+	name, _ := node.Params["test_convention"].(string)
+	if name == "" {
+		name = "go"
+	}
+	conv, ok := testconv.For(name)
+	if !ok {
+		return nil, errs.E(machine.CodeExecutorFailed, "prove: unknown test_convention "+name, "reason", "unknown_test_convention")
+	}
+	return conv, nil
+}
+
 func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.RawMessage, error) {
 	if e.prover == nil {
 		return nil, errNoProver()
@@ -176,7 +195,11 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 		}
 	}
 	dir := proveDir(in.Snap)
-	spec := ProveSpec{TestCmd: testCmdParam(in.Snap, in.Node), Dir: dir, PreFixSHA: in.Snap.FixEntryHead, PostFixSHA: in.Snap.Head}
+	conv, err := conventionParam(in.Node)
+	if err != nil {
+		return nil, err
+	}
+	spec := ProveSpec{TestCmd: testCmdParam(in.Snap, in.Node), Dir: dir, PreFixSHA: in.Snap.FixEntryHead, PostFixSHA: in.Snap.Head, Convention: conv}
 	verified, err := e.prover.ProvePins(ctx, toProve, spec)
 	if err != nil {
 		return nil, err
@@ -237,7 +260,7 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 		if settled[b.ID] || blocked[b.ID] {
 			continue
 		}
-		if owesPin(in.Diff.Text, dir, b.File) {
+		if owesPin(spec.Convention, in.Diff.Text, dir, b.File) {
 			delta.Findings = append(delta.Findings, owedPinMarker(b))
 		}
 	}
@@ -259,28 +282,6 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 	return raw, nil
 }
 
-// testFuncRemovedRe matches a removed Go test declaration, following the testing package's naming
-// rule: TestXxx/BenchmarkXxx/FuzzXxx/ExampleXxx where Xxx is EMPTY or starts with a non-lowercase rune
-// (so `Test`/`TestFoo`/`Test_x`/`TestÜ` match but `Testhelper` does not), with optional whitespace
-// before the parameter list (`func TestFoo (t ...)` is legal). Suffix runes are Unicode identifier
-// characters, not ASCII-only.
-var testFuncRemovedRe = regexp.MustCompile(`^-func (Test|Benchmark|Fuzz|Example)([^\p{Ll}\s(][\p{L}\p{N}_]*)?\s*\(`)
-
-// deletesATest reports whether the diff removes a Go test function — a removed `func Test.../
-// Benchmark.../Fuzz.../Example...` line, which covers both a deleted *_test.go file (its func lines
-// appear as removed) and a test removed from a surviving file. Header lines ("--- a/…") are skipped.
-func deletesATest(diff string) bool {
-	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, "---") {
-			continue
-		}
-		if testFuncRemovedRe.MatchString(line) {
-			return true
-		}
-	}
-	return false
-}
-
 // testDeletionRegressions runs the §9.6 mutation-kill non-regression check. It is a no-op unless the
 // fix deleted a test. Then it re-verifies every previously-PROVEN pin on the current post-deletion
 // tree; a pin that now SURVIVES (the mutation still applies but the tests no longer catch it) means the
@@ -290,7 +291,7 @@ func deletesATest(diff string) bool {
 // removed" pre-filter was tried and removed: a substring match on removed lines dropped still-live pins
 // like From "n < 10" against a removed "n < 100", silently bypassing the gate.)
 func (e *proveExec) testDeletionRegressions(ctx context.Context, in machine.ExecInput, spec ProveSpec) ([]run.Finding, error) {
-	if !deletesATest(in.Diff.Text) {
+	if !spec.Convention.DeletesATest(in.Diff.Text) {
 		return nil, nil
 	}
 	var recheck []run.DifferentialProof
@@ -431,16 +432,8 @@ func isAddedLineInFile(diff, file, from string) bool {
 // added a line in the finding's OWN file AND that file's package has tests. A cross-file remedy (no
 // added line in the finding's file) or a no-test package owes no pin — auditable exemptions, never a
 // silent pass.
-func owesPin(diff, dir, file string) bool {
-	return file != "" && len(judge.AddedLinesInFile(diff, file)) > 0 && packageHasTests(dir, file)
-}
-
-// packageHasTests reports whether the directory holding file contains Go test files (*_test.go). It
-// is the machine-determinable "package that has test files" of §4.2; a non-Go partition would key on
-// its own test convention here.
-func packageHasTests(dir, file string) bool {
-	matches, err := filepath.Glob(filepath.Join(dir, filepath.Dir(file), "*_test.go"))
-	return err == nil && len(matches) > 0
+func owesPin(conv testconv.Convention, diff, dir, file string) bool {
+	return file != "" && len(judge.AddedLinesInFile(diff, file)) > 0 && conv.DirHasTests(dir, file)
 }
 
 // owedPinMarker is the blocking finding for a confirmed finding that owes a pin the fix never
