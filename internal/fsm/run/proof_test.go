@@ -138,7 +138,8 @@ func TestDeriveProofID(t *testing.T) {
 		t.Fatal("a pin with nil payload must still derive a non-empty id")
 	}
 	repro := DifferentialProof{Finding: "f", Kind: ProofReproduction, Test: "T"}
-	if DeriveProofID(repro) == "" || DeriveProofID(repro) != DeriveProofID(repro) {
+	id := DeriveProofID(repro)
+	if id == "" || DeriveProofID(repro) != id {
 		t.Fatal("a reproduction id must be non-empty and stable")
 	}
 	// A deletion folds its file+removed span into the id, so two deletions differing only there differ.
