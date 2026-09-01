@@ -51,10 +51,16 @@ func (typeScriptConvention) SuiteArgs(base []string) []string {
 	return append(append([]string(nil), base...), "--json")
 }
 
-// jestReport is the subset of Jest's `--json` output this reads. Each assertionResult is one test
-// (`fullName` = ancestorTitles + title); a testResult with no assertions but a failed status is a suite
-// that failed to transpile/execute — a build failure, not an assertion.
-type jestReport struct {
+// ParseReport normalizes a Jest `--json` run (see parseJSCompatReport).
+func (typeScriptConvention) ParseReport(code int, stdout, stderr string) (TestReport, error) {
+	return parseJSCompatReport("typescript", code, stdout)
+}
+
+// jsCompatReport is the subset of the Jest `--json` aggregated result this reads. Vitest's `json`
+// reporter emits the SAME (Jest-compatible) shape, so both conventions share this parser. Each
+// assertionResult is one test (`fullName` = ancestorTitles + title); a testResult with no assertions
+// but a failed status is a suite that failed to transpile/execute — a build failure, not an assertion.
+type jsCompatReport struct {
 	NumRuntimeErrorTestSuites int `json:"numRuntimeErrorTestSuites"`
 	TestResults               []struct {
 		Status           string `json:"status"`
@@ -67,19 +73,21 @@ type jestReport struct {
 	} `json:"testResults"`
 }
 
-// ParseReport normalizes a Jest `--json` run. A build/transpile failure (a suite Jest could not
-// run: numRuntimeErrorTestSuites, or a failed suite with zero assertions) sets BuildFailed — the same
-// assertion-vs-compile distinction the Go convention draws. As with the mutation-report readers, output
-// it cannot decode is an error (the caller fails closed), never an empty report scored as a clean run.
-// A FAILED test is authoritative and is never masked by a same-named pass (matching the Go convention).
-func (typeScriptConvention) ParseReport(code int, stdout, stderr string) (TestReport, error) {
-	data, ok := findJestReport(stdout)
+// parseJSCompatReport normalizes a Jest-format `--json` run (Jest or Vitest) into a TestReport. A
+// build/transpile failure (numRuntimeErrorTestSuites, or a failed suite with zero assertions — Vitest's
+// simplified format may omit the former, so the latter is the load-bearing signal there) sets
+// BuildFailed — the assertion-vs-compile distinction the Go convention draws. As with the
+// mutation-report readers, output it cannot decode is an error (the caller fails closed), never an empty
+// report scored as a clean run. A FAILED test is authoritative and is never masked by a same-named pass.
+// runner names the convention in error messages ("typescript"/"vitest").
+func parseJSCompatReport(runner string, code int, stdout string) (TestReport, error) {
+	data, ok := findJSCompatReportLine(stdout)
 	if !ok {
-		return TestReport{}, fmt.Errorf("testconv(typescript): no Jest --json report line in the runner output (exit %d)", code)
+		return TestReport{}, fmt.Errorf("testconv(%s): no Jest-format --json report line in the runner output (exit %d)", runner, code)
 	}
-	var raw jestReport
+	var raw jsCompatReport
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return TestReport{}, fmt.Errorf("testconv(typescript): parsing the runner's --json report: %w", err)
+		return TestReport{}, fmt.Errorf("testconv(%s): parsing the runner's --json report: %w", runner, err)
 	}
 	rep := TestReport{Tests: map[string]Outcome{}}
 	if raw.NumRuntimeErrorTestSuites > 0 {
@@ -109,13 +117,14 @@ func (typeScriptConvention) ParseReport(code int, stdout, stderr string) (TestRe
 	return rep, nil
 }
 
-// findJestReport locates Jest's `--json` report line in the runner output. Jest prints that report as a
-// SINGLE-LINE JSON object to stdout, but its default (pretty) reporter also prints failing-test blocks
-// full of braces to stderr — and the engine feeds combined stdout+stderr here, so a "first `{` to last
-// `}`" span would splice pretty output into the JSON. Instead this scans line by line and returns the
-// one line that is a Jest aggregated result, identified by the always-present `numTotalTestSuites`
-// field (a brace from pretty output never has it). No bespoke parser — the runner's own JSON, isolated.
-func findJestReport(s string) ([]byte, bool) {
+// findJSCompatReportLine locates the Jest-format `--json` report line in the runner output. Jest and
+// Vitest print that report as a SINGLE-LINE JSON object to stdout, but the default (pretty) reporter
+// also prints failing-test blocks full of braces to stderr — and the engine feeds combined stdout+stderr
+// here, so a "first `{` to last `}`" span would splice pretty output into the JSON. Instead this scans
+// line by line and returns the one line that is an aggregated result, identified by the always-present
+// `numTotalTestSuites` field (a brace from pretty output never has it). No bespoke parser — the runner's
+// own JSON, isolated.
+func findJSCompatReportLine(s string) ([]byte, bool) {
 	for _, line := range strings.Split(s, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "{") {
