@@ -110,6 +110,11 @@ type ProofResult struct {
 	Proven  bool              `json:"proven"`
 	Outcome PinOutcome        `json:"outcome,omitempty"`
 	Detail  string            `json:"detail,omitempty"`
+	// FailBefore is the reproduction target test's pre-fix output — the assertion the §9.2 symptom
+	// reviewer judges against the finding's own symptom. It is transient reviewer input consumed
+	// inside the prove node, never persisted (json:"-"): on replay the reviewer's verdict already
+	// lives in the recorded findings, so this need not survive the wire.
+	FailBefore string `json:"-"`
 }
 
 // UnmarshalJSON rejects a contradictory result at decode: an unrecognised outcome, or a Proven flag

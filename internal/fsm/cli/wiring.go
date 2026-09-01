@@ -264,7 +264,9 @@ func (c *ctxDeps) machineDeps(root string, scenario *mockai.Scenario, mode judge
 	// trees via a real git worktree. The reproduction engine's git access arrives through d.Exec — the
 	// hardened shell-out — because ExecInput carries no git handle.
 	d := c.deps
-	kinds, _ := kind.New(kind.Deps{Judge: j, Mock: scenario != nil, Escalate: c.escalation(root, scenario, mode), Prove: kind.Provers{Mutation: kind.MutationProver{}, Reproduction: kind.ReproductionProver{Exec: d.Exec}}}) // consistent by construction: a mock judge iff a scenario
+	// Symptom is the run's judge (real or mock): the §9.2 reviewer that vetoes a proven reproduction
+	// whose pre-fix failure is not the finding's own symptom.
+	kinds, _ := kind.New(kind.Deps{Judge: j, Mock: scenario != nil, Escalate: c.escalation(root, scenario, mode), Prove: kind.Provers{Mutation: kind.MutationProver{}, Reproduction: kind.ReproductionProver{Exec: d.Exec}}, Symptom: j}) // consistent by construction: a mock judge iff a scenario
 	md := machine.Deps{
 		Store: d.Store(root), Sidecar: d.Sidecar(root), Kinds: kinds,
 		Git:      func(dir string) gate.Git { return gate.NewExec(dir, d.Exec) },

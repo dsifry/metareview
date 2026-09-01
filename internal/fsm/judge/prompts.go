@@ -17,6 +17,11 @@ const (
 	KindMatch        = "match"
 	KindAdjudicate   = "adjudicate"
 	KindStillPresent = "still-present"
+	// KindSymptom is the §9.2 "fails-for-the-right-reason" reviewer: given a confirmed finding and the
+	// pre-fix failure of a reproduction proof, it decides whether that failure exhibits the finding's
+	// OWN symptom. Veto-only — a mismatch (Decision false) blocks; a match adds nothing. Fail-closed:
+	// a parse failure or a missing field decides false (veto), never approves.
+	KindSymptom = "symptom"
 )
 
 // Templates — the Python literals at harnesseval@19ff9a8 (vendored under
@@ -53,6 +58,33 @@ const (
 		"premise about a tool or language is wrong. If what you were given is not enough to decide, say exactly what " +
 		"was missing in your reasoning rather than guessing."
 	SystemStillPresent = SystemAdjudicate
+
+	// SystemSymptom drives the §9.2 reviewer. It is deliberately strict about its narrow question:
+	// this is not "is the finding real" (adjudicate already decided that) nor "is the fix good" (the
+	// deterministic differential already decided that) — it is only "does THIS pre-fix failure show
+	// the finding's OWN symptom". Fail-closed is stated so the model does not hedge toward approval.
+	SystemSymptom = "You are a strict verifier. You are given a confirmed bug and the output of a test run on the code BEFORE it was fixed. " +
+		"Decide only whether that failure is the bug's OWN symptom — the specific wrong behavior the bug describes — rather than an unrelated failure " +
+		"(a different assertion, a setup/panic/timeout, or a test of some other behavior). Do not judge whether the bug is real or whether the fix is " +
+		"correct; judge only symptom identity. If the failure does not clearly exhibit the bug's own symptom, answer matches=false. Always respond with valid JSON."
+
+	TemplateSymptom = `You are checking that a test failure reproduces a specific bug's own symptom.
+
+Confirmed bug (what the finding reports):
+{symptom}
+
+Target test (the reproduction test that is claimed to exercise this bug):
+{test}
+
+Output of that test on the PRE-FIX code (it failed here, and passes after the fix):
+` + "```" + `
+{fail_output}
+` + "```" + `
+
+Does this failure exhibit the bug's OWN symptom described above? (True = the failure IS the bug's
+symptom. False = it is an unrelated failure — a different assertion, a compile/setup/panic error, or
+a test of some other behavior.)
+Respond with ONLY a JSON object: {{"reasoning": "...", "matches": true/false, "confidence": 0.0-1.0}}`
 
 	TemplateMatch = `You are evaluating AI code review tools.
 Determine if the candidate issue matches the golden (expected) comment.
@@ -129,7 +161,13 @@ const (
 	MaxTokensAdjudicate              = 2048
 	MaxTokensStillPresentProduct     = 1024
 	MaxTokensStillPresentCalibration = 512
+	MaxTokensSymptom                 = 1024
 )
+
+// MaxFailOutputBytes bounds the pre-fix failure output handed to the §9.2 reviewer, cut like the diff
+// budget so a runaway test log cannot blow the prompt. The failure itself is at the END of a test run,
+// so the tail is kept.
+const MaxFailOutputBytes = 12000
 
 // Error codes.
 const (
@@ -176,6 +214,27 @@ type StillPresentInput struct {
 	Diff            string  `json:"diff"`
 	DiffTruncated   bool    `json:"diff_truncated"`
 	DiffContextHash string  `json:"diff_context_hash"`
+}
+
+// SymptomInput is the §9.2 symptom-reviewer input: the confirmed finding whose own symptom must be
+// matched, the reproduction test's name, and that test's PRE-FIX failure output.
+type SymptomInput struct {
+	Bug        run.Bug `json:"bug"`
+	Test       string  `json:"test"`
+	FailOutput string  `json:"fail_output"`
+}
+
+// CutTail keeps the LAST max bytes of s at a rune boundary — the failure in a test log is at the end,
+// so a tail keeps the signal a symptom judgment needs when the log runs long.
+func CutTail(s string, max int) (string, bool) {
+	if max < 0 || len(s) <= max {
+		return s, false
+	}
+	i := len(s) - max
+	for i < len(s) && !utf8.RuneStart(s[i]) {
+		i++
+	}
+	return s[i:], true
 }
 
 // CutDiff cuts diff to at most MaxDiffBytes at a rune boundary and names the
@@ -241,6 +300,15 @@ func RenderPrompt(kind string, in any, fence, calibration bool, nonce string) (s
 		}
 		slots["golden_comment"], slots["diff"] = si.Bug.Desc, si.Diff
 		fenced["golden_comment"], fenced["diff"] = true, true
+	case KindSymptom:
+		syi, ok := in.(SymptomInput)
+		if !ok {
+			return "", "", errs.E(CodePromptTemplate, "symptom expects SymptomInput", "kind", kind)
+		}
+		system, template = SystemSymptom, TemplateSymptom
+		out, _ := CutTail(syi.FailOutput, MaxFailOutputBytes)
+		slots["symptom"], slots["test"], slots["fail_output"] = syi.Bug.Desc, syi.Test, out
+		fenced["symptom"], fenced["test"], fenced["fail_output"] = true, true, true
 	default:
 		return "", "", errs.E(CodePromptTemplate, "unknown kind "+kind, "kind", kind)
 	}
@@ -346,6 +414,17 @@ type parsedStillPresent struct {
 	Confidence   float64 `json:"confidence"`
 }
 
+type symptomVerdict struct {
+	Reasoning  string   `json:"reasoning"`
+	Matches    *bool    `json:"matches"`
+	Confidence *float64 `json:"confidence"`
+}
+type parsedSymptom struct {
+	Reasoning  string  `json:"reasoning"`
+	Matches    *bool   `json:"matches"`
+	Confidence float64 `json:"confidence"`
+}
+
 func confOf(p *float64) float64 {
 	if p == nil {
 		return 0
@@ -385,6 +464,20 @@ func Parse(kind, raw string) (parsed json.RawMessage, decision bool, confidence 
 		}
 		p := run.MarshalCanonical(parsedAdjudicate{Reasoning: v.Reasoning, IsReal: *v.IsReal, Confidence: confOf(v.Confidence)})
 		return checkSize(p, *v.IsReal, confOf(v.Confidence), fail)
+	case KindSymptom:
+		var v symptomVerdict
+		if err := json.Unmarshal([]byte(body), &v); err != nil {
+			return fail(err.Error()) // fail-closed: a parse error vetoes (decision false)
+		}
+		p := run.MarshalCanonical(parsedSymptom{Reasoning: v.Reasoning, Matches: v.Matches, Confidence: confOf(v.Confidence)})
+		if len(p) > run.MaxDetail {
+			return fail("verdict exceeds MaxDetail")
+		}
+		if v.Matches == nil {
+			capped, _ := run.CapText(raw, run.MaxShort)
+			return p, false, 0, "missing matches; raw: " + capped // fail-closed: a missing field vetoes
+		}
+		return p, *v.Matches, confOf(v.Confidence), ""
 	default:
 		var v stillPresentVerdict
 		if err := json.Unmarshal([]byte(body), &v); err != nil {

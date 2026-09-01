@@ -68,10 +68,37 @@ func fileDiff(file string, added ...string) string {
 	return d
 }
 
+// fakeReviewer is a §9.2 symptom reviewer for tests: decision true = the failure matches the
+// finding's symptom (no veto); an err simulates a reviewer that could not run (fail-closed veto).
+type fakeReviewer struct {
+	decision bool
+	err      error
+	calls    int
+	gotInput []judge.SymptomInput
+}
+
+func (f *fakeReviewer) Call(_ context.Context, r judge.Request) (judge.Verdict, error) {
+	f.calls++
+	if si, ok := r.Input.(judge.SymptomInput); ok {
+		f.gotInput = append(f.gotInput, si)
+	}
+	if f.err != nil {
+		return judge.Verdict{}, f.err
+	}
+	return judge.Verdict{Kind: r.Kind, Decision: f.decision}, nil
+}
+
 func runProve(t *testing.T, snap run.Snapshot, diff string, prover Prover) run.Delta {
 	t.Helper()
+	// A matches-by-default reviewer: it runs only on a Proven reproduction and lets it stand, so a
+	// test that is not about the §9.2 veto behaves exactly as before.
+	return runProveWith(t, snap, diff, prover, &fakeReviewer{decision: true})
+}
+
+func runProveWith(t *testing.T, snap run.Snapshot, diff string, prover Prover, reviewer judge.Judge) run.Delta {
+	t.Helper()
 	r := mustNew(t, judge.NewMock(judge.Script{}), true)
-	r.execs[Prove] = &proveExec{prover: prover}
+	r.execs[Prove] = &proveExec{prover: prover, symptom: reviewer}
 	ex, _ := r.Executor(Prove)
 	raw, err := ex.Execute(context.Background(), machine.ExecInput{Snap: snap, Node: proveNode, Diff: machine.Diff{Text: diff}, Audit: (&audits{}).fn})
 	if err != nil {
@@ -437,5 +464,82 @@ func TestIsAddedLineInFile(t *testing.T) {
 	}
 	if isAddedLineInFile(diff, "a.go", "") || isAddedLineInFile(diff, "", "newCode()") {
 		t.Error("an empty From or file binds to nothing")
+	}
+}
+
+// §9.2: a Proven reproduction whose pre-fix failure MATCHES the finding's own symptom stands — the
+// reviewer runs once, is handed the finding/test/fail-before output, and adds no finding.
+func TestProveReproductionSymptomMatchSettles(t *testing.T) {
+	p := reproDP("f1")
+	mp := &mockProver{reproResults: []run.ProofResult{{Proof: p, Proven: true, Outcome: run.PinProven, FailBefore: "=== RUN   T\n--- FAIL: T\nwant X got Y\n"}}}
+	rev := &fakeReviewer{decision: true}
+	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, Confirmed: []run.Bug{{ID: "f1", Desc: "X not Y"}}, FixEntryHead: "pre", Head: "post"}
+	d := runProveWith(t, snap, "@@\n+x\n", mp, rev)
+	if rev.calls != 1 {
+		t.Fatalf("the reviewer must run exactly once on a proven reproduction: %d", rev.calls)
+	}
+	if len(rev.gotInput) != 1 || rev.gotInput[0].Test != "T" || rev.gotInput[0].Bug.ID != "f1" || !strings.Contains(rev.gotInput[0].FailOutput, "want X got Y") {
+		t.Fatalf("reviewer input must carry the finding, test, and fail-before output: %+v", rev.gotInput)
+	}
+	if len(d.Findings) != 0 {
+		t.Fatalf("a matched symptom must not veto: %+v", d.Findings)
+	}
+	if len(d.PinResults) != 1 || !d.PinResults[0].Proven {
+		t.Fatalf("the reproduction stays proven: %+v", d.PinResults)
+	}
+}
+
+// §9.2 veto: a symptom MISMATCH (reviewer decision false) blocks — a blocking marker the pins_proven
+// gate reddens on, and the finding is NOT settled.
+func TestProveReproductionSymptomMismatchVetoes(t *testing.T) {
+	p := reproDP("f1")
+	mp := &mockProver{reproResults: []run.ProofResult{{Proof: p, Proven: true, Outcome: run.PinProven, FailBefore: "--- FAIL: T\nunrelated panic\n"}}}
+	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, FixEntryHead: "pre", Head: "post"}
+	d := runProveWith(t, snap, "@@\n+x\n", mp, &fakeReviewer{decision: false})
+	if len(d.Findings) != 1 || d.Findings[0].Source != run.SourceMutationVerify || d.Findings[0].Category != run.CategoryUnverifiable || d.Findings[0].Severity != "high" {
+		t.Fatalf("a symptom mismatch must emit a blocking veto finding: %+v", d.Findings)
+	}
+	if !run.ProofCategoryBlocks(d.Findings[0].Category) {
+		t.Fatal("the veto finding's category must block")
+	}
+}
+
+// §9.2 fail-closed: a reviewer that cannot run (error/timeout after the retry ladder) vetoes — never
+// approves — and does so with a blocking finding, not a run abort (NEEDS_REVISION lets the fix retry).
+func TestProveReproductionReviewerErrorFailsClosed(t *testing.T) {
+	p := reproDP("f1")
+	mp := &mockProver{reproResults: []run.ProofResult{{Proof: p, Proven: true, Outcome: run.PinProven, FailBefore: "--- FAIL: T\n"}}}
+	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, FixEntryHead: "pre", Head: "post"}
+	d := runProveWith(t, snap, "@@\n+x\n", mp, &fakeReviewer{err: errors.New("reviewer down")})
+	if len(d.Findings) != 1 || d.Findings[0].Category != run.CategoryUnverifiable {
+		t.Fatalf("a reviewer error must fail closed to a blocking veto: %+v", d.Findings)
+	}
+}
+
+// A nil reviewer with a Proven reproduction to judge is a wiring error surfaced as ERR_EXECUTOR_FAILED
+// — never a silent pass.
+func TestProveNilReviewerFailsClosed(t *testing.T) {
+	p := reproDP("f1")
+	mp := &mockProver{reproResults: []run.ProofResult{{Proof: p, Proven: true, Outcome: run.PinProven, FailBefore: "--- FAIL: T\n"}}}
+	r := mustNew(t, judge.NewMock(judge.Script{}), true)
+	r.execs[Prove] = &proveExec{prover: mp, symptom: nil}
+	ex, _ := r.Executor(Prove)
+	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, FixEntryHead: "pre", Head: "post"}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{Snap: snap, Node: proveNode, Diff: machine.Diff{Text: "@@\n+x\n"}, Audit: (&audits{}).fn}); !errs.Is(err, machine.CodeExecutorFailed) {
+		t.Fatalf("a nil reviewer with a proven reproduction must fail closed: %v", err)
+	}
+}
+
+// The §9.2 reviewer applies to reproductions only: a Proven PIN is never symptom-reviewed.
+func TestProveProvenPinIsNotReviewed(t *testing.T) {
+	p := pinDP("f1", "addedLine")
+	mp := &mockProver{results: []run.ProofResult{provenResult(p)}}
+	rev := &fakeReviewer{decision: true}
+	d := runProveWith(t, run.Snapshot{Unproven: []run.DifferentialProof{p}}, fileDiff("a.go", "addedLine"), mp, rev)
+	if rev.calls != 0 {
+		t.Fatalf("a pin proof must not be symptom-reviewed: %d", rev.calls)
+	}
+	if len(d.Findings) != 0 {
+		t.Fatalf("a proven pin must stand: %+v", d.Findings)
 	}
 }

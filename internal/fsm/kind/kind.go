@@ -65,6 +65,11 @@ type Deps struct {
 	// nil leaves a prove node failing ERR_EXECUTOR_FAILED{reason: no_prover}, the same fail-closed shape
 	// a judge-less adjudicate node has.
 	Prove Prover
+	// Symptom is the §9.2 "fails-for-the-right-reason" reviewer the prove node runs on a PROVEN
+	// reproduction (T1.4). Optional: nil leaves the prove node failing ERR_EXECUTOR_FAILED{reason:
+	// no_reviewer} only when a Proven reproduction actually needs review — pins and unproven proofs are
+	// unaffected. Production wires the run's judge; tests inject a mock.
+	Symptom judge.Judge
 	// Escalate, when set, gives a rejected cross-file candidate a second opinion from a
 	// judge with wider evidence access (see internal/fsm/sandbox). Optional: nil disables
 	// escalation entirely and the primary judge's verdict stands.
@@ -131,7 +136,7 @@ func New(d Deps) (*Registry, error) {
 	r.execs[MatchThenAdjudicate] = &adjudicateExec{judge: d.Judge, escalate: d.Escalate}
 	r.execs[StillPresent] = &stillPresentExec{judge: d.Judge}
 	r.execs[Cmd] = cmdExec{}
-	r.execs[Prove] = &proveExec{prover: d.Prove}
+	r.execs[Prove] = &proveExec{prover: d.Prove, symptom: d.Symptom}
 	return r, nil
 }
 

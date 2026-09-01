@@ -49,7 +49,7 @@ func (rp ReproductionProver) ProveReproductions(ctx context.Context, proofs []ru
 	}
 	out := make([]run.ProofResult, len(rrs))
 	for i, rr := range rrs {
-		out[i] = run.ProofResult{Proof: proofs[i], Proven: rr.Proven, Outcome: run.PinOutcome(rr.Outcome), Detail: rr.Detail}
+		out[i] = run.ProofResult{Proof: proofs[i], Proven: rr.Proven, Outcome: run.PinOutcome(rr.Outcome), Detail: rr.Detail, FailBefore: rr.FailBefore}
 	}
 	return out, nil
 }

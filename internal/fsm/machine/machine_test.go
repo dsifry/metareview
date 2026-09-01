@@ -2080,3 +2080,66 @@ func TestSdlcLoopProvedGatesOnReproductions(t *testing.T) {
 		})
 	}
 }
+
+// TestSdlcLoopProvedVetoesWrongSymptomReproduction is the §9.2 witness at the machine level: even when
+// the deterministic differential PASSED (a Proven reproduction), a symptom-mismatch VETO finding
+// (Source mutation-verify, blocking Category) still blocks pins_proven — a passing differential never
+// bypasses the reviewer's veto. The prove node is faked here (the reviewer itself is unit-tested); this
+// exercises the routing and the gate for the "Proven result + blocking veto finding" shape, which is
+// distinct from a non-Proven survived result.
+func TestSdlcLoopProvedVetoesWrongSymptomReproduction(t *testing.T) {
+	h := newHarness(t)
+	h.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1}
+	h.deps.LookPath = func(n string) (string, error) {
+		if n == "go" {
+			return "/usr/bin/go", nil
+		}
+		return "", errors.New("not found")
+	}
+	h.deps.FileHash = func(p string) (string, error) {
+		if p == "/usr/bin/go" {
+			return "hgo", nil
+		}
+		return "", errors.New("no such file")
+	}
+	h.reg.kinds["agent-edit"].decode = func(raw json.RawMessage) (any, error) {
+		var d run.Delta
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&d); err != nil {
+			return nil, err
+		}
+		return d, nil
+	}
+	h.reg.kinds["agent-edit"].reduce = func(_ run.Snapshot, out any) (run.Delta, error) { return out.(run.Delta), nil }
+	h.reg.kinds["prove"] = &fakeKind{name: "prove", info: workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}}}
+	h.reg.execs["prove"] = &fakeExecutor{fn: func(in ExecInput) (json.RawMessage, error) {
+		var d run.Delta
+		for _, p := range in.Snap.Unproven {
+			// The differential PASSED (Proven), but the §9.2 reviewer vetoed the symptom → a blocking
+			// unverifiable finding accompanies the Proven result.
+			d.PinResults = append(d.PinResults, run.ProofResult{Proof: p, Proven: true, Outcome: run.PinProven})
+			d.Findings = append(d.Findings, run.Finding{IssueText: "§9.2 veto: wrong symptom", File: "f.go", Source: run.SourceMutationVerify, Category: run.CategoryUnverifiable})
+		}
+		return json.RawMessage(run.MarshalCanonical(d)), nil
+	}}
+
+	_, err := h.init(InitOptions{Workflow: "sdlc-loop-proved", Vars: sdlcVars})
+	sha := wantCodeE(t, err, CodeCmdsNotAllowed).Field("sha")
+	m := h.mustInit(InitOptions{Workflow: "sdlc-loop-proved", Vars: sdlcVars, AllowCustomCmds: sha})
+
+	h.advance(m)
+	h.record(m, "discover", findings(1))
+	h.advance(m)
+	h.advance(m)
+	finding := run.FindingKey("f.go", "bug a")
+	fix := fmt.Sprintf(`{"commit":%q,"pins":[{"id":"r1","finding":%q,"kind":"reproduction","test":"TestReproducesTheFault"}]}`, shaFix, finding)
+	h.record(m, "fix", fix)
+	if r := h.advance(m); r.To != "prove" {
+		t.Fatalf("fix must advance to prove: %+v", r)
+	}
+	r := h.advance(m) // prove runs; pins_proven is evaluated
+	if r.Status != StatusGateFailed || r.Gate.Name != "pins_proven" || r.Gate.Error.Code != gate.CodePinsUnproven {
+		t.Fatalf("a vetoed reproduction must block at pins_proven even though the differential passed: %+v", r)
+	}
+}

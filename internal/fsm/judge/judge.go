@@ -276,6 +276,8 @@ func maxTokensFor(kind string, calibration bool) int {
 		return MaxTokensMatch
 	case KindAdjudicate:
 		return MaxTokensAdjudicate
+	case KindSymptom:
+		return MaxTokensSymptom
 	}
 	if calibration {
 		return MaxTokensStillPresentCalibration

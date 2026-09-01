@@ -27,6 +27,11 @@ type ReproResult struct {
 	Proven  bool
 	Outcome Outcome
 	Detail  string
+	// FailBefore is the target test's combined output on the PRE-FIX tree — the assertion failure the
+	// §9.2 symptom reviewer (T1.4) judges against the finding's own symptom. It is only set on a
+	// Proven result (the reviewer runs only on the deterministic PASS path); the non-proven branches
+	// already carry the reason in Detail.
+	FailBefore string
 }
 
 // Reproducer proves reproduction-form proofs against a REAL git worktree (maintainer-approved
@@ -249,7 +254,8 @@ func (r Reproducer) reproduceOne(ctx context.Context, p Proof, part partition) R
 	switch classify(p.Test, code, after) {
 	case clsPassed:
 		return ReproResult{Proof: p, Proven: true, Outcome: PinProven,
-			Detail: fmt.Sprintf("%q fails on the pre-fix tree (assertion) and passes once the fix is applied", p.Test)}
+			Detail:     fmt.Sprintf("%q fails on the pre-fix tree (assertion) and passes once the fix is applied", p.Test),
+			FailBefore: before}
 	case clsNoTest:
 		return fail(PinUnverifiable, "the target test %q vanished from the post-fix tree", p.Test)
 	case clsCompile:

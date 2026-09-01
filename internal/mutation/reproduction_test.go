@@ -158,7 +158,12 @@ func TestReproduceProvenPath(t *testing.T) {
 		return 0, "=== RUN   TestX\n--- PASS: TestX (0.00s)\nok  \tpkg\t0.1s\n", nil // pass-after
 	}
 	r := newReproducer(t, g, run)
-	mustOutcome(t, reproduceOne(t, r, "TestX"), PinProven)
+	res := reproduceOne(t, r, "TestX")
+	mustOutcome(t, res, PinProven)
+	// A Proven result must carry the pre-fix assertion output for the §9.2 symptom reviewer.
+	if !strings.Contains(res.FailBefore, "--- FAIL: TestX") {
+		t.Fatalf("Proven result must carry the fail-before output: %q", res.FailBefore)
+	}
 
 	// The pre-fix run must be narrowed to the target test with an anchored -run, verbosely (-v so the
 	// target's own markers appear).
