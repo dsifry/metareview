@@ -702,7 +702,7 @@ func TestF7DiffRuns(t *testing.T) {
 			if err := llmCall(in, i, 10); err != nil {
 				return nil, err
 			}
-			bugs = append(bugs, run.Bug{ID: run.BugID(f.IssueText), Desc: f.IssueText, Verdict: "real_but_ungold", Confidence: 0.9})
+			bugs = append(bugs, run.Bug{ID: run.FindingKey(f.File, f.IssueText), Desc: f.IssueText, Verdict: "real_but_ungold", Confidence: 0.9})
 		}
 		return json.RawMessage(run.MarshalCanonical(run.Delta{Confirmed: bugs})), nil
 	}

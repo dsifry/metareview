@@ -450,13 +450,17 @@ func callAs(ctx context.Context, j judge.Judge, in machine.ExecInput, req judge.
 	return v, err
 }
 
-// dedupCandidates keeps the first occurrence of each issue text.
+// dedupCandidates keeps the first occurrence of each finding identity. It keys on the file-aware
+// run.FindingKey (T0.1), not raw issue text: the same sentence about two different files is two
+// distinct faults, so collapsing on text alone would drop a real bug. A genuine same-(file,text)
+// repeat still collapses to its first occurrence.
 func dedupCandidates(fs []run.Finding) []run.Finding {
 	seen := map[string]bool{}
 	var out []run.Finding
 	for _, f := range fs {
-		if !seen[f.IssueText] {
-			seen[f.IssueText] = true
+		k := run.FindingKey(f.File, f.IssueText)
+		if !seen[k] {
+			seen[k] = true
 			out = append(out, f)
 		}
 	}
@@ -489,7 +493,7 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		allIDs[b.ID] = true
 	}
 	for _, c := range cands {
-		allIDs[run.BugID(c.IssueText)] = true
+		allIDs[run.FindingKey(c.File, c.IssueText)] = true
 	}
 	if len(allIDs) > run.MaxDeltaList {
 		return nil, errs.E(CodeTooManyBugs, fmt.Sprintf("%d bugs would be known (max %d)", len(allIDs), run.MaxDeltaList), "reason", "preflight")
@@ -517,7 +521,10 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		if winner >= 0 {
 			gi := g
 			desc, _ := run.CapText(golden.Comment, run.MaxDesc)
-			confirmed = append(confirmed, run.Bug{ID: run.BugID(golden.Comment), Desc: desc, File: cands[winner].File, Line: cands[winner].Line, Verdict: run.VerdictMatched, Confidence: best, GoldenIdx: &gi})
+			// §5.1(a): the matched golden inherits the winning candidate's file, so its id lives in the
+			// same (file, text) domain as every candidate id — no fileless-golden vs file-keyed-candidate
+			// split (review #35b).
+			confirmed = append(confirmed, run.Bug{ID: run.FindingKey(cands[winner].File, golden.Comment), Desc: desc, File: cands[winner].File, Line: cands[winner].Line, Verdict: run.VerdictMatched, Confidence: best, GoldenIdx: &gi})
 		}
 	}
 	var rejected []run.Bug
@@ -534,7 +541,7 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		// empty or unreadable diff says nothing about this candidate, so fall through and ask.
 		if cand.File != "" && len(judge.ChangedPaths(in.Diff.Text)) > 0 && !judge.DiffHasFile(in.Diff.Text, cand.File) {
 			desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
-			confirmed = append(confirmed, run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictUnverifiedNoEvidence})
+			confirmed = append(confirmed, run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictUnverifiedNoEvidence})
 			continue
 		}
 		diff, truncated, diffHash := judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, cand.IssueText, judge.MaxDiffBytes)
@@ -547,22 +554,22 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		// finding because the transport failed, not because the judge decided anything.
 		if v.ParseError != "" {
 			desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
-			confirmed = append(confirmed, run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified})
+			confirmed = append(confirmed, run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified})
 			continue
 		}
 		real := v.Decision && v.Confidence >= AdjudicateThreshold
 		if real {
 			desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
-			confirmed = append(confirmed, run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictRealButUngold, Confidence: v.Confidence})
+			confirmed = append(confirmed, run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictRealButUngold, Confidence: v.Confidence})
 		} else if second, ok := e.secondOpinion(ctx, in, cand, &index); ok {
 			confirmed = append(confirmed, second)
 		} else {
 			desc, _ := run.CapText(cand.IssueText, run.MaxShort)
-			rejected = append(rejected, run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictHallucination, Confidence: v.Confidence})
+			rejected = append(rejected, run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictHallucination, Confidence: v.Confidence})
 		}
 	}
 	// validity by construction: the pre-flight bounds the size and count, every
-	// Desc is capped, ids are deduplicated and never empty (BugID of any text).
+	// Desc is capped, ids are deduplicated and never empty (FindingKey of any (file, text)).
 	out := adjudicateOut{Confirmed: dedupBugs(confirmed), Rejected: dedupBugs(rejected)}
 	return json.RawMessage(run.MarshalCanonical(out)), nil
 }
@@ -594,7 +601,7 @@ func (e *adjudicateExec) secondOpinion(ctx context.Context, in machine.ExecInput
 			return run.Bug{}, false // escalation deliberately unavailable: the rejection stands
 		}
 		// The second opinion could not be built, so nothing decided this finding.
-		return run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified}, true
+		return run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified}, true
 	}
 	diff, truncated, diffHash := judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, cand.IssueText, judge.MaxDiffBytes)
 	v, err := callAs(ctx, esc.Judge, in, judge.Request{Kind: judge.KindAdjudicate, Index: *index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand, Sandbox: esc.Root != ""}}, esc)
@@ -602,13 +609,13 @@ func (e *adjudicateExec) secondOpinion(ctx context.Context, in machine.ExecInput
 	if err != nil {
 		// The second opinion never arrived, so nothing decided this finding. Keeping the
 		// first arm's rejection would drop it on the strength of a check that did not run.
-		return run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified}, true
+		return run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified}, true
 	}
 	if v.ParseError != "" {
-		return run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified}, true
+		return run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified}, true
 	}
 	if v.Decision && v.Confidence >= AdjudicateThreshold {
-		return run.Bug{ID: run.BugID(cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictRealButUngold, Confidence: v.Confidence}, true
+		return run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictRealButUngold, Confidence: v.Confidence}, true
 	}
 	return run.Bug{}, false // both arms agree it is not real
 }

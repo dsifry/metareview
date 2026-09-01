@@ -131,7 +131,7 @@ func newRegistry() *fakeRegistry {
 			if err := llmCall(in, i, 10); err != nil {
 				return nil, err
 			}
-			bugs = append(bugs, run.Bug{ID: run.BugID(f.IssueText), Desc: f.IssueText, Verdict: "real_but_ungold", Confidence: 0.9})
+			bugs = append(bugs, run.Bug{ID: run.FindingKey(f.File, f.IssueText), Desc: f.IssueText, Verdict: "real_but_ungold", Confidence: 0.9})
 		}
 		return json.RawMessage(run.MarshalCanonical(run.Delta{Confirmed: bugs})), nil
 	}}
@@ -457,7 +457,9 @@ func wantCodeE(t *testing.T, err error, code string) *errs.Error {
 func findings(n int) string {
 	var fs []run.Finding
 	for i := 0; i < n; i++ {
-		fs = append(fs, run.Finding{IssueText: fmt.Sprintf("bug %d", i), File: "f.go", Line: i + 1})
+		// Digit-free, mutually distinct text: the frozen finding identity (T0.1) collapses digit runs,
+		// so "bug 0"/"bug 1" would share one id and N findings would fold to one. Distinguish by letter.
+		fs = append(fs, run.Finding{IssueText: "bug " + string(rune('a'+i)), File: "f.go", Line: i + 1})
 	}
 	return string(run.MarshalCanonical(run.Delta{Findings: fs}))
 }

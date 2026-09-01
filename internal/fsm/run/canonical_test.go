@@ -96,8 +96,10 @@ func TestOutputHashAndLineHash(t *testing.T) {
 
 // R13: value pins the statement-coverage gate cannot see.
 func TestValuePins(t *testing.T) {
-	if got := BugID("x"); got != "11f6ad8ec52a" {
-		t.Fatalf("BugID(x) = %q", got)
+	// The pre-T0.1 text-only identity (BugID, now removed) survives only as the migration's scheme-0
+	// derivation; its value is pinned so a persisted scheme-0 id stays reproducible from retained text.
+	if got := FindingKeyForScheme(0, "any.go", "x"); got != "11f6ad8ec52a" {
+		t.Fatalf("FindingKeyForScheme(0, x) = %q", got)
 	}
 	if got := Key("n", 2); got != "n@2" {
 		t.Fatalf("Key = %q", got)
