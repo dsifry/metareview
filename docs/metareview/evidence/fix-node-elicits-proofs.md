@@ -52,6 +52,16 @@ evidence it never saw."
   `DeriveProofID`'s pin branch returning the hash instead of `PinID`. Tree confirmed clean.
 - `gofmt`/`go vet` clean; full `go test ./...` green.
 
+## Shepherding round 1 (Cursor Bugbot — 1× High, fixed)
+
+- **Deletion proofs omitted the required `ParentSHA`.** The elicitation asks for a deletion as
+  `{file, removed}`, but `proveDeletion` rejects any deletion whose `DeletionRef.ParentSHA` is not the
+  fix's pre-fix commit — so every declared deletion would have been DOA (malformed). Fixed: `Reduce`
+  now fills `Deletes.ParentSHA` from `Snapshot.FixEntryHead` (set on entry to the fix node; the same
+  value `prove` uses as `PreFixSHA`), a machine-known SHA the agent cannot name. It is not part of
+  `DeriveProofID`, so filling it does not shift the proof id. Regression test + mutation-verified.
+- (Also: a CI-only staticcheck SA4000 in a test's stability check, fixed.)
+
 ## What this unlocks
 A real `sdlc-loop-proved` run can now actually declare and verify proofs at the fix step — the
 prerequisite for a meaningful end-to-end shakedown on a live repo (the next step). It does not by itself

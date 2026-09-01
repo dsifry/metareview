@@ -722,14 +722,15 @@ func (agentEdit) Decode(raw json.RawMessage) (any, error) {
 	return o, nil
 }
 
-func (agentEdit) Reduce(_ run.Snapshot, out any) (run.Delta, error) {
+func (agentEdit) Reduce(s run.Snapshot, out any) (run.Delta, error) {
 	o := out.(editOut)
 	if len(o.Pins) == 0 {
 		return run.Delta{Commit: o.Commit}, nil // preserve the nil-Pins shape for a proofless fix
 	}
-	// Fill the ids the agent did not hand-compute (Instructions tells it not to), and default a pin's
-	// own Finding/Test from the proof level so the two stay consistent. Derivation is idempotent: an
-	// id the agent DID supply is kept, so a re-declared proof keeps its reference/override key.
+	// Fill the machine-known fields the agent cannot supply (Instructions tells it not to), and default
+	// a pin's own Finding/Test from the proof level so the two stay consistent. Everything here is
+	// idempotent: a value the agent DID supply is kept, so a re-declared proof keeps its
+	// reference/override key.
 	pins := make([]run.DifferentialProof, len(o.Pins))
 	for i, p := range o.Pins {
 		if p.Kind == run.ProofPin && p.Pin != nil {
@@ -742,6 +743,13 @@ func (agentEdit) Reduce(_ run.Snapshot, out any) (run.Delta, error) {
 			if p.Pin.ID == "" {
 				p.Pin.ID = run.PinID(p.Finding, p.Pin.File, p.Pin.From, p.Pin.To)
 			}
+		}
+		// A deletion's ParentSHA is the fix's pre-fix commit (FixEntryHead, set on entry to the fix
+		// node): a system-known SHA the agent cannot name, which the prover REQUIRES (proveDeletion
+		// rejects a proof whose ParentSHA != the pre-fix commit). Fill it so a deletion proof is not
+		// dead on arrival. It is not part of DeriveProofID, so filling it does not shift the id.
+		if p.Kind == run.ProofDeletion && p.Deletes != nil && p.Deletes.ParentSHA == "" {
+			p.Deletes.ParentSHA = s.FixEntryHead
 		}
 		if p.ID == "" {
 			p.ID = run.DeriveProofID(p)

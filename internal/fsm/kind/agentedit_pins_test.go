@@ -106,6 +106,14 @@ func TestAgentEditReduceDerivesIDs(t *testing.T) {
 	if d.Pins != nil {
 		t.Fatalf("a proofless fix must keep nil Pins, got %+v", d.Pins)
 	}
+	// A deletion proof's ParentSHA is filled from the snapshot's FixEntryHead (the pre-fix commit the
+	// prover requires); the agent never supplies it. Without this every deletion proof is DOA.
+	del := `{"commit":"abc1234","summary":"s","pins":[{"finding":"f","kind":"deletion","test":"T","deletes":{"file":"a.go","removed":"gone()"}}]}`
+	out, _ = k.Decode(json.RawMessage(del))
+	d, _ = k.Reduce(run.Snapshot{FixEntryHead: "prefixsha"}, out)
+	if d.Pins[0].Deletes.ParentSHA != "prefixsha" {
+		t.Fatalf("a deletion's ParentSHA must be filled from FixEntryHead: %q", d.Pins[0].Deletes.ParentSHA)
+	}
 }
 
 // Decode bounds and validates the declared proofs before they can reach the wire: a malformed proof
