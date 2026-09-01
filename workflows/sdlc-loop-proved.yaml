@@ -21,7 +21,7 @@ nodes:
   discover:   {kind: review-lenses,        exec: subagent, model: $REVIEWER, effort: $REV_EFFORT}
   adjudicate: {kind: match-then-adjudicate, exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
   fix:        {kind: agent-edit}                                   # exec inferred from the kind (inline)
-  prove:      {kind: prove, test_cmd: test}                        # mutation-verify; exec inferred (fork)
+  prove:      {kind: prove, test_cmd: test, model: $JUDGE, effort: $JUDGE_EFFORT}  # mutation-verify + §9.2 symptom reviewer (model/effort feed the reviewer's judge call)
   verify:     {kind: still-present,         model: $JUDGE, effort: $JUDGE_EFFORT}   # exec inferred (fork)
 convergence:
   any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]

@@ -24,6 +24,10 @@ func errNoProver() error {
 	return errs.E(machine.CodeExecutorFailed, "this registry has no prover", "reason", "no_prover")
 }
 
+func errNoReviewer() error {
+	return errs.E(machine.CodeExecutorFailed, "this registry has no symptom reviewer", "reason", "no_reviewer")
+}
+
 // ProveSpec is everything a Prover needs to run a proof against the tree, resolved per execution from
 // the run's snapshot: the consent-hashed test command (never the agent's), the optional build check,
 // the working directory, the timeout, and — for the reproduction form — the pre/post-fix anchors the
@@ -103,6 +107,11 @@ func (proveKind) Reduce(_ run.Snapshot, out any) (run.Delta, error) {
 // (Snapshot.Unproven), checks each, and emits results plus a marker finding per unproven proof.
 type proveExec struct {
 	prover Prover
+	// symptom is the §9.2 "fails-for-the-right-reason" reviewer (T1.4): an injected AI judge that
+	// vetoes a PROVEN reproduction whose pre-fix failure is not the finding's own symptom. Veto-only —
+	// it can only block, never certify. Required whenever a Proven reproduction must be reviewed; a nil
+	// reviewer there is a wiring error (fail closed via errNoReviewer).
+	symptom judge.Judge
 }
 
 // testCmdParam returns the AllowedCmd argv named by the node's test_cmd param, or nil.
@@ -169,8 +178,25 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 	// clause (a). Track findings already carrying a BLOCKING supplied marker so clause (a) does not
 	// duplicate one, and settled (Proven) findings so it skips them.
 	settled, blocked := map[string]bool{}, map[string]bool{}
+	reviewIdx := in.StartIndex
 	for _, r := range results {
 		if r.Proven {
+			// §9.2 veto: a Proven reproduction is the deterministic PASS path, but the pre-fix failure
+			// must be the finding's OWN symptom. The injected reviewer can only veto (block), never
+			// certify — so on a mismatch (or a fail-closed reviewer error) the finding is NOT settled and
+			// a blocking marker is emitted, exactly as pins_proven treats any unproven fix.
+			if r.Proof.Kind == run.ProofReproduction {
+				veto, err := e.symptomVeto(ctx, in, r, reviewIdx)
+				reviewIdx++
+				if err != nil {
+					return nil, err
+				}
+				if veto {
+					delta.Findings = append(delta.Findings, symptomVetoMarker(r))
+					blocked[r.Proof.Finding] = true
+					continue
+				}
+			}
 			settled[r.Proof.Finding] = true
 			continue
 		}
@@ -207,6 +233,69 @@ func proveDir(s run.Snapshot) string {
 		return s.WorkDir
 	}
 	return s.RepoRoot
+}
+
+// symptomVeto runs the §9.2 reviewer on one Proven reproduction and reports whether it must be
+// vetoed. A mismatch verdict vetoes; fail-closed, so does a reviewer error/timeout/parse-failure — a
+// missing veto can never become a silent pass (spec §9.2). The reviewer is required here: a nil
+// reviewer with a Proven reproduction to judge is a wiring error, surfaced (never treated as approval).
+func (e *proveExec) symptomVeto(ctx context.Context, in machine.ExecInput, r run.ProofResult, index int) (bool, error) {
+	if e.symptom == nil {
+		return false, errNoReviewer()
+	}
+	bug := confirmedBug(in.Snap.Confirmed, r.Proof.Finding)
+	v, err := call(ctx, e.symptom, in, judge.Request{
+		Kind:  judge.KindSymptom,
+		Index: index,
+		Input: judge.SymptomInput{Bug: bug, Test: r.Proof.Test, FailOutput: r.FailBefore},
+	})
+	if err != nil {
+		// A CONFIGURATION error (no/invalid model, missing key/url, unsupported effort) means the
+		// reviewer can never run — re-fixing cannot cure it, so a fail-closed veto would block every
+		// reproduction forever. Surface it instead, like a nil reviewer. A TRANSIENT error (timeout,
+		// HTTP/transport after the retry ladder) is the case §9.2 means: fail closed to a blocking veto.
+		if isReviewerConfigError(err) {
+			return false, err
+		}
+		return true, nil
+	}
+	// Decision true = the failure exhibits the finding's own symptom (no veto). Decision false — a
+	// mismatch, or a parse failure Parse decided false — vetoes.
+	return !v.Decision, nil
+}
+
+// isReviewerConfigError reports whether err is a judge misconfiguration — a model/key/url/effort
+// problem that no re-fix can cure. Such an error must abort (surface the wiring bug) rather than
+// fail-closed-veto forever; a transient reviewer failure is handled the other way.
+func isReviewerConfigError(err error) bool {
+	switch errs.Code(err) {
+	case judge.CodeJudgeModel, judge.CodeJudgeKey, judge.CodeJudgeURL, judge.CodeJudgeEffortUnsupported:
+		return true
+	}
+	return false
+}
+
+// confirmedBug returns the confirmed finding with id, or a zero Bug when none matches (the reviewer
+// then judges against an empty symptom, which cannot match — fail closed).
+func confirmedBug(bugs []run.Bug, id string) run.Bug {
+	for _, b := range bugs {
+		if b.ID == id {
+			return b
+		}
+	}
+	return run.Bug{}
+}
+
+// symptomVetoMarker is the blocking finding for a Proven reproduction the §9.2 reviewer vetoed. Like
+// proofFinding it selects on structural provenance (Source mutation-verify + a blocking Category), so
+// pins_proven reddens on it exactly as on any unproven fix.
+func symptomVetoMarker(r run.ProofResult) run.Finding {
+	return run.Finding{
+		IssueText: fmt.Sprintf("prove: the reproduction for finding %s does not exhibit the finding's own symptom (§9.2 veto)", r.Proof.Finding),
+		Severity:  "high",
+		Category:  run.CategoryUnverifiable,
+		Source:    run.SourceMutationVerify,
+	}
 }
 
 // proofResult builds a ProofResult for a proof the executor itself decided (bind failure or an
