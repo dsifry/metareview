@@ -80,9 +80,11 @@ func directive(comment string) (string, bool) {
 		return "", false // block comments are never directives
 	}
 	c := comment[2:]
-	// //line (line directive), //export (cgo), //extern (gccgo), and the legacy "// +build" constraint
-	// (whose // is followed by a space, so c begins " +build") all change linkage or build selection.
-	if strings.HasPrefix(c, "line ") || strings.HasPrefix(c, "export ") || strings.HasPrefix(c, "extern ") || strings.HasPrefix(c, " +build") {
+	// //line (line directive), //export (cgo), and //extern (gccgo) have the keyword immediately after
+	// the //; the legacy build constraint is "//" then any run of spaces/tabs then "+build" (the Go
+	// toolchain tolerates extra whitespace there). Each changes linkage or build selection.
+	if strings.HasPrefix(c, "line ") || strings.HasPrefix(c, "export ") || strings.HasPrefix(c, "extern ") ||
+		strings.HasPrefix(strings.TrimLeft(c, " \t"), "+build") {
 		return c, true
 	}
 	// //name:arg — a lowercase/digit name, no space before the colon (e.g. //go:build).

@@ -585,4 +585,11 @@ func TestSemanticallyNull(t *testing.T) {
 	if semanticallyNull("// +build linux\npackage p\n", "// +build windows\npackage p\n") {
 		t.Fatal("a legacy // +build change must NOT be null")
 	}
+	// The Go toolchain tolerates extra whitespace (or a tab) between // and +build.
+	if semanticallyNull("//   +build linux\npackage p\n", "//   +build windows\npackage p\n") {
+		t.Fatal("a // +build with extra spaces must NOT be null")
+	}
+	if semanticallyNull("//\t+build linux\npackage p\n", "//\t+build windows\npackage p\n") {
+		t.Fatal("a // +build after a tab must NOT be null")
+	}
 }
