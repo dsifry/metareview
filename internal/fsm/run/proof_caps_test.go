@@ -35,7 +35,9 @@ func TestWithinCapsGuardsProofFields(t *testing.T) {
 		{"pin.File", func(d *DeltaAppliedData) { d.Pins[0].Pin.File = long }},
 		{"pin.From", func(d *DeltaAppliedData) { d.Pins[0].Pin.From = bigText }},
 		{"pin.To", func(d *DeltaAppliedData) { d.Pins[0].Pin.To = bigText }},
-		{"deletes.File", func(d *DeltaAppliedData) { d.Pins[0] = DifferentialProof{Kind: ProofDeletion, Deletes: &DeletionRef{File: long, Removed: "x"}} }},
+		{"deletes.File", func(d *DeltaAppliedData) {
+			d.Pins[0] = DifferentialProof{Kind: ProofDeletion, Deletes: &DeletionRef{File: long, Removed: "x"}}
+		}},
 		{"deletes.Removed", func(d *DeltaAppliedData) {
 			d.Pins[0] = DifferentialProof{Kind: ProofDeletion, Deletes: &DeletionRef{File: "a.go", Removed: bigText}}
 		}},

@@ -288,41 +288,41 @@ func (t *Time) UnmarshalJSON(b []byte) error {
 
 // Snapshot is the state derived by folding a run's events (§2.1). Never persisted as authority.
 type Snapshot struct {
-	SchemaVersion  int               `json:"schemaVersion"`
-	RunID          string            `json:"run_id"`
-	ParentRunID    string            `json:"parent_run_id,omitempty"`
-	Lineage        []string          `json:"lineage"`
-	ForkedAtSeq    int64             `json:"forked_at_seq,omitempty"`
-	CreatedAt      Time              `json:"created_at"`
-	Seq            int64             `json:"seq"`
-	Workflow       string            `json:"workflow"`
-	WorkflowHash   string            `json:"workflow_hash"`
-	WorkflowSource string            `json:"workflow_source,omitempty"`
-	Vars           map[string]string `json:"vars"`
-	Calibration    bool              `json:"calibration"`
-	Mock           string            `json:"mock,omitempty"`
-	MockTainted    bool              `json:"mock_tainted"`
-	RepoMode       string            `json:"repo_mode"`
-	AllowedCmds    []AllowedCmd      `json:"allowed_cmds"`
-	CmdsSHA256     string            `json:"cmds_sha256,omitempty"`
-	RepoRoot       string            `json:"repo_root"`
-	WorkDir        string            `json:"work_dir"`
-	State          State             `json:"state"`
-	StateKind      Kind              `json:"state_kind,omitempty"`
-	Outcome        Outcome           `json:"outcome,omitempty"`
-	Iteration      int               `json:"iteration"`
-	BaseSHA        string            `json:"base_sha"`
-	Head           string            `json:"head"`
-	FixEntryHead   string            `json:"fix_entry_head,omitempty"`
-	TreeHash       string            `json:"tree_hash,omitempty"`
-	TreeStatus     string            `json:"tree_status,omitempty"`
-	Goldens        []Golden          `json:"goldens"`
-	Findings       []Finding         `json:"findings"`
-	Confirmed      []Bug             `json:"confirmed"`
+	SchemaVersion  int                 `json:"schemaVersion"`
+	RunID          string              `json:"run_id"`
+	ParentRunID    string              `json:"parent_run_id,omitempty"`
+	Lineage        []string            `json:"lineage"`
+	ForkedAtSeq    int64               `json:"forked_at_seq,omitempty"`
+	CreatedAt      Time                `json:"created_at"`
+	Seq            int64               `json:"seq"`
+	Workflow       string              `json:"workflow"`
+	WorkflowHash   string              `json:"workflow_hash"`
+	WorkflowSource string              `json:"workflow_source,omitempty"`
+	Vars           map[string]string   `json:"vars"`
+	Calibration    bool                `json:"calibration"`
+	Mock           string              `json:"mock,omitempty"`
+	MockTainted    bool                `json:"mock_tainted"`
+	RepoMode       string              `json:"repo_mode"`
+	AllowedCmds    []AllowedCmd        `json:"allowed_cmds"`
+	CmdsSHA256     string              `json:"cmds_sha256,omitempty"`
+	RepoRoot       string              `json:"repo_root"`
+	WorkDir        string              `json:"work_dir"`
+	State          State               `json:"state"`
+	StateKind      Kind                `json:"state_kind,omitempty"`
+	Outcome        Outcome             `json:"outcome,omitempty"`
+	Iteration      int                 `json:"iteration"`
+	BaseSHA        string              `json:"base_sha"`
+	Head           string              `json:"head"`
+	FixEntryHead   string              `json:"fix_entry_head,omitempty"`
+	TreeHash       string              `json:"tree_hash,omitempty"`
+	TreeStatus     string              `json:"tree_status,omitempty"`
+	Goldens        []Golden            `json:"goldens"`
+	Findings       []Finding           `json:"findings"`
+	Confirmed      []Bug               `json:"confirmed"`
 	Unproven       []DifferentialProof `json:"unproven,omitempty"` // proofs no round has proven; drives re-discover. Derived, never persisted.
-	AllFound       []Bug             `json:"all_found"`
-	Status         []BugStatus       `json:"status"`
-	Unfixed        int               `json:"unfixed"`
+	AllFound       []Bug               `json:"all_found"`
+	Status         []BugStatus         `json:"status"`
+	Unfixed        int                 `json:"unfixed"`
 	// PrevUnfixed is retained for the wire schema and operator diagnostics ONLY. No predicate
 	// reads it: measuring progress by comparing unfixed totals is the defect UnfixedAtEntry
 	// exists to replace, and a consumer reaching for this field would reproduce it.
