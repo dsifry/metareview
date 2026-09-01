@@ -61,6 +61,10 @@ var commitPattern = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 type Deps struct {
 	Judge judge.Judge
 	Mock  bool
+	// Prove verifies the differential proofs a fix declares (the mutation-verify `prove` node). Optional:
+	// nil leaves a prove node failing ERR_EXECUTOR_FAILED{reason: no_prover}, the same fail-closed shape
+	// a judge-less adjudicate node has.
+	Prove Prover
 	// Escalate, when set, gives a rejected cross-file candidate a second opinion from a
 	// judge with wider evidence access (see internal/fsm/sandbox). Optional: nil disables
 	// escalation entirely and the primary judge's verdict stands.
@@ -123,9 +127,11 @@ func New(d Deps) (*Registry, error) {
 	r.kinds[AgentEdit] = agentEdit{}
 	r.kinds[StillPresent] = stillPresentKind{}
 	r.kinds[Cmd] = cmdKind{}
+	r.kinds[Prove] = proveKind{}
 	r.execs[MatchThenAdjudicate] = &adjudicateExec{judge: d.Judge, escalate: d.Escalate}
 	r.execs[StillPresent] = &stillPresentExec{judge: d.Judge}
 	r.execs[Cmd] = cmdExec{}
+	r.execs[Prove] = &proveExec{prover: d.Prove}
 	return r, nil
 }
 

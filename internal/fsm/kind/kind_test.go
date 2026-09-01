@@ -1130,6 +1130,9 @@ func TestKindInfoDeclaresWhichKindsCallAJudge(t *testing.T) {
 		ReviewLenses: false,
 		AgentEdit:    false,
 		Cmd:          false,
+		// prove is exec: fork but calls a Prover (mutation engine), not a judge — nothing for judge
+		// pre-flight to validate.
+		Prove: false,
 	}
 	info := r.Info()
 	for name, needs := range want {

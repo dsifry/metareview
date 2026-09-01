@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -1891,4 +1892,98 @@ func renamed(body any) []byte {
 	text = strings.Replace(text, "workflow: sdlc-loop", "workflow: sdlc-loop-test", 1)
 	text = strings.Replace(text, "workflow: review-loop", "workflow: review-loop-test", 1)
 	return []byte(text)
+}
+
+// TestSdlcLoopProvedGatesOnPins drives the real sdlc-loop-proved workflow through the machine and
+// witnesses the pins_proven gate BOTH green and red — a gate never seen failing is not a gate (#24).
+// A fix declares a pin (the T1.2 seam), the fold opens an Unproven gap, the prove node reports the
+// test-controlled outcome, and pins_proven either advances fix→prove→verify (proven) or blocks
+// (survived). The prove node is faked here (its internals are unit-tested); this exercises the
+// workflow routing, the Unproven fold lifecycle, and the gate wired together.
+func TestSdlcLoopProvedGatesOnPins(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		outcome  run.PinOutcome
+		toVerify bool
+	}{
+		{"a proven pin advances to verify", run.PinProven, true},
+		{"a survived pin blocks at pins_proven", run.PinSurvived, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1}
+			// resolve `go` so the workflow's consent-hashed test cmd resolves at init
+			h.deps.LookPath = func(n string) (string, error) {
+				if n == "go" {
+					return "/usr/bin/go", nil
+				}
+				return "", errors.New("not found")
+			}
+			h.deps.FileHash = func(p string) (string, error) {
+				if p == "/usr/bin/go" {
+					return "hgo", nil
+				}
+				return "", errors.New("no such file")
+			}
+			// agent-edit carries the fix's declared pins into the Delta (the T1.2 seam)
+			h.reg.kinds["agent-edit"].decode = func(raw json.RawMessage) (any, error) {
+				var d run.Delta
+				dec := json.NewDecoder(strings.NewReader(string(raw)))
+				dec.DisallowUnknownFields()
+				if err := dec.Decode(&d); err != nil {
+					return nil, err
+				}
+				return d, nil
+			}
+			h.reg.kinds["agent-edit"].reduce = func(_ run.Snapshot, out any) (run.Delta, error) { return out.(run.Delta), nil }
+			// the prove node reads the folded gaps and reports the test-controlled outcome
+			h.reg.kinds["prove"] = &fakeKind{name: "prove", info: workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}}}
+			h.reg.execs["prove"] = &fakeExecutor{fn: func(in ExecInput) (json.RawMessage, error) {
+				var d run.Delta
+				for _, p := range in.Snap.Unproven {
+					proven := tc.outcome == run.PinProven
+					d.PinResults = append(d.PinResults, run.ProofResult{Proof: p, Proven: proven, Outcome: tc.outcome})
+					if !proven {
+						d.Findings = append(d.Findings, run.Finding{IssueText: "unproven fix", File: "f.go", Source: run.SourceMutationVerify, Category: run.CategoryUnprovenFix})
+					}
+				}
+				return json.RawMessage(run.MarshalCanonical(d)), nil
+			}}
+
+			// consent: init once to learn the cmds sha, then init for real
+			_, err := h.init(InitOptions{Workflow: "sdlc-loop-proved", Vars: sdlcVars})
+			sha := wantCodeE(t, err, CodeCmdsNotAllowed).Field("sha")
+			m := h.mustInit(InitOptions{Workflow: "sdlc-loop-proved", Vars: sdlcVars, AllowCustomCmds: sha})
+
+			h.advance(m) // enter discover
+			h.record(m, "discover", findings(1))
+			h.advance(m) // → adjudicate
+			h.advance(m) // → fix (one confirmed bug)
+			finding := run.FindingKey("f.go", "bug a")
+			fix := fmt.Sprintf(`{"commit":%q,"pins":[{"id":"p1","finding":%q,"kind":"pin","pin":{"id":"p1","finding":%q,"file":"f.go","from":"+x","to":"y","test":"T"}}]}`, shaFix, finding, finding)
+			h.record(m, "fix", fix)
+			if r := h.advance(m); r.To != "prove" {
+				t.Fatalf("fix must advance to prove: %+v", r)
+			}
+			if got := m.View().Snapshot.Unproven; len(got) != 1 || got[0].Finding != finding {
+				t.Fatalf("the fix's pin must open exactly one Unproven gap for its finding: %+v", got)
+			}
+			r := h.advance(m) // prove runs; pins_proven is evaluated
+			if tc.toVerify {
+				if r.To != "verify" {
+					t.Fatalf("a proven pin must clear the gate and advance to verify: %+v", r)
+				}
+				if got := m.View().Snapshot.Unproven; len(got) != 0 {
+					t.Fatalf("a proven pin must clear the Unproven gap: %+v", got)
+				}
+			} else {
+				if r.Status != StatusGateFailed || r.Gate.Name != "pins_proven" || r.Gate.Error.Code != gate.CodePinsUnproven {
+					t.Fatalf("a survived pin must block at pins_proven: %+v", r)
+				}
+				if got := m.View().Snapshot.Unproven; len(got) != 1 {
+					t.Fatalf("a survived pin must leave the Unproven gap open: %+v", got)
+				}
+			}
+		})
+	}
 }

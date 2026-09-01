@@ -33,6 +33,14 @@ func kinds() map[string]KindInfo {
 		"agent-edit":            {DefaultExec: "inline", AllowedExec: []string{"inline", "subagent"}},
 		"still-present":         {DefaultExec: "fork", AllowedExec: []string{"fork"}},
 		"cmd":                   {DefaultExec: "fork", AllowedExec: []string{"fork"}},
+		"prove": {DefaultExec: "fork", AllowedExec: []string{"fork"}, ValidateParams: func(p map[string]any) error {
+			for k := range p {
+				if k != "test_cmd" {
+					return errors.New("unknown param " + k)
+				}
+			}
+			return nil
+		}},
 	}
 }
 
@@ -112,6 +120,23 @@ func TestW1Shipped(t *testing.T) {
 	}
 	if !sdlc.IsTerminal("done") || !sdlc.IsTerminal("failed") || sdlc.IsTerminal("verify") {
 		t.Fatal("IsTerminal")
+	}
+	// sdlc-loop-proved inserts a prove node gated by pins_proven between fix and verify.
+	proved := mustParse(t, string(must(workflows.Read("sdlc-loop-proved"))))
+	if len(proved.Transitions) != 8 || proved.Nodes["prove"].Kind != "prove" || proved.Nodes["prove"].Params["test_cmd"] != "test" {
+		t.Fatalf("sdlc-loop-proved shape: %+v", proved.Nodes["prove"])
+	}
+	var fixToProve, proveToVerify bool
+	for _, tr := range proved.Transitions {
+		if tr.From == "fix" && tr.To == "prove" && tr.Gate == "commit_exists" {
+			fixToProve = true
+		}
+		if tr.From == "prove" && tr.To == "verify" && tr.Gate == "pins_proven" {
+			proveToVerify = true
+		}
+	}
+	if !fixToProve || !proveToVerify {
+		t.Fatalf("sdlc-loop-proved must route fix→prove[commit_exists]→verify[pins_proven]: %+v", proved.Transitions)
 	}
 	rl := mustParse(t, string(must(workflows.Read("review-loop"))))
 	if rl.LoopTransition() != nil || rl.Convergence != nil || len(rl.Outgoing("adjudicate")) != 2 {

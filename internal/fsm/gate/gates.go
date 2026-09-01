@@ -20,6 +20,7 @@ const (
 	CodeBugsRemain       = "ERR_BUGS_REMAIN"
 	CodeAllFixed         = "ERR_ALL_FIXED"
 	CodeBugsKnown        = "ERR_BUGS_KNOWN"
+	CodePinsUnproven     = "ERR_PINS_UNPROVEN"
 )
 
 // Gate evaluates a snapshot; nil means pass.
@@ -73,6 +74,24 @@ var builtin = map[string]Gate{
 		}
 		if len(s.Confirmed) > 0 {
 			return fail("nothing_confirmed", CodeConfirmedPresent, fmt.Sprintf("%d confirmed bugs present", len(s.Confirmed)))
+		}
+		return nil
+	},
+	// pins_proven blocks the fix→verify transition while the round's `prove` node reports an unproven
+	// fix. It selects on the finding's structural provenance — Source == mutation-verify and a BLOCKING
+	// Category (unproven-fix or unverifiable) — never on issue text (the #24 lesson): a prove result of
+	// `survived` (a real test gap) or `unverifiable` (the tree could not answer) reddens the gate, while
+	// a `malformed-pin` is advisory and does not block. A round with no such finding — every supplied
+	// proof Proven, nothing owed left unproven — passes. This is the deterministic differential PASS
+	// path; the §9.2 symptom reviewer (T1.4) can only veto it, never certify.
+	"pins_proven": func(_ context.Context, s run.Snapshot, _ Git) *run.GateError {
+		for _, f := range s.Findings {
+			if f.Source != run.SourceMutationVerify {
+				continue
+			}
+			if run.ProofCategoryBlocks(f.Category) {
+				return fail("pins_proven", CodePinsUnproven, fmt.Sprintf("unproven fix (%s) at %s", f.Category, f.File))
+			}
 		}
 		return nil
 	},

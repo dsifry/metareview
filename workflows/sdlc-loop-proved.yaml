@@ -1,0 +1,28 @@
+workflow: sdlc-loop-proved
+version: 1
+vars:
+  REVIEWER:     {default: claude-opus-5}
+  JUDGE:        {required: true}
+  REV_EFFORT:   {default: low}
+  JUDGE_EFFORT: {required: true}   # Pareto-selected with JUDGE (spec §17); pinned to medium under --calibration
+states: [discover, adjudicate, fix, prove, verify, done, failed]
+cmds:
+  test: {argv: [go, test, ./...], timeout: 600}   # the consent-hashed command `prove` mutates against
+transitions:                                  # ordered
+  - {from: discover,   to: done,       gate: nothing_found,      outcome: clean}   # iteration 0 only: refuses once bugs are known
+  - {from: discover,   to: adjudicate, gate: findings_nonempty}
+  - {from: adjudicate, to: done,       gate: nothing_confirmed,  outcome: clean}
+  - {from: adjudicate, to: fix,        gate: confirmed_nonempty}
+  - {from: fix,        to: prove,      gate: commit_exists}
+  - {from: prove,      to: verify,     gate: pins_proven}    # a fix's declared proofs must all hold
+  - {from: verify,     to: done,       gate: all_fixed,   outcome: fixed}
+  - {from: verify,     to: discover,   gate: bugs_remain, loop: true}
+nodes:
+  discover:   {kind: review-lenses,        exec: subagent, model: $REVIEWER, effort: $REV_EFFORT}
+  adjudicate: {kind: match-then-adjudicate, exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
+  fix:        {kind: agent-edit}                                   # exec inferred from the kind (inline)
+  prove:      {kind: prove, test_cmd: test}                        # mutation-verify; exec inferred (fork)
+  verify:     {kind: still-present,         model: $JUDGE, effort: $JUDGE_EFFORT}   # exec inferred (fork)
+convergence:
+  any: [no_fixation_progress, {max_iterations: 5}, {budget: {tokens: 4000000}}]
+repo_mode: advisory
