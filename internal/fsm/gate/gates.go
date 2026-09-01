@@ -89,7 +89,7 @@ var builtin = map[string]Gate{
 			if f.Source != run.SourceMutationVerify {
 				continue
 			}
-			if f.Category == run.CategoryUnprovenFix || f.Category == run.CategoryUnverifiable {
+			if run.ProofCategoryBlocks(f.Category) {
 				return fail("pins_proven", CodePinsUnproven, fmt.Sprintf("unproven fix (%s) at %s", f.Category, f.File))
 			}
 		}

@@ -46,6 +46,16 @@ func provenResult(p run.DifferentialProof) run.ProofResult {
 	return run.ProofResult{Proof: p, Proven: true, Outcome: run.PinProven}
 }
 
+// fileDiff builds a well-formed unified diff (with the "diff --git" header the parser keys on) that
+// ADDS the given lines to file.
+func fileDiff(file string, added ...string) string {
+	d := "diff --git a/" + file + " b/" + file + "\n--- a/" + file + "\n+++ b/" + file + "\n@@ -1,1 +1," + fmt.Sprint(len(added)+1) + " @@\n"
+	for _, l := range added {
+		d += "+" + l + "\n"
+	}
+	return d
+}
+
 func runProve(t *testing.T, snap run.Snapshot, diff string, prover Prover) run.Delta {
 	t.Helper()
 	r := mustNew(t, judge.NewMock(judge.Script{}), true)
@@ -70,7 +80,7 @@ func runProve(t *testing.T, snap run.Snapshot, diff string, prover Prover) run.D
 func TestProveProvenPinEmitsNoFinding(t *testing.T) {
 	p := pinDP("f1", "addedLine")
 	mp := &mockProver{results: []run.ProofResult{provenResult(p)}}
-	d := runProve(t, run.Snapshot{Unproven: []run.DifferentialProof{p}}, "+++ b/a.go\n+addedLine\n", mp)
+	d := runProve(t, run.Snapshot{Unproven: []run.DifferentialProof{p}}, fileDiff("a.go", "addedLine"), mp)
 	if len(mp.gotProofs) != 1 {
 		t.Fatalf("the bound pin must reach the prover: %+v", mp.gotProofs)
 	}
@@ -86,7 +96,7 @@ func TestProveProvenPinEmitsNoFinding(t *testing.T) {
 func TestProveSurvivedPinEmitsBlockingFinding(t *testing.T) {
 	p := pinDP("f1", "addedLine")
 	mp := &mockProver{results: []run.ProofResult{{Proof: p, Proven: false, Outcome: run.PinSurvived, Detail: "tests still passed"}}}
-	d := runProve(t, run.Snapshot{Unproven: []run.DifferentialProof{p}}, "+++ b/a.go\n+addedLine\n", mp)
+	d := runProve(t, run.Snapshot{Unproven: []run.DifferentialProof{p}}, fileDiff("a.go", "addedLine"), mp)
 	if len(d.Findings) != 1 || d.Findings[0].Source != run.SourceMutationVerify || d.Findings[0].Category != run.CategoryUnprovenFix {
 		t.Fatalf("a survived pin must emit an unproven-fix marker: %+v", d.Findings)
 	}
@@ -101,7 +111,7 @@ func TestProveAddedLineBindRejectsNonAddedFrom(t *testing.T) {
 	p := pinDP("f1", "contextLine")
 	mp := &mockProver{}
 	// The diff carries contextLine only as an unchanged context line and as a removed line — never "+".
-	d := runProve(t, run.Snapshot{Unproven: []run.DifferentialProof{p}}, "+++ b/a.go\n contextLine\n-contextLine\n+different\n", mp)
+	d := runProve(t, run.Snapshot{Unproven: []run.DifferentialProof{p}}, "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,2 @@\n contextLine\n-contextLine\n+different\n", mp)
 	if len(mp.gotProofs) != 0 {
 		t.Fatalf("an unbound pin must NOT reach the prover: %+v", mp.gotProofs)
 	}
@@ -135,7 +145,7 @@ func TestProveNilProverFailsClosed(t *testing.T) {
 	r := mustNew(t, judge.NewMock(judge.Script{}), true)
 	r.execs[Prove] = &proveExec{prover: nil}
 	ex, _ := r.Executor(Prove)
-	_, err := ex.Execute(context.Background(), machine.ExecInput{Snap: run.Snapshot{Unproven: []run.DifferentialProof{pinDP("f1", "x")}}, Node: proveNode, Diff: machine.Diff{Text: "+++ b/a.go\n+x"}, Audit: (&audits{}).fn})
+	_, err := ex.Execute(context.Background(), machine.ExecInput{Snap: run.Snapshot{Unproven: []run.DifferentialProof{pinDP("f1", "x")}}, Node: proveNode, Diff: machine.Diff{Text: fileDiff("a.go", "x")}, Audit: (&audits{}).fn})
 	if !errs.Is(err, machine.CodeExecutorFailed) {
 		t.Fatalf("a nil prover must fail closed: %v", err)
 	}
@@ -147,7 +157,7 @@ func TestProveProverErrorAborts(t *testing.T) {
 	r := mustNew(t, judge.NewMock(judge.Script{}), true)
 	r.execs[Prove] = &proveExec{prover: &mockProver{err: errors.New("runner down")}}
 	ex, _ := r.Executor(Prove)
-	_, err := ex.Execute(context.Background(), machine.ExecInput{Snap: run.Snapshot{Unproven: []run.DifferentialProof{p}}, Node: proveNode, Diff: machine.Diff{Text: "+++ b/a.go\n+addedLine"}, Audit: (&audits{}).fn})
+	_, err := ex.Execute(context.Background(), machine.ExecInput{Snap: run.Snapshot{Unproven: []run.DifferentialProof{p}}, Node: proveNode, Diff: machine.Diff{Text: fileDiff("a.go", "addedLine")}, Audit: (&audits{}).fn})
 	if err == nil || err.Error() != "runner down" {
 		t.Fatalf("a prover error must abort: %v", err)
 	}
@@ -165,7 +175,7 @@ func TestProveResolvesSpecFromSnapshot(t *testing.T) {
 	}
 	proveNode.Params = map[string]any{"test_cmd": "test"}
 	defer func() { proveNode.Params = nil }()
-	runProve(t, snap, "+++ b/a.go\n+addedLine\n", mp)
+	runProve(t, snap, fileDiff("a.go", "addedLine"), mp)
 	if len(mp.gotSpec.TestCmd) != 3 || mp.gotSpec.TestCmd[0] != "go" || mp.gotSpec.Dir != "/w" {
 		t.Fatalf("spec must come from the snapshot: %+v", mp.gotSpec)
 	}
@@ -190,7 +200,7 @@ func TestProveClauseAOwedPin(t *testing.T) {
 	mustWrite("bare/bar.go", "package bare\n")    // bare has NO tests
 
 	owed := run.Bug{ID: "owed", Desc: "d", File: "pkg/foo.go", Verdict: run.VerdictRealButUngold}
-	diffTouchesPkg := "+++ b/pkg/foo.go\n+newLine\n"
+	diffTouchesPkg := fileDiff("pkg/foo.go", "newLine")
 
 	// (1) owes a pin, none supplied → a blocking owed-pin marker naming the file.
 	d := runProve(t, run.Snapshot{WorkDir: dir, Confirmed: []run.Bug{owed}}, diffTouchesPkg, &mockProver{})
@@ -199,13 +209,13 @@ func TestProveClauseAOwedPin(t *testing.T) {
 	}
 
 	// (2) the fix touched only a DIFFERENT file → the finding owes no pin here (cross-file remedy).
-	d = runProve(t, run.Snapshot{WorkDir: dir, Confirmed: []run.Bug{owed}}, "+++ b/other/z.go\n+elsewhere\n", &mockProver{})
+	d = runProve(t, run.Snapshot{WorkDir: dir, Confirmed: []run.Bug{owed}}, fileDiff("other/z.go", "elsewhere"), &mockProver{})
 	if len(d.Findings) != 0 {
 		t.Fatalf("a cross-file remedy owes no pin: %+v", d.Findings)
 	}
 
 	// (3) the finding's package has no test files → owes no pin (unpinnable, so not blocked).
-	d = runProve(t, run.Snapshot{WorkDir: dir, Confirmed: []run.Bug{{ID: "b2", File: "bare/bar.go", Verdict: run.VerdictRealButUngold}}}, "+++ b/bare/bar.go\n+x\n", &mockProver{})
+	d = runProve(t, run.Snapshot{WorkDir: dir, Confirmed: []run.Bug{{ID: "b2", File: "bare/bar.go", Verdict: run.VerdictRealButUngold}}}, fileDiff("bare/bar.go", "x"), &mockProver{})
 	if len(d.Findings) != 0 {
 		t.Fatalf("a no-test package owes no pin: %+v", d.Findings)
 	}
@@ -216,6 +226,25 @@ func TestProveClauseAOwedPin(t *testing.T) {
 	d = runProve(t, run.Snapshot{WorkDir: dir, Confirmed: []run.Bug{owed}, Unproven: []run.DifferentialProof{proof}}, diffTouchesPkg, &mockProver{results: []run.ProofResult{provenResult(proof)}})
 	if len(d.Findings) != 0 {
 		t.Fatalf("a finding backed by a Proven pin owes no additional marker: %+v", d.Findings)
+	}
+
+	// (5) the finding-1 hole: a MALFORMED (advisory) supplied pin must NOT let an owed finding escape.
+	// The pin's From is not an added line → malformed (advisory); clause (a) still emits a BLOCKING
+	// owed marker, so the gate reddens.
+	mal := pinDP("owed", "notAnAddedLine")
+	mal.Pin.File = "pkg/foo.go"
+	d = runProve(t, run.Snapshot{WorkDir: dir, Confirmed: []run.Bug{owed}, Unproven: []run.DifferentialProof{mal}}, diffTouchesPkg, &mockProver{})
+	var advisory, blocking int
+	for _, f := range d.Findings {
+		switch f.Category {
+		case run.CategoryMalformedPin:
+			advisory++
+		case run.CategoryUnprovenFix:
+			blocking++
+		}
+	}
+	if advisory != 1 || blocking != 1 {
+		t.Fatalf("a malformed (advisory) pin must not let an owed finding escape clause (a): %+v", d.Findings)
 	}
 }
 
@@ -292,7 +321,7 @@ func TestProveUnconsentedTestCmdResolvesToNothing(t *testing.T) {
 	snap := run.Snapshot{Unproven: []run.DifferentialProof{pinDP("f1", "addedLine")}, AllowedCmds: []run.AllowedCmd{{Name: "build"}}}
 	proveNode.Params = map[string]any{"test_cmd": "test"} // not present among AllowedCmds
 	defer func() { proveNode.Params = nil }()
-	runProve(t, snap, "+++ b/a.go\n+addedLine\n", mp)
+	runProve(t, snap, fileDiff("a.go", "addedLine"), mp)
 	if mp.gotSpec.TestCmd != nil {
 		t.Fatalf("an unconsented test_cmd must resolve to no command: %+v", mp.gotSpec.TestCmd)
 	}

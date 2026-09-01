@@ -145,24 +145,31 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 	results = append(results, verified...)
 
 	delta := run.Delta{PinResults: results}
-	supplied, proven := map[string]bool{}, map[string]bool{}
+	// A finding is settled iff a Proven proof cleared it; a finding whose only supplied proofs were
+	// non-Proven is NOT settled — a malformed pin (advisory) in particular must not let it escape
+	// clause (a). Track findings already carrying a BLOCKING supplied marker so clause (a) does not
+	// duplicate one, and settled (Proven) findings so it skips them.
+	settled, blocked := map[string]bool{}, map[string]bool{}
 	for _, r := range results {
-		supplied[r.Proof.Finding] = true
 		if r.Proven {
-			proven[r.Proof.Finding] = true
+			settled[r.Proof.Finding] = true
+			continue
 		}
-		if !r.Proven {
-			delta.Findings = append(delta.Findings, proofFinding(r))
+		f := proofFinding(r)
+		delta.Findings = append(delta.Findings, f)
+		if run.ProofCategoryBlocks(f.Category) {
+			blocked[r.Proof.Finding] = true
 		}
 	}
 	// pins_proven clause (a) — the non-vacuous half (spec §3.1). A fix that OWES a pin but supplied
-	// none would otherwise leave Unproven empty and the gate green (the #24 shape). For every confirmed
-	// finding that owes a pin — the fix added a line in the finding's OWN file and that file's package
-	// has tests — with no Proven proof, emit a blocking marker naming the file. A finding that owes no
-	// pin (cross-file remedy, or a no-test package) is exempt by construction, never a silent pass.
+	// none (or only a malformed, advisory one) would otherwise leave the gate green (the #24 shape).
+	// For every confirmed finding that owes a pin — the fix added a line in the finding's OWN file and
+	// that file's package has tests — with no Proven proof and no blocking marker yet, emit one naming
+	// the file. A finding that owes no pin (cross-file remedy, or a no-test package) is exempt by
+	// construction, never a silent pass.
 	for _, b := range in.Snap.Confirmed {
-		if supplied[b.ID] {
-			continue // a supplied proof already spoke for this finding (marked above if not Proven)
+		if settled[b.ID] || blocked[b.ID] {
+			continue
 		}
 		if owesPin(in.Diff.Text, dir, b.File) {
 			delta.Findings = append(delta.Findings, owedPinMarker(b))
@@ -189,33 +196,16 @@ func proofResult(proof run.DifferentialProof, outcome run.PinOutcome, detail str
 	return run.ProofResult{Proof: proof, Proven: false, Outcome: outcome, Detail: detail}
 }
 
-// addedLinesInFile returns the contents of the ADDED ("+", not "+++") lines of a unified diff that
-// belong to a specific file, tracked via the "+++ b/<path>" section headers. Scoping by file is what
-// stops a pin binding to a line the fix added in some OTHER file.
-func addedLinesInFile(diff, file string) []string {
-	want := judge.NormalizePath(file)
-	var out []string
-	current := ""
-	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, "+++ ") {
-			current = judge.NormalizePath(strings.TrimPrefix(line, "+++ "))
-			continue
-		}
-		if current == want && strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			out = append(out, line[1:])
-		}
-	}
-	return out
-}
-
-// isAddedLineInFile reports whether from appears within an added line of file's diff section. The bind
-// is to added CODE in the pin's own file, not exact-line equality (from is the text to replace, which
-// lives on an added line). An empty from or file binds to nothing.
+// isAddedLineInFile reports whether from appears within a line the fix added to file's own diff
+// section (via judge.AddedLinesInFile, which keys sections on "diff --git" so a "+++"-prefixed added
+// line is not mistaken for a header). The bind is to added CODE in the pin's own file, not exact-line
+// equality (from is the text to replace, which lives on an added line). An empty from or file binds
+// to nothing.
 func isAddedLineInFile(diff, file, from string) bool {
 	if from == "" || file == "" {
 		return false
 	}
-	for _, added := range addedLinesInFile(diff, file) {
+	for _, added := range judge.AddedLinesInFile(diff, file) {
 		if strings.Contains(added, from) {
 			return true
 		}
@@ -228,7 +218,7 @@ func isAddedLineInFile(diff, file, from string) bool {
 // added line in the finding's file) or a no-test package owes no pin — auditable exemptions, never a
 // silent pass.
 func owesPin(diff, dir, file string) bool {
-	return file != "" && len(addedLinesInFile(diff, file)) > 0 && packageHasTests(dir, file)
+	return file != "" && len(judge.AddedLinesInFile(diff, file)) > 0 && packageHasTests(dir, file)
 }
 
 // packageHasTests reports whether the directory holding file contains Go test files (*_test.go). It

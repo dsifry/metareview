@@ -130,3 +130,20 @@ func TestSnapshotCloneCopiesUnproven(t *testing.T) {
 		t.Error("Clone must deep-copy the proof's Deletes pointer, not alias it")
 	}
 }
+
+// ProofCategoryBlocks marks the two blocking prove outcomes (unproven fix, unverifiable tree) and
+// leaves the advisory malformed pin and everything else non-blocking — the shared rule the gate and
+// the prove node both key on.
+func TestProofCategoryBlocks(t *testing.T) {
+	for cat, want := range map[string]bool{
+		CategoryUnprovenFix:  true,
+		CategoryUnverifiable: true,
+		CategoryMalformedPin: false,
+		"":                   false,
+		"something-else":     false,
+	} {
+		if ProofCategoryBlocks(cat) != want {
+			t.Errorf("ProofCategoryBlocks(%q) = %v, want %v", cat, ProofCategoryBlocks(cat), want)
+		}
+	}
+}

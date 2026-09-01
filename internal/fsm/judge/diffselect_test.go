@@ -510,3 +510,25 @@ func TestReferencedPathsTreatsAliasesOfTheOwnFileAsTheSameFile(t *testing.T) {
 		}
 	}
 }
+
+// AddedLinesInFile returns only the lines a diff adds to the named file, keyed on the "diff --git"
+// header so an added line whose OWN content begins with "+++" (or "---") is never mistaken for a
+// section boundary — the robustness a naive "+++ " scan lacks.
+func TestAddedLinesInFile(t *testing.T) {
+	diff := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,3 @@\n ctx\n-gone\n+kept()\n+++added tricky\n" +
+		"diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1,1 +1,2 @@\n+other()\n"
+	got := AddedLinesInFile(diff, "a.go")
+	if len(got) != 2 || got[0] != "kept()" || got[1] != "++added tricky" {
+		t.Fatalf("a.go added lines (incl. a +++-prefixed one) = %v", got)
+	}
+	if lines := AddedLinesInFile(diff, "b.go"); len(lines) != 1 || lines[0] != "other()" {
+		t.Fatalf("b.go added lines = %v", lines)
+	}
+	// a git-prefixed / bare spelling of the same path resolves to the same file
+	if lines := AddedLinesInFile(diff, "b/a.go"); len(lines) != 2 {
+		t.Fatalf("path spelling must normalize: %v", lines)
+	}
+	if lines := AddedLinesInFile(diff, "untouched.go"); lines != nil {
+		t.Fatalf("an untouched file has no added lines: %v", lines)
+	}
+}

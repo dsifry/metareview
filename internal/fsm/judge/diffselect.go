@@ -212,6 +212,30 @@ func SelectDiff(diff, path string, line, budget int) (out string, ok bool, hash 
 
 // ChangedPaths lists every post-image path in a unified diff, for telling the judge what
 // exists outside the window it was given.
+// AddedLinesInFile returns the contents of the lines the diff ADDED to a specific file. It keys file
+// sections on the "diff --git" header via the shared parser, so an added line whose own content begins
+// with "+++" (or "---") is a hunk line, never mistaken for a section header. Each returned string is
+// the added line without its leading "+". A file the diff does not touch yields none.
+func AddedLinesInFile(diff, path string) []string {
+	want := NormalizePath(path)
+	var out []string
+	for _, b := range parseUnifiedDiff(diff) {
+		if NormalizePath(b.path) != want {
+			continue
+		}
+		for _, h := range b.hunks {
+			for _, line := range h.lines {
+				// Hunk lines are "@@…", " context", "-removed", or "+added"; only the last starts
+				// with "+" (the "@@" header does not), so an added "+++foo" content line is included.
+				if strings.HasPrefix(line, "+") {
+					out = append(out, line[1:])
+				}
+			}
+		}
+	}
+	return out
+}
+
 func ChangedPaths(diff string) []string {
 	blocks := parseUnifiedDiff(diff)
 	out := make([]string, 0, len(blocks))

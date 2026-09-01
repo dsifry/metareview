@@ -195,8 +195,16 @@ const (
 	SourceMutationVerify = "mutation-verify"
 	CategoryUnprovenFix  = "unproven-fix"  // a fix whose pin the tests did not catch: blocks
 	CategoryMalformedPin = "malformed-pin" // a pin that could not be evaluated: reported, does not block
-	CategoryUnverifiable = "unverifiable"  // the tree could not answer at all
+	CategoryUnverifiable = "unverifiable"  // the tree could not answer at all: blocks
 )
+
+// ProofCategoryBlocks reports whether a mutation-verify finding of this Category is a BLOCKING one —
+// an unproven fix or an unverifiable tree, both of which pins_proven fails on. A malformed pin is
+// advisory (the claim is bad, not the fix), so it never blocks. Shared by the gate and the prove node
+// so the two can never disagree on what blocks.
+func ProofCategoryBlocks(category string) bool {
+	return category == CategoryUnprovenFix || category == CategoryUnverifiable
+}
 
 // Pin is a fix agent's claim that one specific test holds one specific line of production code.
 //
