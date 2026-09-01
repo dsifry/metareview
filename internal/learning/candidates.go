@@ -14,11 +14,17 @@ type Input struct {
 	Findings []findings.Record
 	GitHub   githubcontext.Context
 	Session  sessionhistory.Context
+	// Diff is the reviewed diff (base..HEAD), read by the §9.7 trajectory monitor's whitespace-only
+	// flag. Optional: an empty diff yields no whitespace-only flag.
+	Diff string
 }
 
 type Result struct {
 	Knowledge   []Candidate `json:"knowledge"`
 	Calibration []Candidate `json:"calibration"`
+	// Flags are the §9.7 trajectory monitor's advisory flags (whitespace-only, self-served override).
+	// They are reported to a human, not written to repository knowledge.
+	Flags []Candidate `json:"flags,omitempty"`
 }
 
 type Candidate struct {
@@ -48,6 +54,7 @@ func ExtractCandidates(input Input) Result {
 	result.Knowledge = append(result.Knowledge, githubReviewBlockers(input.GitHub)...)
 	result.Knowledge = append(result.Knowledge, sessionCorrections(input.Session)...)
 	result.Calibration = append(result.Calibration, calibrationFromFindings(input.Findings)...)
+	result.Flags = trajectoryFlags(input.Diff, input.Findings)
 	return result
 }
 
