@@ -32,16 +32,30 @@ type fakeGit struct {
 	removedWorktree bool
 }
 
+// gitVerb returns the subcommand and its following args, skipping leading `-c <value>` config pairs
+// (the engine prefixes some calls with `-c core.quotePath=false`).
+func gitVerb(args []string) (string, []string) {
+	i := 0
+	for i+1 < len(args) && args[i] == "-c" {
+		i += 2
+	}
+	if i >= len(args) {
+		return "", nil
+	}
+	return args[i], args[i+1:]
+}
+
 func (f *fakeGit) run(_ context.Context, args ...string) (string, int, error) {
+	verb, rest := gitVerb(args)
 	switch {
-	case args[0] == "diff":
+	case verb == "diff":
 		return f.partition, f.partitionCode, f.partitionErr
-	case args[0] == "worktree" && args[1] == "add":
+	case verb == "worktree" && rest[0] == "add":
 		return "", f.addCode, f.addErr
-	case args[0] == "worktree" && args[1] == "remove":
+	case verb == "worktree" && rest[0] == "remove":
 		f.removedWorktree = true
 		return "", 0, nil
-	case args[0] == "show":
+	case verb == "show":
 		spec := args[len(args)-1]
 		path := spec[strings.Index(spec, ":")+1:]
 		if len(f.showErrOnce) > 0 { // targeted mode: only the named paths fail
@@ -94,6 +108,16 @@ func reproduceOne(t *testing.T, r Reproducer, test string) ReproResult {
 	return res[0]
 }
 
+// hasFlagValue reports whether argv contains flag immediately followed by value.
+func hasFlagValue(argv []string, flag, value string) bool {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == flag && argv[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
 func mustOutcome(t *testing.T, got ReproResult, want Outcome) {
 	t.Helper()
 	if got.Outcome != want {
@@ -120,19 +144,20 @@ func TestReproduceProvenPath(t *testing.T) {
 		calls++
 		if calls == 1 {
 			argvAtFailBefore = argv
-			return 1, "--- FAIL: TestX (0.00s)\nFAIL\tpkg\t0.1s\n", nil // fail-before: assertion
+			return 1, "=== RUN   TestX\n--- FAIL: TestX (0.00s)\nFAIL\tpkg\t0.1s\n", nil // fail-before: assertion
 		}
 		_, err := os.Stat(filepath.Join(dir, "pkg", "prod.go"))
 		prodPresent = err == nil
 		prodAtPassAfter = argv
-		return 0, "ok  \tpkg\t0.1s\n", nil // pass-after
+		return 0, "=== RUN   TestX\n--- PASS: TestX (0.00s)\nok  \tpkg\t0.1s\n", nil // pass-after
 	}
 	r := newReproducer(t, g, run)
 	mustOutcome(t, reproduceOne(t, r, "TestX"), PinProven)
 
-	// The pre-fix run must be narrowed to the target test with an anchored -run.
-	if n := len(argvAtFailBefore); n < 2 || argvAtFailBefore[n-2] != "-run" || argvAtFailBefore[n-1] != "^TestX$" {
-		t.Fatalf("target test must be selected with an anchored -run: %v", argvAtFailBefore)
+	// The pre-fix run must be narrowed to the target test with an anchored -run, verbosely (-v so the
+	// target's own markers appear).
+	if !hasFlagValue(argvAtFailBefore, "-run", "^TestX$") || argvAtFailBefore[len(argvAtFailBefore)-1] != "-v" {
+		t.Fatalf("target test must be selected with an anchored -run and -v: %v", argvAtFailBefore)
 	}
 	if !prodPresent {
 		t.Fatalf("the fix's production file must be applied before the pass-after run (argv %v)", prodAtPassAfter)
@@ -154,11 +179,11 @@ func TestReproduceAppliesDeletion(t *testing.T) {
 	run := func(_ context.Context, dir string, _ []string) (int, string, error) {
 		calls++
 		if calls == 1 {
-			return 1, "--- FAIL: TestX\n", nil
+			return 1, "=== RUN   TestX\n--- FAIL: TestX\n", nil
 		}
 		_, err := os.Stat(filepath.Join(dir, "pkg", "gone.go"))
 		goneAbsent = os.IsNotExist(err)
-		return 0, "ok\n", nil
+		return 0, "=== RUN   TestX\n--- PASS: TestX\nok\n", nil
 	}
 	r := newReproducer(t, g, run)
 	// Pre-create the file the fix deletes so step (d) has something to remove.
@@ -179,7 +204,7 @@ func TestReproduceAppliesDeletion(t *testing.T) {
 // A deletion whose target is a non-empty directory cannot be removed: unverifiable, not a crash.
 func TestReproduceDeletionRemoveError(t *testing.T) {
 	g := &fakeGit{partition: "A\tpkg/new_test.go\nD\tpkg/busy\n", showBody: map[string]string{"pkg/new_test.go": "t"}}
-	run := &seqRunner{resp: []runResp{{code: 1, out: "--- FAIL: TestX\n"}}}
+	run := &seqRunner{resp: []runResp{{code: 1, out: "=== RUN   TestX\n--- FAIL: TestX\n"}}}
 	r := newReproducer(t, g, run.run)
 	wtParent := t.TempDir()
 	r.MkWork = func() (string, error) { return wtParent, nil }
@@ -204,7 +229,7 @@ func TestReproduceFailBeforeClassification(t *testing.T) {
 		want Outcome
 		hint string
 	}{
-		{"pass-before is a test gap", runResp{code: 0, out: "ok\tpkg\t0.1s\n"}, PinSurvived, "does not exercise the fault"},
+		{"pass-before is a test gap", runResp{code: 0, out: "=== RUN   TestX\n--- PASS: TestX\nok\tpkg\t0.1s\n"}, PinSurvived, "does not exercise the fault"},
 		{"filter matched nothing", runResp{code: 0, out: "testing: warning: no tests to run\nPASS\n"}, PinMalformed, "was not found"},
 		{"compile error is not an assertion", runResp{code: 1, out: "# pkg\n./x_test.go:1:1: undefined: Z\nFAIL\tpkg [build failed]\n"}, PinMalformed, "compile/import error"},
 		{"non-assertion failure fails closed", runResp{code: 1, out: "some unexpected failure\n"}, PinMalformed, "not a recognizable test assertion"},
@@ -230,13 +255,13 @@ func TestReproducePassAfterClassification(t *testing.T) {
 		want  Outcome
 		hint  string
 	}{
-		{"still failing means the fix did not hold", runResp{code: 1, out: "--- FAIL: TestX\nFAIL\n"}, PinSurvived, "did not make the test pass"},
+		{"still failing means the fix did not hold", runResp{code: 1, out: "=== RUN   TestX\n--- FAIL: TestX\nFAIL\n"}, PinSurvived, "did not make the test pass"},
 		{"vanished test is unverifiable", runResp{code: 0, out: "no tests to run\n"}, PinUnverifiable, "vanished"},
 		{"post-fix build failure is unverifiable", runResp{code: 1, out: "FAIL\tpkg [build failed]\n"}, PinUnverifiable, "did not build"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &fakeGit{partition: "A\tpkg/new_test.go\n", showBody: map[string]string{"pkg/new_test.go": "t"}}
-			run := &seqRunner{resp: []runResp{{code: 1, out: "--- FAIL: TestX\n"}, tc.after}}
+			run := &seqRunner{resp: []runResp{{code: 1, out: "=== RUN   TestX\n--- FAIL: TestX\n"}, tc.after}}
 			got := reproduceOne(t, newReproducer(t, g, run.run), "TestX")
 			mustOutcome(t, got, tc.want)
 			if !strings.Contains(got.Detail, tc.hint) {
@@ -364,7 +389,7 @@ func TestReproduceFailBeforeRunError(t *testing.T) {
 
 func TestReproducePassAfterRunError(t *testing.T) {
 	g := &fakeGit{partition: "A\tpkg/new_test.go\n", showBody: map[string]string{"pkg/new_test.go": "t"}}
-	run := &seqRunner{resp: []runResp{{code: 1, out: "--- FAIL: T\n"}, {err: errors.New("exec failed")}}}
+	run := &seqRunner{resp: []runResp{{code: 1, out: "=== RUN   T\n--- FAIL: T\n"}, {err: errors.New("exec failed")}}}
 	got := reproduceOne(t, newReproducer(t, g, run.run), "T")
 	mustOutcome(t, got, PinUnverifiable)
 	if !strings.Contains(got.Detail, "post-fix test run failed to execute") {
@@ -381,7 +406,7 @@ func TestReproduceProdOverlayFailsClosed(t *testing.T) {
 		showErrOnce: map[string]bool{"pkg/prod.go": true},
 		showErr:     errors.New("boom"),
 	}
-	run := &seqRunner{resp: []runResp{{code: 1, out: "--- FAIL: T\n"}}}
+	run := &seqRunner{resp: []runResp{{code: 1, out: "=== RUN   T\n--- FAIL: T\n"}}}
 	got := reproduceOne(t, newReproducer(t, g, run.run), "T")
 	mustOutcome(t, got, PinUnverifiable)
 	if !strings.Contains(got.Detail, "could not apply the fix") {
@@ -393,23 +418,36 @@ func TestClassifyAndPredicates(t *testing.T) {
 	if !isTestFile("a/b_test.go") || isTestFile("a/b.go") {
 		t.Fatal("isTestFile must key on the _test.go suffix")
 	}
-	if classify(0, "ok\n") != clsPassed {
-		t.Fatal("zero exit with output is passed")
+	const run = "=== RUN   TestX\n"
+	// Keyed on the target: exit 0 WITH the target's RUN marker is passed; without it the target never
+	// ran, so it is absent (clsNoTest) — even amid sibling-package "no test files"/"no tests to run".
+	if classify("TestX", 0, run+"--- PASS: TestX\nok\n") != clsPassed {
+		t.Fatal("zero exit with the target's RUN marker is passed")
 	}
-	if classify(0, "no tests to run") != clsNoTest || classify(0, "no test files") != clsNoTest {
-		t.Fatal("zero exit with a no-tests notice is clsNoTest")
+	if classify("TestX", 0, "?   sibling [no test files]\nok  other\ttesting: warning: no tests to run\n") != clsNoTest {
+		t.Fatal("zero exit without the target's RUN marker is clsNoTest, ignoring sibling-package noise")
 	}
-	if classify(1, "FAIL [build failed]") != clsCompile || classify(1, "[setup failed]") != clsCompile || classify(1, "[vet failed]") != clsCompile {
+	// A build/setup/vet failure is compile — before the assertion check.
+	if classify("TestX", 1, "FAIL [build failed]") != clsCompile || classify("TestX", 1, "[setup failed]") != clsCompile || classify("TestX", 1, "[vet failed]") != clsCompile {
 		t.Fatal("a build/setup/vet failure is clsCompile")
 	}
-	// Compile beats assertion: a build-failed run that also prints --- FAIL: is still compile.
-	if classify(1, "--- FAIL: X\nFAIL\tpkg [build failed]\n") != clsCompile {
+	// Compile beats assertion: a build-failed run that also prints the target's --- FAIL is still compile.
+	if classify("TestX", 1, run+"--- FAIL: TestX\nFAIL\tpkg [build failed]\n") != clsCompile {
 		t.Fatal("a compile failure must win over an assertion marker")
 	}
-	if classify(1, "--- FAIL: X\n") != clsAssert {
-		t.Fatal("a plain assertion failure is clsAssert")
+	if classify("TestX", 1, run+"--- FAIL: TestX\n") != clsAssert {
+		t.Fatal("the target's assertion failure is clsAssert")
 	}
-	if classify(1, "mystery\n") != clsOther {
-		t.Fatal("a nonzero exit with no marker is clsOther")
+	// A non-zero exit whose target neither ran nor failed (e.g. a sibling package failed) is clsOther.
+	if classify("TestX", 1, "mystery\n") != clsOther {
+		t.Fatal("a nonzero exit with no target marker is clsOther")
+	}
+	// Ran but no target FAIL line (an odd non-assertion failure) is also clsOther, not a valid assertion.
+	if classify("TestX", 1, run+"panic: boom\n") != clsOther {
+		t.Fatal("ran but no target --- FAIL line is clsOther")
+	}
+	// A SIBLING test's failure is not the target's assertion: the FAIL check is keyed on the target.
+	if classify("TestX", 1, run+"--- FAIL: TestOther (0.00s)\n") != clsOther {
+		t.Fatal("a non-target --- FAIL line must not count as the target's assertion")
 	}
 }

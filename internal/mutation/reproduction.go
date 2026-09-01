@@ -103,13 +103,16 @@ func unproven(p Proof, o Outcome, detail string) ReproResult {
 	return ReproResult{Proof: p, Outcome: o, Detail: detail}
 }
 
-// partition is the fix's changed files split by role. Deleted paths are removed when the fix is
-// applied (step d); test files are overlaid pre-fix (step b) and production files only when the fix
-// is applied (step d), so the pre-fix run sees the new tests against the OLD production.
+// partition is the fix's changed files split by role. The pre-fix run must see the fix's TEST state
+// against the OLD production, so ALL test-only changes — adds, modifies, AND deletes — are applied in
+// step (b); production changes and production deletions land only when the fix is applied (step d).
+// Applying test deletions in step (b) matters for a renamed test (a delete plus an add with rename
+// detection off): leaving the old copy present would redeclare the moved test and fail to compile.
 type partition struct {
 	testFiles []string // *_test.go files the fix adds or changes — overlaid in step (b)
+	delTests  []string // *_test.go files the fix deletes — removed in step (b), with the overlay
 	prodFiles []string // non-test files the fix adds or changes — applied in step (d)
-	delFiles  []string // files the fix deletes — removed in step (d)
+	delFiles  []string // non-test files the fix deletes — removed in step (d)
 }
 
 // isTestFile is the test-vs-production predicate (spec §9.1): the Go `*_test.go` convention, the same
@@ -119,7 +122,9 @@ func isTestFile(path string) bool { return strings.HasSuffix(path, "_test.go") }
 // changedPartition lists the fix's changed files (PreFixSHA→PostFixSHA) split by role. Rename
 // detection is disabled so a rename is a delete plus an add, which materialize correctly.
 func (r Reproducer) changedPartition(ctx context.Context) (partition, error) {
-	out, code, err := r.git(ctx, "diff", "--no-renames", "--name-status", "--no-color", "--end-of-options", r.PreFixSHA, r.PostFixSHA)
+	// core.quotePath=false keeps a non-ASCII path raw, so the byte string this parser hands to
+	// `git show` and the worktree write is the one git resolves — a quoted "pkg/\303\251.go" would not.
+	out, code, err := r.git(ctx, "-c", "core.quotePath=false", "diff", "--no-renames", "--name-status", "--no-color", "--end-of-options", r.PreFixSHA, r.PostFixSHA)
 	if err != nil {
 		return partition{}, err
 	}
@@ -137,11 +142,16 @@ func (r Reproducer) changedPartition(ctx context.Context) (partition, error) {
 			continue
 		}
 		status, path := fields[0][0], fields[1]
+		test := isTestFile(path)
 		switch status {
 		case 'D':
-			part.delFiles = append(part.delFiles, path)
+			if test {
+				part.delTests = append(part.delTests, path)
+			} else {
+				part.delFiles = append(part.delFiles, path)
+			}
 		case 'A', 'M', 'T':
-			if isTestFile(path) {
+			if test {
 				part.testFiles = append(part.testFiles, path)
 			} else {
 				part.prodFiles = append(part.prodFiles, path)
@@ -175,10 +185,16 @@ func (r Reproducer) reproduceOne(ctx context.Context, p Proof, part partition) R
 	}
 	defer func() { _, _, _ = r.git(ctx, "worktree", "remove", "--force", "--end-of-options", wt) }()
 
-	// (b) overlay ONLY the fix's test-only files from the post-fix tree.
+	// (b) put the fix's TEST state onto the pre-fix tree: overlay the test files it adds or changes,
+	//     and remove the ones it deletes (so a renamed test does not redeclare its moved function).
 	for _, f := range part.testFiles {
 		if err := r.overlay(ctx, wt, f); err != nil {
 			return fail(PinUnverifiable, "could not overlay test file %s: %v", f, err)
+		}
+	}
+	for _, f := range part.delTests {
+		if err := removeInTree(wt, f); err != nil {
+			return fail(PinUnverifiable, "could not remove deleted test file %s: %v", f, err)
 		}
 	}
 
@@ -187,7 +203,7 @@ func (r Reproducer) reproduceOne(ctx context.Context, p Proof, part partition) R
 	if err != nil {
 		return fail(PinUnverifiable, "the pre-fix test run failed to execute: %v", err)
 	}
-	switch classify(code, before) {
+	switch classify(p.Test, code, before) {
 	case clsPassed:
 		return fail(PinSurvived, "the test passes on the pre-fix tree, so it does not exercise the fault: %s", tail(before))
 	case clsNoTest:
@@ -206,7 +222,7 @@ func (r Reproducer) reproduceOne(ctx context.Context, p Proof, part partition) R
 		}
 	}
 	for _, f := range part.delFiles {
-		if err := os.Remove(filepath.Join(wt, filepath.FromSlash(f))); err != nil && !os.IsNotExist(err) {
+		if err := removeInTree(wt, f); err != nil {
 			return fail(PinUnverifiable, "could not remove deleted file %s: %v", f, err)
 		}
 	}
@@ -216,7 +232,7 @@ func (r Reproducer) reproduceOne(ctx context.Context, p Proof, part partition) R
 	if err != nil {
 		return fail(PinUnverifiable, "the post-fix test run failed to execute: %v", err)
 	}
-	switch classify(code, after) {
+	switch classify(p.Test, code, after) {
 	case clsPassed:
 		return ReproResult{Proof: p, Proven: true, Outcome: PinProven,
 			Detail: fmt.Sprintf("%q fails on the pre-fix tree (assertion) and passes once the fix is applied", p.Test)}
@@ -246,11 +262,21 @@ func (r Reproducer) overlay(ctx context.Context, wt, path string) error {
 	return os.WriteFile(dest, []byte(out), 0o644)
 }
 
-// runTest runs the consent-hashed test command narrowed to the single target test. The test name is
-// regexp-quoted and anchored so it selects exactly that test and cannot inject a flag (it is one
-// argv element after -run, never a shell string).
+// removeInTree deletes path from the worktree, treating an already-absent path as success. A path
+// that cannot be removed (e.g. a non-empty directory) is a real error.
+func removeInTree(wt, path string) error {
+	if err := os.Remove(filepath.Join(wt, filepath.FromSlash(path))); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// runTest runs the consent-hashed test command narrowed to the single target test, verbosely. The
+// test name is regexp-quoted and anchored so -run selects exactly that test and cannot inject a flag
+// (it is one argv element, never a shell string); -v makes the target's own `=== RUN`/`--- PASS`/
+// `--- FAIL` markers appear, so classify keys on the target rather than inferring from suite noise.
 func (r Reproducer) runTest(ctx context.Context, dir, test string) (int, string, error) {
-	argv := append(append([]string(nil), r.TestCmd...), "-run", "^"+regexp.QuoteMeta(test)+"$")
+	argv := append(append([]string(nil), r.TestCmd...), "-run", "^"+regexp.QuoteMeta(test)+"$", "-v")
 	if r.Run != nil {
 		return r.Run(ctx, dir, argv)
 	}
@@ -314,20 +340,26 @@ const (
 	clsOther                    // exited non-zero but no assertion marker — fail closed on the assertion axis
 )
 
-// classify reads a `go test` run. The compile check comes BEFORE the assertion check: a run whose
-// package failed to build can still print "--- FAIL:" lines from other packages, and accepting that
-// as a valid fail-before is exactly the hole spec §9.3(b) closes.
-func classify(code int, out string) failClass {
+// classify reads a verbose `go test -run ^<test>$ -v` run, keyed on the TARGET test's own markers.
+// Because TestCmd is the repo-wide command (e.g. `go test ./...`), sibling packages print
+// "[no test files]" and "no tests to run" for reasons unrelated to the target — so inferring the
+// target's fate from those strings misfires in any multi-package repo. Instead:
+//   - `=== RUN   <test>` proves the target actually ran;
+//   - the compile check comes BEFORE the assertion check, so a build-failed run that still prints a
+//     `--- FAIL:` from another package is compile, not a valid fail-before (the hole spec §9.3(b) closes);
+//   - `--- FAIL: <test>` proves the target itself failed an assertion.
+func classify(test string, code int, out string) failClass {
+	ran := strings.Contains(out, "=== RUN   "+test)
 	if code == 0 {
-		if noTestsRun(out) {
-			return clsNoTest
+		if ran {
+			return clsPassed
 		}
-		return clsPassed
+		return clsNoTest // exit 0 but the target never ran → it is absent from the tree
 	}
 	if isCompileError(out) {
 		return clsCompile
 	}
-	if strings.Contains(out, "--- FAIL:") {
+	if ran && strings.Contains(out, "--- FAIL: "+test) {
 		return clsAssert
 	}
 	return clsOther
@@ -339,12 +371,6 @@ func isCompileError(out string) bool {
 	return strings.Contains(out, "[build failed]") ||
 		strings.Contains(out, "[setup failed]") ||
 		strings.Contains(out, "[vet failed]")
-}
-
-// noTestsRun reports that `go test` ran but the -run filter selected no test, so the named test is
-// not in the tree (a bad claim), distinct from a test that ran and passed.
-func noTestsRun(out string) bool {
-	return strings.Contains(out, "no tests to run") || strings.Contains(out, "no test files")
 }
 
 // runProc runs argv in dir with a timeout, returning the exit code and combined output. A run killed

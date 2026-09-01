@@ -76,6 +76,10 @@ func TestReproduceRealGitProven(t *testing.T) {
 	pre := map[string]string{
 		"go.mod":  goMod,
 		"calc.go": "package fixture\n\nfunc Allow(n int) bool { return n <= 10 }\n",
+		// A second package with NO test files makes `go test ./...` print "[no test files]" — the
+		// shape every real multi-package repo has, and what makes classify key on the target's own
+		// RUN marker rather than the suite-wide "no test files" / "no tests to run" noise.
+		"util/util.go": "package util\n\nfunc Noop() {}\n",
 	}
 	post := map[string]string{
 		"calc.go":      "package fixture\n\nfunc Allow(n int) bool { return n < 10 }\n",
@@ -87,7 +91,49 @@ func TestReproduceRealGitProven(t *testing.T) {
 		t.Fatalf("Reproduce: %v", err)
 	}
 	if !res[0].Proven || res[0].Outcome != PinProven {
-		t.Fatalf("a genuine fail-before/pass-after must be proven: %+v", res[0])
+		t.Fatalf("a genuine fail-before/pass-after must be proven even in a multi-package repo: %+v", res[0])
+	}
+}
+
+// The multi-package regression, made explicit: a renamed test file (delete + add, rename detection
+// off) must not leave both copies present during the fail-before run — the moved test would redeclare
+// and fail to compile, scoring a valid reproduction as malformed. Applying the test deletion in step
+// (b) keeps it proven.
+func TestReproduceRealGitRenamedTestFile(t *testing.T) {
+	pre := map[string]string{
+		"go.mod":      goMod,
+		"calc.go":     "package fixture\n\nfunc Allow(n int) bool { return n <= 10 }\n",
+		"old_test.go": "package fixture\n\nimport \"testing\"\n\nfunc TestBoundary(t *testing.T) {\n\tif Allow(10) {\n\t\tt.Fatal(\"10 must not be allowed\")\n\t}\n}\n",
+	}
+	post := map[string]string{
+		"calc.go":     "package fixture\n\nfunc Allow(n int) bool { return n < 10 }\n",
+		"old_test.go": "", // deleted below
+		"new_test.go": "package fixture\n\nimport \"testing\"\n\nfunc TestBoundary(t *testing.T) {\n\tif Allow(10) {\n\t\tt.Fatal(\"10 must not be allowed\")\n\t}\n}\n",
+	}
+	dir := t.TempDir()
+	realGit(t, dir, "init", "-q", "-b", "main")
+	for rel, body := range pre {
+		writeFile(t, dir, rel, body)
+	}
+	realGit(t, dir, "add", "-A")
+	realGit(t, dir, "commit", "-qm", "pre")
+	preSHA := trim(realGit(t, dir, "rev-parse", "HEAD"))
+	// Move the test to a new file: a delete plus an add of the SAME test function.
+	if err := os.Remove(filepath.Join(dir, "old_test.go")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "new_test.go", post["new_test.go"])
+	writeFile(t, dir, "calc.go", post["calc.go"])
+	realGit(t, dir, "add", "-A")
+	realGit(t, dir, "commit", "-qm", "post")
+	postSHA := trim(realGit(t, dir, "rev-parse", "HEAD"))
+
+	res, err := realReproducer(dir, preSHA, postSHA).Reproduce(context.Background(), []Proof{{Test: "TestBoundary"}})
+	if err != nil {
+		t.Fatalf("Reproduce: %v", err)
+	}
+	if !res[0].Proven || res[0].Outcome != PinProven {
+		t.Fatalf("a renamed test file must not redeclare during fail-before; expected proven: %+v", res[0])
 	}
 }
 

@@ -13,7 +13,16 @@ import (
 func fakeExec(t *testing.T) func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
 	t.Helper()
 	return func(_ context.Context, _ string, _ []string, args ...string) ([]byte, []byte, int, error) {
-		switch args[0] {
+		// Skip any leading `-c <value>` config pairs the engine prefixes onto a call.
+		i := 0
+		for i+1 < len(args) && args[i] == "-c" {
+			i += 2
+		}
+		verb := ""
+		if i < len(args) {
+			verb = args[i]
+		}
+		switch verb {
 		case "diff":
 			return []byte("A\tpkg/x_test.go\n"), nil, 0, nil
 		case "show":
@@ -41,9 +50,9 @@ func TestReproductionProverMapsProven(t *testing.T) {
 		Run: func(_ context.Context, _ string, _ []string) (int, string, error) {
 			calls++
 			if calls == 1 {
-				return 1, "--- FAIL: T\n", nil
+				return 1, "=== RUN   T\n--- FAIL: T\n", nil
 			}
-			return 0, "ok\n", nil
+			return 0, "=== RUN   T\n--- PASS: T\nok\n", nil
 		},
 	}
 	spec := ProveSpec{Dir: t.TempDir(), TestCmd: []string{"go", "test", "./..."}, PreFixSHA: "pre", PostFixSHA: "post"}
@@ -80,9 +89,9 @@ func TestProversRoutesByKind(t *testing.T) {
 			Run: func(_ context.Context, _ string, _ []string) (int, string, error) {
 				reproCalls++
 				if reproCalls == 1 {
-					return 1, "--- FAIL: T\n", nil
+					return 1, "=== RUN   T\n--- FAIL: T\n", nil
 				}
-				return 0, "ok\n", nil
+				return 0, "=== RUN   T\n--- PASS: T\nok\n", nil
 			},
 		},
 	}
