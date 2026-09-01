@@ -734,14 +734,16 @@ func (agentEdit) Reduce(s run.Snapshot, out any) (run.Delta, error) {
 	pins := make([]run.DifferentialProof, len(o.Pins))
 	for i, p := range o.Pins {
 		if p.Kind == run.ProofPin && p.Pin != nil {
-			if p.Pin.Finding == "" {
-				p.Pin.Finding = p.Finding
-			}
+			// The outer proof Finding is the canonical chain link (what Snapshot.Unproven clears by), so
+			// it is AUTHORITATIVE over a nested pin.finding — set, never merely defaulted. This keeps
+			// Pin.ID (the hash of the pin's OWN {Finding,File,From,To}) consistent with Pin.Finding: a
+			// stray nested finding cannot make the id hash a different value than the field it names.
+			p.Pin.Finding = p.Finding
 			if p.Pin.Test == "" {
 				p.Pin.Test = p.Test
 			}
 			if p.Pin.ID == "" {
-				p.Pin.ID = run.PinID(p.Finding, p.Pin.File, p.Pin.From, p.Pin.To)
+				p.Pin.ID = run.PinID(p.Pin.Finding, p.Pin.File, p.Pin.From, p.Pin.To)
 			}
 		}
 		// A deletion's ParentSHA is the fix's pre-fix commit (FixEntryHead, set on entry to the fix
