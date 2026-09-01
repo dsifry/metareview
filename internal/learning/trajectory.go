@@ -1,10 +1,10 @@
 package learning
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/dsifry/metareview/internal/findings"
+	"github.com/dsifry/metareview/internal/fsm/judge"
 )
 
 // trajectoryFlags is the §9.7 trajectory monitor's derivable half: advisory flags read directly from
@@ -56,58 +56,63 @@ func selfServed(r findings.Record) bool {
 	return r.OverrideRequestedBy == "" || strings.EqualFold(r.OverrideRequestedBy, r.OverrideGrantedBy)
 }
 
-// whitespaceOnly reports whether a unified diff changes only whitespace and/or comments — i.e. after
-// dropping blank and comment-only lines and collapsing interior whitespace, the added and removed CODE
-// lines are identical (both may be empty, e.g. a comment-only edit). A diff with no changes at all is
-// not flagged (there is nothing to flag); a substantive code change (added ≠ removed) is not flagged.
+// whitespaceOnly reports whether a unified diff changes only whitespace and/or comments. It compares,
+// PER FILE and IN ORDER, the normalized code lines the diff added vs removed (via the shared diff
+// parser, which correctly separates `+++`/`---` file headers from `++i`/`--i` content). A file whose
+// ordered added and removed code lines are identical after normalization changed only whitespace/
+// comments; if ANY changed file's code lines differ (a real edit, an added/removed line, a move that
+// lands lines in only one file, or a reorder — order-sensitive) the diff is substantive and not
+// flagged. A diff with no content lines is not flagged (nothing to flag).
 func whitespaceOnly(diff string) bool {
-	var added, removed []string
-	changed := false
-	for _, line := range strings.Split(diff, "\n") {
-		switch {
-		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
-			// unified-diff file headers, not content
-		case strings.HasPrefix(line, "+"):
-			changed = true
-			if n := normalizeCode(line[1:]); n != "" {
-				added = append(added, n)
-			}
-		case strings.HasPrefix(line, "-"):
-			changed = true
-			if n := normalizeCode(line[1:]); n != "" {
-				removed = append(removed, n)
-			}
-		}
-	}
-	if !changed {
+	paths := judge.ChangedPaths(diff)
+	if len(paths) == 0 {
 		return false
 	}
-	return equalMultiset(added, removed)
+	sawContent := false
+	for _, p := range paths {
+		add := judge.AddedLinesInFile(diff, p)
+		rem := judge.RemovedLinesInFile(diff, p)
+		if len(add) > 0 || len(rem) > 0 {
+			sawContent = true
+		}
+		if !equalSeq(codeLines(add), codeLines(rem)) {
+			return false // a substantive change in this file
+		}
+	}
+	return sawContent
 }
 
-// normalizeCode strips a source line to its substantive content: "" for a blank or comment-only line
-// (Go/C/JS `//`, shell/Python `#`, or a block-comment continuation `*`), otherwise the line with
-// interior whitespace collapsed. Comment prefixes cover the languages metareview reviews; the point is
-// that a change confined to comments/whitespace normalizes both sides to the same code.
+// codeLines drops blank and full-line comment lines and collapses interior whitespace, preserving
+// order. A full-line comment is `//` followed by a space (or a bare `//`) — NOT a Go directive such as
+// `//go:build` (`//` immediately followed by a non-space), which is meaningful and kept. Ambiguous
+// prefixes (`*` pointer deref, `#` JS-private/preprocessor, `/*`) are deliberately NOT treated as
+// comments — a change to them is real code.
+func codeLines(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if n := normalizeCode(l); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 func normalizeCode(s string) string {
 	t := strings.TrimSpace(s)
-	if t == "" || strings.HasPrefix(t, "//") || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "*") || strings.HasPrefix(t, "/*") {
+	if t == "" || t == "//" || strings.HasPrefix(t, "// ") {
 		return ""
 	}
 	return strings.Join(strings.Fields(t), " ")
 }
 
-// equalMultiset reports whether two string slices hold the same elements with the same multiplicities.
-func equalMultiset(a, b []string) bool {
+// equalSeq reports whether two string slices are identical in length, contents, AND order (so a
+// reorder of the same lines is NOT equal).
+func equalSeq(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	ac := append([]string(nil), a...)
-	bc := append([]string(nil), b...)
-	sort.Strings(ac)
-	sort.Strings(bc)
-	for i := range ac {
-		if ac[i] != bc[i] {
+	for i := range a {
+		if a[i] != b[i] {
 			return false
 		}
 	}

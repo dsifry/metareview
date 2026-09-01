@@ -68,15 +68,44 @@ func TestTrajectoryFlagsAdvisoryAndDiscriminating(t *testing.T) {
 		}
 	}
 	// A substantive diff with only a clean override → no flags at all (no over-flagging).
-	if got := trajectoryFlags("@@ -1,1 +1,1 @@\n-x := 1\n+x := 2\n", []findings.Record{{OverrideRequestedBy: "alice", OverrideGrantedBy: "bob"}}); len(got) != 0 {
+	sub := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,1 @@\n-x := 1\n+x := 2\n"
+	if got := trajectoryFlags(sub, []findings.Record{{OverrideRequestedBy: "alice", OverrideGrantedBy: "bob"}}); len(got) != 0 {
 		t.Fatalf("a substantive fix with a clean override must raise no flags: %+v", got)
+	}
+}
+
+// The whitespace-only heuristic must not over-flag the fragile cases Bugbot found: content lines that
+// look like diff headers (`++i`/`--i`), ambiguous prefixes (`*p`, `//go:build` directives), and
+// file-moves/reorders (per-file, order-sensitive).
+func TestWhitespaceOnlyRobustness(t *testing.T) {
+	no := map[string]string{
+		"real pointer-deref edit":      "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,1 @@\n-\t*p = old\n+\t*p = new\n",
+		"go:build directive edit":      "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,1 @@\n-//go:build linux\n+//go:build windows\n",
+		"increment content edit":       "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,1 @@\n-\t--i\n+\t++i\n",
+		"reorder within a file":        "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,2 @@\n-a()\n-b()\n+b()\n+a()\n",
+		"move across files (add side)": "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -0,0 +1,1 @@\n+moved()\n",
+	}
+	for name, d := range no {
+		if whitespaceOnly(d) {
+			t.Fatalf("%s must NOT be flagged whitespace-only", name)
+		}
+	}
+	// True positives still fire: a pure reindent, and a normal comment-only edit.
+	yes := map[string]string{
+		"reindent":     "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,1 @@\n-\tx := 1\n+  x := 1\n",
+		"comment-only": "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,2 @@\n-// old note\n+// new note\n code()\n",
+	}
+	for name, d := range yes {
+		if !whitespaceOnly(d) {
+			t.Fatalf("%s must be flagged whitespace-only", name)
+		}
 	}
 }
 
 func TestExtractCandidatesEmitsTrajectoryFlags(t *testing.T) {
 	in := Input{
 		Findings: []findings.Record{{ID: "f1", OverrideRequestedBy: "alice", OverrideGrantedBy: "alice"}},
-		Diff:     "@@ -1,1 +1,1 @@\n-\tx := 1\n+ x := 1\n",
+		Diff:     "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,1 @@\n-\tx := 1\n+ x := 1\n",
 	}
 	res := ExtractCandidates(in)
 	if len(res.Flags) != 2 {
