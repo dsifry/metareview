@@ -86,6 +86,11 @@ type KindInfo struct {
 	// the cmd kind forks a subprocess and carries no model — so callers that validate judge
 	// configuration (machine's Preflight) must key on this rather than on Exec.
 	NeedsJudge bool
+	// FixScopedDiff marks a kind whose diff must be the FIX's own diff (FixEntryHead..head), not the
+	// reviewed change (base..head). The prove kind sets it: its pin added-line bind and owed-pin check
+	// must see what the fix changed, which in a loop differs from base..head (a restore-type fix nets
+	// out against the original base). The machine falls back to base..head when FixEntryHead is unset.
+	FixScopedDiff bool
 }
 
 // Options parameterizes Parse. Kinds is required.

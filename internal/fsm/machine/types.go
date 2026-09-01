@@ -22,7 +22,8 @@ type Instructions struct {
 	OutputSchema json.RawMessage `json:"output_schema"`
 }
 
-// Diff is the base..head diff handed to kinds, cut at MaxDiffBytes.
+// Diff is the diff handed to a kind, cut at MaxDiffBytes: base..head for most kinds, or the fix's own
+// diff (FixEntryHead..head) for a kind whose KindInfo.FixScopedDiff is set (prove) — see runNode.
 type Diff struct {
 	Text      string
 	Truncated bool
