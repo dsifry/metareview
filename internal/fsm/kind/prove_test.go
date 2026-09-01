@@ -740,3 +740,11 @@ func TestProveTestDeletionRecheckErrorAborts(t *testing.T) {
 		t.Fatal("a re-verification error must abort the run")
 	}
 }
+
+// The prove kind must declare FixScopedDiff so the machine binds its pins/owed-pin check against the
+// fix's own diff (FixEntryHead..head), not base..head. Guards against the flag being dropped.
+func TestProveKindInfoFixScoped(t *testing.T) {
+	if !(proveKind{}).Info().FixScopedDiff {
+		t.Fatal("proveKind.Info().FixScopedDiff must be true")
+	}
+}

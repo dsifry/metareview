@@ -657,6 +657,12 @@ func (s *session) runNode(node *workflow.Node, head string) (AdvanceResult, bool
 		// pre-bug commit, so a fix that restores or re-touches code nets out against base and its added
 		// lines vanish — which silently defeats the pin added-line bind and owesPin (found by the first
 		// live shakedown). FixEntryHead is the pre-fix anchor, so FixEntryHead..head is the fix's own diff.
+		//
+		// FixEntryHead is empty by design on a fork into a POST-fix state (the fix baseline is cleared so
+		// commit_exists fails closed until re-established — see the fork-safety invariant), so this falls
+		// back to base..head there. That is consistent: a failed-proof retry is a fork back into the FIX
+		// node (which re-baselines FixEntryHead via FixBaselineData, restoring the fix-scoped diff), not a
+		// re-run of prove on the same commit.
 		diffFrom := snap.BaseSHA
 		if kind.Info().FixScopedDiff && snap.FixEntryHead != "" {
 			diffFrom = snap.FixEntryHead

@@ -43,7 +43,21 @@ Declarative and generic: the machine keys on `Info().FixScopedDiff`, not on the 
   `proven=1, unproven=0` (the pin is now in the §9.6 killed-mutant set). The deterministic proof
   actually gated the outcome — no longer riding on the LLM verify.
 
+## Shepherding round 1
+
+- **Cursor Bugbot (Medium): "Prove retries lose the fix-scoped diff."** Correct observation, but it is
+  the *designed* fork-safety behavior, not a regression: a fork into a post-fix state clears
+  `FixEntryHead` on purpose so `commit_exists` fails closed until the fix baseline is re-established
+  (fork_test.go:466). The productive retry for a failed proof is a fork back into the FIX node, which
+  re-baselines `FixEntryHead` via `FixBaselineData` — and then the fix-scoped diff works. Re-running
+  `prove` on the same commit (a fork `--from prove`) cannot change a pin outcome anyway. Documented the
+  fallback explicitly at the branch so it is not mistaken for an oversight; no code change to the path.
+- **CodeRabbit (Minor/Trivial):** updated the stale "Diff is the base..head diff" contract comment in
+  `types.go` (it is now per-kind); added a `proveKind.Info().FixScopedDiff` assertion (catches the flag
+  being dropped, which the generic machine test cannot); fixed an MD022 blank-line nit in this doc.
+
 ## Left as-is (deliberately, pending the retry we just did)
+
 The malformed-pin-is-advisory semantics are unchanged: with the binding fixed, `owesPin` now correctly
 sees the fix's added line and would demand a proof (blocking) for a fix that adds a line in the
 finding's own file, so a real proofless fix blocks via the owed-pin marker — no need to flip
