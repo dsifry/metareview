@@ -11,9 +11,12 @@ func TestForSelectsAndFailsClosed(t *testing.T) {
 	if !ok || c == nil || c.Name() != "go" {
 		t.Fatalf("For(go) must return the Go convention, got %v ok=%v", c, ok)
 	}
+	if c, ok := For("typescript"); !ok || c == nil || c.Name() != "typescript" {
+		t.Fatalf("For(typescript) must return the TS convention, got %v ok=%v", c, ok)
+	}
 	// The load-bearing negative: an unknown or empty name returns (nil,false) so the caller fails
-	// closed — never a silent default to Go.
-	if c, ok := For("typescript"); ok || c != nil {
+	// closed — never a silent default to a language.
+	if c, ok := For("cobol"); ok || c != nil {
 		t.Fatal("an unregistered convention must return (nil,false)")
 	}
 	if c, ok := For(""); ok || c != nil {
