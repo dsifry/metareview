@@ -84,6 +84,10 @@ func TestWhitespaceOnlyRobustness(t *testing.T) {
 		"increment content edit":       "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,1 @@\n-\t--i\n+\t++i\n",
 		"reorder within a file":        "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,2 @@\n-a()\n-b()\n+b()\n+a()\n",
 		"move across files (add side)": "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -0,0 +1,1 @@\n+moved()\n",
+		// A move between files literally under `a/` and `b/` dirs: path-normalization would merge them,
+		// but per-raw-section comparison keeps them distinct → substantive (not flagged).
+		"move between a/ and b/ dirs": "diff --git a/a/foo.go b/a/foo.go\n--- a/a/foo.go\n+++ b/a/foo.go\n@@ -1,1 +0,0 @@\n-moved()\n" +
+			"diff --git a/b/foo.go b/b/foo.go\n--- a/b/foo.go\n+++ b/b/foo.go\n@@ -0,0 +1,1 @@\n+moved()\n",
 	}
 	for name, d := range no {
 		if whitespaceOnly(d) {
