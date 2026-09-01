@@ -20,14 +20,18 @@ import (
 var proveNode = &workflow.Node{Name: "prove", Kind: Prove, Exec: "fork"}
 
 type mockProver struct {
-	results      []run.ProofResult
-	err          error
-	gotProofs    []run.DifferentialProof
-	gotSpec      ProveSpec
-	reproResults []run.ProofResult
-	reproErr     error
-	gotRepro     []run.DifferentialProof
-	gotReproSpec ProveSpec
+	results       []run.ProofResult
+	err           error
+	gotProofs     []run.DifferentialProof
+	gotSpec       ProveSpec
+	reproResults  []run.ProofResult
+	reproErr      error
+	gotRepro      []run.DifferentialProof
+	gotReproSpec  ProveSpec
+	deleteResults []run.ProofResult
+	deleteErr     error
+	gotDelete     []run.DifferentialProof
+	gotDeleteSpec ProveSpec
 }
 
 func (m *mockProver) ProvePins(_ context.Context, proofs []run.DifferentialProof, spec ProveSpec) ([]run.ProofResult, error) {
@@ -44,6 +48,14 @@ func (m *mockProver) ProveReproductions(_ context.Context, proofs []run.Differen
 		return nil, m.reproErr
 	}
 	return m.reproResults, nil
+}
+
+func (m *mockProver) ProveDeletions(_ context.Context, proofs []run.DifferentialProof, spec ProveSpec) ([]run.ProofResult, error) {
+	m.gotDelete, m.gotDeleteSpec = proofs, spec
+	if m.deleteErr != nil {
+		return nil, m.deleteErr
+	}
+	return m.deleteResults, nil
 }
 
 func pinDP(finding, from string) run.DifferentialProof {
@@ -212,20 +224,72 @@ func TestProveReproductionErrorAborts(t *testing.T) {
 	}
 }
 
-// A deletion proof still has no engine in this build: it is unverifiable (blocking), never a silent
-// pass, and never reaches either prover.
-func TestProveDeletionIsUnverifiableInThisBuild(t *testing.T) {
-	p := run.DifferentialProof{ID: "d1", Finding: "f1", Kind: run.ProofDeletion, Deletes: &run.DeletionRef{File: "a.go", Removed: "gone"}}
-	mp := &mockProver{}
-	d := runProve(t, run.Snapshot{Unproven: []run.DifferentialProof{p}}, "@@\n+whatever\n", mp)
+// A deletion engine error aborts the run rather than being swallowed as a pass.
+func TestProveDeletionErrorAborts(t *testing.T) {
+	p := deletionDP("f1", "a.go", "gone")
+	mp := &mockProver{deleteErr: errors.New("worktree exploded")}
+	r := mustNew(t, judge.NewMock(judge.Script{}), true)
+	r.execs[Prove] = &proveExec{prover: mp, symptom: &fakeReviewer{decision: true}}
+	ex, _ := r.Executor(Prove)
+	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, Confirmed: []run.Bug{{ID: "f1", File: "a.go"}}, FixEntryHead: "pre", Head: "post"}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{Snap: snap, Node: proveNode, Diff: machine.Diff{Text: "@@\n+x\n"}, Audit: (&audits{}).fn}); err == nil {
+		t.Fatal("a deletion engine error must abort the run")
+	}
+}
+
+func deletionDP(finding, file, removed string) run.DifferentialProof {
+	return run.DifferentialProof{ID: "d-" + finding, Finding: finding, Kind: run.ProofDeletion, Test: "T", Deletes: &run.DeletionRef{File: file, Removed: removed}}
+}
+
+// A deletion in the finding's OWN file routes to the deletion engine (ProveDeletions), never the pin
+// prover, with the pre/post-fix anchors on the spec. A proven deletion emits no marker.
+func TestProveDeletionRoutesToDeletionEngine(t *testing.T) {
+	p := deletionDP("f1", "a.go", "gone")
+	mp := &mockProver{deleteResults: []run.ProofResult{provenResult(p)}}
+	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, Confirmed: []run.Bug{{ID: "f1", File: "a.go"}}, FixEntryHead: "preSHA", Head: "postSHA"}
+	d := runProve(t, snap, "@@\n+whatever\n", mp)
 	if len(mp.gotProofs) != 0 || len(mp.gotRepro) != 0 {
-		t.Fatalf("a deletion proof must reach no prover: pins %+v repro %+v", mp.gotProofs, mp.gotRepro)
+		t.Fatalf("a deletion must reach neither the pin nor the reproduction prover: %+v %+v", mp.gotProofs, mp.gotRepro)
 	}
-	if len(d.PinResults) != 1 || d.PinResults[0].Outcome != run.PinUnverifiable {
-		t.Fatalf("a deletion proof must be unverifiable here: %+v", d.PinResults)
+	if len(mp.gotDelete) != 1 || mp.gotDeleteSpec.PreFixSHA != "preSHA" || mp.gotDeleteSpec.PostFixSHA != "postSHA" {
+		t.Fatalf("a deletion must reach the deletion engine with the anchors: %+v %+v", mp.gotDelete, mp.gotDeleteSpec)
 	}
-	if len(d.Findings) != 1 || d.Findings[0].Category != run.CategoryUnverifiable {
-		t.Fatalf("an unverifiable proof must emit an unverifiable marker: %+v", d.Findings)
+	if len(d.Findings) != 0 || len(d.PinResults) != 1 || !d.PinResults[0].Proven {
+		t.Fatalf("a proven deletion stands with no marker: results %+v findings %+v", d.PinResults, d.Findings)
+	}
+}
+
+// The own-file bind: a deletion whose file is NOT the finding's own file is malformed and never reaches
+// the engine — the own-file guarantee (§9.1) that keeps the proven code and the class gate's line the same.
+func TestProveDeletionOwnFileBind(t *testing.T) {
+	p := deletionDP("f1", "other.go", "gone")
+	mp := &mockProver{}
+	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, Confirmed: []run.Bug{{ID: "f1", File: "a.go"}}, FixEntryHead: "pre", Head: "post"}
+	d := runProve(t, snap, "@@\n+x\n", mp)
+	if len(mp.gotDelete) != 0 {
+		t.Fatalf("a cross-file deletion must NOT reach the engine: %+v", mp.gotDelete)
+	}
+	if len(d.PinResults) != 1 || d.PinResults[0].Outcome != run.PinMalformed {
+		t.Fatalf("a deletion outside the finding's file must be malformed: %+v", d.PinResults)
+	}
+	// Unlike a malformed PIN (advisory), a malformed DELETION BLOCKS — the deletion IS the fix's proof
+	// and a pure deletion has no owed-pin backup, so an advisory marker would be a silent pass.
+	if len(d.Findings) != 1 || d.Findings[0].Category != run.CategoryUnprovenFix || !run.ProofCategoryBlocks(d.Findings[0].Category) {
+		t.Fatalf("a malformed deletion must emit a BLOCKING marker: %+v", d.Findings)
+	}
+}
+
+// An unknown proof kind cannot occur through decode (the one-of is enforced), but if one reached the
+// node it must ABORT (surface the invariant violation), never be silently skipped into a pass.
+func TestProveUnknownKindAborts(t *testing.T) {
+	p := run.DifferentialProof{ID: "u1", Finding: "f1", Kind: run.ProofPin, Pin: &run.Pin{File: "a.go", From: "x", To: "y", Test: "T"}}
+	p.Kind = "mystery" // force an unknown kind past the decode-time one-of check
+	r := mustNew(t, judge.NewMock(judge.Script{}), true)
+	r.execs[Prove] = &proveExec{prover: &mockProver{}, symptom: &fakeReviewer{decision: true}}
+	ex, _ := r.Executor(Prove)
+	_, err := ex.Execute(context.Background(), machine.ExecInput{Snap: run.Snapshot{Unproven: []run.DifferentialProof{p}}, Node: proveNode, Diff: machine.Diff{Text: "@@\n+x\n"}, Audit: (&audits{}).fn})
+	if !errs.Is(err, machine.CodeExecutorFailed) {
+		t.Fatalf("an unknown kind must abort: %v", err)
 	}
 }
 
@@ -555,5 +619,15 @@ func TestProveReviewerConfigErrorAborts(t *testing.T) {
 	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, FixEntryHead: "pre", Head: "post"}
 	if _, err := ex.Execute(context.Background(), machine.ExecInput{Snap: snap, Node: proveNode, Diff: machine.Diff{Text: "@@\n+x\n"}, Audit: (&audits{}).fn}); !errs.Is(err, judge.CodeJudgeModel) {
 		t.Fatalf("a reviewer config error must abort (surface), not veto: %v", err)
+	}
+}
+
+// A malformed REPRODUCTION blocks (it is the fix's proof), unlike a malformed pin which is advisory.
+func TestProveMalformedReproductionBlocks(t *testing.T) {
+	p := reproDP("f1")
+	mp := &mockProver{reproResults: []run.ProofResult{{Proof: p, Proven: false, Outcome: run.PinMalformed, Detail: "compile-error fail-before"}}}
+	d := runProve(t, run.Snapshot{Unproven: []run.DifferentialProof{p}, FixEntryHead: "pre", Head: "post"}, "@@\n+x\n", mp)
+	if len(d.Findings) != 1 || d.Findings[0].Category != run.CategoryUnprovenFix || !run.ProofCategoryBlocks(d.Findings[0].Category) {
+		t.Fatalf("a malformed reproduction must block, not be advisory: %+v", d.Findings)
 	}
 }

@@ -523,3 +523,56 @@ func TestClassifyAndPredicates(t *testing.T) {
 		t.Fatal("a non-target --- FAIL line must not count as the target's assertion")
 	}
 }
+
+// ScopeSuite runs the full test command (no -run) on both trees: green→green passes, green→red blocks,
+// a red or unrunnable baseline is unverifiable.
+func TestScopeSuite(t *testing.T) {
+	newR := func(g *fakeGit, run func(context.Context, string, []string) (int, string, error)) Reproducer {
+		return Reproducer{Dir: t.TempDir(), PreFixSHA: "pre", PostFixSHA: "post", TestCmd: []string{"go", "test", "./..."},
+			Git: g.run, Run: run, MkWork: func() (string, error) { return t.TempDir(), nil }}
+	}
+	okGit := func() *fakeGit { return &fakeGit{} }
+
+	// green baseline, green post → proven.
+	seq := &seqRunner{resp: []runResp{{code: 0, out: "ok\n"}, {code: 0, out: "ok\n"}}}
+	if r := newR(okGit(), seq.run).ScopeSuite(context.Background()); r.Outcome != PinProven {
+		t.Fatalf("green→green must be proven: %+v", r)
+	}
+	// the scope run must NOT carry a -run filter (it is the WHOLE suite).
+	for _, argv := range seq.gotArgv {
+		if hasFlagValue(argv, "-run", argv[len(argv)-1]) || (len(argv) > 0 && argv[len(argv)-1] == "-v") {
+			t.Fatalf("the scope suite must run the full command, no -run/-v: %v", argv)
+		}
+	}
+	// green baseline, red post → survived (regressed an existing test).
+	seq = &seqRunner{resp: []runResp{{code: 0, out: "ok\n"}, {code: 1, out: "--- FAIL: TestOther\n"}}}
+	if r := newR(okGit(), seq.run).ScopeSuite(context.Background()); r.Outcome != PinSurvived || !strings.Contains(r.Detail, "green→red") {
+		t.Fatalf("green→red must be survived: %+v", r)
+	}
+	// red baseline → unverifiable (cannot attribute).
+	seq = &seqRunner{resp: []runResp{{code: 1, out: "--- FAIL: TestPre\n"}}}
+	if r := newR(okGit(), seq.run).ScopeSuite(context.Background()); r.Outcome != PinUnverifiable || !strings.Contains(r.Detail, "not green") {
+		t.Fatalf("a red baseline must be unverifiable: %+v", r)
+	}
+	// baseline run error → unverifiable.
+	seq = &seqRunner{resp: []runResp{{err: errors.New("boom")}}}
+	if r := newR(okGit(), seq.run).ScopeSuite(context.Background()); r.Outcome != PinUnverifiable || !strings.Contains(r.Detail, "baseline") {
+		t.Fatalf("a baseline exec error must be unverifiable: %+v", r)
+	}
+	// post run error → unverifiable.
+	seq = &seqRunner{resp: []runResp{{code: 0, out: "ok\n"}, {err: errors.New("boom")}}}
+	if r := newR(okGit(), seq.run).ScopeSuite(context.Background()); r.Outcome != PinUnverifiable || !strings.Contains(r.Detail, "post-deletion") {
+		t.Fatalf("a post exec error must be unverifiable: %+v", r)
+	}
+	// worktree add failure → unverifiable (surfaced through the baseline run).
+	if r := newR(&fakeGit{addCode: 128}, (&seqRunner{}).run).ScopeSuite(context.Background()); r.Outcome != PinUnverifiable {
+		t.Fatalf("a worktree add failure must be unverifiable: %+v", r)
+	}
+	// misconfiguration / missing anchor.
+	if r := (Reproducer{PreFixSHA: "pre", PostFixSHA: "post"}).ScopeSuite(context.Background()); r.Outcome != PinUnverifiable {
+		t.Fatalf("no test command → unverifiable: %+v", r)
+	}
+	if r := (Reproducer{TestCmd: []string{"go", "test"}}).ScopeSuite(context.Background()); r.Outcome != PinUnverifiable {
+		t.Fatalf("missing anchor → unverifiable: %+v", r)
+	}
+}

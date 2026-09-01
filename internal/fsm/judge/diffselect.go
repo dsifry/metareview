@@ -236,6 +236,34 @@ func AddedLinesInFile(diff, path string) []string {
 	return out
 }
 
+// RemovedLinesInFile returns the contents of the lines the diff REMOVED from a specific file — the
+// mirror of AddedLinesInFile, for the §9.4 deletion binding (a deletion's Removed span must appear as
+// "-" lines in the fix's own diff for the file). It keys file sections on the "diff --git" header via
+// the shared parser, so a removed line whose own content begins with "---" is a hunk line, never
+// mistaken for the "--- a/file" section header (that header lives in block.header, not the hunks).
+// Each returned string is the removed line without its leading "-". A file the diff does not touch
+// yields none.
+func RemovedLinesInFile(diff, path string) []string {
+	want := NormalizePath(path)
+	var out []string
+	for _, b := range parseUnifiedDiff(diff) {
+		if NormalizePath(b.path) != want {
+			continue
+		}
+		for _, h := range b.hunks {
+			for _, line := range h.lines {
+				// Hunk lines are "@@…", " context", "-removed", or "+added"; only "-" marks a removed
+				// line (the "@@" header does not start with "-"), so a removed "---foo" content line is
+				// included.
+				if strings.HasPrefix(line, "-") {
+					out = append(out, line[1:])
+				}
+			}
+		}
+	}
+	return out
+}
+
 func ChangedPaths(diff string) []string {
 	blocks := parseUnifiedDiff(diff)
 	out := make([]string, 0, len(blocks))

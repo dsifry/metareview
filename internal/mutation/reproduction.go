@@ -282,6 +282,72 @@ func (r Reproducer) reproduceOne(ctx context.Context, p Proof, part partition) R
 	}
 }
 
+// ScopeResult is the whole-suite over-deletion scope check's verdict (§9.4/§9.6). Proven = the suite
+// is green before AND after; Survived = the change regressed an existing test (green→red); Unverifiable
+// = a red/unbuildable baseline (nothing can be attributed) or a tree that could not answer.
+type ScopeResult struct {
+	Outcome Outcome
+	Detail  string
+}
+
+// ScopeSuite runs the FULL consent-hashed test command (NO -run filter) on both the pre-fix and
+// post-fix trees to guard over-deletion. A deletion that fixes the reported bug can still break some
+// OTHER existing test — a proven deletion means "removing this fixed the bug and broke no existing
+// test", not "globally safe" (§9.4 honest-limits). The pre-fix suite MUST be green: a red baseline
+// cannot attribute a later failure to the change (fail closed). A green baseline with a green post-fix
+// suite passes; a green→red transition blocks (survived). It keys on exit code alone — no per-test
+// identity — which is exactly the all-or-nothing contract of the consent-hashed command (§4.2).
+func (r Reproducer) ScopeSuite(ctx context.Context) ScopeResult {
+	if len(r.TestCmd) == 0 {
+		return ScopeResult{PinUnverifiable, "no test command configured, so the whole-suite scope check cannot run"}
+	}
+	if r.PreFixSHA == "" || r.PostFixSHA == "" {
+		return ScopeResult{PinUnverifiable, "no pre/post-fix anchor for the whole-suite scope check"}
+	}
+	code, out, err := r.suiteRun(ctx, r.PreFixSHA)
+	if err != nil {
+		return ScopeResult{PinUnverifiable, fmt.Sprintf("could not run the pre-deletion baseline suite: %v", err)}
+	}
+	if code != 0 {
+		return ScopeResult{PinUnverifiable, "the pre-deletion suite is not green, so a regression cannot be attributed: " + tail(out)}
+	}
+	code, out, err = r.suiteRun(ctx, r.PostFixSHA)
+	if err != nil {
+		return ScopeResult{PinUnverifiable, fmt.Sprintf("could not run the post-deletion suite: %v", err)}
+	}
+	if code != 0 {
+		return ScopeResult{PinSurvived, "the change regressed an existing test — the whole suite went green→red: " + tail(out)}
+	}
+	return ScopeResult{PinProven, "the whole suite is green before and after the change"}
+}
+
+// suiteRun checks sha out into a throwaway worktree and runs the full test command (no -run filter).
+// The worktree lifecycle mirrors reproduceOne's — cancellation-independent cleanup with a prune fallback.
+func (r Reproducer) suiteRun(ctx context.Context, sha string) (int, string, error) {
+	parent, err := r.mkWork()
+	if err != nil {
+		return 0, "", err
+	}
+	defer func() { _ = os.RemoveAll(parent) }()
+	wt := filepath.Join(parent, "wt")
+	if _, code, err := r.git(ctx, "worktree", "add", "--detach", "--end-of-options", wt, sha); err != nil {
+		return 0, "", err
+	} else if code != 0 {
+		return 0, "", fmt.Errorf("git worktree add exited %d for %s", code, sha)
+	}
+	defer func() {
+		clean := context.WithoutCancel(ctx)
+		if _, code, err := r.git(clean, "worktree", "remove", "--force", "--end-of-options", wt); err != nil || code != 0 {
+			_ = os.RemoveAll(wt)
+			_, _, _ = r.git(clean, "worktree", "prune")
+		}
+	}()
+	if r.Run != nil {
+		return r.Run(ctx, wt, r.TestCmd)
+	}
+	return runProc(ctx, wt, r.TestCmd, r.Timeout)
+}
+
 // overlay writes PostFixSHA:path into the worktree, creating parent directories. Byte-for-byte: the
 // stdout of `git show` is the file body, and a test file's line numbers must survive intact.
 func (r Reproducer) overlay(ctx context.Context, wt, path string) error {

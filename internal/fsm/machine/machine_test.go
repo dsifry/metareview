@@ -2143,3 +2143,83 @@ func TestSdlcLoopProvedVetoesWrongSymptomReproduction(t *testing.T) {
 		t.Fatalf("a vetoed reproduction must block at pins_proven even though the differential passed: %+v", r)
 	}
 }
+
+// TestSdlcLoopProvedGatesOnDeletions witnesses a Kind:"deletion" proof through the machine: it folds an
+// Unproven gap and pins_proven gates on it — a proven deletion clears and advances fix→prove→verify; a
+// deletion the whole-suite scope check rejected (survived) blocks. The prove node is faked here (the
+// deletion engine is unit- and e2e-tested); this exercises the routing, the fold, and the gate.
+func TestSdlcLoopProvedGatesOnDeletions(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		outcome  run.PinOutcome
+		toVerify bool
+	}{
+		{"a proven deletion advances to verify", run.PinProven, true},
+		{"a scope-rejected deletion blocks at pins_proven", run.PinSurvived, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1}
+			h.deps.LookPath = func(n string) (string, error) {
+				if n == "go" {
+					return "/usr/bin/go", nil
+				}
+				return "", errors.New("not found")
+			}
+			h.deps.FileHash = func(p string) (string, error) {
+				if p == "/usr/bin/go" {
+					return "hgo", nil
+				}
+				return "", errors.New("no such file")
+			}
+			h.reg.kinds["agent-edit"].decode = func(raw json.RawMessage) (any, error) {
+				var d run.Delta
+				dec := json.NewDecoder(strings.NewReader(string(raw)))
+				dec.DisallowUnknownFields()
+				if err := dec.Decode(&d); err != nil {
+					return nil, err
+				}
+				return d, nil
+			}
+			h.reg.kinds["agent-edit"].reduce = func(_ run.Snapshot, out any) (run.Delta, error) { return out.(run.Delta), nil }
+			h.reg.kinds["prove"] = &fakeKind{name: "prove", info: workflow.KindInfo{DefaultExec: "fork", AllowedExec: []string{"fork"}}}
+			h.reg.execs["prove"] = &fakeExecutor{fn: func(in ExecInput) (json.RawMessage, error) {
+				var d run.Delta
+				for _, p := range in.Snap.Unproven {
+					proven := tc.outcome == run.PinProven
+					d.PinResults = append(d.PinResults, run.ProofResult{Proof: p, Proven: proven, Outcome: tc.outcome})
+					if !proven {
+						d.Findings = append(d.Findings, run.Finding{IssueText: "over-deletion regression", File: "f.go", Source: run.SourceMutationVerify, Category: run.CategoryUnprovenFix})
+					}
+				}
+				return json.RawMessage(run.MarshalCanonical(d)), nil
+			}}
+
+			_, err := h.init(InitOptions{Workflow: "sdlc-loop-proved", Vars: sdlcVars})
+			sha := wantCodeE(t, err, CodeCmdsNotAllowed).Field("sha")
+			m := h.mustInit(InitOptions{Workflow: "sdlc-loop-proved", Vars: sdlcVars, AllowCustomCmds: sha})
+
+			h.advance(m)
+			h.record(m, "discover", findings(1))
+			h.advance(m)
+			h.advance(m)
+			finding := run.FindingKey("f.go", "bug a")
+			fix := fmt.Sprintf(`{"commit":%q,"pins":[{"id":"d1","finding":%q,"kind":"deletion","test":"TestRepro","deletes":{"file":"f.go","parent_sha":"pre","removed":"gone()"}}]}`, shaFix, finding)
+			h.record(m, "fix", fix)
+			if r := h.advance(m); r.To != "prove" {
+				t.Fatalf("fix must advance to prove: %+v", r)
+			}
+			if got := m.View().Snapshot.Unproven; len(got) != 1 || got[0].Kind != run.ProofDeletion {
+				t.Fatalf("the fix's deletion must open exactly one Unproven gap: %+v", got)
+			}
+			r := h.advance(m)
+			if tc.toVerify {
+				if r.To != "verify" {
+					t.Fatalf("a proven deletion must clear the gate and advance to verify: %+v", r)
+				}
+			} else if r.Status != StatusGateFailed || r.Gate.Name != "pins_proven" {
+				t.Fatalf("a scope-rejected deletion must block at pins_proven: %+v", r)
+			}
+		})
+	}
+}
