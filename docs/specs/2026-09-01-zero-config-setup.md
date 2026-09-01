@@ -58,16 +58,25 @@ test:
 runner respects its own config (`jest.config`, `pytest.ini`, `vitest.config`) and therefore already
 handles co-located / `tests/**` / subdir transparently:
 
-- `pytest --collect-only -q` → every nodeid
-- `jest --listTests` → every test file
-- `vitest list --json` → every test (Vitest's discovery subcommand; JSON array of
-  `{file, name, …}`, mapped to test ids the same way `vitestConvention.ParseReport` maps run results —
-  discovery reuses the convention's id derivation, it does not invent a second one)
-- `go test -list '.*' ./...` → every test
+- `pytest --collect-only -q` → every nodeid (test-level)
+- `jest --listTests` → every test **file** (file-level only — Jest's list does not enumerate test names)
+- `vitest list` → `file > test name` per test (test-level)
+- `go test -list '.*' ./...` → every test name (test-level)
 
-Each convention owns **both** a run contract (`RunArgs`/`ParseReport`, already built) **and** a discovery
-contract (`DiscoverArgs`/`ParseDiscovery`) added here; discovery ids MUST agree with run ids (same
-derivation), so a discovered test and a failing test are the same identity.
+**The run report is the identity authority, not discovery.** Proof binding uses the id a convention's
+`ParseReport` emits — validated live in the mixed-repo shakedown (2026-09-01): a pytest proof declared by
+bare function name (`test_clamp_upper_bound`) came back **malformed** because `ParseReport` keys results by
+nodeid; re-declared as the nodeid (`tests/test_clamp.py::test_clamp_upper_bound`) it proved. So the
+per-convention **run-report selector** is: Go = test func name; pytest = `file::name` nodeid; Jest/Vitest
+= the test's `fullName`. The fix-node proof instructions (today a generic `"<TestName>"`, which is
+Go-centric) MUST state this selector per active convention — captured as a docs/UX fix in §8.
+
+Discovery is a coarser **existence/coverage** aid layered on top, and its granularity is whatever the
+runner offers: **test-level** where the runner enumerates tests (pytest `--collect-only`, `vitest list`,
+`go test -list`) and only **file-level** where it does not (Jest `--listTests`). The contract is therefore
+"discovery ids map into the run-report identity space at their available granularity" — a file-level
+discovery maps to the run report's tests within that file — **not** the stronger (and for Jest false)
+"discovery yields run-identical test ids."
 
 By invoking the runner we inherit its config resolution *for free* — the same "the tool is the source of
 truth" move used to read `--json` / JUnit results. Layout variance lives entirely inside the runner, not
@@ -92,20 +101,31 @@ same shape as today's "no added lines ⇒ owes no pin."
 ### 3.1 Route-matching semantics (fully specified — no ambiguity at selection time)
 
 `Route.Path` is a **directory prefix**, expressed as the manifest's directory relative to the repo root
-(e.g. `frontend`, `server`, `pkg`). A finding's file (repo-relative, forward slashes) **matches** a route
-iff the file path is lexically within that directory: `file == Path` or `file` has `Path + "/"` as a
-prefix, compared **segment-wise** (so `serverx/a.py` does NOT match route `server`). The `**` glob form in
-the human-facing examples is sugar for "this directory and everything under it" — it desugars to the same
-prefix; metareview does not implement general glob matching, and a `config check` error is raised if a
-`Path` contains glob metacharacters other than a trailing `/**` (§8: no bespoke matcher).
+(e.g. `frontend`, `server`, `pkg`). The **repo root** is expressed as `Path: ""` (empty; `.` is accepted
+and normalized to it) — the common single-language case, a `go.mod`/`package.json`/`pyproject.toml` at the
+top level. A finding's file (repo-relative, forward slashes) **matches** a route iff the root is `""`
+(matches every file — the empty prefix) **or** the file path is lexically within the directory: `file ==
+Path` or `file` has `Path + "/"` as a prefix, compared **segment-wise** (so `serverx/a.py` does NOT match
+route `server`). The `**` glob form in the examples is sugar for "this directory and everything under it"
+— it desugars to the same prefix (`**` alone desugars to the root route `""`); metareview does not
+implement general glob matching, and a `config check` error is raised if a `Path` contains glob
+metacharacters other than a trailing `/**` (§8: no bespoke matcher).
 
-- **Specificity = number of path segments in `Path`.** The matching route with the **most segments** wins
-  (nearest-enclosing-manifest, the same rule ecosystems use for nested projects).
-- **Deterministic tie-breaker.** Two matching routes with equal segment count is a **configuration
-  error**, not a silent pick: the analyzer never emits overlapping equal-specificity roots (manifests nest,
-  they don't collide), and a hand-written `.metareview.yml` that does is rejected by `config check` with
-  both offending `Path`s named. There is therefore no runtime "pick one of two equal routes" path — the
-  ambiguity is resolved at config-validation time, before any finding is selected.
+- **Specificity = number of path segments in `Path`** (the root `""` has zero, so it always loses to any
+  subtree route). The matching route with the **most segments** wins (nearest-enclosing-manifest).
+- **A route also matches only files its convention owns** (by language/extension: a `go` route matches
+  `*.go`, a `python` route `*.py`, a JS route `*.js`/`*.ts`/`*.jsx`/`*.tsx`). This is what makes
+  **same-directory manifests of different ecosystems** — `go.mod` next to `package.json`, common in
+  mixed repos — *not* a tie: a `.go` finding selects the go route, a `.ts` finding the JS route, even
+  though both roots have equal path-specificity. Language is the tie-breaker before path length matters.
+- **Same-ecosystem config duplicates in one directory** (`pyproject.toml` + `setup.cfg` + `tox.ini`, or
+  `jest.config` beside `package.json`) collapse to **one** route via a fixed source precedence
+  (`pyproject.toml` > `setup.cfg` > `tox.ini`; `package.json` is the JS root, its `jest.config`/
+  `vitest.config` only disambiguate the provider). The analyzer emits one route per (directory, language),
+  never two.
+- **Genuine equal-specificity, same-language overlap** (only constructible by hand in `.metareview.yml`,
+  never emitted by the analyzer) is a **configuration error**, rejected by `config check` naming both
+  `Path`s — so there is no runtime "pick one of two equal routes" path.
 - **No-match** is the auditable exemption above (owes no proof), recorded so it is visible, not silent.
 
 **Per-subtree scope.** The whole-suite check and `IsTestFile` use the *finding's row's* convention, and
@@ -186,9 +206,14 @@ Running is not writing; keep the gates separate.
     no re-consent; a manifest change that changes a command changes the digest ⇒ re-consent (the intended
     guard). The digest's canonical input **includes the route `Path`s**, not only the command strings, so
     moving a command to a different subtree is itself a consent-relevant change.
-  - **Committed `.metareview.yml`:** the digest is taken over the same canonicalized route table the file
-    resolves to (equivalently, the file's content hash, since the file *is* the canonical source) ⇒
-    consent-once, stable in CI until the file changes.
+  - **Committed `.metareview.yml`:** the digest is taken over the **same canonicalized resolved route
+    table** — never the file's raw content hash. One canonical definition, used identically for the
+    no-config and committed-file cases: the resolved routes as an ordered list of `(Path, TestCmd argv,
+    discovery argv)` tuples, sorted by `Path`, argv normalized, serialized canonically, then
+    `CmdsSHA256`. Comments, key order, and the `defaults:` block do **not** affect it (they are not part
+    of the resolved table); a changed command or a subtree move (a changed `Path`) does. This removes any
+    "equivalently the content hash" ambiguity — two implementers computing the digest from the resolved
+    table get the same value.
 - **Write consent** — writing `.metareview.yml` **mutates the repo**, so it happens **only** on an
   explicit `--write-config` and **only** after affirmative consent: an interactive `[y/N]` by default,
   and a **`--consent` / `--yes` flag** so an agent or CI can pre-authorize it headlessly. **Never a side
@@ -222,6 +247,13 @@ than by hardcode) and is safe on its own (default preserves today's Go behavior)
 - **Runner discovery has a cost** — `--collect-only` / `--listTests` require *running* the runner (cheap,
   and we already run it for tests). In Docker-isolated shakedowns this goes through the same wrapper
   script (`run-tests.sh`) as the test command.
+- **Per-convention proof selector (docs/UX, found live 2026-09-01).** The fix-node proof instructions say
+  a generic `"test":"<TestName>"`, which is Go-centric. The correct selector is the convention's
+  run-report id (Go func name; pytest `file::name` nodeid; Jest/Vitest `fullName`). In the mixed-repo
+  shakedown a bare-name pytest selector produced a *malformed* proof; the nodeid produced *proven*. Fix:
+  make the fix-node instructions state the active convention's selector format. This is a docs/UX change,
+  **not** a machinery bug — pytest-alone and pytest-in-a-mixed-tree both prove correctly once the id is
+  right.
 - **No meta-tool dependency** — Nx / Bazel solve this but only if the project adopts them; leaning on the
   project's own manifests + runners is universal (every project has both) and requires zero adoption.
 
@@ -251,7 +283,18 @@ shepherded through the bots — the standard methodology.
 
 ## 11. Acceptance / validation
 
-- A pure Go repo (N=1 table) behaves exactly as today with **no config file** (regression guard).
+- A pure Go repo (N=1 table) behaves exactly as today with **no config file** (regression guard). Note
+  its `go.mod` is at the **repo root** ⇒ `Path: ""` ⇒ matches every `.go` file (§3.1 root-route rule —
+  the case a naive prefix rule would wrongly exempt).
+
+> **Mixed-repo dry run (2026-09-01).** A 4-provider repo (`gopkg/` go · `web-jest/` jest · `web-vitest/`
+> vitest · `pyserver/` pytest) was stood up and the detector run **by hand**: manifest discovery produced
+> the four roots + providers + commands with zero custom layout logic, and each runner's own discovery
+> (`go test -list`, `jest --listTests`, `vitest list`, `pytest --collect-only`) enumerated its tests — the
+> routing table fell straight out. A pytest-subtree loop then ran end-to-end (recall 2/2 cold reviewers,
+> codex-confirmed, reproduction proof **PROVEN**, `DONE(fixed)`), confirming per-subtree proof in a mixed
+> tree is identical to single-language. Findings folded back into this spec: the root-route rule (§3.1),
+> same-directory manifests (§3.1), Jest file-level discovery (§2), the per-convention proof selector (§8).
 - A constructed **multi-provider** repo (Vitest subtree + Jest subtree + pytest subtree + Go module),
   with **no config file**, runs the loop with each finding verified by its own runner — the runbook's
   mixed-language rung, now configurable.
