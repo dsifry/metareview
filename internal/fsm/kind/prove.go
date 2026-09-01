@@ -365,14 +365,24 @@ func owedPinMarker(b run.Bug) run.Finding {
 
 // proofFinding turns an unproven ProofResult into the structural marker the pins_proven gate selects
 // on: Source is mutation-verify and Category encodes the outcome (never issue text). Severity mirrors
-// the gate's blocking rule — high for a blocking outcome, medium for the advisory malformed pin.
+// the gate's blocking rule.
+//
+// A malformed PIN is ADVISORY: a pin is an optional extra claim, and clause (a)'s owed-pin marker is
+// the blocking backup when the fix owes one. A malformed REPRODUCTION or DELETION is BLOCKING: that
+// proof IS the fix's proof (the preferred forms), and a fix adds no owed-pin backup for it — a pure
+// deletion adds no line at all, so owesPin never fires. Treating a bad reproduction/deletion proof as
+// merely advisory would let a fix pass with a proof that never held (the #24 vacuous-pass shape).
 func proofFinding(r run.ProofResult) run.Finding {
 	category, severity := run.CategoryUnverifiable, "high"
 	switch r.Outcome {
 	case run.PinSurvived:
 		category, severity = run.CategoryUnprovenFix, "high"
 	case run.PinMalformed:
-		category, severity = run.CategoryMalformedPin, "medium"
+		if r.Proof.Kind == run.ProofPin {
+			category, severity = run.CategoryMalformedPin, "medium"
+		} else {
+			category, severity = run.CategoryUnprovenFix, "high"
+		}
 	}
 	file := ""
 	if r.Proof.Pin != nil {

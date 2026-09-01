@@ -272,6 +272,11 @@ func TestProveDeletionOwnFileBind(t *testing.T) {
 	if len(d.PinResults) != 1 || d.PinResults[0].Outcome != run.PinMalformed {
 		t.Fatalf("a deletion outside the finding's file must be malformed: %+v", d.PinResults)
 	}
+	// Unlike a malformed PIN (advisory), a malformed DELETION BLOCKS — the deletion IS the fix's proof
+	// and a pure deletion has no owed-pin backup, so an advisory marker would be a silent pass.
+	if len(d.Findings) != 1 || d.Findings[0].Category != run.CategoryUnprovenFix || !run.ProofCategoryBlocks(d.Findings[0].Category) {
+		t.Fatalf("a malformed deletion must emit a BLOCKING marker: %+v", d.Findings)
+	}
 }
 
 // An unknown proof kind cannot occur through decode (the one-of is enforced), but if one reached the
@@ -614,5 +619,15 @@ func TestProveReviewerConfigErrorAborts(t *testing.T) {
 	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, FixEntryHead: "pre", Head: "post"}
 	if _, err := ex.Execute(context.Background(), machine.ExecInput{Snap: snap, Node: proveNode, Diff: machine.Diff{Text: "@@\n+x\n"}, Audit: (&audits{}).fn}); !errs.Is(err, judge.CodeJudgeModel) {
 		t.Fatalf("a reviewer config error must abort (surface), not veto: %v", err)
+	}
+}
+
+// A malformed REPRODUCTION blocks (it is the fix's proof), unlike a malformed pin which is advisory.
+func TestProveMalformedReproductionBlocks(t *testing.T) {
+	p := reproDP("f1")
+	mp := &mockProver{reproResults: []run.ProofResult{{Proof: p, Proven: false, Outcome: run.PinMalformed, Detail: "compile-error fail-before"}}}
+	d := runProve(t, run.Snapshot{Unproven: []run.DifferentialProof{p}, FixEntryHead: "pre", Head: "post"}, "@@\n+x\n", mp)
+	if len(d.Findings) != 1 || d.Findings[0].Category != run.CategoryUnprovenFix || !run.ProofCategoryBlocks(d.Findings[0].Category) {
+		t.Fatalf("a malformed reproduction must block, not be advisory: %+v", d.Findings)
 	}
 }
