@@ -3,7 +3,7 @@ package run
 import (
 	"crypto/sha1" // #nosec G505 -- identity digest, not security
 	"encoding/hex"
-	"path/filepath"
+	"path"
 	"regexp"
 	"strings"
 )
@@ -20,24 +20,33 @@ var nonWord = regexp.MustCompile(`[^\p{L}\p{N}\s]+`)
 var wsRun = regexp.MustCompile(`\s+`)
 
 // NormalizeText is the N2+N3 normalization (spike §4): strip a leading [shard-XX]/[cross-shard]
-// prefix (T3), lowercase, collapse digit runs to a single '#' so "line 42" ≡ "line 51" (T2), drop
-// punctuation, and collapse whitespace (T1). It is pure and deterministic — no locale, no embedding.
+// prefix (T3), lowercase, drop punctuation, then collapse each digit run to a single "#" token so
+// "line 42" ≡ "line 51" (T2) while a text that mentions no number stays distinct, and collapse
+// whitespace (T1). Punctuation is stripped BEFORE the digit collapse so the "#" placeholder is not
+// itself removed as punctuation. Pure and deterministic — no locale, no embedding.
 func NormalizeText(s string) string {
 	s = shardPrefix.ReplaceAllString(s, "")
 	s = strings.ToLower(s)
-	s = digitRun.ReplaceAllString(s, "#")
 	s = nonWord.ReplaceAllString(s, " ")
+	s = digitRun.ReplaceAllString(s, " # ")
 	s = wsRun.ReplaceAllString(s, " ")
 	return strings.TrimSpace(s)
 }
 
-// normalizePath is the file half of the key. A cross-package cycle blocks reusing judge.NormalizePath
-// (judge imports run), so the minimal, equivalent normalization lives here: slashes, no leading "./",
-// lowercased, trimmed. An empty path is its own bucket (kept as "").
+// normalizePath is the file half of the key. A cross-package import cycle blocks reusing
+// judge.NormalizePath (judge imports run), so its exact definition of "same file" is replicated here:
+// trim, drop a leading "./", strip git "a/"/"b/" diff prefixes, and path.Clean. An empty path is its
+// own bucket ("") so a fileless finding never matches another by similarity (SameFault guards on it).
 func normalizePath(p string) string {
-	p = strings.TrimSpace(filepath.ToSlash(p))
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
 	p = strings.TrimPrefix(p, "./")
-	return strings.ToLower(p)
+	for _, prefix := range []string{"a/", "b/"} {
+		p = strings.TrimPrefix(p, prefix)
+	}
+	return path.Clean(p)
 }
 
 // FindingKey is the file-aware finding identity: hex(sha1(normPath(file) \x00 normalizeText(text)))[:12].

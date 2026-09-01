@@ -1,6 +1,7 @@
 package run
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -22,6 +23,35 @@ func TestNormalizeTextCanonicalizesT1toT3(t *testing.T) {
 	// A genuinely different sentence must NOT normalize equal.
 	if NormalizeText("the loader runs twice, doubling startup cost") == NormalizeText(base) {
 		t.Error("distinct text must not normalize equal")
+	}
+	// The digit placeholder must SURVIVE the punctuation pass: a number is canonicalized to a "#"
+	// token, not deleted, so a text mentioning a count stays distinct from one that does not.
+	if NormalizeText("error at 42") == NormalizeText("error at") {
+		t.Error("a number must not vanish — the # placeholder must survive normalization")
+	}
+	if !strings.Contains(NormalizeText("error at 42"), "#") {
+		t.Errorf("the digit placeholder must be present: %q", NormalizeText("error at 42"))
+	}
+	if NormalizeText("line 42") != NormalizeText("line 51") {
+		t.Error("two line numbers must canonicalize equal (T2)")
+	}
+}
+
+// The file half of the key must use the repo's definition of "same file" (judge.NormalizePath):
+// git a/ b/ diff prefixes, a leading ./, and path.Clean all canonicalize, or a re-discovered fault
+// splits across rounds — the recall failure this freeze exists to prevent.
+func TestFindingKeyCanonicalizesFileSpellings(t *testing.T) {
+	want := FindingKey("internal/foo.go", "x")
+	for _, alias := range []string{"a/internal/foo.go", "b/internal/foo.go", "./internal/foo.go", "internal/./foo.go", "internal/bar/../foo.go"} {
+		if FindingKey(alias, "x") != want {
+			t.Errorf("file spelling %q must canonicalize to the same key", alias)
+		}
+	}
+	// SameFault's same-file continuity must also see aliases as one file.
+	src := "the mock-scenario refusal is a duplicated guard only one test pins"
+	reword := "a duplicated guard that only one test pins the mock-scenario refusal"
+	if !SameFault("a/x.go", src, "x.go", reword) {
+		t.Error("continuity must treat git-prefixed and bare spellings as the same file")
 	}
 }
 
