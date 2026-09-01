@@ -148,6 +148,20 @@ func Apply(st FoldState, ev Event) (FoldState, error) {
 			}
 			next.Status = p.Status
 		}
+		// Unproven gap lifecycle (§2.4 R4), maintained in temporal fold order. A fix node's declared
+		// proofs ADD their Finding gaps; a Proven prove-result CLEARs the matching gap. Re-add is
+		// automatic: a later fix re-declaring a proof for a regressed finding adds it again, and it is
+		// never cleared against a stale historical Proven because clearing is driven only by a
+		// PinResult processed here, never by recomputation against past state. Snapshot.Unproven is
+		// derived (never its own event), so re-folding the log reproduces it.
+		for _, proof := range p.Pins {
+			next.Unproven = addUnproven(next.Unproven, proof)
+		}
+		for _, r := range p.PinResults {
+			if r.Proven {
+				next.Unproven = clearUnproven(next.Unproven, r.Proof.Finding)
+			}
+		}
 		next.Unfixed = countUnfixed(next.AllFound, next.Status)
 		next.Applied[k] = true
 	case *LLMCallData:
@@ -270,6 +284,7 @@ func (st FoldState) cow() FoldState {
 	next.Goldens = append([]Golden{}, st.Goldens...)
 	next.Findings = append([]Finding{}, st.Findings...)
 	next.Confirmed = append([]Bug{}, st.Confirmed...)
+	next.Unproven = cloneProofs(st.Unproven)
 	next.AllFound = append([]Bug{}, st.AllFound...)
 	next.Status = append([]BugStatus{}, st.Status...)
 	next.PrevUnfixed = cloneInt(st.PrevUnfixed)
@@ -617,6 +632,31 @@ func withinCaps(p any) bool {
 		return shortOK(d.ChildRunID)
 	}
 	return true
+}
+
+// addUnproven records a declared proof's Finding gap as open, keyed by Finding. A re-declared proof
+// for a Finding already open replaces the entry in place (keeping its position) so a regressed fix's
+// re-added gap carries the latest proof, not a stale one; a new Finding appends.
+func addUnproven(open []DifferentialProof, proof DifferentialProof) []DifferentialProof {
+	for i := range open {
+		if open[i].Finding == proof.Finding {
+			out := cloneProofs(open)
+			out[i] = proof
+			return out
+		}
+	}
+	return append(cloneProofs(open), proof)
+}
+
+// clearUnproven removes every gap whose Finding matches (a Proven result closes it).
+func clearUnproven(open []DifferentialProof, finding string) []DifferentialProof {
+	out := make([]DifferentialProof, 0, len(open))
+	for _, p := range open {
+		if p.Finding != finding {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // unfixedIDs is the id of every AllFound bug with no fixed status, in AllFound order so the

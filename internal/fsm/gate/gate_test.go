@@ -66,9 +66,48 @@ func TestG1Gates(t *testing.T) {
 	if _, ok := Builtin("nope"); ok {
 		t.Fatal("unknown gate")
 	}
-	want := []string{"all_fixed", "bugs_remain", "commit_exists", "confirmed_empty", "confirmed_nonempty", "findings_empty", "findings_nonempty", "nothing_confirmed", "nothing_found"}
+	want := []string{"all_fixed", "bugs_remain", "commit_exists", "confirmed_empty", "confirmed_nonempty", "findings_empty", "findings_nonempty", "nothing_confirmed", "nothing_found", "pins_proven"}
 	if strings.Join(Names(), ",") != strings.Join(want, ",") {
 		t.Fatalf("Names: %v", Names())
+	}
+}
+
+// pins_proven selects on the finding's structural provenance (Source == mutation-verify + a blocking
+// Category), never on issue text. A survived (unproven-fix) or unverifiable result blocks; a
+// malformed-pin is advisory; a same-category finding from a DIFFERENT source (a discover finding)
+// must not block — the Source guard is what keeps the gate from firing on ordinary review prose.
+func TestPinsProvenGate(t *testing.T) {
+	ctx := context.Background()
+	g, ok := Builtin("pins_proven")
+	if !ok {
+		t.Fatal("missing gate pins_proven")
+	}
+	mv := func(cat string) run.Finding {
+		return run.Finding{IssueText: "x", File: "a.go", Source: run.SourceMutationVerify, Category: cat}
+	}
+	cases := []struct {
+		name string
+		s    run.Snapshot
+		code string // "" → pass
+	}{
+		{"empty passes", run.Snapshot{}, ""},
+		{"every proof proven passes", run.Snapshot{Findings: []run.Finding{{IssueText: "ordinary finding"}}}, ""},
+		{"unproven-fix blocks", run.Snapshot{Findings: []run.Finding{mv(run.CategoryUnprovenFix)}}, CodePinsUnproven},
+		{"unverifiable blocks", run.Snapshot{Findings: []run.Finding{mv(run.CategoryUnverifiable)}}, CodePinsUnproven},
+		{"malformed-pin is advisory, does not block", run.Snapshot{Findings: []run.Finding{mv(run.CategoryMalformedPin)}}, ""},
+		{"same category but a different source does not block", run.Snapshot{Findings: []run.Finding{{IssueText: "x", File: "a.go", Category: run.CategoryUnprovenFix}}}, ""},
+	}
+	for _, c := range cases {
+		err := g(ctx, c.s, &Fake{})
+		if c.code == "" {
+			if err != nil {
+				t.Errorf("%s: unexpected %+v", c.name, err)
+			}
+			continue
+		}
+		if err == nil || err.Code != c.code || err.Gate != "pins_proven" || err.Detail == "" {
+			t.Errorf("%s: got %+v want %s", c.name, err, c.code)
+		}
 	}
 }
 

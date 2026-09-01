@@ -2,6 +2,83 @@ package run
 
 import "testing"
 
+// pinProof is a Kind:"pin" DifferentialProof for a given finding id.
+func pinProof(finding string) DifferentialProof {
+	return DifferentialProof{ID: "p-" + finding, Finding: finding, Kind: ProofPin, Pin: &Pin{ID: "p-" + finding, Finding: finding, File: "a.go", From: "+x", To: "y", Test: "T"}}
+}
+
+// provenFor is a Proven ProofResult for a given finding id.
+func provenFor(finding string) ProofResult {
+	return ProofResult{Proof: pinProof(finding), Proven: true, Outcome: PinProven}
+}
+
+// unprovenFindings lists the finding ids currently open in Unproven, in order.
+func unprovenFindings(s Snapshot) []string {
+	var out []string
+	for _, p := range s.Unproven {
+		out = append(out, p.Finding)
+	}
+	return out
+}
+
+// The Unproven gap lifecycle (spec §2.4 R4): a fix's declared proof ADDs its Finding gap; a later
+// Proven prove-result CLEARs it; a re-declared proof for a regressed finding RE-ADDs it — and a
+// re-added gap is NOT cleared against the stale historical Proven (only a NEW prove result clears).
+func TestFoldUnprovenLifecycle(t *testing.T) {
+	b := NewBuilder(runA)
+	b.Init(baseInit())
+	// [1,2] fix declares proofs for f1 and f2 → both gaps enter Unproven (ADD)
+	b.Event(TypeNodeOutput, out(`{}`), WithNode("fix"))
+	b.Event(TypeDeltaApplied, deltaFor(`{}`, Delta{Pins: []DifferentialProof{pinProof("f1"), pinProof("f2")}}), WithNode("fix"))
+	// [3,4] prove proves f1 → f1 clears, f2 remains (CLEAR)
+	b.Event(TypeNodeOutput, out(`{}`), WithNode("prove"))
+	b.Event(TypeDeltaApplied, deltaFor(`{}`, Delta{PinResults: []ProofResult{provenFor("f1")}}), WithNode("prove"))
+	// [5,6] a later fix re-declares a proof for f1 (the fix regressed) → f1 re-enters (RE-ADD), and it
+	// must NOT be auto-cleared by the earlier Proven result for f1.
+	b.Event(TypeNodeOutput, out(`{}`), WithNode("fix2"))
+	b.Event(TypeDeltaApplied, deltaFor(`{}`, Delta{Pins: []DifferentialProof{pinProof("f1")}}), WithNode("fix2"))
+	evs := b.Events()
+
+	eq := func(prefix int, want ...string) {
+		got := unprovenFindings(mustFold(t, evs[:prefix]))
+		if len(got) != len(want) {
+			t.Fatalf("after %d events, Unproven=%v want %v", prefix, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("after %d events, Unproven=%v want %v", prefix, got, want)
+			}
+		}
+	}
+	eq(3, "f1", "f2") // ADD
+	eq(5, "f2")       // CLEAR f1
+	eq(7, "f2", "f1") // RE-ADD f1 (not cleared by the stale historical Proven)
+}
+
+// A non-Proven prove-result must NOT clear the gap (only Proven closes it), and re-declaring a proof
+// for an already-open finding keeps a SINGLE gap, never a duplicate.
+func TestFoldUnprovenGuards(t *testing.T) {
+	b := NewBuilder(runA)
+	b.Init(baseInit())
+	b.Event(TypeNodeOutput, out(`{}`), WithNode("fix"))
+	b.Event(TypeDeltaApplied, deltaFor(`{}`, Delta{Pins: []DifferentialProof{pinProof("f1")}}), WithNode("fix"))
+	// a survived (non-Proven) result must leave f1 open
+	b.Event(TypeNodeOutput, out(`{}`), WithNode("prove"))
+	b.Event(TypeDeltaApplied, deltaFor(`{}`, Delta{PinResults: []ProofResult{{Proof: pinProof("f1"), Proven: false, Outcome: PinSurvived}}}), WithNode("prove"))
+	// re-declaring f1 must keep a single gap, not a second copy
+	b.Event(TypeNodeOutput, out(`{}`), WithNode("fix2"))
+	b.Event(TypeDeltaApplied, deltaFor(`{}`, Delta{Pins: []DifferentialProof{pinProof("f1")}}), WithNode("fix2"))
+	evs := b.Events()
+	// After the survived result (before any re-declare), f1 must STILL be open — a non-Proven result
+	// must not clear it. Asserted at this prefix so a later re-add cannot mask an erroneous clear.
+	if got := unprovenFindings(mustFold(t, evs[:5])); len(got) != 1 || got[0] != "f1" {
+		t.Fatalf("a survived (non-Proven) result must not clear the gap: %v", got)
+	}
+	if got := unprovenFindings(mustFold(t, evs)); len(got) != 1 || got[0] != "f1" {
+		t.Fatalf("re-declaring an already-open finding must not duplicate the gap: %v", got)
+	}
+}
+
 func TestPinIDIsIdempotentAndContentDerived(t *testing.T) {
 	a := PinID("f1", "a.go", "x", "y")
 	if a != PinID("f1", "a.go", "x", "y") {
