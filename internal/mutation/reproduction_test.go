@@ -181,6 +181,22 @@ func TestReproduceProvenPath(t *testing.T) {
 	}
 }
 
+// A Proven result stores only a bounded, copied tail of the pre-fix output — a test that logs a lot
+// before its assertion must not keep the whole buffer alive for the §9.2 reviewer.
+func TestReproduceCapsFailBefore(t *testing.T) {
+	huge := "=== RUN   T\n" + strings.Repeat("x", maxFailBeforeBytes+5000) + "\n--- FAIL: T\n"
+	g := &fakeGit{partition: "A\tpkg/new_test.go\n", showBody: map[string]string{"pkg/new_test.go": "t"}}
+	run := &seqRunner{resp: []runResp{{code: 1, out: huge}, {code: 0, out: "=== RUN   T\n--- PASS: T\nok\n"}}}
+	res := reproduceOne(t, newReproducer(t, g, run.run), "T")
+	mustOutcome(t, res, PinProven)
+	if len(res.FailBefore) > maxFailBeforeBytes {
+		t.Fatalf("FailBefore must be capped to its tail: %d > %d", len(res.FailBefore), maxFailBeforeBytes)
+	}
+	if !strings.Contains(res.FailBefore, "--- FAIL: T") {
+		t.Fatal("the cap must keep the tail (where the assertion is)")
+	}
+}
+
 // The deleted file the fix removes must be gone from the worktree after step (d).
 func TestReproduceAppliesDeletion(t *testing.T) {
 	g := &fakeGit{

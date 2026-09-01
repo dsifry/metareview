@@ -108,6 +108,20 @@ func unproven(p Proof, o Outcome, detail string) ReproResult {
 	return ReproResult{Proof: p, Outcome: o, Detail: detail}
 }
 
+// maxFailBeforeBytes bounds the pre-fix output retained on a Proven result for the §9.2 reviewer. It
+// is larger than the reviewer's own render budget so the render's tail cut is what trims to the model,
+// while this only stops an unbounded test log from being held in memory across proofs.
+const maxFailBeforeBytes = 16 << 10
+
+// tailClone returns a COPY of the last max bytes of s (all of s when short), so the returned string
+// does not keep a larger backing array alive.
+func tailClone(s string, max int) string {
+	if len(s) > max {
+		s = s[len(s)-max:]
+	}
+	return strings.Clone(s)
+}
+
 // partition is the fix's changed files split by role. The pre-fix run must see the fix's TEST state
 // against the OLD production, so ALL test-only changes — adds, modifies, AND deletes — are applied in
 // step (b); production changes and production deletions land only when the fix is applied (step d).
@@ -254,8 +268,11 @@ func (r Reproducer) reproduceOne(ctx context.Context, p Proof, part partition) R
 	switch classify(p.Test, code, after) {
 	case clsPassed:
 		return ReproResult{Proof: p, Proven: true, Outcome: PinProven,
-			Detail:     fmt.Sprintf("%q fails on the pre-fix tree (assertion) and passes once the fix is applied", p.Test),
-			FailBefore: before}
+			Detail: fmt.Sprintf("%q fails on the pre-fix tree (assertion) and passes once the fix is applied", p.Test),
+			// Store a COPIED tail, not the whole output: a test that logs a lot before its assertion
+			// would otherwise keep the full buffer alive through post-fix execution and symptom review,
+			// and several proofs could exhaust memory. strings.Clone frees the original backing array.
+			FailBefore: tailClone(before, maxFailBeforeBytes)}
 	case clsNoTest:
 		return fail(PinUnverifiable, "the target test %q vanished from the post-fix tree", p.Test)
 	case clsCompile:

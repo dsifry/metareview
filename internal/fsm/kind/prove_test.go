@@ -543,3 +543,17 @@ func TestProveProvenPinIsNotReviewed(t *testing.T) {
 		t.Fatalf("a proven pin must stand: %+v", d.Findings)
 	}
 }
+
+// A reviewer CONFIGURATION error (no/invalid model, missing key/url) can never be cured by re-fixing,
+// so it must ABORT (surface the wiring bug), not fail-closed-veto every reproduction forever.
+func TestProveReviewerConfigErrorAborts(t *testing.T) {
+	p := reproDP("f1")
+	mp := &mockProver{reproResults: []run.ProofResult{{Proof: p, Proven: true, Outcome: run.PinProven, FailBefore: "--- FAIL: T\n"}}}
+	r := mustNew(t, judge.NewMock(judge.Script{}), true)
+	r.execs[Prove] = &proveExec{prover: mp, symptom: &fakeReviewer{err: errs.E(judge.CodeJudgeModel, "no model configured")}}
+	ex, _ := r.Executor(Prove)
+	snap := run.Snapshot{Unproven: []run.DifferentialProof{p}, FixEntryHead: "pre", Head: "post"}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{Snap: snap, Node: proveNode, Diff: machine.Diff{Text: "@@\n+x\n"}, Audit: (&audits{}).fn}); !errs.Is(err, judge.CodeJudgeModel) {
+		t.Fatalf("a reviewer config error must abort (surface), not veto: %v", err)
+	}
+}

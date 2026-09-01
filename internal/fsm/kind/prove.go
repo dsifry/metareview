@@ -250,14 +250,29 @@ func (e *proveExec) symptomVeto(ctx context.Context, in machine.ExecInput, r run
 		Input: judge.SymptomInput{Bug: bug, Test: r.Proof.Test, FailOutput: r.FailBefore},
 	})
 	if err != nil {
-		// Fail closed: a reviewer that could not run (transport error after the retry ladder, or an
-		// unrecordable audit) vetoes rather than aborting the run — §9.2 wants a blocking NEEDS_REVISION,
-		// which lets the fix loop retry, and never an approval.
+		// A CONFIGURATION error (no/invalid model, missing key/url, unsupported effort) means the
+		// reviewer can never run — re-fixing cannot cure it, so a fail-closed veto would block every
+		// reproduction forever. Surface it instead, like a nil reviewer. A TRANSIENT error (timeout,
+		// HTTP/transport after the retry ladder) is the case §9.2 means: fail closed to a blocking veto.
+		if isReviewerConfigError(err) {
+			return false, err
+		}
 		return true, nil
 	}
 	// Decision true = the failure exhibits the finding's own symptom (no veto). Decision false — a
 	// mismatch, or a parse failure Parse decided false — vetoes.
 	return !v.Decision, nil
+}
+
+// isReviewerConfigError reports whether err is a judge misconfiguration — a model/key/url/effort
+// problem that no re-fix can cure. Such an error must abort (surface the wiring bug) rather than
+// fail-closed-veto forever; a transient reviewer failure is handled the other way.
+func isReviewerConfigError(err error) bool {
+	switch errs.Code(err) {
+	case judge.CodeJudgeModel, judge.CodeJudgeKey, judge.CodeJudgeURL, judge.CodeJudgeEffortUnsupported:
+		return true
+	}
+	return false
 }
 
 // confirmedBug returns the confirmed finding with id, or a zero Bug when none matches (the reviewer
