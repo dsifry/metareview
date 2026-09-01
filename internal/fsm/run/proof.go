@@ -2,9 +2,27 @@ package run
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 )
+
+// DeriveProofID returns the idempotent content id for a proof whose author left ID empty (the fix node
+// elicits proofs but does not ask an agent to hand-compute a hash). It is pure and stable across
+// machines/replays. A pin reuses PinID (its {finding,file,from,to} content hash, so the killed-mutant
+// set in Snapshot.Proven dedupes exactly as before); a reproduction/deletion hashes its identifying
+// content — the finding, kind, test, and (for a deletion) the removed span and file.
+func DeriveProofID(p DifferentialProof) string {
+	if p.Kind == ProofPin && p.Pin != nil {
+		return PinID(p.Finding, p.Pin.File, p.Pin.From, p.Pin.To)
+	}
+	var delFile, delRemoved string
+	if p.Deletes != nil {
+		delFile, delRemoved = p.Deletes.File, p.Deletes.Removed
+	}
+	h := sha256.Sum256([]byte(p.Finding + "\x00" + p.Kind + "\x00" + p.Test + "\x00" + delFile + "\x00" + delRemoved))
+	return fmt.Sprintf("%x", h[:16])
+}
 
 // DifferentialProof generalizes Pin (spec §9.1): a proof is "a test that changes outcome across
 // two tree-states," and a mutate-a-line pin is only ONE form of it. The preferred form is a
