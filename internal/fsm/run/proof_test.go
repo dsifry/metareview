@@ -94,3 +94,32 @@ func TestProofResultRoundTripsAndCarriesTheGeneralProof(t *testing.T) {
 		t.Errorf("the verdict was not carried: %+v", got)
 	}
 }
+
+// A contradictory result — proven disagreeing with the outcome, or an unrecognised outcome — must be
+// rejected at decode, so it never reaches the persisted wire (Proven is true iff Outcome==PinProven).
+func TestProofResultDecodeRejectsContradiction(t *testing.T) {
+	good := []string{
+		`{"proof":{"kind":"reproduction","test":"T"},"proven":true,"outcome":"proven"}`,
+		`{"proof":{"kind":"reproduction","test":"T"},"proven":false,"outcome":"survived"}`,
+		`{"proof":{"kind":"reproduction","test":"T"},"proven":false}`, // no outcome, not proven
+	}
+	for _, s := range good {
+		var r ProofResult
+		if err := json.Unmarshal([]byte(s), &r); err != nil {
+			t.Errorf("a consistent result must decode: %v (%s)", err, s)
+		}
+	}
+	bad := []string{
+		`{"proof":{"kind":"reproduction","test":"T"},"proven":true,"outcome":"survived"}`, // proven≠outcome
+		`{"proof":{"kind":"reproduction","test":"T"},"proven":false,"outcome":"proven"}`,  // proven≠outcome
+		`{"proof":{"kind":"reproduction","test":"T"},"proven":true}`,                      // proven but no proven outcome
+		`{"proof":{"kind":"reproduction","test":"T"},"proven":false,"outcome":"bogus"}`,   // unknown outcome
+		`{"proof":{"kind":"reproduction","test":"T"},"proven":false,"zzz":1}`,             // unknown field
+	}
+	for _, s := range bad {
+		var r ProofResult
+		if err := json.Unmarshal([]byte(s), &r); err == nil {
+			t.Errorf("a contradictory/invalid result must be rejected: %s", s)
+		}
+	}
+}

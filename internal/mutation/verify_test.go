@@ -190,6 +190,20 @@ func TestEndToEndAClaimIsProvenOrRefused(t *testing.T) {
 	}
 }
 
+// Pin.File is agent-supplied: an absolute path or a "../" climb must not let the mutation escape the
+// temp copy and touch the real tree the verifier promises never to modify. Both are rejected as
+// malformed before any read/write.
+func TestVerifyRejectsAPinFileThatEscapesTheCopy(t *testing.T) {
+	dir := fixtureRepo(t, "n < 10", "func TestBoundary(t *testing.T) {\n\tif Allow(10) {\n\t\tt.Fatal(\"no\")\n\t}\n}\n")
+	v := Verifier{Dir: dir, TestCmd: []string{"go", "test", "./..."}}
+	for _, bad := range []string{"/etc/passwd", "../escape.go", "../../x.go"} {
+		got := v.verifyOne(context.Background(), Pin{File: bad, From: "a", To: "b", Test: "T"})
+		if got.Proven || got.Outcome != PinMalformed {
+			t.Errorf("File %q must be malformed, got %+v", bad, got)
+		}
+	}
+}
+
 // The four-cause decision table (spec §7 L1 / T1.1): verify.go must produce all FOUR PinOutcome
 // values, each from its own distinct cause, and the mapping must be exact. A gate reads only
 // proven-vs-not, but the actor needs the other three kept apart — survived sends them to write a
@@ -256,7 +270,7 @@ func TestTailTrimsAtItsBoundary(t *testing.T) {
 	over := strings.Repeat("b", 401)
 	got := tail(over)
 	if !strings.HasPrefix(got, "...") {
-		t.Errorf("output past the boundary must be marked as truncated: %q", got[:10])
+		t.Errorf("output past the boundary must be marked as truncated: %q", got)
 	}
 	if len(got) != 403 {
 		t.Errorf("truncated length = %d, want 403 (the marker plus the last 400)", len(got))

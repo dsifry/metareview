@@ -111,3 +111,26 @@ type ProofResult struct {
 	Outcome PinOutcome        `json:"outcome,omitempty"`
 	Detail  string            `json:"detail,omitempty"`
 }
+
+// UnmarshalJSON rejects a contradictory result at decode: an unrecognised outcome, or a Proven flag
+// that disagrees with the outcome. Proven is true exactly when the outcome is PinProven, so a record
+// claiming proven:true with outcome:"survived" — or a bogus outcome PinOutcome.Valid() would reject
+// — never reaches the persisted wire. Unknown fields are refused, as elsewhere on the wire.
+func (r *ProofResult) UnmarshalJSON(b []byte) error {
+	type alias ProofResult
+	var a alias
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&a); err != nil {
+		return err
+	}
+	pr := ProofResult(a)
+	if pr.Outcome != "" && !pr.Outcome.Valid() {
+		return fmt.Errorf("unknown proof outcome %q", pr.Outcome)
+	}
+	if pr.Proven != (pr.Outcome == PinProven) {
+		return fmt.Errorf("proven=%v contradicts outcome %q", pr.Proven, pr.Outcome)
+	}
+	*r = pr
+	return nil
+}

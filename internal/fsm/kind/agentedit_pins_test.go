@@ -61,12 +61,25 @@ func TestAgentEditDecodeBoundsAndValidatesProofs(t *testing.T) {
 		t.Errorf("exactly %d proofs must be accepted: %v", run.MaxPins, err)
 	}
 
-	// The count cap is not enough: a single pin can still carry enough content to blow the payload
-	// budget, so the canonical-size check must reject it before it reaches the wire and the fold
-	// refuses it after the executor already reported success (the sibling Decodes' lesson).
-	huge := &run.Pin{ID: "i", Finding: "f", File: "a.go", From: "+" + strings.Repeat("x", run.MaxPayload), To: "y", Test: "T"}
-	fat := string(run.MarshalCanonical(editOut{Commit: "abc1234", Summary: "s", Pins: []run.DifferentialProof{{ID: "i", Finding: "f", Kind: run.ProofPin, Pin: huge}}}))
+	// The count and per-field caps are not enough: MaxPins pins each with per-field-valid but large
+	// From/To aggregate past MaxPayload, so the canonical-size check must reject them before the wire
+	// and the fold refuses them after the executor already reported success (the sibling Decodes' lesson).
+	big := strings.Repeat("x", run.MaxText-10) // canonical ≤ MaxText, so per-field passes
+	aggr := make([]run.DifferentialProof, run.MaxPins)
+	for i := range aggr {
+		aggr[i] = run.DifferentialProof{ID: "i", Finding: "f", Kind: run.ProofPin, Pin: &run.Pin{ID: "i", Finding: "f", File: "a.go", From: big, To: big, Test: "T"}}
+	}
+	fat := string(run.MarshalCanonical(editOut{Commit: "abc1234", Summary: "s", Pins: aggr}))
 	if _, err := k.Decode(json.RawMessage(fat)); err == nil {
-		t.Error("a proof payload over the size budget must be refused at decode")
+		t.Error("proofs aggregating over the payload budget must be refused at decode")
+	}
+
+	// A single over-cap FIELD (From just over MaxText) fits under the aggregate MaxPayload, so the
+	// per-field caps must be applied at decode too — or it passes here and fails at fold, after the
+	// executor already reported success.
+	overField := &run.Pin{ID: "i", Finding: "f", File: "a.go", From: "+" + strings.Repeat("x", run.MaxText), To: "y", Test: "T"}
+	perField := string(run.MarshalCanonical(editOut{Commit: "abc1234", Summary: "s", Pins: []run.DifferentialProof{{ID: "i", Finding: "f", Kind: run.ProofPin, Pin: overField}}}))
+	if _, err := k.Decode(json.RawMessage(perField)); err == nil {
+		t.Error("a proof with an over-cap per-field value must be refused at decode")
 	}
 }

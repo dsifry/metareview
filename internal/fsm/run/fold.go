@@ -508,10 +508,10 @@ func argvOK(argv []string) bool {
 	return len(argv) <= MaxArgv && textOK(argv...)
 }
 
-// proofWithinCaps enforces the per-field caps on a DifferentialProof and its payload. The short
+// ProofWithinCaps enforces the per-field caps on a DifferentialProof and its payload. The short
 // fields (ids, kind, file paths, blob/sha, test name) are MaxShort; the pin's From/To and the
 // deletion's Removed span are MaxText, the same bound the finding IssueText carries.
-func proofWithinCaps(p DifferentialProof) bool {
+func ProofWithinCaps(p DifferentialProof) bool {
 	if !shortOK(p.ID, p.Finding, p.Kind, p.Test) {
 		return false
 	}
@@ -581,12 +581,12 @@ func withinCaps(p any) bool {
 			}
 		}
 		for _, p := range d.Pins {
-			if !proofWithinCaps(p) {
+			if !ProofWithinCaps(p) {
 				return false
 			}
 		}
 		for _, r := range d.PinResults {
-			if !proofWithinCaps(r.Proof) || !shortOK(string(r.Outcome)) || canonLenStr(r.Detail) > MaxDetail {
+			if !ProofWithinCaps(r.Proof) || !shortOK(string(r.Outcome)) || canonLenStr(r.Detail) > MaxDetail {
 				return false
 			}
 		}

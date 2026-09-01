@@ -676,6 +676,15 @@ func (agentEdit) Decode(raw json.RawMessage) (any, error) {
 	if len(o.Pins) > run.MaxPins {
 		return nil, invalid("cap", fmt.Sprintf("a fix may declare at most %d proofs", run.MaxPins))
 	}
+	// Apply the SAME per-field caps the fold enforces (run.ProofWithinCaps), so an over-cap pin
+	// From/To or deletion Removed fails here rather than passing decode+reduce and then being
+	// rejected as oversize at fold — after the executor already reported success (the sibling-decode
+	// failure mode this node's own comment warns about).
+	for _, p := range o.Pins {
+		if !run.ProofWithinCaps(p) {
+			return nil, invalid("cap", "a declared proof exceeds a per-field cap")
+		}
+	}
 	if err := checkPayload(o); err != nil {
 		return nil, err
 	}

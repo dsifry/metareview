@@ -2,6 +2,7 @@ package mutation
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -111,8 +112,17 @@ func (v Verifier) verifyOne(ctx context.Context, p Pin) PinResult {
 		return fail(PinUnverifiable, "could not copy the tree: %v", err)
 	}
 
+	// Pin.File is agent-supplied and untrusted: an absolute path or one climbing out with ".."
+	// would make filepath.Join escape the temp copy and mutate the real tree (the one this verifier
+	// promises never to touch). Reject anything that does not stay strictly inside the working copy.
 	target := filepath.Join(work, filepath.FromSlash(p.File))
-	original, err := os.ReadFile(target) // #nosec G304 -- path validated by the caller, inside a temp copy
+	if filepath.IsAbs(p.File) {
+		return fail(PinMalformed, "the pin's file %q must be repo-relative", p.File)
+	}
+	if rel, rerr := filepath.Rel(work, target); rerr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fail(PinMalformed, "the pin's file %q escapes the working copy", p.File)
+	}
+	original, err := os.ReadFile(target) // #nosec G304 -- path validated just above, inside a temp copy
 	if err != nil {
 		return fail(PinMalformed, "could not read %s in the copy: %v", p.File, err)
 	}
@@ -257,10 +267,12 @@ func FindingsForPins(results []PinResult) []findings.Input {
 			continue
 		}
 		f := findings.Input{
-			Reviewer:    "mutation-verify",
-			Found:       r.Detail,
-			Evidence:    []findings.Evidence{{Type: "pin", Path: r.Pin.File}},
-			Fingerprint: fmt.Sprintf("mutation-verify:%s:%s:%s", r.Outcome, r.Pin.File, r.Pin.From),
+			Reviewer: "mutation-verify",
+			Found:    r.Detail,
+			Evidence: []findings.Evidence{{Type: "pin", Path: r.Pin.File}},
+			// A short digest of the anchor, not the raw source: From can be multi-line and unbounded,
+			// which makes a raw fingerprint fragile as a dedupe key.
+			Fingerprint: fmt.Sprintf("mutation-verify:%s:%s:%x", r.Outcome, r.Pin.File, sha256.Sum256([]byte(r.Pin.From))),
 		}
 		switch r.Outcome {
 		case PinSurvived:
