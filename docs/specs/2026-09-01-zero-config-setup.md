@@ -208,9 +208,12 @@ Running is not writing; keep the gates separate.
     moving a command to a different subtree is itself a consent-relevant change.
   - **Committed `.metareview.yml`:** the digest is taken over the **same canonicalized resolved route
     table** — never the file's raw content hash. One canonical definition, used identically for the
-    no-config and committed-file cases: the resolved routes as an ordered list of `(Path, TestCmd argv,
-    discovery argv)` tuples, sorted by `Path`, argv normalized, serialized canonically, then
-    `CmdsSHA256`. Comments, key order, and the `defaults:` block do **not** affect it (they are not part
+    no-config and committed-file cases: the resolved routes as an ordered list of `(Path, convention,
+    TestCmd argv, discovery argv)` tuples, sorted by the composite key **`(Path, convention)`** — `Path`
+    alone is not a unique sort key, because same-directory multi-ecosystem routes share a `Path` and differ
+    only by convention (§3.1), so a `Path`-only sort is unstable and two implementations could serialize
+    the same table differently. `(Path, convention)` is unique per route (one route per `(directory,
+    language)`), argv normalized, serialized canonically, then `CmdsSHA256`. Comments, key order, and the `defaults:` block do **not** affect it (they are not part
     of the resolved table); a changed command or a subtree move (a changed `Path`) does. This removes any
     "equivalently the content hash" ambiguity — two implementers computing the digest from the resolved
     table get the same value.
