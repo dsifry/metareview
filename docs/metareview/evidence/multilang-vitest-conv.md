@@ -47,6 +47,16 @@ non-interactive invocation to the consent-hashed base command.
   clean afterward.
 - `gofmt`/`go vet` clean; full `go test ./...` green.
 
+## Shepherding round 1 (Cursor Bugbot — 1× High, corrected)
+
+- **"Vitest JSON not emitted on stdout" — the premise was wrong.** Bugbot claimed Vitest's json reporter
+  writes to a file *by default*. Vitest's docs say the opposite: "Can either be printed to the terminal
+  or written to a file using the `outputFile` configuration option" — i.e., stdout by default, which is
+  what `ParseReport` reads. No code change to the default path. The legitimate residual — a repo that
+  hard-wires `outputFile` in its Vitest config sends the report to a file and leaves stdout empty — is
+  now documented: it fails CLOSED (no report line → unverifiable), never silently wrong, the same edge
+  as Jest's `--outputFile`. Verified against [Vitest Reporters](https://vitest.dev/guide/reporters).
+
 ## Now covered
 
 `go` (go test -json), `typescript`/Jest (`--json`), and `vitest` (`--reporter=json`). A repository in

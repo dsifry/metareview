@@ -14,6 +14,13 @@ func init() { register(vitestConvention{}) }
 // (verified against Vitest's reporter docs, 2026-09-01). The base command must be a one-shot run
 // (`vitest run`, or CI mode) — the convention does not add a subcommand, matching how the Jest
 // convention leaves non-interactive invocation to the consent-hashed base command.
+//
+// The json reporter prints to STDOUT by default (Vitest docs: "Can either be printed to the terminal or
+// written to a file using the outputFile configuration option"), which is what ParseReport reads. If a
+// repository hard-wires `outputFile` in its Vitest config, the report goes to that file and stdout is
+// empty — ParseReport then finds no report line and fails CLOSED (unverifiable), never silently wrong.
+// That is the same misconfiguration edge as Jest's `--outputFile`; such a repo must not redirect the
+// json reporter away from stdout in its consent-hashed base command / config.
 type vitestConvention struct{ typeScriptConvention }
 
 func (vitestConvention) Name() string { return "vitest" }
