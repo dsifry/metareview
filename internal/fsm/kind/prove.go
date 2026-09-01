@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/dsifry/metareview/internal/fsm/errs"
+	"github.com/dsifry/metareview/internal/fsm/judge"
 	"github.com/dsifry/metareview/internal/fsm/machine"
 	"github.com/dsifry/metareview/internal/fsm/run"
 	"github.com/dsifry/metareview/internal/fsm/workflow"
@@ -121,11 +123,11 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 		case run.ProofPin:
 			// Kind:pin guarantees a non-nil Pin — DifferentialProof decode enforces the one-of, and
 			// Unproven only ever holds decoded proofs — so Pin is dereferenced without a nil check.
-			// Added-line bind (spec §3.1): the pin's From must be a line the fix ADDED — a "+" line in
-			// the reviewed diff — never a context or removed line, which a mutation could not attribute
-			// to the fix. A pin that fails the bind is malformed: the CLAIM is bad, rewrite the pin.
-			if !isAddedLine(in.Diff.Text, proof.Pin.From) {
-				results = append(results, proofResult(proof, run.PinMalformed, "pin From is not a line the fix added"))
+			// Added-line bind (spec §3.1): the pin's From must be a line the fix ADDED **in the pin's
+			// own file** — a "+" line under that file's diff section — never a context/removed line, nor
+			// an added line in some OTHER file. A pin that fails the bind is malformed: rewrite the pin.
+			if !isAddedLineInFile(in.Diff.Text, proof.Pin.File, proof.Pin.From) {
+				results = append(results, proofResult(proof, run.PinMalformed, "pin From is not a line the fix added in the pin's file"))
 				continue
 			}
 			toProve = append(toProve, proof)
@@ -135,16 +137,35 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 			results = append(results, proofResult(proof, run.PinUnverifiable, "differential proving for kind "+proof.Kind+" is not available in this build"))
 		}
 	}
-	verified, err := e.prover.ProvePins(ctx, toProve, ProveSpec{TestCmd: testCmdParam(in.Snap, in.Node), Dir: proveDir(in.Snap)})
+	dir := proveDir(in.Snap)
+	verified, err := e.prover.ProvePins(ctx, toProve, ProveSpec{TestCmd: testCmdParam(in.Snap, in.Node), Dir: dir})
 	if err != nil {
 		return nil, err
 	}
 	results = append(results, verified...)
 
 	delta := run.Delta{PinResults: results}
+	supplied, proven := map[string]bool{}, map[string]bool{}
 	for _, r := range results {
+		supplied[r.Proof.Finding] = true
+		if r.Proven {
+			proven[r.Proof.Finding] = true
+		}
 		if !r.Proven {
 			delta.Findings = append(delta.Findings, proofFinding(r))
+		}
+	}
+	// pins_proven clause (a) — the non-vacuous half (spec §3.1). A fix that OWES a pin but supplied
+	// none would otherwise leave Unproven empty and the gate green (the #24 shape). For every confirmed
+	// finding that owes a pin — the fix added a line in the finding's OWN file and that file's package
+	// has tests — with no Proven proof, emit a blocking marker naming the file. A finding that owes no
+	// pin (cross-file remedy, or a no-test package) is exempt by construction, never a silent pass.
+	for _, b := range in.Snap.Confirmed {
+		if supplied[b.ID] {
+			continue // a supplied proof already spoke for this finding (marked above if not Proven)
+		}
+		if owesPin(in.Diff.Text, dir, b.File) {
+			delta.Findings = append(delta.Findings, owedPinMarker(b))
 		}
 	}
 	raw := json.RawMessage(run.MarshalCanonical(delta))
@@ -168,19 +189,60 @@ func proofResult(proof run.DifferentialProof, outcome run.PinOutcome, detail str
 	return run.ProofResult{Proof: proof, Proven: false, Outcome: outcome, Detail: detail}
 }
 
-// isAddedLine reports whether from appears within an ADDED ("+", not "+++") line of a unified diff.
-// The bind is to added CODE, not exact-line equality: from is the text to replace, which lives on a
-// line the fix introduced. An empty from can bind to nothing.
-func isAddedLine(diff, from string) bool {
-	if from == "" {
+// addedLinesInFile returns the contents of the ADDED ("+", not "+++") lines of a unified diff that
+// belong to a specific file, tracked via the "+++ b/<path>" section headers. Scoping by file is what
+// stops a pin binding to a line the fix added in some OTHER file.
+func addedLinesInFile(diff, file string) []string {
+	want := judge.NormalizePath(file)
+	var out []string
+	current := ""
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "+++ ") {
+			current = judge.NormalizePath(strings.TrimPrefix(line, "+++ "))
+			continue
+		}
+		if current == want && strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+			out = append(out, line[1:])
+		}
+	}
+	return out
+}
+
+// isAddedLineInFile reports whether from appears within an added line of file's diff section. The bind
+// is to added CODE in the pin's own file, not exact-line equality (from is the text to replace, which
+// lives on an added line). An empty from or file binds to nothing.
+func isAddedLineInFile(diff, file, from string) bool {
+	if from == "" || file == "" {
 		return false
 	}
-	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") && strings.Contains(line[1:], from) {
+	for _, added := range addedLinesInFile(diff, file) {
+		if strings.Contains(added, from) {
 			return true
 		}
 	}
 	return false
+}
+
+// owesPin reports whether a confirmed finding in file must be backed by a proof (spec §3.1): the fix
+// added a line in the finding's OWN file AND that file's package has tests. A cross-file remedy (no
+// added line in the finding's file) or a no-test package owes no pin — auditable exemptions, never a
+// silent pass.
+func owesPin(diff, dir, file string) bool {
+	return file != "" && len(addedLinesInFile(diff, file)) > 0 && packageHasTests(dir, file)
+}
+
+// packageHasTests reports whether the directory holding file contains Go test files (*_test.go). It
+// is the machine-determinable "package that has test files" of §4.2; a non-Go partition would key on
+// its own test convention here.
+func packageHasTests(dir, file string) bool {
+	matches, err := filepath.Glob(filepath.Join(dir, filepath.Dir(file), "*_test.go"))
+	return err == nil && len(matches) > 0
+}
+
+// owedPinMarker is the blocking finding for a confirmed finding that owes a pin the fix never
+// supplied. Like proofFinding it selects on structural provenance, never issue text.
+func owedPinMarker(b run.Bug) run.Finding {
+	return run.Finding{IssueText: "prove: confirmed finding owes a pin but the fix supplied none", File: b.File, Severity: "high", Category: run.CategoryUnprovenFix, Source: run.SourceMutationVerify}
 }
 
 // proofFinding turns an unproven ProofResult into the structural marker the pins_proven gate selects
