@@ -86,6 +86,23 @@ func TestAgentEditReduceDerivesIDs(t *testing.T) {
 	if p.Pin.Finding != "f" || p.Pin.Test != "TestX" {
 		t.Fatalf("pin Finding/Test must default from the proof level: %+v", p.Pin)
 	}
+	// A nested pin.finding that DIFFERS from the outer finding must not survive: the outer is
+	// authoritative, so Pin.Finding is overwritten to it and Pin.ID hashes that same value — the id can
+	// never disagree with the field it names (CodeRabbit #51).
+	diverge := `{"commit":"abc1234","summary":"s","pins":[{"finding":"outer","kind":"pin","test":"T","pin":{"finding":"nested","file":"a.go","from":"g","to":"b"}}]}`
+	out, err = k.Decode(json.RawMessage(diverge))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ = k.Reduce(run.Snapshot{}, out)
+	pd := d.Pins[0]
+	if pd.Pin.Finding != "outer" {
+		t.Fatalf("the outer finding must be authoritative over a nested one: %q", pd.Pin.Finding)
+	}
+	if want := run.PinID("outer", "a.go", "g", "b"); pd.Pin.ID != want || pd.ID != want {
+		t.Fatalf("Pin.ID must hash the (authoritative) finding it names: proof=%q pin=%q want=%q", pd.ID, pd.Pin.ID, want)
+	}
+
 	// A reproduction with no id: DeriveProofID gives a stable non-empty content id.
 	repro := `{"commit":"abc1234","summary":"s","pins":[{"finding":"f2","kind":"reproduction","test":"TestY"}]}`
 	out, _ = k.Decode(json.RawMessage(repro))
