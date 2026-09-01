@@ -229,21 +229,45 @@ func TestReproduceDeletionRemoveError(t *testing.T) {
 	}
 }
 
-// When `worktree remove` cannot complete (e.g. a cancelled run), the engine prunes the orphaned
-// .git/worktrees metadata rather than leaving it stale in the main repo.
+// When `worktree remove` cannot complete (e.g. a cancelled run), the engine deletes the worktree
+// directory itself and THEN prunes — because `git worktree prune` only drops a registration whose
+// directory is already gone. Pruning before the dir is removed would be a no-op and orphan the
+// .git/worktrees entry, and the fixed leaf name "wt" would then break a later `worktree add`.
 func TestReproducePrunesWhenRemoveFails(t *testing.T) {
-	g := &fakeGit{
-		partition:  "A\tpkg/new_test.go\n",
-		showBody:   map[string]string{"pkg/new_test.go": "t"},
-		removeCode: 1, // remove could not complete
+	parent := t.TempDir()
+	wt := filepath.Join(parent, "wt")
+	var wtGoneAtPrune, pruned bool
+	git := func(_ context.Context, args ...string) (string, int, error) {
+		verb, rest := gitVerb(args)
+		switch {
+		case verb == "diff":
+			return "A\tpkg/new_test.go\n", 0, nil
+		case verb == "show":
+			return "t", 0, nil
+		case verb == "worktree" && rest[0] == "add":
+			return "", 0, nil
+		case verb == "worktree" && rest[0] == "remove":
+			return "", 1, nil // remove could not complete
+		case verb == "worktree" && rest[0] == "prune":
+			pruned = true
+			_, err := os.Stat(wt)
+			wtGoneAtPrune = os.IsNotExist(err)
+			return "", 0, nil
+		}
+		return "", 0, nil
 	}
 	run := &seqRunner{resp: []runResp{
 		{code: 1, out: "=== RUN   TestX\n--- FAIL: TestX\n"},
 		{code: 0, out: "=== RUN   TestX\n--- PASS: TestX\nok\n"},
 	}}
-	mustOutcome(t, reproduceOne(t, newReproducer(t, g, run.run), "TestX"), PinProven)
-	if !g.pruned {
+	r := Reproducer{Dir: t.TempDir(), PreFixSHA: "pre", PostFixSHA: "post", TestCmd: []string{"go", "test", "./..."},
+		Git: git, Run: run.run, MkWork: func() (string, error) { return parent, nil }}
+	mustOutcome(t, reproduceOne(t, r, "TestX"), PinProven)
+	if !pruned {
 		t.Fatal("a failed worktree remove must fall back to prune")
+	}
+	if !wtGoneAtPrune {
+		t.Fatal("the worktree dir must be deleted BEFORE prune, or prune is a no-op and orphans metadata")
 	}
 }
 

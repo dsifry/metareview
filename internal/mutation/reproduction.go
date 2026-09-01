@@ -190,6 +190,11 @@ func (r Reproducer) reproduceOne(ctx context.Context, p Proof, part partition) R
 	defer func() {
 		clean := context.WithoutCancel(ctx)
 		if _, code, err := r.git(clean, "worktree", "remove", "--force", "--end-of-options", wt); err != nil || code != 0 {
+			// `git worktree prune` only drops a registration whose directory is already GONE, so delete
+			// the worktree dir ourselves FIRST — otherwise prune is a no-op and os.RemoveAll(parent)
+			// below then orphans the .git/worktrees entry, and the fixed leaf name "wt" makes a later
+			// `worktree add` fail closed.
+			_ = os.RemoveAll(wt)
 			_, _, _ = r.git(clean, "worktree", "prune")
 		}
 	}()
