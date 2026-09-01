@@ -195,3 +195,23 @@ func TestReproduceRealGitCompileErrorIsMalformed(t *testing.T) {
 		t.Fatalf("a pre-fix compile error must be malformed, never a valid fail-before: %+v", res[0])
 	}
 }
+
+// ScopeSuite end to end against real git + real `go test`: a suite green before and after passes;
+// a suite that goes green→red (the post commit adds a failing test) blocks.
+func TestScopeSuiteRealGit(t *testing.T) {
+	// green → green: pre has no test (green: "no test files"); post adds a passing test.
+	dir, pre, post := reproRepo(t,
+		map[string]string{"go.mod": goMod, "calc.go": "package fixture\n\nfunc Allow(n int) bool { return n < 10 }\n"},
+		map[string]string{"calc_test.go": "package fixture\n\nimport \"testing\"\n\nfunc TestOK(t *testing.T) {\n\tif Allow(10) {\n\t\tt.Fatal(\"no\")\n\t}\n}\n"})
+	if r := realReproducer(dir, pre, post).ScopeSuite(context.Background()); r.Outcome != PinProven {
+		t.Fatalf("a green→green suite must pass the scope check: %+v", r)
+	}
+
+	// green → red: post adds a FAILING test → the whole suite regresses.
+	dir2, pre2, post2 := reproRepo(t,
+		map[string]string{"go.mod": goMod, "calc.go": "package fixture\n\nfunc Allow(n int) bool { return n < 10 }\n"},
+		map[string]string{"calc_test.go": "package fixture\n\nimport \"testing\"\n\nfunc TestBroken(t *testing.T) {\n\tt.Fatal(\"regressed\")\n}\n"})
+	if r := realReproducer(dir2, pre2, post2).ScopeSuite(context.Background()); r.Outcome != PinSurvived {
+		t.Fatalf("a green→red suite must block (survived): %+v", r)
+	}
+}

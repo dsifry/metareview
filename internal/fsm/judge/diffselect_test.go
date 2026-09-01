@@ -532,3 +532,23 @@ func TestAddedLinesInFile(t *testing.T) {
 		t.Fatalf("an untouched file has no added lines: %v", lines)
 	}
 }
+
+// RemovedLinesInFile is the mirror: the lines a diff DELETES from the named file, for the §9.4 deletion
+// binding. A removed line whose own content begins with "---" is a hunk line, never the section header.
+func TestRemovedLinesInFile(t *testing.T) {
+	diff := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +1,1 @@\n ctx\n-gone()\n---tricky removed\n+kept()\n" +
+		"diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1,2 +1,1 @@\n-onlyremoved()\n"
+	got := RemovedLinesInFile(diff, "a.go")
+	if len(got) != 2 || got[0] != "gone()" || got[1] != "--tricky removed" {
+		t.Fatalf("a.go removed lines (incl. a ---prefixed one) = %v", got)
+	}
+	if lines := RemovedLinesInFile(diff, "b.go"); len(lines) != 1 || lines[0] != "onlyremoved()" {
+		t.Fatalf("b.go removed lines = %v", lines)
+	}
+	if lines := RemovedLinesInFile(diff, "b/a.go"); len(lines) != 2 {
+		t.Fatalf("path spelling must normalize: %v", lines)
+	}
+	if lines := RemovedLinesInFile(diff, "untouched.go"); lines != nil {
+		t.Fatalf("an untouched file has no removed lines: %v", lines)
+	}
+}

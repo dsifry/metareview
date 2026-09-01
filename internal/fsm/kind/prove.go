@@ -51,6 +51,9 @@ type ProveSpec struct {
 type Prover interface {
 	ProvePins(ctx context.Context, proofs []run.DifferentialProof, spec ProveSpec) ([]run.ProofResult, error)
 	ProveReproductions(ctx context.Context, proofs []run.DifferentialProof, spec ProveSpec) ([]run.ProofResult, error)
+	// ProveDeletions proves Kind:"deletion" proofs (spec §9.4): the DeletionRef↔diff binding, a
+	// fail-before/pass-after reproduction, and a whole-suite over-deletion scope check.
+	ProveDeletions(ctx context.Context, proofs []run.DifferentialProof, spec ProveSpec) ([]run.ProofResult, error)
 }
 
 type proveKind struct{}
@@ -132,7 +135,7 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 	if e.prover == nil {
 		return nil, errNoProver()
 	}
-	var toProve, toReproduce []run.DifferentialProof
+	var toProve, toReproduce, toDelete []run.DifferentialProof
 	var results []run.ProofResult
 	for _, proof := range in.Snap.Unproven {
 		switch proof.Kind {
@@ -153,10 +156,22 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 			// the §9.2 symptom reviewer (T1.4). The engine checks out the pre-fix tree, overlays the
 			// fix's test-only files, and requires an assertion fail-before / pass-after.
 			toReproduce = append(toReproduce, proof)
+		case run.ProofDeletion:
+			// Own-file bind (spec §9.1): a deletion discharges clause (a) only when it removes code from
+			// the finding's OWN file — the same own-file guarantee a pin's File gives, so the proven code
+			// and the class gate's touched line stay the same code. A deletion elsewhere is malformed.
+			// (This is DeletionRef.File==Finding.File, distinct from §9.5's Root.File structural gate.)
+			b := confirmedBug(in.Snap.Confirmed, proof.Finding)
+			if judge.NormalizePath(proof.Deletes.File) != judge.NormalizePath(b.File) {
+				results = append(results, proofResult(proof, run.PinMalformed, "the deletion is not in the finding's own file"))
+				continue
+			}
+			toDelete = append(toDelete, proof)
 		default:
-			// Deletion (T1.5) and any unknown kind have no engine here. Fail closed: unverifiable
-			// blocks, it never silently passes.
-			results = append(results, proofResult(proof, run.PinUnverifiable, "differential proving for kind "+proof.Kind+" is not available in this build"))
+			// DifferentialProof decode enforces the one-of, so Unproven never holds an unknown kind. This
+			// is a defensive invariant guard: if one somehow arrived, abort rather than silently skip it
+			// (a skipped proof would leave its finding neither settled nor blocked — a silent pass).
+			return nil, errs.E(machine.CodeExecutorFailed, "prove cannot handle proof kind "+proof.Kind, "reason", "unknown_kind")
 		}
 	}
 	dir := proveDir(in.Snap)
@@ -171,6 +186,11 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 		return nil, err
 	}
 	results = append(results, reproved...)
+	deleted, err := e.prover.ProveDeletions(ctx, toDelete, spec)
+	if err != nil {
+		return nil, err
+	}
+	results = append(results, deleted...)
 
 	delta := run.Delta{PinResults: results}
 	// A finding is settled iff a Proven proof cleared it; a finding whose only supplied proofs were
@@ -185,7 +205,7 @@ func (e *proveExec) Execute(ctx context.Context, in machine.ExecInput) (json.Raw
 			// must be the finding's OWN symptom. The injected reviewer can only veto (block), never
 			// certify — so on a mismatch (or a fail-closed reviewer error) the finding is NOT settled and
 			// a blocking marker is emitted, exactly as pins_proven treats any unproven fix.
-			if r.Proof.Kind == run.ProofReproduction {
+			if r.Proof.Kind == run.ProofReproduction || r.Proof.Kind == run.ProofDeletion {
 				veto, err := e.symptomVeto(ctx, in, r, reviewIdx)
 				reviewIdx++
 				if err != nil {
