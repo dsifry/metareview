@@ -63,6 +63,7 @@ var verbatim = map[string]string{
 	"unfixed_at_entry": "bug ids only, already exported verbatim in all_found/confirmed",
 	"findings":         "review findings, the point of the bundle",
 	"unproven":         "pins over the fix's OWN added lines (R1) — the same review evidence as findings",
+	"proven":           "proofs the run proved (the §9.6 killed-mutant set) — the same review evidence as unproven/findings",
 	"confirmed":        "review findings, the point of the bundle",
 	"all_found":        "review findings, the point of the bundle",
 	"status":           "per-finding status list",

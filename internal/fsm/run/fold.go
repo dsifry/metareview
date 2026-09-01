@@ -160,6 +160,7 @@ func Apply(st FoldState, ev Event) (FoldState, error) {
 		for _, r := range p.PinResults {
 			if r.Proven {
 				next.Unproven = clearUnproven(next.Unproven, r.Proof.Finding)
+				next.Proven = addProven(next.Proven, r.Proof)
 			}
 		}
 		next.Unfixed = countUnfixed(next.AllFound, next.Status)
@@ -285,6 +286,7 @@ func (st FoldState) cow() FoldState {
 	next.Findings = append([]Finding{}, st.Findings...)
 	next.Confirmed = append([]Bug{}, st.Confirmed...)
 	next.Unproven = cloneProofs(st.Unproven)
+	next.Proven = cloneProofs(st.Proven)
 	next.AllFound = append([]Bug{}, st.AllFound...)
 	next.Status = append([]BugStatus{}, st.Status...)
 	next.PrevUnfixed = cloneInt(st.PrevUnfixed)
@@ -646,6 +648,20 @@ func addUnproven(open []DifferentialProof, proof DifferentialProof) []Differenti
 		}
 	}
 	return append(cloneProofs(open), proof)
+}
+
+// addProven records a proof a round has PROVEN, deduped by proof ID. Re-proving the same pin (same
+// ID, e.g. a later round re-declaring and re-proving it) does not duplicate the entry; a proof with a
+// new ID appends in temporal order. This is the run's killed-mutant set for the §9.6 test-deletion gate.
+func addProven(proven []DifferentialProof, proof DifferentialProof) []DifferentialProof {
+	for i := range proven {
+		if proven[i].ID == proof.ID {
+			out := cloneProofs(proven)
+			out[i] = proof
+			return out
+		}
+	}
+	return append(cloneProofs(proven), proof)
 }
 
 // clearUnproven removes every gap whose Finding matches (a Proven result closes it).

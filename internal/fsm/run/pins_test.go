@@ -55,6 +55,47 @@ func TestFoldUnprovenLifecycle(t *testing.T) {
 	eq(7, "f2", "f1") // RE-ADD f1 (not cleared by the stale historical Proven)
 }
 
+// provenIDs lists the proof ids currently in Proven, in order.
+func provenIDs(s Snapshot) []string {
+	var out []string
+	for _, p := range s.Proven {
+		out = append(out, p.ID)
+	}
+	return out
+}
+
+// The Proven set (the run's killed-mutant set for §9.6): a Proven prove-result ADDs its proof; a
+// non-Proven result adds nothing; re-proving the same proof id dedupes (replaces in place, never a
+// duplicate); a distinct proof appends in temporal order.
+func TestFoldProvenLifecycle(t *testing.T) {
+	b := NewBuilder(runA)
+	b.Init(baseInit())
+	b.Event(TypeNodeOutput, out(`{}`), WithNode("fix"))
+	b.Event(TypeDeltaApplied, deltaFor(`{}`, Delta{Pins: []DifferentialProof{pinProof("f1"), pinProof("f2")}}), WithNode("fix"))
+	// prove: f1 proven, f2 survives (not proven) → Proven has only p-f1.
+	b.Event(TypeNodeOutput, out(`{}`), WithNode("prove"))
+	b.Event(TypeDeltaApplied, deltaFor(`{}`, Delta{PinResults: []ProofResult{provenFor("f1"), {Proof: pinProof("f2"), Proven: false, Outcome: PinSurvived}}}), WithNode("prove"))
+	// a later round re-proves f1 (same id → dedupe) and proves a new f3 (append).
+	b.Event(TypeNodeOutput, out(`{}`), WithNode("prove2"))
+	b.Event(TypeDeltaApplied, deltaFor(`{}`, Delta{PinResults: []ProofResult{provenFor("f1"), provenFor("f3")}}), WithNode("prove2"))
+	evs := b.Events()
+
+	eq := func(prefix int, want ...string) {
+		got := provenIDs(mustFold(t, evs[:prefix]))
+		if len(got) != len(want) {
+			t.Fatalf("after %d events, Proven=%v want %v", prefix, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("after %d events, Proven=%v want %v", prefix, got, want)
+			}
+		}
+	}
+	eq(3)                 // nothing proven yet
+	eq(5, "p-f1")         // f1 proven; f2 survived → not added
+	eq(7, "p-f1", "p-f3") // f1 re-proven (deduped in place); f3 appended
+}
+
 // A non-Proven prove-result must NOT clear the gap (only Proven closes it), and re-declaring a proof
 // for an already-open finding keeps a SINGLE gap, never a duplicate.
 func TestFoldUnprovenGuards(t *testing.T) {

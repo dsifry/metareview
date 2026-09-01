@@ -35,6 +35,9 @@ type mockProver struct {
 }
 
 func (m *mockProver) ProvePins(_ context.Context, proofs []run.DifferentialProof, spec ProveSpec) ([]run.ProofResult, error) {
+	if len(proofs) == 0 { // mirror the real prover: nothing to verify
+		return nil, nil
+	}
 	m.gotProofs, m.gotSpec = proofs, spec
 	if m.err != nil {
 		return nil, m.err
@@ -629,5 +632,99 @@ func TestProveMalformedReproductionBlocks(t *testing.T) {
 	d := runProve(t, run.Snapshot{Unproven: []run.DifferentialProof{p}, FixEntryHead: "pre", Head: "post"}, "@@\n+x\n", mp)
 	if len(d.Findings) != 1 || d.Findings[0].Category != run.CategoryUnprovenFix || !run.ProofCategoryBlocks(d.Findings[0].Category) {
 		t.Fatalf("a malformed reproduction must block, not be advisory: %+v", d.Findings)
+	}
+}
+
+// §9.6: a test deletion that un-kills a previously-PROVEN pin (it now survives) blocks.
+func TestProveTestDeletionUnkillsProvenPin(t *testing.T) {
+	pin := pinDP("f1", "guard") // File a.go
+	mp := &mockProver{results: []run.ProofResult{{Proof: pin, Proven: false, Outcome: run.PinSurvived, Detail: "no longer caught"}}}
+	diff := "diff --git a/x_test.go b/x_test.go\n--- a/x_test.go\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-package x\n-func TestX(t *testing.T) {\n-}\n"
+	// A proven REPRODUCTION in the set is skipped (§9.6 mutation-kill re-verifies pins only); only the
+	// pin is re-verified.
+	d := runProve(t, run.Snapshot{Proven: []run.DifferentialProof{reproDP("f2"), pin}}, diff, mp)
+	if len(d.Findings) != 1 || d.Findings[0].Category != run.CategoryUnprovenFix || d.Findings[0].Source != run.SourceMutationVerify {
+		t.Fatalf("un-killing a proven pin via test deletion must block: %+v", d.Findings)
+	}
+	if len(mp.gotProofs) != 1 || mp.gotProofs[0].ID != pin.ID {
+		t.Fatalf("the proven pin must be re-verified: %+v", mp.gotProofs)
+	}
+}
+
+// A test deletion where the proven pin STILL holds (re-verifies proven) → no regression.
+func TestProveTestDeletionProvenPinStillHolds(t *testing.T) {
+	pin := pinDP("f1", "guard")
+	mp := &mockProver{results: []run.ProofResult{provenResult(pin)}}
+	diff := "diff --git a/x_test.go b/x_test.go\n--- a/x_test.go\n+++ b/x_test.go\n@@ -1,4 +1,2 @@\n package x\n-func TestGone(t *testing.T) {\n-}\n func TestKept(t *testing.T) {}\n"
+	d := runProve(t, run.Snapshot{Proven: []run.DifferentialProof{pin}}, diff, mp)
+	if len(d.Findings) != 0 {
+		t.Fatalf("a still-held pin after a test deletion must not block: %+v", d.Findings)
+	}
+}
+
+// No test deleted → the §9.6 check is inert (no re-verification, no finding), even with proven pins.
+func TestProveNoTestDeletionIsInert(t *testing.T) {
+	pin := pinDP("f1", "guard")
+	mp := &mockProver{results: []run.ProofResult{{Proof: pin, Proven: false, Outcome: run.PinSurvived}}}
+	d := runProve(t, run.Snapshot{Proven: []run.DifferentialProof{pin}}, fileDiff("a.go", "just a change"), mp)
+	if len(d.Findings) != 0 {
+		t.Fatalf("no test deletion → no §9.6 finding: %+v", d.Findings)
+	}
+	if len(mp.gotProofs) != 0 {
+		t.Fatalf("no re-verification when no test was deleted: %+v", mp.gotProofs)
+	}
+}
+
+// A proven pin whose mutated line the fix itself removed is EXCLUDED from the non-regression set (its
+// target is legitimately gone), even when a test is also deleted in the same commit.
+func TestProveTestDeletionExcludesRemovedTarget(t *testing.T) {
+	pin := pinDP("f1", "guardLine") // File a.go
+	mp := &mockProver{results: []run.ProofResult{{Proof: pin, Proven: false, Outcome: run.PinSurvived}}}
+	diff := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,1 @@\n-guardLine\n context\n" +
+		"diff --git a/x_test.go b/x_test.go\n--- a/x_test.go\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-package x\n-func TestX(t *testing.T) {}\n"
+	d := runProve(t, run.Snapshot{Proven: []run.DifferentialProof{pin}}, diff, mp)
+	if len(d.Findings) != 0 {
+		t.Fatalf("a pin whose mutated line was removed must be excluded: %+v", d.Findings)
+	}
+	if len(mp.gotProofs) != 0 {
+		t.Fatalf("an excluded pin must not be re-verified: %+v", mp.gotProofs)
+	}
+}
+
+// A re-verification error aborts the run rather than being swallowed.
+func TestProveTestDeletionRecheckErrorAborts(t *testing.T) {
+	pin := pinDP("f1", "guard")
+	mp := &mockProver{err: errors.New("verifier exploded")}
+	r := mustNew(t, judge.NewMock(judge.Script{}), true)
+	r.execs[Prove] = &proveExec{prover: mp, symptom: &fakeReviewer{decision: true}}
+	ex, _ := r.Executor(Prove)
+	diff := "diff --git a/x_test.go b/x_test.go\n--- a/x_test.go\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-package x\n-func TestX(t *testing.T) {}\n"
+	snap := run.Snapshot{Proven: []run.DifferentialProof{pin}}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{Snap: snap, Node: proveNode, Diff: machine.Diff{Text: diff}, Audit: (&audits{}).fn}); err == nil {
+		t.Fatal("a re-verification error must abort the run")
+	}
+}
+
+func TestDeletesATestAndRemovedLine(t *testing.T) {
+	yes := "diff --git a/x_test.go b/x_test.go\n--- a/x_test.go\n+++ b/x_test.go\n@@ -1,1 +0,0 @@\n-func TestFoo(t *testing.T) {}\n"
+	if !deletesATest(yes) {
+		t.Fatal("a removed test func must be detected")
+	}
+	for _, kind := range []string{"Benchmark", "Fuzz", "Example"} {
+		if !deletesATest("@@\n-func " + kind + "Bar(") {
+			t.Fatalf("a removed %s func must be detected", kind)
+		}
+	}
+	// A removed non-test func, and the "--- a/foo_test.go" header, must NOT count.
+	if deletesATest("--- a/x_test.go\n-func helper() {}\n") {
+		t.Fatal("a removed non-test func (and the --- header) must not count")
+	}
+	// isRemovedLineInFile
+	rd := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,1 @@\n-gone()\n kept\n"
+	if !isRemovedLineInFile(rd, "a.go", "gone()") {
+		t.Fatal("a removed line must bind")
+	}
+	if isRemovedLineInFile(rd, "a.go", "kept") || isRemovedLineInFile(rd, "", "x") || isRemovedLineInFile(rd, "a.go", "") {
+		t.Fatal("a context line, or an empty file/from, must not bind")
 	}
 }
