@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Install metareview</title>
+  <meta name="description" content="Install metareview via npm, the Claude Code or Codex plugin, or a source checkout — then run your first review.">
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <nav class="nav">
+    <div class="wrap">
+      <a class="brand" href="index.html">metareview</a>
+      <div class="links">
+        <a href="usage.html">What it does</a>
+        <a href="install.html">Install</a>
+        <a href="https://github.com/dsifry/metareview">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Get started</p>
+      <h1>Install metareview in about a minute.</h1>
+      <p class="lede">It runs locally on your machine, inside your own git repository. Pick the path that matches how you work — a command-line tool, or a plugin for your AI coding agent.</p>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <div class="wrap">
+        <h2>Choose your path</h2>
+        <div class="grid">
+          <div class="card">
+            <span class="tag green">Command line</span>
+            <h3>npm</h3>
+            <pre><code>npm install -g metareview
+metareview setup --check</code></pre>
+            <p>The quickest way to get the <code>metareview</code> command. Requires Node.js 18+.</p>
+          </div>
+          <div class="card">
+            <span class="tag blue">Claude Code</span>
+            <h3>Claude Code plugin</h3>
+            <pre><code>claude plugin marketplace add dsifry/metareview-marketplace
+claude plugin install metareview</code></pre>
+            <p>Adds <code>/setup</code>, <code>/review-task-done</code>, <code>/review-pr-ready</code>, <code>/fsm</code>, and more inside Claude Code.</p>
+          </div>
+          <div class="card">
+            <span class="tag gold">Codex</span>
+            <h3>Codex plugin</h3>
+            <pre><code>codex plugin marketplace add dsifry/metareview-marketplace
+codex</code></pre>
+            <p>Open <code>/plugins</code>, select the marketplace, and install <code>metareview</code> for the matching <code>$</code> skills.</p>
+          </div>
+          <div class="card">
+            <span class="tag red">From source</span>
+            <h3>Source checkout</h3>
+            <pre><code>git clone https://github.com/dsifry/metareview.git
+cd metareview
+npm install &amp;&amp; npm run build
+./bin/metareview setup --check</code></pre>
+            <p>For development or the latest code. Requires Go 1.26+.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap split">
+        <div>
+          <h2>Run your first review.</h2>
+          <p class="section-intro">Use the smallest gate that matches the decision you're making.</p>
+        </div>
+        <div class="panel">
+          <pre><code># is this branch ready to merge?
+metareview review pr-ready --base main
+
+# is this plan good enough to build from?
+metareview review artifact docs/spec.md</code></pre>
+          <p>Each review writes a readable Markdown record into your repo and returns a clear verdict: <strong>PASS</strong> to proceed, <strong>NEEDS_REVISION</strong> to fix the cited blockers, or <strong>ESCALATED</strong> when a human should step in.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap split">
+        <div>
+          <h2>Pick your reviewer model.</h2>
+          <p class="section-intro">Optional — for the find-and-fix loop and judge calls.</p>
+        </div>
+        <div class="panel">
+          <p>metareview can use Claude, GPT (via Codex), or any OpenAI-compatible provider such as GLM or Kimi. Choose per run with <code>--judge-model</code>:</p>
+          <pre><code>metareview fsm init --workflow sdlc-loop-proved \
+  --base main --judge-model glm-5.3-flash --judge-effort medium</code></pre>
+          <p>For OpenAI-compatible providers, set <code>OPENAI_BASE_URL</code> and <code>OPENAI_API_KEY</code>; for Codex/GPT it uses your local Codex sign-in. Full details are in the guides below.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <h2>Next steps</h2>
+        <div class="hero-actions">
+          <a class="button" href="usage.html">See what metareview does</a>
+          <a class="button secondary" href="https://github.com/dsifry/metareview/blob/main/INSTALL.md">Full install guide</a>
+          <a class="button secondary" href="https://github.com/dsifry/metareview/blob/main/USAGE.md">Full usage guide</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>metareview is Markdown-friendly, git-native, and built for review accountability. See <a href="index.html">Home</a>, <a href="usage.html">What it does</a>, the <a href="https://github.com/dsifry/metareview">GitHub repo</a>, and the <a href="https://github.com/dsifry/metareview/blob/main/INSTALL.md">full install guide</a>.</p>
+    </div>
+  </footer>
+</body>
+</html>
