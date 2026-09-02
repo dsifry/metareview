@@ -249,6 +249,34 @@ func TestBuildForBranchSupersedesRepairedParent(t *testing.T) {
 	}
 }
 
+// BuildForBranch computes supersede over the FULL log set, not the branch-scoped subset: a repair whose
+// CLEAN child sits at a commit OFF this branch (out of scope) must still retire the in-scope open parent it
+// links back to. A mutation narrowing supersededRuns(all) -> supersededRuns(scoped) drops that child and
+// wrongly keeps the parent blocking — this pins the `all` choice as load-bearing. An in-scope PASS covers
+// both changed files so unreviewed-files never confounds the supersede answer.
+func TestBuildForBranchSupersedesFromFullLogSetNotScoped(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "cover.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-cover`\nTarget: `current branch`\n\n## Verdict\n\nPASS\n")
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "parent.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-parent`\nTarget: `current branch`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "child.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-child`\nTarget: `current branch`\n\nPrevious run: `mrv-parent`\n\n## Verdict\n\nPASS\n")
+	offBranch := "0000000000000000000000000000000000cafe00" // a commit not in this branch's set
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-cover","scope":"pr-ready","verdict":"PASS","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"]}`+"\n"+
+			`{"id":"mrv-parent","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`"}`+"\n"+
+			`{"id":"mrv-child","scope":"pr-ready","verdict":"PASS","headSha":"`+offBranch+`","previousRunId":"mrv-parent"}`+"\n")
+
+	got, err := BuildForBranch(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Blocked || len(got.MustClear) != 0 {
+		t.Fatalf("an out-of-scope clean child must still supersede the in-scope open parent (full log set, not scoped); blocked=%v must_clear=%+v", got.Blocked, got.MustClear)
+	}
+}
+
 // A scope that cannot be resolved reports the UNSCOPED answer with a warning, never an empty one,
 // and it BLOCKS. A gate that cannot work out what the work is must fail toward blocking.
 //

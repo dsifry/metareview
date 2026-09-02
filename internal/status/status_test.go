@@ -156,6 +156,23 @@ func TestSupersedeDoesNotClearAcrossTargets(t *testing.T) {
 	}
 }
 
+// A malformed previousRunId CYCLE (a.prev=b, b.prev=a) must TERMINATE, not hang the gate. The visited guard
+// (`!superseded[prev]`) bounds the walk; without it this input infinite-loops the supersede pass. Both runs
+// are clean, so the observable outcome is just that Build returns an empty must_clear — a hang would time
+// the test out instead of failing an assertion.
+func TestSupersedeTerminatesOnCyclicChain(t *testing.T) {
+	root := t.TempDir()
+	writeLog(t, root, "mrv-a-pr.md", "# metareview: pr-ready review\n\nRun ID: `mrv-a`\nTarget: `current branch`\n\nPrevious run: `mrv-b`\n\n## Verdict\n\nPASS\n")
+	writeLog(t, root, "mrv-b-pr.md", "# metareview: pr-ready review\n\nRun ID: `mrv-b`\nTarget: `current branch`\n\nPrevious run: `mrv-a`\n\n## Verdict\n\nPASS\n")
+	r, err := Build(root)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(r.MustClear) != 0 {
+		t.Fatalf("two clean runs in a cyclic chain block nothing; must_clear=%+v", r.MustClear)
+	}
+}
+
 // blocking_count, attempt_number and max_attempts are the operator-facing half of the contract -
 // how many blockers remain, and which attempt of how many, which is the escalation signal the
 // Completion Rule depends on. Deleting the line that populates all three left ./internal/status

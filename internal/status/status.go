@@ -348,6 +348,11 @@ func supersededRuns(logs []reviewlog.Summary) map[string]bool {
 		// clear an unrelated open review: dropping a blocker for work that was never fixed is a
 		// false-CLEAR, the worst failure a gate can have. The target guard also bounds the walk, and
 		// the visited guard makes a malformed cyclic chain terminate.
+		//
+		// NOTE the target guard is VACUOUS for pr-ready: every pr-ready run records the target
+		// `current branch`, so it protects only the distinct-id kinds (task-done / epic-ready). pr-ready
+		// supersede therefore rests entirely on the explicit previousRunId link a real repair creates —
+		// which is never forged spontaneously, only by an operator/tool mis-passing --previous-run.
 		for prev := prevOf[s.RunID]; prev != "" && !superseded[prev] && targetOf[prev] == s.Target; prev = prevOf[prev] {
 			superseded[prev] = true
 		}
