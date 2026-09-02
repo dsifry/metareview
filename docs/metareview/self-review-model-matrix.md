@@ -102,15 +102,27 @@ The subtler, larger-context package. This is where the configs split.
   where it answered but unusable as a routine judge.
 - **Opus caught all three** at appropriately low confidence (0.55–0.72), reflecting their subtlety.
 
-### internal/fsm/export — _pending (export-1 debatable, export-2 dead assertion)_
+### internal/fsm/export (2 candidates: 1 real dead-assertion, 1 debatable)
 
-## Aggregate (14 candidates: 8 real, 5 precision probes, 1 debatable)
+| id | truth | Opus | GLM-5.3 | GLM-5.3-flash |
+| --- | --- | --- | --- | --- |
+| export-2 (dead/tautological assertion) | true | True 0.82 / 51.1s | **timeout >240s** | True 0.72 / 14.7s |
+| export-1 (audit-log fail-open) | debatable | True 0.58 / 94.9s | **timeout >240s** | True 0.72 / 15.9s |
+
+flash caught the subtle dead-assertion (export-2); Opus did too (low confidence on the debatable
+export-1). **GLM-5.3 timed out on both** (48 KB context) — the same failure it showed on prready.
+
+## Aggregate (16 candidates: 9 real, 5 precision probes, 2 debatable)
 
 | config | precision (probes rejected) | recall (real confirmed) | median latency | timeouts |
 | --- | ---: | ---: | ---: | ---: |
-| Opus 4.8 (claude -p) | 5/5 | **8/8** | ~24s | 0 |
-| GLM-5.3 | 5/5 | 6/8 (2 timed out) | ~78s | 2 |
-| GLM-5.3-flash | 5/5 | 6/8 (missed prready-1, prready-3) | ~5s | 0 |
+| Opus 4.8 (claude -p) | 5/5 | **9/9** | ~25s | 0 |
+| GLM-5.3 | 5/5 | 7/9 (2 timed out) | ~80s | 4 (all on ≥48 KB contexts) |
+| GLM-5.3-flash | 5/5 | 7/9 (missed prready-1, prready-3) | ~5s | 0 |
+
+Note flash *did* catch export-2 (a subtle dead-assertion) — its two misses are both prready findings,
+suggesting the miss is finding-specific (unpinned-branch / rune-edge reasoning) rather than purely
+context-size. GLM-5.3 (full) timed out on 4 of the ≥48 KB-context candidates — unusable as a routine judge.
 
 **On crisp bugs (redaction leaks, epicready loose matching) all three agree perfectly.** They diverge only
 on subtle test-gap / edge-case findings:
@@ -134,7 +146,22 @@ on subtle test-gap / edge-case findings:
   control runs through `fsm judge` itself; (2) revisit the `glm-5.3` judge timeout so one slow call can't
   block a routine run ~4 min.
 
-## metareview recall/precision self-observations (calibration inputs)
+## metareview recall gaps the external bots caught (the highest-value calibration input)
+
+Deliverable #4 — bot findings on the fix PRs that metareview's own `task-done` gate did **not** surface.
+Each is a labeled example of a metareview blind spot; fold into calibration via `learn --post-merge`.
+
+| # | Source | PR | Gap | metareview lesson |
+| --- | --- | --- | --- | --- |
+| R1 | CodeRabbit | #67 | The **committed context pack embeds the absolute host `cwd`** (`/Users/<user>/…`), leaking username + FS layout — metareview generates this artifact and its own review never flagged it. Fixed by recording `cwd` as `.`. | metareview's context-pack / evidence generator should mask the host cwd the way `internal/fsm/export`'s `rootPath()` masks outside-repo paths. A whole class of already-committed context packs carry this. |
+| R2 | Cursor Bugbot | #68 | The `servicePathPattern` fix over-narrowed and **stopped matching dotted basenames** (`user.service.ts`, the Angular/NestJS convention) — a regression `task-done` passed. Fixed by adding `.` to the boundary class. | metareview's review missed a real behavior regression in a regex it was asked to review; the security/architecture lens should probe convention coverage (dotted vs underscore basenames), not just the reported false positive. |
+| R3 | CodeRabbit | #67 | Redaction tests asserted only **absence of selected substrings**, so a regression leaking a different slice would pass. Strengthened to exact-match. | the testing-quality lens should flag negative-substring assertions on redaction/security output as weak (prefer exact-match), a near-miss of the "assertion that cannot fail" lens. |
+
+Notably, **Bugbot and CodeRabbit found nothing in the fix *logic* itself** (the redaction and matching
+fixes were correct) — the gaps were an artifact leak, a convention-coverage regression, and assertion
+strength. That is a strong recall result for the core review, with three precise lens-improvement targets.
+
+## metareview recall/precision self-observations (from running the gate on itself)
 
 - **Its deterministic eval lint (`\beval\s*\(`) fires on test/doc code** that legitimately contains an
   `eval(` literal (a test asserting eval-detection, a comment). The repo works around it by splitting the
@@ -142,3 +169,9 @@ on subtle test-gap / edge-case findings:
   lines only.
 - **Stale findings from a failed run re-surface** from `.metareview/findings.jsonl` unless the re-run
   chains `--previous-run <opening-run-id>` — easy to trip; worth a louder hint in NEEDS_REVISION output.
+
+## Fold-back
+
+Run `metareview learn --post-merge <pr> --base <pre-merge-ref>` (with `evidence import --github-checks`)
+on each merged PR to ingest the R1–R3 bot findings as durable calibration — metareview improving from its
+own blind spots. _Pending PR merges._
