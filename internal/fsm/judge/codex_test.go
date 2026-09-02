@@ -491,3 +491,40 @@ func TestWithCodexWorkDirConfinesOnlyCodexJudges(t *testing.T) {
 		t.Error("a non-router judge must be returned unchanged")
 	}
 }
+
+// WithTimeout on the HTTP judge propagates through routing to the codex arm: the codex exec must run
+// under a context whose deadline reflects the override (and the AttemptTimeout default without one).
+func TestCodexAttemptTimeoutOverride(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		apply time.Duration
+		want  time.Duration
+	}{
+		{"default", 0, AttemptTimeout},
+		{"override", 500 * time.Second, 500 * time.Second},
+	} {
+		var deadline time.Time
+		var hasDeadline bool
+		exec := func(ctx context.Context, _ string, _ []string, _ string) ([]byte, int, error) {
+			deadline, hasDeadline = ctx.Deadline()
+			return []byte(codexStream(`{"reasoning":"r","is_real":true,"confidence":0.9}`)), 0, nil
+		}
+		j, err := NewWithCodex(nil, Keys{}, URLs{}, func() string { return "n" }, codexClock(), exec)
+		if err != nil {
+			t.Fatalf("%s: NewWithCodex: %v", tc.name, err)
+		}
+		if tc.apply != 0 {
+			j = WithTimeout(j, tc.apply)
+		}
+		before := time.Now()
+		if _, err := j.Call(context.Background(), codexRequest()); err != nil {
+			t.Fatalf("%s: Call: %v", tc.name, err)
+		}
+		if !hasDeadline {
+			t.Fatalf("%s: codex exec ran without a context deadline", tc.name)
+		}
+		if got := deadline.Sub(before); got < tc.want-5*time.Second || got > tc.want+5*time.Second {
+			t.Errorf("%s: codex deadline ~%v, want ~%v", tc.name, got, tc.want)
+		}
+	}
+}

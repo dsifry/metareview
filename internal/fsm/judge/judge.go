@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -186,11 +187,52 @@ type realJudge struct {
 	// codexWorkDir narrows a codex judge to a materialized evidence tree. Empty inherits the
 	// caller's directory, which is metareview's own repo - read and exec access to all of it.
 	codexWorkDir string
-	doer         Doer
-	keys         Keys
-	urls         URLs
-	nonce        func() string
-	clock        Clock
+	// attemptTimeout overrides the per-attempt timeout; zero means the AttemptTimeout default.
+	// Set via WithTimeout so a slow reasoning model (a large-context glm-5.3 call routinely needs
+	// >180s) can be given more room without editing a compile-time constant.
+	attemptTimeout time.Duration
+	doer           Doer
+	keys           Keys
+	urls           URLs
+	nonce          func() string
+	clock          Clock
+}
+
+// EnvTimeout is the environment variable that overrides the default judge timeout, in whole seconds.
+const EnvTimeout = "METAREVIEW_JUDGE_TIMEOUT"
+
+// ResolveTimeout returns the effective judge timeout: METAREVIEW_JUDGE_TIMEOUT seconds when it is set
+// to a positive integer, else the AttemptTimeout default. A missing, empty, malformed, or non-positive
+// value is ignored (falls back to the default), so a bad override can never shorten or disable the
+// timeout. It governs both the per-attempt context deadline and the HTTP client timeout.
+func ResolveTimeout(getenv func(string) string) time.Duration {
+	if getenv == nil {
+		return AttemptTimeout
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(getenv(EnvTimeout))); err == nil && n > 0 {
+		return time.Duration(n) * time.Second
+	}
+	return AttemptTimeout
+}
+
+// WithTimeout returns j with its per-attempt timeout set to d. A non-positive d, or a judge that is not
+// the HTTP judge (a mock or, structurally, anything else), is returned unchanged.
+func WithTimeout(j Judge, d time.Duration) Judge {
+	rj, ok := j.(*realJudge)
+	if !ok || d <= 0 {
+		return j
+	}
+	clone := *rj
+	clone.attemptTimeout = d
+	return &clone
+}
+
+// timeout is the per-attempt timeout: the configured override, or the AttemptTimeout default.
+func (j *realJudge) timeout() time.Duration {
+	if j.attemptTimeout > 0 {
+		return j.attemptTimeout
+	}
+	return AttemptTimeout
 }
 
 // New builds the real judge; base URLs are validated once.
@@ -536,7 +578,7 @@ func (j *realJudge) Call(ctx context.Context, r Request) (v Verdict, err error) 
 			return Verdict{Kind: r.Kind, Model: r.Model, Effort: r.Effort, InputHash: InputHash(r.Input)},
 				errs.E(CodeJudgeModel, "no codex runner is wired for "+r.Model, "model", r.Model, "provider", "codex")
 		}
-		return (&codexJudge{exec: j.codex, nonce: j.nonce, clock: j.clock, workDir: j.codexWorkDir}).Call(ctx, r)
+		return (&codexJudge{exec: j.codex, nonce: j.nonce, clock: j.clock, workDir: j.codexWorkDir, attemptTimeout: j.attemptTimeout}).Call(ctx, r)
 	}
 	v = Verdict{Kind: r.Kind, Model: r.Model, Effort: r.Effort, InputHash: InputHash(r.Input)}
 	system, user, err := RenderPrompt(r.Kind, r.Input, r.Fence, r.Calibration, j.nonce())
@@ -584,7 +626,7 @@ func classOf(err error) retryClass {
 
 // attempt performs one HTTP round trip and classifies it.
 func (j *realJudge) attempt(ctx context.Context, req request) (string, run.TokenTotals, retryClass, error) {
-	actx, cancel := context.WithTimeout(ctx, AttemptTimeout)
+	actx, cancel := context.WithTimeout(ctx, j.timeout())
 	defer cancel()
 	hreq, _ := http.NewRequestWithContext(actx, http.MethodPost, req.url, bytes.NewReader(req.body))
 	for k, val := range req.headers {

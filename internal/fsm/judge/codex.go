@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/dsifry/metareview/internal/fsm/errs"
 	"github.com/dsifry/metareview/internal/fsm/run"
@@ -34,10 +35,19 @@ var codexEfforts = map[string]bool{
 
 // codexJudge answers Requests by shelling out to the Codex CLI.
 type codexJudge struct {
-	exec    CodexExec
-	nonce   func() string
-	clock   Clock
-	workDir string // empty: inherit the caller's directory
+	exec           CodexExec
+	nonce          func() string
+	clock          Clock
+	workDir        string        // empty: inherit the caller's directory
+	attemptTimeout time.Duration // zero: the AttemptTimeout default
+}
+
+// timeout is the per-attempt timeout: the configured override, or the AttemptTimeout default.
+func (j *codexJudge) timeout() time.Duration {
+	if j.attemptTimeout > 0 {
+		return j.attemptTimeout
+	}
+	return AttemptTimeout
 }
 
 // Call renders the same prompts the HTTP providers use and parses the same way,
@@ -88,7 +98,7 @@ func (j *codexJudge) Call(ctx context.Context, r Request) (v Verdict, err error)
 			case <-j.clock.After(backoff(classBackoff, attempt-1)):
 			}
 		}
-		actx, cancel := context.WithTimeout(ctx, AttemptTimeout)
+		actx, cancel := context.WithTimeout(ctx, j.timeout())
 		stdout, code, execErr := j.exec(actx, j.workDir, args, prompt)
 		cancel()
 

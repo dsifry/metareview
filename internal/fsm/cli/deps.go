@@ -56,9 +56,6 @@ type Deps struct {
 	Runner    func(r machine.RunnerDeps, env func() []string, fileHash func(string) (string, error), now func() time.Time, real cmdexec.Runner) converge.Caller
 }
 
-// HTTPTimeout is the judge client timeout.
-const HTTPTimeout = 180 * time.Second
-
 // RealDeps binds every seam to its real implementation and nothing else; it cannot fail.
 func RealDeps() Deps {
 	return Deps{
@@ -85,9 +82,11 @@ func RealDeps() Deps {
 	}
 }
 
-// newHTTPClient is judge.NewHTTPClient with proxy environment variables switched off (spec 5 §8).
+// newHTTPClient is judge.NewHTTPClient with proxy environment variables switched off (spec 5 §8). The
+// client timeout follows METAREVIEW_JUDGE_TIMEOUT so it never cuts a request short before the
+// (equally overridden) per-attempt deadline does.
 func newHTTPClient() *http.Client {
-	c := judge.NewHTTPClient(HTTPTimeout)
+	c := judge.NewHTTPClient(judge.ResolveTimeout(os.Getenv))
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.Proxy = nil
 	c.Transport = t

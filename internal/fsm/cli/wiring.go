@@ -197,9 +197,15 @@ func (c *ctxDeps) keys() judge.Keys {
 }
 
 func (c *ctxDeps) newJudge() (judge.Judge, error) {
-	return judge.NewWithCodex(c.deps.HTTP, c.keys(),
+	j, err := judge.NewWithCodex(c.deps.HTTP, c.keys(),
 		judge.URLs{Anthropic: c.deps.Getenv(EnvAnthropicURL), OpenAI: c.deps.Getenv(EnvOpenAIURL)},
 		c.nonce, judge.Clock{Now: c.deps.Now, After: c.deps.After}, c.deps.CodexExec)
+	if err != nil {
+		return nil, err
+	}
+	// METAREVIEW_JUDGE_TIMEOUT overrides the per-attempt deadline (and the HTTP client timeout, see
+	// newHTTPClient) so a slow reasoning model can be given more room; unset keeps the 180s default.
+	return judge.WithTimeout(j, judge.ResolveTimeout(c.deps.Getenv)), nil
 }
 
 // judgeOverride is the model/effort the operator chose, by flag or environment.
