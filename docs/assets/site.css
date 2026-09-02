@@ -168,10 +168,15 @@
       margin: 0;
       overflow-x: auto;
       padding: 20px;
+      background: var(--code);
+      border-radius: 8px;
       color: #e8f4ed;
       font-size: 14px;
       line-height: 1.55;
     }
+
+    /* Inside a .terminal the dark background and rounding come from the wrapper, so let pre sit flush. */
+    .terminal pre { border-radius: 0; }
 
     code {
       font-family: "SF Mono", Menlo, Consolas, monospace;
