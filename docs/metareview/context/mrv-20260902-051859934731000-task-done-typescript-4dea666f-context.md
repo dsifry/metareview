@@ -1,3 +1,9 @@
+# metareview task-done context
+
+Run ID: `mrv-20260902-051859934731000-task-done-typescript-4dea666f`
+
+## Task
+
 package testconv
 
 import (
@@ -192,3 +198,90 @@ func (c typeScriptConvention) DirHasTests(root, file string) bool {
 // deliberately dependency-free (Dave, 2026-09-01), so the trivial-pin pre-screen is skipped for TS. The
 // full compile-then-break steps still run — the safe direction, at worst one wasted mutation.
 func (typeScriptConvention) SemanticallyNull(orig, mutated string) bool { return false }
+
+
+## Git
+
+- Base: `846d0ea1da8134f4e35e8cb658cb6f8ef9c702a3`
+- Head: `afd0a6129e27e813e7ecc246b30a6d894062d62f`
+- Branch: `testconv-mjs-cjs`
+- Gate effect: `gate`
+
+## Context Profile
+
+- Raw diff bytes: `1463`
+- Filtered diff bytes: `1463`
+- Risk level: `none`
+
+## Context Shard Plan
+
+Not sharded.
+
+## Review Manifest
+
+- Manifest verdict: `PASS`
+- Source manifest hash: not sharded
+- Runtime assessment: static-only; runtime not assessed
+
+### Source Paths
+- internal/testconv/typescript.go
+- internal/testconv/typescript_test.go
+
+### Manifest Blockers
+No manifest blockers.
+
+## Changed Files
+
+- internal/testconv/typescript.go
+- internal/testconv/typescript_test.go
+
+## Diff
+
+```diff
+diff --git a/internal/testconv/typescript.go b/internal/testconv/typescript.go
+index 58ef523..c201e80 100644
+--- a/internal/testconv/typescript.go
++++ b/internal/testconv/typescript.go
+@@ -25,8 +25,8 @@ func (typeScriptConvention) Name() string { return "typescript" }
+ 
+ // testFileSuffixes are the conventional TS/JS test-file endings (shared across Jest and Vitest).
+ var testFileSuffixes = []string{
+-	".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".test.mts", ".test.cts",
+-	".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx", ".spec.mts", ".spec.cts",
++	".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".test.mjs", ".test.cjs", ".test.mts", ".test.cts",
++	".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx", ".spec.mjs", ".spec.cjs", ".spec.mts", ".spec.cts",
+ }
+ 
+ // IsTestFile reports whether path ends in a `*.test.*` / `*.spec.*` suffix.
+diff --git a/internal/testconv/typescript_test.go b/internal/testconv/typescript_test.go
+index 04ea4b1..0d46efc 100644
+--- a/internal/testconv/typescript_test.go
++++ b/internal/testconv/typescript_test.go
+@@ -8,7 +8,7 @@ import (
+ 
+ func TestTSBasics(t *testing.T) {
+ 	c := typeScriptConvention{}
+-	for _, f := range []string{"src/calc.test.ts", "a/b.spec.tsx", "x.test.js", "y.spec.jsx", "m.test.mts"} {
++	for _, f := range []string{"src/calc.test.ts", "a/b.spec.tsx", "x.test.js", "y.spec.jsx", "m.test.mts", "e.test.mjs", "c.spec.cjs"} {
+ 		if !c.IsTestFile(f) {
+ 			t.Fatalf("%s must be a test file", f)
+ 		}
+
+
+
+```
+
+## Knowledge And Registries
+
+Service inventory: none
+
+No service inventory found.
+
+Knowledge facts:
+
+No Beads knowledge facts found.
+
+## Evidence
+
+{"schemaVersion":1,"kind":"validation","command":["go","test","./internal/testconv/"],"cwd":".","exitCode":0,"startedAt":"2026-09-02T05:18:59.845699Z","finishedAt":"2026-09-02T05:18:59.926721Z","stdoutSha256":"fc0b56768ed3f840beef0f981d0f9c4f383ff53c7e99186b5a8f51072edef17d","stderrSha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","summary":"go test ./internal/testconv/ exited 0"}
+
