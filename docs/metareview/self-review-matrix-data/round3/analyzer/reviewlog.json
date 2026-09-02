@@ -1,0 +1,22 @@
+[
+  {
+    "id": "reviewlog-1",
+    "file": "internal/reviewlog/reviewlog.go",
+    "line": 242,
+    "category": "doc-comment-claim-code-lacks",
+    "severity": "medium",
+    "issue_text": "Both the production comment (reviewlog.go:240-242) and the test comment (reviewlog_test.go:480-484) assert that TestLensErasAreKeyedByDate enforces the 'cut a new frozen vNLenses snapshot and append an era' step: 'growing lens.All (and with it currentLenses) without cutting a new frozen snapshot and era would make eraLenses(\"mrv-20260831-…\") return more than nine and fail here' / 'TestLensErasAreKeyedByDate pins each era against its frozen literal so skipping that step fails.' That enforcement does not exist. eraLenses() returns only entries of lensEras, whose .lenses fields are the FROZEN literals (legacyLenses/v08Lenses/v09Lenses) — never currentLenses/lens.All. The test's want values are those same frozen literals (e.g. line 485 {\"mrv-20260831-…\", v09Lenses}). Adding a lens to lens.All changes currentLenses (via currentLensKeys) but leaves lensEras and eraLenses output completely unchanged, so TestLensErasAreKeyedByDate is invariant to lens.All growth and CANNOT fail when the era-cut step is skipped. Consequence: adding a lens to lens.All has zero gating effect for any review that falls back to the era floor (declares no 'Required lenses:' marker) — a post-addition undeclared review is still only required to cover the stale newest-era set — and no test in the repo fails to remind the developer to cut the era.",
+    "why_real": "Verified statically and by grep: eraLenses (reviewlog.go:281-293) reads lensEras[i].lenses which are frozen literals; the test (reviewlog_test.go:470-506) compares eraLenses output against the same frozen literals. No test anywhere binds len(lens.All)/currentLenses to the newest era (grep for currentLenses/v09Lenses/len(All) shows only lens_test.go length-consistency checks, unrelated). A well-formed new lens added to lens.All passes TestEveryLensSlugAndDisplayNormalizeToSameKey and lens.TestAllAndAccessorsAreConsistent too, so the whole suite stays green while the newest era floor silently goes stale. This is precisely the 'a comment/test claims a protection the code gets from somewhere else / does not implement' defect class this codebase's own tests call out (reviewlog_test.go:793-794, 844-845 — 'found three times').",
+    "tests_checked": "TestLensErasAreKeyedByDate (reviewlog_test.go:470-506) — want values are frozen legacy/v08/v09Lenses, not currentLenses; TestDuplicateLensDeclarationIsNotAShippedRubric (539-556); TestEveryLensSlugAndDisplayNormalizeToSameKey (20-28); lens/lens_test.go TestAllAndAccessorsAreConsistent (8-35). None fails on a lens.All addition without an era cut."
+  },
+  {
+    "id": "reviewlog-2",
+    "file": "internal/reviewlog/reviewlog.go",
+    "line": 349,
+    "category": "invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "In knownRubric (reviewlog.go:348-355) the candidate list is [][]string{currentLenses, v09Lenses, v08Lenses, legacyLenses}. The currentLenses element is not independently pinned by any test and is deletable with the whole suite still green. Because lens.All currently produces exactly the v09 nine-lens set, currentLenses is set-equal to v09Lenses, so knownRubric(currentLenses) still matches via the v09Lenses entry even if the currentLenses entry is removed. TestDuplicateLensDeclarationIsNotAShippedRubric line 553 (`knownRubric(currentLenses)` must be non-nil) therefore continues to pass after deleting the currentLenses list element, and no test constructs a currentLenses that differs from v09Lenses.",
+    "why_real": "Same root cause as reviewlog-1: currentLenses is indistinguishable from v09Lenses today, so the guard meant to recognise the live/current set after lens.All diverges from the newest era is untested in isolation and can be removed without any red test. The element is defensible forward-looking code, but nothing currently holds the invariant it exists for.",
+    "tests_checked": "TestDuplicateLensDeclarationIsNotAShippedRubric (reviewlog_test.go:539-556) asserts knownRubric(currentLenses)!=nil but currentLenses set-equals v09Lenses, so the v09Lenses list entry satisfies it after removing the currentLenses entry; no test builds a currentLenses distinct from v09Lenses."
+  }
+]

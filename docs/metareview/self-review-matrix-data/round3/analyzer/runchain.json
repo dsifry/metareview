@@ -1,0 +1,32 @@
+[
+  {
+    "id": "runchain-1",
+    "file": "internal/runchain/runchain.go",
+    "line": 92,
+    "category": "invariant-nothing-holds",
+    "severity": "medium",
+    "issue_text": "In the previous-run branch of Resolve, `max := rootRun.MaxAttempts; if max == 0 { max = effectiveMax(options.MaxAttempts) }` (lines 91-94). The `max == 0` guard can never be true and lines 92-94's fallback is dead code. `rootRun` is `chain[0]`, and `chain` is always produced by `ChainTo(records, ...)` where `records` come from `ReadRuns` (line 68). `ReadRuns` unconditionally coerces every record whose `MaxAttempts == 0` to `DefaultMaxAttempts` (lines 128-130), so every Record in the chain has a non-zero MaxAttempts. Therefore `rootRun.MaxAttempts` is never 0, the branch is unreachable, and `options.MaxAttempts` is silently ignored on the previous-run path (which happens to match the documented 'mid-chain --max-attempts is ignored' contract, but via root inheritance, not this fallback).",
+    "why_real": "Deletable branch: removing lines 92-94 and keeping only `max := rootRun.MaxAttempts` leaves all tests passing, because no test can construct a chain root with MaxAttempts==0 (ReadRuns coerces it before Resolve ever sees it). It is impossible to write a test that exercises effectiveMax(options.MaxAttempts) via this line. This is an invariant (ReadRuns coercion) that makes a guard dead, not defensive code any input can trip.",
+    "tests_checked": "TestResolveFollowsPreviousRunChainAndInheritsRootMax (root maxAttempts:2 -> decision.MaxAttempts 2, never hits guard); TestResolveStartsFirstAttempt / TestResolveRejectsInvalidMaxAttempts exercise only the non-previous path (line 100). ReadRuns coercion at lines 128-130 confirmed as the invariant source; ChainTo/ReadRuns feed confirmed at lines 68,74. No test drives max==0."
+  },
+  {
+    "id": "runchain-2",
+    "file": "internal/runchain/runchain.go",
+    "line": 87,
+    "category": "condition-cannot-fail",
+    "severity": "low",
+    "issue_text": "In the previous-run branch, line 87: `if escalated, ok := escalatedForTarget(...); ok && escalated.ID != previous.ID`. The `escalated.ID != previous.ID` sub-condition is always true when evaluated. `previous` (chain leaf, the PreviousRunID run) is guaranteed non-ESCALATED by the immediately preceding check on lines 84-86 (which returns an error if `previous.Verdict` equals ESCALATED). `escalatedForTarget` only ever returns records whose verdict IS ESCALATED. So the returned `escalated` record can never be `previous`, and their IDs (unique run ids) can never be equal at this point. The `escalated.ID != previous.ID` term can never be false.",
+    "why_real": "Assertion/condition that cannot fail. The guard was presumably written to avoid double-reporting the previous run's own escalation, but the line-84 early return already makes that case unreachable, so the sub-condition is redundant. Low severity: it is dead defensiveness rather than a behavioral bug. Note also there is no test that reaches this line with ok==true (a separate same-target escalated run at the same head while retrying a non-escalated previous run), so the whole escalatedForTarget check in the previous-run path is unpinned.",
+    "tests_checked": "TestResolveRejectsEscalatedPreviousRun pins line 84 (previous itself escalated). TestResolveRejectsAnyPriorEscalatedSameTargetRestart / TestResolveRejectsEscalatedSameTargetAtSameHead exercise escalatedForTarget only on the non-previous path (line 97). No test reaches line 87 with ok==true, so neither the guard nor its redundant sub-condition is covered."
+  },
+  {
+    "id": "runchain-3",
+    "file": "internal/runchain/runchain.go",
+    "line": 66,
+    "category": "doc-claim-code-lacks",
+    "severity": "low",
+    "issue_text": "The MaxAttempts validation rejects only `options.MaxAttempts < 0` (line 65) with the message 'max attempts must be at least 1' (line 66), but MaxAttempts == 0 is accepted and passed to effectiveMax, which coerces 0 to DefaultMaxAttempts (lines 217-221). So 0 is a legal input meaning 'unset/use default', contradicting the error message's claim that the value must be 'at least 1'. The message describes a constraint the code does not enforce.",
+    "why_real": "Message-vs-code mismatch: the human-facing error asserts a lower bound of 1, yet 0 is a valid, load-bearing sentinel that the code deliberately accepts and defaults. Not a correctness bug (the 0 sentinel behavior is intended), but the error text misstates the actual contract. Low severity, borderline; flagged as a concrete claim the code lacks rather than style.",
+    "tests_checked": "TestResolveRejectsInvalidMaxAttempts pins only MaxAttempts:-1 -> 'max attempts must be at least 1'. TestResolveStartsFirstAttempt implicitly relies on MaxAttempts==0 being accepted (decision.MaxAttempts == DefaultMaxAttempts). No test asserts a 0-is-rejected behavior, confirming 0 is accepted despite the message."
+  }
+]

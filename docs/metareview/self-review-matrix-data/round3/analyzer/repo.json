@@ -1,0 +1,52 @@
+[
+  {
+    "id": "repo-1",
+    "file": "internal/repo/repo.go",
+    "line": 41,
+    "category": "invariant-nothing-holds",
+    "severity": "medium",
+    "issue_text": "Detect, hasMetaswarmMarker, hasMetaswarmInstructionMarker, FindServiceInventory, exists, readIfFile and JSON have zero test coverage: the only test file in the package (root_test.go) tests only Root/RootOr from root.go. Every capability/mode decision in repo.go is therefore an unpinned invariant. Concretely, the negative-override loop (lines 42-47) can be deleted, or the whole hasMetaswarmInstructionMarker return inverted, and `go test ./internal/repo/...` stays green; likewise the mode-precedence ladder (lines 90-97) can be reordered with no failing test.",
+    "why_real": "Verified by grep: no *_test.go under internal/ or cmd/ references Detect, FindServiceInventory, hasMetaswarm, or Capabilities{. The mode/capability logic that this package exists to compute (metaswarm/beads/service-inventory presence, advisory vs standalone vs metaswarm-extension mode) is entirely unguarded, so a capability wrongly reported present or absent would be caught by no test.",
+    "tests_checked": "internal/repo/root_test.go (only Root/RootOr); grep of --include=*_test.go across internal/ and cmd/ for Detect|FindServiceInventory|hasMetaswarm|Capabilities{ returned only an unrelated match in internal/mutation/stryker_test.go. No test constructs a repo fixture and calls Detect."
+  },
+  {
+    "id": "repo-2",
+    "file": "internal/repo/repo.go",
+    "line": 85,
+    "category": "assertion-cannot-fail",
+    "severity": "low",
+    "issue_text": "`Beads: exists(root, \".beads\") || exists(root, \".beads/issues.jsonl\")` — the second operand can never be the deciding factor. `.beads/issues.jsonl` existing implies `.beads` exists (os.Stat succeeds on the parent), so `exists(root, \".beads\")` is already true whenever the second operand is true. The second exists() call can never flip the result from false to true.",
+    "why_real": "Dead operand: os.Stat(root/.beads/issues.jsonl) cannot succeed unless root/.beads exists as a directory, in which case exists(root,\".beads\") already returned true. The disjunction reduces to `exists(root, \".beads\")`. Not a style restatement — it is an unreachable-as-deciding condition (adjudicate category 3), and with no tests (repo-1) nothing documents or pins the intended extra check.",
+    "tests_checked": "No test exercises Detect or the Beads capability at all (see repo-1); the redundancy is established by the os.Stat parent-implies-child relationship, not by a test."
+  },
+  {
+    "id": "repo-3",
+    "file": "internal/repo/repo.go",
+    "line": 48,
+    "category": "assertion-cannot-fail",
+    "severity": "low",
+    "issue_text": "hasMetaswarmInstructionMarker's positive check is `Contains(x,\"uses metaswarm\") || Contains(x,\"metaswarm workflows\") || Contains(x,\"metaswarm\")`. The first two substrings both contain \"metaswarm\", so the third disjunct subsumes them: any text making disjunct 1 or 2 true also makes disjunct 3 true. Disjuncts 1 and 2 can never independently determine the result.",
+    "why_real": "Pure dead code — the two specific-phrase checks are unreachable as deciding operands because the broad \"metaswarm\" check that follows is a substring of both. This is a genuine can-never-fire condition (category 3), not a naming nit.",
+    "tests_checked": "No test exercises hasMetaswarmInstructionMarker (repo-1); redundancy is a substring property, not test-dependent."
+  },
+  {
+    "id": "repo-4",
+    "file": "internal/repo/repo.go",
+    "line": 43,
+    "category": "genuine-bug",
+    "severity": "low",
+    "issue_text": "hasMetaswarmInstructionMarker suppresses metaswarm detection when any negative marker is a substring of the joined instruction files: `strings.Contains(normalized, \"no metaswarm\")` (and the other three) match without word boundaries. Text like 'there is no metaswarm-legacy plugin, we use metaswarm workflows' contains 'no metaswarm' and returns false, wrongly reporting the metaswarm capability absent when the instructions declare it present.",
+    "why_real": "Substring matching without boundaries is a real false-negative in a capability detector: a metaswarm repo declaring the capability only via instruction files (no .claude/plugins/metaswarm etc. dir marker) would be classified non-metaswarm, downgrading Detect's mode from metaswarm-extension. The wrong-absent report is the exact failure mode the package must avoid. Input-dependent, hence low severity, but the matcher behavior is factual, not speculative.",
+    "tests_checked": "No test covers hasMetaswarmInstructionMarker or the negative-marker path (repo-1), so the substring hazard is entirely unguarded."
+  },
+  {
+    "id": "repo-5",
+    "file": "internal/repo/root.go",
+    "line": 36,
+    "category": "doc-comment-mismatch",
+    "severity": "low",
+    "issue_text": "The comment on the no-repository branch says 'Reached the filesystem root without finding either marker.' but Root searches THREE markers (`.metareview`, `docs/metareview`, `.git`) — as the error string on the very next line and the doc comment at lines 28-30 both enumerate. 'either' describes two, contradicting the three-marker loop it annotates.",
+    "why_real": "Concrete internal inconsistency between the inline comment and the actual marker set (and the adjacent error message), not a style preference. A reader trusting the comment would believe two markers are checked.",
+    "tests_checked": "root_test.go (TestRootReportsWhenThereIsNoRepository:89-108) asserts the error occurs but does not inspect the comment; the mismatch is verified against the marker slice at root.go:29 and the error text at root.go:37."
+  }
+]

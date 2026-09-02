@@ -1,0 +1,22 @@
+[
+  {
+    "id": "cmdmetareview-1",
+    "file": "cmd/metareview/main.go",
+    "line": 414,
+    "category": "dead-branch / invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "In the `evidence run` handler, the fallback `os.Exit(1)` (line 414) is unreachable. It only runs when `runErr != nil` AND `receipt.ExitCode == 0`. But line 403 already exited for the schemaVersion==0 case, so reaching line 409 with runErr!=nil requires receipt.SchemaVersion==1. evidence.Run (internal/evidence/runner.go:54-64) only returns a non-nil error with SchemaVersion==1 in the non-ExitError branch, where it unconditionally sets exitCode=1. Therefore receipt.ExitCode is always 1 (never 0) at line 411, line 411's condition is always true, and line 414 never executes.",
+    "why_real": "Deletable with every test still passing: no test in tests/go/test-evidence.sh (or any other) drives runErr!=nil with receipt.ExitCode==0 — the missing-command case yields ExitCode=1, and a subprocess that merely exits nonzero has err nil'd by errors.As at runner.go:62. Removing os.Exit(1) would let main() fall through and return 0 (reporting a failing run as success) IF the branch were reachable, so nothing pins its presence. It is a real unheld invariant / dead exit branch in the exit-code contract, latent only against a future change to evidence.Run's return contract.",
+    "tests_checked": "tests/go/test-evidence.sh (missing-command -> ExitCode!=0, exit nonzero; nonzero-exit subprocess via runner.go ExitError path nils err); internal/evidence/runner.go:54-78 (exitCode=1 set whenever err stays non-nil). No test reaches runErr!=nil && ExitCode==0."
+  },
+  {
+    "id": "cmdmetareview-2",
+    "file": "cmd/metareview/main.go",
+    "line": 90,
+    "category": "invariant-nothing-holds (untested branch)",
+    "severity": "info",
+    "issue_text": "The short-flag aliases `-h` (line 90) and `-v` (line 95) are never exercised. Deleting the `|| args[0] == \"-h\"` disjunct and the `|| args[0] == \"-v\"` disjunct leaves every test green.",
+    "why_real": "tests/go/test-cli-baseline.sh drives only `--help` and `--version` (`go run ./cmd/metareview --version` / `--help`); no shell test or Go test invokes `-h` or `-v`. Both disjuncts are deletable/invertible with tests still passing — a genuine invariant nothing holds. Very low severity (harmless alias), reported only because it is a true unheld guard, not a correctness risk.",
+    "tests_checked": "tests/go/test-cli-baseline.sh (lines 10-23: only --version and --help). No *_test.go exists for package main (git ls-files 'cmd/metareview/*.go' -> main.go only)."
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "integration-1",
+    "file": "internal/integration/metaswarm.go",
+    "line": 129,
+    "category": "invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "fileExists guards surface candidates with `err == nil && !info.IsDir()`, encoding the invariant that a discovered surface must be a regular file and not a directory. No test pins the `!info.IsDir()` clause: TestInspectMetaswarmRecordsConcreteSurfaces writes every candidate (AGENTS.md, CLAUDE.md, .claude/commands/*, skills/*, rubrics/*) as a real file, so deleting `!info.IsDir()` (reducing the guard to `err == nil`) leaves all tests passing. A directory created at a candidate path would be wrongly reported as a surface and no test would catch the regression.",
+    "why_real": "Provable surviving mutant: dropping the `!info.IsDir()` term keeps both package tests green because no test ever creates a directory at any of the 10 candidate surface paths. The guard's file-vs-directory distinction is therefore unheld by the suite.",
+    "tests_checked": "internal/integration/metaswarm_test.go: TestInspectMetaswarmRecordsConcreteSurfaces (writes all candidates as files via writeFile), TestMetaswarmContractDefinesPostMergeAndStrictBehavior (root is empty temp dir, no surfaces discovered). Neither constructs a directory at a candidate path."
+  },
+  {
+    "id": "integration-2",
+    "file": "internal/integration/metaswarm.go",
+    "line": 124,
+    "category": "invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "isDirectory guards metaswarm presence with `err == nil && info.IsDir()`, encoding the invariant that the sibling `../metaswarm` must be a directory (not a regular file) for descriptor.Present to be set. No test pins the `info.IsDir()` clause: TestInspectMetaswarmRecordsConcreteSurfaces creates ../metaswarm as a real directory (Present true), and TestMetaswarmContract... uses a temp root whose sibling does not exist at all (Stat errors, Present false). Inverting/deleting `info.IsDir()` (to `err == nil`) leaves both tests passing; a regular file named `metaswarm` would then be wrongly treated as present and no test would catch it.",
+    "why_real": "Provable surviving mutant: removing the `info.IsDir()` term keeps the suite green because no test places a plain file at the ../metaswarm sibling path. The directory-vs-file distinction that gates Present/Path/Surfaces is unheld by any test.",
+    "tests_checked": "internal/integration/metaswarm_test.go: TestInspectMetaswarmRecordsConcreteSurfaces (../metaswarm is a real dir), TestMetaswarmContractDefinesPostMergeAndStrictBehavior (../metaswarm absent). Neither creates a file (non-dir) at the sibling metaswarm path."
+  }
+]

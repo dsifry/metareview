@@ -1,0 +1,22 @@
+[
+  {
+    "id": "artifactreview-1",
+    "file": "internal/artifactreview/review.go",
+    "line": 92,
+    "category": "invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "reviewerPrompts() (and the rubricLinks map it consumes) generate the per-lens '## Reviewer Prompts' list that drives the parallel review subagents, and their doc comment (lines 89-92) claims the list 'stays in lockstep with record.Reviewers (lens.Slugs()) and the Required lenses marker'. No test in this package (or anywhere in the tree) pins that. reviewerPrompts could drop lenses, return \"\", or lose every rubric suffix and both package tests stay green.",
+    "why_real": "TestScaffoldDeclaresItsLensSet asserts only the 'Required lenses:' marker line (built from lens.Slugs() via a separate code path), and its own comment scopes the check to that line. TestCompletedScaffoldReadsAsCompleteInReviewLog completes the scaffold by replacing the verdict and the empty table header with rows named from a HARD-CODED Display-name list -- it never reads the scaffold's Reviewer Prompts section or any rubric suffix. So the Display-name prompt list and the 4 rubric-link suffixes (security/testing-quality/data-migration/mechanical-precision) are wholly unpinned: a mutation blanking reviewerPrompts() or removing a lens from it leaves the suite passing, contradicting the lockstep invariant the comment asserts. Impact is bounded (a missing lens still surfaces via the empty reviewer-rows completeness check downstream), hence low severity, but the claimed invariant genuinely has no guard.",
+    "tests_checked": "review_test.go TestScaffoldDeclaresItsLensSet (parses only the 'Required lenses:' marker line; derives from lens.Slugs(), not reviewerPrompts); TestCompletedScaffoldReadsAsCompleteInReviewLog (completes via a hard-coded Display list, reads nothing from the Reviewer Prompts section or rubric suffixes). Repo-wide grep for 'Reviewer Prompts'/'reviewerPrompts'/'*-review-rubric' in _test.go files: no matches. Rubric files themselves all exist under rubrics/, so the references are valid -- the gap is test coverage of the generator, not a broken link."
+  },
+  {
+    "id": "artifactreview-2",
+    "file": "internal/artifactreview/review.go",
+    "line": 122,
+    "category": "assertion-cannot-fail",
+    "severity": "low",
+    "issue_text": "The guard `if ctx.RunID != runID { return ...run ID mismatch... }` compares two values that are computed by the identical deterministic call. review.go computes runID = state.RunID(\"artifact\", target, runAt) (line 110) and passes the same runAt into contextpack.Build (line 118), where contextpack/artifact.go:120 computes runID = state.RunID(\"artifact\", target, at) with at == runAt. state.RunID (state.go:92) is a pure function of (scope, target, at). The two sides are therefore equal by construction and this branch can never be taken; no test exercises the error path.",
+    "why_real": "Both operands reduce to state.RunID(\"artifact\", target, runAt) with byte-identical arguments and a pure implementation (sha1 of target + UTC timestamp format + slugs), so the inequality is unreachable as written. This is a genuine cannot-fail assertion. Caveat for adjudication: it is a defensible defense-in-depth guard against the two packages' RunID derivations drifting in the future (e.g. contextpack changing scope/format) -- it is dead only because both packages currently share the exact call. Reported at low confidence for that reason; not a functional bug.",
+    "tests_checked": "review_test.go: neither TestScaffoldDeclaresItsLensSet nor TestCompletedScaffoldReadsAsCompleteInReviewLog constructs a divergent context-pack RunID, so the error branch is uncovered. Confirmed contextpack/artifact.go:120 and state/state.go:92 share the same deterministic RunID formula with identical args."
+  }
+]

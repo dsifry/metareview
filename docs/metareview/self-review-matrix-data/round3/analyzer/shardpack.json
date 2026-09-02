@@ -1,0 +1,12 @@
+[
+  {
+    "id": "shardpack-1",
+    "file": "internal/shardpack/shardpack.go",
+    "line": 507,
+    "category": "invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "shardPack's chunk validation guard `if c.ByteStart > c.ByteEnd || c.ByteEnd > len(file.Diff)` has two clauses; only the second is exercised by any test. The inverted-range clause `c.ByteStart > c.ByteEnd` is deletable with the whole suite still green. The guard also never checks `c.ByteStart >= 0`. It protects the slice `files[c.Path].Diff[c.ByteStart:c.ByteEnd]` at line 530 from a runtime panic ('slice bounds out of range'), so an inverted or negative ByteStart in a plan reaches the slice unguarded on the code paths the clause claims to cover.",
+    "why_real": "I deleted the `c.ByteStart > c.ByteEnd ||` clause and ran `go test ./internal/shardpack/` — all tests pass (ok, 0.374s). TestChunkNotBackedByFilesFails only exercises the missing-file case (files=nil) and the short-file case (Diff=\"\" so ByteEnd>0 > len 0); neither constructs ByteStart>ByteEnd or ByteStart<0. So the code asserts a range invariant (start<=end, start>=0) that no test pins and that, on the paths it names, would surface as a panic rather than the intended `fmt.Errorf`. Low severity: contextprofile.PlanShards is the only producer of these chunks and yields valid ranges, so this is dead defensive code / an untested guard clause rather than a live data bug.",
+    "tests_checked": "TestChunkNotBackedByFilesFails (missing-file, short-file subtests) at shardpack_test.go:639-656 — the only tests hitting this guard; both trip the ByteEnd>len clause, neither the ByteStart>ByteEnd clause nor a negative start. Empirically deleted the clause: suite still passes."
+  }
+]

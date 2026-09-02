@@ -1,0 +1,15 @@
+[
+  {
+    "id": "contextpack-1",
+    "category": "invariant-nothing-holds",
+    "lens": "test-effectiveness",
+    "confidence": "high",
+    "file": "internal/contextpack/artifact.go",
+    "symbol": "assertInsideFile",
+    "lines": "64-73",
+    "title": "Every rejection branch of assertInsideFile is unpinned; the repo-containment guard can be deleted with tests still green",
+    "detail": "assertInsideFile is the security guard that stops Build from packing a file outside the repository root (or a non-regular file). Its three rejection branches are all untested: the containment error return (lines 65-66), the not-found error (69-70), and the not-regular-file error (72-73) each show ZERO statement coverage in the package profile. The sole test in the package, TestSuggestedReviewersDeriveFromCanonicalLenses (artifact_test.go:19), only calls Build(root, \"A.md\", ...) on a plain in-root file, which drives the guard's happy path and never a rejection. Consequence: the entire containment check block (lines 64-66) can be deleted and `go test ./internal/contextpack/` still passes — the invariant 'target must be inside the repo root' is enforced by nothing in the test suite. (Inverting just the `!strings.HasPrefix` inside the condition would be caught, but deleting the guard wholesale is not.) Contrast: the sibling package internal/knowledge DOES pin its equivalent guard via TestCollectRejectsKnowledgeSymlinkOutsideRepo; contextpack has no analogous test.",
+    "evidence": "coverage profile: artifact.go:65.3,66.1 = 0; 69.3,70.1 = 0; 72.3,73.1 = 0. Only test: artifact_test.go writes A.md inside root.",
+    "suggested_fix": "Add a test that passes a target resolving outside root (e.g. a symlink escaping root, mirroring knowledge's test) and one for a directory/non-regular target, asserting Build returns an error."
+  }
+]
