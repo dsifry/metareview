@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -316,8 +317,10 @@ const cleanScenario = `calls:
   - {kind: adjudicate, node: adjudicate, iter: 1, index: 0, raw: '{"reasoning":"r","is_real":true,"confidence":0.9}', tokens: {input: 10, output: 5}}
 `
 
-// findingsB is a SECOND, distinct finding (different file/text) so it is not deduped against findingsData.
-const findingsB = `{"findings":[{"issue_text":"off-by-one in g.go","file":"g.go","line":7,"severity":"high","category":"bug","source":"lens"}]}`
+// findingsB is a SECOND, distinct finding. It stays on f.go (distinct issue text → distinct candidate):
+// a candidate must name a file the diff actually carries, or adjudicate keeps it as unverified_no_evidence
+// WITHOUT calling the judge (kind.go), and the re-review's mock verdict would never be exercised.
+const findingsB = `{"findings":[{"issue_text":"off-by-one in f.go","file":"f.go","line":7,"severity":"high","category":"bug","source":"lens"}]}`
 
 // TestSdlcLoopCleanReReviewLoopMockAI drives the WHOLE multi-iteration re-review loop of sdlc-loop-clean
 // through the real machine and the real fork/adjudicate path against an injected mock judge — a real temp
@@ -375,6 +378,189 @@ func TestSdlcLoopCleanReReviewLoopMockAI(t *testing.T) {
 	env := h.must(machine.StatusDone, 0, "advance", "--run", id)
 	if env["outcome"] != "clean" {
 		t.Fatalf("a fresh review that finds nothing → done(clean): %v", env)
+	}
+}
+
+// ---- sdlc-loop-clean scenario helpers (real machine + real fork adjudicate vs a mock judge) ----------
+
+// setupClean inits a sdlc-loop-clean mock run on the temp repo and returns the harness and run id.
+// `.metareview/` is ignored so the store's files never dirty the tree a fix commits into.
+func setupClean(t *testing.T, scenario string) (*harness, string) {
+	t.Helper()
+	h := newHarness(t)
+	_ = os.WriteFile(filepath.Join(h.root, "mock", "judge.yaml"), []byte(scenario), 0o644)
+	_ = os.WriteFile(filepath.Join(h.root, ".gitignore"), []byte("mock/\nfixtures/\nexp/\nsmall/\ndocs/\n.metareview/\n"), 0o644)
+	git(t, h.root, "add", ".gitignore")
+	git(t, h.root, "commit", "-q", "-m", "ignore .metareview")
+	return h, h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop-clean", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock")["run_id"].(string)
+}
+
+// review advances into a review node (discover/recheck), which parks for input, and records its findings.
+func (h *harness) review(id, node, data string) {
+	h.t.Helper()
+	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
+	h.must(StatusOK, 0, "record", "node-output", "--node", node, "--data", h.file("nd.json", data), "--run", id)
+}
+
+// fixCommit advances into the fix node, makes a real commit, and records it.
+func (h *harness) fixCommit(id, msg string) {
+	h.t.Helper()
+	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
+	sha := h.commit(msg)
+	h.must(StatusOK, 0, "record", "node-output", "--node", "fix", "--data", h.file("fx.json", `{"commit":"`+sha+`","summary":"`+msg+`"}`), "--run", id)
+}
+
+// adv takes one transition and asserts the state it lands in.
+func (h *harness) adv(id, to string) map[string]any {
+	h.t.Helper()
+	env := h.must(machine.StatusAdvanced, 0, "advance", "--run", id)
+	if env["to"] != to {
+		h.t.Fatalf("advance → %v, want %s: %v", env["to"], to, env)
+	}
+	return env
+}
+
+func finding(text, file string, line int) string {
+	return fmt.Sprintf(`{"issue_text":%q,"file":%q,"line":%d,"severity":"high","category":"bug","source":"lens"}`, text, file, line)
+}
+
+func findingsJSON(items ...string) string { return `{"findings":[` + strings.Join(items, ",") + `]}` }
+
+// TestSdlcLoopCleanTwoBugsOneFixIntroducesAnother: iteration 0 finds TWO bugs, both confirmed and fixed;
+// one fix is correct but the other leaves a FURTHER bug, which the re-review catches → the loop
+// re-adjudicates and re-fixes it → a fresh review is clean → done. (Dave's example scenario.)
+func TestSdlcLoopCleanTwoBugsOneFixIntroducesAnother(t *testing.T) {
+	scenario := `calls:
+  - {kind: adjudicate, node: adjudicate, iter: 0, index: 0, raw: '{"reasoning":"r","is_real":true,"confidence":0.9}', tokens: {input: 1, output: 1}}
+  - {kind: adjudicate, node: adjudicate, iter: 0, index: 1, raw: '{"reasoning":"r","is_real":true,"confidence":0.9}', tokens: {input: 1, output: 1}}
+  - {kind: adjudicate, node: adjudicate, iter: 1, index: 0, raw: '{"reasoning":"r","is_real":true,"confidence":0.9}', tokens: {input: 1, output: 1}}
+`
+	b1 := finding("nil deref in f.go", "f.go", 3)
+	b2 := finding("unchecked error in f.go", "f.go", 7)
+	b3 := finding("off-by-one the fix introduced in f.go", "f.go", 8)
+	h, id := setupClean(t, scenario)
+
+	// iter 0: two bugs, both confirmed, both fixed; the re-review finds the further bug b3.
+	h.review(id, "discover", findingsJSON(b1, b2))
+	h.adv(id, "adjudicate")
+	h.adv(id, "fix") // this advance RUNS the adjudicate node against the mock judge
+	if env := h.must(StatusOK, 0, "state", "--run", id); env["counts"].(map[string]any)["confirmed"] != float64(2) {
+		t.Fatalf("both candidates must be confirmed: %v", env["counts"])
+	}
+	h.fixCommit(id, "fix-b1-b2")
+	h.adv(id, "recheck")
+	h.review(id, "recheck", findingsJSON(b3)) // one fix left a further bug
+	if env := h.adv(id, "discover"); env["iteration"] != float64(1) {
+		t.Fatalf("the re-review's finding must start a fresh iteration: %v", env)
+	}
+
+	// iter 1: the fresh review re-finds b3, it is confirmed and fixed, and the re-review is clean.
+	h.review(id, "discover", findingsJSON(b3))
+	h.adv(id, "adjudicate")
+	h.adv(id, "fix")
+	h.fixCommit(id, "fix-b3")
+	h.adv(id, "recheck")
+	h.review(id, "recheck", `{"findings":[]}`)
+	if env := h.adv(id, "discover"); env["iteration"] != float64(2) {
+		t.Fatalf("recheck loops once more for an authoritative fresh review: %v", env)
+	}
+
+	// iter 2: a fresh review of the now-fixed code finds nothing → done(clean).
+	h.review(id, "discover", `{"findings":[]}`)
+	if env := h.must(machine.StatusDone, 0, "advance", "--run", id); env["outcome"] != "clean" {
+		t.Fatalf("done(clean): %v", env)
+	}
+}
+
+// TestSdlcLoopCleanAdjudicatorSplitsVerdict: iteration 0 finds two candidates; the fork adjudicator
+// confirms ONE and REJECTS the other, so only the confirmed one is fixed. The run then converges to
+// done(clean) — the rejected candidate never forces a fix.
+func TestSdlcLoopCleanAdjudicatorSplitsVerdict(t *testing.T) {
+	scenario := `calls:
+  - {kind: adjudicate, node: adjudicate, iter: 0, index: 0, raw: '{"reasoning":"r","is_real":true,"confidence":0.9}', tokens: {input: 1, output: 1}}
+  - {kind: adjudicate, node: adjudicate, iter: 0, index: 1, raw: '{"reasoning":"r","is_real":false,"confidence":0.8}', tokens: {input: 1, output: 1}}
+`
+	real := finding("real nil deref in f.go", "f.go", 3)
+	notReal := finding("style nit in f.go", "f.go", 7)
+	h, id := setupClean(t, scenario)
+
+	h.review(id, "discover", findingsJSON(real, notReal))
+	h.adv(id, "adjudicate")
+	h.adv(id, "fix") // this advance RUNS adjudicate; only the confirmed candidate drives a fix
+	if env := h.must(StatusOK, 0, "state", "--run", id); env["counts"].(map[string]any)["confirmed"] != float64(1) {
+		t.Fatalf("exactly one of the two candidates must be confirmed: %v", env["counts"])
+	}
+	h.fixCommit(id, "fix-real")
+	h.adv(id, "recheck")
+	h.review(id, "recheck", `{"findings":[]}`)
+	if env := h.adv(id, "discover"); env["iteration"] != float64(1) {
+		t.Fatalf("loop to a fresh review: %v", env)
+	}
+	h.review(id, "discover", `{"findings":[]}`)
+	if env := h.must(machine.StatusDone, 0, "advance", "--run", id); env["outcome"] != "clean" {
+		t.Fatalf("done(clean): %v", env)
+	}
+}
+
+// TestSdlcLoopCleanReReviewCandidateRejectedReachesDone: after a fix (so AllFound>0), the re-review
+// surfaces a candidate and the adjudicator REJECTS it. nothing_confirmed would dead-end here
+// (ERR_BUGS_KNOWN); confirmed_empty (AllFound-blind) must reach done(clean). The blocker, through the
+// real fork.
+func TestSdlcLoopCleanReReviewCandidateRejectedReachesDone(t *testing.T) {
+	scenario := `calls:
+  - {kind: adjudicate, node: adjudicate, iter: 0, index: 0, raw: '{"reasoning":"r","is_real":true,"confidence":0.9}', tokens: {input: 1, output: 1}}
+  - {kind: adjudicate, node: adjudicate, iter: 1, index: 0, raw: '{"reasoning":"r","is_real":false,"confidence":0.8}', tokens: {input: 1, output: 1}}
+`
+	b1 := finding("nil deref in f.go", "f.go", 3)
+	phantom := finding("suspicious but fine in f.go", "f.go", 7)
+	h, id := setupClean(t, scenario)
+
+	h.review(id, "discover", findingsJSON(b1))
+	h.adv(id, "adjudicate")
+	h.adv(id, "fix")
+	h.fixCommit(id, "fix-b1")
+	h.adv(id, "recheck")
+	h.review(id, "recheck", findingsJSON(phantom)) // re-review surfaces a candidate
+	if env := h.adv(id, "discover"); env["iteration"] != float64(1) {
+		t.Fatalf("loop to a fresh review: %v", env)
+	}
+	h.review(id, "discover", findingsJSON(phantom)) // the fresh review re-surfaces it
+	h.adv(id, "adjudicate")
+	// AllFound>0 (b1 known) and the adjudicator confirms nothing → confirmed_empty → done, not dead-end.
+	if env := h.must(machine.StatusDone, 0, "advance", "--run", id); env["outcome"] != "clean" {
+		t.Fatalf("adjudicator rejects the re-surfaced candidate → done(clean) via confirmed_empty: %v", env)
+	}
+}
+
+// TestSdlcLoopCleanLoopIsBounded: a fix that keeps leaving a bug would loop forever; max_iterations bounds
+// it. A sdlc-loop-clean derived with max_iterations:1 STOPS at the first loop boundary instead of
+// re-reviewing endlessly.
+func TestSdlcLoopCleanLoopIsBounded(t *testing.T) {
+	scenario := `calls:
+  - {kind: adjudicate, node: adjudicate, iter: 0, index: 0, raw: '{"reasoning":"r","is_real":true,"confidence":0.9}', tokens: {input: 1, output: 1}}
+`
+	h := newHarness(t)
+	_ = os.WriteFile(filepath.Join(h.root, "mock", "judge.yaml"), []byte(scenario), 0o644)
+	_ = os.WriteFile(filepath.Join(h.root, ".gitignore"), []byte("mock/\nfixtures/\nexp/\nsmall/\ndocs/\n.metareview/\n"), 0o644)
+	git(t, h.root, "add", ".gitignore")
+	git(t, h.root, "commit", "-q", "-m", "ignore .metareview")
+	raw, _ := h.deps.Workflows("sdlc-loop-clean")
+	renamed := strings.Replace(string(raw), "workflow: sdlc-loop-clean", "workflow: sdlc-clean-bounded", 1)
+	bounded := h.file("bounded.yaml", strings.Replace(renamed, "max_iterations: 8", "max_iterations: 1", 1))
+	id := h.must(StatusOK, 0, "init", "--workflow", bounded, "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock")["run_id"].(string)
+
+	b1 := finding("nil deref in f.go", "f.go", 3)
+	stillBad := finding("the fix did not take in f.go", "f.go", 7)
+	h.review(id, "discover", findingsJSON(b1))
+	h.adv(id, "adjudicate")
+	h.adv(id, "fix")
+	h.fixCommit(id, "fix-attempt")
+	h.adv(id, "recheck")
+	h.review(id, "recheck", findingsJSON(stillBad)) // the fix did not clear it
+	// recheck→discover would begin iteration 1, but max_iterations:1 stops the loop at that boundary.
+	env := h.must(machine.StatusStopped, 1, "advance", "--run", id)
+	if env["stop_reason"] == nil {
+		t.Fatalf("a non-converging loop must STOP at the iteration bound: %v", env)
 	}
 }
 
