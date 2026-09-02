@@ -1,0 +1,32 @@
+[
+  {
+    "id": "reviewers-1",
+    "file": "internal/reviewers/epicready.go",
+    "line": 195,
+    "category": "correctness",
+    "issue_text": "childEvidencePassed treats a child task as having passing acceptance evidence if any evidence line mentioning the child ID also contains the bare substring \"ok\" (line 195) or \"pass\" (line 192). Because these are unanchored strings.Contains checks over lowercased text, common failure words contain them: \"broke\", \"broken\", \"look\"/\"lookup\", \"took\" all contain \"ok\"; \"bypassed\", \"surpassed\" contain \"pass\". So an evidence line like \"task-1 broke CI, reverting\" or \"task-1 was bypassed\" is accepted as passing, and missingChildEvidence drops that child from the missing list.",
+    "severity": "high",
+    "why_real": "Category 1 (silently drops a blocker) + Category 2 (invariant nothing holds). The whole point of missingChildEvidence is to block epic closure when a child lacks passing evidence; this over-match lets clearly-failing evidence text satisfy the gate, a false acceptance of a high-severity blocker. Verified: strings.Contains(\"broke\",\"ok\")==true and strings.Contains(\"bypassed\",\"pass\")==true. Word-boundary matching (as used by evalPattern elsewhere) is what is intended.",
+    "tests_checked": "Read epicready_test.go. TestEpicReadyReviewersDoNotTreatBareTaskMentionAsEvidence only exercises the phrase \"task-1 still needs review\" (no ok/pass substring); no test pins that a failing line containing \"ok\"/\"pass\" must be rejected. The positive tests use \"task-1 passed\" which still matches via the \"passed\" branch, so deleting the \"ok\" check (line 195) OR the \"pass\" check (line 192) leaves every test green — each branch is independently deletable, confirming the invariant is unheld."
+  },
+  {
+    "id": "reviewers-2",
+    "file": "internal/reviewers/epicready.go",
+    "line": 51,
+    "category": "correctness",
+    "issue_text": "servicePathPattern = `(?i)(service|controller|worker|client)\\.(go|js|ts|tsx|jsx|py|rb)$|(?i)(service|controller|worker|client)`. The second alternative is an unanchored bare-word match, which subsumes the first (any path matching the anchored `<word>.<ext>$` alternative also contains the word). The intended extension anchoring in the first alternative is therefore dead, and missingServiceInventoryCoverage fires on ANY changed path containing service/controller/worker/client as a substring, regardless of extension or role: e.g. docs/client-guide.md, config/worker.yaml, and internal/client_helper.go all match, raising a blocking \"Missing service inventory update\" for docs and config files.",
+    "severity": "medium",
+    "why_real": "Category 2 (deletable invariant) + Category 1 (false-positive blocker). Verified: the pattern matches docs/client-guide.md and config/worker.yaml (both non-source) and internal/client_helper.go (which the first, anchored alternative would NOT match since 'client' is not immediately followed by '.go'). This produces spurious epic-closure blockers and shows the first alternative is non-functional.",
+    "tests_checked": "Read epicready_test.go. The only positive service test uses internal/billing/payment_service.go, which matches BOTH alternatives; no test uses a file that matches only the first alternative, and no negative test asserts a non-source path containing one of these words is ignored. So the first alternative can be deleted entirely with all tests passing, and the over-broad second-alternative behavior is unpinned."
+  },
+  {
+    "id": "reviewers-3",
+    "file": "internal/reviewers/epicready.go",
+    "line": 222,
+    "category": "correctness",
+    "issue_text": "violatesNoEvalIntent uses strings.Contains(evidence, \"eval(\") on the lowercased diff/child bodies, with no word boundary. This matches inside longer identifiers: \"retrieval(input)\" contains \"eval(\". So when the epic body states a no-eval intent (\"without executing\"/\"no eval\"/\"avoid eval\"), a diff that legitimately calls something like retrieval(...) triggers a false \"Epic intent drift\" blocker. The deterministic security lint in taskdone.go deliberately uses `\\beval\\s*\\(` to avoid exactly this; the epic path does not.",
+    "severity": "low",
+    "why_real": "Category 1 (false-positive blocker) + inconsistency with the word-boundary guard used elsewhere. Verified: strings.Contains(\"x := retrieval(input)\",\"eval(\")==true while regexp `\\beval\\s*\\(` does not match it. Trigger is narrow (requires the specific no-eval intent phrasing plus a diff containing an *eval(-suffixed identifier), hence low severity, but it is a genuine over-match.",
+    "tests_checked": "Read epicready_test.go TestEpicReadyReviewersBlockContradictionsAndIntentDrift, which uses a real eval(input) call and does not exercise a retrieval(-style false positive. No test pins that a longer identifier ending in eval( must NOT trip intent drift, so the missing word boundary is unguarded."
+  }
+]
