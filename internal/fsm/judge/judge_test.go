@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -782,5 +783,86 @@ func TestPreflight(t *testing.T) {
 		if !errs.Is(err, c.code) || (c.reason != "" && errs.As(err).Fields["reason"] != c.reason) {
 			t.Fatalf("%s: %v", c.name, err)
 		}
+	}
+}
+
+func TestResolveTimeout(t *testing.T) {
+	cases := []struct {
+		name string
+		env  map[string]string
+		want time.Duration
+	}{
+		{"unset", nil, AttemptTimeout},
+		{"empty", map[string]string{EnvTimeout: ""}, AttemptTimeout},
+		{"positive", map[string]string{EnvTimeout: "600"}, 600 * time.Second},
+		{"whitespace-trimmed", map[string]string{EnvTimeout: " 45 "}, 45 * time.Second},
+		{"zero-ignored", map[string]string{EnvTimeout: "0"}, AttemptTimeout},
+		{"negative-ignored", map[string]string{EnvTimeout: "-30"}, AttemptTimeout},
+		{"malformed-ignored", map[string]string{EnvTimeout: "abc"}, AttemptTimeout},
+		// Overflow guard: a value that would wrap time.Duration when multiplied by time.Second must be
+		// rejected, not silently truncated to a tiny (positive) timeout.
+		{"max-in-range", map[string]string{EnvTimeout: strconv.FormatInt(maxTimeoutSeconds, 10)}, time.Duration(maxTimeoutSeconds) * time.Second},
+		{"one-past-max-ignored", map[string]string{EnvTimeout: strconv.FormatInt(maxTimeoutSeconds+1, 10)}, AttemptTimeout},
+		{"way-overflow-ignored", map[string]string{EnvTimeout: "18446744074"}, AttemptTimeout},
+		{"int64-overflow-ignored", map[string]string{EnvTimeout: "99999999999999999999"}, AttemptTimeout},
+	}
+	for _, c := range cases {
+		getenv := func(k string) string { return c.env[k] }
+		if got := ResolveTimeout(getenv); got != c.want {
+			t.Errorf("%s: ResolveTimeout = %v, want %v", c.name, got, c.want)
+		}
+	}
+	// A nil getenv falls back to the default rather than panicking.
+	if got := ResolveTimeout(nil); got != AttemptTimeout {
+		t.Errorf("nil getenv: %v, want %v", got, AttemptTimeout)
+	}
+}
+
+// The per-attempt HTTP request must carry a context deadline that reflects the configured timeout:
+// the AttemptTimeout default with no override, and the WithTimeout value when set. WithTimeout on a
+// non-HTTP judge, or with a non-positive duration, is a no-op.
+func TestWithTimeoutSetsAttemptDeadline(t *testing.T) {
+	cases := []struct {
+		name  string
+		apply time.Duration
+		want  time.Duration
+	}{
+		{"default", 0, AttemptTimeout},
+		{"override", 500 * time.Second, 500 * time.Second},
+		{"non-positive-noop", -1, AttemptTimeout},
+	}
+	for _, c := range cases {
+		d := &fakeDoer{steps: []step{{status: 200, body: oaiOK}}}
+		var sleeps []time.Duration
+		j := newJudge(t, d, &sleeps)
+		if c.apply != 0 {
+			j = WithTimeout(j, c.apply)
+		}
+		before := time.Now()
+		if _, err := j.Call(context.Background(), Request{Kind: KindAdjudicate, Model: "gpt-5.2", Effort: "low", Input: fixedInputs[KindAdjudicate], Fence: true}); err != nil {
+			t.Fatalf("%s: Call: %v", c.name, err)
+		}
+		dl, ok := d.reqs[0].Context().Deadline()
+		if !ok {
+			t.Fatalf("%s: request carried no deadline", c.name)
+		}
+		got := dl.Sub(before)
+		if got < c.want-5*time.Second || got > c.want+5*time.Second {
+			t.Errorf("%s: attempt deadline ~%v, want ~%v", c.name, got, c.want)
+		}
+	}
+	// WithTimeout on a non-HTTP judge (a mock) returns it unchanged.
+	m := NewMock(Script{})
+	if WithTimeout(m, 500*time.Second) != Judge(m) {
+		t.Error("WithTimeout must return a non-HTTP judge unchanged")
+	}
+	// A non-positive duration is a no-op: the SAME judge is returned, not a clone. This pins the
+	// `d <= 0` boundary (d == 0 must be treated as no-op, which `d < 0` would not).
+	base := newJudge(t, &fakeDoer{steps: []step{{status: 200, body: oaiOK}}}, new([]time.Duration))
+	if WithTimeout(base, 0) != base {
+		t.Error("WithTimeout(j, 0) must return the same judge unchanged")
+	}
+	if WithTimeout(base, -1) != base {
+		t.Error("WithTimeout(j, -1) must return the same judge unchanged")
 	}
 }
