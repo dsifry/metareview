@@ -34,15 +34,15 @@ had **not** caught:
 
 | ID | Package | Sev | Defect | Status |
 | --- | --- | --- | --- | --- |
-| ghctx-1 | internal/githubcontext | HIGH | `redactMatch` leaks an unencrypted PEM private-key body (splits at base64 `=` padding) | **Fixed — PR #67** |
-| ghctx-2 | internal/githubcontext | MED | `redactMatch` leaks a value prefix when the value contains `:` (`token=a:b`) | **Fixed — PR #67** |
-| reviewers-1 | internal/reviewers | HIGH | `childEvidencePassed` accepts "broke"/"bypassed" as passing (unanchored `ok`/`pass`) → epic gate false-pass | **Fixed — PR #68** |
-| reviewers-2 | internal/reviewers | MED | `servicePathPattern` bare-word alt flags docs/config as service changes → spurious blockers | **Fixed — PR #68** |
-| reviewers-3 | internal/reviewers | LOW | `violatesNoEvalIntent` matches `retrieval(` (no `\b`) → false intent-drift blocker | **Fixed — PR #68** |
-| gate-5 | internal/fsm/gate | MED | `RealExec` security-hardening flags/env are unpinned by any test (deletable, tests still green) | **Fixed — PR #70** |
-| prready-3 | internal/prready | LOW | `readEvidence` truncates at a raw byte boundary → can split a UTF-8 rune | **Fixed — PR #69** |
+| ghctx-1 | internal/githubcontext | HIGH | `redactMatch` leaks an unencrypted PEM private-key body (splits at base64 `=` padding) | **Merged — #67** |
+| ghctx-2 | internal/githubcontext | MED | `redactMatch` leaks a value prefix when the value contains `:` (`token=a:b`) | **Merged — #67** |
+| reviewers-1 | internal/reviewers | HIGH | `childEvidencePassed` accepts "broke"/"bypassed" as passing (unanchored `ok`/`pass`) → epic gate false-pass | **Merged — #68** |
+| reviewers-2 | internal/reviewers | MED | `servicePathPattern` bare-word alt flags docs/config as service changes → spurious blockers | **Merged — #68** |
+| reviewers-3 | internal/reviewers | LOW | `violatesNoEvalIntent` matches `retrieval(` (no `\b`) → false intent-drift blocker | **Merged — #68** |
+| gate-5 | internal/fsm/gate | MED | `RealExec` security-hardening flags/env are unpinned by any test (deletable, tests still green) | **Merged — #70** |
+| prready-3 | internal/prready | LOW | `readEvidence` truncates at a raw byte boundary → can split a UTF-8 rune | **Merged — #69** |
 | export-2 | internal/fsm/export | LOW | dead/tautological assertion in `TestF8Redaction` (can never fail) | open (low, documented) |
-| prready-1 | internal/prready | MED | `verdictForCounts` ESCALATED branch (`>=`) unpinned across the repo | **Fixed — PR #69** |
+| prready-1 | internal/prready | MED | `verdictForCounts` ESCALATED branch (`>=`) unpinned across the repo | **Merged — #69** |
 
 _(export-1 audit-log fail-open and prready-2 unreachable-PASS are lower-confidence / debatable; see
 per-config verdicts.)_
@@ -172,6 +172,8 @@ strength. That is a strong recall result for the core review, with three precise
 
 ## Fold-back
 
-Run `metareview learn --post-merge <pr> --base <pre-merge-ref>` (with `evidence import --github-checks`)
-on each merged PR to ingest the R1–R3 bot findings as durable calibration — metareview improving from its
-own blind spots. _Pending PR merges._
+All four fix PRs (#67–#70) are merged. `learn --post-merge` has been run on #67 and #68 (the PRs that drew
+bot findings), ingesting R1–R3 as durable calibration — the accepted/discarded artifacts are under
+`docs/metareview/learning/` and the curated knowledge in `.metareview/knowledge/metareview.jsonl`. This
+closes the metareview-first-then-bots loop: metareview's gate ran first, the bots measured the residual,
+and the residual is now folded back.
