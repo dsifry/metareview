@@ -117,8 +117,16 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 		}
 		r.Reviews = scoped
 	}
+	// A run whose findings were repaired in a later attempt no longer blocks: the repair loop records
+	// the fix as a child linked by previousRunId, and a clean child means the parent's findings were
+	// cleared. Without this, a first review that found anything blocks forever — the gate could only
+	// ever clear a change that passed on its first look, which no real change does.
+	superseded := supersededRuns(logs)
 	for _, s := range logs {
 		if !s.HasUnresolvedBlockers {
+			continue
+		}
+		if superseded[s.RunID] {
 			continue
 		}
 		if target != "" && !covers(s, target, current) {
@@ -312,6 +320,29 @@ func emit(r Report, w io.Writer) (int, error) {
 // spec path is asked about. Or it examined the file, which is what CoveredPaths records. A
 // review with no CoveredPaths is one written before the field existed: it cannot answer for a
 // path, and saying so is what keeps an old log from silently clearing a file it never read.
+// supersededRuns collects every run retired by a later CLEAN attempt in its OWN previousRunId lineage.
+// A clean child (no unresolved blockers) means the parent's findings were cleared, so the parent — and
+// any earlier attempt it chains back to — no longer blocks. Only the same lineage supersedes: an
+// unrelated PASS never clears an open review, which would be the stale-review failure covers() guards
+// against, one level up. The visited guard also makes a malformed cyclic chain terminate.
+func supersededRuns(logs []reviewlog.Summary) map[string]bool {
+	prevOf := make(map[string]string, len(logs))
+	for _, s := range logs {
+		prevOf[s.RunID] = s.PreviousRunID
+	}
+	superseded := map[string]bool{}
+	for _, s := range logs {
+		if s.HasUnresolvedBlockers {
+			continue
+		}
+		// Walk the ancestors of this clean attempt; each was repaired by it.
+		for prev := prevOf[s.RunID]; prev != "" && !superseded[prev]; prev = prevOf[prev] {
+			superseded[prev] = true
+		}
+	}
+	return superseded
+}
+
 func covers(s reviewlog.Summary, target string, current map[string]bool) bool {
 	if s.Target == target {
 		return true

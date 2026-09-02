@@ -105,6 +105,40 @@ func TestReportIsMachineReadableAndNamesWhatMustBeCleared(t *testing.T) {
 	}
 }
 
+// A NEEDS_REVISION run superseded by a later PASS in its previousRunId lineage must NOT keep blocking.
+// The repair loop is: a review finds blockers (NEEDS_REVISION) -> fix -> re-review with --previous-run
+// passes (PASS). Nothing retires the parent today, so must_clear keeps it forever and the gate can never
+// reach clean after any first review that found something — which is every real first review. This is the
+// second half of docs/tasks/2026-09-01-status-covered-paths-gap.md.
+func TestNeedsRevisionSupersededByLineagePass(t *testing.T) {
+	root := t.TempDir()
+	writeLog(t, root, "mrv-parent-task-done-a.md", "# metareview: task-done review\n\nRun ID: `mrv-parent`\nTarget: `task-a`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	writeLog(t, root, "mrv-child-task-done-a.md", "# metareview: task-done review\n\nRun ID: `mrv-child`\nTarget: `task-a`\n\nPrevious run: `mrv-parent`\n\n## Verdict\n\nPASS\n")
+	r, err := Build(root)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if r.Blocked || len(r.MustClear) != 0 {
+		t.Fatalf("a NEEDS_REVISION superseded by a lineage PASS must not block; blocked=%v must_clear=%+v", r.Blocked, r.MustClear)
+	}
+}
+
+// A NEEDS_REVISION with NO passing descendant still blocks: only a lineage PASS supersedes it, and an
+// unrelated PASS (different lineage) must not clear it — that would be the stale-review failure one level up.
+func TestNeedsRevisionWithoutLineagePassStillBlocks(t *testing.T) {
+	root := t.TempDir()
+	writeLog(t, root, "mrv-open-task-done-a.md", "# metareview: task-done review\n\nRun ID: `mrv-open`\nTarget: `task-a`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	// A PASS of a DIFFERENT target/lineage must not retire the open one.
+	writeLog(t, root, "mrv-other-task-done-b.md", "# metareview: task-done review\n\nRun ID: `mrv-other`\nTarget: `task-b`\n\n## Verdict\n\nPASS\n")
+	r, err := Build(root)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(r.MustClear) != 1 || r.MustClear[0].RunID != "mrv-open" {
+		t.Fatalf("an unsuperseded NEEDS_REVISION must still block; must_clear=%+v", r.MustClear)
+	}
+}
+
 // blocking_count, attempt_number and max_attempts are the operator-facing half of the contract -
 // how many blockers remain, and which attempt of how many, which is the escalation signal the
 // Completion Rule depends on. Deleting the line that populates all three left ./internal/status

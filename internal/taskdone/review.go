@@ -16,6 +16,7 @@ import (
 	"github.com/dsifry/metareview/internal/markdown"
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewers"
+	"github.com/dsifry/metareview/internal/reviewlog"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/runchain"
 	"github.com/dsifry/metareview/internal/shardpack"
@@ -258,7 +259,7 @@ func Create(root, target string, options Options) (Result, error) {
 			FollowUpFindingCount: counts.FollowUp,
 			WarningFindingCount:  counts.Warnings,
 		}
-		return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, target, contextRel, options.PreviousRunID, gateEffect, verdict, reconciled.OpenFindings, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
+		return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, target, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
 	}()
 	if err != nil {
 		restoreSnapshots(snapshots)
@@ -554,12 +555,16 @@ func verdictForCounts(counts findings.ClassCounts, gateEffect string, attemptNum
 	return "PASS", "passed", false, ""
 }
 
-func reviewMarkdown(runID, target, contextRel, previousRun, gateEffect, verdict string, records []findings.Record, shardedReview string, meta reviewMetadata) string {
+func reviewMarkdown(runID, target, contextRel, previousRun, gateEffect, verdict string, coveredPaths []string, records []findings.Record, shardedReview string, meta reviewMetadata) string {
 	// The sharded section sits after the verdict value line, so reviewlog still
 	// reads the verdict token as the first non-empty line after the heading.
 	if shardedReview != "" {
 		shardedReview += "\n\n"
 	}
+	// Covered paths: the exclude-filtered source files this review examined, so `status` can credit a
+	// clean review for the files it read (without it every changed file stays UNREVIEWED forever, which
+	// is what made the branch-status gate unsatisfiable). Emitted on every verdict — status only credits
+	// it from a review with no unresolved blockers.
 	return "# metareview: task-done review\n\n" +
 		"Run ID: " + markdown.InlineCode(runID) + "\n\n" +
 		"Target: " + markdown.InlineCode(target) + "\n\n" +
@@ -567,6 +572,7 @@ func reviewMarkdown(runID, target, contextRel, previousRun, gateEffect, verdict 
 		"Execution mode: " + markdown.InlineCode("deterministic-local") + "\n\n" +
 		"Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		"Previous run: " + markdown.InlineCode(firstNonEmpty(previousRun, "none")) + "\n\n" +
+		reviewlog.CoveredPathsLabel + " " + markdown.InlineCode(reviewlog.EncodeCoveredPaths(coveredPaths)) + "\n\n" +
 		"## Verdict\n\n" + verdict + "\n\n" + shardedReview +
 		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n" +
 		reviewerTable(records) + "\n\n" +

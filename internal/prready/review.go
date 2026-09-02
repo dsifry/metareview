@@ -282,7 +282,7 @@ func Create(root string, options Options) (Result, error) {
 			FollowUpFindingCount: counts.FollowUp,
 			WarningFindingCount:  counts.Warnings,
 		}
-		return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, verdict, reconciled.OpenFindings, prEvidence, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
+		return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, prEvidence, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
 	}()
 	if err != nil {
 		restoreSnapshots(snapshots)
@@ -923,12 +923,14 @@ func verdictForCounts(counts findings.ClassCounts, gateEffect string, attemptNum
 	return "PASS", "passed", false, ""
 }
 
-func reviewMarkdown(runID, contextRel, previousRun, gateEffect, verdict string, records []findings.Record, prEvidence, shardedReview string, meta reviewMetadata) string {
+func reviewMarkdown(runID, contextRel, previousRun, gateEffect, verdict string, coveredPaths []string, records []findings.Record, prEvidence, shardedReview string, meta reviewMetadata) string {
 	// The sharded section sits after the verdict value line, so reviewlog still
 	// reads the verdict token as the first non-empty line after the heading.
 	if shardedReview != "" {
 		shardedReview += "\n\n"
 	}
+	// Covered paths: the exclude-filtered source files this review examined, so `status` can credit a
+	// clean review for the files it read (see reviewlog.DecodeCoveredPaths / status coverage accounting).
 	return "# metareview: pr-ready review\n\n" +
 		"Run ID: " + markdown.InlineCode(runID) + "\n\n" +
 		"Target: `current branch`\n\n" +
@@ -936,6 +938,7 @@ func reviewMarkdown(runID, contextRel, previousRun, gateEffect, verdict string, 
 		"Execution mode: " + markdown.InlineCode("deterministic-local") + "\n\n" +
 		"Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		"Previous run: " + markdown.InlineCode(firstNonEmpty(previousRun, "none")) + "\n\n" +
+		reviewlog.CoveredPathsLabel + " " + markdown.InlineCode(reviewlog.EncodeCoveredPaths(coveredPaths)) + "\n\n" +
 		"## Verdict\n\n" + verdict + "\n\n" + shardedReview +
 		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n" +
 		reviewerTable(records) + "\n\n" +
