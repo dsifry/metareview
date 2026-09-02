@@ -143,9 +143,13 @@ func TestMissingServiceInventoryCoverageIgnoresNonServicePaths(t *testing.T) {
 			t.Errorf("%q wrongly flagged as a service file: %v", f, got)
 		}
 	}
-	realService := missingServiceInventoryCoverage(EpicReadyContext{Git: EpicGitContext{ChangedFiles: []string{"internal/billing/payment_service.go"}}})
-	if len(realService) != 1 {
-		t.Errorf("a real *_service.go file should be flagged, got %v", realService)
+	// Both underscore and dotted basenames ending in a role word + source extension are service-shaped
+	// (dotted is the Angular/NestJS convention, e.g. user.service.ts) and must be flagged.
+	for _, f := range []string{"internal/billing/payment_service.go", "src/app/user.service.ts", "app/auth.controller.ts"} {
+		got := missingServiceInventoryCoverage(EpicReadyContext{Git: EpicGitContext{ChangedFiles: []string{f}}})
+		if len(got) != 1 {
+			t.Errorf("service file %q should be flagged, got %v", f, got)
+		}
 	}
 	// A service file already recorded in the inventory must NOT be flagged (pins the inventory!="" guard).
 	covered := missingServiceInventoryCoverage(EpicReadyContext{

@@ -53,7 +53,7 @@ type EpicKnowledgeContext struct {
 // is a whole path component / directory (services/foo.go). A bare occurrence of the word inside an
 // unrelated name (client_helper.go) or a non-source file (client-guide.md, worker.yaml) is NOT a
 // service change — the previous unanchored second alternative matched all of those as false positives.
-var servicePathPattern = regexp.MustCompile(`(?i)(?:^|[/_-])(service|controller|worker|client)\.(go|js|ts|tsx|jsx|py|rb)$|(?:^|/)(service|controller|worker|client)s?/`)
+var servicePathPattern = regexp.MustCompile(`(?i)(?:^|[/_.-])(service|controller|worker|client)\.(go|js|ts|tsx|jsx|py|rb)$|(?:^|/)(service|controller|worker|client)s?/`)
 
 // evidencePassPattern matches a status word as a whole word, so "broke"/"bypassed"/"lookup" are not
 // mistaken for "ok"/"pass". Callers lowercase the line first.
