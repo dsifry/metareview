@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -798,6 +799,12 @@ func TestResolveTimeout(t *testing.T) {
 		{"zero-ignored", map[string]string{EnvTimeout: "0"}, AttemptTimeout},
 		{"negative-ignored", map[string]string{EnvTimeout: "-30"}, AttemptTimeout},
 		{"malformed-ignored", map[string]string{EnvTimeout: "abc"}, AttemptTimeout},
+		// Overflow guard: a value that would wrap time.Duration when multiplied by time.Second must be
+		// rejected, not silently truncated to a tiny (positive) timeout.
+		{"max-in-range", map[string]string{EnvTimeout: strconv.FormatInt(maxTimeoutSeconds, 10)}, time.Duration(maxTimeoutSeconds) * time.Second},
+		{"one-past-max-ignored", map[string]string{EnvTimeout: strconv.FormatInt(maxTimeoutSeconds+1, 10)}, AttemptTimeout},
+		{"way-overflow-ignored", map[string]string{EnvTimeout: "18446744074"}, AttemptTimeout},
+		{"int64-overflow-ignored", map[string]string{EnvTimeout: "99999999999999999999"}, AttemptTimeout},
 	}
 	for _, c := range cases {
 		getenv := func(k string) string { return c.env[k] }

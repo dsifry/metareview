@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -201,15 +202,20 @@ type realJudge struct {
 // EnvTimeout is the environment variable that overrides the default judge timeout, in whole seconds.
 const EnvTimeout = "METAREVIEW_JUDGE_TIMEOUT"
 
+// maxTimeoutSeconds is the largest METAREVIEW_JUDGE_TIMEOUT that still fits in a time.Duration once
+// multiplied by time.Second; a larger value would WRAP to a tiny positive duration, so it is rejected.
+const maxTimeoutSeconds = int64(math.MaxInt64) / int64(time.Second)
+
 // ResolveTimeout returns the effective judge timeout: METAREVIEW_JUDGE_TIMEOUT seconds when it is set
-// to a positive integer, else the AttemptTimeout default. A missing, empty, malformed, or non-positive
-// value is ignored (falls back to the default), so a bad override can never shorten or disable the
-// timeout. It governs both the per-attempt context deadline and the HTTP client timeout.
+// to a positive integer in range, else the AttemptTimeout default. A missing, empty, malformed,
+// non-positive, or overflowing value is ignored (falls back to the default), so a bad override can
+// never shorten or disable the timeout. It governs both the per-attempt context deadline and the HTTP
+// client timeout.
 func ResolveTimeout(getenv func(string) string) time.Duration {
 	if getenv == nil {
 		return AttemptTimeout
 	}
-	if n, err := strconv.Atoi(strings.TrimSpace(getenv(EnvTimeout))); err == nil && n > 0 {
+	if n, err := strconv.ParseInt(strings.TrimSpace(getenv(EnvTimeout)), 10, 64); err == nil && n > 0 && n <= maxTimeoutSeconds {
 		return time.Duration(n) * time.Second
 	}
 	return AttemptTimeout
