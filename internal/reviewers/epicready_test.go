@@ -196,6 +196,10 @@ func TestServicePathMatchesPascalCase(t *testing.T) {
 		"internal/billing/PaymentService.go", "web/ApiClient.jsx",
 		"src/HTTPClient.ts", "src/S3Client.ts", "internal/DBWorker.go", "src/APIService.tsx",
 		"internal/billing/payment_service.GO",
+		// Arm 3: a role word as a whole path component, singular or plural, case-INSENSITIVE — including the
+		// all-caps directory (SERVICES/) whose optional plural `s` was case-sensitive before the fix.
+		"services/foo.go", "SERVICES/foo.go", "Services/Foo.ts", "service/bar.go",
+		"controllers/x.tsx", "WORKERS/y.py",
 	} {
 		if len(missingServiceInventoryCoverage(EpicReadyContext{Git: EpicGitContext{ChangedFiles: []string{f}}})) != 1 {
 			t.Errorf("service file %q must be flagged", f)

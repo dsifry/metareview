@@ -60,7 +60,7 @@ type EpicKnowledgeContext struct {
 var servicePathPattern = regexp.MustCompile(
 	`(?:^|[/_.-])(?i:service|controller|worker|client)\.(?i:go|js|ts|tsx|jsx|py|rb)$` +
 		`|[A-Za-z0-9](?:Service|Controller|Worker|Client)\.(?i:go|js|ts|tsx|jsx|py|rb)$` +
-		`|(?:^|/)(?i:service|controller|worker|client)s?/`)
+		`|(?:^|/)(?i:(?:service|controller|worker|client)s?)/`)
 
 // evidencePassPattern matches a status word as a whole word, so "broke"/"bypassed"/"lookup" are not
 // mistaken for "ok"/"pass" (callers lowercase the line first). It deliberately EXCLUDES the ambiguous
