@@ -2,80 +2,85 @@ package githubcontext
 
 import (
 	"encoding/json"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"errors"
 	"strings"
 	"testing"
 )
 
+// withSeams installs fake external-process seams for the test: lookGh returns lookErr, and runCommand
+// dispatches to run. Both are restored on cleanup. No subprocess is spawned, so these tests are fast and
+// gremlins can mutation-test Collect without per-mutant process spawns timing out.
+func withSeams(t *testing.T, lookErr error, run func(root, name string, args ...string) (string, error)) {
+	t.Helper()
+	origRun, origLook := runCommand, lookGh
+	t.Cleanup(func() { runCommand, lookGh = origRun, origLook })
+	lookGh = func() error { return lookErr }
+	runCommand = run
+}
+
+// ghScript returns a runCommand that answers the git-remote / gh-auth / gh-pr-view calls Collect makes.
+func ghScript(remote string, remoteErr, authErr, prErr error, prOut string) func(root, name string, args ...string) (string, error) {
+	return func(root, name string, args ...string) (string, error) {
+		switch {
+		case name == "git":
+			return remote, remoteErr
+		case name == "gh" && len(args) > 0 && args[0] == "auth":
+			return "", authErr
+		case name == "gh" && len(args) > 0 && args[0] == "pr":
+			return prOut, prErr
+		}
+		return "", errors.New("unexpected command")
+	}
+}
+
 func TestCollectUnavailableWithoutPRNumber(t *testing.T) {
 	ctx, err := Collect(t.TempDir(), "")
-	if err != nil {
-		t.Fatalf("Collect returned error: %v", err)
-	}
-	if ctx.Available {
-		t.Fatalf("expected unavailable context")
-	}
-	if ctx.UnavailableReason != "pr-number-unavailable" {
-		t.Fatalf("unexpected reason: %s", ctx.UnavailableReason)
+	if err != nil || ctx.Available || ctx.UnavailableReason != "pr-number-unavailable" {
+		t.Fatalf("want pr-number-unavailable, got err=%v ctx=%+v", err, ctx)
 	}
 }
 
 func TestCollectUnavailableWithoutGh(t *testing.T) {
+	// Exercises the real lookGh seam (a fast filesystem check): gh absent from PATH -> gh-unavailable.
 	t.Setenv("PATH", t.TempDir())
 	ctx, err := Collect(t.TempDir(), "12")
-	if err != nil {
-		t.Fatalf("Collect returned error: %v", err)
-	}
-	if ctx.Available {
-		t.Fatalf("expected unavailable context")
-	}
-	if ctx.UnavailableReason != "gh-unavailable" {
-		t.Fatalf("unexpected reason: %s", ctx.UnavailableReason)
+	if err != nil || ctx.Available || ctx.UnavailableReason != "gh-unavailable" {
+		t.Fatalf("want gh-unavailable, got err=%v ctx=%+v", err, ctx)
 	}
 }
 
 func TestCollectUnavailableWithoutRemote(t *testing.T) {
-	bin := t.TempDir()
-	writeMockGh(t, bin, `{"number":12}`)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	root := t.TempDir()
-
-	ctx, err := Collect(root, "12")
-	if err != nil {
-		t.Fatalf("Collect returned error: %v", err)
-	}
-	if ctx.Available {
-		t.Fatalf("expected unavailable context")
-	}
-	if ctx.UnavailableReason != "remote-unavailable" {
-		t.Fatalf("unexpected reason: %s", ctx.UnavailableReason)
+	withSeams(t, nil, ghScript("", nil, nil, nil, "")) // empty remote
+	ctx, _ := Collect(t.TempDir(), "12")
+	if ctx.Available || ctx.UnavailableReason != "remote-unavailable" {
+		t.Fatalf("want remote-unavailable, got %+v", ctx)
 	}
 }
 
 func TestCollectUnavailableWhenGhAuthFails(t *testing.T) {
-	bin := t.TempDir()
-	writeMockGhAuthFailure(t, bin)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	root := t.TempDir()
-	run(t, root, "git", "init", "-q")
-	run(t, root, "git", "remote", "add", "origin", "https://github.com/acme/repo.git")
+	withSeams(t, nil, ghScript("https://github.com/acme/repo.git", nil, errors.New("auth"), nil, ""))
+	ctx, _ := Collect(t.TempDir(), "12")
+	if ctx.Available || ctx.UnavailableReason != "gh-auth-unavailable" {
+		t.Fatalf("want gh-auth-unavailable, got %+v", ctx)
+	}
+}
 
-	ctx, err := Collect(root, "12")
-	if err != nil {
-		t.Fatalf("Collect returned error: %v", err)
+func TestCollectUnavailableWhenPRViewFails(t *testing.T) {
+	withSeams(t, nil, ghScript("https://github.com/acme/repo.git", nil, nil, errors.New("pr view"), ""))
+	ctx, _ := Collect(t.TempDir(), "12")
+	if ctx.Available || ctx.UnavailableReason != "github-pr-unavailable" {
+		t.Fatalf("want github-pr-unavailable, got %+v", ctx)
 	}
-	if ctx.Available {
-		t.Fatalf("expected unavailable context")
-	}
-	if ctx.UnavailableReason != "gh-auth-unavailable" {
-		t.Fatalf("unexpected reason: %s", ctx.UnavailableReason)
+}
+
+func TestCollectErrorsOnMalformedJSON(t *testing.T) {
+	withSeams(t, nil, ghScript("https://github.com/acme/repo.git", nil, nil, nil, "this is not json"))
+	if _, err := Collect(t.TempDir(), "12"); err == nil {
+		t.Fatal("expected an error when gh returns malformed JSON")
 	}
 }
 
 func TestCollectSummarizesAndRedactsGitHubText(t *testing.T) {
-	bin := t.TempDir()
 	longComment := strings.Repeat("x", maxExcerptRunes+25)
 	credentialValue := "redaction-test-value"
 	bearerValue := "redaction-bearer-value"
@@ -97,18 +102,13 @@ func TestCollectSummarizesAndRedactsGitHubText(t *testing.T) {
 			"state":  "APPROVED",
 		}},
 	}
-	bytes, err := json.Marshal(payload)
+	raw, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeMockGh(t, bin, string(bytes))
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	withSeams(t, nil, ghScript("https://github.com/acme/repo.git", nil, nil, nil, string(raw)))
 
-	root := t.TempDir()
-	run(t, root, "git", "init", "-q")
-	run(t, root, "git", "remote", "add", "origin", "https://github.com/acme/repo.git")
-
-	ctx, err := Collect(root, "12")
+	ctx, err := Collect(t.TempDir(), "12")
 	if err != nil {
 		t.Fatalf("Collect returned error: %v", err)
 	}
@@ -148,48 +148,28 @@ func TestRedactCommonBareCredentialPatterns(t *testing.T) {
 	}
 }
 
-func writeMockGh(t *testing.T, dir, payload string) {
-	t.Helper()
-	script := `#!/usr/bin/env bash
-set -euo pipefail
-if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
-  exit 0
-fi
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  cat <<'JSON'
-` + payload + `
-JSON
-  exit 0
-fi
-exit 1
-`
-	path := filepath.Join(dir, "gh")
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+// realCommand is the production seam; these direct tests cover its success and both failure branches
+// (stderr present, and stderr empty -> fall back to err.Error()), the latter killing the line-137 mutant.
+func TestRealCommandSuccess(t *testing.T) {
+	out, err := realCommand(t.TempDir(), "echo", "seam-ok")
+	if err != nil || out != "seam-ok" {
+		t.Fatalf("realCommand echo = %q, %v; want \"seam-ok\", nil", out, err)
 	}
 }
 
-func writeMockGhAuthFailure(t *testing.T, dir string) {
-	t.Helper()
-	script := `#!/usr/bin/env bash
-set -euo pipefail
-if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
-  exit 1
-fi
-exit 0
-`
-	path := filepath.Join(dir, "gh")
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+func TestRealCommandErrorUsesStderr(t *testing.T) {
+	// A command that fails while writing to stderr: the returned message is that stderr text.
+	_, err := realCommand(t.TempDir(), "ls", "/metareview-no-such-path-xyz123")
+	if err == nil || err.Error() == "" {
+		t.Fatalf("ls of a missing path should error with stderr text, got %v", err)
 	}
 }
 
-func run(t *testing.T, dir, name string, args ...string) {
-	t.Helper()
-	cmd := exec.Command(name, args...)
-	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("%s %v failed: %v", name, args, err)
+func TestRealCommandErrorFallsBackWhenStderrEmpty(t *testing.T) {
+	// A nonexistent binary fails before writing stderr, so command falls back to err.Error() (non-empty).
+	_, err := realCommand(t.TempDir(), "metareview-no-such-binary-xyz123")
+	if err == nil || err.Error() == "" {
+		t.Fatalf("nonexistent binary should error with a non-empty message, got %v", err)
 	}
 }
 
@@ -199,55 +179,6 @@ func TestFirstNonEmpty(t *testing.T) {
 	}
 	if got := firstNonEmpty("", "second"); got != "second" {
 		t.Fatalf("should skip the empty value and return the first non-empty, got %q", got)
-	}
-}
-
-func TestCollectErrorsOnMalformedJSON(t *testing.T) {
-	bin := t.TempDir()
-	writeMockGh(t, bin, "this is not json")
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	root := t.TempDir()
-	run(t, root, "git", "init", "-q")
-	run(t, root, "git", "remote", "add", "origin", "https://github.com/acme/repo.git")
-
-	if _, err := Collect(root, "12"); err == nil {
-		t.Fatal("expected an error when gh returns malformed JSON")
-	}
-}
-
-func TestCollectUnavailableWhenPRViewFails(t *testing.T) {
-	bin := t.TempDir()
-	writeMockGhPRViewFailure(t, bin)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	root := t.TempDir()
-	run(t, root, "git", "init", "-q")
-	run(t, root, "git", "remote", "add", "origin", "https://github.com/acme/repo.git")
-
-	ctx, err := Collect(root, "12")
-	if err != nil {
-		t.Fatalf("Collect returned error: %v", err)
-	}
-	if ctx.Available || ctx.UnavailableReason != "github-pr-unavailable" {
-		t.Fatalf("expected github-pr-unavailable, got available=%v reason=%s", ctx.Available, ctx.UnavailableReason)
-	}
-}
-
-func writeMockGhPRViewFailure(t *testing.T, dir string) {
-	t.Helper()
-	script := `#!/usr/bin/env bash
-set -euo pipefail
-if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
-  exit 0
-fi
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  echo "gh: pr view failed" >&2
-  exit 1
-fi
-exit 1
-`
-	path := filepath.Join(dir, "gh")
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -290,18 +221,6 @@ func TestRenderMarkdownOmitsEmptyOptionalFields(t *testing.T) {
 	out2 := RenderMarkdown(Context{Available: true, URL: "u", Title: "t", Comments: []Entry{{}}})
 	if !strings.Contains(out2, "- unknown\n") {
 		t.Fatalf("empty author should render 'unknown' with no trailing fields: %q", out2)
-	}
-}
-
-func TestCommandErrorMessageNonEmptyWhenStderrEmpty(t *testing.T) {
-	// A nonexistent binary fails before it can write stderr, so command() falls back to err.Error();
-	// the returned message must not be empty (kills the message=="" -> message!="" mutant, line 137).
-	_, err := command(t.TempDir(), "metareview-no-such-binary-xyz123")
-	if err == nil {
-		t.Fatal("expected an error running a nonexistent binary")
-	}
-	if err.Error() == "" {
-		t.Fatal("error message must not be empty when stderr is empty")
 	}
 }
 
