@@ -1,0 +1,22 @@
+[
+  {
+    "id": "workflow-1",
+    "file": "internal/fsm/workflow/resolve.go",
+    "line": 62,
+    "category": "invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "Resolve caps the resolved model AND effort against run.MaxShort by looping over `[]string{nn.Model, nn.Effort}` and rejecting an over-length value with reason bad_var. No test ever supplies an over-length effort: the only over-length case (workflow_test.go:431) sets JUDGE (which feeds model) to Repeat(\"m\", MaxShort+1) while JUDGE_EFFORT stays \"b\". The effort element of the guard is therefore a surviving mutant: change the slice to `[]string{nn.Model}` (drop nn.Effort) and every test in the package still passes, so an over-MaxShort resolved effort string would slip through the early guard and only be caught (if at all) downstream at event-fold time.",
+    "why_real": "This is a deletable/reducible validation guard with the existing tests still green. The effort half of the MaxShort length check is entirely unpinned — no test exercises an over-length JUDGE_EFFORT / effort value, so removing nn.Effort from the checked slice is undetectable. It is a genuine blind spot in the resolve-time length invariant, not a restatement of intended behavior.",
+    "tests_checked": "workflow_test.go TestW3Resolve line 431 (only JUDGE/model over-length; JUDGE_EFFORT='b'); grep confirmed no other JUDGE_EFFORT/effort over-length case; only one _test.go in the package (git ls-files)."
+  },
+  {
+    "id": "workflow-2",
+    "file": "internal/fsm/workflow/workflow_test.go",
+    "line": 118,
+    "category": "assertion-cannot-fail",
+    "severity": "low",
+    "issue_text": "TestW1Shipped asserts `if sdlc.Nodes[\"fix\"].Exec != \"inline\" || sdlc.Nodes[\"fix\"].Params[\"x\"] != nil`. The sdlc-loop `fix` node is declared `{kind: agent-edit}` with no params at all, so `Params` is an empty map and `Params[\"x\"]` is always nil; the `Params[\"x\"] != nil` disjunct is tautologically false and can never contribute to a failure. The key \"x\" is arbitrary and set by nothing in the workflow or the code, making this sub-assertion vacuous.",
+    "why_real": "It is a tautological test clause (category: assertion that cannot fail). If the intent was to assert the fix node carries no params, the correct property is len(Params)==0; checking one arbitrary absent key proves nothing and would not catch a stray param under any other name.",
+    "tests_checked": "workflow_test.go:118 (the assertion itself); confirmed sdlc-loop.yaml:20 declares fix as `{kind: agent-edit}` with no params, so parseNodes leaves Params an empty map."
+  }
+]

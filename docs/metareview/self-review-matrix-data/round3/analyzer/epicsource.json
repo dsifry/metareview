@@ -1,0 +1,22 @@
+[
+  {
+    "id": "epicsource-1",
+    "file": "internal/epicsource/epicsource.go",
+    "line": 107,
+    "category": "unreachable-branch",
+    "severity": "medium",
+    "issue_text": "resolveMarkdown's not-found handling is dead code. containedPath() (called at line 102) runs filepath.EvalSymlinks(candidateAbs) at line 143, which fails for any nonexistent path, so containedPath returns that raw error before resolveMarkdown ever reaches os.Stat at line 106. The os.Stat error branch at lines 107-109 that produces the intended user-facing message `epic path not found: <target>` is therefore unreachable for a missing file: instead the caller gets a confusing lstat error like `lstat /.../docs: no such file or directory`.",
+    "why_real": "Empirically confirmed: Resolve(root, \"docs/does-not-exist.md\") returns error `lstat .../docs: no such file or directory`, and strings.Contains(err, \"epic path not found\") == false. The branch at 107-109 cannot fire for a nonexistent path (EvalSymlinks succeeds only if the path exists, in which case Stat also succeeds), so the friendly error message is both unreachable and untested. This is a real UX/correctness defect: the not-found message the code was written to emit never reaches the user.",
+    "tests_checked": "TestResolveMarkdownEpicAndRejectsOutsidePaths (epicsource_test.go:33) covers an existing markdown file and an existing outside-root file (caught lexically at line 136 before EvalSymlinks). No test exercises a nonexistent in-root path, so the dead branch is unpinned. Verified with a probe test showing the actual error text."
+  },
+  {
+    "id": "epicsource-2",
+    "file": "internal/epicsource/epicsource.go",
+    "line": 51,
+    "category": "unpinned-branch",
+    "severity": "low",
+    "issue_text": "The epic's own declared children list is never actually tested. Line 51 `children.addAll(stringList(epic, \"children\"))` handles the epic's explicit `children` field, but in the only beads fixture the sole listed child (task-1) also carries `parent:\"epic-1\"`, so it is added redundantly by the parent-inference loop at lines 54-57. Deleting or blanking line 51 leaves every test passing. Line 52 (`depends_on` on the epic) is likewise never exercised because the fixture epic has no `depends_on` field.",
+    "why_real": "Invariant that nothing holds: the most semantically important resolution path (an epic's explicitly declared child list) is fully masked in the test suite by parent-based inference of the same id. Confirmed by probe: an epic with NO children field but a child with parent:\"epic-1\" still yields [task-1], so line 51's contribution is invisible to TestResolveBeadsEpicAndChildGraph. A regression that broke `children`-field handling (e.g., wrong key, inverted guard) would ship green.",
+    "tests_checked": "TestResolveBeadsEpicAndChildGraph (epicsource_test.go:10). Its wantChildren = [task-0, task-1, task-2, task-3]: task-0 comes only from epic.dependencies (line 53, genuinely pinned), task-1 from children AND parent (redundant), task-2 from epic-field, task-3 from depends_on->epic. Probe confirmed parent-only fixture still returns task-1, proving line 51 is not distinguished by any assertion."
+  }
+]

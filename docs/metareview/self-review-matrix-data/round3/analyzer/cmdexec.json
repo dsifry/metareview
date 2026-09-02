@@ -1,0 +1,22 @@
+[
+  {
+    "id": "cmdexec-1",
+    "file": "internal/fsm/cmdexec/cmdexec.go",
+    "line": 120,
+    "category": "invariant-not-held",
+    "severity": "medium",
+    "issue_text": "The primary allowlist gate `if !ok { return errs.E(CodeCmdNotAllowed, \"command \"+name+\" is not consented\", ...) }` (lines 120-123 of exec) is a surviving-mutant: it can be deleted and every test still passes. When find(name) misses, it returns a zero-value run.AllowedCmd whose Argv is nil, so control falls through to the very next check `if len(c.Argv) == 0 || !filepath.IsAbs(c.Argv[0])` (line 124) which returns the SAME error code CodeCmdNotAllowed. No test distinguishes the not-consented refusal from the empty-argv refusal.",
+    "why_real": "The two tests that exercise an unknown name (cmdexec_test.go:268 g.Run(ctx,\"nope\",...) and :271 g.Call(ctx,\"nope\",...)) assert only `errs.Is(err, CodeCmdNotAllowed)` and `len(audits)==0`. Neither asserts the message (\"is not consented\") nor the absence of the reason field. With the `if !ok` block removed, an unknown name yields c=AllowedCmd{} -> len(c.Argv)==0 -> returns CodeCmdNotAllowed (reason=relative), so errs.Is still holds and no audit is emitted: both assertions pass. cli_test.go:372 exercises a different CLI path, not Guarded.find. Thus the dedicated allowlist-lookup check is not independently pinned by any test; the suite only verifies the downstream empty-argv fallback happens to also refuse. This is exactly a guard deletable with tests green.",
+    "tests_checked": "cmdexec_test.go:268,271 (nope Run/Call: only check CodeCmdNotAllowed + audits==0, not message/reason); :274 (rel: checks reason==relative, pins the SECOND check not this one); cli_test.go:372 (CLI converge --check path, not Guarded.exec). grep for 'is not consented' shows no test references the message."
+  },
+  {
+    "id": "cmdexec-2",
+    "file": "internal/fsm/cmdexec/cmdexec.go",
+    "line": 173,
+    "category": "audit-gap",
+    "severity": "low",
+    "issue_text": "The sentinel `if data.Name == \"\"` (Run line 173, Call line 187) is used to mean \"pre-exec refusal: never audited\". But exec() sets data.Name = name only after success, and an AllowedCmd whose Name is the empty string is consentable (ResolveCmds/cmdNames in workflow/resolve.go does not reject an empty map key). For such a command, find(\"\") succeeds, the process EXECUTES (all guards run, side effects happen), yet exec returns data with Name==\"\"; Run/Call then treat it as a pre-exec refusal: no cmd_call audit event is emitted and the real CmdResult is discarded (empty result, nil error returned to the caller).",
+    "why_real": "Violates the package-doc invariant (cmdexec.go:1-4) 'one audited cmd_call per execution. Nothing here is reachable without consent.' Here a consented, executed command produces zero audit records and its output is silently dropped, because the empty-name value collides with the sentinel that distinguishes 'did not execute' from 'executed'. The sentinel should be a separate boolean (executed) rather than an in-band empty-string test. No test uses an empty command name, so this latent audit gap is uncovered.",
+    "tests_checked": "cmdexec_test.go:268-276 (refusal-not-audited cases all use non-empty names 'nope','rel'); :159-162,292-295 (success-audited cases use non-empty 'echo','ok'). No test in cmdexec_test.go or sha_test.go exercises an AllowedCmd with Name==\"\" or Run(ctx,\"\",...). workflow/resolve.go:103-131 ResolveCmds iterates w.cmdNames() with no empty-name filter."
+  }
+]

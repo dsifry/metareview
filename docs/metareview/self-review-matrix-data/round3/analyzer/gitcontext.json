@@ -1,0 +1,42 @@
+[
+  {
+    "id": "gitcontext-1",
+    "file": "internal/gitcontext/gitcontext.go",
+    "line": 245,
+    "category": "exclude-glob-under-match",
+    "severity": "medium",
+    "issue_text": "matchesExclude() treats a non-'/**' exclude as an EXACT path match ('return file == exclude'), but git's ':(exclude)<dir>' pathspec matches that directory recursively. matchesExclude is used only by matchesAnyExclude inside exactExcludesExcept (the exceptions path), which converts each changed file that matches an exclude into an exact ':(exclude)<file>' pathspec. So for a bare-directory exclude like ['build'] combined with any exception, matchesExclude('build/foo.js','build') is false, build/foo.js is never added to effectiveExcludes, and it leaks into the reviewed Diff/ChangedFiles/DiffStat. Without the exception, the same exclude goes straight through withPathspec as ':(exclude)build' and git excludes build/ recursively (verified: git diff --name-only -- . ':(exclude)build' drops build/foo.js). Net effect: adding a single unrelated --except path silently un-excludes an entire bare-named directory.",
+    "why_real": "Demonstrable semantic divergence between the Go-side matchesExclude and git's own pathspec used on the non-exception path. Over-inclusion of content the caller asked to exclude, in a review harness where the diff drives what gets judged.",
+    "tests_checked": "The only exceptions tests (TestCollectWithExcludesExceptIncludesOnlyExplicitGeneratedTarget) use 'docs/metareview/**' (the '/**' branch), never a bare directory. TestBranchFilesExcludeGenerated uses a bare 'docs/metareview' but WITHOUT exceptions, so it goes through withPathspec/git pathspec and never calls matchesExclude. The bare-exclude-plus-exception combination where the under-match manifests is unpinned; matchesExclude's 'return file == exclude' line could be broadened to prefix-match with every existing test still green."
+  },
+  {
+    "id": "gitcontext-2",
+    "file": "internal/gitcontext/gitcontext.go",
+    "line": 174,
+    "category": "invariant-untested-inconsistency",
+    "severity": "low",
+    "issue_text": "DiffStat, StagedStat and WorkingTreeStat (lines 174-176) build their pathspec from the ORIGINAL 'excludes', while the Diff, --name-only file lists and byte measurements (lines 121-136) all use 'effectiveExcludes'. The two are identical unless exceptions are present; under CollectWithExcludesExcept, effectiveExcludes is the exact file list that KEEPS the excepted target, but the *Stat lines re-apply the raw 'docs/metareview/**' glob which drops the target. Result: the excepted target file appears in Diff and ChangedFiles but is missing from DiffStat, so the summary stat disagrees with the diff it summarizes.",
+    "why_real": "Genuine output inconsistency reachable through the exceptions feature; the stat under-reports files the diff shows. Either 'excludes' or 'effectiveExcludes' on these three lines passes the suite, so nothing pins the intended value.",
+    "tests_checked": "No test asserts *Stat content under exceptions. TestCollectWithExcludesExcept... checks ChangedFiles/Diff/GeneratedExcludedFiles only. TestCollectWithExcludesKeepsGeneratedArtifactsOutOfTruncation references context.DiffStat solely in a Fatalf format string (no assertion) and is a no-exceptions case where excludes==effectiveExcludes."
+  },
+  {
+    "id": "gitcontext-3",
+    "file": "internal/gitcontext/gitcontext.go",
+    "line": 136,
+    "category": "mis-parsed-git-output",
+    "severity": "low",
+    "issue_text": "The main collect() path enumerates files with 'diff --name-only' / 'ls-files --others' WITHOUT -z (lines 133-136, 156, 195-198, 254-257), so with git's default core.quotePath=true a non-ASCII path comes back C-quoted (e.g. \"\\303\\274.txt\" with surrounding quotes). splitLines keeps the quoted literal. For untracked files this reaches safeJoin/os.Stat with the literal quoted name, os.Stat fails, and the file is silently dropped from UntrackedExcerpts AND from totalBytes (readUntrackedExcerpts line 523-524) — under-inclusion with no omitted/truncated counter incremented. The same quoted literals also break exact comparison against exceptions/excludes. The branchfiles.go path deliberately uses -z (--name-only -z, split on NUL) and is tested against exotic/unicode names, showing the authors handle this in one path but not the other.",
+    "why_real": "A real parse divergence for non-ASCII paths that produces a wrong (silently smaller) file/excerpt set on the primary path, contradicting the -z handling proven necessary in branchfiles.go.",
+    "tests_checked": "TestBranchFilesLiteralPathspecs covers exotic/unicode names but only through the branchfiles -z path. No test in the collect (non-truncated) path uses a non-ASCII filename, so the quoting divergence is unpinned."
+  },
+  {
+    "id": "gitcontext-4",
+    "file": "internal/gitcontext/gitcontext.go",
+    "line": 238,
+    "category": "dead-guard-cannot-fail",
+    "severity": "low",
+    "issue_text": "matchesExclude line 238 guards 'if exclude == \".\" || exclude == \"\"', but line 237 has just run exclude = filepath.ToSlash(filepath.Clean(exclude)), and filepath.Clean never returns \"\" (it returns \".\" for empty input). So the 'exclude == \"\"' disjunct is unreachable. The same dead disjunct appears at line 205 in exactExcludesExcept ('file == \"\"' after file = filepath.ToSlash(filepath.Clean(file)) on line 204).",
+    "why_real": "A guard branch that can never be true after the preceding Clean; deletable with every test still passing (assertion-that-cannot-fail). Harmless-defensive, flagged only as a low-value invariant finding.",
+    "tests_checked": "No test constructs an empty exclude/file value that could reach these disjuncts; each is dead regardless of inputs because Clean() precedes it."
+  }
+]

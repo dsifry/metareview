@@ -1,0 +1,15 @@
+[
+  {
+    "id": "knowledge-1",
+    "category": "invariant-nothing-holds",
+    "lens": "test-effectiveness",
+    "confidence": "medium",
+    "file": "internal/knowledge/knowledge.go",
+    "symbol": "containedPath",
+    "lines": "103-105",
+    "title": "The lexical (pre-symlink) containment check in containedPath is unpinned and deletable with tests still green",
+    "detail": "containedPath has two containment guards: a lexical check on the cleaned/abs path (lines 103-105) that fires before symlink resolution, and a real-path check after EvalSymlinks (lines 114-116). The symlink test TestCollectRejectsKnowledgeSymlinkOutsideRepo (knowledge_test.go:36) exercises only the SECOND guard: its escaping symlink is lexically inside root (`.beads/knowledge/external.jsonl`), so line 103's condition is false and its error return at 104-105 is never taken — the coverage profile shows 104.3,105.1 = 0 while the real-path error return 115.3,116.1 = 1 (covered). No test passes a path with `..`/traversal segments, so the lexical guard's rejection is enforced by nothing: lines 103-105 can be deleted and both tests still pass (the symlink case is caught by 114, the sorted-facts case never reaches the branch). The lexical check is the ONLY guard that returns the 'outside repository root' error for a non-existent traversal path (where EvalSymlinks at 110-113 would otherwise error first with a different message), yet that behavior is untested.",
+    "evidence": "coverage profile: knowledge.go:104.3,105.1 = 0 (lexical error return uncovered) vs 115.3,116.1 = 1 (real-path error return covered by the symlink test).",
+    "suggested_fix": "Add a test that reaches containedPath with a rel containing `..` (or otherwise lexically escaping root) and assert the 'outside repository root' error, pinning the lexical guard."
+  }
+]

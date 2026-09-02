@@ -1,0 +1,22 @@
+[
+  {
+    "id": "findings-1",
+    "file": "internal/findings/findings.go",
+    "line": 424,
+    "category": "invariant-nothing-holds",
+    "severity": "medium",
+    "issue_text": "classForCount() downgrades a \"blocking\"-classified finding to \"warning\" (non-blocking) when its severity is not critical/high (default branch, line 424-425). This severity gate directly drives gate verdicts: OpenBlockingCount, CountByClass().Blocking, and unresolvedBlockingFrom() all route through classForCount, and every task-done/pr-ready/epic-ready gate blocks on counts.Blocking > 0. Yet NO test in the findings package exercises a \"blocking\" classification at medium/low severity. The whole switch could be deleted (making every \"blocking\" finding block regardless of severity) or widened to `!= \"low\"` and the entire findings package test suite stays green — silently promoting medium-severity blocking findings to gate-closing blockers.",
+    "why_real": "Every findings-package test that uses classification \"blocking\" sets severity \"high\" (unsafeEval, findings_test.go:325) or \"critical\" (override recur test, findings_test.go:496). TestCountByClass... (findings_test.go:11) uses spec-contract/advisory/follow-up/novel — no \"blocking\" record at all, so classForCount's blocking branch is never hit there. Deleting lines 420-426's inner severity switch and returning \"blocking\" unconditionally leaves all findings tests passing. This is the exact class of gap the SISTER package explicitly closed: internal/reviewlog has a parallel isOpenBlocker() with TestOnlyCriticalAndHighSeveritiesBlock (reviewlog_test.go:511) whose own comment records the lesson — \"only three of its four cases were pinned - medium had none, so widening the set from (critical|high) to != 'low' left the suite green and silently promoted every medium finding to a blocker.\" findings.classForCount has no equivalent enumeration.",
+    "tests_checked": "findings_test.go: TestCountByClassSeparatesBlockersAdvisoriesFollowUpsAndWarnings (no blocking-class record), TestReconcileFindingsLifecycle / TestReconcileReturnsOpenFindingsForCurrentTarget / all Reconcile tests (unsafeEval => blocking+high), TestSpecContractFindingsBlockRegardlessOfSeverity (spec-contract path only), TestReconcileClosesAPendingOverrideThatWasActuallyFixed (blocking+critical). None uses blocking+medium/low. Cross-checked repo: only internal/reviewlog/reviewlog_test.go:TestOnlyCriticalAndHighSeveritiesBlock pins this rule, and it tests reviewlog's own isOpenBlocker, not findings.classForCount."
+  },
+  {
+    "id": "findings-2",
+    "file": "internal/findings/findings.go",
+    "line": 403,
+    "category": "invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "canonicalClass() aliases \"blocker\" -> \"spec-contract\" (line 403) and \"followup\" -> \"follow-up\" (line 409), plus the ReplaceAll(\"_\",\"-\") normalization (line 401). These aliases are gate-affecting: a finding classified \"blocker\" resolves to spec-contract which classForCount always treats as blocking. But no test anywhere feeds classification \"blocker\", \"followup\", or an underscore variant. Removing the \"blocker\" alias makes such a finding fall to default -> \"warning\" -> non-blocking, and every test still passes.",
+    "why_real": "Grep across all *_test.go Classification: literals yields only blocking, advisory, follow-up, spec-contract, novel, warning — never \"blocker\", \"followup\", or \"spec_contract\". So the alias arms of canonicalClass are unpinned: deleting `case \"blocker\"` (leaving only \"spec-contract\") or `\"followup\"` from line 409, or the underscore ReplaceAll, keeps the findings suite green while changing how a real \"blocker\"-tagged finding is counted at a gate. Lower severity than findings-1 because the canonical spellings (blocking/spec-contract) are the ones the pipeline emits; the aliases are defensive input-normalization with no coverage.",
+    "tests_checked": "findings_test.go all tests (classifications used: blocking, spec-contract, advisory, follow-up, novel); override_test.go (blocking only). Repo-wide grep of Classification: literals in *_test.go confirms no \"blocker\"/\"followup\"/underscore forms are ever supplied."
+  }
+]

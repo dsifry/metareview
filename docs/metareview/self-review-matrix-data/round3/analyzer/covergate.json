@@ -1,0 +1,22 @@
+[
+  {
+    "id": "covergate-1",
+    "file": "internal/covergate/covergate.go",
+    "line": 33,
+    "category": "below-floor-passing / doc-claim-code-lacks / zero-denominator",
+    "severity": "low",
+    "issue_text": "Pct() computes float64(Covered)/float64(Total)*100 with no Total>0 guard, and ParseProfile (lines 49-95) accepts a profile line whose numstmts field is 0 without rejecting it. A package whose profile lines all have numstmts=0 enters the map with Total=0. Pct() then returns NaN; pct1(NaN)=NaN; and the floor comparison at line 166 (pct1(cov.Pct()) < floor) is false for NaN, so the package is reported Status=\"ok\", Fail=false and SILENTLY PASSES its floor (displayed Pct is the string \"NaN\"). This is a below-floor-passing path with a zero denominator. It directly contradicts the doc comments at lines 31-32 (\"A zero-total package never reaches Pct — it emits no profile lines and so never enters the map\") and line 42 (\"a zero-statement package is absent from the map\"): a 0-numstmts line does enter the map. Guarding numstmts==0 in ParseProfile, or Total==0 in Gate, or treating NaN as a failure, would close it.",
+    "why_real": "Empirically verified: ParseProfile(\"mode: atomic\\n<mod>/internal/z/z.go:1.1,2.2 0 0\\n\") yields map[internal/z:{Covered:0 Total:0}] with nil error; Gate with Floor{internal/z:80} returns that row as Status=\"ok\" Fail=false (no failure counted). Pct()=NaN, pct1(NaN)=NaN, NaN<80==false, FormatFloat(NaN)=\"NaN\". The stated invariant that such a package can never enter the map/reach Pct is false in code. Real-world trigger requires a crafted/malformed profile since `go tool covdata textfmt` does not normally emit 0-statement blocks, hence low severity — but the gate's own doc asserts a guarantee the parser does not enforce, and the failure mode is a silent floor pass rather than an error.",
+    "tests_checked": "covergate_test.go: TestPkgCovPctAndExact (lines 26-40) pins Exact(0/0)==false via the Total>0 guard, but NO test feeds a 0-numstmts line through ParseProfile or Gate; TestParseProfile (42-58) and TestParseProfileErrors (60-75) never exercise numstmts=0; TestGate/TestGateFloorRounding (106-170) never exercise a Total=0 package. The zero-total-never-in-map doc claim is therefore untested and, as shown, false."
+  },
+  {
+    "id": "covergate-2",
+    "file": "internal/covergate/covergate.go",
+    "line": 60,
+    "category": "unpinned-guard / invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "The mode-skip guard `if line == 1 && strings.HasPrefix(text, \"mode:\")` uses the `line == 1` sub-condition, but no data line can ever start with \"mode:\" (every real data line begins with the module-qualified file path), so the HasPrefix half already uniquely identifies the header. Deleting the `line == 1 &&` clause changes no real behavior and breaks no test. Conversely the `line == 1` clause makes a header not on physical line 1 (e.g. a profile with a leading blank line, which increments the counter) fall through and error as a malformed 2-field data line — behavior no test asserts.",
+    "why_real": "The `line == 1` sub-condition is an unpinned branch: no test places a 'mode:'-prefixed line anywhere but line 1, and no test places a blank line before the mode line, so mutating/removing `line == 1` leaves all tests green. It is a guard whose invariant nothing holds. Marginal impact (covdata always emits `mode:` on line 1), noted at low confidence.",
+    "tests_checked": "covergate_test.go: TestParseProfile (42-58) has `mode: atomic` only on line 1 and a blank line AFTER the header, not before; TestParseProfileErrors (60-75) has no mode-line-position case; cli_test.go profiles all start with `mode: atomic\\n` on line 1. Nothing exercises mode-not-on-line-1 or mode-as-data, so the `line == 1` clause is unpinned."
+  }
+]

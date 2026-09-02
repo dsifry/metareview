@@ -1,0 +1,22 @@
+[
+  {
+    "id": "epicready-1",
+    "file": "internal/epicready/review.go",
+    "line": 569,
+    "category": "invariant-nothing-holds",
+    "severity": "medium",
+    "issue_text": "The escalation decision branch `if blocking && attemptNumber >= maxAttempts { return \"ESCALATED\", \"escalated\", true, reason }` in verdictForCounts is entirely untested. The branch (and its `>=` comparison, which decides whether an epic escalates vs. loops as NEEDS_REVISION) can be deleted, or the operator flipped to `>`/`<`, and every test in the package still passes. So a wrong escalation decision on an epic that still has blocking child findings after the attempt budget is exhausted would ship unnoticed.",
+    "why_real": "verdictForCounts is 60.0% covered (go tool cover). The only in-package caller is review_markdown_test.go:30, which passes findings.ClassCounts{Advisory:1,FollowUp:1} — blocking=false — so lines 569-572 are never evaluated. No cmd- or reviewers-level test constructs blocking counts through this copy of verdictForCounts (each of taskdone/prready/epicready has its own copy; grep found no other in-package caller). Deleting the escalation branch keeps TestVerdictForNonBlockingFindingsIsPassAdvisory green; flipping `>=` to `<` likewise. This is a decision-critical readiness branch with no pinning assertion.",
+    "tests_checked": "internal/epicready/review_markdown_test.go (TestVerdictForNonBlockingFindingsIsPassAdvisory — only non-blocking counts; TestRunChainMarkdownIncludesEscalationDetails constructs ESCALATED text manually and never calls verdictForCounts); grep confirmed verdictForCounts has no other caller; go tool cover shows 60.0%."
+  },
+  {
+    "id": "epicready-2",
+    "file": "internal/epicready/review.go",
+    "line": 292,
+    "category": "invariant-nothing-holds",
+    "severity": "medium",
+    "issue_text": "The child readiness/aggregation logic — childOpenBlockerLogs (lines 292-320), latestChildLogs (265-290) and findingTargetID (322-338) — has 0.0% test coverage. This is the exact logic the review is meant to scrutinize (a child counted ready vs. blocked): childOpenBlockerLogs is what synthesizes a NEEDS_REVISION log with HasUnresolvedBlockers=true for any child that still carries an open blocking finding, and latestChildLogs is what picks each child's latest review log. Any of these branches can be inverted or removed with all package tests still passing: e.g. dropping `HasUnresolvedBlockers: true` (line 316), inverting the child-membership guard `if !childSet[id] || seen[id]` (line 308) so it processes non-children, or breaking the latest-log selection `logSortKey(log) > logSortKey(current)` (line 279) — none is caught by a test.",
+    "why_real": "go tool cover reports childOpenBlockerLogs, latestChildLogs, findingTargetID, resolveChildren and Create all at 0.0% (package total 17.2%). grep of internal/epicready/*_test.go shows no test references childOpenBlockerLogs / latestChildLogs / UnresolvedBlocking / findingTargetID at all — only verdictForCounts and reviewMarkdown are exercised. With zero tests invoking these functions, every decision branch in the child-blocked/ready aggregation is trivially deletable or invertible while the suite stays green, so a regression that mis-flags a blocked child as ready (or vice versa) would not be detected here.",
+    "tests_checked": "internal/epicready/review_markdown_test.go and internal/epicready/mutationctx_test.go read in full — neither calls childOpenBlockerLogs, latestChildLogs, findingTargetID, resolveChildren, or Create; grep across the two test files confirms no reference; go tool cover -func shows 0.0% for each."
+  }
+]

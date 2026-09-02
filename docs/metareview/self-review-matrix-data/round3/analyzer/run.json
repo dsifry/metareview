@@ -1,0 +1,12 @@
+[
+  {
+    "id": "run-1",
+    "file": "internal/fsm/run/fold.go",
+    "line": 359,
+    "category": "invariant-nothing-holds",
+    "severity": "med",
+    "issue_text": "nodeScoped() (fold.go:358-360) lists TypeLLMCall and TypeDeltaApplied so that Apply (fold.go:53) rejects a node-scoped event whose ev.Node==\"\" with ReasonNodeScope. But no test ever constructs a TypeLLMCall (or TypeDeltaApplied) event with an empty Node: every llm_call in the suite is built WithNode(...) (fold_test.go:44,55,265-283,472/478,655,932,1087,1105,1123), and the only ReasonNodeScope assertions are for TypeNodeOutput and TypeNeedsInput (fold_test.go:331,335). Deleting the `|| t == TypeLLMCall` clause from nodeScoped leaves every test green (statement coverage is unchanged since the branch is a single OR-return still evaluated on the happy path), yet now a malformed nodeless llm_call folds and persists: after the guard, k=Key(\"\",iter) and the LLMCallData case only checks Index/Tokens, so nothing else requires a node. The TypeDeltaApplied clause is likewise unpinned (though removing it only shifts the error to ReasonDeltaWithoutOutput rather than admitting the event).",
+    "why_real": "Category 2 (invariant nothing holds): the node-scope guard for llm_call is deletable with all tests passing, and its deletion lets a node-scoped event (spec §4 requires a node) with Node=\"\" into the audit log — a real weakening, not a restatement. Verified by reading fold.go and every *_test.go: grep confirms ReasonNodeScope is only asserted for node_output/needs_input and every TypeLLMCall event carries WithNode.",
+    "tests_checked": "Read fold_test.go fully (TestFoldOutputRules node-scope rows b6/b7 cover only node_output & needs_input; all llm_call events use WithNode), TestFoldTerminalAndMisc (llm_call built WithNode(\"n\")), TestFoldNodeIterKeying, and grep of the whole package: no test pins node-scope for llm_call or delta_applied."
+  }
+]

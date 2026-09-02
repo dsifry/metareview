@@ -1,0 +1,32 @@
+[
+  {
+    "id": "reviewmanifest-1",
+    "file": "internal/reviewmanifest/manifest.go",
+    "line": 419,
+    "category": "invariant-nothing-holds",
+    "severity": "medium",
+    "issue_text": "In shardResultBlockers, a result is matched to a shard by its content hash (MatchShard), giving id = \"shard-\"+shard.ID. The guard at lines 419-422 (`if strings.TrimSpace(result.ShardID) != id`) is the ONLY check that the result's self-declared ShardID field actually equals the shard its hash belongs to. It is deletable with every test still passing: no test asserts the blocker it emits (\"... declares shard ...\"). Grep confirms the literal \"declares shard\" appears only in manifest.go, never in a test.",
+    "why_real": "Category 2 (invariant nothing holds). Exploit: a result with ShardHash = the hash of shard-3a, ShardID = \"shard-b1\", and Path = \".../shard-b1.<hash>.result.json\". MatchShard resolves it to shard-3a (id=\"shard-3a\"); the filename check at 482-489 uses want=result.ShardID=\"shard-b1\" and passes (ShardIDFromResultPath==\"shard-b1\"); shardIDPattern passes. Only line 419 rejects the mismatch. Delete lines 419-422 and shard-3a is recorded as covered by a result that names shard-b1, with no test failing. The completeness/coverage claim (ShardsCovered) is thus silently corruptible and unguarded by the suite.",
+    "tests_checked": "TestRenderersNeutraliseShardIDAndVerdict (sets ShardID=\"mrvf-injected-shard\" but only asserts no \"mrvf-\" token survives rendering, not the blocker); TestAggregateValidatesResultFieldShape/\"bad shard id\" (asserts \"invalid shard ID\" from line 479, passes with or without 419); TestFilenameIdMismatchBlocks (mutates Path, keeps ShardID=\"shard-3a\"); no test asserts the \"declares shard\" blocker."
+  },
+  {
+    "id": "reviewmanifest-2",
+    "file": "internal/reviewmanifest/manifest.go",
+    "line": 616,
+    "category": "assertion-cannot-fail",
+    "severity": "low",
+    "issue_text": "validRationale returns false for len(value) < 12 at line 613, THEN switches on lowercased value rejecting \"n/a\", \"none\", \"to\"+\"do\" (=\"todo\"), \"tbd\" at lines 616-621. All four literals are 3-4 characters, strictly less than 12, so the length guard already returns false before any of them can reach the switch. The switch's reject cases are unreachable dead code; the switch can be deleted with all tests passing.",
+    "why_real": "Category 3 (guard that cannot fire). The switch's stated purpose is to reject placeholder rationales like tbd/todo/n/a/none, but the preceding `len(value) < 12` check subsumes every listed literal (max length 4). No input can trigger the switch's `return false`. The only test that exercises a placeholder (Rationale=\"tbd\") is caught by the length check, not the switch, so the switch is both dead and untested.",
+    "tests_checked": "TestAggregateRequiresCompletePathAccounting (sets Rationale=\"tbd\", asserts \"invalid disposition rationale\" — satisfied by the len<12 branch); no test passes a >=12-char string equal to any switch case (impossible for these literals)."
+  },
+  {
+    "id": "reviewmanifest-3",
+    "file": "internal/reviewmanifest/manifest.go",
+    "line": 646,
+    "category": "invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "severityBlocks (line 646) excludes SeverityLow from the blocking set, so a low-severity finding with an open/waived/deferred disposition does not block a PASS. No test pins this exclusion: every test that uses SeverityLow pairs it with another blocker (unknown disposition, missing evidence) or a closing disposition. severityBlocks could be changed to treat low as blocking (e.g. `value != \"\"`) and the entire suite still passes.",
+    "why_real": "Category 2 (invariant invertible with tests still passing). The intended behavior 'a low-severity open finding does not block' is unverified. Verified by walking each SeverityLow test: TestAggregateValidatesResultFieldShape/\"unknown disposition\" (Disposition \"shrug\" fails validFindingDisposition, else-branch skipped), /\"finding evidence\" (Disposition Fixed closes via dispositionCloses so severityBlocks result is irrelevant, plus separate evidence blocker). passingShardResult carries no findings, so no passing manifest contains a bare Low+Open finding.",
+    "tests_checked": "TestWaivedMediumFindingBlocks (uses SeverityMedium only); TestFixedAndFalsePositiveClose (SeverityCritical + closing disposition); TestAggregateValidatesResultFieldShape/\"unknown severity\",\"unknown disposition\",\"finding evidence\" (Low always accompanied by another blocker or closing disposition). None asserts a Low finding is non-blocking."
+  }
+]

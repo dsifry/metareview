@@ -1,0 +1,22 @@
+[
+  {
+    "id": "evidence-1",
+    "file": "internal/evidence/runner.go",
+    "line": 58,
+    "category": "invariant-nothing-holds",
+    "severity": "medium",
+    "issue_text": "In Run(), exitCode is initialized to 0 (line 56); the only place it is set to a failure value for a command that never produced a normal exit status is the `exitCode = 1` default on line 58, inside `if err != nil`. When cmd.Run() fails with a NON-*exec.ExitError (command/binary not found -> *exec.Error, or certain launch failures), errors.As(&exitErr) is false, so exitErr.ExitCode() is never reached and exitCode relies entirely on the line-58 default. Deleting line 58 leaves exitCode==0 for such a failure, so the receipt records exitCode:0 (a passing receipt) for a command that failed to run.",
+    "why_real": "The guard is load-bearing yet unpinned. runner_test.go has exactly two tests: a success (`printf hello`) and an *exec.ExitError case (`exit 7`, which reassigns exitCode via ExitCode()). Neither exercises a non-ExitError failure (e.g. a nonexistent binary). Removing `exitCode = 1` keeps both tests green, but a failed-to-launch command would then be minted as a SchemaVersion:1 receipt with ExitCode:0. Bundle.HasSuccessfulValidation treats ExitCode==0 as passing, and the CLI (cmd/metareview/main.go:402-408) prints/persists the receipt (SchemaVersion is set to 1 so the runErr guard at 403 does not suppress it). Result: a failing command recorded as passing evidence. Classic invariant-that-nothing-holds plus latent correctness bug.",
+    "tests_checked": "internal/evidence/runner_test.go: TestRunCapturesSuccessfulCommandReceipt (exit 0), TestRunReturnsReceiptForFailedCommand (exit 7 via ExitError). No test runs a non-existent/unlaunchable command, so line 58 is deletable with all package tests passing."
+  },
+  {
+    "id": "evidence-2",
+    "file": "internal/evidence/github_checks.go",
+    "line": 69,
+    "category": "invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "checkSucceeded()'s state-fallback branch matches state == \"success\" || \"successful\" || \"pass\" || \"passed\". Only \"success\" is a real `gh pr checks --json state` value; the other three alternatives are never emitted by gh and are never exercised.",
+    "why_real": "The `|| state == \"successful\" || state == \"pass\" || state == \"passed\"` alternatives can be deleted with all tests still passing: the only state-only success test (TestImportGitHubChecksPassesWhenAllChecksSucceed) uses state \"SUCCESS\", which the surviving `state == \"success\"` clause covers. They are dead defensive branches that no input reaches. Lower confidence: harmless (they cannot cause a false positive since gh never emits those strings), so this is a dead-branch/unheld-invariant note rather than a behavioral bug.",
+    "tests_checked": "internal/evidence/github_checks_test.go: TestImportGitHubChecksPassesWhenAllChecksSucceed pins only state==\"SUCCESS\"; the bucket-based tests never reach the state fallback. No test distinguishes the extra alternatives."
+  }
+]

@@ -242,3 +242,69 @@ integer-overflow on any parsed-number → duration/size multiplication.
 The one clear logic bug (**testconv-1**) is worth a fix; the rest are subtle test-pinning gaps — exactly
 the **100%-coverage campaign's** work — and are captured here (and in the raw data under
 `self-review-matrix-data/round2/`) as its backlog rather than fixed piecemeal.
+
+---
+
+# Round 3: the full sweep — every remaining package (2026-09-02)
+
+At the maintainer's direction ("do all the rest of the remaining packages"), rounds 1–2's 10 packages were
+extended to **all 51 packages** in the repo. 29 more packages were reviewed by Opus-4.8 analyzer subagents
+(the substantial ones) plus a direct self-review of the 10 trivial utility packages (<120 LOC); findings
+were adjudicated with the same flash-low → flash-high → glm-5.3-low → Opus ladder (`METAREVIEW_JUDGE_TIMEOUT`
+raised so glm-5.3 never times out).
+
+## Coverage & findings
+
+- **51/51 packages reviewed.** **69 findings** total across the three rounds (2 HIGH — both round-1, fixed;
+  ~21 medium; ~43 low). 5 packages came back an honest **zero** (mutation, contextprofile, converge,
+  tasksource, fsm/record) and 10 trivial utility packages were clean.
+- **~64 of the 69 are "invariant nothing holds" test-pinning gaps** — a guard/assertion/error-code that can
+  be deleted or inverted with the whole suite still green. This is the **100%-coverage / mutation campaign's
+  backlog, systematically enumerated** — see `docs/metareview/COVERAGE-CAMPAIGN-BACKLOG.md`.
+- **The real logic bugs** (a small minority) surfaced by the sweep, beyond round-1/2's fixes:
+  - `gitcontext` — `matchesExclude` treats a bare-directory exclude as an *exact* match, but git's
+    `:(exclude)<dir>` is recursive, so a bare exclude **plus any exception** silently un-excludes a whole
+    directory into the reviewed diff (verified against real git). **(fix pending)**
+  - `internal/evidence` — a command that fails to *launch* (binary-not-found) is recorded as `ExitCode:0`, a
+    passing receipt for a failed command (`HasSuccessfulValidation` then treats it as success). **(fix pending)**
+  - `internal/findings` — `classForCount` downgrades a medium/low-severity **blocking** finding to
+    non-blocking "warning"; this drives gate verdicts and nothing pins it (the sister `reviewlog` package
+    closed exactly this gap). **(fix pending)**
+  - `internal/covergate` — a crafted 0-statement profile line yields `Pct()=NaN`, and `NaN < floor` is false,
+    so the package silently passes its floor. Lower priority (needs a hand-crafted profile).
+  - `internal/repo` — boundary-free negative-marker substring matching (`"no metaswarm-legacy"` matches
+    `"no metaswarm"`); minor.
+
+## The model matrix, now well-sampled (29 REAL adjudicated findings across rounds 2–3)
+
+| judge config | recall on the 29 REAL findings | false positives |
+| --- | ---: | ---: |
+| **Opus 4.8** | **26/29 (90%)** | 0 |
+| flash-low | 16/29 (55%) | 0 |
+| glm-5.3-low | 16/29 (55%) | 0 |
+| flash-high (of the escalated) | 9/21 | 0 |
+| **2-tier ladder: flash-low confident-True → Opus** | **27/29 (93%)** | 0 |
+
+## What the full sweep settles
+
+1. **Opus 4.8 is the strongest single adjudicator (90%, zero false positives)** but is **not perfect on
+   test-gap findings** — it misses a few where deletability cannot be confirmed from source.
+2. **The 2-tier ladder marginally beats Opus alone (93%)** and is the recommended design: run flash-low as
+   the cheap first pass, accept its *confident* `True` (flash-low never false-positived across all 69
+   findings), and escalate everything else **straight to Opus**. **Drop the flash-high rung** — across the
+   full sample it added no recall and once flipped a correct verdict.
+3. **glm-5.3 offers no recall edge over flash and is far slower**; with `effort=low` it is fast but no more
+   accurate. Not worth it as a routine judge.
+4. **Systematic limitation — adjudicate the crisp, mutation-verify the subtle.** Every model's recall is
+   high on crisp bugs (round 1: all three ~perfect) and drops on "invariant nothing holds" test-gaps,
+   because an adjudicator *cannot run the tests* to confirm a guard is deletable. For that finding class the
+   **analyzer's mutation run is the reliable oracle, not the adjudicator** — which is exactly how these 64
+   test-gaps were verified (each analyzer empirically deleted/inverted the guard and re-ran the suite).
+
+## Recommendation (final)
+
+- **Judge:** two-tier — **GLM-5.3-flash (effort low) first pass, escalate to Opus 4.8** on any non-confident
+  or `False` verdict. No flash-high, no glm-5.3-full.
+- **For test-gap ("invariant nothing holds") findings, don't rely on the adjudicator at all** — have the
+  analyzer prove deletability by mutation, which is what closes them in the coverage campaign.
+- Raw round-3 analyzer sets and ladder rows: `docs/metareview/self-review-matrix-data/round3/`.

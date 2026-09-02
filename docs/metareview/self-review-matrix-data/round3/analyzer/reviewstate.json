@@ -1,0 +1,22 @@
+[
+  {
+    "id": "reviewstate-1",
+    "file": "internal/reviewstate/projector.go",
+    "line": 100,
+    "category": "invariant-not-held",
+    "severity": "low",
+    "issue_text": "In the log loop, `if log.RunID != \"\"` guards writing an unrelated-artifact log's RunID into the local `historicalRunIDs` set. That set is later used at line 113 to demote blockers whose RunID matches an unrelated artifact run. The guard exists to avoid poisoning `historicalRunIDs[\"\"]`, which would wrongly demote any blocker carrying an empty RunID (an ambiguous, run-less blocker) into HistoricalBlockers instead of leaving it a current blocker.",
+    "why_real": "Deleting the `if log.RunID != \"\"` guard (keeping only the unconditional `historicalRunIDs[log.RunID] = true`) leaves ALL tests green: every artifact-log test (TestProjectTreatsUnrelatedArtifactLogAsHistorical, ...WhenNoPathsReviewed, ...BlockersFromUnrelatedArtifactRun) sets a non-empty RunID (\"mrv-artifact\"), so the guard is never distinguished. Yet the guard prevents a real projection bug: an unrelated artifact review whose markdown lacks a `Run ID:` line yields RunID=\"\" with a non-empty Target (reachable via reviewlog.Discover), which without the guard sets historicalRunIDs[\"\"]=true and then mis-scopes any empty-RunID current blocker to historical. No test pins this invariant.",
+    "tests_checked": "TestProjectTreatsUnrelatedArtifactLogAsHistorical (l.173), TestProjectTreatsArtifactLogAsHistoricalWhenNoPathsReviewed (l.188), TestProjectTreatsBlockersFromUnrelatedArtifactRunAsHistorical (l.203) — all use RunID \"mrv-artifact\"; grep confirms no test constructs an empty-RunID log/blocker."
+  },
+  {
+    "id": "reviewstate-2",
+    "file": "internal/reviewstate/projector.go",
+    "line": 233,
+    "category": "invariant-not-held",
+    "severity": "low",
+    "issue_text": "unrelatedBranchBlocker's guard `if current[\"type\"] != \"branch\" || current[\"id\"] == \"\"` restricts branch-vs-branch scoping to only fire when the current review target is itself a branch. The `current[\"type\"] != \"branch\"` half of that condition is unexercised by tests: no test drives a non-branch CurrentTarget (path/beads-task with a set id) together with a branch-typed blocker.",
+    "why_real": "Deleting the `current[\"type\"] != \"branch\"` clause (leaving only the `current[\"id\"] == \"\"` guard) keeps every test passing: all branch-blocker tests (TestProjectTreatsMismatchedBranchRun l.250, ...WithoutLog l.275) pass a branch CurrentTarget {type:branch,id:branch-b}, so removing the type check changes nothing there; TestProjectKeepsRelevantPathBlockerCurrent (l.238) has empty CurrentTarget so current[\"id\"]==\"\" still short-circuits. Removing the clause introduces a real target-scoping bug: a stale branch-targeted blocker would then be compared against a non-branch current target's id and mis-classified. Because ProjectRecords is exported and its Options documents general target scoping, this is a genuine untested-invariant gap in the weighted correctness area (blocker target scoping); it is latent for the sole current caller (prready always passes a branch target).",
+    "tests_checked": "TestProjectTreatsMismatchedBranchRun (l.250), TestProjectTreatsMismatchedBranchBlockerAsHistoricalWithoutLog (l.275), TestProjectKeepsRelevantPathBlockerCurrent (l.238); grep of CurrentTarget/type usages confirms only branch-typed CurrentTargets are tested."
+  }
+]

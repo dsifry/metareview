@@ -1,0 +1,12 @@
+[
+  {
+    "id": "mockai-1",
+    "file": "internal/fsm/mockai/mockai.go",
+    "line": 139,
+    "category": "invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "In fakeRunner.Run the repeat-row selection `if r.Repeat && r.Call <= sp.Ordinal && repeat == nil { repeat = r }` uses the `repeat == nil` guard to lock in the FIRST matching repeat row, which the Runner() doc comment (lines 122-124) states as the contract: 'else the first `repeat` row with `call <= Ordinal`'. Deleting `&& repeat == nil` inverts the behavior to last-repeat-wins, silently.",
+    "why_real": "The documented tie-break ('the first repeat row') is not pinned by any test. The only fixture (`good`, mockai_test.go lines 18-25) contains exactly one repeat row (`{name: notify, call: 1, repeat: true}`) across all command names, so with a single candidate, first-wins and last-wins are indistinguishable. Removing `&& repeat == nil` leaves TestS3Runner (the only Runner test) green while breaking the stated contract, so nothing holds the invariant.",
+    "tests_checked": "TestS3Runner (mockai_test.go:85-114) exercises notify ordinal 0/1/7 and the unscripted paths but never supplies two repeat rows for one name; TestS1Load does not touch Runner. No test distinguishes first- from last-repeat selection."
+  }
+]

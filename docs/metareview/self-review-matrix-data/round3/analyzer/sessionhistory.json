@@ -1,0 +1,22 @@
+[
+  {
+    "id": "sessionhistory-1",
+    "file": "internal/sessionhistory/sessionhistory.go",
+    "line": 355,
+    "category": "assertion-that-cannot-fail",
+    "severity": "low",
+    "issue_text": "In excerpt(), after slicing to MaxExcerptRunes the code does `truncated := string(runes[:MaxExcerptRunes])` then loops `for !utf8.ValidString(truncated) && len(truncated) > 0 { truncated = truncated[:len(truncated)-1] }` to trim a supposedly-split multibyte rune. The loop body can never execute: `runes` is a []rune, and re-encoding any []rune slice via string(...) always yields valid UTF-8 (even invalid input bytes were already decoded to U+FFFD, itself a valid code point). Therefore utf8.ValidString(truncated) is always true and !ValidString is always false.",
+    "why_real": "The trim loop is dead code guarding against a condition that is impossible on this data path. The common correct version of this pattern truncates a []byte at a byte offset (which CAN split a multibyte char and needs the trim); here truncation is on []rune, so the byte-trim loop is a misconception that never runs. It can be deleted entirely and every test still passes, and the condition `!utf8.ValidString(truncated)` can never be true — it is an unfalsifiable guard. No mutation of the loop can be caught by the suite.",
+    "tests_checked": "sessionhistory_test.go TestCollectBoundsFilesAndExcerpts (only ASCII 'x' repeated, always valid UTF-8, never approaches an invalid boundary); grep confirms no test constructs an invalid or multibyte string near MaxExcerptRunes and no utf8.ValidString reference in tests. Deleting the for-loop leaves all tests green."
+  },
+  {
+    "id": "sessionhistory-2",
+    "file": "internal/sessionhistory/sessionhistory.go",
+    "line": 168,
+    "category": "invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "In candidateFor(): `confidence := \"medium\"; if recordKind == \"raw-transcript\" && (ext == \".jsonl\" || ext == \".json\") { confidence = \"high\" }`. The `(ext == \".jsonl\" || ext == \".json\")` conjunct is always true whenever recordKind == \"raw-transcript\": the top guard rejects any ext other than .jsonl/.json/.md, and ext == \".md\" forces recordKind to \"generated-summary\", so a raw-transcript can only have ext .jsonl or .json. The whole high-vs-medium confidence distinction is also unpinned by any test.",
+    "why_real": "Two overlapping problems in one branch. (a) The ext sub-condition can never be false when the left operand is true, so it is a dead conjunct — invertible/deletable with no observable effect. (b) No test asserts a Signal.Confidence value of \"high\" or \"medium\" (only that it is non-empty), so the entire `confidence = \"high\"` branch can be deleted and all tests still pass — the confidence classification the package emits to post-merge learning has zero test coverage.",
+    "tests_checked": "sessionhistory_test.go line 41 asserts only `signal.Confidence == \"\"` (non-empty); assertSignal ignores Confidence. fixture_home_test.go asserts SourceType/recordKind but never a confidence value. grep for 'Confidence ==' / 'confidence' in tests shows no high/medium assertion. Setting confidence permanently to \"medium\" (or dropping the ext conjunct) keeps every test green."
+  }
+]
