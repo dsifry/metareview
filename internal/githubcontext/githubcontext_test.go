@@ -292,3 +292,32 @@ func TestRenderMarkdownOmitsEmptyOptionalFields(t *testing.T) {
 		t.Fatalf("empty author should render 'unknown' with no trailing fields: %q", out2)
 	}
 }
+
+func TestCommandErrorMessageNonEmptyWhenStderrEmpty(t *testing.T) {
+	// A nonexistent binary fails before it can write stderr, so command() falls back to err.Error();
+	// the returned message must not be empty (kills the message=="" -> message!="" mutant, line 137).
+	_, err := command(t.TempDir(), "metareview-no-such-binary-xyz123")
+	if err == nil {
+		t.Fatal("expected an error running a nonexistent binary")
+	}
+	if err.Error() == "" {
+		t.Fatal("error message must not be empty when stderr is empty")
+	}
+}
+
+func TestRedactMatchSeparatorAtStart(t *testing.T) {
+	// A value whose separator is at index 0 (key becomes ""): index>=0 must accept it, which the
+	// index>0 boundary mutant (line 159) would skip, redacting differently.
+	if got := redactMatch(":=value"); got != ":"+redactionMarker {
+		t.Fatalf("redactMatch(\":=value\") = %q, want %q", got, ":"+redactionMarker)
+	}
+}
+
+func TestExcerptExactlyAtBoundary(t *testing.T) {
+	// Exactly maxExcerptRunes runes must NOT be truncated (no "..." suffix). The <= -> < boundary
+	// mutant (line 222) would truncate and append "...".
+	s := strings.Repeat("x", maxExcerptRunes)
+	if got := excerpt(s); got != s {
+		t.Fatalf("excerpt at exactly maxExcerptRunes should be unchanged, got %d runes ending %q", len([]rune(got)), got[max(0, len(got)-4):])
+	}
+}
