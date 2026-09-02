@@ -1,6 +1,8 @@
 package prready
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,9 +11,32 @@ import (
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/githubcontext"
 	"github.com/dsifry/metareview/internal/knowledge"
+	"github.com/dsifry/metareview/internal/reviewlog"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/runchain"
 )
+
+// The pr-ready log must carry a Covered paths: header that the reviewlog parser reads back, so `status`
+// can credit a clean pr-ready review for the branch files it examined.
+func TestPRReadyReviewMarkdownEmitsRoundTrippableCoveredPaths(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "docs", "metareview", "reviews")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	md := reviewMarkdown("mrv-pr-cov", "ctx.md", "", "gate", "PASS", []string{"internal/foo.go", "a,b.go"}, nil, "ev", "", reviewMetadata{})
+	if err := os.WriteFile(filepath.Join(dir, "mrv-pr-cov.md"), []byte(md), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := reviewlog.Discover(root)
+	if err != nil || len(logs) != 1 {
+		t.Fatalf("Discover: %v (%d logs)", err, len(logs))
+	}
+	s := logs[0]
+	if !s.CoveredPathsKnown || len(s.CoveredPaths) != 2 || s.CoveredPaths[1] != "a,b.go" {
+		t.Fatalf("pr-ready covered paths did not round-trip: known=%v %+v", s.CoveredPathsKnown, s.CoveredPaths)
+	}
+}
 
 func TestReviewMarkdownSeparatesNonBlockingFindings(t *testing.T) {
 	records := []findings.Record{
@@ -19,7 +44,7 @@ func TestReviewMarkdownSeparatesNonBlockingFindings(t *testing.T) {
 		{Reviewer: "validation-reviewer", Classification: "follow-up", Severity: "low", Title: "Track cleanup", Finding: "Cleanup belongs in a later target."},
 		{Reviewer: "security-reviewer", Classification: "warning", Severity: "high", Title: "Unknown class", Finding: "Unknown classification was downgraded to warning."},
 	}
-	md := reviewMarkdown("mrv-pr", "ctx.md", "", "gate", "PASS_ADVISORY", records, "evidence", "", reviewMetadata{AdvisoryFindingCount: 1, FollowUpFindingCount: 1, WarningFindingCount: 1})
+	md := reviewMarkdown("mrv-pr", "ctx.md", "", "gate", "PASS_ADVISORY", []string{"internal/foo.go"}, records, "evidence", "", reviewMetadata{AdvisoryFindingCount: 1, FollowUpFindingCount: 1, WarningFindingCount: 1})
 	if strings.Contains(md, "| pr-readiness-reviewer | NEEDS_REVISION | 1 |") || strings.Contains(md, "| validation-reviewer | NEEDS_REVISION | 1 |") {
 		t.Fatalf("non-blocking findings must not render as blocking reviewer failures:\n%s", md)
 	}

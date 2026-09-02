@@ -1,6 +1,8 @@
 package taskdone
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -8,6 +10,7 @@ import (
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/knowledge"
+	"github.com/dsifry/metareview/internal/reviewlog"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/runchain"
 	"github.com/dsifry/metareview/internal/tasksource"
@@ -19,7 +22,7 @@ func TestReviewMarkdownSeparatesNonBlockingFindings(t *testing.T) {
 		{Reviewer: "architecture-reviewer", Classification: "follow-up", Severity: "low", Title: "Track cleanup", Finding: "Cleanup belongs in a later target."},
 		{Reviewer: "security-reviewer", Classification: "warning", Severity: "high", Title: "Unknown class", Finding: "Unknown classification was downgraded to warning."},
 	}
-	md := reviewMarkdown("mrv-task", "task-1", "ctx.md", "", "gate", "PASS_ADVISORY", records, "", reviewMetadata{AdvisoryFindingCount: 1, FollowUpFindingCount: 1, WarningFindingCount: 1})
+	md := reviewMarkdown("mrv-task", "task-1", "ctx.md", "", "gate", "PASS_ADVISORY", []string{"internal/foo.go"}, records, "", reviewMetadata{AdvisoryFindingCount: 1, FollowUpFindingCount: 1, WarningFindingCount: 1})
 	if strings.Contains(md, "| code-quality-reviewer | NEEDS_REVISION | 1 |") || strings.Contains(md, "| architecture-reviewer | NEEDS_REVISION | 1 |") {
 		t.Fatalf("non-blocking findings must not render as blocking reviewer failures:\n%s", md)
 	}
@@ -27,6 +30,45 @@ func TestReviewMarkdownSeparatesNonBlockingFindings(t *testing.T) {
 		if !strings.Contains(md, required) {
 			t.Fatalf("review markdown missing %q:\n%s", required, md)
 		}
+	}
+}
+
+// The review log must record the source files it examined as a Covered paths: header that the reviewlog
+// parser reads back — that is what lets `status` credit a clean review for the files it read and stop
+// reporting them UNREVIEWED. Round-tripped through the real parser, not just a substring check, because a
+// header the parser cannot decode credits nothing (see reviewlog.DecodeCoveredPaths).
+func TestReviewMarkdownEmitsRoundTrippableCoveredPaths(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "docs", "metareview", "reviews")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	covered := []string{"internal/foo.go", "docs/weird,name.md"} // a comma in a path must survive (JSON, not CSV)
+	write := func(name, md string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(md), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("mrv-cov.md", reviewMarkdown("mrv-cov", "task-1", "ctx.md", "", "gate", "PASS", covered, nil, "", reviewMetadata{}))
+	// A review that examined nothing says "none" (known-and-empty), distinct from a legacy log that said
+	// nothing at all (unknown) — status must not credit the latter.
+	write("mrv-none.md", reviewMarkdown("mrv-none", "task-1", "ctx.md", "", "gate", "PASS", nil, nil, "", reviewMetadata{}))
+
+	logs, err := reviewlog.Discover(root)
+	if err != nil {
+		t.Fatalf("the emitted logs must parse: %v", err)
+	}
+	byID := map[string]reviewlog.Summary{}
+	for _, s := range logs {
+		byID[s.RunID] = s
+	}
+	cov := byID["mrv-cov"]
+	if !cov.CoveredPathsKnown || len(cov.CoveredPaths) != 2 || cov.CoveredPaths[0] != "internal/foo.go" || cov.CoveredPaths[1] != "docs/weird,name.md" {
+		t.Fatalf("covered paths did not round-trip through Discover: known=%v paths=%+v", cov.CoveredPathsKnown, cov.CoveredPaths)
+	}
+	none := byID["mrv-none"]
+	if !none.CoveredPathsKnown || len(none.CoveredPaths) != 0 {
+		t.Fatalf("an empty covered set must be known-and-empty, got known=%v paths=%+v", none.CoveredPathsKnown, none.CoveredPaths)
 	}
 }
 

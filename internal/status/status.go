@@ -117,8 +117,16 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 		}
 		r.Reviews = scoped
 	}
+	// A run whose findings were repaired in a later attempt no longer blocks: the repair loop records
+	// the fix as a child linked by previousRunId, and a clean child means the parent's findings were
+	// cleared. Without this, a first review that found anything blocks forever — the gate could only
+	// ever clear a change that passed on its first look, which no real change does.
+	superseded := supersededRuns(logs)
 	for _, s := range logs {
 		if !s.HasUnresolvedBlockers {
+			continue
+		}
+		if superseded[s.RunID] {
 			continue
 		}
 		if target != "" && !covers(s, target, current) {
@@ -225,8 +233,14 @@ func BuildForBranch(root, base string, run RunGit) (Report, error) {
 	}
 	r.Reviews, r.Target = scoped, "branch "+shortSHA(scope.Base)+".."+shortSHA(scope.Head)
 	r.MustClear = []Blocker{}
+	// Supersede over the FULL log set (all), not scoped, so lineage is complete. BuildForBranch rebuilds
+	// must_clear from scoped reviews and DISCARDS buildFor's — the same trap that once dropped the
+	// abandoned runs (see below). Without applying the supersede here too, the branch scope — the one the
+	// Stop/commit hook actually uses — blocks a successfully-repaired branch forever, which is exactly the
+	// "reach clean after a repair" this change exists to enable.
+	superseded := supersededRuns(all)
 	for _, s := range scoped {
-		if !s.HasUnresolvedBlockers {
+		if !s.HasUnresolvedBlockers || superseded[s.RunID] {
 			continue
 		}
 		r.MustClear = append(r.MustClear, Blocker{
@@ -312,6 +326,43 @@ func emit(r Report, w io.Writer) (int, error) {
 // spec path is asked about. Or it examined the file, which is what CoveredPaths records. A
 // review with no CoveredPaths is one written before the field existed: it cannot answer for a
 // path, and saying so is what keeps an old log from silently clearing a file it never read.
+// supersededRuns collects every run retired by a later CLEAN attempt in its OWN previousRunId lineage.
+// A clean child (no unresolved blockers) means the parent's findings were cleared, so the parent — and
+// any earlier attempt it chains back to — no longer blocks. Only the same lineage supersedes: an
+// unrelated PASS never clears an open review, which would be the stale-review failure covers() guards
+// against, one level up. The visited guard also makes a malformed cyclic chain terminate.
+func supersededRuns(logs []reviewlog.Summary) map[string]bool {
+	prevOf := make(map[string]string, len(logs))
+	targetOf := make(map[string]string, len(logs))
+	kindOf := make(map[string]string, len(logs))
+	for _, s := range logs {
+		prevOf[s.RunID] = s.PreviousRunID
+		targetOf[s.RunID] = s.Target
+		kindOf[s.RunID] = s.Kind
+	}
+	superseded := map[string]bool{}
+	for _, s := range logs {
+		if s.HasUnresolvedBlockers {
+			continue
+		}
+		// Walk the ancestors of this clean attempt; each was repaired by it — but only within the SAME
+		// target AND the SAME kind. A previousRunId that points across targets or kinds (a mis-linked
+		// --previous-run) must not clear an unrelated open review: dropping a blocker for work that was
+		// never fixed is a false-CLEAR, the worst failure a gate can have. Both guards bound the walk, and
+		// the visited guard makes a malformed cyclic chain terminate.
+		//
+		// The KIND guard matters because the target guard is VACUOUS for pr-ready (every pr-ready run
+		// records the target `current branch`), and because a task-done and an epic-ready review CAN share
+		// the same target text (a path/id) — so without it, a clean child of one kind could suppress an
+		// open blocker of another. pr-ready-to-pr-ready supersede still rests on the explicit previousRunId
+		// link a real repair creates, which is never forged spontaneously.
+		for prev := prevOf[s.RunID]; prev != "" && !superseded[prev] && targetOf[prev] == s.Target && kindOf[prev] == s.Kind; prev = prevOf[prev] {
+			superseded[prev] = true
+		}
+	}
+	return superseded
+}
+
 func covers(s reviewlog.Summary, target string, current map[string]bool) bool {
 	if s.Target == target {
 		return true

@@ -220,6 +220,63 @@ func TestBuildForBranchAnswersAboutTheWorkInHand(t *testing.T) {
 	}
 }
 
+// The repair loop must reach clean IN BRANCH SCOPE — the scope the Stop/commit hook actually uses.
+// BuildForBranch rebuilds must_clear from scoped reviews, and an earlier version of the supersede fix was
+// wired only into the unscoped Build path, so a superseded parent kept blocking the branch forever. This
+// pins that the branch answer honours the supersede.
+func TestBuildForBranchSupersedesRepairedParent(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	// Parent attempt found blockers; the child re-review of the same branch head passed and read both
+	// changed files, so nothing is unreviewed and only the supersede decides the answer.
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "parent.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-parent`\nTarget: `current branch`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "child.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-child`\nTarget: `current branch`\n\nPrevious run: `mrv-parent`\n\n## Verdict\n\nPASS\n")
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-parent","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`"}`+"\n"+
+			`{"id":"mrv-child","scope":"pr-ready","verdict":"PASS","headSha":"`+headSHA+`","previousRunId":"mrv-parent","coveredPaths":["a.go","b.go"]}`+"\n")
+
+	got, err := BuildForBranch(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Blocked || len(got.MustClear) != 0 {
+		t.Fatalf("a branch whose repair passed must not block; blocked=%v must_clear=%+v", got.Blocked, got.MustClear)
+	}
+	var buf bytes.Buffer
+	if code, _ := EmitForBranch(root, "", nil, &buf); code != 0 {
+		t.Fatalf("exit code = %d, want 0 once the branch is clean:\n%s", code, buf.String())
+	}
+}
+
+// BuildForBranch computes supersede over the FULL log set, not the branch-scoped subset: a repair whose
+// CLEAN child sits at a commit OFF this branch (out of scope) must still retire the in-scope open parent it
+// links back to. A mutation narrowing supersededRuns(all) -> supersededRuns(scoped) drops that child and
+// wrongly keeps the parent blocking — this pins the `all` choice as load-bearing. An in-scope PASS covers
+// both changed files so unreviewed-files never confounds the supersede answer.
+func TestBuildForBranchSupersedesFromFullLogSetNotScoped(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "cover.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-cover`\nTarget: `current branch`\n\n## Verdict\n\nPASS\n")
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "parent.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-parent`\nTarget: `current branch`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "child.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-child`\nTarget: `current branch`\n\nPrevious run: `mrv-parent`\n\n## Verdict\n\nPASS\n")
+	offBranch := "0000000000000000000000000000000000cafe00" // a commit not in this branch's set
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-cover","scope":"pr-ready","verdict":"PASS","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"]}`+"\n"+
+			`{"id":"mrv-parent","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`"}`+"\n"+
+			`{"id":"mrv-child","scope":"pr-ready","verdict":"PASS","headSha":"`+offBranch+`","previousRunId":"mrv-parent"}`+"\n")
+
+	got, err := BuildForBranch(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Blocked || len(got.MustClear) != 0 {
+		t.Fatalf("an out-of-scope clean child must still supersede the in-scope open parent (full log set, not scoped); blocked=%v must_clear=%+v", got.Blocked, got.MustClear)
+	}
+}
+
 // A scope that cannot be resolved reports the UNSCOPED answer with a warning, never an empty one,
 // and it BLOCKS. A gate that cannot work out what the work is must fail toward blocking.
 //
