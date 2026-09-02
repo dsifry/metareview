@@ -1,0 +1,32 @@
+[
+  {
+    "id": "learning-1",
+    "file": "internal/learning/candidates.go",
+    "line": 243,
+    "category": "untested-decision-branch",
+    "severity": "medium",
+    "issue_text": "containsBlockerLanguage() is 0% covered and its decision branch in githubReviewBlockers() is never exercised. githubReviewBlockers emits a knowledge candidate when body!=\"\" && (state==\"CHANGES_REQUESTED\" || containsBlockerLanguage(body)). The only test (TestExtractCandidatesFromGitHubAndSessionCorrectionsWithRedaction) uses state \"CHANGES_REQUESTED\", so Go's short-circuit means containsBlockerLanguage is NEVER called. A non-CHANGES_REQUESTED review (APPROVED/COMMENTED) whose body contains 'blocker'/'must'/'do not' is supposed to become a knowledge candidate; nothing pins that path.",
+    "why_real": "Verified by mutation: replacing the body of containsBlockerLanguage with `return false` (dropping every non-CHANGES_REQUESTED blocker-language review from learning) leaves the entire package test suite green. The function is a real accept-decision branch that silently governs whether externally-worded blockers are captured as knowledge, and it is completely unguarded.",
+    "tests_checked": "candidates_test.go TestExtractCandidatesFromGitHubAndSessionCorrectionsWithRedaction (only githubReviewBlockers test; uses CHANGES_REQUESTED, short-circuits before containsBlockerLanguage). Confirmed by `go tool cover` (containsBlockerLanguage 0.0%) and by an invert-to-false mutation that kept all tests passing."
+  },
+  {
+    "id": "learning-2",
+    "file": "internal/learning/candidates.go",
+    "line": 211,
+    "category": "untested-decision-branch",
+    "severity": "medium",
+    "issue_text": "The title/finding-text fallback in calibrationDisposition() (the switch over strings.Contains(title, \"false positive\"|\"rebutted\"|\"accepted risk\"), lines 211-220) is untested. Every calibration test sets record.Status to a canonical value (false-positive/accepted-risk/rebutted), so the disposition is always resolved by the earlier status/classification loop and the text-fallback switch is dead in tests. This fallback is the only path that turns a finding whose disposition is expressed in prose (not in the Status/Classification fields) into a reviewer-calibration candidate.",
+    "why_real": "Verified by mutation: deleting the whole title-based switch (replacing it with `return \"\"`) leaves all package tests green. So the branch that decides whether prose-only false-positive/rebutted/accepted-risk findings feed reviewer calibration can be removed or inverted with no test catching it — a genuine invariant nothing holds.",
+    "tests_checked": "candidates_test.go TestExtractCalibrationCandidatesFromFalsePositiveAndAcceptedRiskPatterns (drives dispositions only via record.Status, hitting the status loop, never the title fallback). Confirmed by coverage (calibrationDisposition 72.7%) and a delete-the-switch mutation that kept all tests passing."
+  },
+  {
+    "id": "learning-3",
+    "file": "internal/learning/prune.go",
+    "line": 98,
+    "category": "correctness-risk",
+    "severity": "low",
+    "issue_text": "alreadyCovered() uses bidirectional substring containment on normalized text: `strings.Contains(haystack, needle) || strings.Contains(needle, haystack)`. The second direction discards a NEW candidate whenever any existing knowledge fact's normalized text is a substring of the candidate's — including short/generic existing facts. A richer, more-detailed new candidate that merely contains an older terse fact is dropped as 'already-covered', losing the added detail; a very short existing fact (e.g. 'run tests') would suppress many unrelated candidates.",
+    "why_real": "The dedup is deliberately loose, but the reverse-containment direction causes knowledge loss rather than dedup: a candidate that is a strict superset of an existing fact is silently discarded even though it adds information. No test pins a minimum-length or superset guard (the only alreadyCovered test uses text identical to the existing fact, which passes under either containment direction), so the behavior is unconstrained.",
+    "tests_checked": "prune_test.go TestPruneDiscardsCoveredRegistryFollowupUnverifiedSpecificAndObsoleteCandidates ('already' candidate is byte-identical to the seeded knowledge fact, so it cannot distinguish superset-containment from equality). No test exercises a short existing fact or a candidate that is a superset of a fact."
+  }
+]

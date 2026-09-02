@@ -177,3 +177,68 @@ bot findings), ingesting R1–R3 as durable calibration — the accepted/discard
 `docs/metareview/learning/` and the curated knowledge in `.metareview/knowledge/metareview.jsonl`. This
 closes the metareview-first-then-bots loop: metareview's gate ran first, the bots measured the residual,
 and the residual is now folded back.
+
+---
+
+# Round 2: 5 more packages + an effort-ladder (2026-09-02)
+
+To answer "do we have enough info?", a second pass over **5 more packages** — `internal/fsm/machine`,
+`internal/learning`, `internal/mutation`, `internal/testconv`, `internal/status` — with a new
+**effort-escalation ladder** and the new `METAREVIEW_JUDGE_TIMEOUT` (set to 600s so glm-5.3 is never cut
+off). Ladder per candidate: **flash `low`** first → if `False`/`conf<0.75`, re-ask **flash `high`** →
+**glm-5.3 `low`** as a comparison point → **Opus 4.8** as backstop.
+
+## Candidates found (8; mutation was a clean zero)
+
+| package | findings |
+| --- | --- |
+| fsm/machine (100%-cov, hardened) | machine-1 (MED): `incompleteFork`'s agent-edit disjunct is a live corruption guard deletable with tests green |
+| learning (floored) | learning-1/2 (MED, mutation-verified test-gaps: `containsBlockerLanguage` / calibration prose fallback never called), learning-3 (debatable) |
+| mutation (floored) | **0** — honestly clean; 6 candidates pursued and rejected against the tests |
+| testconv (floored) | **testconv-1 (MED, real logic bug):** `testFileSuffixes` omits `.mjs`/`.cjs`, so `foo.test.mjs` (a real Vitest test) is misclassified as non-test; testconv-2 (dead `---` guard), testconv-3 (debatable) |
+| status (floored) | status-1 (LOW, mutation-verified test-gap): `Subtype=="error"` disjunct unpinned |
+
+## Effort-ladder adjudication (6 REAL + 2 debatable)
+
+| id | truth | flash·low | flash·high | glm-5.3·low | Opus | ladder |
+| --- | --- | --- | --- | --- | --- | --- |
+| learning-1 | real | True 0.80 / 2s | — | True 0.85 / 3s | True 0.76 / 20s | flash-low ✓ |
+| learning-2 | real | True 0.70 / 2s | **False 0.85** | True 0.70 / 6s | True 0.72 / 36s | →Opus ✓ |
+| machine-1 | real | **False 0.85** | **False 0.75** | True 0.55 / 12s | True 0.72 / 24s | →Opus ✓ |
+| status-1 | real | True 0.70 / 3s | True 0.65 / 10s | **False 0.70** | True 0.88 / 16s | flash-high ✓ |
+| testconv-1 | real | **False 0.65** | **False 0.80** | **False 0.80** | True 0.68 / 20s | →Opus ✓ |
+| testconv-2 | real | True 0.70 / 4s | True 0.75 / 6s | True 0.85 / 5s | True 0.68 / 19s | flash-high ✓ |
+| learning-3 | debatable | True 0.65 | False 0.70 | False 0.70 | False 0.62 | →Opus (False) |
+| testconv-3 | debatable | True 0.75 | — | True 0.72 | True 0.68 | flash-low (True) |
+
+**Recall on the 6 real:** Opus **6/6**; flash-low 4/6; glm-5.3-low 4/6. The **two-tier ladder resolved all
+6/6** — because Opus is the backstop.
+
+## What round 2 settled
+
+- **Opus 4.8 is the only full-recall judge — now 15/15 real findings across both rounds, with zero false
+  positives ever.** It remains the trustworthy backstop.
+- **flash-high is NOT a reliable escalation.** It flipped `learning-2` from a correct True to a confident
+  False — *worse* than flash-low. The earlier single-datapoint hint (flash-high recovered prready-1) does
+  not generalise; drop the flash-high rung.
+- **flash-low and glm-5.3-low miss *different* subtle findings** (flash missed machine-1; glm-5.3 missed
+  status-1; both missed testconv-1). Neither cheap model alone is a safe judge for subtle findings, but
+  **both have zero false positives**, so a confident cheap `True` is trustworthy.
+- **The right design is two-tier, not three:** flash-low first pass (accept its confident REALs), escalate
+  everything else **straight to Opus**. glm-5.3-full adds latency without a recall edge.
+- **`METAREVIEW_JUDGE_TIMEOUT`** (this round's enhancement) removed the glm-5.3 timeouts, and `effort=low`
+  kept glm-5.3 fast (3–26s) on 62–258 KB contexts.
+
+## Recall gap R4 (this round)
+
+**CodeRabbit on #72** caught an integer **overflow** in the new `ResolveTimeout` (`n * time.Second` wraps
+for a huge `n`), which metareview's own `task-done` and single-worker gremlins both missed — gremlins
+mutates operators, not input *values*, and the initial tests had no out-of-range case. Fixed with a
+`maxTimeoutSeconds` bound. Lesson: the mechanical-precision / testing-quality lenses should probe
+integer-overflow on any parsed-number → duration/size multiplication.
+
+## Status of the round-2 findings
+
+The one clear logic bug (**testconv-1**) is worth a fix; the rest are subtle test-pinning gaps — exactly
+the **100%-coverage campaign's** work — and are captured here (and in the raw data under
+`self-review-matrix-data/round2/`) as its backlog rather than fixed piecemeal.

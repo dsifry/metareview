@@ -1,0 +1,32 @@
+[
+  {
+    "id": "testconv-1",
+    "file": "internal/testconv/typescript.go",
+    "line": 27,
+    "category": "detection-accuracy",
+    "severity": "low",
+    "issue_text": "testFileSuffixes includes the exotic TS module variants .test.mts/.cts and .spec.mts/.cts but omits the common JS module variants .test.mjs/.cjs and .spec.mjs/.cjs. The list is documented as \"conventional TS/JS test-file endings (shared across Jest and Vitest)\" and is shared (via embedding) by vitestConvention. Vitest's own default include glob is `**/*.{test,spec}.?(c|m)[jt]s?(x)`, which DOES match `.test.mjs`, `.test.cjs`, `.spec.mjs`, `.spec.cjs`. So a Vitest repo with a `foo.test.mjs` (or `.cjs`) test file has IsTestFile return false for it: it is excluded from the reproduction partition, DirHasTests, and DeletesATest test-file detection.",
+    "why_real": "The suffix list already commits to module-variant coverage (.mts/.cts) but is asymmetric: it includes the TS ESM/CJS forms and drops the JS ESM/CJS forms that Vitest's default config treats as tests. A real .test.mjs/.cjs test file is therefore misclassified as a non-test file, silently narrowing detection for the Vitest convention that reuses this shared list.",
+    "tests_checked": "typescript_test.go TestTSBasics (IsTestFile positive list has .test.ts/.spec.tsx/.test.js/.spec.jsx/.test.mts; negatives are .ts/.tsx/.md/test.ts) and vitest_test.go TestVitestSharesTSPredicates (only .spec.ts / .ts). No test exercises .mjs or .cjs, so the gap is unpinned and would not be caught."
+  },
+  {
+    "id": "testconv-2",
+    "file": "internal/testconv/goconv.go",
+    "line": 125,
+    "category": "dead-guard",
+    "severity": "low",
+    "issue_text": "In goConvention.DeletesATest the guard `if strings.HasPrefix(line, \"---\") { continue }` is dead. The only match performed on the line is testFuncRemovedRe = `^-func (Test|Benchmark|Fuzz|Example)...`, which requires the line to begin with `-func`. A line beginning with `---` cannot begin with `-func` (char 1 is `-`, not `f`), so no `---`-prefixed line could ever match the regex. Deleting the entire guard leaves behavior identical, and every existing test still passes.",
+    "why_real": "It is provable that for all inputs the guard changes nothing: any line reaching the regex that starts with `---` fails the `^-func` anchor regardless. TestGoDeletesATest line 175 (`\"--- a/foo_test.go\\n\"` -> false) passes with or without the guard because the regex already rejects it. This is an invariant nothing holds / removable branch, unlike the identical-looking guard in the TS/python DeletesATest where the final case is `strings.HasPrefix(line, \"-\")` and the `---` skip is genuinely load-bearing.",
+    "tests_checked": "testconv_test.go TestGoDeletesATest (all cases: -func TestFoo, kind loop, Test(/Test_x(, Testhelper negative, the `--- a/foo_test.go` header case at line 175, added-test negative). None distinguishes guard-present from guard-absent."
+  },
+  {
+    "id": "testconv-3",
+    "file": "internal/testconv/typescript.go",
+    "line": 158,
+    "category": "diff-handling",
+    "severity": "low",
+    "issue_text": "typeScriptConvention.DeletesATest (and the identical pythonConvention.DeletesATest at python.go:177) classifies a hunk line with `case strings.HasPrefix(line, \"---\"), strings.HasPrefix(line, \"+++\")` as a file header BEFORE the `inHunk && inTestFile && strings.HasPrefix(line, \"-\")` removal case. A removed CONTENT line whose original text starts with `--` appears in the unified diff as `---<rest>` and is therefore swallowed by the header case, so it never triggers the deletion gate.",
+    "why_real": "The switch is order-sensitive: a removed content line like `--foo` (original content beginning with two dashes, e.g. an embedded `-- sql comment` or a `--flag` string, which does occur in JS/TS/py test files) becomes diff line `---foo`, matches the `---` header case, and is skipped. This is a genuine false negative that contradicts the documented \"over-triggers safely\" claim (comment at typescript.go:143-148). Practical impact is small because DeletesATest returns on the FIRST qualifying removed line and a real test deletion also removes ordinary `it(...)`/`def test_` lines that are caught, but the mechanical over-match in header detection is real and demonstrable. Confidence that it is a defect: medium-low (borderline; the safety net is the return-on-first-line behavior).",
+    "tests_checked": "typescript_test.go TestTSDeletesATest and python_test.go TestPyDeletesATest — both only exercise removed lines whose content starts with a letter/keyword (it(, def, const, x =); neither tests a removed content line whose content begins with `--`, so the false negative is unpinned."
+  }
+]
