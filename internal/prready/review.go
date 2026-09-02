@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dsifry/metareview/internal/contextprofile"
 	"github.com/dsifry/metareview/internal/evidence"
@@ -849,7 +850,12 @@ func readEvidence(path string) (string, error) {
 	}
 	text := string(bytes)
 	if len(text) > 12000 {
-		return text[:12000], nil
+		// Cut back to a rune boundary so truncation never splits a multi-byte rune into the pack.
+		cut := 12000
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		return text[:cut], nil
 	}
 	return text, nil
 }
