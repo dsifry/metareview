@@ -15,3 +15,6 @@ node_modules/
 
 # Local, uncommitted session handoff prompts (see .handoffs/README not tracked)
 .handoffs/
+
+# Local agent worktrees (never commit)
+.claude/worktrees/
