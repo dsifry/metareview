@@ -61,6 +61,27 @@ cut it into content-stable **shards** and write one prompt pack per shard; you r
 a result back, and the context-risk blocker clears once every shard (plus the cross-shard seam) has a
 fresh passing result. See the sharded-review section in [CLAUDE.md](CLAUDE.md).
 
+### Make it mechanical — the git-native gate
+
+Prose ("review before you push") is not a gate. Install the **git-native hooks** and it is enforced by git
+itself, so it holds however a command is spelled:
+
+```bash
+metareview setup --install-hooks        # interactive; --yes for headless, --dry-run to preview
+```
+
+- **`git push` is blocked** until the branch is review-clean — the `pre-push` hook runs `metareview review
+  gate --push` (deterministic) and aborts the push on a nonzero result, *before* anything leaves. It fails
+  closed; `git push --no-verify` is the escape hatch. The gate measures the checked-out branch; pushing a
+  different ref is not yet gated ([#82](https://github.com/dsifry/metareview/issues/82)).
+- **metareview never blocks a commit** — a commit saves work, and the `post-commit` hook cannot block one
+  anyway (it runs after the commit). It just names the files it wrote and reminds you (and the agent) to
+  review them before pushing.
+
+The hooks run **outside** the agent, so they only run the deterministic gate and emit a message; the agent
+reads that message, runs the review, records coverage (metareview adjudicates), and re-pushes. Install is
+non-destructive and reversible (`--uninstall-hooks`); see [INSTALL.md](INSTALL.md).
+
 ---
 
 ## 2. Find and fix bugs — with proof

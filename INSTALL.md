@@ -72,6 +72,40 @@ claude plugin install metareview@metareview
 
 Then use `/setup`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/review-artifact`, `/learn-post-merge`, `/status`, and `/fsm`.
 
+## Enforce the review gate (git hooks)
+
+metareview can enforce review-before-push with **git-native hooks**. Because git runs them on the real
+operation, no *spelling* of the push command walks around the gate — a plain command, a compound `a && b`, a
+subshell, an alias, `eval`, a push from a plain terminal all reach it, which a command-string parser cannot
+say. Two deliberate, honest limits: `git push --no-verify` skips the hook git-natively (the intended escape
+hatch), and the gate measures the **checked-out branch** — pushing a *different* ref (`git push origin
+other-branch`) is not yet gated ([#82](https://github.com/dsifry/metareview/issues/82)). It is split:
+
+- **`git push` is blocked** until the branch is review-clean. The `pre-push` hook runs `metareview review
+  gate --push` (deterministic — no model call); a nonzero result aborts the push *before* anything leaves.
+  It **fails closed** (a missing binary, a broken gate, or a timeout all block). `git push --no-verify` is
+  the explicit escape hatch.
+- **metareview never blocks a commit** — a commit saves work, and metareview's `post-commit` hook cannot
+  block one anyway (post-commit runs *after* the commit exists). It only prints a *review-owed* nudge naming
+  the files the commit wrote, so the agent reviews them before it pushes. (Other git hooks or git errors are
+  outside metareview's control.)
+
+Install it — interactive, and **non-destructive** (it refuses rather than override an existing
+`core.hooksPath` or silently bypass hooks already in `.git/hooks`):
+
+```bash
+metareview setup --install-hooks            # interactive: shows the plan, asks [y/N] (default No)
+metareview setup --install-hooks --dry-run  # preview only, changes nothing
+metareview setup --install-hooks --yes      # headless (agents/CI); no prompt
+metareview setup --install-hooks --force    # override a detected conflict
+metareview setup --uninstall-hooks          # reverse it (only if it is metareview's)
+```
+
+With no TTY and no `--yes` (an agent or CI), it prints the plan and the flags and **changes nothing** rather
+than hanging on a prompt. Install sets `core.hooksPath` to this clone's `hooks/git`; git hooks are per-clone
+and never auto-install (git's security model), so each clone runs this once. Keep `bin/metareview` built (or
+`metareview` on `PATH`, or `METAREVIEW_BIN` set) — the pre-push gate fails closed if it cannot run.
+
 ## Standalone Setup
 
 From a repository that does not already use metaswarm:

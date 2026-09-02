@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# git post-commit hook — the per-commit review NUDGE. Runs after EVERY commit (any spelling; `--no-verify`
+# does NOT skip post-commit — it only skips the pre-commit/commit-msg "verify" hooks), and CANNOT block: the
+# commit already exists, which is exactly what we want (a commit saves work; saving is never gated).
+#
+# It runs OUTSIDE the agent, so it cannot generate a review — it only does the deterministic part: name the
+# files THIS commit wrote (read from the commit itself, not guessed pre-commit) and print a review-owed
+# message to stderr. The agent sees that in the `git commit` output and does the agentic part — build the
+# review, run it, record coverage (metareview adjudicates), before it pushes (where the pre-push gate
+# enforces it). Best-effort throughout: a nudge must never fail a commit.
+set -uo pipefail
+
+# The files this commit wrote, minus metareview's own generated artifacts (which no review can ever cover,
+# so nudging about them would loop). --root so the very first commit on a branch is handled too.
+FILES="$(git diff-tree --no-commit-id --name-only -r --root HEAD 2>/dev/null \
+  | grep -Ev '^(\.metareview/|docs/metareview/)' || true)"
+[ -z "$FILES" ] && exit 0
+
+COUNT="$(printf '%s\n' "$FILES" | grep -c . 2>/dev/null || echo "?")"
+{
+  echo "metareview: commit saved. A review is OWED on the ${COUNT} file(s) it wrote — review them before you push (the pre-push gate blocks an unreviewed branch):"
+  printf '%s\n' "$FILES" | sed 's/^/  - /'
+  echo "Run your adversarial review of these files, then record coverage (e.g. \`metareview review pr-ready --base <ref> --evidence <file>\`)."
+} >&2
+exit 0

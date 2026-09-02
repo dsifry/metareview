@@ -231,6 +231,7 @@ next: fix, re-run with --previous-run</code></pre>
         <ul class="checklist">
           <li>Adversarial multi-reviewer passes with named perspectives.</li>
           <li>Hard blockers for critical findings, spec-contract failures, and acceptance gaps.</li>
+          <li>A git-native enforcement gate: <code>git push</code> is blocked until the branch is review-clean (<code>--no-verify</code> escapes; it gates the checked-out branch), while metareview never blocks a commit — its <code>post-commit</code> hook just nudges you to review what it wrote.</li>
           <li>Fresh re-review with <code>--previous-run</code> instead of self-certification.</li>
           <li>Evidence-backed decisions: diff, tests, acceptance notes, and GitHub context.</li>
           <li>Fractal review loops for decomposed epics and child plans.</li>
@@ -263,6 +264,10 @@ next: fix, re-run with --previous-run</code></pre>
           <div class="card">
             <h3>CLI gates</h3>
             <p><code>metareview</code> runs setup checks, context packing, lifecycle reviews, and post-merge learning from the repository checkout.</p>
+          </div>
+          <div class="card">
+            <h3>Git-native enforcement</h3>
+            <p><code>metareview setup --install-hooks</code> wires deterministic git hooks: a <code>pre-push</code> gate blocks an unreviewed push (fail-closed; <code>--no-verify</code> escapes), and a <code>post-commit</code> nudge names the files to review. Git invokes them on the real operation, so no <em>spelling</em> of the push command walks around the gate (it gates the checked-out branch; pushing a different ref is <a href="https://github.com/dsifry/metareview/issues/82">#82</a>).</p>
           </div>
           <div class="card">
             <h3>Markdown artifacts</h3>

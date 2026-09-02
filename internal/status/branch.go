@@ -63,6 +63,14 @@ func realGit(root string, args ...string) ([]byte, error) {
 // gitcontext resolves it the way every other command does (merge-base with main, then master,
 // then HEAD~1) so the answer matches what a review would have been run against.
 func ResolveBranchScope(root, base string, run RunGit) (BranchScope, error) {
+	return resolveBranchScope(root, base, run, false)
+}
+
+// resolveBranchScope resolves the branch scope with an explicit file mode. committedOnly true restricts
+// Files to the committed range base..HEAD — what a PUSH actually sends — so uncommitted local WIP does not
+// enter the answer. The default (false, what ResolveBranchScope exposes) also folds in staged, working-tree
+// and untracked changes, which is what a Stop-time "is the work in hand reviewed" question needs.
+func resolveBranchScope(root, base string, run RunGit, committedOnly bool) (BranchScope, error) {
 	if run == nil {
 		run = realGit
 	}
@@ -84,7 +92,12 @@ func ResolveBranchScope(root, base string, run RunGit) (BranchScope, error) {
 	// exit 0. The unscoped query it replaced at least failed closed; this default failed open on
 	// the single most common state at Stop time.
 	files := append([]string(nil), ctx.ChangedFiles...)
-	files = appendUnseen(files, ctx.StagedFiles, ctx.WorkingTreeFiles, ctx.UntrackedFiles)
+	if !committedOnly {
+		// A push sends commits, not the index or the working tree, so PushGate (committedOnly) must NOT
+		// fold these in — doing so blocked a fully-reviewed push on unrelated local WIP and pressured
+		// --no-verify. The Stop-hook view still wants them (work is most likely uncommitted at finish time).
+		files = appendUnseen(files, ctx.StagedFiles, ctx.WorkingTreeFiles, ctx.UntrackedFiles)
+	}
 	s := BranchScope{Base: ctx.BaseSHA, Head: ctx.HeadSHA, Commits: map[string]bool{}, Files: files}
 	// HEAD is always in scope, set BEFORE anything that can fail. rev-list excludes it on a merge
 	// or an empty range, and an early return on rev-list failing used to skip this line entirely
@@ -257,6 +270,38 @@ func ChangeKinds(root, base string, run RunGit) map[string]string {
 // what made the divergence visible.
 func GeneratedMetareviewPathExcludes() []string {
 	return []string{".metareview", ".metareview/**", "docs/metareview", "docs/metareview/**"}
+}
+
+// gitCommitFiles is the exclude-filtered set of paths a pending `git commit` will WRITE, for the given
+// scope. ScopeStaged reads the index (`git diff --cached`) — what a plain `git commit` records. ScopeAll
+// reads every tracked change vs HEAD (`git diff HEAD`, staged AND unstaged, untracked excluded as git
+// excludes it) — what `git commit -a` and a pathspec commit actually record, and the set a staged-only gate
+// missed. The gate scopes to this, not the whole branch.
+func gitCommitFiles(run RunGit, root string, scope CommitScope) ([]string, error) {
+	// -z: NUL-delimited, VERBATIM pathnames. Without it git newline-separates and QUOTES paths with unusual
+	// bytes (spaces near the edges, control chars), and the old TrimSpace then mangled a legitimately
+	// space-prefixed path into a different string — so the gate could fail to match, and thus fail to gate, a
+	// real file (CodeRabbit: branch.go — preserve staged pathname bytes). NUL never appears in a pathname.
+	args := []string{"diff", "--no-renames", "--name-only", "-z"}
+	if scope == ScopeAll {
+		args = append(args, "HEAD") // HEAD vs worktree: every tracked modification (what -a / a pathspec writes)
+	} else {
+		args = append(args, "--cached") // index vs HEAD: what a plain `git commit` writes
+	}
+	out, err := run(root, args...)
+	if err != nil {
+		// The error is returned, not swallowed: a caller that cannot list what a commit writes must fail
+		// CLOSED (see CommitGateScoped), the same way an unresolvable branch scope does. Returning an empty
+		// set here would read as "nothing to gate" and wave the commit through.
+		return nil, err
+	}
+	var files []string
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" && !isGeneratedMetareviewPath(p) { // no trim: the bytes between NULs are the exact path
+			files = append(files, p)
+		}
+	}
+	return files, nil
 }
 
 // appendUnseen adds every path not already present, preserving order so the report reads the same

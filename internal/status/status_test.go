@@ -105,6 +105,30 @@ func TestReportIsMachineReadableAndNamesWhatMustBeCleared(t *testing.T) {
 	}
 }
 
+// The commit gate acts on code-review state (unreviewed files, open blockers, unresolved scope) but NOT
+// abandoned FSM runs — those are a finish-the-session concern, not "is this commit's code reviewed".
+func TestCommitBlockersDropsAbandonedRunsOnly(t *testing.T) {
+	r := Report{MustClear: []Blocker{
+		{Target: "a.go", Verdict: VerdictUnreviewed, Kind: "unreviewed"},
+		{Target: "task-1", Verdict: "NEEDS_REVISION", Kind: "task-done"},
+		{Target: "sdlc-loop @ fix", Verdict: VerdictAbandoned, Kind: AbandonedKind},
+		{Target: "scope", Verdict: VerdictUnscoped, Kind: "scope"},
+	}}
+	got := CommitBlockers(r)
+	if len(got) != 3 {
+		t.Fatalf("commit gate must keep unreviewed + blocking review + scope, drop only fsm-run; got %+v", got)
+	}
+	for _, b := range got {
+		if b.Kind == AbandonedKind {
+			t.Fatalf("an abandoned run must not block a commit: %+v", b)
+		}
+	}
+	// A report whose only blocker is an abandoned run is clear for a commit.
+	if len(CommitBlockers(Report{MustClear: []Blocker{{Kind: AbandonedKind}}})) != 0 {
+		t.Fatal("an abandoned-run-only report must not block a commit")
+	}
+}
+
 // A NEEDS_REVISION run superseded by a later PASS in its previousRunId lineage must NOT keep blocking.
 // The repair loop is: a review finds blockers (NEEDS_REVISION) -> fix -> re-review with --previous-run
 // passes (PASS). Nothing retires the parent today, so must_clear keeps it forever and the gate can never
