@@ -1,0 +1,32 @@
+[
+  {
+    "id": "prready-1",
+    "file": "internal/prready/review.go",
+    "line": 907,
+    "category": "correctness",
+    "severity": "medium",
+    "issue_text": "verdictForCounts' escalation guard `if blocking && attemptNumber >= maxAttempts` (and the whole ESCALATED branch, lines 907-910) is not pinned by any test in the pr-ready gate. The only unit call is verdictForCounts(counts, \"gate\", 1, 3) with zero blocking findings (review_markdown_test.go:35, TestVerdictForNonBlockingFindingsIsPassAdvisory), which returns PASS_ADVISORY and never touches this branch. The integration fixtures (shardedRepo) always block at attempt 1 of 3 (TestGCOnlyRunsAfterAPassingGate asserts result.Blocking with NEEDS_REVISION), so the escalation path is never exercised end-to-end either. The whole `if blocking && attemptNumber >= maxAttempts { ESCALATED }` block could be deleted, or `>=` inverted to `>` (an off-by-one that would grant one extra attempt / fail to escalate at exactly maxAttempts), and every test in the repo still passes.",
+    "why_real": "Category 2 (invariant that nothing holds). ESCALATED is the terminal safety valve: per CLAUDE.md it 'stops same-target retries' and forces a human to narrow/split/redesign. A silent break of the attempt threshold (delete branch => infinite NEEDS_REVISION retries; `>=`->`>` => escalation fires one attempt late or never) has zero test coverage in the pr-ready gate. Confirmed by go tool cover: verdictForCounts is 70% and the uncovered statements are the escalation reason+return and the final PASS return.",
+    "tests_checked": "review_markdown_test.go:33-39 (only PASS_ADVISORY, gate/1/3, no blocking); shardingestion_test.go:132-146 and shardwiring_test.go (Create integration only ever blocks at attempt 1/3, never escalates); grepped whole repo for ESCALATED + prready Create with MaxAttempts forcing escalation -- none drive verdictForCounts into the escalation branch. verdictForCounts is unexported so only the prready package can pin it, and it does not."
+  },
+  {
+    "id": "prready-2",
+    "file": "internal/prready/review.go",
+    "line": 917,
+    "category": "completeness",
+    "severity": "low",
+    "issue_text": "The final `return \"PASS\", \"passed\", false, \"\"` in verdictForCounts (line 917) is unreachable by any test. Reaching it requires gateEffect==\"gate\" (only set when report.Capabilities.Beads || .Metaswarm, review.go:176) AND all finding counts zero. Every prready Create test builds a plain temp git repo (shardedRepo, shardwiring_test.go:70) with no Beads/metaswarm capability, so gateEffect is always \"advisory\" and line 914 (`gateEffect==\"advisory\" || nonBlocking`) always returns PASS_ADVISORY first. Changing line 917 from \"PASS\" to \"PASS_ADVISORY\" (collapsing the clean-gate-mode verdict into advisory) leaves all tests green.",
+    "why_real": "Category 2/3: the PASS vs PASS_ADVISORY distinction for a clean gated repo is an untested decision branch that could be deleted/inverted. Lower impact than prready-1 because both verdicts are non-blocking, but the gate's headline verdict for a clean metaswarm/beads repo is entirely unpinned in this package.",
+    "tests_checked": "review_markdown_test.go:33-39 exercises only the advisory/non-blocking case; no prready test constructs a beads/metaswarm-capable repo, so the gateEffect==\"gate\" + zero-finding path is never built. Coverage report: verdictForCounts 70%, this return is among the uncovered statements."
+  },
+  {
+    "id": "prready-3",
+    "file": "internal/prready/review.go",
+    "line": 851,
+    "category": "mechanical-precision",
+    "severity": "low",
+    "issue_text": "readEvidence truncates by raw byte count: `if len(text) > 12000 { return text[:12000] }`. This slices at a byte boundary and can split a multi-byte UTF-8 rune, emitting an invalid trailing byte into evidenceText, which is then embedded verbatim into the context-pack markdown (contextMarkdown line 889) and passed to reviewers. readEvidence is only 22.2% covered and the truncation branch is untested, so nothing checks the truncation preserves valid UTF-8 or cuts on a rune boundary.",
+    "why_real": "Category 1 (mechanical): byte-boundary slice of UTF-8 text is a genuine defect (produces malformed output), though impact is cosmetic since it only affects rendered evidence text, not a gate decision. Included for completeness given the floor coverage on this function.",
+    "tests_checked": "No test in internal/prready exercises readEvidence with input >12000 bytes; TestRenderEvidence* tests operate on already-parsed EvidenceInput, not readEvidence's truncation. Confirmed readEvidence 22.2% coverage."
+  }
+]

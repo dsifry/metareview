@@ -1,0 +1,22 @@
+[
+  {
+    "id": "ghctx-1",
+    "file": "internal/githubcontext/githubcontext.go",
+    "line": 167,
+    "category": "security",
+    "severity": "high",
+    "issue_text": "redactMatch leaks the body of an unencrypted PEM private key. Pattern 6 (line 69) matches a whole '-----BEGIN...PRIVATE KEY-----...-----END...-----' block and hands the entire block to redactMatch. redactMatch (lines 167-172) scans the WHOLE matched string for ':' then '=' and, on the first hit, returns value[:index] verbatim as the 'key' plus '<sep>[REDACTED]'. An unencrypted PEM has no ':' but its base64 body commonly ends in '=' / '==' padding, so the first '=' is near the very end: value[:index] is the BEGIN line plus essentially all of the base64 key material, which is emitted unredacted.",
+    "why_real": "Category 1 (redaction gap). Ran a probe with a realistic PEM ending in '==' padding: Redact() returned '-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADAN...ab=[REDACTED]' i.e. the whole key body leaked, only the trailing padding+END were replaced. The entire raison d'etre of pattern 6 is defeated whenever the key's base64 has '=' padding (very common). A private key accidentally pasted into a PR body/comment flows straight through to the rendered context.",
+    "tests_checked": "Read all of githubcontext_test.go. No test exercises the private-key pattern at all (grep: no PEM/BEGIN in the test file); the redaction tests (TestCollectSummarizesAndRedactsGitHubText, TestRedactCommonBareCredentialPatterns) use only token=value, secret=value, gho_/ghs_/sk-proj bare tokens and Authorization: Bearer. So this leak is entirely unpinned."
+  },
+  {
+    "id": "ghctx-2",
+    "file": "internal/githubcontext/githubcontext.go",
+    "line": 167,
+    "category": "security",
+    "severity": "medium",
+    "issue_text": "redactMatch splits at the first ':' anywhere in the match, before considering '=', so a generic credential whose real separator is '=' but whose value contains ':' leaks its value prefix. The value group in pattern 8 (line 70) allows ':' ([^\\s`,;]+ and the quoted forms all permit ':'), and redactMatch (lines 167-168) checks ':' before '='. For token=abc:def:ghi the first ':' sits inside the value, so key=value[:index]='token=abc' and the output is 'token=abc:[REDACTED]' — the 'abc' portion of the secret survives.",
+    "why_real": "Category 1 (partial redaction gap). Probe confirmed: Redact(\"token=abc:def:ghi\") returned \"token=abc:[REDACTED]\", leaking 'abc'. Same class hits quoted values (token=\"a:b\" -> token=\"a:[REDACTED]'). Because separator preference is positional-order-independent ':' first, any '=' delimited secret containing a ':' bleeds its prefix.",
+    "tests_checked": "Read TestCollectSummarizesAndRedactsGitHubText and TestRedactCommonBareCredentialPatterns fully: their credential values ('redaction-test-value', bare tokens) contain no ':' or '=', so the wrong-split path is never exercised and no test fails on this leak. TestRedactMatchSeparatorAtStart only checks the index>=0 boundary with ':=value', not a value-embedded ':'."
+  }
+]

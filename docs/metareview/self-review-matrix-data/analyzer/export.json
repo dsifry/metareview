@@ -1,0 +1,22 @@
+[
+  {
+    "id": "export-1",
+    "file": "internal/fsm/export/export.go",
+    "line": 436,
+    "category": "architecture",
+    "severity": "medium",
+    "issue_text": "The audit-log redaction path (redactor.event) FAILS OPEN, contrary to the spec-3-§5 'fail closed' requirement that redaction_test.go's own docstring cites. event() only transforms an enumerated set of fields for a hard-coded set of event types (init, tree, node_output, cmd_call/overflow_handler, gate, converge, warn); for any event TYPE not in the switch it returns (nil,nil) and the caller emits the ORIGINAL raw source line verbatim (lines 133-145, 436-438), and within a handled type any data field not explicitly marked passes through verbatim. Unlike redactor.snapshot(), which is guarded by TestEverySnapshotFieldIsClassifiedForExport (a fail-CLOSED reflection test over run.Snapshot), there is NO structural test that forces a new event type or a new sensitive field on an existing event's data to be classified before it can land in audit.redacted.jsonl. A sensitive field added to e.g. LLMCallData or CmdCallData, or a new event type, would be exported unredacted into the default committed bundle with the whole suite green — exactly the hole redaction_test.go was written to close for snapshots, left open for the larger audit surface.",
+    "why_real": "Category 4 (a spec/doc claim the code does not hold) + Category 2 (an invariant nothing enforces). redaction_test.go lines 12-13 assert 'Spec 3 §5 requires the export to fail closed' and build reflective enforcement for Snapshot; no equivalent exists for the audit log, whose default branch is verbatim emission. Concrete failure: the fail-closed guarantee the bundle advertises does not cover audit.redacted.jsonl.",
+    "tests_checked": "Read export_test.go (TestF8Redaction/TestF8Refusals) and redaction_test.go in full. TestEverySnapshotFieldIsClassifiedForExport enumerates run.Snapshot fields only. No test enumerates run.EventTypes or event-data fields for redaction classification; the event() default (verbatim) branch is only exercised for benign types, so deleting/inverting a redaction case for an unexercised event type (or adding a field) would not fail any test."
+  },
+  {
+    "id": "export-2",
+    "file": "internal/fsm/export/export_test.go",
+    "line": 239,
+    "category": "testing-quality",
+    "severity": "low",
+    "issue_text": "In TestF8Redaction the leaked-marker slice includes the literal \"porcelain-file.go \\n\" (a space followed by a newline byte). This substring is unproducible in either the redacted or the unredacted output: the source tree status stores '...porcelain-file.go\\n?...' where \\n is the JSON escape (backslash+n, no space) inside \"status\":\"...\", and the redacted form reduces status to a JSON path array [\"porcelain-file.go\",\"untracked-marker.txt\"]. So the assertion !strings.Contains(every, \"porcelain-file.go \\n\") is a tautology that holds regardless of whether tree-status redaction works.",
+    "why_real": "Category 3 (an assertion that cannot fail): the check names 'the raw porcelain status line must not leak' but tests for a string neither branch of the code ever emits. The real property (the porcelain metadata prefix is stripped to a bare path) is actually pinned elsewhere (lines 298-303 / 301), so removing this dead marker loses no coverage — but as written it asserts nothing.",
+    "tests_checked": "Read export_test.go fully. Traced markedLog's TreeData.Status ('1 .M N... 100644 100644 100644 abc def porcelain-file.go\\n? untracked-marker.txt\\n') through statusPaths and through run.MarshalCanonical (which JSON-escapes newlines); confirmed the space-plus-literal-newline sequence appears in neither h.fs.files output. The genuine strip-the-prefix assertion at line 301 (st[0] == 'porcelain-file.go') is what actually pins the behavior."
+  }
+]
