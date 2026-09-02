@@ -262,18 +262,20 @@ raised so glm-5.3 never times out).
   be deleted or inverted with the whole suite still green. This is the **100%-coverage / mutation campaign's
   backlog, systematically enumerated** — see `docs/metareview/COVERAGE-CAMPAIGN-BACKLOG.md`.
 - **The real logic bugs** (a small minority) surfaced by the sweep, beyond round-1/2's fixes:
-  - `gitcontext` — `matchesExclude` treats a bare-directory exclude as an *exact* match, but git's
+  - `gitcontext` — **(fixed, #76)** `matchesExclude` treats a bare-directory exclude as an *exact* match, but git's
     `:(exclude)<dir>` is recursive, so a bare exclude **plus any exception** silently un-excludes a whole
     directory into the reviewed diff (verified against real git). **(fix pending)**
-  - `internal/evidence` — a command that fails to *launch* (binary-not-found) is recorded as `ExitCode:0`, a
-    passing receipt for a failed command (`HasSuccessfulValidation` then treats it as success). **(fix pending)**
-  - `internal/findings` — `classForCount` downgrades a medium/low-severity **blocking** finding to
-    non-blocking "warning"; this drives gate verdicts and nothing pins it (the sister `reviewlog` package
-    closed exactly this gap). **(fix pending)**
   - `internal/covergate` — a crafted 0-statement profile line yields `Pct()=NaN`, and `NaN < floor` is false,
     so the package silently passes its floor. Lower priority (needs a hand-crafted profile).
   - `internal/repo` — boundary-free negative-marker substring matching (`"no metaswarm-legacy"` matches
     `"no metaswarm"`); minor.
+
+  Two findings first flagged here as bugs are on re-reading **high-value test-gaps, not live defects** (the
+  current code is correct; the guard is merely unpinned): `internal/evidence`'s `exitCode=1` default that
+  catches a failed-to-launch command is deletable with tests green (delete it and a failed command *would*
+  mint a passing receipt — so it is an unheld invariant, not a present bug), and `internal/findings`'
+  `classForCount` medium/low-blocking→warning downgrade is the sister-package-`reviewlog` policy left
+  unpinned. Both are in the backlog.
 
 ## The model matrix, now well-sampled (29 REAL adjudicated findings across rounds 2–3)
 
