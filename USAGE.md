@@ -158,7 +158,7 @@ metareview fsm init … --judge-model claude-opus-4-8
 metareview fsm init … --judge-model codex/gpt-5.6-sol
 
 # OpenAI-compatible providers (GPT, GLM, Kimi) via an endpoint you point at:
-OPENAI_BASE_URL=<https base>  OPENAI_API_KEY=<key> \
+OPENAI_BASE_URL="https://your-openai-compatible-host"  OPENAI_API_KEY="your-api-key" \
   metareview fsm init … --judge-model glm-5.3-flash
 ```
 
@@ -180,7 +180,7 @@ convention** that reads each runner's own machine-readable output — never a be
 | Go (default) | `go` | `go test -json` (test2json) |
 | TypeScript / Jest | `typescript` | `jest --json` |
 | TypeScript / Vitest | `vitest` | `vitest run --reporter=json` |
-| Python / pytest | `python` | pytest JUnit XML (`--junit-xml`) |
+| Python / pytest | `python` | pytest JUnit XML (`-o junit_family=xunit1 --junit-xml=/dev/stdout`) |
 
 The shipped `sdlc-loop-proved` workflow defaults to Go. For another language, point the `prove` node's
 `test_convention` at the right value and set the workflow's test command to your runner (a per-language
