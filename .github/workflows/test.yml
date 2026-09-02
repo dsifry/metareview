@@ -64,3 +64,9 @@ jobs:
         # On this branch `npm test` also runs tests/coverage.sh, which holds
         # internal/fsm and workflows at 100% and floors the rest.
         run: npm test
+      - name: Coverage gate (Go-native, parity run)
+        # Transition step (spec docs/specs/2026-09-01-covergate-go-native.md §3): `make cover` is the
+        # Go-native replacement — it runs the same suite and hands the merged profile to cmd/covergate.
+        # Running it beside `npm test` proves the two gates agree on real runs; once stable, coverage.sh
+        # and the `npm test` step are deleted and this becomes the only gate. A divergence fails here.
+        run: make cover
