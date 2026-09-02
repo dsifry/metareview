@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>What metareview does — review, fix bugs with proof, and test deeply</title>
+  <meta name="description" content="metareview reviews your work, finds and fixes bugs with proof, hardens the code that matters with real testing, and learns from what ships — all locally.">
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <nav class="nav">
+    <div class="wrap">
+      <a class="brand" href="index.html">metareview</a>
+      <div class="links">
+        <a href="usage.html">What it does</a>
+        <a href="install.html">Install</a>
+        <a href="https://github.com/dsifry/metareview">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">What it does</p>
+      <h1>Four ways metareview makes your code trustworthy.</h1>
+      <p class="lede">Whether you write the code or your AI agent does, metareview is the rigorous second pass that turns "looks done" into "proven done" — without sending your code to anyone else's servers.</p>
+      <div class="hero-actions">
+        <a class="button" href="install.html">Install it</a>
+        <a class="button secondary" href="https://github.com/dsifry/metareview/blob/main/USAGE.md">Full technical guide</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <div class="wrap split">
+        <div>
+          <span class="tag blue">1 · Review</span>
+          <h2>Catch problems before they ship.</h2>
+          <p class="section-intro">A structured second pass at the moments that matter.</p>
+        </div>
+        <div>
+          <p>metareview reviews the things that decide quality — the plan before work starts, each change as it's finished, and the whole branch before it merges. Multiple independent reviewers look for missing tests, security gaps, work that drifted from the original goal, and edges nobody thought about.</p>
+          <p>The result isn't a vague "looks good." It's a clear verdict with specific blockers that stay on the to-do list until they're genuinely fixed — so nothing important gets waved through.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap split">
+        <div>
+          <span class="tag red">2 · Find &amp; fix — with proof</span>
+          <h2>Bugs found, fixed, and proven gone.</h2>
+          <p class="section-intro">The part you can never quite trust from an AI — solved.</p>
+        </div>
+        <div>
+          <p>metareview runs a loop that finds a bug, confirms it's real, fixes it, and then <strong>proves the fix</strong>: it writes a test that fails on the old code and passes on the new one, and runs it for real. If a fix can't be proven, it doesn't count as done.</p>
+          <p>That's the difference between "the AI says it fixed it" and "here's the evidence it's fixed." Every judgment along the way is recorded, so you can always see what was decided and why.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap split">
+        <div>
+          <span class="tag green">3 · Test deeply</span>
+          <h2>Make sure the important code is really tested.</h2>
+          <p class="section-intro">"The tests pass" isn't the same as "this is tested."</p>
+        </div>
+        <div>
+          <p>A test suite can run every line and still check almost nothing. metareview uses <strong>mutation testing</strong> — it deliberately breaks the code in small ways and watches whether your tests notice. The breaks nobody catches are exactly the gaps that let real bugs through.</p>
+          <p>Point it at the code that matters most, and it drives those pieces toward genuine, exhaustive coverage — not the superficial kind.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap split">
+        <div>
+          <span class="tag gold">4 · Learn locally</span>
+          <h2>It gets smarter about your project — privately.</h2>
+          <p class="section-intro">Your code and your lessons stay on your machine.</p>
+        </div>
+        <div>
+          <p>After work merges, metareview records the durable lessons — the repo-specific gotchas, the decisions, the mistakes worth not repeating — as plain Markdown in your own repository. Future reviews start smarter.</p>
+          <p>Unlike hosted review services, nothing leaves your machine and nothing is locked in a vendor's database. It's yours, it's readable, and it travels with your code.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="quote">A review is not a vibe check. It is a state transition.</div>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap split">
+        <div>
+          <h2>Works with your stack and your AI.</h2>
+          <p class="section-intro">No lock-in — to a language or a model.</p>
+        </div>
+        <div class="panel">
+          <p><strong>Languages:</strong> Go, TypeScript (Jest or Vitest), and Python work out of the box, reading each test runner's own results.</p>
+          <p><strong>Models:</strong> use Claude, GPT, GLM, or Kimi as the reviewer, and switch per run. Every review is recorded so decisions are auditable.</p>
+          <p><strong>Where it runs:</strong> entirely local and git-native. Your code, your machine, your rules.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="setup">
+      <div class="wrap">
+        <h2>Ready to try it?</h2>
+        <p class="section-intro">Install in a minute, then run your first review.</p>
+        <div class="hero-actions">
+          <a class="button" href="install.html">Installation guide</a>
+          <a class="button secondary" href="https://github.com/dsifry/metareview/blob/main/USAGE.md">Command-by-command usage</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>metareview is Markdown-friendly, git-native, and built for review accountability. See <a href="index.html">Home</a>, <a href="install.html">Install</a>, the <a href="https://github.com/dsifry/metareview">GitHub repo</a>, and the <a href="https://github.com/dsifry/metareview/blob/main/USAGE.md">full usage guide</a>.</p>
+    </div>
+  </footer>
+</body>
+</html>

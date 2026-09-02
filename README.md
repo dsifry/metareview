@@ -1,6 +1,32 @@
 # metareview
 
-Local-first review gates and learning for specs, plans, code, epics, PRs, and post-merge follow-up. Metareview is Go-backed, Markdown-friendly, and designed to run standalone or as a deeper review engine inside metaswarm, Superpowers, and Beads workflows.
+**Local-first review, repair, and hardening for humans and coding agents.** metareview brings structured,
+adversarial, *evidence-backed* rigor to the parts of the software lifecycle where quality is actually
+decided — reviewing work before it lands, finding and fixing bugs with proof that the fix holds, and
+driving critical code to exhaustive tests. It's Go-backed, Markdown-friendly, model-swappable, and runs
+standalone or as a deeper review engine inside metaswarm, Superpowers, and Beads workflows.
+
+## What metareview does
+
+- **🔍 Reviews before you commit.** Named gates for specs, plans, code, epics, and PRs — nine adversarial
+  reviewer lenses, deterministic blockers, and durable Markdown evidence. Not another "please review this"
+  prompt: real gates with explicit verdicts.
+- **🐛 Finds and fixes bugs — *with proof*.** `metareview fsm` drives an audited `discover → adjudicate →
+  fix → prove → verify` loop where a fix is trusted only when it carries a **differential proof**
+  (a reproduction / pin / deletion) that metareview runs *deterministically* against your real tests. A
+  `{commit, summary}` is not evidence; a proof is.
+- **🧪 Hardens critical code toward exhaustive tests.** Ingests mutation-tool output (gremlins / Stryker /
+  mutmut) so a surviving mutant on a "100%-covered" line becomes an actionable finding, plus a Go-native
+  coverage gate that only ratchets up.
+- **🌐 Works across languages** — Go, TypeScript/Jest, Vitest, Python/pytest — using each test runner's own
+  structured output (no bespoke parser).
+- **🔀 Model-swappable, auditable judges.** Pick the judge per run — Claude, Codex/GPT, GLM, Kimi — every
+  judge call is recorded and swappable, and runs are forkable and resumable.
+- **📚 Learns locally.** Post-merge learning extracts durable, git-native, human-readable lessons — no
+  proprietary SaaS lock-in.
+
+**→ New here? Read [USAGE.md](USAGE.md) for a task-oriented walkthrough, and [INSTALL.md](INSTALL.md) to
+get set up.**
 
 ## Use Cases
 
@@ -51,6 +77,31 @@ metareview is built around review patterns that work well when humans and coding
 - **Repository-knowledge priming:** load service inventories, Beads knowledge, session history, and GitHub history so reviewers catch duplicated services, stale assumptions, and prior mistakes.
 - **Review artifact accountability:** write durable Markdown context and review logs so future humans and agents can inspect what was reviewed, what blocked, and why it passed.
 - **Post-merge reflection:** after a PR lands, extract accepted learnings, discarded candidates, and reviewer calibration so the next review starts smarter.
+
+## Highlights in 0.10.0
+
+0.10.0 turns metareview from a review harness into a review-*and-repair* harness:
+
+- **The proved SDLC loop.** `metareview fsm` runs `sdlc-loop-proved` (`discover → adjudicate → fix → prove
+  → verify`) as an audited state machine. The `fix` node must declare a **differential proof** for each
+  bug, and the `prove` node runs it deterministically against your real test command — a **reproduction**
+  (a test that fails-before / passes-after with a real assertion), a **pin** (a mutation-verified guard),
+  or a **deletion** proof. A fix that can't prove itself doesn't clear the gate.
+- **Multi-language proofs.** A pluggable test-convention seam reads each runner's own machine-readable
+  output — `go test -json`, `jest --json`, `vitest run --reporter=json`, pytest JUnit XML — so the proof
+  engine works for Go, TypeScript/Jest, Vitest, and Python/pytest without a bespoke parser.
+- **Model-swappable, auditable judges.** Choose the judge per run with `--judge-model`: Claude,
+  Codex/GPT (via the Codex CLI), or any OpenAI-compatible provider including GLM and Kimi
+  (`OPENAI_BASE_URL`). Reasoning models get a generous token budget automatically; compare two runs with
+  `metareview fsm diff`.
+- **Mutation-aware review + a Go-native coverage gate.** Pass a mutation report to any gate
+  (`--mutation-report`) so surviving mutants surface as findings; a dishonest mutation summary (timeouts
+  scored as kills) is refused. The coverage gate holds critical packages at 100% of statements and floors
+  the rest.
+- **Consent-gated custom commands.** The loop runs your real test command, but only after an explicit,
+  hash-pinned human consent (`--allow-custom-cmds <sha>`).
+
+See **[USAGE.md](USAGE.md)** for how to use all of this, and [CHANGELOG.md](CHANGELOG.md) for full notes.
 
 ## What Changed In 0.8.3
 
@@ -259,6 +310,15 @@ metareview review epic-ready <epic-id-or-path> --base <base-ref> --evidence <fil
 metareview review pr-ready --base <base-ref> --evidence <file>
 metareview learn --post-merge <pr-number> --base <pre-merge-ref>
 metareview status
+
+# find-and-fix loop (audited state machine); driver contract: metareview fsm --agent-prompt
+metareview fsm init --workflow sdlc-loop-proved --base <ref> --judge-model <model> --judge-effort medium
+metareview fsm state
+metareview fsm advance
+
+# record an escalation rather than working around a blocker
+metareview override request <finding-id> --reason "<why>"
+metareview override grant   <finding-id> --reason "<why accepted>"
 ```
 
 ## Philosophy
@@ -275,6 +335,7 @@ metareview follows a few practical rules:
 
 ## More Docs
 
+- [USAGE.md](USAGE.md) - task-oriented guide: review, find & fix bugs with proof, harden tests, pick a judge
 - [INSTALL.md](INSTALL.md) - installation paths and troubleshooting
 - [CHANGELOG.md](CHANGELOG.md) - release notes
 - [docs/quickstart.md](docs/quickstart.md) - short operator guide
