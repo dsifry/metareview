@@ -11,3 +11,4 @@ node_modules/
 !.metareview/knowledge/metareview.jsonl
 !.metareview/calibration.jsonl
 !.metareview/learning-runs.jsonl
+/covergate

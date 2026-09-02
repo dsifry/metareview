@@ -145,6 +145,30 @@ func TestGate(t *testing.T) {
 	}
 }
 
+// TestGateFloorRounding guards the parity bug the make-cover run caught: a package sitting exactly at
+// its (1-decimal) floor must pass, because coverage.sh compares the %.1f-rounded pct, not the raw value.
+func TestGateFloorRounding(t *testing.T) {
+	in := GateInput{
+		Profile: map[string]PkgCov{
+			"internal/atfloor": {Covered: 7, Total: 9},    // 77.777…% -> rounds to 77.8
+			"internal/below":   {Covered: 77, Total: 100}, // 77.0% -> below 77.8
+		},
+		Floor:      map[string]float64{"internal/atfloor": 77.8, "internal/below": 77.8},
+		Require100: []string{"internal/x"}, // non-empty; absent -> its own FAIL, ignored below
+	}
+	rows, _ := Gate(in)
+	byPkg := map[string]Row{}
+	for _, r := range rows {
+		byPkg[r.Pkg] = r
+	}
+	if byPkg["internal/atfloor"].Fail {
+		t.Errorf("77.777%% must pass floor 77.8 (rounds to 77.8): %+v", byPkg["internal/atfloor"])
+	}
+	if !byPkg["internal/below"].Fail {
+		t.Errorf("77.0%% must FAIL floor 77.8: %+v", byPkg["internal/below"])
+	}
+}
+
 func TestGateEmptyRequired(t *testing.T) {
 	rows, failures := Gate(GateInput{Profile: map[string]PkgCov{}, Require100: nil})
 	if failures != 1 {

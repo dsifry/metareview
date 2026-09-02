@@ -13,6 +13,7 @@ package covergate
 import (
 	"fmt"
 	"io"
+	"math"
 	"path"
 	"sort"
 	"strconv"
@@ -30,6 +31,12 @@ type PkgCov struct {
 // Pct is covered/total as a percentage. A zero-total package never reaches Pct — it emits no profile
 // lines and so never enters the map (spec rule 6); callers key on presence, not on a percentage.
 func (p PkgCov) Pct() float64 { return float64(p.Covered) / float64(p.Total) * 100 }
+
+// pct1 rounds a percentage to one decimal place. The floor file stores 1-decimal values, and
+// tests/coverage.sh compares the `%.1f`-formatted coverage against them; the gate must compare the same
+// rounded value, or a package sitting exactly at its floor (raw 77.777…% vs floor 77.8) spuriously FAILs
+// — a real divergence the parity run caught.
+func pct1(v float64) float64 { return math.Round(v*10) / 10 }
 
 // Exact reports whether every statement is covered (spec rule 7). Total is always > 0 here (a
 // zero-statement package is absent from the map), so this never divides intent by an empty package.
@@ -156,7 +163,7 @@ func Gate(in GateInput) (rows []Row, failures int) {
 			case !has:
 				rows = append(rows, Row{pkg, pctStr, "FAIL (no floor: add a line to tests/coverage-floor.txt, or run --update-floor)", true})
 				failures++
-			case cov.Pct() < floor:
+			case pct1(cov.Pct()) < floor:
 				rows = append(rows, Row{pkg, pctStr, fmt.Sprintf("FAIL (floor %s)", strconv.FormatFloat(floor, 'f', -1, 64)), true})
 				failures++
 			default:
@@ -212,13 +219,14 @@ func UpdateFloor(profile map[string]PkgCov, oldFloor map[string]float64, require
 		return nil, fmt.Errorf("refusing to update the floor: floored package(s) absent from the profile: %s", strings.Join(vanished, ", "))
 	}
 
-	// rule 13: new floor = measured, non-required packages.
+	// rule 13: new floor = measured, non-required packages, at 1-decimal precision (the file's and the
+	// gate's comparison precision — see pct1).
 	newFloor := map[string]float64{}
 	for pkg, cov := range profile {
 		if req[pkg] {
 			continue
 		}
-		newFloor[pkg] = cov.Pct()
+		newFloor[pkg] = pct1(cov.Pct())
 	}
 
 	// rule 14: refuse to lower an existing floor unless allowed.
