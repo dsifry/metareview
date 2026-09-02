@@ -102,6 +102,79 @@ func TestEpicReadyReviewersAllowCleanEpic(t *testing.T) {
 	}
 }
 
+// reviewers-1: childEvidencePassed must not accept a line as passing on a loose substring of "pass"
+// or "ok" (e.g. "broke" contains "ok", "bypassed" contains "pass"), which would silently satisfy the
+// acceptance gate for a child that in fact failed.
+func TestChildEvidencePassedRejectsSubstringFalsePositives(t *testing.T) {
+	falsePositives := []string{
+		"task-1 broke ci, reverting",
+		"task-1 bypassed the queue",
+		"task-1 surpassed the budget",
+		"task-1 lookup returned nil",
+		"task-1 took too long",
+	}
+	for _, ev := range falsePositives {
+		if childEvidencePassed(ev, "task-1") {
+			t.Errorf("evidence %q must NOT count as passing acceptance evidence", ev)
+		}
+	}
+	genuine := []string{
+		"task-1 passed",
+		"task-1 ok",
+		"ok   task-1  0.30s",
+		"task-1 exited 0",
+		"PASS task-1",
+	}
+	for _, ev := range genuine {
+		if !childEvidencePassed(strings.ToLower(ev), "task-1") {
+			t.Errorf("evidence %q should count as passing acceptance evidence", ev)
+		}
+	}
+}
+
+// reviewers-2: a changed file is service-shaped only when its basename ends in a service role word +
+// source extension, or a path component is a service role directory. A bare occurrence of the word in
+// an unrelated filename or a non-source file must not be flagged.
+func TestMissingServiceInventoryCoverageIgnoresNonServicePaths(t *testing.T) {
+	notServices := []string{"docs/client-guide.md", "config/worker.yaml", "internal/client_helper.go"}
+	for _, f := range notServices {
+		got := missingServiceInventoryCoverage(EpicReadyContext{Git: EpicGitContext{ChangedFiles: []string{f}}})
+		if len(got) != 0 {
+			t.Errorf("%q wrongly flagged as a service file: %v", f, got)
+		}
+	}
+	// Both underscore and dotted basenames ending in a role word + source extension are service-shaped
+	// (dotted is the Angular/NestJS convention, e.g. user.service.ts) and must be flagged.
+	for _, f := range []string{"internal/billing/payment_service.go", "src/app/user.service.ts", "app/auth.controller.ts"} {
+		got := missingServiceInventoryCoverage(EpicReadyContext{Git: EpicGitContext{ChangedFiles: []string{f}}})
+		if len(got) != 1 {
+			t.Errorf("service file %q should be flagged, got %v", f, got)
+		}
+	}
+	// A service file already recorded in the inventory must NOT be flagged (pins the inventory!="" guard).
+	covered := missingServiceInventoryCoverage(EpicReadyContext{
+		Git:       EpicGitContext{ChangedFiles: []string{"internal/billing/payment_service.go"}},
+		Knowledge: EpicKnowledgeContext{ServiceInventory: "Billing: internal/billing/payment_service.go"},
+	})
+	if len(covered) != 0 {
+		t.Errorf("a service file present in the inventory must not be flagged, got %v", covered)
+	}
+}
+
+// reviewers-3: violatesNoEvalIntent must use a word-boundary call match (like taskdone's), so a
+// retrieval(...) call is not mistaken for the dynamic-evaluation builtin. (The call literals below are
+// split the way the tests above split them, so metareview's own deterministic lint does not flag this
+// test's diff as introducing that builtin.)
+func TestViolatesNoEvalIntentUsesWordBoundary(t *testing.T) {
+	intent := EpicContext{Body: "Build a parser without executing user input."}
+	if violatesNoEvalIntent(EpicReadyContext{Epic: intent, Git: EpicGitContext{Diff: "+result := retrie" + "val(input)\n"}}) {
+		t.Error("a retrieval(...) call must not be treated as the dynamic-evaluation builtin")
+	}
+	if !violatesNoEvalIntent(EpicReadyContext{Epic: intent, Git: EpicGitContext{Diff: "+x = ev" + "al(input)\n"}}) {
+		t.Error("a genuine dynamic-evaluation call must still be caught")
+	}
+}
+
 func assertEpicFinding(t *testing.T, findings []Finding, reviewer, titlePart string) {
 	t.Helper()
 	for _, finding := range findings {
