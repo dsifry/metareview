@@ -527,3 +527,33 @@ func TestG4FakeContract(t *testing.T) {
 		t.Fatal("cut before a partial rune")
 	}
 }
+
+// RealExec hardens git against the ambient environment; none of that was pinned — the flags and env
+// entries could all be removed and every test still passed. This pins the security-relevant one: the
+// `-c core.excludesFile=` override neutralizes a user's global excludes file, so a global gitignore can
+// never hide an untracked file from the clean-tree / untracked detection the gates depend on (a hidden
+// untracked file would make commit_exists read the tree as clean). Wired through $HOME/.gitconfig, which
+// git reads and scrubEnv keeps — GIT_CONFIG_GLOBAL would be scrubbed and prove nothing about the flag.
+func TestG5RealExecIgnoresGlobalExcludesFile(t *testing.T) {
+	ctx := context.Background()
+	dir, _, _ := repo(t)
+	home := t.TempDir()
+	excludes := filepath.Join(home, "globalignore")
+	if err := os.WriteFile(excludes, []byte("*.untracked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[core]\n\texcludesFile = "+excludes+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg-empty"))
+	write(t, dir, "hidden.untracked", "u")
+	g := NewExec(dir, RealExec)
+	clean, porcelain, err := g.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clean || !strings.Contains(porcelain, "hidden.untracked") {
+		t.Fatalf("RealExec must neutralize the global excludesFile; clean=%v porcelain=%q", clean, porcelain)
+	}
+}
