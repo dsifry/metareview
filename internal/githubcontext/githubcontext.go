@@ -159,15 +159,23 @@ func Redact(text string) string {
 	return redacted
 }
 
+// credKeyName matches exactly the key names of the token/secret/password/api_key pattern, so only a
+// genuine `key<sep>value` match keeps its key as provenance. Any other match (a bare token, a PEM
+// block) has no key/value shape and is redacted whole — preserving a "prefix" there leaks the secret.
+var credKeyName = regexp.MustCompile(`(?i)^(token|secret|password|api[_-]?key)$`)
+
 func redactMatch(value string) string {
 	lower := strings.ToLower(value)
 	if strings.HasPrefix(lower, "authorization:") {
 		return "Authorization: Bearer " + redactionMarker
 	}
-	for _, sep := range []string{":", "="} {
-		if index := strings.Index(value, sep); index >= 0 {
-			key := strings.TrimSpace(value[:index])
-			return key + sep + redactionMarker
+	// Use the LEFTMOST ':' or '=' as the key/value boundary (not the first ':' anywhere, then '='):
+	// a value that itself contains ':' — e.g. token=a:b — must still split at its real '=' boundary.
+	// Preserve the key only when the prefix is one of the recognized credential key names; otherwise
+	// the entire match is the secret and is fully redacted.
+	if i := strings.IndexAny(value, ":="); i >= 0 {
+		if key := strings.TrimSpace(value[:i]); credKeyName.MatchString(key) {
+			return key + string(value[i]) + redactionMarker
 		}
 	}
 	return redactionMarker
