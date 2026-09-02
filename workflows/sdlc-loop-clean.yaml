@@ -1,0 +1,29 @@
+workflow: sdlc-loop-clean
+version: 1
+# Like sdlc-loop, but it does not stop when the ORIGINAL bugs are fixed: after every fix it RE-REVIEWS
+# the (now fix-modified) diff at `recheck` and only reaches `done` when that fresh review finds nothing
+# (or the adjudicator confirms none of the new candidates are real). This catches bugs a fix itself
+# introduces — "review the code you just wrote" — iterating fix -> recheck -> adjudicate -> fix until the
+# review/adjudicator pronounces the change bug-free.
+vars:
+  REVIEWER:     {default: claude-opus-5}
+  JUDGE:        {required: true}
+  REV_EFFORT:   {default: low}
+  JUDGE_EFFORT: {required: true}
+states: [discover, adjudicate, fix, recheck, done, failed]
+transitions:                                  # ordered
+  - {from: discover,   to: done,       gate: findings_empty,    outcome: clean}    # nothing found at all → bug-free
+  - {from: discover,   to: adjudicate, gate: findings_nonempty}
+  - {from: adjudicate, to: done,       gate: nothing_confirmed, outcome: clean}    # adjudicator rejected every candidate → bug-free
+  - {from: adjudicate, to: fix,        gate: confirmed_nonempty}
+  - {from: fix,        to: recheck,    gate: commit_exists}
+  - {from: recheck,    to: done,       gate: findings_empty,    outcome: clean}    # a FRESH review of the fix found nothing → bug-free
+  - {from: recheck,    to: adjudicate, gate: findings_nonempty, loop: true}        # the fix introduced/left findings → adjudicate → fix → recheck …
+nodes:
+  discover:   {kind: review-lenses,        exec: subagent, model: $REVIEWER, effort: $REV_EFFORT}
+  adjudicate: {kind: match-then-adjudicate, exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
+  fix:        {kind: agent-edit}
+  recheck:    {kind: review-lenses,        exec: subagent, model: $REVIEWER, effort: $REV_EFFORT}
+convergence:
+  any: [no_fixation_progress, {max_iterations: 8}, {budget: {tokens: 4000000}}]
+repo_mode: advisory

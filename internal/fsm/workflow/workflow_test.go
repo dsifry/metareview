@@ -659,3 +659,48 @@ func TestW5Accessors(t *testing.T) {
 		t.Fatal("cmdNames")
 	}
 }
+
+// sdlc-loop-clean is the "review the code you just wrote" workflow: after every fix it RE-REVIEWS the
+// change at `recheck` and only reaches done when a fresh review is clean, so a bug the fix itself
+// introduces is caught. This pins that topology (distinct from sdlc-loop, which exits on all_fixed
+// without re-reviewing the fix).
+func TestSDLCLoopCleanReReviewsAfterFix(t *testing.T) {
+	raw, err := workflows.Read("sdlc-loop-clean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := Parse(raw, Options{Kinds: kinds()})
+	if err != nil {
+		t.Fatalf("sdlc-loop-clean must be a valid workflow: %v", err)
+	}
+	has := func(from, to run.State) *Transition {
+		for i := range w.Transitions {
+			if w.Transitions[i].From == from && w.Transitions[i].To == to {
+				return &w.Transitions[i]
+			}
+		}
+		return nil
+	}
+	// After a fix, control goes to `recheck` (a re-review), not straight to done.
+	if has("fix", "recheck") == nil {
+		t.Fatal("fix must transition to recheck (re-review the fix), not done")
+	}
+	if has("fix", "done") != nil {
+		t.Fatal("fix must NOT exit directly to done without re-review")
+	}
+	// recheck exits clean only when a FRESH review finds nothing, and otherwise LOOPS back to adjudicate.
+	clean := has("recheck", "done")
+	if clean == nil || clean.Gate != "findings_empty" || clean.Outcome == "" {
+		t.Fatalf("recheck must exit to done on findings_empty with an outcome, got %+v", clean)
+	}
+	loop := has("recheck", "adjudicate")
+	if loop == nil || !loop.Loop || loop.Gate != "findings_nonempty" {
+		t.Fatalf("recheck must LOOP back to adjudicate on findings_nonempty, got %+v", loop)
+	}
+	// It never exits on all_fixed (the sdlc-loop behavior this workflow deliberately replaces).
+	for _, tr := range w.Transitions {
+		if tr.Gate == "all_fixed" {
+			t.Fatal("sdlc-loop-clean must not exit on all_fixed; it re-reviews until a fresh review is clean")
+		}
+	}
+}

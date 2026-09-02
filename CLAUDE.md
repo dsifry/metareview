@@ -59,6 +59,13 @@ metareview override list [--pending]
 ## Lifecycle Placement
 
 - Before implementing a plan or spec: review the artifact.
+- **After writing a fix or new code, review the code you just wrote — and iterate until it is bug-free.**
+  Run `metareview fsm --workflow sdlc-loop-clean --base <ref>` on your own diff: it discovers → adjudicates
+  → fixes, then **re-reviews the fix at `recheck` and only stops when a fresh review finds nothing**. A fix
+  often introduces its own bug (a broadened matcher over-matches, a parsed value overflows); the
+  deterministic task-done gate and the external bots will not always catch it, but a fresh adversarial
+  review of the diff does. Do this before opening the PR. (Reviews parallelize — fan out lenses and run one
+  loop per fix concurrently.)
 - After each small implementation chunk: run task-done.
 - After all child tasks for an epic are complete: run epic-ready.
 - Before opening, pushing, or merging a PR: run pr-ready.

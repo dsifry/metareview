@@ -7,7 +7,7 @@ import (
 
 func TestNamesAndRead(t *testing.T) {
 	names := Names()
-	if len(names) != 3 || names[0] != "review-loop" || names[1] != "sdlc-loop" || names[2] != "sdlc-loop-proved" {
+	if len(names) != 4 || names[0] != "review-loop" || names[1] != "sdlc-loop" || names[2] != "sdlc-loop-clean" || names[3] != "sdlc-loop-proved" {
 		t.Fatalf("Names = %v", names)
 	}
 	for _, n := range names {
