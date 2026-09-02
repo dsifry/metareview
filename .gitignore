@@ -12,3 +12,9 @@ node_modules/
 !.metareview/calibration.jsonl
 !.metareview/learning-runs.jsonl
 /covergate
+
+# Local, uncommitted session handoff prompts (see .handoffs/README not tracked)
+.handoffs/
+
+# Local agent worktrees (never commit)
+.claude/worktrees/
