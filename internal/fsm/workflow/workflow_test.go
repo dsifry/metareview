@@ -688,14 +688,26 @@ func TestSDLCLoopCleanReReviewsAfterFix(t *testing.T) {
 	if has("fix", "done") != nil {
 		t.Fatal("fix must NOT exit directly to done without re-review")
 	}
-	// recheck exits clean only when a FRESH review finds nothing, and otherwise LOOPS back to adjudicate.
+	// recheck exits clean only when a FRESH review finds nothing, and otherwise LOOPS back to discover.
+	// The loop MUST target a review node: fold clears this iteration's Findings/Confirmed at the loop
+	// boundary, so only a review (discover) re-derives them — targeting adjudicate/fix would hand them an
+	// empty set. discover is therefore where the authoritative fresh re-review of the fix happens.
 	clean := has("recheck", "done")
 	if clean == nil || clean.Gate != "findings_empty" || clean.Outcome == "" {
 		t.Fatalf("recheck must exit to done on findings_empty with an outcome, got %+v", clean)
 	}
-	loop := has("recheck", "adjudicate")
+	loop := has("recheck", "discover")
 	if loop == nil || !loop.Loop || loop.Gate != "findings_nonempty" {
-		t.Fatalf("recheck must LOOP back to adjudicate on findings_nonempty, got %+v", loop)
+		t.Fatalf("recheck must LOOP back to discover (a review node) on findings_nonempty, got %+v", loop)
+	}
+	if has("recheck", "adjudicate") != nil {
+		t.Fatal("recheck must not loop directly to adjudicate: the loop reset would clear the findings it needs")
+	}
+	// discover→done must be AllFound-BLIND (findings_empty), NOT nothing_found: on the loop AllFound>0
+	// (bugs known), and nothing_found refuses then — a clean re-review would match no edge and dead-end.
+	discClean := has("discover", "done")
+	if discClean == nil || discClean.Outcome == "" || discClean.Gate != "findings_empty" {
+		t.Fatalf("discover→done must be findings_empty (AllFound-blind, reachable on the loop), got %+v", discClean)
 	}
 	// The adjudicator-clean exit must use an AllFound-BLIND gate (confirmed_empty), NOT nothing_confirmed:
 	// once a bug has been confirmed earlier in the run, AllFound > 0, so nothing_confirmed would fail

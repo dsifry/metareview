@@ -1,10 +1,22 @@
 workflow: sdlc-loop-clean
 version: 1
 # Like sdlc-loop, but it does not stop when the ORIGINAL bugs are fixed: after every fix it RE-REVIEWS
-# the (now fix-modified) diff at `recheck` and only reaches `done` when that fresh review finds nothing
-# (or the adjudicator confirms none of the new candidates are real). This catches bugs a fix itself
-# introduces — "review the code you just wrote" — iterating fix -> recheck -> adjudicate -> fix until the
-# review/adjudicator pronounces the change bug-free.
+# the (now fix-modified) diff and only reaches `done` when a fresh review finds nothing OR the adjudicator
+# confirms none of the fresh candidates are real. This catches bugs a fix itself introduces — "review the
+# code you just wrote". sdlc-loop terminates via `verify` (a still-present mutation check that the ORIGINAL
+# bugs are gone), which can exit while a fix-introduced bug is still present; this workflow removes that
+# early exit.
+#
+# It is a graph with ONE loop. The single framework rule that shapes it: the loop:true edge clears this
+# iteration's provisional Findings/Confirmed at the boundary, and only a REVIEW node re-derives them
+# afterward — so the loop's target must be a review node (`discover`), never `adjudicate`/`fix` (they would
+# be handed an empty set). Consequences that follow purely from that rule:
+#   * `discover` is the loop target, so a fresh iteration's authoritative re-review happens there.
+#   * `recheck` is the loop-carrying state (exactly one terminal + the loop edge). It re-reviews the fix;
+#     a clean recheck can exit directly, a non-clean one starts a fresh iteration at `discover`.
+#   * The clean exits are a REVIEW finding nothing (`discover`/`recheck` → done on findings_empty) or the
+#     ADJUDICATOR confirming nothing real (`adjudicate` → done on confirmed_empty). Findings are provisional
+#     candidates; only a review's emptiness or the adjudicator's verdict ends the run.
 vars:
   REVIEWER:     {default: claude-opus-5}
   JUDGE:        {required: true}
@@ -12,22 +24,31 @@ vars:
   JUDGE_EFFORT: {required: true}
 states: [discover, adjudicate, fix, recheck, done, failed]
 transitions:                                  # ordered
-  - {from: discover,   to: done,       gate: nothing_found,    outcome: clean}     # entry only: nothing found → bug-free
+  # findings_empty (AllFound-blind), NOT nothing_found: on the loop AllFound>0 (bugs already known), and
+  # nothing_found REFUSES once bugs are known — a clean re-review would then match no edge and dead-end.
+  # findings_empty reaches done whenever THIS review found no candidates, iteration 0 or later.
+  - {from: discover,   to: done,       gate: findings_empty,    outcome: clean}   # a review found no candidates → bug-free
   - {from: discover,   to: adjudicate, gate: findings_nonempty}
   # confirmed_empty (this iteration's Confirmed == 0), NOT nothing_confirmed: once ANY bug has been
-  # confirmed in the run, AllFound > 0, so nothing_confirmed would fail (ERR_BUGS_KNOWN) and the loop
-  # would dead-end on the common good case — a clean fix whose re-review surfaces a candidate the
-  # adjudicator then rejects. confirmed_empty is AllFound-blind, so that case correctly reaches done.
-  - {from: adjudicate, to: done,       gate: confirmed_empty,  outcome: clean}     # adjudicator confirmed none real → bug-free
+  # confirmed in the run, AllFound>0, so nothing_confirmed would fail (ERR_BUGS_KNOWN) and dead-end on the
+  # common good case — a re-review that surfaces a candidate the adjudicator then rejects. confirmed_empty
+  # is AllFound-blind, so that case correctly reaches done.
+  - {from: adjudicate, to: done,       gate: confirmed_empty,   outcome: clean}   # adjudicator confirmed none real → bug-free
   - {from: adjudicate, to: fix,        gate: confirmed_nonempty}
   - {from: fix,        to: recheck,    gate: commit_exists}
-  - {from: recheck,    to: done,       gate: findings_empty,   outcome: clean}     # a FRESH review of the fix found nothing → bug-free
-  - {from: recheck,    to: adjudicate, gate: findings_nonempty, loop: true}        # the fix introduced/left findings → adjudicate → fix → recheck …
+  # recheck is the loop-carrying state: exactly one outcome-bearing terminal (→done) plus the loop edge.
+  - {from: recheck,    to: done,       gate: findings_empty,    outcome: clean}   # a fresh review of the fix found nothing → bug-free
+  - {from: recheck,    to: discover,   gate: findings_nonempty, loop: true}       # the re-review is not clean → new iteration re-discovers → adjudicate → fix → recheck …
 nodes:
   discover:   {kind: review-lenses,        exec: subagent, model: $REVIEWER, effort: $REV_EFFORT}
   adjudicate: {kind: match-then-adjudicate, exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
   fix:        {kind: agent-edit}
   recheck:    {kind: review-lenses,        exec: subagent, model: $REVIEWER, effort: $REV_EFFORT}
+# No `no_fixation_progress` here. That atom measures progress by bugs marked fixed via a still-present
+# oracle (BugStatus), which this workflow has no node to emit — its termination signal is a clean re-review
+# / adjudication, a different oracle. With no fixed-marking every bug stays in UnfixedAtEntry, so
+# no_fixation_progress would stall the loop at its first boundary. max_iterations + budget bound the loop
+# (Validate requires a looping workflow to carry one of them).
 convergence:
-  any: [no_fixation_progress, {max_iterations: 8}, {budget: {tokens: 4000000}}]
+  any: [{max_iterations: 8}, {budget: {tokens: 4000000}}]
 repo_mode: advisory
