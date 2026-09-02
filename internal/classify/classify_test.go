@@ -67,3 +67,12 @@ func TestTallyAndHasCodeOrConfig(t *testing.T) {
 		t.Fatal("config alone is behavioral and must report HasCodeOrConfig")
 	}
 }
+
+// String is used by reviewprompt for display; cover it here so classify's own suite exercises every Class.
+func TestClassString(t *testing.T) {
+	for c, want := range map[Class]string{Code: "code", Config: "config", Docs: "docs"} {
+		if got := c.String(); got != want {
+			t.Errorf("Class(%d).String() = %q, want %q", int(c), got, want)
+		}
+	}
+}

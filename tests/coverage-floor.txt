@@ -42,3 +42,5 @@ internal/tasksource 100.0
 internal/testconv 100.0
 cmd/covergate 100.0
 internal/covergate 100.0
+internal/classify 100.0
+internal/reviewprompt 100.0

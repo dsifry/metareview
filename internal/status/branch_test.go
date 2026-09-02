@@ -793,3 +793,31 @@ func TestChangeKinds(t *testing.T) {
 		t.Errorf("a rename must key on the NEW path only, not the old one: %v", k)
 	}
 }
+
+// ChangeKinds edge branches: a git error, a copy (C) keyed on the new path, an unhandled status letter
+// defaulting to modified, and base resolution (success in a repo; failure outside one).
+func TestChangeKindsEdges(t *testing.T) {
+	if k := ChangeKinds("/nope", "base", func(string, ...string) ([]byte, error) { return nil, errors.New("boom") }); len(k) != 0 {
+		t.Fatalf("a git error must yield no kinds, got %v", k)
+	}
+	run := func(string, ...string) ([]byte, error) {
+		return []byte("C100\told.go\tcopied.go\nT\tchanged.go\n"), nil
+	}
+	k := ChangeKinds("/x", "base", run)
+	if k["copied.go"] != "added" {
+		t.Errorf("a copy must key the NEW path as added: %v", k)
+	}
+	if _, ok := k["old.go"]; ok {
+		t.Errorf("a copy must not key the OLD path: %v", k)
+	}
+	if k["changed.go"] != "modified" {
+		t.Errorf("an unhandled status letter must default to modified: %v", k)
+	}
+	// base=="" resolves the merge-base and diffs (success continuation) in a real repo.
+	root, _, _ := gitRepo(t)
+	_ = ChangeKinds(root, "", nil)
+	// base=="" outside a repo: ResolveBranchScope errors, so ChangeKinds returns empty.
+	if k := ChangeKinds(t.TempDir(), "", nil); len(k) != 0 {
+		t.Fatalf("base-resolution failure must yield no kinds, got %v", k)
+	}
+}
