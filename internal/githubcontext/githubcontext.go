@@ -70,22 +70,31 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(token|secret|password|api[_-]?key)\s*[:=]\s*("[^"]+"|'[^']+'|[^\s` + "`" + `,;]+)`),
 }
 
+// runCommand and lookGh are the external-process seams. Production shells out (realCommand, exec.LookPath);
+// tests inject fast in-process fakes so Collect needs no git/gh/bash subprocess — which keeps the unit
+// tests quick and, crucially, makes gremlins mutation testing fast and reliable (per-mutant test reruns no
+// longer spawn processes, so parallel workers stop timing out and masking survivors).
+var (
+	runCommand = realCommand
+	lookGh     = func() error { _, err := exec.LookPath("gh"); return err }
+)
+
 func Collect(root, prNumber string) (Context, error) {
 	prNumber = strings.TrimSpace(prNumber)
 	if prNumber == "" {
 		return unavailable("pr-number-unavailable", prNumber), nil
 	}
-	if _, err := exec.LookPath("gh"); err != nil {
+	if err := lookGh(); err != nil {
 		return unavailable("gh-unavailable", prNumber), nil
 	}
-	remote, err := command(root, "git", "remote", "get-url", "origin")
+	remote, err := runCommand(root, "git", "remote", "get-url", "origin")
 	if err != nil || strings.TrimSpace(remote) == "" {
 		return unavailable("remote-unavailable", prNumber), nil
 	}
-	if _, err := command(root, "gh", "auth", "status"); err != nil {
+	if _, err := runCommand(root, "gh", "auth", "status"); err != nil {
 		return unavailable("gh-auth-unavailable", prNumber), nil
 	}
-	out, err := command(root, "gh", "pr", "view", prNumber, "--json", "number,url,title,body,reviewDecision,comments,reviews")
+	out, err := runCommand(root, "gh", "pr", "view", prNumber, "--json", "number,url,title,body,reviewDecision,comments,reviews")
 	if err != nil {
 		return unavailable("github-pr-unavailable", prNumber), nil
 	}
@@ -126,8 +135,8 @@ func unavailable(reason, prNumber string) Context {
 	return Context{Available: false, UnavailableReason: reason, PRNumber: prNumber}
 }
 
-func command(root, name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
+func realCommand(root, name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...) // #nosec G204 -- fixed git/gh subcommands with caller-provided args
 	cmd.Dir = root
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
