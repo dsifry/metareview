@@ -48,7 +48,16 @@ type EpicKnowledgeContext struct {
 	ServiceInventory string
 }
 
-var servicePathPattern = regexp.MustCompile(`(?i)(service|controller|worker|client)\.(go|js|ts|tsx|jsx|py|rb)$|(?i)(service|controller|worker|client)`)
+// servicePathPattern flags a changed file as service-shaped when its basename ends in a service role
+// word plus a source extension (payment_service.go, user_controller.ts), or when a service role word
+// is a whole path component / directory (services/foo.go). A bare occurrence of the word inside an
+// unrelated name (client_helper.go) or a non-source file (client-guide.md, worker.yaml) is NOT a
+// service change — the previous unanchored second alternative matched all of those as false positives.
+var servicePathPattern = regexp.MustCompile(`(?i)(?:^|[/_-])(service|controller|worker|client)\.(go|js|ts|tsx|jsx|py|rb)$|(?:^|/)(service|controller|worker|client)s?/`)
+
+// evidencePassPattern matches a status word as a whole word, so "broke"/"bypassed"/"lookup" are not
+// mistaken for "ok"/"pass". Callers lowercase the line first.
+var evidencePassPattern = regexp.MustCompile(`\b(pass|passed|passes|ok)\b`)
 
 func RunEpicReady(context EpicReadyContext) []Finding {
 	var results []Finding
@@ -189,10 +198,7 @@ func childEvidencePassed(evidence, childID string) bool {
 		if !strings.Contains(line, childID) {
 			continue
 		}
-		if strings.Contains(line, "pass") ||
-			strings.Contains(line, "passed") ||
-			strings.Contains(line, "exited 0") ||
-			strings.Contains(line, "ok") {
+		if evidencePassPattern.MatchString(line) || strings.Contains(line, "exited 0") {
 			return true
 		}
 	}
@@ -219,7 +225,7 @@ func violatesNoEvalIntent(context EpicReadyContext) bool {
 	for _, child := range context.Children {
 		evidence += "\n" + strings.ToLower(child.Body)
 	}
-	return strings.Contains(evidence, "eval(") || strings.Contains(evidence, "use eval")
+	return evalPattern.MatchString(evidence) || strings.Contains(evidence, "use eval")
 }
 
 func missingServiceInventoryCoverage(context EpicReadyContext) []string {
