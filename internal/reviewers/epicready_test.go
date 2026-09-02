@@ -184,3 +184,48 @@ func assertEpicFinding(t *testing.T, findings []Finding, reviewer, titlePart str
 	}
 	t.Fatalf("missing finding reviewer=%s title~=%s in %+v", reviewer, titlePart, findings)
 }
+
+// A blind pre-push review surfaced that the #68 fix stopped flagging PascalCase service files, and that
+// naively adding "passing"/"okay" to the evidence pattern re-opens an acceptance-gate false positive. So
+// servicePathPattern matches camelCase/PascalCase incl. acronym/digit-prefixed names, case-insensitively
+// on the extension; and the evidence pattern deliberately excludes ambiguous "passing"/"okay".
+func TestServicePathMatchesPascalCase(t *testing.T) {
+	// camelCase / PascalCase, including acronym- and digit-prefixed (HTTPClient, S3Client), any-case ext.
+	for _, f := range []string{
+		"src/auth/AuthService.ts", "app/UserController.tsx", "src/EmailWorker.ts",
+		"internal/billing/PaymentService.go", "web/ApiClient.jsx",
+		"src/HTTPClient.ts", "src/S3Client.ts", "internal/DBWorker.go", "src/APIService.tsx",
+		"internal/billing/payment_service.GO",
+	} {
+		if len(missingServiceInventoryCoverage(EpicReadyContext{Git: EpicGitContext{ChangedFiles: []string{f}}})) != 1 {
+			t.Errorf("service file %q must be flagged", f)
+		}
+	}
+	// Must NOT match: a lowercase concatenation that is not a word boundary, a role word not at the
+	// basename end, or a non-source file.
+	for _, f := range []string{"internal/x/disservice.go", "docs/client-guide.md", "config/worker.yaml", "internal/client_helper.go", "internal/AuthServiceHelper.go"} {
+		if len(missingServiceInventoryCoverage(EpicReadyContext{Git: EpicGitContext{ChangedFiles: []string{f}}})) != 0 {
+			t.Errorf("%q must NOT be flagged as a service file", f)
+		}
+	}
+}
+
+func TestChildEvidencePassedRejectsAmbiguousPassTokens(t *testing.T) {
+	// Unambiguous pass tokens count.
+	for _, ev := range []string{"task-1 passed", "task-1 ok", "task-1 exited 0", "PASS task-1"} {
+		if !childEvidencePassed(strings.ToLower(ev), "task-1") {
+			t.Errorf("evidence %q should count as passing", ev)
+		}
+	}
+	// Ambiguous or negated summaries must NOT satisfy the acceptance gate (a false positive here lets a
+	// failing child pass). This is why "passing"/"okay" are excluded, and the reviewers-1 substrings stay
+	// rejected.
+	for _, ev := range []string{
+		"task-1 1 passing 5 failing", "task-1 all tests passing", "task-1 not passing", "task-1 okay",
+		"task-1 broke ci", "task-1 bypassed the queue", "task-1 bypassing checks",
+	} {
+		if childEvidencePassed(strings.ToLower(ev), "task-1") {
+			t.Errorf("evidence %q must NOT count as passing", ev)
+		}
+	}
+}

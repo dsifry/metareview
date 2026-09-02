@@ -49,14 +49,26 @@ type EpicKnowledgeContext struct {
 }
 
 // servicePathPattern flags a changed file as service-shaped when its basename ends in a service role
-// word plus a source extension (payment_service.go, user_controller.ts), or when a service role word
-// is a whole path component / directory (services/foo.go). A bare occurrence of the word inside an
-// unrelated name (client_helper.go) or a non-source file (client-guide.md, worker.yaml) is NOT a
-// service change — the previous unanchored second alternative matched all of those as false positives.
-var servicePathPattern = regexp.MustCompile(`(?i)(?:^|[/_.-])(service|controller|worker|client)\.(go|js|ts|tsx|jsx|py|rb)$|(?:^|/)(service|controller|worker|client)s?/`)
+// word plus a source extension, in any common convention: separator-delimited (payment_service.go,
+// user.service.ts) or camelCase/PascalCase (AuthService.ts, UserController.tsx); or when a role word is
+// a whole path component (services/foo.go). Arms 1 and 3 are case-insensitive; the camelCase arm 2 is
+// case-SENSITIVE and its boundary is any alphanumeric (so acronym/digit-prefixed HTTPClient.ts,
+// S3Client.ts match) — which, because it requires a *capitalized* role word, still excludes an
+// all-lowercase concatenation that is not a word boundary (disservice.go). A role word not at the
+// basename end (AuthServiceHelper.go, client_helper.go) and a non-source file (client-guide.md,
+// worker.yaml) never match.
+var servicePathPattern = regexp.MustCompile(
+	`(?:^|[/_.-])(?i:service|controller|worker|client)\.(?i:go|js|ts|tsx|jsx|py|rb)$` +
+		`|[A-Za-z0-9](?:Service|Controller|Worker|Client)\.(?i:go|js|ts|tsx|jsx|py|rb)$` +
+		`|(?:^|/)(?i:service|controller|worker|client)s?/`)
 
 // evidencePassPattern matches a status word as a whole word, so "broke"/"bypassed"/"lookup" are not
-// mistaken for "ok"/"pass". Callers lowercase the line first.
+// mistaken for "ok"/"pass" (callers lowercase the line first). It deliberately EXCLUDES the ambiguous
+// "passing"/"okay": a summary like "1 passing 5 failing" or a negated "not passing" would then wrongly
+// satisfy the acceptance gate. For an acceptance gate a false positive (a failing child counted as
+// passed) is worse than a false negative (a passing child needing clearer evidence), so only
+// unambiguous pass tokens count. (The bare "ok"/"passed" tokens have a pre-existing negation gap —
+// "not ok" still matches — tracked in the backlog; this is not widened here.)
 var evidencePassPattern = regexp.MustCompile(`\b(pass|passed|passes|ok)\b`)
 
 func RunEpicReady(context EpicReadyContext) []Finding {
