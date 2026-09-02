@@ -659,3 +659,77 @@ func TestW5Accessors(t *testing.T) {
 		t.Fatal("cmdNames")
 	}
 }
+
+// sdlc-loop-clean is the "review the code you just wrote" workflow: after every fix it RE-REVIEWS the
+// change at `recheck` and only reaches done when a fresh review is clean, so a bug the fix itself
+// introduces is caught. This pins that topology (distinct from sdlc-loop, which exits on all_fixed
+// without re-reviewing the fix).
+func TestSDLCLoopCleanReReviewsAfterFix(t *testing.T) {
+	raw, err := workflows.Read("sdlc-loop-clean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := Parse(raw, Options{Kinds: kinds()})
+	if err != nil {
+		t.Fatalf("sdlc-loop-clean must be a valid workflow: %v", err)
+	}
+	has := func(from, to run.State) *Transition {
+		for i := range w.Transitions {
+			if w.Transitions[i].From == from && w.Transitions[i].To == to {
+				return &w.Transitions[i]
+			}
+		}
+		return nil
+	}
+	// After a fix, control goes to `recheck` (a re-review), not straight to done.
+	if has("fix", "recheck") == nil {
+		t.Fatal("fix must transition to recheck (re-review the fix), not done")
+	}
+	if has("fix", "done") != nil {
+		t.Fatal("fix must NOT exit directly to done without re-review")
+	}
+	// recheck LOOPS back to discover on findings_nonempty; the loop MUST target a review node: fold clears
+	// this iteration's Findings/Confirmed at the loop boundary, so only a review (discover) re-derives them
+	// — targeting adjudicate/fix would hand them an empty set. discover is therefore where the authoritative
+	// fresh re-review of the fix happens.
+	//
+	// This pins that recheck carries a findings_empty→done terminal, which Validate's loop_terminal rule
+	// REQUIRES (a loop-carrying state needs exactly one outcome-bearing terminal). It pins the edge EXISTS,
+	// not that it ever fires — at runtime it is dead (findings linger within an iteration, so recheck's set
+	// is never empty and it always loops). The clean exit the suite actually exercises is discover→done; do
+	// not read this assertion as proof recheck exits clean directly.
+	clean := has("recheck", "done")
+	if clean == nil || clean.Gate != "findings_empty" || clean.Outcome == "" {
+		t.Fatalf("recheck must carry the (structural) findings_empty→done terminal, got %+v", clean)
+	}
+	loop := has("recheck", "discover")
+	if loop == nil || !loop.Loop || loop.Gate != "findings_nonempty" {
+		t.Fatalf("recheck must LOOP back to discover (a review node) on findings_nonempty, got %+v", loop)
+	}
+	if has("recheck", "adjudicate") != nil {
+		t.Fatal("recheck must not loop directly to adjudicate: the loop reset would clear the findings it needs")
+	}
+	// discover→done must be AllFound-BLIND (findings_empty), NOT nothing_found: on the loop AllFound>0
+	// (bugs known), and nothing_found refuses then — a clean re-review would match no edge and dead-end.
+	discClean := has("discover", "done")
+	if discClean == nil || discClean.Outcome == "" || discClean.Gate != "findings_empty" {
+		t.Fatalf("discover→done must be findings_empty (AllFound-blind, reachable on the loop), got %+v", discClean)
+	}
+	// The adjudicator-clean exit must use an AllFound-BLIND gate (confirmed_empty), NOT nothing_confirmed:
+	// once a bug has been confirmed earlier in the run, AllFound > 0, so nothing_confirmed would fail
+	// (ERR_BUGS_KNOWN) and the loop would dead-end on a clean fix whose re-review is then rejected. This
+	// pins the fix for that blocker.
+	adjClean := has("adjudicate", "done")
+	if adjClean == nil || adjClean.Outcome == "" || adjClean.Gate == "nothing_confirmed" {
+		t.Fatalf("adjudicate must exit to done on an AllFound-blind gate (confirmed_empty), got %+v", adjClean)
+	}
+	if adjClean.Gate != "confirmed_empty" {
+		t.Fatalf("adjudicate→done gate should be confirmed_empty (reachable inside the loop), got %q", adjClean.Gate)
+	}
+	// It never exits on all_fixed (the sdlc-loop behavior this workflow deliberately replaces).
+	for _, tr := range w.Transitions {
+		if tr.Gate == "all_fixed" {
+			t.Fatal("sdlc-loop-clean must not exit on all_fixed; it re-reviews until a fresh review is clean")
+		}
+	}
+}

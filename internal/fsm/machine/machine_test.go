@@ -2261,3 +2261,97 @@ func TestRunNodeFixScopedDiffUsesFixEntryHead(t *testing.T) {
 		t.Fatalf("a fix-scoped kind must see the FixEntryHead..head diff, got %q", got)
 	}
 }
+
+// End-to-end proof that sdlc-loop-clean ENFORCES re-review of the fix. It is a graph with one loop:
+// discover → adjudicate → fix → recheck, and recheck loops back to discover for a fresh iteration until
+// a review is clean (discover/recheck → done on findings_empty) or the adjudicator confirms nothing real
+// (adjudicate → done on confirmed_empty). The loop:true edge is recheck→discover: fold clears this
+// iteration's Findings/Confirmed at the boundary, so the loop MUST target a review node (discover) that
+// re-derives them — the authoritative fresh re-review happens there.
+//
+// This is MACHINE-LAYER coverage: adjudicate is the harness's fake executor (it does not run kind.go's
+// real judging), so what it pins is the graph/gate wiring, not the fork's rejection logic. The real
+// fork/adjudicate rejection is exercised end-to-end in cli's TestSdlcLoopCleanReReviewCandidateRejected...
+// This test drives:
+//
+//	(A) a fix that INTRODUCES a new bug — the re-review catches it, the loop re-adjudicates and re-fixes,
+//	    and the run only reaches done when a fresh discover is clean;
+//	(B) the blocker — once bugs are known (AllFound>0), when adjudicate confirms nothing the run must still
+//	    reach done via confirmed_empty (AllFound-blind), not dead-end. Here the fake adjudicate returns an
+//	    empty Delta to model "nothing confirmed"; the gate wiring is what's under test.
+func TestSdlcLoopCleanEnforcesReReviewOfTheFix(t *testing.T) {
+	distinct := func(text, file string, line int) string {
+		return string(run.MarshalCanonical(run.Delta{Findings: []run.Finding{{IssueText: text, File: file, Line: line}}}))
+	}
+	// discover finds `bug` → adjudicate confirms → fix → recheck, leaving m AT recheck awaiting its review.
+	// Asserts the fix RE-REVIEWS (fix→recheck) rather than exiting straight to done.
+	fixThenRecheck := func(h *harness, m *Machine, bug, file string, line int) {
+		h.record(m, "discover", distinct(bug, file, line))
+		if r := h.advance(m); r.To != "adjudicate" {
+			t.Fatalf("discover→adjudicate: %+v", r)
+		}
+		if r := h.advance(m); r.To != "fix" {
+			t.Fatalf("adjudicate→fix (confirms %s): %+v", bug, r)
+		}
+		h.advance(m)
+		h.record(m, "fix", `{"commit":"`+shaFix+`","summary":"fixed `+bug+`"}`)
+		if r := h.advance(m); r.To != "recheck" {
+			t.Fatalf("fix→recheck — the FSM must re-review the fix, not exit: %+v", r)
+		}
+		h.advance(m) // enter recheck, awaiting its review
+	}
+
+	// (A) iter0: fix B1, and the fix INTRODUCES B2. recheck sees a non-clean diff → loops to a fresh
+	// iteration at discover, which re-reviews and re-finds B2 → re-adjudicate → re-fix. iter1's recheck is
+	// clean, so it loops once more to a fresh discover, which finds nothing → done.
+	h := newHarness(t)
+	h.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1}
+	m := h.mustInit(InitOptions{Workflow: "sdlc-loop-clean", Vars: sdlcVars})
+	h.advance(m)
+	fixThenRecheck(h, m, "bug a", "f.go", 1)
+	h.record(m, "recheck", distinct("bug b", "g.go", 2)) // the fix introduced B2; the re-review catches it
+	if r := h.advance(m); r.To != "discover" || r.Status != StatusAdvanced || m.View().Snapshot.Iteration != 1 {
+		t.Fatalf("a non-clean recheck must LOOP to a fresh discover: %+v iter=%d", r, m.View().Snapshot.Iteration)
+	}
+	h.advance(m)
+	fixThenRecheck(h, m, "bug b", "g.go", 2)  // fresh re-review re-finds the fix's bug and fixes it
+	h.record(m, "recheck", `{"findings":[]}`) // recheck now clean, but B2 lingers in Findings → loops once more
+	if r := h.advance(m); r.To != "discover" || m.View().Snapshot.Iteration != 2 {
+		t.Fatalf("recheck loops to a fresh discover for an authoritative re-review: %+v iter=%d", r, m.View().Snapshot.Iteration)
+	}
+	h.advance(m)
+	h.record(m, "discover", `{"findings":[]}`) // fresh review of the now-fixed code: nothing
+	if r := h.advance(m); r.Status != StatusDone || r.Outcome != run.OutcomeClean {
+		t.Fatalf("a fresh review that finds nothing → done(clean): %+v", r)
+	}
+
+	// (B) the blocker: after a fix, a re-surfaced candidate reaches adjudicate with AllFound>0. The
+	// adjudicator REJECTS it. nothing_confirmed would dead-end (ERR_BUGS_KNOWN); confirmed_empty must
+	// reach done.
+	h = newHarness(t)
+	h.git.def.Counts = map[string]int{shaHead + ".." + shaHead: 1}
+	m = h.mustInit(InitOptions{Workflow: "sdlc-loop-clean", Vars: sdlcVars})
+	h.advance(m)
+	fixThenRecheck(h, m, "bug a", "f.go", 1)
+	h.record(m, "recheck", distinct("bug c", "h.go", 3)) // recheck surfaces a distinct candidate N
+	if r := h.advance(m); r.To != "discover" {
+		t.Fatalf("non-clean recheck→discover (loop): %+v", r)
+	}
+	h.advance(m)
+	h.record(m, "discover", distinct("bug c", "h.go", 3)) // the fresh re-review re-surfaces N
+	if r := h.advance(m); r.To != "adjudicate" {
+		t.Fatalf("iter1 discover→adjudicate: %+v", r)
+	}
+	// adjudicator now REJECTS every candidate (Confirmed empty).
+	h.reg.execs["match-then-adjudicate"].fn = func(in ExecInput) (json.RawMessage, error) {
+		for i := range in.Snap.Findings {
+			if err := llmCall(in, i, 10); err != nil {
+				return nil, err
+			}
+		}
+		return json.RawMessage(run.MarshalCanonical(run.Delta{})), nil
+	}
+	if r := h.advance(m); r.Status != StatusDone || r.Outcome != run.OutcomeClean {
+		t.Fatalf("adjudicator rejects the re-surfaced finding → done (confirmed_empty), NOT dead-end: %+v", r)
+	}
+}
