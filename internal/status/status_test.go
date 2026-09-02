@@ -156,6 +156,23 @@ func TestSupersedeDoesNotClearAcrossTargets(t *testing.T) {
 	}
 }
 
+// A clean child of a DIFFERENT KIND must not supersede an open parent, even when they share the same target
+// text: a task-done and an epic-ready review can both name the same path/id, so a mis-linked --previous-run
+// across kinds clearing an unrelated blocker is a false-clear (raised by CodeRabbit's review of PR A).
+func TestSupersedeDoesNotClearAcrossKinds(t *testing.T) {
+	root := t.TempDir()
+	writeLog(t, root, "mrv-parent-epic.md", "# metareview: epic-ready review\n\nRun ID: `mrv-parent`\nTarget: `shared`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	// A task-done PASS wrongly linked to the epic-ready open run, sharing the same target text.
+	writeLog(t, root, "mrv-child-task.md", "# metareview: task-done review\n\nRun ID: `mrv-child`\nTarget: `shared`\n\nPrevious run: `mrv-parent`\n\n## Verdict\n\nPASS\n")
+	r, err := Build(root)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(r.MustClear) != 1 || r.MustClear[0].RunID != "mrv-parent" {
+		t.Fatalf("a cross-KIND mis-link must not clear the open review; must_clear=%+v", r.MustClear)
+	}
+}
+
 // A malformed previousRunId CYCLE (a.prev=b, b.prev=a) must TERMINATE, not hang the gate. The visited guard
 // (`!superseded[prev]`) bounds the walk; without it this input infinite-loops the supersede pass. Both runs
 // are clean, so the observable outcome is just that Build returns an empty must_clear — a hang would time

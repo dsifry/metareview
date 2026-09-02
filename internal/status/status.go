@@ -334,9 +334,11 @@ func emit(r Report, w io.Writer) (int, error) {
 func supersededRuns(logs []reviewlog.Summary) map[string]bool {
 	prevOf := make(map[string]string, len(logs))
 	targetOf := make(map[string]string, len(logs))
+	kindOf := make(map[string]string, len(logs))
 	for _, s := range logs {
 		prevOf[s.RunID] = s.PreviousRunID
 		targetOf[s.RunID] = s.Target
+		kindOf[s.RunID] = s.Kind
 	}
 	superseded := map[string]bool{}
 	for _, s := range logs {
@@ -344,16 +346,17 @@ func supersededRuns(logs []reviewlog.Summary) map[string]bool {
 			continue
 		}
 		// Walk the ancestors of this clean attempt; each was repaired by it — but only within the SAME
-		// target. A previousRunId that points across targets (a mis-linked --previous-run) must not
-		// clear an unrelated open review: dropping a blocker for work that was never fixed is a
-		// false-CLEAR, the worst failure a gate can have. The target guard also bounds the walk, and
+		// target AND the SAME kind. A previousRunId that points across targets or kinds (a mis-linked
+		// --previous-run) must not clear an unrelated open review: dropping a blocker for work that was
+		// never fixed is a false-CLEAR, the worst failure a gate can have. Both guards bound the walk, and
 		// the visited guard makes a malformed cyclic chain terminate.
 		//
-		// NOTE the target guard is VACUOUS for pr-ready: every pr-ready run records the target
-		// `current branch`, so it protects only the distinct-id kinds (task-done / epic-ready). pr-ready
-		// supersede therefore rests entirely on the explicit previousRunId link a real repair creates —
-		// which is never forged spontaneously, only by an operator/tool mis-passing --previous-run.
-		for prev := prevOf[s.RunID]; prev != "" && !superseded[prev] && targetOf[prev] == s.Target; prev = prevOf[prev] {
+		// The KIND guard matters because the target guard is VACUOUS for pr-ready (every pr-ready run
+		// records the target `current branch`), and because a task-done and an epic-ready review CAN share
+		// the same target text (a path/id) — so without it, a clean child of one kind could suppress an
+		// open blocker of another. pr-ready-to-pr-ready supersede still rests on the explicit previousRunId
+		// link a real repair creates, which is never forged spontaneously.
+		for prev := prevOf[s.RunID]; prev != "" && !superseded[prev] && targetOf[prev] == s.Target && kindOf[prev] == s.Kind; prev = prevOf[prev] {
 			superseded[prev] = true
 		}
 	}
