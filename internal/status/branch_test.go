@@ -746,3 +746,50 @@ func TestARevListTimeoutMakesTheScopeUnresolvable(t *testing.T) {
 		t.Error("HEAD is in scope even when rev-list failed")
 	}
 }
+
+// ChangeKinds maps each changed path to its git change type, keyed on the NEW path for a rename.
+func TestChangeKinds(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = root
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	write("edit.go", "package p\nvar E = 1\n")
+	// gone.go and new.go are deliberately DISSIMILAR so git's rename detection does not pair the deletion
+	// with the addition (it pairs a deleted file with a similar added one — real behavior, see ChangeKinds).
+	write("gone.go", "package removed\n\nfunc ToBeDeletedEntirely() string { return \"delete me\" }\n")
+	write("move.go", "package p\nvar M = 1\n")
+	run("add", ".")
+	run("commit", "-qm", "base")
+	base := run("rev-parse", "HEAD")
+	run("checkout", "-q", "-b", "work")
+	write("edit.go", "package p\nvar E = 2\n")                                         // modified
+	write("new.go", "package fresh\n\ntype BrandNewUnrelated struct{ X, Y, Z int }\n") // added
+	run("rm", "-q", "gone.go")                                                         // deleted
+	run("mv", "move.go", "moved.go")                                                   // renamed (new path = moved.go)
+	run("add", "-A")
+	run("commit", "-qm", "changes")
+
+	k := ChangeKinds(root, base, nil)
+	for path, want := range map[string]string{"edit.go": "modified", "new.go": "added", "gone.go": "deleted", "moved.go": "renamed"} {
+		if k[path] != want {
+			t.Errorf("ChangeKinds[%q] = %q, want %q (full: %v)", path, k[path], want, k)
+		}
+	}
+	if _, ok := k["move.go"]; ok {
+		t.Errorf("a rename must key on the NEW path only, not the old one: %v", k)
+	}
+}

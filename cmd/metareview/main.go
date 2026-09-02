@@ -23,6 +23,7 @@ import (
 	"github.com/dsifry/metareview/internal/prready"
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
+	"github.com/dsifry/metareview/internal/reviewprompt"
 	"github.com/dsifry/metareview/internal/setup"
 	"github.com/dsifry/metareview/internal/status"
 	"github.com/dsifry/metareview/internal/taskdone"
@@ -197,6 +198,34 @@ func main() {
 		return
 	}
 
+	if len(args) >= 2 && args[0] == "review" && args[1] == "prompt" {
+		base := ""
+		for i := 2; i < len(args); i++ {
+			switch args[i] {
+			case "--base":
+				base = flagValue(args, i, "--base")
+				i++
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
+				os.Exit(2)
+			}
+		}
+		// The same set the coverage gate measures: this branch's changed files (committed + staged +
+		// working + untracked), exclude-filtered. Classifying that set keeps the prompt and the gate
+		// talking about exactly the same files.
+		root := repo.RootOr(mustCwd())
+		scope, err := status.ResolveBranchScope(root, base, nil)
+		exitOnErr(err)
+		label := base
+		if label == "" {
+			label = scope.Base
+			if len(label) > 12 {
+				label = label[:12]
+			}
+		}
+		fmt.Print(reviewprompt.Build(label, scope.Files, status.ChangeKinds(root, base, nil)))
+		os.Exit(0)
+	}
 	if len(args) >= 3 && args[0] == "review" && args[1] == "artifact" {
 		previousRun := ""
 		scaffoldOnly := false
