@@ -139,6 +139,23 @@ func TestNeedsRevisionWithoutLineagePassStillBlocks(t *testing.T) {
 	}
 }
 
+// A clean PASS whose previousRunId points at a DIFFERENT target's NEEDS_REVISION (a mis-linked
+// --previous-run) must NOT supersede it: clearing a blocker for work that was never fixed is a
+// false-CLEAR, the worst failure for a gate. Only a same-target lineage supersedes.
+func TestSupersedeDoesNotClearAcrossTargets(t *testing.T) {
+	root := t.TempDir()
+	writeLog(t, root, "mrv-a-task-done-a.md", "# metareview: task-done review\n\nRun ID: `mrv-a`\nTarget: `task-a`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	// A PASS of task-b that wrongly links back to task-a's open run.
+	writeLog(t, root, "mrv-b-task-done-b.md", "# metareview: task-done review\n\nRun ID: `mrv-b`\nTarget: `task-b`\n\nPrevious run: `mrv-a`\n\n## Verdict\n\nPASS\n")
+	r, err := Build(root)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(r.MustClear) != 1 || r.MustClear[0].RunID != "mrv-a" {
+		t.Fatalf("a cross-target mis-link must not clear the open review; must_clear=%+v", r.MustClear)
+	}
+}
+
 // blocking_count, attempt_number and max_attempts are the operator-facing half of the contract -
 // how many blockers remain, and which attempt of how many, which is the escalation signal the
 // Completion Rule depends on. Deleting the line that populates all three left ./internal/status

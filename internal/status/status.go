@@ -233,8 +233,14 @@ func BuildForBranch(root, base string, run RunGit) (Report, error) {
 	}
 	r.Reviews, r.Target = scoped, "branch "+shortSHA(scope.Base)+".."+shortSHA(scope.Head)
 	r.MustClear = []Blocker{}
+	// Supersede over the FULL log set (all), not scoped, so lineage is complete. BuildForBranch rebuilds
+	// must_clear from scoped reviews and DISCARDS buildFor's — the same trap that once dropped the
+	// abandoned runs (see below). Without applying the supersede here too, the branch scope — the one the
+	// Stop/commit hook actually uses — blocks a successfully-repaired branch forever, which is exactly the
+	// "reach clean after a repair" this change exists to enable.
+	superseded := supersededRuns(all)
 	for _, s := range scoped {
-		if !s.HasUnresolvedBlockers {
+		if !s.HasUnresolvedBlockers || superseded[s.RunID] {
 			continue
 		}
 		r.MustClear = append(r.MustClear, Blocker{
@@ -327,16 +333,22 @@ func emit(r Report, w io.Writer) (int, error) {
 // against, one level up. The visited guard also makes a malformed cyclic chain terminate.
 func supersededRuns(logs []reviewlog.Summary) map[string]bool {
 	prevOf := make(map[string]string, len(logs))
+	targetOf := make(map[string]string, len(logs))
 	for _, s := range logs {
 		prevOf[s.RunID] = s.PreviousRunID
+		targetOf[s.RunID] = s.Target
 	}
 	superseded := map[string]bool{}
 	for _, s := range logs {
 		if s.HasUnresolvedBlockers {
 			continue
 		}
-		// Walk the ancestors of this clean attempt; each was repaired by it.
-		for prev := prevOf[s.RunID]; prev != "" && !superseded[prev]; prev = prevOf[prev] {
+		// Walk the ancestors of this clean attempt; each was repaired by it — but only within the SAME
+		// target. A previousRunId that points across targets (a mis-linked --previous-run) must not
+		// clear an unrelated open review: dropping a blocker for work that was never fixed is a
+		// false-CLEAR, the worst failure a gate can have. The target guard also bounds the walk, and
+		// the visited guard makes a malformed cyclic chain terminate.
+		for prev := prevOf[s.RunID]; prev != "" && !superseded[prev] && targetOf[prev] == s.Target; prev = prevOf[prev] {
 			superseded[prev] = true
 		}
 	}

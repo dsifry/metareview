@@ -220,6 +220,35 @@ func TestBuildForBranchAnswersAboutTheWorkInHand(t *testing.T) {
 	}
 }
 
+// The repair loop must reach clean IN BRANCH SCOPE — the scope the Stop/commit hook actually uses.
+// BuildForBranch rebuilds must_clear from scoped reviews, and an earlier version of the supersede fix was
+// wired only into the unscoped Build path, so a superseded parent kept blocking the branch forever. This
+// pins that the branch answer honours the supersede.
+func TestBuildForBranchSupersedesRepairedParent(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	// Parent attempt found blockers; the child re-review of the same branch head passed and read both
+	// changed files, so nothing is unreviewed and only the supersede decides the answer.
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "parent.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-parent`\nTarget: `current branch`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "child.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-child`\nTarget: `current branch`\n\nPrevious run: `mrv-parent`\n\n## Verdict\n\nPASS\n")
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-parent","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`"}`+"\n"+
+			`{"id":"mrv-child","scope":"pr-ready","verdict":"PASS","headSha":"`+headSHA+`","previousRunId":"mrv-parent","coveredPaths":["a.go","b.go"]}`+"\n")
+
+	got, err := BuildForBranch(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Blocked || len(got.MustClear) != 0 {
+		t.Fatalf("a branch whose repair passed must not block; blocked=%v must_clear=%+v", got.Blocked, got.MustClear)
+	}
+	var buf bytes.Buffer
+	if code, _ := EmitForBranch(root, "", nil, &buf); code != 0 {
+		t.Fatalf("exit code = %d, want 0 once the branch is clean:\n%s", code, buf.String())
+	}
+}
+
 // A scope that cannot be resolved reports the UNSCOPED answer with a warning, never an empty one,
 // and it BLOCKS. A gate that cannot work out what the work is must fail toward blocking.
 //
