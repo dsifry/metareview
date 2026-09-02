@@ -697,6 +697,17 @@ func TestSDLCLoopCleanReReviewsAfterFix(t *testing.T) {
 	if loop == nil || !loop.Loop || loop.Gate != "findings_nonempty" {
 		t.Fatalf("recheck must LOOP back to adjudicate on findings_nonempty, got %+v", loop)
 	}
+	// The adjudicator-clean exit must use an AllFound-BLIND gate (confirmed_empty), NOT nothing_confirmed:
+	// once a bug has been confirmed earlier in the run, AllFound > 0, so nothing_confirmed would fail
+	// (ERR_BUGS_KNOWN) and the loop would dead-end on a clean fix whose re-review is then rejected. This
+	// pins the fix for that blocker.
+	adjClean := has("adjudicate", "done")
+	if adjClean == nil || adjClean.Outcome == "" || adjClean.Gate == "nothing_confirmed" {
+		t.Fatalf("adjudicate must exit to done on an AllFound-blind gate (confirmed_empty), got %+v", adjClean)
+	}
+	if adjClean.Gate != "confirmed_empty" {
+		t.Fatalf("adjudicate→done gate should be confirmed_empty (reachable inside the loop), got %q", adjClean.Gate)
+	}
 	// It never exits on all_fixed (the sdlc-loop behavior this workflow deliberately replaces).
 	for _, tr := range w.Transitions {
 		if tr.Gate == "all_fixed" {

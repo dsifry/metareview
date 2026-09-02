@@ -12,12 +12,16 @@ vars:
   JUDGE_EFFORT: {required: true}
 states: [discover, adjudicate, fix, recheck, done, failed]
 transitions:                                  # ordered
-  - {from: discover,   to: done,       gate: findings_empty,    outcome: clean}    # nothing found at all → bug-free
+  - {from: discover,   to: done,       gate: nothing_found,    outcome: clean}     # entry only: nothing found → bug-free
   - {from: discover,   to: adjudicate, gate: findings_nonempty}
-  - {from: adjudicate, to: done,       gate: nothing_confirmed, outcome: clean}    # adjudicator rejected every candidate → bug-free
+  # confirmed_empty (this iteration's Confirmed == 0), NOT nothing_confirmed: once ANY bug has been
+  # confirmed in the run, AllFound > 0, so nothing_confirmed would fail (ERR_BUGS_KNOWN) and the loop
+  # would dead-end on the common good case — a clean fix whose re-review surfaces a candidate the
+  # adjudicator then rejects. confirmed_empty is AllFound-blind, so that case correctly reaches done.
+  - {from: adjudicate, to: done,       gate: confirmed_empty,  outcome: clean}     # adjudicator confirmed none real → bug-free
   - {from: adjudicate, to: fix,        gate: confirmed_nonempty}
   - {from: fix,        to: recheck,    gate: commit_exists}
-  - {from: recheck,    to: done,       gate: findings_empty,    outcome: clean}    # a FRESH review of the fix found nothing → bug-free
+  - {from: recheck,    to: done,       gate: findings_empty,   outcome: clean}     # a FRESH review of the fix found nothing → bug-free
   - {from: recheck,    to: adjudicate, gate: findings_nonempty, loop: true}        # the fix introduced/left findings → adjudicate → fix → recheck …
 nodes:
   discover:   {kind: review-lenses,        exec: subagent, model: $REVIEWER, effort: $REV_EFFORT}
