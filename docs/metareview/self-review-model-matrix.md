@@ -248,16 +248,19 @@ the **100%-coverage campaign's** work — and are captured here (and in the raw 
 # Round 3: the full sweep — every remaining package (2026-09-02)
 
 At the maintainer's direction ("do all the rest of the remaining packages"), rounds 1–2's 10 packages were
-extended to **all 51 packages** in the repo. 29 more packages were reviewed by Opus-4.8 analyzer subagents
-(the substantial ones) plus a direct self-review of the 10 trivial utility packages (<120 LOC); findings
-were adjudicated with the same flash-low → flash-high → glm-5.3-low → Opus ladder (`METAREVIEW_JUDGE_TIMEOUT`
-raised so glm-5.3 never times out).
+extended to **all 51 packages**. The 51 break down as: **10** in rounds 1–2; **29** substantial packages in
+round 3 via Opus-4.8 analyzer subagents; **10** trivial utility packages (<120 LOC) via direct self-review;
+and **2** — `internal/fsm/judge` and `internal/fsm/cli` — reviewed in the course of building the
+`METAREVIEW_JUDGE_TIMEOUT` feature (#72), not as separate analyzer runs. (10 + 29 + 10 + 2 = 51.) Round-3
+findings were adjudicated with the same flash-low → flash-high → glm-5.3-low → Opus ladder
+(`METAREVIEW_JUDGE_TIMEOUT` raised so glm-5.3 never times out).
 
 ## Coverage & findings
 
-- **51/51 packages reviewed.** **69 findings** total across the three rounds (2 HIGH — both round-1, fixed;
-  ~21 medium; ~43 low). 5 packages came back an honest **zero** (mutation, contextprofile, converge,
-  tasksource, fsm/record) and 10 trivial utility packages were clean.
+- **51/51 packages reviewed** (10 + 29 + 10 + 2 as above). **69 findings** total across the three rounds
+  (2 HIGH — both round-1, fixed; 21 medium; 43 low; 1 info; 2 severity-unlabelled). 5 packages came back an
+  honest **zero** (mutation, contextprofile, converge, tasksource, fsm/record) and the 10 trivial utility
+  packages were clean.
 - **~64 of the 69 are "invariant nothing holds" test-pinning gaps** — a guard/assertion/error-code that can
   be deleted or inverted with the whole suite still green. This is the **100%-coverage / mutation campaign's
   backlog, systematically enumerated** — see `docs/metareview/COVERAGE-CAMPAIGN-BACKLOG.md`.
@@ -279,12 +282,25 @@ raised so glm-5.3 never times out).
 
 ## The model matrix, now well-sampled (29 REAL adjudicated findings across rounds 2–3)
 
-| judge config | recall on the 29 REAL findings | false positives |
+**Ground truth is the *analyzer's* verification, not any adjudicator.** Every finding's REAL/not-REAL label
+comes from the Opus-4.8 **analyzer** subagent that filed it having *empirically deleted or inverted the
+guard and re-run the test suite* (for test-gaps) or reproduced the defect (for crisp bugs) — a
+mutation-level oracle the **adjudicators cannot reproduce because they cannot run the tests**. The
+denominator here is the **29 findings whose analyzer verification I re-confirmed as REAL** (the 2 debatable
+findings — `learning-3`, `export-1` — and `prready-2` are excluded from recall/FP; they are counted only in
+the 69-finding backlog). "False positives" below therefore means *a judge marked REAL a candidate the
+analyzer ground truth says is not real* — and across all 69 findings no config did so, hence 0. Note this
+also means the `flash=True / opus=False` rows (`epicready-2`, and the excluded `learning-3`) are **Opus
+false-negatives, not flash false-positives**: on `epicready-2` the analyzer had coverage-proved the guard
+deletable (REAL), flash agreed, and Opus was the one that erred. That is precisely why Opus is not perfect
+on test-gaps and why the ladder (which also trusts flash's confident True) edges it out.
+
+| judge config | recall on the 29 REAL findings | false positives (vs analyzer ground truth) |
 | --- | ---: | ---: |
 | **Opus 4.8** | **26/29 (90%)** | 0 |
 | flash-low | 16/29 (55%) | 0 |
 | glm-5.3-low | 16/29 (55%) | 0 |
-| flash-high (of the escalated) | 9/21 | 0 |
+| flash-high (of the 21 it was run on) | 9/21 | 0 |
 | **2-tier ladder: flash-low confident-True → Opus** | **27/29 (93%)** | 0 |
 
 ## What the full sweep settles
