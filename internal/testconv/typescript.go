@@ -25,8 +25,8 @@ func (typeScriptConvention) Name() string { return "typescript" }
 
 // testFileSuffixes are the conventional TS/JS test-file endings (shared across Jest and Vitest).
 var testFileSuffixes = []string{
-	".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".test.mts", ".test.cts",
-	".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx", ".spec.mts", ".spec.cts",
+	".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".test.mjs", ".test.cjs", ".test.mts", ".test.cts",
+	".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx", ".spec.mjs", ".spec.cjs", ".spec.mts", ".spec.cts",
 }
 
 // IsTestFile reports whether path ends in a `*.test.*` / `*.spec.*` suffix.

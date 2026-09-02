@@ -8,7 +8,7 @@ import (
 
 func TestTSBasics(t *testing.T) {
 	c := typeScriptConvention{}
-	for _, f := range []string{"src/calc.test.ts", "a/b.spec.tsx", "x.test.js", "y.spec.jsx", "m.test.mts"} {
+	for _, f := range []string{"src/calc.test.ts", "a/b.spec.tsx", "x.test.js", "y.spec.jsx", "m.test.mts", "e.test.mjs", "c.spec.cjs"} {
 		if !c.IsTestFile(f) {
 			t.Fatalf("%s must be a test file", f)
 		}
