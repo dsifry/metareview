@@ -31,20 +31,24 @@ Retires: `tests/coverage.sh` (178 lines of bash gate logic). Keeps: the 37 behav
 6. Per-package **statement** coverage from the textfmt profile: package = directory of `<file>` relative
    to the module path; `pct = covered_stmts / total_stmts * 100`; `exact = (covered == total)`. Computed
    from statement counts, **not** parsed from `covdata percent` (whose output drops newlines for
-   zero-statement packages — a documented trap). **Zero-statement packages** (review §2.2) emit no profile
-   lines, so they never appear in the per-package map; they are handled entirely by presence checks against
-   `--packages`/`--require-100`/floor (rules 9/11/12), never assigned a percentage. A required package with
-   zero statements is therefore *absent* → FAIL (rule 11), never a vacuous `0==0` pass.
+   zero-statement packages — a documented trap). **Zero-statement packages** (`internal/version` is one)
+   emit no profile lines, so they never appear in the per-package map and are **not gated by rule 9** —
+   there is nothing to cover, exactly as `coverage.sh` (which evaluates over the profile) does. A
+   zero-statement package that is *required* (rule 7's set) is *absent* → FAIL (rule 11); a zero-statement
+   package that is not required simply passes, so a clean tree passes.
 
 **Enforce** (→ Go, pure):
 7. `internal/fsm/*` and `workflows`: **exact 100%** (every statement). Not exact → FAIL.
 8. Every other package: `pct ≥ floor` from `tests/coverage-floor.txt`. Below → FAIL.
-9. A package with **no floor line** → FAIL (`no floor: add a line, or --update-floor`). New packages must
-   be floored deliberately (a whole subsystem, `internal/mutation`, once shipped unmeasured this way).
-   Evaluated over the **`--packages` universe**, not the profile (review §2.3/§2.6): this matches
-   `coverage.sh`'s *code* — whose stale header comment still says "absent from the floor file are reported
-   but not enforced," a line the code overrode (see its own "UNGATED, and silently so" comment). Parity is
-   against the code, which FAILs; the port fixes the universe hole the profile-only version left open.
+9. A **profile package** (one with statements) that has **no floor line** → FAIL (`no floor: add a line,
+   or --update-floor`). New packages must be floored deliberately (a whole subsystem, `internal/mutation`,
+   once shipped unmeasured this way). Evaluated over the **profile**, exactly as `coverage.sh` (matching its
+   *code* — whose stale header comment still says "absent from the floor file are reported but not
+   enforced," a line the code overrode; see its own "UNGATED, and silently so" comment). `go test -cover
+   ./...` instruments **every buildable package that has statements**, so each appears in the profile and
+   is floor-checked; a package *absent* from the profile is zero-statement (nothing to cover) and is not
+   gated — so there is **no** universe hole to close, and gating `go list ./...` instead would wrongly FAIL
+   zero-statement packages that have no passing state (the parity bug an earlier draft introduced).
 10. The required set `go list ./internal/fsm/... ./workflows` must be **non-empty** unless those dirs are
     absent — a moved tree or a `go list` failure must not turn the gate into a no-op.
 11. Every **required** package must be **present** in the profile (absent → FAIL) — a package with zero
@@ -68,45 +72,46 @@ Retires: `tests/coverage.sh` (178 lines of bash gate logic). Keeps: the 37 behav
 
 ```text
 covergate --profile <textfmt> --floor <file> --module <path> \
-          --packages <universe-list-file> --require-100 <require-list-file> \
-          [--update-floor [--allow-floor-decrease]]
+          --require-100 <require-list-file> [--update-floor [--allow-floor-decrease]]
 ```
 
 covergate takes **resolved package lists as files, not globs, and never shells out** (⇒ no exec seam, 100%
-coverage is a file-and-flags exercise). The Makefile resolves both lists via `go list` and passes them:
+coverage is a file-and-flags exercise). Rule 9 is evaluated over the **profile** (§1 rule 9) — there is no
+`--packages` universe input: `go test -cover ./...` already puts every has-statements package in the
+profile, and a universe input would only mis-gate zero-statement packages. The Makefile passes:
 
-- `--packages` = the **complete package universe** (`go list ./...`). This closes the package-universe
-  hole (review §2.6): `covdata textfmt` only emits packages that were *instrumented and present in
-  coverage metadata*, so a non-required package covdata omits would never be floor-checked. Rule 9 is
-  evaluated over **`--packages`, not over the profile's packages** — every package in the universe must be
-  required-100, floored, or explicitly exempt; one covdata dropped cannot pass unfloored.
 - `--require-100` = the packages that must be exactly 100% — resolved by the Makefile as
   `go list ./internal/fsm/... ./workflows` **plus `cmd/covergate` itself** (the gate tool is held to the
-  same bar it enforces; review §2.11). covergate does no globbing.
+  same bar it enforces; review §2.11). covergate does no globbing; its **rule-10 non-empty guard** trusts
+  that the Makefile only produces this file when `go list` for the required patterns *succeeded* (below).
 - `--module` = `go list -m`, to strip the module prefix from profile paths (rule 6).
 - Implements rules 6–16. Exit 0 on pass, 1 on FAIL (with the package table), 2 on usage error.
 - Plain `bufio`/`strings`, no new dependency.
 
-**The Makefile owns orchestration** (rules 1–5, idiomatic make; `.ONESHELL` so one shell runs the whole
-recipe under a `trap` that makes cleanup + plain rebuild **unconditional** — on success, failure, or
-interrupt (review §2.1/§2.7), matching `coverage.sh`'s EXIT trap):
+**The Makefile owns orchestration** (rules 1–5). The whole `cover` body is **one backslash-continued
+shell line** so `COVDIR` and the `trap` share a single shell **without relying on `.ONESHELL`** — stock
+macOS `make` is GNU Make 3.81, which ignores `.ONESHELL` (review §2.3); the trap makes cleanup + plain
+rebuild **unconditional** on success, failure, or interrupt (review §2.1/§2.7). The required-set `go list`
+is checked for **real failure** (rule 10) separately from appending `cmd/covergate`, so a moved
+`internal/fsm`/`workflows` tree errors instead of silently dropping the exact-100 requirement (review §2.2):
 
 ```makefile
-.ONESHELL:
 export GOTOOLCHAIN := $(shell awk '$$1=="toolchain"{print $$2}' go.mod)
+MODULE := $(shell go list -m)
 build: ; go build -o bin/metareview ./cmd/metareview
 cover:
-	set -e
-	COVDIR=$$(mktemp -d)
-	trap 'rm -rf "$$COVDIR"; go build -o bin/metareview ./cmd/metareview || echo "post-run rebuild FAILED" >&2' EXIT
-	go test -cover -covermode=atomic ./... -args -test.gocoverdir=$$COVDIR
-	GOFLAGS="-cover -covermode=atomic" GOCOVERDIR=$$COVDIR bash tests/run-all.sh
-	go tool covdata textfmt -i=$$COVDIR -o $$COVDIR/profile.txt
-	go list ./... > $$COVDIR/universe.txt
-	# tolerate an absent required dir (rule 10) but never swallow a real go-list error
-	{ go list ./internal/fsm/... ./workflows 2>/dev/null; echo cmd/covergate | sed 's#^#$(shell go list -m)/#'; } | sort -u > $$COVDIR/require100.txt
-	go run ./cmd/covergate --profile $$COVDIR/profile.txt --floor tests/coverage-floor.txt \
-	  --module $$(go list -m) --packages $$COVDIR/universe.txt --require-100 $$COVDIR/require100.txt
+	@set -e; \
+	COVDIR=$$(mktemp -d); \
+	trap 'rm -rf "$$COVDIR"; go build -o bin/metareview ./cmd/metareview || echo "post-run rebuild FAILED" >&2' EXIT; \
+	go test -cover -covermode=atomic ./... -args -test.gocoverdir="$$COVDIR"; \
+	GOFLAGS="-cover -covermode=atomic" GOCOVERDIR="$$COVDIR" bash tests/run-all.sh; \
+	go tool covdata textfmt -i="$$COVDIR" -o "$$COVDIR/profile.txt"; \
+	if req=$$(go list ./internal/fsm/... ./workflows 2>&1); then :; \
+	elif [ -d internal/fsm ] || [ -d workflows ]; then echo "go list required set failed:" >&2; echo "$$req" >&2; exit 1; \
+	else req=""; fi; \
+	{ printf '%s\n' $$req; echo "$(MODULE)/cmd/covergate"; } | sort -u > "$$COVDIR/require100.txt"; \
+	go run ./cmd/covergate --profile "$$COVDIR/profile.txt" --floor tests/coverage-floor.txt \
+	  --module "$(MODULE)" --require-100 "$$COVDIR/require100.txt"
 test: cover
 ```
 
@@ -118,8 +123,8 @@ once the shell suite no longer calls `npm run build`.
 ## 3. Transition — prove verdict-equivalence before deleting the script
 
 1. Land `cmd/covergate` + Makefile with covergate **unit-tested to 100%** (fixture profiles covering every
-   rule 6–16 branch: exact-100 pass/fail, floor pass/fail, missing floor (over the universe, incl. a
-   package covdata omits), absent required, absent floored, zero-statement required, refuse-update-on-vanished,
+   rule 6–16 branch: exact-100 pass/fail, floor pass/fail, missing floor, absent required, absent floored,
+   zero-statement (required→FAIL, non-required→pass), refuse-update-on-vanished,
    empty required set, update-floor write, refuse-lower, forgive-missing-after-write).
 2. CI runs **both** `bash tests/coverage.sh` **and** `make cover` for a transition window and asserts they
    produce the **same** pass/fail verdict and the same per-package table (a small diff harness). Any
@@ -146,8 +151,8 @@ scripts toward 100%" north star; it is independent of Phase 1 and done defect-by
 - `cmd/covergate` at **100%**, enforced by adding it to `--require-100` (not left to a floor line).
 - `make cover` reproduces `coverage.sh`'s verdict on: a clean tree (pass), an `internal/fsm` package at
   99.x% (FAIL rule 7), a below-floor package (FAIL rule 8), a new unfloored package (FAIL rule 9), a
-  package in the universe that covdata omitted (FAIL rule 9 — the universe hole), a zero-statement required
-  package (FAIL rule 11), a vanished required/floored package (FAIL rules 11/12), `--update-floor` (write +
+  a zero-statement REQUIRED package (FAIL rule 11), a zero-statement NON-required package (pass — the
+  clean-tree parity case), a vanished required/floored package (FAIL rules 11/12), `--update-floor` (write +
   refuse-lower), and `--update-floor` with a vanished floored package (refuse-write, rule 16).
 - The parallel-run diff harness reports zero divergence before `coverage.sh` is deleted.
 - Every documented lesson in `coverage.sh` (toolchain pin, covdata-newline avoidance, floor semantics,
