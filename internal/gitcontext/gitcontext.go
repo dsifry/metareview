@@ -242,7 +242,10 @@ func matchesExclude(file, exclude string) bool {
 		prefix := strings.TrimSuffix(exclude, "/**")
 		return file == prefix || strings.HasPrefix(file, prefix+"/")
 	}
-	return file == exclude
+	// A bare exclude matches the exact path AND anything under it as a directory, because git's
+	// :(exclude)<dir> pathspec is recursive. The `exclude+"/"` prefix (not a bare prefix) keeps a file
+	// exclude from over-matching a sibling that merely shares its name (config/app.yaml vs app.yaml.bak).
+	return file == exclude || strings.HasPrefix(file, exclude+"/")
 }
 
 func generatedExcludedFiles(root, base string, excludes []string, changedFiles, stagedFiles, workingTreeFiles, untrackedFiles []string) []string {

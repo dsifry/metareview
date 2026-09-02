@@ -375,3 +375,30 @@ func TestHardenDiffPinsPathPrefixes(t *testing.T) {
 		t.Errorf("diff header must carry a/ and b/ prefixes regardless of diff.noprefix; got %q", first)
 	}
 }
+
+// gitcontext-1: a bare-directory exclude must match files UNDER it, because git's :(exclude)<dir>
+// pathspec is recursive. The exceptions path (exactExcludesExcept) converts each matched changed file
+// into an exact :(exclude)<file>; if matchesExclude only did exact matching, a bare "build" exclude
+// plus any exception would silently un-exclude the whole build/ directory into the reviewed diff.
+func TestMatchesExcludeDirectoryIsRecursive(t *testing.T) {
+	if !matchesExclude("build/foo.js", "build") {
+		t.Error("a bare directory exclude must match files under it (git :(exclude) is recursive)")
+	}
+	if !matchesExclude("build/sub/deep.js", "build") {
+		t.Error("directory exclude must match nested files")
+	}
+	if !matchesExclude("build", "build") {
+		t.Error("directory exclude must still match the exact path")
+	}
+	// A file exclude must not over-match a sibling that merely shares its prefix.
+	if matchesExclude("config/app.yaml.bak", "config/app.yaml") {
+		t.Error("a file exclude must not match a prefix-sharing sibling")
+	}
+	// Unrelated files and the /** form are unchanged.
+	if matchesExclude("other/foo.js", "build") {
+		t.Error("unrelated path must not match")
+	}
+	if !matchesExclude("docs/x/y.md", "docs/x/**") {
+		t.Error("the /** recursive form must still match")
+	}
+}
