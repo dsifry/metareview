@@ -203,6 +203,53 @@ func (s BranchScope) Unreviewed(logs []reviewlog.Summary) []string {
 	return out
 }
 
+// ChangeKinds maps each changed path (vs base, through the working tree) to its git change type:
+// "added", "modified", "deleted", or "renamed" (keyed on the NEW path). It is language-agnostic — used
+// only to frame the review. A path the diff does not classify, and an untracked file (not in the diff),
+// are left absent; the caller defaults those to "modified".
+//
+// Rename detection is git's, and it is a HEURISTIC: git may pair a deleted file with a similar-enough
+// added file and report the pair as a rename. That is tolerable for framing — a rename and a delete+add
+// both warrant the same impact review (references to the old name/path) — but it means the label is
+// git's best guess, not ground truth.
+func ChangeKinds(root, base string, run RunGit) map[string]string {
+	kinds := map[string]string{}
+	if run == nil {
+		run = realGit
+	}
+	baseSHA := base
+	if baseSHA == "" {
+		scope, err := ResolveBranchScope(root, base, run)
+		if err != nil {
+			return kinds
+		}
+		baseSHA = scope.Base
+	}
+	out, err := run(root, "diff", "--name-status", "--find-renames", baseSHA)
+	if err != nil {
+		return kinds
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Split(line, "\t")
+		if len(f) < 2 {
+			continue
+		}
+		switch {
+		case f[0] == "A":
+			kinds[f[1]] = "added"
+		case f[0] == "D":
+			kinds[f[1]] = "deleted"
+		case strings.HasPrefix(f[0], "R") && len(f) == 3:
+			kinds[f[2]] = "renamed" // status like R100/R087; new path is the last field
+		case strings.HasPrefix(f[0], "C") && len(f) == 3:
+			kinds[f[2]] = "added" // a copy is new content at the new path
+		default:
+			kinds[f[len(f)-1]] = "modified"
+		}
+	}
+	return kinds
+}
+
 // GeneratedMetareviewPathExcludes are the paths metareview itself writes. They are excluded from
 // a review's source context, so nothing can ever record having reviewed them, so they must be
 // excluded from the set a review is measured against too. Exported and defined once: it was

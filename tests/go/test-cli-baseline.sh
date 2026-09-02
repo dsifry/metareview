@@ -136,3 +136,27 @@ fi
 if (cd "$clean" && ./mrv status --json --target 2>/dev/null); then
   echo "FAIL: --target with no value must be refused"; exit 1
 fi
+
+# review prompt builds the adversarial-review prompt for a branch's changed files. Exercised here (a
+# behavioral test) because the handler's flag parsing and label logic live in main's dispatch, so a plain
+# `go test` never runs it — covering it keeps cmd/metareview above its coverage floor.
+promptrepo="$(mktemp -d)"
+trap 'rm -rf "$clean" "$promptrepo"' EXIT
+(
+  cd "$promptrepo"
+  git init -q -b main
+  printf 'package p\n' > a.go
+  git add a.go
+  git -c user.email=t@e -c user.name=t commit -qm base
+  git checkout -q -b work
+  printf 'package p\nvar X = 1\n' > a.go
+  git add a.go
+  git -c user.email=t@e -c user.name=t commit -qm change
+)
+(cd "$promptrepo" && "$clean/mrv" review prompt --base main) | grep -q 'Adversarial review' \
+  || { echo "FAIL: review prompt --base must render the prompt"; exit 1; }
+(cd "$promptrepo" && "$clean/mrv" review prompt) | grep -q 'Adversarial review' \
+  || { echo "FAIL: review prompt without --base must render the prompt"; exit 1; }
+if (cd "$promptrepo" && "$clean/mrv" review prompt --bogus 2>/dev/null); then
+  echo "FAIL: review prompt with an unknown option must exit nonzero"; exit 1
+fi
