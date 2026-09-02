@@ -192,3 +192,103 @@ func run(t *testing.T, dir, name string, args ...string) {
 		t.Fatalf("%s %v failed: %v", name, args, err)
 	}
 }
+
+func TestFirstNonEmpty(t *testing.T) {
+	if got := firstNonEmpty("", "  ", "\t"); got != "" {
+		t.Fatalf("all-empty inputs should yield %q, got %q", "", got)
+	}
+	if got := firstNonEmpty("", "second"); got != "second" {
+		t.Fatalf("should skip the empty value and return the first non-empty, got %q", got)
+	}
+}
+
+func TestCollectErrorsOnMalformedJSON(t *testing.T) {
+	bin := t.TempDir()
+	writeMockGh(t, bin, "this is not json")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	root := t.TempDir()
+	run(t, root, "git", "init", "-q")
+	run(t, root, "git", "remote", "add", "origin", "https://github.com/acme/repo.git")
+
+	if _, err := Collect(root, "12"); err == nil {
+		t.Fatal("expected an error when gh returns malformed JSON")
+	}
+}
+
+func TestCollectUnavailableWhenPRViewFails(t *testing.T) {
+	bin := t.TempDir()
+	writeMockGhPRViewFailure(t, bin)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	root := t.TempDir()
+	run(t, root, "git", "init", "-q")
+	run(t, root, "git", "remote", "add", "origin", "https://github.com/acme/repo.git")
+
+	ctx, err := Collect(root, "12")
+	if err != nil {
+		t.Fatalf("Collect returned error: %v", err)
+	}
+	if ctx.Available || ctx.UnavailableReason != "github-pr-unavailable" {
+		t.Fatalf("expected github-pr-unavailable, got available=%v reason=%s", ctx.Available, ctx.UnavailableReason)
+	}
+}
+
+func writeMockGhPRViewFailure(t *testing.T, dir string) {
+	t.Helper()
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  echo "gh: pr view failed" >&2
+  exit 1
+fi
+exit 1
+`
+	path := filepath.Join(dir, "gh")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRenderMarkdownUnavailable(t *testing.T) {
+	if out := RenderMarkdown(Context{Available: false, UnavailableReason: "gh-unavailable"}); !strings.Contains(out, "GitHub context unavailable: gh-unavailable") {
+		t.Fatalf("unavailable render wrong: %q", out)
+	}
+	if out := RenderMarkdown(Context{Available: false}); !strings.Contains(out, "unavailable: unknown") {
+		t.Fatalf("empty reason should render 'unknown': %q", out)
+	}
+}
+
+func TestRenderMarkdownFull(t *testing.T) {
+	ctx := Context{
+		Available: true, PRNumber: "12", URL: "https://github.com/acme/repo/pull/12",
+		Title: "Improve parser", Body: "body text", ReviewDecision: "APPROVED",
+		Comments: []Entry{{Author: "alice", URL: "u1", Body: "nice"}},
+		Reviews:  []Entry{{Author: "bob", URL: "u2", State: "CHANGES_REQUESTED", Body: "lgtm"}},
+	}
+	out := RenderMarkdown(ctx)
+	for _, want := range []string{
+		"- PR: https://github.com/acme/repo/pull/12", "- Title: Improve parser",
+		"- Review decision: APPROVED", "- Body excerpt: body text",
+		"Comments:", "- alice u1: nice", "Reviews:", "- CHANGES_REQUESTED by bob u2: lgtm",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderMarkdownOmitsEmptyOptionalFields(t *testing.T) {
+	out := RenderMarkdown(Context{Available: true, URL: "u", Title: "t"})
+	for _, absent := range []string{"Review decision:", "Body excerpt:", "Comments:", "Reviews:"} {
+		if strings.Contains(out, absent) {
+			t.Fatalf("empty optional %q should be omitted: %q", absent, out)
+		}
+	}
+	// an entry with an empty author renders "unknown"; empty state/url/body branches are skipped.
+	out2 := RenderMarkdown(Context{Available: true, URL: "u", Title: "t", Comments: []Entry{{}}})
+	if !strings.Contains(out2, "- unknown\n") {
+		t.Fatalf("empty author should render 'unknown' with no trailing fields: %q", out2)
+	}
+}

@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 )
 
 const maxExcerptRunes = 500
@@ -223,10 +222,9 @@ func excerpt(text string) string {
 	if len(runes) <= maxExcerptRunes {
 		return text
 	}
+	// runes is []rune(text), so string(runes[:n]) re-encodes whole runes and is always valid UTF-8 —
+	// no trailing-partial-rune trimming is needed (the former utf8.ValidString loop here was unreachable).
 	truncated := string(runes[:maxExcerptRunes])
-	for !utf8.ValidString(truncated) && len(truncated) > 0 {
-		truncated = truncated[:len(truncated)-1]
-	}
 	return strings.TrimSpace(truncated) + "..."
 }
 
