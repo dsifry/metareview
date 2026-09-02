@@ -84,6 +84,11 @@ func TestHookInstallRefusesForeignLocalHooksPath(t *testing.T) {
 	if len(plan.Conflicts) == 0 || !strings.Contains(plan.Conflicts[0], foreign) {
 		t.Fatalf("a foreign local core.hooksPath must be a conflict naming it: %+v", plan)
 	}
+	// A LOCAL conflict must NOT be described as global/system — that wording is reserved for a value we do
+	// not own locally. (Pins the `if local == ""` scope-naming branch.)
+	if strings.Contains(plan.Conflicts[0], "a global or system") {
+		t.Fatalf("a LOCAL conflict must not be worded as global/system: %+v", plan)
+	}
 	if err := ApplyHookInstall(root, plan, false, g); err == nil {
 		t.Fatal("apply must refuse a conflict without force")
 	}
@@ -118,8 +123,8 @@ func TestHookInstallRefusesForeignGlobalHooksPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Conflicts) == 0 || !strings.Contains(plan.Conflicts[0], foreign) || !strings.Contains(plan.Conflicts[0], "global") {
-		t.Fatalf("a foreign GLOBAL core.hooksPath must be a conflict naming it as global: %+v", plan)
+	if len(plan.Conflicts) == 0 || !strings.Contains(plan.Conflicts[0], foreign) || !strings.Contains(plan.Conflicts[0], "a global or system") {
+		t.Fatalf("a foreign GLOBAL core.hooksPath must be a conflict worded as global/system: %+v", plan)
 	}
 	if err := ApplyHookInstall(root, plan, false, g); err == nil {
 		t.Fatal("apply must refuse a global conflict without force")
@@ -185,5 +190,65 @@ func TestApplyHookInstallRevalidatesBeforeWrite(t *testing.T) {
 	// --force still overrides the changed state.
 	if err := ApplyHookInstall(root, plan, true, g); err != nil {
 		t.Fatalf("--force must install over the changed state: %v", err)
+	}
+}
+
+// Passing a nil GitRunner must fall back to the REAL git binary (the `if git == nil` default). The negation
+// mutant leaves git nil and the next call nil-derefs, so exercising the nil path across all four entry points
+// kills those guards. HOME/config are isolated via t.Setenv so the real runner is deterministic.
+func TestHookInstallNilGitUsesRealRunner(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	root := t.TempDir()
+	if out, err := exec.Command("git", "-C", root, "init", "-q", "-b", "main").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	plan, err := PlanHookInstall(root, nil) // nil → realGitRunner
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.AlreadyDone || len(plan.Conflicts) != 0 {
+		t.Fatalf("clean repo via the real runner must have no conflicts: %+v", plan)
+	}
+	if err := ApplyHookInstall(root, plan, false, nil); err != nil { // nil → realGitRunner
+		t.Fatal(err)
+	}
+	st, err := UninstallPreview(root, nil) // nil → realGitRunner
+	if err != nil || !st.WouldChange {
+		t.Fatalf("after install, preview via the real runner must report WouldChange: %+v err=%v", st, err)
+	}
+	if changed, err := UninstallHookInstall(root, nil); err != nil || !changed { // nil → realGitRunner
+		t.Fatalf("uninstall via the real runner must change it: changed=%v err=%v", changed, err)
+	}
+}
+
+// UninstallPreview is read-only truth for the uninstall CLI: it fails closed on a non-repo, and its
+// WouldChange is true ONLY when core.hooksPath is metareview's own hooks/git — false when unset or foreign.
+func TestUninstallPreviewStates(t *testing.T) {
+	// Non-repo → fail closed (pins the rev-parse guard).
+	if _, err := UninstallPreview(t.TempDir(), isolatedGit(t.TempDir())); err == nil {
+		t.Fatal("UninstallPreview on a non-git dir must fail closed")
+	}
+	root, g := tempRepo(t)
+	target, _ := filepath.Abs(filepath.Join(root, "hooks", "git"))
+	// Unset → nothing to change.
+	if st, err := UninstallPreview(root, g); err != nil || st.WouldChange || st.Current != "" {
+		t.Fatalf("unset core.hooksPath: WouldChange must be false; %+v err=%v", st, err)
+	}
+	// A foreign value → not ours, so WouldChange must be false.
+	if _, err := g(root, "config", "--local", "core.hooksPath", filepath.Join(root, "not-ours")); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := UninstallPreview(root, g); err != nil || st.WouldChange {
+		t.Fatalf("a foreign core.hooksPath must not be WouldChange: %+v err=%v", st, err)
+	}
+	// Our own hooks/git → WouldChange true.
+	if _, err := g(root, "config", "--local", "core.hooksPath", target); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := UninstallPreview(root, g); err != nil || !st.WouldChange || st.Current != target {
+		t.Fatalf("metareview's own hooks/git must be WouldChange with Current set: %+v err=%v", st, err)
 	}
 }
