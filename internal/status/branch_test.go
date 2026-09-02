@@ -516,6 +516,11 @@ func TestShortSHA(t *testing.T) {
 	if got := shortSHA("abc"); got != "abc" {
 		t.Errorf("a short value is left alone, got %q", got)
 	}
+	// A 9-char input sits just past the boundary — it pins `len(s) > 8` against a `> 9` mutant, which would
+	// pass all 9 chars through instead of truncating to 8.
+	if got := shortSHA("123456789"); got != "12345678" {
+		t.Errorf("a 9-char value must truncate to 8, got %q", got)
+	}
 }
 
 func mustWriteFile(t *testing.T, path, body string) {
@@ -991,9 +996,12 @@ func TestChangeKindsEdges(t *testing.T) {
 	if k["changed.go"] != "modified" {
 		t.Errorf("an unhandled status letter must default to modified: %v", k)
 	}
-	// base=="" resolves the merge-base and diffs (success continuation) in a real repo.
-	root, _, _ := gitRepo(t)
-	_ = ChangeKinds(root, "", nil)
+	// base=="" resolves the merge-base and diffs (success continuation) in a real repo. Asserting the result
+	// is non-empty pins the `if err != nil { return }` guard: negating it returns early with no kinds.
+	root, _, _ := gitRepo(t) // branch adds a.go and b.go off main
+	if kk := ChangeKinds(root, "", nil); kk["a.go"] != "added" || kk["b.go"] != "added" {
+		t.Fatalf("base=\"\" must resolve the merge-base and classify the branch's changes as added: %v", kk)
+	}
 	// base=="" outside a repo: ResolveBranchScope errors, so ChangeKinds returns empty.
 	if k := ChangeKinds(t.TempDir(), "", nil); len(k) != 0 {
 		t.Fatalf("base-resolution failure must yield no kinds, got %v", k)
