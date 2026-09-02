@@ -308,6 +308,76 @@ func TestHappySdlcLoop(t *testing.T) {
 	}
 }
 
+// cleanScenario is the mock judge for a sdlc-loop-clean drive: the fork adjudicate node confirms the one
+// candidate it is handed in iteration 0 and again in iteration 1 (the re-review's re-surfaced bug). No
+// still-present/verify calls — this workflow has no such node.
+const cleanScenario = `calls:
+  - {kind: adjudicate, node: adjudicate, iter: 0, index: 0, raw: '{"reasoning":"r","is_real":true,"confidence":0.9}', tokens: {input: 10, output: 5}}
+  - {kind: adjudicate, node: adjudicate, iter: 1, index: 0, raw: '{"reasoning":"r","is_real":true,"confidence":0.9}', tokens: {input: 10, output: 5}}
+`
+
+// findingsB is a SECOND, distinct finding (different file/text) so it is not deduped against findingsData.
+const findingsB = `{"findings":[{"issue_text":"off-by-one in g.go","file":"g.go","line":7,"severity":"high","category":"bug","source":"lens"}]}`
+
+// TestSdlcLoopCleanReReviewLoopMockAI drives the WHOLE multi-iteration re-review loop of sdlc-loop-clean
+// through the real machine and the real fork/adjudicate path against an injected mock judge — a real temp
+// git repo, the real event log, deterministic, no real LLM and no real subprocess. It proves the FSM
+// ENFORCES re-review of the fix: after fixing B1 the fix INTRODUCES B2, the re-review catches it, the loop
+// re-adjudicates and re-fixes, and the run reaches done(clean) only when a fresh review finds nothing.
+func TestSdlcLoopCleanReReviewLoopMockAI(t *testing.T) {
+	h := newHarness(t)
+	_ = os.WriteFile(filepath.Join(h.root, "mock", "judge.yaml"), []byte(cleanScenario), 0o644)
+	// Ignore .metareview/ so the store's run files never dirty the tree the fix commits into.
+	_ = os.WriteFile(filepath.Join(h.root, ".gitignore"), []byte("mock/\nfixtures/\nexp/\nsmall/\ndocs/\n.metareview/\n"), 0o644)
+	git(t, h.root, "add", ".gitignore")
+	git(t, h.root, "commit", "-q", "-m", "ignore .metareview")
+
+	id := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop-clean", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock")["run_id"].(string)
+
+	// review discovers `find`, the fork adjudicator confirms it, we commit a fix, and control lands at
+	// recheck (the re-review) — asserting the fix is re-reviewed, not waved through to done.
+	fixLeg := func(node, find, msg string) {
+		h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
+		h.must(StatusOK, 0, "record", "node-output", "--node", node, "--data", h.file(node+".json", find), "--run", id)
+		if env := h.must(machine.StatusAdvanced, 0, "advance", "--run", id); env["to"] != "adjudicate" {
+			t.Fatalf("%s→adjudicate: %v", node, env)
+		}
+		if env := h.must(machine.StatusAdvanced, 0, "advance", "--run", id); env["to"] != "fix" { // real fork adjudicate vs the mock judge
+			t.Fatalf("adjudicate→fix (mock judge confirms): %v", env)
+		}
+		h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
+		sha := h.commit(msg)
+		h.must(StatusOK, 0, "record", "node-output", "--node", "fix", "--data", h.file("fix-"+msg+".json", `{"commit":"`+sha+`","summary":"`+msg+`"}`), "--run", id)
+		if env := h.must(machine.StatusAdvanced, 0, "advance", "--run", id); env["to"] != "recheck" {
+			t.Fatalf("fix→recheck — the FSM must re-review the fix: %v", env)
+		}
+		h.must(machine.StatusNeedsInput, 3, "advance", "--run", id) // recheck awaits its review
+	}
+
+	// iteration 0: fix B1; the fix INTRODUCES B2, which the re-review at recheck catches → loop to discover.
+	fixLeg("discover", findingsData, "fix-b1")
+	h.must(StatusOK, 0, "record", "node-output", "--node", "recheck", "--data", h.file("rc0.json", findingsB), "--run", id)
+	if env := h.must(machine.StatusAdvanced, 0, "advance", "--run", id); env["to"] != "discover" || env["iteration"] != float64(1) {
+		t.Fatalf("a non-clean recheck must LOOP to a fresh discover: %v", env)
+	}
+
+	// iteration 1: the fresh discover re-finds B2, adjudicate re-confirms, we re-fix. recheck is now clean,
+	// but B2 lingers in this iteration's Findings, so the loop takes one more fresh pass at discover.
+	fixLeg("discover", findingsB, "fix-b2")
+	h.must(StatusOK, 0, "record", "node-output", "--node", "recheck", "--data", h.file("rc1.json", `{"findings":[]}`), "--run", id)
+	if env := h.must(machine.StatusAdvanced, 0, "advance", "--run", id); env["to"] != "discover" || env["iteration"] != float64(2) {
+		t.Fatalf("recheck loops once more to a fresh discover: %v", env)
+	}
+
+	// iteration 2: a fresh review of the now-fixed code finds nothing → done(clean).
+	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
+	h.must(StatusOK, 0, "record", "node-output", "--node", "discover", "--data", h.file("d2.json", `{"findings":[]}`), "--run", id)
+	env := h.must(machine.StatusDone, 0, "advance", "--run", id)
+	if env["outcome"] != "clean" {
+		t.Fatalf("a fresh review that finds nothing → done(clean): %v", env)
+	}
+}
+
 func TestRunResolutionAndRecords(t *testing.T) {
 	h := newHarness(t)
 	h.mustErr(CodeNoRuns, 2, "state")
