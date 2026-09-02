@@ -688,13 +688,19 @@ func TestSDLCLoopCleanReReviewsAfterFix(t *testing.T) {
 	if has("fix", "done") != nil {
 		t.Fatal("fix must NOT exit directly to done without re-review")
 	}
-	// recheck exits clean only when a FRESH review finds nothing, and otherwise LOOPS back to discover.
-	// The loop MUST target a review node: fold clears this iteration's Findings/Confirmed at the loop
-	// boundary, so only a review (discover) re-derives them — targeting adjudicate/fix would hand them an
-	// empty set. discover is therefore where the authoritative fresh re-review of the fix happens.
+	// recheck LOOPS back to discover on findings_nonempty; the loop MUST target a review node: fold clears
+	// this iteration's Findings/Confirmed at the loop boundary, so only a review (discover) re-derives them
+	// — targeting adjudicate/fix would hand them an empty set. discover is therefore where the authoritative
+	// fresh re-review of the fix happens.
+	//
+	// This pins that recheck carries a findings_empty→done terminal, which Validate's loop_terminal rule
+	// REQUIRES (a loop-carrying state needs exactly one outcome-bearing terminal). It pins the edge EXISTS,
+	// not that it ever fires — at runtime it is dead (findings linger within an iteration, so recheck's set
+	// is never empty and it always loops). The clean exit the suite actually exercises is discover→done; do
+	// not read this assertion as proof recheck exits clean directly.
 	clean := has("recheck", "done")
 	if clean == nil || clean.Gate != "findings_empty" || clean.Outcome == "" {
-		t.Fatalf("recheck must exit to done on findings_empty with an outcome, got %+v", clean)
+		t.Fatalf("recheck must carry the (structural) findings_empty→done terminal, got %+v", clean)
 	}
 	loop := has("recheck", "discover")
 	if loop == nil || !loop.Loop || loop.Gate != "findings_nonempty" {

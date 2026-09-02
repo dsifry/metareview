@@ -2267,12 +2267,18 @@ func TestRunNodeFixScopedDiffUsesFixEntryHead(t *testing.T) {
 // a review is clean (discover/recheck → done on findings_empty) or the adjudicator confirms nothing real
 // (adjudicate → done on confirmed_empty). The loop:true edge is recheck→discover: fold clears this
 // iteration's Findings/Confirmed at the boundary, so the loop MUST target a review node (discover) that
-// re-derives them — the authoritative fresh re-review happens there. This test drives:
+// re-derives them — the authoritative fresh re-review happens there.
+//
+// This is MACHINE-LAYER coverage: adjudicate is the harness's fake executor (it does not run kind.go's
+// real judging), so what it pins is the graph/gate wiring, not the fork's rejection logic. The real
+// fork/adjudicate rejection is exercised end-to-end in cli's TestSdlcLoopCleanReReviewCandidateRejected...
+// This test drives:
 //
 //	(A) a fix that INTRODUCES a new bug — the re-review catches it, the loop re-adjudicates and re-fixes,
 //	    and the run only reaches done when a fresh discover is clean;
-//	(B) the blocker the pre-push review caught — once bugs are known (AllFound>0) a re-surfaced candidate
-//	    the adjudicator REJECTS must still reach done via confirmed_empty, not dead-end.
+//	(B) the blocker — once bugs are known (AllFound>0), when adjudicate confirms nothing the run must still
+//	    reach done via confirmed_empty (AllFound-blind), not dead-end. Here the fake adjudicate returns an
+//	    empty Delta to model "nothing confirmed"; the gate wiring is what's under test.
 func TestSdlcLoopCleanEnforcesReReviewOfTheFix(t *testing.T) {
 	distinct := func(text, file string, line int) string {
 		return string(run.MarshalCanonical(run.Delta{Findings: []run.Finding{{IssueText: text, File: file, Line: line}}}))

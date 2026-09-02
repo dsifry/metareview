@@ -13,10 +13,17 @@ version: 1
 # be handed an empty set). Consequences that follow purely from that rule:
 #   * `discover` is the loop target, so a fresh iteration's authoritative re-review happens there.
 #   * `recheck` is the loop-carrying state (exactly one terminal + the loop edge). It re-reviews the fix;
-#     a clean recheck can exit directly, a non-clean one starts a fresh iteration at `discover`.
-#   * The clean exits are a REVIEW finding nothing (`discover`/`recheck` → done on findings_empty) or the
-#     ADJUDICATOR confirming nothing real (`adjudicate` → done on confirmed_empty). Findings are provisional
-#     candidates; only a review's emptiness or the adjudicator's verdict ends the run.
+#     any non-clean re-review starts a fresh iteration at `discover`.
+#   * The clean exit that actually FIRES is a fresh `discover` finding nothing (findings_empty) or the
+#     `adjudicate`-tor confirming nothing real (confirmed_empty). Findings are provisional candidates; only a
+#     review's emptiness or the adjudicator's verdict ends the run.
+#   * NOTE: `recheck → done` (findings_empty) is a STRUCTURAL requirement of Validate's loop_terminal rule
+#     (the loop-carrying state must carry exactly one outcome-bearing terminal), but it is DEAD at runtime
+#     and never taken: findings accumulate within an iteration and are cleared only at the loop boundary
+#     (Delta.Findings is json omitempty, so an empty re-review is a fold no-op — it does not clear the
+#     findings `discover` already recorded this iteration). So `recheck` always sees a non-empty finding set
+#     and always loops. Do not "optimize" this edge away (Validate rejects a loop state with no terminal)
+#     and do not rely on it firing — the authoritative clean exit is the fresh `discover → done`.
 vars:
   REVIEWER:     {default: claude-opus-5}
   JUDGE:        {required: true}
@@ -37,7 +44,9 @@ transitions:                                  # ordered
   - {from: adjudicate, to: fix,        gate: confirmed_nonempty}
   - {from: fix,        to: recheck,    gate: commit_exists}
   # recheck is the loop-carrying state: exactly one outcome-bearing terminal (→done) plus the loop edge.
-  - {from: recheck,    to: done,       gate: findings_empty,    outcome: clean}   # a fresh review of the fix found nothing → bug-free
+  # This terminal satisfies Validate's loop_terminal rule but is DEAD at runtime (see header): findings
+  # linger within an iteration, so recheck's finding set is never empty and this edge never fires.
+  - {from: recheck,    to: done,       gate: findings_empty,    outcome: clean}   # STRUCTURAL terminal (never taken); real clean exit is discover→done
   - {from: recheck,    to: discover,   gate: findings_nonempty, loop: true}       # the re-review is not clean → new iteration re-discovers → adjudicate → fix → recheck …
 nodes:
   discover:   {kind: review-lenses,        exec: subagent, model: $REVIEWER, effort: $REV_EFFORT}

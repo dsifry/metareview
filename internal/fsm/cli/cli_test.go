@@ -559,8 +559,8 @@ func TestSdlcLoopCleanLoopIsBounded(t *testing.T) {
 	h.review(id, "recheck", findingsJSON(stillBad)) // the fix did not clear it
 	// recheck→discover would begin iteration 1, but max_iterations:1 stops the loop at that boundary.
 	env := h.must(machine.StatusStopped, 1, "advance", "--run", id)
-	if env["stop_reason"] == nil {
-		t.Fatalf("a non-converging loop must STOP at the iteration bound: %v", env)
+	if sr, _ := env["stop_reason"].(string); !strings.Contains(sr, "max_iterations") {
+		t.Fatalf("the loop must STOP for the iteration bound (max_iterations), got stop_reason %q: %v", sr, env)
 	}
 }
 
