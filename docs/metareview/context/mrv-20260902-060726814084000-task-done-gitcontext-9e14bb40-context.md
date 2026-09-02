@@ -1,3 +1,9 @@
+# metareview task-done context
+
+Run ID: `mrv-20260902-060726814084000-task-done-gitcontext-9e14bb40`
+
+## Task
+
 package gitcontext
 
 import (
@@ -571,3 +577,113 @@ func untrackedExcerpt(rel, text string) string {
 	}
 	return "--- " + rel + "\n" + strings.Join(lines, "\n")
 }
+
+
+## Git
+
+- Base: `53ea11985bcea11ddf250a4612d958c7400d508e`
+- Head: `df1885a92279baffd1f02a727d422a8661b13c9a`
+- Branch: `gitcontext-exclude-recursive`
+- Gate effect: `gate`
+
+## Context Profile
+
+- Raw diff bytes: `2632`
+- Filtered diff bytes: `2632`
+- Risk level: `none`
+
+## Context Shard Plan
+
+Not sharded.
+
+## Review Manifest
+
+- Manifest verdict: `PASS`
+- Source manifest hash: not sharded
+- Runtime assessment: static-only; runtime not assessed
+
+### Source Paths
+- internal/gitcontext/gitcontext.go
+- internal/gitcontext/gitcontext_test.go
+
+### Manifest Blockers
+No manifest blockers.
+
+## Changed Files
+
+- internal/gitcontext/gitcontext.go
+- internal/gitcontext/gitcontext_test.go
+
+## Diff
+
+```diff
+diff --git a/internal/gitcontext/gitcontext.go b/internal/gitcontext/gitcontext.go
+index c3124ec..a6acce7 100644
+--- a/internal/gitcontext/gitcontext.go
++++ b/internal/gitcontext/gitcontext.go
+@@ -242,7 +242,10 @@ func matchesExclude(file, exclude string) bool {
+ 		prefix := strings.TrimSuffix(exclude, "/**")
+ 		return file == prefix || strings.HasPrefix(file, prefix+"/")
+ 	}
+-	return file == exclude
++	// A bare exclude matches the exact path AND anything under it as a directory, because git's
++	// :(exclude)<dir> pathspec is recursive. The `exclude+"/"` prefix (not a bare prefix) keeps a file
++	// exclude from over-matching a sibling that merely shares its name (config/app.yaml vs app.yaml.bak).
++	return file == exclude || strings.HasPrefix(file, exclude+"/")
+ }
+ 
+ func generatedExcludedFiles(root, base string, excludes []string, changedFiles, stagedFiles, workingTreeFiles, untrackedFiles []string) []string {
+diff --git a/internal/gitcontext/gitcontext_test.go b/internal/gitcontext/gitcontext_test.go
+index ffbce28..059d8fb 100644
+--- a/internal/gitcontext/gitcontext_test.go
++++ b/internal/gitcontext/gitcontext_test.go
+@@ -375,3 +375,30 @@ func TestHardenDiffPinsPathPrefixes(t *testing.T) {
+ 		t.Errorf("diff header must carry a/ and b/ prefixes regardless of diff.noprefix; got %q", first)
+ 	}
+ }
++
++// gitcontext-1: a bare-directory exclude must match files UNDER it, because git's :(exclude)<dir>
++// pathspec is recursive. The exceptions path (exactExcludesExcept) converts each matched changed file
++// into an exact :(exclude)<file>; if matchesExclude only did exact matching, a bare "build" exclude
++// plus any exception would silently un-exclude the whole build/ directory into the reviewed diff.
++func TestMatchesExcludeDirectoryIsRecursive(t *testing.T) {
++	if !matchesExclude("build/foo.js", "build") {
++		t.Error("a bare directory exclude must match files under it (git :(exclude) is recursive)")
++	}
++	if !matchesExclude("build/sub/deep.js", "build") {
++		t.Error("directory exclude must match nested files")
++	}
++	if !matchesExclude("build", "build") {
++		t.Error("directory exclude must still match the exact path")
++	}
++	// A file exclude must not over-match a sibling that merely shares its prefix.
++	if matchesExclude("config/app.yaml.bak", "config/app.yaml") {
++		t.Error("a file exclude must not match a prefix-sharing sibling")
++	}
++	// Unrelated files and the /** form are unchanged.
++	if matchesExclude("other/foo.js", "build") {
++		t.Error("unrelated path must not match")
++	}
++	if !matchesExclude("docs/x/y.md", "docs/x/**") {
++		t.Error("the /** recursive form must still match")
++	}
++}
+
+
+
+```
+
+## Knowledge And Registries
+
+Service inventory: none
+
+No service inventory found.
+
+Knowledge facts:
+
+No Beads knowledge facts found.
+
+## Evidence
+
+{"schemaVersion":1,"kind":"validation","command":["go","test","./internal/gitcontext/"],"cwd":".","exitCode":0,"startedAt":"2026-09-02T06:07:26.660954Z","finishedAt":"2026-09-02T06:07:26.8064Z","stdoutSha256":"b69bdfdde5c6143030cbd3f6d55e0345427ec32495bbd0172cd43c2590bb90bf","stderrSha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","summary":"go test ./internal/gitcontext/ exited 0"}
+
