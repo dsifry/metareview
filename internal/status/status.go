@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewlog"
@@ -149,17 +150,142 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 		r.MustClear = append(r.MustClear, Blocker{
 			Target:  target,
 			Verdict: VerdictUnreviewed,
-			Kind:    "unreviewed",
+			Kind:    UnreviewedKind,
 		})
 	}
 	r.Abandoned = DiscoverAbandonedRuns(root)
 	for _, a := range r.Abandoned {
 		r.MustClear = append(r.MustClear, Blocker{
-			Target: a.Workflow + " @ " + a.State, RunID: a.RunID, Verdict: VerdictAbandoned, Kind: "fsm-run",
+			Target: a.Workflow + " @ " + a.State, RunID: a.RunID, Verdict: VerdictAbandoned, Kind: AbandonedKind,
 		})
 	}
 	r.Blocked = len(r.MustClear) > 0
 	return r, nil
+}
+
+// AbandonedKind is the Blocker.Kind for an FSM run left mid-flight; UnreviewedKind is the kind for a
+// changed file no passing review has read.
+const (
+	AbandonedKind  = "fsm-run"
+	UnreviewedKind = "unreviewed"
+)
+
+// CommitScope selects which files a pending `git commit` will actually write, so the gate measures exactly
+// that set and cannot be walked around by the flag that decides it.
+type CommitScope int
+
+const (
+	// ScopeStaged is a plain `git commit`: it writes the index, so the gate measures `git diff --cached`.
+	ScopeStaged CommitScope = iota
+	// ScopeAll is `git commit -a`/`--all` (or a commit that names a pathspec, or `--include`/`--only`): the
+	// commit pulls in tracked working-tree content beyond the curated index, so the gate must measure ALL
+	// tracked changes vs HEAD (`git diff HEAD`), not just what happens to be staged. This is the hole a
+	// staged-only gate left wide open: `git commit -am` stages-and-writes in one step, so at PreToolUse time
+	// nothing is staged yet and a staged-only gate saw an empty diff and waved the whole commit through.
+	ScopeAll
+)
+
+// CommitGate is the PRE-COMMIT decision over a plain `git commit` (ScopeStaged). See CommitGateScoped for
+// the scope-aware form the hook drives; this is the staged-only default kept for callers and tests.
+func CommitGate(root, base string, run RunGit) (blocked bool, message string, err error) {
+	return CommitGateScoped(root, base, ScopeStaged, run)
+}
+
+// CommitGateScoped is the PRE-COMMIT decision, scoped to THIS commit — the files the commit will WRITE, not
+// the whole branch. `scope` says which files that is (see CommitScope): ScopeStaged is the index; ScopeAll
+// is every tracked working-tree change, which is what `git commit -a` and a pathspec commit actually record.
+// A commit only asks "were the files I am committing reviewed", so a normal small commit is a small check
+// that never needs the whole-branch sharded review. Whole-branch integration is PushGate's job. Both the
+// decision AND the message live here (tested, mutation-checkable); the CLI is a thin shim.
+//
+// Coverage is by FILE: a passing review that read a file on a branch commit clears it. (Content-aware
+// currency — re-flag a file edited since it was reviewed — is a deliberate follow-up, not wired here.)
+func CommitGateScoped(root, base string, scope CommitScope, run RunGit) (blocked bool, message string, err error) {
+	if run == nil {
+		run = realGit
+	}
+	branch, err := ResolveBranchScope(root, base, run)
+	if err != nil {
+		// Fail closed: not knowing what the branch is means we cannot say the committed files are reviewed.
+		return true, "metareview: commit blocked — branch scope could not be resolved (" + err.Error() +
+			"); failing closed. Record an override reason to commit anyway.\n", nil
+	}
+	files, ferr := gitCommitFiles(run, root, scope)
+	if ferr != nil {
+		// Fail closed, exactly as an unresolvable scope does: not knowing what this commit writes means we
+		// cannot say the committed files were reviewed.
+		return true, "metareview: commit blocked — could not list the files this commit writes (" + ferr.Error() +
+			"); failing closed. Record an override reason to commit anyway.\n", nil
+	}
+	if len(files) == 0 {
+		return false, "", nil // nothing this commit writes (or only generated) → nothing to gate
+	}
+	logs, err := reviewlog.Discover(root)
+	if err != nil {
+		return false, "", err
+	}
+	commitScope := BranchScope{Base: branch.Base, Head: branch.Head, Commits: branch.Commits, Files: files}
+	unreviewed := commitScope.Unreviewed(logs)
+	if len(unreviewed) == 0 {
+		return false, "", nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d file(s) this commit writes are not reviewed:\n", len(unreviewed))
+	for _, f := range unreviewed {
+		fmt.Fprintf(&b, "  - %s\n", f)
+	}
+	baseArg := ""
+	if base != "" {
+		baseArg = " --base " + base
+	}
+	fmt.Fprintf(&b, "Review the changes: `metareview review prompt%s`, run the adversarial review and record coverage.\n", baseArg)
+	return true, b.String(), nil
+}
+
+// PushGate is the PRE-PUSH decision, scoped to the WHOLE branch: everything about whether the branch's code
+// is reviewed — unreviewed changed files, open (non-superseded) blocking reviews, an unresolvable scope
+// (fail closed) — minus abandoned runs (CommitBlockers). There is NO claim-free exemption: every changed
+// file must be reviewed, whitespace-only included (see TestPushGateDoesNotExemptWhitespaceOnlyChange). This
+// is the integration pass: it catches what per-commit reviews missed and anything spanning commits, and on a
+// large branch it is where the single sharded review belongs. Same tested-decision-plus-message shape as CommitGate.
+func PushGate(root, base string, run RunGit) (blocked bool, message string, err error) {
+	// committedOnly: a push sends commits, so uncommitted local WIP must not block a reviewed branch.
+	report, err := buildForBranch(root, base, run, true)
+	if err != nil {
+		return false, "", err
+	}
+	blockers := CommitBlockers(report)
+	if len(blockers) == 0 {
+		return false, "", nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "metareview: push blocked — %d unreviewed or unresolved across this branch:\n", len(blockers))
+	for _, bl := range blockers {
+		fmt.Fprintf(&b, "  - [%s] %s\n", bl.Verdict, bl.Target)
+	}
+	baseArg := ""
+	if base != "" {
+		baseArg = " --base " + base
+	}
+	fmt.Fprintf(&b, "Run the whole-branch review (sharded if large): `metareview review pr-ready%s --evidence <file>`, clear findings, then push; or record an override reason.\n", baseArg)
+	return true, b.String(), nil
+}
+
+// CommitBlockers is the subset of a report's MustClear that a COMMIT gate acts on: everything about
+// whether this branch's code is reviewed — unreviewed changed files, open (non-superseded) blocking
+// reviews, and an unresolvable scope (fail closed) — but NOT abandoned FSM runs. An abandoned run means a
+// review loop was left unfinished, which is a "before you finish the session" concern (the Stop scope),
+// not "is the code in this commit reviewed". Blocking every commit on an unrelated leftover run would be
+// noise an operator learns to bypass with --no-verify, which is how a gate stops being one.
+func CommitBlockers(r Report) []Blocker {
+	out := make([]Blocker, 0, len(r.MustClear))
+	for _, b := range r.MustClear {
+		if b.Kind == AbandonedKind {
+			continue
+		}
+		out = append(out, b)
+	}
+	return out
 }
 
 // VerdictAbandoned is the verdict on an FSM run left mid-flight. Every loop here ends by handing
@@ -192,10 +318,17 @@ func Emit(root string, w io.Writer) (int, error) { return EmitFor(root, "", w) }
 // refuses every session for work it never touched; scoped to a target string it could not match
 // a source file at all, so it cleared everything.
 func BuildForBranch(root, base string, run RunGit) (Report, error) {
+	return buildForBranch(root, base, run, false)
+}
+
+// buildForBranch is BuildForBranch with an explicit scope mode. committedOnly true measures only the
+// committed range (PushGate — a push sends commits, so uncommitted WIP must not block it); false folds in
+// staged/working-tree/untracked changes too (the Stop-hook / `status --scope branch` view).
+func buildForBranch(root, base string, run RunGit, committedOnly bool) (Report, error) {
 	// The scope is resolved BEFORE the report is built, so the commit set the report needs for
 	// currency checks is the same one the scoping uses — resolved once, with this caller's base
 	// and its injected git seam rather than a second guess made with neither.
-	scope, scopeErr := ResolveBranchScope(root, base, run)
+	scope, scopeErr := resolveBranchScope(root, base, run, committedOnly)
 	commits := map[string]bool(nil)
 	if scopeErr == nil {
 		commits = scope.Commits
@@ -249,7 +382,7 @@ func BuildForBranch(root, base string, run RunGit) (Report, error) {
 		})
 	}
 	for _, f := range scope.Unreviewed(all) {
-		r.MustClear = append(r.MustClear, Blocker{Target: f, Verdict: VerdictUnreviewed, Kind: "unreviewed"})
+		r.MustClear = append(r.MustClear, Blocker{Target: f, Verdict: VerdictUnreviewed, Kind: UnreviewedKind})
 	}
 	// An abandoned run blocks in EVERY scope, and re-adding it here is not a detail.
 	//
@@ -265,7 +398,7 @@ func BuildForBranch(root, base string, run RunGit) (Report, error) {
 	// told the loop finished.
 	for _, a := range r.Abandoned {
 		r.MustClear = append(r.MustClear, Blocker{
-			Target: a.Workflow + " @ " + a.State, RunID: a.RunID, Verdict: VerdictAbandoned, Kind: "fsm-run",
+			Target: a.Workflow + " @ " + a.State, RunID: a.RunID, Verdict: VerdictAbandoned, Kind: AbandonedKind,
 		})
 	}
 	r.Blocked = len(r.MustClear) > 0

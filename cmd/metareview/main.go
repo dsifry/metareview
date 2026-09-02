@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 
 	"github.com/dsifry/metareview/internal/artifactreview"
 	"github.com/dsifry/metareview/internal/contextpack"
@@ -198,34 +201,6 @@ func main() {
 		return
 	}
 
-	if len(args) >= 2 && args[0] == "review" && args[1] == "prompt" {
-		base := ""
-		for i := 2; i < len(args); i++ {
-			switch args[i] {
-			case "--base":
-				base = flagValue(args, i, "--base")
-				i++
-			default:
-				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-				os.Exit(2)
-			}
-		}
-		// The same set the coverage gate measures: this branch's changed files (committed + staged +
-		// working + untracked), exclude-filtered. Classifying that set keeps the prompt and the gate
-		// talking about exactly the same files.
-		root := repo.RootOr(mustCwd())
-		scope, err := status.ResolveBranchScope(root, base, nil)
-		exitOnErr(err)
-		label := base
-		if label == "" {
-			label = scope.Base
-			if len(label) > 12 {
-				label = label[:12]
-			}
-		}
-		fmt.Print(reviewprompt.Build(label, scope.Files, status.ChangeKinds(root, base, nil)))
-		os.Exit(0)
-	}
 	if len(args) >= 3 && args[0] == "review" && args[1] == "artifact" {
 		previousRun := ""
 		scaffoldOnly := false
@@ -325,6 +300,73 @@ func main() {
 		return
 	}
 
+	if len(args) >= 2 && args[0] == "review" && args[1] == "prompt" {
+		base := ""
+		for i := 2; i < len(args); i++ {
+			switch args[i] {
+			case "--base":
+				base = flagValue(args, i, "--base")
+				i++
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
+				os.Exit(2)
+			}
+		}
+		// The same set the coverage gate measures: this branch's changed files (committed + staged +
+		// working + untracked), exclude-filtered. Classifying that set keeps the prompt and the gate
+		// talking about exactly the same files.
+		root := repo.RootOr(mustCwd())
+		scope, err := status.ResolveBranchScope(root, base, nil)
+		exitOnErr(err)
+		label := base
+		if label == "" {
+			label = scope.Base
+			if len(label) > 12 {
+				label = label[:12]
+			}
+		}
+		fmt.Print(reviewprompt.Build(label, scope.Files, status.ChangeKinds(root, base, nil)))
+		os.Exit(0)
+	}
+	if len(args) >= 2 && args[0] == "review" && args[1] == "gate" {
+		base, push, all := "", false, false
+		for i := 2; i < len(args); i++ {
+			switch args[i] {
+			case "--base":
+				base = flagValue(args, i, "--base")
+				i++
+			case "--push":
+				push = true // whole-branch (pre-push) scope instead of the staged (pre-commit) scope
+			case "--all":
+				all = true // mirror `git commit -a`: gate every tracked change, not just the staged index
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
+				os.Exit(2)
+			}
+		}
+		// All the judgement is in status.CommitGate*/PushGate (tested); this is the thin CLI over it. The
+		// block reason goes to STDERR so a PreToolUse hook surfaces it verbatim. --all is the -a/pathspec
+		// scope: a commit that writes tracked working-tree content the index does not hold must be measured
+		// against that content, or `git commit -am` slips the whole thing past a staged-only gate.
+		root := repo.RootOr(mustCwd())
+		var blocked bool
+		var message string
+		var err error
+		switch {
+		case push:
+			blocked, message, err = status.PushGate(root, base, nil)
+		case all:
+			blocked, message, err = status.CommitGateScoped(root, base, status.ScopeAll, nil)
+		default:
+			blocked, message, err = status.CommitGate(root, base, nil)
+		}
+		exitOnErr(err)
+		if blocked {
+			fmt.Fprint(os.Stderr, message)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if len(args) >= 2 && args[0] == "review" && args[1] == "pr-ready" {
 		options := prready.Options{}
 		for i := 2; i < len(args); i++ {
@@ -528,25 +570,41 @@ func handleSetup(args []string) {
 		return
 	}
 
-	bootstrap := false
-	options := setup.BootstrapOptions{}
+	bootstrap, installHooks, uninstallHooks, yes, force, dryRun := false, false, false, false, false, false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--bootstrap-prereqs":
 			bootstrap = true
+		case "--install-hooks":
+			installHooks = true
+		case "--uninstall-hooks":
+			uninstallHooks = true
 		case "--dry-run":
-			options.DryRun = true
-		case "--confirm-bootstrap-prereqs":
-			options.Confirm = true
+			dryRun = true
+		case "--yes", "--confirm-bootstrap-prereqs":
+			yes = true
+		case "--force":
+			force = true
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
 			os.Exit(2)
 		}
 	}
-	if !bootstrap {
-		fmt.Fprintln(os.Stderr, "Usage: metareview setup --check OR metareview setup --bootstrap-prereqs [--dry-run] [--confirm-bootstrap-prereqs]")
+
+	if installHooks && uninstallHooks {
+		fmt.Fprintln(os.Stderr, "Choose one of --install-hooks or --uninstall-hooks, not both.")
 		os.Exit(2)
 	}
+	if installHooks || uninstallHooks {
+		handleHookInstall(uninstallHooks, yes, force, dryRun)
+		return
+	}
+
+	if !bootstrap {
+		fmt.Fprintln(os.Stderr, "Usage: metareview setup --check | --install-hooks [--dry-run|--yes|--force] | --uninstall-hooks [--dry-run|--yes] | --bootstrap-prereqs [--dry-run] [--confirm-bootstrap-prereqs]")
+		os.Exit(2)
+	}
+	options := setup.BootstrapOptions{DryRun: dryRun, Confirm: yes}
 	plan, err := setup.BootstrapPrereqs(mustCwd(), options)
 	if errors.Is(err, setup.ErrConfirmationRequired) {
 		fmt.Fprintln(os.Stderr, "setup --bootstrap-prereqs requires --confirm-bootstrap-prereqs without --dry-run")
@@ -558,6 +616,134 @@ func handleSetup(args []string) {
 	for _, action := range plan.Actions {
 		fmt.Printf("- %s\n", action)
 	}
+}
+
+// handleHookInstall installs/uninstalls the git-native review gate (core.hooksPath). It gives the user total
+// control: interactive by default (a [y/N] prompt that defaults to NO), non-destructive on any conflict, and
+// — with no TTY and no --yes, almost certainly an AGENT — it prints the plan and the flags and changes
+// nothing rather than hanging on a prompt. --yes installs headlessly, --dry-run previews, --force overrides a
+// conflict.
+func handleHookInstall(uninstall, yes, force, dryRun bool) {
+	root := repo.RootOr(mustCwd())
+	if uninstall {
+		// Uninstall disables the gate, so it runs through the SAME guards as install: a read-only preview,
+		// --dry-run, and the [y/N] / --yes / no-TTY gating. The old path unset core.hooksPath immediately,
+		// ignoring --dry-run and letting a non-interactive caller disable the gate without --yes.
+		status, err := setup.UninstallPreview(root, nil)
+		exitOnErr(err)
+		current := status.Current
+		if current == "" {
+			current = "unset"
+		}
+		fmt.Println("metareview review gate — uninstall (git-native hooks)")
+		fmt.Println("  Currently: core.hooksPath = " + current)
+		if !status.WouldChange {
+			fmt.Println("\nNothing to uninstall — core.hooksPath is not metareview's hooks/git. No changes made.")
+			return
+		}
+		fmt.Println("  Will UNSET core.hooksPath — the pre-push gate and post-commit nudge stop running on this repo.")
+		if dryRun {
+			fmt.Println("\n(dry run — no changes made.)")
+			return
+		}
+		proceed := yes
+		if !yes {
+			if isTTY(os.Stdin) {
+				proceed = promptYesNo("Uninstall the review gate?")
+			} else {
+				// No TTY and no --yes: almost certainly an agent. Show the directions, change NOTHING.
+				fmt.Println("\nNo TTY and no --yes, so NOTHING was changed.")
+				fmt.Println("  uninstall: metareview setup --uninstall-hooks --yes")
+				fmt.Println("  preview:   metareview setup --uninstall-hooks --dry-run")
+				return
+			}
+		}
+		if !proceed {
+			fmt.Println("No changes made — core.hooksPath left as is. Re-run with --yes to uninstall.")
+			return
+		}
+		changed, err := setup.UninstallHookInstall(root, nil)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "metareview: "+err.Error())
+			os.Exit(1)
+		}
+		if changed {
+			fmt.Println("metareview: uninstalled — core.hooksPath unset; the git-native review gate no longer runs.")
+		} else {
+			fmt.Println("metareview: nothing to uninstall — core.hooksPath was not metareview's hooks/git.")
+		}
+		return
+	}
+
+	plan, err := setup.PlanHookInstall(root, nil)
+	exitOnErr(err)
+	printHookPlan(plan)
+
+	if plan.AlreadyDone {
+		fmt.Println("\nAlready installed — no changes made.")
+		return
+	}
+	if len(plan.Conflicts) > 0 && !force {
+		fmt.Println("\nCONFLICT — no changes made:")
+		for _, c := range plan.Conflicts {
+			fmt.Println("  - " + c)
+		}
+		fmt.Println("Resolve it, or re-run with --force to override.")
+		os.Exit(1)
+	}
+	if dryRun {
+		fmt.Println("\n(dry run — no changes made.)")
+		return
+	}
+
+	proceed := yes
+	if !yes {
+		if isTTY(os.Stdin) {
+			proceed = promptYesNo("Proceed?")
+		} else {
+			// No TTY and no --yes: almost certainly an agent. Show the directions, change NOTHING, never hang.
+			fmt.Println("\nNo TTY and no --yes, so NOTHING was changed.")
+			fmt.Println("  install: metareview setup --install-hooks --yes      (add --force to override a conflict)")
+			fmt.Println("  preview: metareview setup --install-hooks --dry-run")
+			return
+		}
+	}
+	if !proceed {
+		fmt.Println("No changes made — core.hooksPath was not set. Re-run with --yes to install.")
+		return
+	}
+
+	exitOnErr(setup.ApplyHookInstall(root, plan, force, nil))
+	fmt.Println("\nInstalled — core.hooksPath = " + plan.Target)
+	fmt.Println("The pre-push gate (blocks an unreviewed push) and post-commit review nudge are now active on this repo.")
+}
+
+func printHookPlan(plan setup.HookInstallPlan) {
+	current := plan.Current
+	if current == "" {
+		current = "unset (git uses the default .git/hooks)"
+	}
+	fmt.Println("metareview review gate — git-native hooks")
+	fmt.Println("  Will set:  core.hooksPath = " + plan.Target + "   (this clone only)")
+	fmt.Println("  Currently: core.hooksPath = " + current)
+	fmt.Println("  Effect:    git runs hooks/git/pre-push (BLOCKS an unreviewed push) and")
+	fmt.Println("             hooks/git/post-commit (review-owed nudge) on this repo.")
+	fmt.Println("  Flags:     --dry-run (preview, no change) · --yes (install without prompting) · --force (override a conflict)")
+}
+
+// isTTY reports whether f is an interactive terminal, so a prompt is appropriate. A pipe, a file, or
+// /dev/null (an agent, CI) is not, and must never be prompted. term.IsTerminal is a real ioctl check, so it
+// correctly excludes /dev/null (which os.ModeCharDevice alone does not).
+func isTTY(f *os.File) bool {
+	return term.IsTerminal(int(f.Fd()))
+}
+
+// promptYesNo asks a yes/no question defaulting to NO: a bare Return (empty line) does nothing.
+func promptYesNo(question string) bool {
+	fmt.Printf("%s [y/N] ", question)
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes"
 }
 
 func executablePath() string {

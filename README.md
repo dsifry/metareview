@@ -100,6 +100,12 @@ metareview is built around review patterns that work well when humans and coding
   the rest.
 - **Consent-gated custom commands.** The loop runs your real test command, but only after an explicit,
   hash-pinned human consent (`--allow-custom-cmds <sha>`).
+- **A git-native enforcement gate.** `metareview setup --install-hooks` wires deterministic git hooks so
+  the review gate is enforced by git itself: `git push` is **blocked** until the branch is review-clean
+  (fail-closed; `--no-verify` escapes), while metareview **never blocks a commit** — its `post-commit` hook
+  just nudges you to review the files it wrote. Because git invokes the hooks on the real operation, no
+  *spelling* of the push command walks around the gate (it gates the checked-out branch; pushing a different
+  ref is [#82](https://github.com/dsifry/metareview/issues/82)). Install is interactive, non-destructive, and reversible.
 
 See **[USAGE.md](USAGE.md)** for how to use all of this, and [CHANGELOG.md](CHANGELOG.md) for full notes.
 
@@ -175,6 +181,15 @@ npm run build
 ```
 
 See [INSTALL.md](INSTALL.md), [docs/README.codex.md](docs/README.codex.md), and [docs/README.claude.md](docs/README.claude.md) for details.
+
+To enforce the review gate with git-native hooks (block an unreviewed `git push`; nudge on each commit):
+
+```bash
+metareview setup --install-hooks        # interactive; --yes headless, --dry-run preview, --uninstall-hooks to reverse
+```
+
+It sets `core.hooksPath` for this clone (non-destructive — it refuses rather than override an existing one).
+See the "Enforce the review gate" section of [INSTALL.md](INSTALL.md).
 
 ## Works even better with metaswarm!
 

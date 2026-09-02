@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# git pre-push hook — the HARD review gate. Git invokes this on the ACTUAL push, however the command was
+# spelled (compound, subshell, alias, eval, a human's terminal push all reach it), so it cannot be walked
+# around by the shell-obfuscation bypasses a command-string parser suffers. `git push --no-verify` skips it
+# git-natively — that is the deliberate escape hatch. It FAILS CLOSED: if the gate cannot run, the push is
+# blocked, never waved through.
+#
+# Install: `git config core.hooksPath hooks/git` (metareview `/setup` wires this). All the judgement lives in
+# `metareview review gate --push` (exit 1 = something to clear); this is the thin shim.
+set -uo pipefail
+
+# git streams the refs being pushed on stdin, one per line: `<local-ref> <local-sha> <remote-ref> <remote-sha>`.
+# This gate measures the CURRENTLY CHECKED-OUT branch (via merge-base) — which is the ref the overwhelmingly
+# common `git push` / `git push origin HEAD` sends, so on that path it gates exactly what is pushed. It does
+# NOT yet parse stdin to gate a DIFFERENT ref: `git push origin some-other-branch` or `git push origin
+# HEAD~3:main` is evaluated against the checked-out branch, not its own content, so an unreviewed non-checked-
+# -out ref can slip past. That is a known, tracked limitation (issue #82) — per-ref gating (read these lines,
+# gate each pushed range) is a follow-up. We still drain stdin here, or git can see a broken pipe.
+cat >/dev/null 2>&1 || true
+
+# Find the binary. In a source checkout metareview is usually not on PATH; the hook runs from the repo root.
+BIN="${METAREVIEW_BIN:-}"
+if [ -z "$BIN" ]; then
+  if command -v metareview >/dev/null 2>&1; then
+    BIN="metareview"
+  elif [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -x "$CLAUDE_PROJECT_DIR/bin/metareview" ]; then
+    BIN="$CLAUDE_PROJECT_DIR/bin/metareview"
+  elif [ -x "./bin/metareview" ]; then
+    BIN="./bin/metareview"
+  fi
+fi
+if [ -z "$BIN" ]; then
+  echo "metareview: pre-push gate could not run — the binary was not found." >&2
+  echo "Build ./bin/metareview, put metareview on PATH, or set METAREVIEW_BIN; or push with --no-verify to override deliberately." >&2
+  exit 1 # fail closed
+fi
+
+# The gate shells out to git (rev-list), which can wedge; bound it when timeout/gtimeout is present (a
+# timeout exits 124, which falls into the blocked path below — fail closed). macOS has neither by default.
+TO=""
+if command -v timeout >/dev/null 2>&1; then TO="timeout 30"; elif command -v gtimeout >/dev/null 2>&1; then TO="gtimeout 30"; fi
+BASEARG=""
+[ -n "${METAREVIEW_BASE:-}" ] && BASEARG="--base ${METAREVIEW_BASE}"
+
+# shellcheck disable=SC2086
+OUT="$($TO "$BIN" review gate --push $BASEARG 2>&1)"
+CODE=$?
+if [ "$CODE" -eq 0 ]; then
+  exit 0 # branch is reviewed and clean — allow the push
+fi
+echo "metareview: PUSH BLOCKED — the branch is not review-clean." >&2
+echo "$OUT" >&2
+if [ "$CODE" -ne 1 ]; then
+  echo "(the gate itself failed with exit $CODE — a broken gate blocks, it is not a clean branch)" >&2
+fi
+echo "Clear the above (review + record coverage), or push with --no-verify to override deliberately." >&2
+exit 1

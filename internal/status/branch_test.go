@@ -277,6 +277,184 @@ func TestBuildForBranchSupersedesFromFullLogSetNotScoped(t *testing.T) {
 	}
 }
 
+// CommitGate is scoped to the STAGED files (this commit), not the branch: a staged unreviewed file blocks,
+// but a committed-but-not-staged change (the branch's other commits) is PushGate's concern, not this one.
+func TestCommitGateScopedToStagedFiles(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = root
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	write("base.go", "package p\n")
+	run("add", ".")
+	run("commit", "-qm", "base")
+	run("checkout", "-q", "-b", "work")
+
+	// Nothing staged yet: the commit gate has nothing to gate.
+	if blocked, _, err := CommitGate(root, "", nil); err != nil || blocked {
+		t.Fatalf("nothing staged must not block: blocked=%v err=%v", blocked, err)
+	}
+	// A COMMITTED (not staged) change is the branch's business, not this commit's — CommitGate ignores it.
+	write("committed.go", "package p\nvar C = 1\n")
+	run("add", "committed.go")
+	run("commit", "-qm", "prior")
+	if blocked, _, err := CommitGate(root, "", nil); err != nil || blocked {
+		t.Fatalf("a committed-but-not-staged change is PushGate's concern, not CommitGate's: blocked=%v", blocked)
+	}
+	// Now STAGE an unreviewed change: the commit gate blocks it and names it.
+	write("staged.go", "package p\nvar S = 1\n")
+	run("add", "staged.go")
+	blocked, msg, err := CommitGate(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !blocked || !strings.Contains(msg, "staged.go") {
+		t.Fatalf("a staged unreviewed file must block and be named; blocked=%v msg=%q", blocked, msg)
+	}
+	if strings.Contains(msg, "committed.go") {
+		t.Fatalf("CommitGate must not report the committed-but-not-staged file:\n%s", msg)
+	}
+}
+
+// The `git commit -a` / pathspec hole: a tracked file MODIFIED in the working tree but not staged is
+// invisible to the staged scope (a plain commit would not write it), but `git commit -a` writes it. The
+// ScopeAll gate must catch exactly that content — and must NOT pull in untracked files, which `-a` does not
+// commit either.
+func TestCommitGateAllScopeCatchesUnstagedTrackedChange(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = root
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	write("tracked.go", "package p\nvar T = 1\n")
+	run("add", ".")
+	run("commit", "-qm", "base")
+	run("checkout", "-q", "-b", "work")
+
+	// Modify a tracked file WITHOUT staging it, and drop an untracked file alongside.
+	write("tracked.go", "package p\nvar T = 2\n") // modified, unstaged
+	write("untracked.go", "package p\nvar U = 1\n")
+
+	// Staged scope: a plain `git commit` writes the (empty) index, so it has nothing to gate — this is the
+	// exact state that let `git commit -am` slip through when the gate was staged-only.
+	if blocked, _, err := CommitGate(root, "", nil); err != nil || blocked {
+		t.Fatalf("staged scope must not block an unstaged change (a plain commit would not write it): blocked=%v err=%v", blocked, err)
+	}
+
+	// -a scope: `git commit -a` WOULD write the modified tracked file, so the gate must block and name it.
+	blocked, msg, err := CommitGateScoped(root, "", ScopeAll, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !blocked || !strings.Contains(msg, "tracked.go") {
+		t.Fatalf("-a scope must block the unstaged tracked change and name it; blocked=%v msg=%q", blocked, msg)
+	}
+	// `git commit -a` does not commit untracked files, so the gate must not invent a blocker for one.
+	if strings.Contains(msg, "untracked.go") {
+		t.Fatalf("-a does not commit untracked files; the gate must not block on one:\n%s", msg)
+	}
+}
+
+// PushGate is the whole-branch decision the pre-push hook stands on; its block/allow AND message are tested
+// here rather than left to untested cmd glue.
+func TestPushGateBlocksUnreviewedAndClearsWhenReviewed(t *testing.T) {
+	root, _, headSHA := gitRepo(t) // branch changes a.go and b.go
+
+	// No review yet: the gate blocks and names the unreviewed files and the review-prompt command.
+	blocked, msg, err := PushGate(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !blocked {
+		t.Fatal("an unreviewed branch must block a push")
+	}
+	if !strings.Contains(msg, "a.go") || !strings.Contains(msg, "b.go") {
+		t.Fatalf("the message must name the unreviewed files:\n%s", msg)
+	}
+	if !strings.Contains(msg, "review pr-ready") || !strings.Contains(msg, "override") {
+		t.Fatalf("the push message must point at the whole-branch review and the override:\n%s", msg)
+	}
+
+	// A passing pr-ready review of this branch head that read both files clears the gate.
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "now.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-now`\nTarget: `current branch`\n\n## Verdict\n\nPASS\n")
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-now","scope":"pr-ready","verdict":"PASS","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"]}`+"\n")
+	blocked, msg, err = PushGate(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked || msg != "" {
+		t.Fatalf("a fully-reviewed branch must not block; blocked=%v msg=%q", blocked, msg)
+	}
+}
+
+// There is NO claim-free exemption: every changed file must be reviewed, whitespace-only included. The
+// exemption was removed because a false exemption is a review gate's worst failure (unreviewed code ships
+// as "exempt"), and it had already produced a critical rename+edit false-exemption. A whitespace-only diff
+// is trivial for a reviewer to clear, so blocking it costs a glance and buys correctness.
+func TestPushGateDoesNotExemptWhitespaceOnlyChange(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = root
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	write("ws.go", "package p\nvar X = 1\n")
+	run("add", ".")
+	run("commit", "-qm", "base")
+	run("checkout", "-q", "-b", "work")
+	write("ws.go", "package p\nvar  X = 1\n") // whitespace-only, unreviewed
+	run("add", "-A")
+	run("commit", "-qm", "ws")
+
+	blocked, msg, err := PushGate(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !blocked || !strings.Contains(msg, "ws.go") {
+		t.Fatalf("a whitespace-only change is no longer exempt: it must block and be named; blocked=%v msg=%q", blocked, msg)
+	}
+}
+
 // A scope that cannot be resolved reports the UNSCOPED answer with a warning, never an empty one,
 // and it BLOCKS. A gate that cannot work out what the work is must fail toward blocking.
 //

@@ -42,6 +42,7 @@
         <div>
           <p>metareview reviews the things that decide quality — the plan before work starts, each change as it's finished, and the whole branch before it merges. Multiple independent reviewers look for missing tests, security gaps, work that drifted from the original goal, and edges nobody thought about.</p>
           <p>The result isn't a vague "looks good." It's a clear verdict with specific blockers that stay on the to-do list until they're genuinely fixed — so nothing important gets waved through.</p>
+          <p>And you can make it mechanical: <code>metareview setup --install-hooks</code> wires git so an unreviewed <code>git push</code> is <strong>blocked</strong> until the branch is review-clean (fail-closed; <code>--no-verify</code> escapes; it gates the checked-out branch — pushing a different ref is <a href="https://github.com/dsifry/metareview/issues/82">#82</a>), while metareview never blocks a commit — its <code>post-commit</code> hook just reminds you to review what it wrote. Because git enforces it, no <em>spelling</em> of the push command walks its way around the gate.</p>
         </div>
       </div>
     </section>

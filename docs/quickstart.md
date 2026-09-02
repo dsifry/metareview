@@ -76,6 +76,8 @@ Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` w
 
 Task-done, epic-ready, and PR-ready context packs include a Context Profile. Task-done and PR-ready add a Context Shard Plan and prompt packs when the branch diff exceeds the review context limit, and a Review Manifest that accounts for source paths, generated path dispositions, chunk assignments, the plan hash, the shard results ingested, and manifest blockers; epic-ready renders "not sharded".
 
+To enforce this at the git level, run `metareview setup --install-hooks` (interactive; `--yes` for headless): an unreviewed `git push` is then **blocked** until the branch is review-clean (fail-closed; `--no-verify` escapes; it gates the checked-out branch — pushing a different ref is [#82](https://github.com/dsifry/metareview/issues/82)), while metareview never blocks a commit — its `post-commit` hook just nudges you to review what it wrote. See the "Enforce the review gate" section of [INSTALL.md](../INSTALL.md).
+
 ## 4. Metaswarm Fit
 
 When metaswarm, Superpowers, and Beads are present, metaswarm remains the lifecycle owner. Metareview supplies deeper review commands and durable artifacts. The integration contract is in `docs/integrations/metaswarm.md`.

@@ -13,4 +13,9 @@ go 1.26
 // tenths, so an unpinned gate produces floors that pass locally and fail on CI.
 toolchain go1.27.0
 
-require gopkg.in/yaml.v3 v3.0.1
+require (
+	golang.org/x/term v0.45.0
+	gopkg.in/yaml.v3 v3.0.1
+)
+
+require golang.org/x/sys v0.47.0 // indirect

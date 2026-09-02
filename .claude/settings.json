@@ -1,5 +1,21 @@
 {
-  "_disabledHooksReason": "The pre-finish Stop hook (hooks/pre-finish.sh -> `metareview status --scope branch`) is DISABLED while metareview's branch-status gate is unsatisfiable: no review gate records the `Covered paths:` header the check requires, and a repaired NEEDS_REVISION parent is not superseded by a PASS child, so the hook can never pass and only yields loudly on the second Stop. The per-task gates (review task-done / pr-ready) still run and pass. Re-enable by moving the `Stop` array from `_disabledHooks` back under `hooks` once docs/tasks/2026-09-01-status-covered-paths-gap.md is resolved.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/hooks/session-start-check.sh",
+            "async": false,
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "_reviewGateNote": "The review gate is GIT-NATIVE, not a Claude Code hook — a git hook runs OUTSIDE the agent and is invoked by git on the ACTUAL commit/push (any spelling: compound, subshell, alias, eval, even a human's terminal push), so it cannot be walked around by the shell-obfuscation bypasses a command-string parser suffers. Install: `git config core.hooksPath hooks/git` (metareview `/setup` wires this). Two hooks: `hooks/git/pre-push` is the HARD gate — it runs `metareview review gate --push` (deterministic; no model) and BLOCKS an unreviewed/unresolved branch (nonzero exit aborts the push before it reaches the remote), failing CLOSED; `git push --no-verify` is the git-native escape hatch. `hooks/git/post-commit` NEVER blocks (a commit saves work) — it names the files the commit wrote and prints a review-OWED nudge to stderr, which the agent sees in the `git commit` output. Both only run DETERMINISTIC metareview and emit exit codes + messages; the AGENT reads those, builds the subagent review prompts, runs the reviews, and calls metareview to record coverage (metareview adjudicates) before re-pushing. Keep ./bin/metareview built (`go build -o bin/metareview ./cmd/metareview`) or set METAREVIEW_BIN, or the pre-push gate fails closed.",
+  "_disabledHooksReason": "The pre-finish Stop hook (hooks/pre-finish.sh) stays disabled BY CHOICE, not because it cannot pass: the covered-paths gap it waited on (docs/tasks/2026-09-01-status-covered-paths-gap.md) was fixed on 2026-09-02 (status covered-paths + supersede), so `metareview status --scope branch` is now satisfiable. Hard enforcement lives at the PUSH gate (above): commits save freely and carry a review-OWED reminder, and the pre-push gate refuses an unreviewed/unresolved branch. To add turn-end gating too, move the `Stop` array back under `hooks`.",
   "_disabledHooks": {
     "Stop": [
       {
