@@ -53,14 +53,37 @@ func itoa(n int) string {
 }
 
 // runPrePush runs pre-push with a metareview binary and returns its exit code and combined output. git feeds
-// the hook the refs on stdin, so we do too.
+// the hook the refs on stdin, so we do too — a normal (non-deletion) push of the current branch.
 func runPrePush(t *testing.T, bin string) (int, string) {
+	return runPrePushStdin(t, bin, "refs/heads/main abc refs/heads/main def\n")
+}
+
+// runPrePushStdin is runPrePush with caller-supplied stdin, so a test can feed the ref lines git would — in
+// particular a DELETION line (all-zero local sha), which the hook must treat as "nothing to review".
+func runPrePushStdin(t *testing.T, bin, stdin string) (int, string) {
 	t.Helper()
 	c := exec.Command("bash", hookPath(t, "pre-push"), "origin", "https://example/repo.git")
 	c.Env = append(os.Environ(), "METAREVIEW_BIN="+bin, "METAREVIEW_BASE=main")
-	c.Stdin = strings.NewReader("refs/heads/main abc refs/heads/main def\n")
+	c.Stdin = strings.NewReader(stdin)
 	out, _ := c.CombinedOutput()
 	return c.ProcessState.ExitCode(), string(out)
+}
+
+// A ref DELETION sends no content, so the pre-push gate must NOT block it — even when the gate binary would
+// fail (fakeBin(1)). git signals a deletion with an all-zero local sha. This is the case that blocked a
+// `git push --delete` of an already-merged branch.
+func TestPrePushSkipsGateOnRefDeletion(t *testing.T) {
+	zero := "0000000000000000000000000000000000000000"
+	// Only a deletion is pushed: the hook exits 0 without ever consulting the (failing) gate.
+	if code, out := runPrePushStdin(t, fakeBin(t, 1), "(delete) "+zero+" refs/heads/gone "+zero+"\n"); code != 0 {
+		t.Fatalf("a pure ref deletion must not be gated (exit 0), got code=%d out=%q", code, out)
+	}
+	// A deletion mixed with a real (non-deletion) push still gates — there IS content to review, so a failing
+	// gate blocks. This keeps the deletion shortcut from becoming a bypass for a piggybacked real push.
+	mixed := "(delete) " + zero + " refs/heads/gone " + zero + "\nrefs/heads/main abc refs/heads/main def\n"
+	if code, _ := runPrePushStdin(t, fakeBin(t, 1), mixed); code != 1 {
+		t.Fatalf("a non-deletion ref alongside a deletion must still gate (exit 1), got code=%d", code)
+	}
 }
 
 // The hooks MUST be executable: git silently SKIPS a non-executable hook, which would make the gate fail

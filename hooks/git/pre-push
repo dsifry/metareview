@@ -10,13 +10,24 @@
 set -uo pipefail
 
 # git streams the refs being pushed on stdin, one per line: `<local-ref> <local-sha> <remote-ref> <remote-sha>`.
-# This gate measures the CURRENTLY CHECKED-OUT branch (via merge-base) — which is the ref the overwhelmingly
-# common `git push` / `git push origin HEAD` sends, so on that path it gates exactly what is pushed. It does
-# NOT yet parse stdin to gate a DIFFERENT ref: `git push origin some-other-branch` or `git push origin
-# HEAD~3:main` is evaluated against the checked-out branch, not its own content, so an unreviewed non-checked-
-# -out ref can slip past. That is a known, tracked limitation (issue #82) — per-ref gating (read these lines,
-# gate each pushed range) is a follow-up. We still drain stdin here, or git can see a broken pipe.
-cat >/dev/null 2>&1 || true
+# A ref DELETION has an all-zero local sha and sends NO content, so there is nothing to review: if every
+# pushed ref is a deletion we exit 0 without gating (a `git push --delete` of a merged branch must not be
+# blocked). Otherwise this gate measures the CURRENTLY CHECKED-OUT branch (via merge-base) — the ref the
+# overwhelmingly common `git push` / `git push origin HEAD` sends, so on that path it gates exactly what is
+# pushed. It does NOT yet gate a DIFFERENT non-deletion ref (`git push origin some-other-branch`, `HEAD~3:main`)
+# against its own content — that ref is evaluated against the checked-out branch, a known limitation (issue #82;
+# per-ref gating is the follow-up). We must consume stdin regardless, or git can see a broken pipe.
+have_content=0
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  case "$local_sha" in
+    "") : ;;             # blank line
+    *[!0]*) have_content=1 ;; # a non-zero sha → a real (non-deletion) push has content to gate
+    *) : ;;              # all zeros → a deletion, nothing to review
+  esac
+done
+if [ "$have_content" -eq 0 ]; then
+  exit 0 # only ref deletions (or an empty ref list) — no content to review
+fi
 
 # Find the binary. In a source checkout metareview is usually not on PATH; the hook runs from the repo root.
 BIN="${METAREVIEW_BIN:-}"
