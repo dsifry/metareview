@@ -136,6 +136,33 @@ Commit durable Markdown artifacts under `docs/metareview/`, including the shard 
 
 Do not ignore `docs/metareview/` or the whole `.metareview/` directory. FSM runs (`.metareview/runs/`) ignore themselves; `docs/metareview/fsm/` export bundles are durable. `metareview fsm` needs git ≥ 2.31 (`metareview setup --check` reports it).
 
+## Judge models and providers
+
+The review gates and the `metareview fsm` loop make **judge calls** (adjudicate / verify / symptom
+review). The model is chosen per run with `--judge-model` (or `METAREVIEW_JUDGE_MODEL`) and is routed by
+name — no code changes needed:
+
+- **Claude** (`claude-*`, `anthropic/*`) → the Anthropic API (`ANTHROPIC_API_KEY`; `ANTHROPIC_BASE_URL`
+  overrides the endpoint).
+- **Codex/GPT** (`codex/gpt-5.6-sol`, …) → the local **Codex CLI** on its OAuth session under `~/.codex`
+  (no API key needed).
+- **OpenAI-compatible providers** — GPT (`gpt*`, `openai/*`), **GLM** (`glm*`), **Kimi** (`kimi*`) → a
+  `/v1/chat/completions` endpoint. Set `OPENAI_BASE_URL` and `OPENAI_API_KEY`:
+
+  ```bash
+  OPENAI_BASE_URL=<https base>  OPENAI_API_KEY=<key> \
+    metareview fsm init --workflow sdlc-loop-proved --base <ref> --judge-model glm-5.3-flash --judge-effort medium
+  ```
+
+metareview appends `/v1/chat/completions` to `OPENAI_BASE_URL` and gives reasoning models (GLM/Kimi) a
+generous token budget automatically. The model that judged a run stays recorded in its snapshot and
+`metareview fsm export`. Never pass a secret via `--var`; use the declared env names above.
+
+The `fsm` loop also needs git ≥ 2.31, and runs your project's **real test command** — the first `init`
+with a non-default command prints a `cmds_sha256` you consent to with `--allow-custom-cmds <sha>` (a human
+decision). Run the loop on throwaway clones; it makes commits. See [USAGE.md](USAGE.md) for the full
+workflow.
+
 ## Update
 
 For package installs:
