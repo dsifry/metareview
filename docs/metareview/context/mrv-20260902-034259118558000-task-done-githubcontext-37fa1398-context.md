@@ -1,3 +1,9 @@
+# metareview task-done context
+
+Run ID: `mrv-20260902-034259118558000-task-done-githubcontext-37fa1398`
+
+## Task
+
 package githubcontext
 
 import (
@@ -253,3 +259,138 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+
+## Git
+
+- Base: `cbaa849f15dd585a3b88b00d2f5167d59f990680`
+- Head: `87c1fd0352fd51b32bea4c43633d6c527216439e`
+- Branch: `redact-secret-leaks`
+- Gate effect: `gate`
+
+## Context Profile
+
+- Raw diff bytes: `4309`
+- Filtered diff bytes: `4309`
+- Risk level: `none`
+
+## Context Shard Plan
+
+Not sharded.
+
+## Review Manifest
+
+- Manifest verdict: `PASS`
+- Source manifest hash: not sharded
+- Runtime assessment: static-only; runtime not assessed
+
+### Source Paths
+- internal/githubcontext/githubcontext.go
+- internal/githubcontext/githubcontext_test.go
+
+### Manifest Blockers
+No manifest blockers.
+
+## Changed Files
+
+- internal/githubcontext/githubcontext.go
+- internal/githubcontext/githubcontext_test.go
+
+## Diff
+
+```diff
+diff --git a/internal/githubcontext/githubcontext.go b/internal/githubcontext/githubcontext.go
+index 779f91e..722e48d 100644
+--- a/internal/githubcontext/githubcontext.go
++++ b/internal/githubcontext/githubcontext.go
+@@ -159,15 +159,23 @@ func Redact(text string) string {
+ 	return redacted
+ }
+ 
++// credKeyName matches exactly the key names of the token/secret/password/api_key pattern, so only a
++// genuine `key<sep>value` match keeps its key as provenance. Any other match (a bare token, a PEM
++// block) has no key/value shape and is redacted whole — preserving a "prefix" there leaks the secret.
++var credKeyName = regexp.MustCompile(`(?i)^(token|secret|password|api[_-]?key)$`)
++
+ func redactMatch(value string) string {
+ 	lower := strings.ToLower(value)
+ 	if strings.HasPrefix(lower, "authorization:") {
+ 		return "Authorization: Bearer " + redactionMarker
+ 	}
+-	for _, sep := range []string{":", "="} {
+-		if index := strings.Index(value, sep); index >= 0 {
+-			key := strings.TrimSpace(value[:index])
+-			return key + sep + redactionMarker
++	// Use the LEFTMOST ':' or '=' as the key/value boundary (not the first ':' anywhere, then '='):
++	// a value that itself contains ':' — e.g. token=a:b — must still split at its real '=' boundary.
++	// Preserve the key only when the prefix is one of the recognized credential key names; otherwise
++	// the entire match is the secret and is fully redacted.
++	if i := strings.IndexAny(value, ":="); i >= 0 {
++		if key := strings.TrimSpace(value[:i]); credKeyName.MatchString(key) {
++			return key + string(value[i]) + redactionMarker
+ 		}
+ 	}
+ 	return redactionMarker
+diff --git a/internal/githubcontext/githubcontext_test.go b/internal/githubcontext/githubcontext_test.go
+index 9e00161..66befd3 100644
+--- a/internal/githubcontext/githubcontext_test.go
++++ b/internal/githubcontext/githubcontext_test.go
+@@ -225,10 +225,36 @@ func TestRenderMarkdownOmitsEmptyOptionalFields(t *testing.T) {
+ }
+ 
+ func TestRedactMatchSeparatorAtStart(t *testing.T) {
+-	// A value whose separator is at index 0 (key becomes ""): index>=0 must accept it, which the
+-	// index>0 boundary mutant (line 159) would skip, redacting differently.
+-	if got := redactMatch(":=value"); got != ":"+redactionMarker {
+-		t.Fatalf("redactMatch(\":=value\") = %q, want %q", got, ":"+redactionMarker)
++	// A value whose separator is at index 0 has an empty prefix, so it is not a recognized
++	// credential key and the whole match is redacted. (The prefix-preservation path is only for
++	// genuine token/secret/password/api_key keys; see TestRedactWholeSecretsLeakNoPrefix.)
++	if got := redactMatch(":=value"); got != redactionMarker {
++		t.Fatalf("redactMatch(\":=value\") = %q, want %q", got, redactionMarker)
++	}
++}
++
++// A whole-secret match (a PEM private key block, or a key=value whose value itself contains ':')
++// must not leak any of the secret material through redactMatch's key-prefix preservation. The old
++// logic preserved value[:index] up to the first ':' anywhere, then the first '=', which leaked the
++// PEM body (base64 '=' padding sits at the end) and the value prefix before an in-value ':'.
++func TestRedactWholeSecretsLeakNoPrefix(t *testing.T) {
++	// ghctx-1: an unencrypted PEM key whose base64 body ends in '=' padding.
++	pemBody := "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwZZTOPSECRETKEYMATERIALabcd=="
++	pem := "-----BEGIN PRIVATE KEY-----\n" + pemBody + "\n-----END PRIVATE KEY-----"
++	if red := Redact(pem); strings.Contains(red, "MIIEvQ") || strings.Contains(red, "TOPSECRETKEYMATERIAL") {
++		t.Fatalf("PEM key body leaked through redaction: %q", red)
++	}
++	// ghctx-2: a token whose value contains a ':' — the leftmost separator is the '=' key boundary,
++	// so nothing of the value may survive.
++	if red := Redact("token=abc:def:ghi"); strings.Contains(red, "abc") || strings.Contains(red, "def") {
++		t.Fatalf("token value leaked through redaction: %q", red)
++	}
++	if red := Redact(`secret="a:b:c"`); strings.Contains(red, "a:b") {
++		t.Fatalf("quoted secret value leaked through redaction: %q", red)
++	}
++	// A genuine key=value still keeps its key name (provenance) while dropping the value.
++	if red := Redact("token=plainsecret"); !strings.Contains(red, "token=[REDACTED]") {
++		t.Fatalf("legitimate key prefix should be preserved: %q", red)
+ 	}
+ }
+
+
+
+```
+
+## Knowledge And Registries
+
+Service inventory: none
+
+No service inventory found.
+
+Knowledge facts:
+
+No Beads knowledge facts found.
+
+## Evidence
+
+{"schemaVersion":1,"kind":"validation","command":["go","test","./internal/githubcontext/"],"cwd":".","exitCode":0,"startedAt":"2026-09-02T03:42:54.361Z","finishedAt":"2026-09-02T03:42:54.43195Z","stdoutSha256":"c92b672669ee445199a6dbace5c431c428b6bbd93230c997b55f426d18ada7d3","stderrSha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","summary":"go test ./internal/githubcontext/ exited 0"}
+

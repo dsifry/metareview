@@ -225,10 +225,39 @@ func TestRenderMarkdownOmitsEmptyOptionalFields(t *testing.T) {
 }
 
 func TestRedactMatchSeparatorAtStart(t *testing.T) {
-	// A value whose separator is at index 0 (key becomes ""): index>=0 must accept it, which the
-	// index>0 boundary mutant (line 159) would skip, redacting differently.
-	if got := redactMatch(":=value"); got != ":"+redactionMarker {
-		t.Fatalf("redactMatch(\":=value\") = %q, want %q", got, ":"+redactionMarker)
+	// A value whose separator is at index 0 has an empty prefix, so it is not a recognized
+	// credential key and the whole match is redacted. (The prefix-preservation path is only for
+	// genuine token/secret/password/api_key keys; see TestRedactWholeSecretsLeakNoPrefix.)
+	if got := redactMatch(":=value"); got != redactionMarker {
+		t.Fatalf("redactMatch(\":=value\") = %q, want %q", got, redactionMarker)
+	}
+}
+
+// A whole-secret match (a PEM private key block, or a key=value whose value itself contains ':')
+// must not leak any of the secret material through redactMatch's key-prefix preservation. The old
+// logic preserved value[:index] up to the first ':' anywhere, then the first '=', which leaked the
+// PEM body (base64 '=' padding sits at the end) and the value prefix before an in-value ':'.
+func TestRedactWholeSecretsLeakNoPrefix(t *testing.T) {
+	// Assert the EXACT redacted output (not just absence of selected substrings), so a regression that
+	// leaks any other slice of the secret still fails.
+	// ghctx-1: an unencrypted PEM key whose base64 body ends in '=' padding — the whole block is a
+	// single secret with no key/value shape, so it redacts to the bare marker.
+	pemBody := "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwZZTOPSECRETKEYMATERIALabcd=="
+	pem := "-----BEGIN PRIVATE KEY-----\n" + pemBody + "\n-----END PRIVATE KEY-----"
+	if red := Redact(pem); red != redactionMarker {
+		t.Fatalf("PEM key must redact whole: got %q, want %q", red, redactionMarker)
+	}
+	// ghctx-2: a token whose value contains ':' — the leftmost separator is the '=' key boundary, so
+	// only the key name survives.
+	if red := Redact("token=abc:def:ghi"); red != "token="+redactionMarker {
+		t.Fatalf("token value leaked: got %q, want %q", red, "token="+redactionMarker)
+	}
+	if red := Redact(`secret="a:b:c"`); red != "secret="+redactionMarker {
+		t.Fatalf("quoted secret value leaked: got %q, want %q", red, "secret="+redactionMarker)
+	}
+	// A genuine key=value keeps its key name (provenance) while dropping the value.
+	if red := Redact("token=plainsecret"); red != "token="+redactionMarker {
+		t.Fatalf("legitimate key prefix not preserved: got %q, want %q", red, "token="+redactionMarker)
 	}
 }
 
