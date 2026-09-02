@@ -1,0 +1,12 @@
+[
+  {
+    "id": "status-1",
+    "file": "internal/status/blocked.go",
+    "line": 64,
+    "category": "invariant-nothing-holds",
+    "severity": "low",
+    "issue_text": "In AuditRun the outcome switch has `case env.IsError || env.Subtype == \"error\":` but no test exercises the `env.Subtype == \"error\"` disjunct on its own. Every RunFailed test fixture sets is_error:true (the only subtype:\"error\" fixture, `{\"subtype\":\"error\",\"is_error\":true}` in TestAuditRunSeparatesTheThreeOutcomes, also sets is_error). A host that signals failure only via subtype (subtype:\"error\", is_error:false) would be misclassified as RunCompleted (or RunBlocked if a Stop hook fired), i.e. a failed session scored as clean — the exact fold-into-fine that RunOutcome exists to prevent.",
+    "why_real": "Confirmed by mutation: deleting `|| env.Subtype == \"error\"` (leaving `case env.IsError:`) leaves the entire package test suite green. The disjunct is a real classification branch feeding a benchmark harness's outcome, and it is unpinned — a survivable mutant, not a style nit. Severity is low because AuditRun is not on the Stop-hook exit-code path (that is Emit/Build), and StopHookBlocks/Result still carry evidence in the struct.",
+    "tests_checked": "blocked_test.go TestAuditRunSeparatesTheThreeOutcomes (all RunFailed cases set is_error:true; no subtype-only case), TestABlockedRunIsNotASuccess, TestCountStopHookBlocksReadsAnImperfectTranscript. Mutation `case env.IsError:` -> `go test ./internal/status/` PASS."
+  }
+]
