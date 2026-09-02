@@ -150,7 +150,7 @@ name — no code changes needed:
   `/v1/chat/completions` endpoint. Set `OPENAI_BASE_URL` and `OPENAI_API_KEY`:
 
   ```bash
-  OPENAI_BASE_URL=<https base>  OPENAI_API_KEY=<key> \
+  OPENAI_BASE_URL="https://your-openai-compatible-host"  OPENAI_API_KEY="your-api-key" \
     metareview fsm init --workflow sdlc-loop-proved --base <ref> --judge-model glm-5.3-flash --judge-effort medium
   ```
 

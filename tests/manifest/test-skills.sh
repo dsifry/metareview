@@ -72,8 +72,8 @@ grep -q 'Repository-knowledge priming' README.md
 grep -q 'Review artifact accountability' README.md
 grep -q 'Post-merge reflection' README.md
 grep -q '^## Install$' README.md
-grep -q 'codex plugin marketplace add dsifry/metareview-marketplace' README.md
-grep -q 'claude plugin marketplace add dsifry/metareview-marketplace' README.md
+grep -q 'codex plugin marketplace add dsifry/metareview' README.md
+grep -q 'claude plugin marketplace add dsifry/metareview' README.md
 grep -q '^## Works even better with metaswarm!$' README.md
 grep -q 'https://github.com/dsifry/metaswarm' README.md
 grep -q 'multi-agent orchestration framework' README.md

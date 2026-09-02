@@ -142,7 +142,7 @@ go run ./cmd/metareview
 ### Codex Plugin
 
 ```bash
-codex plugin marketplace add dsifry/metareview-marketplace
+codex plugin marketplace add dsifry/metareview
 codex
 ```
 
@@ -158,8 +158,8 @@ codex
 ### Claude Code Plugin
 
 ```bash
-claude plugin marketplace add dsifry/metareview-marketplace
-claude plugin install metareview
+claude plugin marketplace add dsifry/metareview
+claude plugin install metareview@metareview
 ```
 
 Claude Code invokes metareview through `/setup`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/review-artifact`, `/learn-post-merge`, `/status`, and `/fsm`.
