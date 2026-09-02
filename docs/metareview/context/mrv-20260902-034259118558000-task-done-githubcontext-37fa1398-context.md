@@ -392,5 +392,5 @@ No Beads knowledge facts found.
 
 ## Evidence
 
-{"schemaVersion":1,"kind":"validation","command":["go","test","./internal/githubcontext/"],"cwd":"/Users/dsifry/Developer/metareview","exitCode":0,"startedAt":"2026-09-02T03:42:54.361Z","finishedAt":"2026-09-02T03:42:54.43195Z","stdoutSha256":"c92b672669ee445199a6dbace5c431c428b6bbd93230c997b55f426d18ada7d3","stderrSha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","summary":"go test ./internal/githubcontext/ exited 0"}
+{"schemaVersion":1,"kind":"validation","command":["go","test","./internal/githubcontext/"],"cwd":".","exitCode":0,"startedAt":"2026-09-02T03:42:54.361Z","finishedAt":"2026-09-02T03:42:54.43195Z","stdoutSha256":"c92b672669ee445199a6dbace5c431c428b6bbd93230c997b55f426d18ada7d3","stderrSha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","summary":"go test ./internal/githubcontext/ exited 0"}
 
