@@ -28,19 +28,23 @@ cover:
 	if req=$$(go list ./internal/fsm/... ./workflows 2>&1); then :; \
 	elif [ -d internal/fsm ] || [ -d workflows ]; then echo "cover: go list of the required set failed:" >&2; echo "$$req" >&2; exit 1; \
 	else req=""; fi; \
-	{ printf '%s\n' $$req; echo "$(MODULE)/cmd/covergate"; echo "$(MODULE)/internal/covergate"; } | sort -u > "$$COVDIR/require100.txt"; \
+	printf '%s\n' $$req | sort -u > "$$COVDIR/require100.txt"; \
 	go run ./cmd/covergate --profile "$$COVDIR/profile.txt" --floor tests/coverage-floor.txt \
 	  --module "$(MODULE)" --require-100 "$$COVDIR/require100.txt"
 
-# Regenerate the floor from measured packages (never lowers without --allow-floor-decrease).
+# Regenerate the floor from measured packages (never lowers without --allow-floor-decrease). The
+# require-100 set here is exactly `internal/fsm/... ./workflows` — the same packages coverage.sh excludes
+# from the regenerated floor — so cmd/covergate and internal/covergate are KEPT in the floor (at their
+# measured 100.0) rather than dropped, matching `coverage.sh --update-floor`. They stay pinned to 100 by
+# their 100.0 floor line plus covergate's refuse-to-lower rule.
 cover-update-floor:
 	@set -e; \
 	COVDIR=$$(mktemp -d); \
-	trap 'rm -rf "$$COVDIR"; go build -o bin/metareview ./cmd/metareview >/dev/null 2>&1 || true' EXIT; \
+	trap 'rm -rf "$$COVDIR"; go build -o bin/metareview ./cmd/metareview || echo "cover-update-floor: post-run rebuild of bin/metareview FAILED" >&2' EXIT; \
 	go test -cover -covermode=atomic ./... -args -test.gocoverdir="$$COVDIR"; \
 	GOFLAGS="-cover -covermode=atomic" GOCOVERDIR="$$COVDIR" bash tests/run-all.sh; \
 	go tool covdata textfmt -i="$$COVDIR" -o "$$COVDIR/profile.txt"; \
-	{ go list ./internal/fsm/... ./workflows 2>/dev/null; echo "$(MODULE)/cmd/covergate"; echo "$(MODULE)/internal/covergate"; } | sort -u > "$$COVDIR/require100.txt"; \
+	go list ./internal/fsm/... ./workflows 2>/dev/null | sort -u > "$$COVDIR/require100.txt"; \
 	go run ./cmd/covergate --profile "$$COVDIR/profile.txt" --floor tests/coverage-floor.txt \
 	  --module "$(MODULE)" --require-100 "$$COVDIR/require100.txt" --update-floor $(ARGS)
 
