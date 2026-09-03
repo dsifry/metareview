@@ -5,7 +5,7 @@ metareview supports Claude Code as a plugin and as a direct CLI.
 ## Install
 
 ```bash
-claude plugin marketplace add dsifry/metareview-marketplace
+claude plugin marketplace add dsifry/metareview
 claude plugin install metareview
 ```
 
