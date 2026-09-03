@@ -86,6 +86,58 @@ func TestPrePushSkipsGateOnRefDeletion(t *testing.T) {
 	}
 }
 
+// recordingBin writes a stand-in `metareview` that dumps its args and stdin to a file and exits 0. It lets a
+// test assert that pre-push FORWARDS git's ref lines to `review gate --pre-push-stdin` (issue #82) — the CLI
+// gates the PUSHED refs, so the hook must hand it exactly what git streamed.
+func recordingBin(t *testing.T, argsFile, stdinFile string) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "metareview")
+	body := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + argsFile + "\ncat > " + stdinFile + "\nexit 0\n"
+	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// pre-push must FORWARD git's pushed-ref stdin to the gate with --pre-push-stdin, so the gate can judge the
+// PUSHED refs and not just the checked-out branch (issue #82). A content push of a non-checked-out ref reaches
+// the binary with the ref lines intact.
+func TestPrePushForwardsPushedRefsToGate(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	stdinFile := filepath.Join(t.TempDir(), "stdin")
+	bin := recordingBin(t, argsFile, stdinFile)
+	refs := "refs/heads/evil 2222222222222222222222222222222222222222 refs/heads/main 1111111111111111111111111111111111111111\n"
+	if code, out := runPrePushStdin(t, bin, refs); code != 0 {
+		t.Fatalf("a clean (exit 0) gate must allow the push; got code=%d out=%q", code, out)
+	}
+	gotArgs, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("hook did not invoke the gate: %v", err)
+	}
+	if !strings.Contains(string(gotArgs), "review gate --push --pre-push-stdin") {
+		t.Fatalf("pre-push must forward to `review gate --push --pre-push-stdin`; got args %q", gotArgs)
+	}
+	gotStdin, err := os.ReadFile(stdinFile)
+	if err != nil {
+		t.Fatalf("hook did not forward stdin: %v", err)
+	}
+	if !strings.Contains(string(gotStdin), "refs/heads/evil") || !strings.Contains(string(gotStdin), "refs/heads/main") {
+		t.Fatalf("pre-push must forward git's ref lines verbatim to the gate; got stdin %q", gotStdin)
+	}
+}
+
+// A MALFORMED non-blank ref line (no local sha) must be FORWARDED to the gate, not silently allowed by the
+// bash pre-filter — the Go gate is the authority and fails closed on it. git never streams such a line, so
+// this is defense-in-depth: the bash shortcut must not under-block relative to the Go classifier.
+func TestPrePushForwardsMalformedLineToGate(t *testing.T) {
+	// fakeBin(1): if the hook forwards, the gate "fails" (exit 1) and the hook BLOCKS; if the hook's pre-filter
+	// wrongly treated the line as no-content, it would exit 0 (allow) without ever calling the gate.
+	if code, out := runPrePushStdin(t, fakeBin(t, 1), "garbage-single-field\n"); code != 1 {
+		t.Fatalf("a malformed non-blank ref line must reach the gate and block; got code=%d out=%q", code, out)
+	}
+}
+
 // The hooks MUST be executable: git silently SKIPS a non-executable hook, which would make the gate fail
 // OPEN on a fresh clone. This guards the exec bit against a regression (e.g. an edit that drops it).
 func TestGitHooksAreExecutable(t *testing.T) {

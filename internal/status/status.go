@@ -271,6 +271,114 @@ func PushGate(root, base string, run RunGit) (blocked bool, message string, err 
 	return true, b.String(), nil
 }
 
+// pushedRef is one line of git's pre-push stdin: "<local-ref> <local-sha> <remote-ref> <remote-sha>".
+type pushedRef struct {
+	localRef  string
+	localSHA  string
+	remoteRef string
+}
+
+// isZeroSHA reports whether a sha is the all-zero deletion sentinel git streams for a ref DELETION (40 hex
+// zeros for sha1, 64 for sha256). A deletion carries no content, so there is nothing to review.
+func isZeroSHA(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c != '0' {
+			return false
+		}
+	}
+	return true
+}
+
+// PushGateForRefs applies the pre-push gate to the refs git streams on stdin (one line each:
+// "<local-ref> <local-sha> <remote-ref> <remote-sha>"). It closes issue #82's silent bypass, where a push of
+// a ref OTHER than the checked-out branch (`git push origin evil:main`, `HEAD~3:main`) was evaluated against
+// the checked-out branch — not its own content — and so slipped past the gate with no --no-verify.
+//
+//   - A ref DELETION (all-zero local sha) is skipped — no content to review.
+//   - If there is no non-deletion ref, the push is not blocked (nothing to gate).
+//   - If EVERY non-deletion ref's local sha equals the checked-out HEAD, the pushed content IS the checked-out
+//     branch, so it delegates to PushGate and gates exactly as before.
+//   - Otherwise it BLOCKS (fail closed), naming each ref whose sha != HEAD: the gate measures the checked-out
+//     branch and cannot verify a different ref's content. The remedy is to check that ref out and push it, or
+//     push with --no-verify to override deliberately.
+//
+// This is the fail-closed MVP (issue #82, Option B): it does not attempt to review a non-checked-out ref's own
+// content. A malformed line, or a HEAD that cannot be resolved, also fails closed — an unverifiable push must
+// block, never wave through.
+func PushGateForRefs(root, base, stdin string, run RunGit) (blocked bool, message string, err error) {
+	refs, malformed := parsePushedRefs(stdin)
+	if malformed != "" {
+		return true, fmt.Sprintf("metareview: PUSH BLOCKED — a pre-push ref line from git was malformed (%q), so the gate cannot tell what is being pushed; failing closed. Push with --no-verify to override deliberately.\n", malformed), nil
+	}
+	var content []pushedRef
+	for _, r := range refs {
+		if isZeroSHA(r.localSHA) {
+			continue // a deletion carries no content
+		}
+		if strings.HasPrefix(r.remoteRef, "refs/tags/") {
+			// A tag is a pointer to commits that were gated when their BRANCH was pushed, not new branch
+			// content — and an annotated tag's object sha never equals HEAD, so gating it would falsely block
+			// a legit `git push origin v1.0` (issue #82 acceptance: tags are not falsely blocked).
+			continue
+		}
+		content = append(content, r)
+	}
+	if len(content) == 0 {
+		return false, "", nil // only deletions / tags (or an empty ref list) — nothing to review
+	}
+	if run == nil {
+		run = realGit
+	}
+	out, herr := run(root, "rev-parse", "HEAD")
+	head := strings.TrimSpace(string(out))
+	if herr != nil || head == "" {
+		return true, "metareview: PUSH BLOCKED — could not resolve the checked-out HEAD, so the gate cannot verify the pushed refs; failing closed. Push with --no-verify to override deliberately.\n", nil
+	}
+	var mismatched []pushedRef
+	for _, r := range content {
+		if r.localSHA != head {
+			mismatched = append(mismatched, r)
+		}
+	}
+	if len(mismatched) == 0 {
+		// Every pushed ref IS the checked-out branch — gate it exactly as before.
+		return PushGate(root, base, run)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "metareview: PUSH BLOCKED — a pushed ref is not the checked-out branch, so the review gate cannot verify its content (issue #82):\n")
+	for _, r := range mismatched {
+		fmt.Fprintf(&b, "  - %s ← %s @ %s (checked-out HEAD is %s)\n", r.remoteRef, r.localRef, shortSHA(r.localSHA), shortSHA(head))
+	}
+	fmt.Fprint(&b, "Check that ref out and push it so the gate reviews its own content, or push with --no-verify to override deliberately.\n")
+	return true, b.String(), nil
+}
+
+// parsePushedRefs splits git's pre-push stdin into refs. A blank line is ignored. A non-blank line with fewer
+// than two fields has no local sha, so the gate cannot classify it — that line is returned as `malformed` so
+// the caller fails closed rather than silently dropping a ref that might carry content.
+func parsePushedRefs(stdin string) (refs []pushedRef, malformed string) {
+	for _, line := range strings.Split(stdin, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			return nil, line
+		}
+		r := pushedRef{localRef: f[0], localSHA: f[1]}
+		if len(f) >= 3 {
+			r.remoteRef = f[2]
+		} else {
+			r.remoteRef = "(unknown remote ref)"
+		}
+		refs = append(refs, r)
+	}
+	return refs, ""
+}
+
 // CommitBlockers is the subset of a report's MustClear that a COMMIT gate acts on: everything about
 // whether this branch's code is reviewed — unreviewed changed files, open (non-superseded) blocking
 // reviews, and an unresolvable scope (fail closed) — but NOT abandoned FSM runs. An abandoned run means a
