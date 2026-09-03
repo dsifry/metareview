@@ -155,12 +155,25 @@ drives a one-shot `review-loop` (discover → adjudicate → done) over the inte
 marker. `epicready.Create` does **not** invoke the FSM — it stays a pure, model-free, hermetically-testable
 deterministic function, keeping ONE bridge pattern across all three scopes.
 
-- Full independent review: `metareview fsm --workflow review-loop --base <epic-base>` over the integration
-  diff, then `record-lenses --scope epic-ready --mode subagent-adjudicated --from-run <run>` (identical
-  `--base`, per the base-consistency rule). `validateFromRunDiff` already checks the run's init reviewed the
-  same `base..head` and reached a passing terminal transition (`main.go:640-688`), so `subagent-adjudicated`
-  works for epic-ready the moment the scope is allow-listed — no FSM change.
+- Full independent review: `metareview fsm --workflow epic-review-loop --base <epic-base>` over the
+  integration diff, then `record-lenses --scope epic-ready --mode subagent-adjudicated --from-run <run>`
+  (identical `--base`, per the base-consistency rule). `validateFromRunDiff` checks the run's init reviewed the
+  same `base..head`, reached a passing terminal transition, **and — for epic-ready — was produced by the
+  `epic-review-loop` workflow** (its `init.workflow`), so a generic `review-loop` run cannot be laundered as
+  epic evidence.
 - Subagents unavailable: `--mode in-session-emulated` (honest, advisory) after an in-session multi-lens read.
+
+**Binding the strong-evidence path to the epic workflow (added after the diff+bot review).** A
+`subagent-adjudicated` epic-ready marker now requires its `--from-run` to have been produced by
+`epic-review-loop` — without it, a `review-loop` run (task-done rubric) over the same integration diff could be
+recorded as full-strength epic evidence, defeating choice 5's seam at the enforcement level, not just the
+guidance level. Three independent reviewers (the in-tree correctness lens, Cursor Bugbot, CodeRabbit)
+converged on this, and it directly serves the maintainer's lens-independence caveat, so it is enforced rather
+than left as an accepted limitation. (`in-session-emulated` is self-attested and already advisory-flagged;
+`pr-ready`/`task-done` keep no workflow constraint since they share the default rubric.) What remains
+deliberately deferred (choice 5): binding the *roll-up context* and *named lens personas* into the FSM review
+node — the epic rubric directs the generic lenses at cross-child concerns, and the pre-checks guard roll-up
+freshness, so the substantive control (the epic rubric ran) is enforced without them.
 
 The workflow the agent drives is the epic-specific one from choice 5 (its `discover` node applies the epic
 rubric), not the raw `review-loop.yaml` (which applies the task-done rubric).

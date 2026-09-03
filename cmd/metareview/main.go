@@ -393,7 +393,13 @@ func main() {
 				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: not a valid run id\n", fromRun)
 				os.Exit(2)
 			}
-			if err := validateFromRunDiff(root, fromRun, gc.BaseSHA, gc.HeadSHA); err != nil {
+			// epic-ready subagent evidence must come from the epic review workflow (its lenses apply the epic
+			// rubric); pr-ready/task-done accept any review workflow (they share the default rubric).
+			wantWorkflow := ""
+			if scope == "epic-ready" {
+				wantWorkflow = "epic-review-loop"
+			}
+			if err := validateFromRunDiff(root, fromRun, gc.BaseSHA, gc.HeadSHA, wantWorkflow); err != nil {
 				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: %v\n", fromRun, err)
 				os.Exit(2)
 			}
@@ -637,7 +643,7 @@ func mustCwd() string {
 // (outcome clean|reviewed|fixed). This keeps a subagent-adjudicated marker from being pointed at an empty
 // audit, a run over a different diff, or a run that reviewed the diff and did NOT come out clean. It scans
 // events leniently (in the spirit of the FSM's own peek) rather than folding the full chain.
-func validateFromRunDiff(root, runID, wantBase, wantHead string) error {
+func validateFromRunDiff(root, runID, wantBase, wantHead, wantWorkflow string) error {
 	path := filepath.Join(root, ".metareview", "runs", runID, "audit.jsonl")
 	raw, err := os.ReadFile(path) // #nosec G304 -- runID is validated to a single path segment by the caller
 	if err != nil {
@@ -663,6 +669,13 @@ func validateFromRunDiff(root, runID, wantBase, wantHead string) error {
 	}
 	if d.Head != wantHead || d.BaseSHA != wantBase {
 		return fmt.Errorf("it reviewed a different diff (run base..head %s..%s, marker %s..%s)", short(d.BaseSHA), short(d.Head), short(wantBase), short(wantHead))
+	}
+	// For a scope whose lenses must apply a scope-specific rubric (epic-ready), the run must have been produced
+	// by that scope's review workflow — otherwise a generic review-loop run (task-done rubric) over the same
+	// diff could be recorded as subagent-adjudicated evidence for the epic gate, silently crediting a review
+	// that never applied the epic lenses. wantWorkflow is empty for pr-ready/task-done (no constraint).
+	if wantWorkflow != "" && d.Workflow != wantWorkflow {
+		return fmt.Errorf("it was produced by workflow %q, but this scope requires %q (whose lenses apply the scope's rubric)", d.Workflow, wantWorkflow)
 	}
 	// The LAST outcome-bearing transition is the run's verdict: a run that was `reviewed` and then looped and
 	// came out `failed` must be rejected, so we cannot accept the first passing outcome we see. Unreadable

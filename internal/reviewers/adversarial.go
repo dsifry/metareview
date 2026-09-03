@@ -69,9 +69,9 @@ func adversarialReviewFindings(require bool, s AdversarialReviewStatus) []Findin
 			Severity:       "high",
 			Title:          "Adjudicated review does not cover the working tree",
 			Finding:        "This run's reviewed surface includes uncommitted working-tree changes, but the recorded review-evidence marker attests only the committed base..HEAD diff — it cannot vouch for uncommitted content.",
-			Expected:       "The reviewed content is committed (so the marker's base..HEAD covers it), or a fresh review is recorded over the working tree.",
+			Expected:       "The reviewed content is committed, so the marker's base..HEAD covers it (a review-evidence marker attests only a committed diff — it cannot be recorded over an uncommitted working tree).",
 			Found:          "A marker for HEAD " + head + " exists, but the working tree has uncommitted changes it does not attest.",
-			Recommendation: "Commit (or stash/discard) the working-tree changes so the marker's committed base..HEAD covers the reviewed surface, then re-run the gate.",
+			Recommendation: "Commit (or stash/discard) the working-tree changes, record a marker for the new HEAD, then re-run the gate.",
 			Fingerprint:    "review:working-tree-unattested",
 		})}
 	}

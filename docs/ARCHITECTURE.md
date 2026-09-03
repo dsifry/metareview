@@ -35,11 +35,13 @@ abbreviated — task-done/epic-ready/pr-ready also take `--evidence <file>` (a v
 | **artifact** | `review artifact <path>` | a spec/plan/design/doc (no code yet) | **agent lenses** (scaffold → subagents fill rows; `NOT_REVIEWED` until done) |
 | **task-done** | `review task-done <id> --base <ref>` | one task's diff (small) | deterministic-local gate ⚠️ |
 | **pr-ready** | `review pr-ready --base <ref>` | the whole branch diff (sharded over 120 KB) | deterministic-local gate ⚠️ |
-| **epic-ready** | `review epic-ready <id>` | **roll-up over already-reviewed children** — child evidence present? contradictions? intent drift? registry coverage? — plus the integration diff | deterministic heuristics (roll-up freshness) **+ a required adjudicated review** over the integration diff (base..HEAD) via the `epic-review-loop` workflow — same require-lenses gate as pr-ready/task-done |
+| **epic-ready** | `review epic-ready <id>` | the epic's **integration diff** (base..HEAD, the union of the children's changes), **with the roll-up as context** — child evidence present? contradictions? intent drift? registry coverage? | deterministic heuristics (roll-up freshness) **+ a required adjudicated review** over the integration diff (base..HEAD) via the `epic-review-loop` workflow — same require-lenses gate as pr-ready/task-done |
 | **learn** | `learn --post-merge <pr>` | what the merged PR + bot findings teach us | learning extraction |
 
-`epic-ready` runs *after* every child task is task-done-reviewed; it reads child review logs + evidence + the
-parent intent, not a code diff. See `internal/reviewers/epicready.go`, `rubrics/epic-ready-review-rubric.md`.
+`epic-ready` runs *after* every child task is task-done-reviewed. It reviews the epic's **integration diff**
+(base..HEAD, the union of the children's changes) **with the roll-up — child review logs, evidence, parent
+intent — as context**; the roll-up's own freshness is guarded by the deterministic pre-checks (re-read every
+run). See `internal/reviewers/epicready.go`, `rubrics/epic-ready-review-rubric.md`.
 
 ## 3. Two review engines — and the gap between them
 

@@ -154,6 +154,14 @@ repo="$(mktemp -d)"
   printf '{"type":"init","data":{"base_sha":"deadbeef","head":"cafef00d","workflow":"epic-review-loop"}}\n' > .metareview/runs/other/audit.jsonl
   # shellcheck disable=SC2086
   reject reject-wrong-diff  $ebase --mode subagent-adjudicated --from-run other
+  # A run over the RIGHT diff but produced by the generic review-loop (task-done rubric) must NOT credit the
+  # epic-ready gate — else a non-epic review is laundered as epic evidence (bypassing the lens seam).
+  mkdir -p .metareview/runs/wrongwf
+  { printf '{"type":"init","data":{"base_sha":"%s","head":"%s","workflow":"review-loop"}}\n' "$(git rev-parse main)" "$(git rev-parse HEAD)";
+    printf '{"type":"transition","data":{"from":"adjudicate","to":"done","gate":"confirmed_nonempty","outcome":"reviewed","head":"%s"}}\n' "$(git rev-parse HEAD)";
+  } > .metareview/runs/wrongwf/audit.jsonl
+  # shellcheck disable=SC2086
+  reject reject-wrong-workflow $ebase --mode subagent-adjudicated --from-run wrongwf
   echo "ok: cli-epic-ready-scope-and-rejects"
 )
 rm -rf "$repo"
