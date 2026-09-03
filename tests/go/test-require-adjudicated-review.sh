@@ -51,12 +51,24 @@ scenario() {
   rm -rf "$repo" "$ev"
 }
 
-# A run id is meaningless without a named lens, and subagent-adjudicated must mirror a real FSM run: its
-# --from-run must exist AND its init event must record the SAME base..head. mkfsmrun forges such an init.
-mkfsmrun() { # <run-id> : write a minimal FSM init line matching the repo's main..HEAD
+# A run id is meaningless without a named lens, and subagent-adjudicated must mirror a real FSM review run:
+# --from-run must exist, its init must record the SAME base..head, AND it must reach a PASSING terminal
+# transition (clean|reviewed|fixed). mkfsmrun forges such a two-event audit; mkfsmrun_init writes only the
+# init (an incomplete run), and mkfsmrun_failed a run that reviewed the diff but came out non-clean.
+mkfsmrun_init() { # <run-id> : init line only (matching base..HEAD) — an incomplete run
   mkdir -p ".metareview/runs/$1"
   printf '{"type":"init","data":{"base_sha":"%s","head":"%s","workflow":"review-loop"}}\n' \
     "$(git rev-parse main)" "$(git rev-parse HEAD)" > ".metareview/runs/$1/audit.jsonl"
+}
+mkfsmrun() { # <run-id> : init + a PASSING terminal transition
+  mkfsmrun_init "$1"
+  printf '{"type":"transition","data":{"from":"adjudicate","to":"done","gate":"confirmed_nonempty","outcome":"reviewed","head":"%s"}}\n' \
+    "$(git rev-parse HEAD)" >> ".metareview/runs/$1/audit.jsonl"
+}
+mkfsmrun_failed() { # <run-id> : init + a NON-passing terminal transition
+  mkfsmrun_init "$1"
+  printf '{"type":"transition","data":{"from":"verify","to":"done","gate":"stuck","outcome":"failed","head":"%s"}}\n' \
+    "$(git rev-parse HEAD)" >> ".metareview/runs/$1/audit.jsonl"
 }
 rec='"$BIN" review record-lenses --scope pr-ready --base main --lenses security'
 
@@ -135,6 +147,14 @@ repo="$(mktemp -d)"
   printf '{"type":"init","data":{"base_sha":"deadbeef","head":"cafef00d","workflow":"review-loop"}}\n' > .metareview/runs/other/audit.jsonl
   # shellcheck disable=SC2086
   reject reject-wrong-diff  $base --mode subagent-adjudicated --from-run other
+  # A run over the RIGHT diff that never reached a passing terminal transition (incomplete) is rejected.
+  mkfsmrun_init incomplete
+  # shellcheck disable=SC2086
+  reject reject-incomplete  $base --mode subagent-adjudicated --from-run incomplete
+  # A run over the right diff whose terminal outcome was non-clean (failed) is rejected.
+  mkfsmrun_failed failedrun
+  # shellcheck disable=SC2086
+  reject reject-failed      $base --mode subagent-adjudicated --from-run failedrun
   # A marker with no named lens is refused (it would let the gate pass on nothing).
   reject reject-no-lenses   --scope pr-ready --base main --mode in-session-emulated
   echo "ok: cli-rejects-invalid-markers"

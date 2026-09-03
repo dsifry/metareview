@@ -73,10 +73,12 @@ not `PASS`/`PASS_ADVISORY`, and emits an **advisory** finding (not a block) when
 The FSM stays scope-agnostic: the **agent** bridges its run into a marker with `--from-run`, rather than the
 FSM emitting scope-specific markers. Because a CLI seam cannot witness that independent subagents actually
 ran, `record-lenses --mode subagent-adjudicated` is admitted **only** when `--from-run` names an FSM run that
-exists on disk (`.metareview/runs/<id>/`); a self-attested review has no such run and must record the
-labeled, advisory `in-session-emulated` mode. This keeps a hand-typed one-liner from laundering a fake review
-as full-strength independent evidence. (`--from-run` verifying the referenced run's *verdict* and head, and
-crediting a marker for a dirty working tree under `--include-working-tree`, are known follow-ups.)
+reviewed the same `base..head` (its init) AND reached a passing terminal transition (`clean|reviewed|fixed`);
+an empty, wrong-diff, incomplete, or failed run is rejected, and a self-attested review has no such run and
+must record the labeled, advisory `in-session-emulated` mode. This keeps a hand-typed one-liner from
+laundering a fake review as full-strength independent evidence. A marker attests the committed `base..HEAD`
+only, so a `--include-working-tree` run over a dirty tree blocks on a `working-tree-unattested` reviewer
+despite a valid marker.
 
 **Escape hatch.** `METAREVIEW_ALLOW_MECHANICAL_PASS=1` opts a single run out of the requirement, restoring
 the old deterministic-only pass (`reviewstate.RequireAdjudicatedReview()`). `artifact` review is unchanged —

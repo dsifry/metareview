@@ -31,6 +31,7 @@ func TestAdversarialReviewFindings(t *testing.T) {
 		{"required + passing independent marker satisfies", true, AdversarialReviewStatus{Present: true, Verdict: "PASS", HeadSHA: "abc"}, 0, 0, "", ""},
 		{"required + PASS_ADVISORY satisfies", true, AdversarialReviewStatus{Present: true, Verdict: "PASS_ADVISORY", HeadSHA: "abc"}, 0, 0, "", ""},
 		{"required + passing emulated is advisory, not blocking", true, AdversarialReviewStatus{Present: true, Verdict: "PASS", Emulated: true, HeadSHA: "abc"}, 0, 1, "in-session-emulated", ""},
+		{"required + passing marker but unattested working tree blocks", true, AdversarialReviewStatus{Present: true, Verdict: "PASS", WorkingTreeUnattested: true, HeadSHA: "abc"}, 1, 0, "does not cover the working tree", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

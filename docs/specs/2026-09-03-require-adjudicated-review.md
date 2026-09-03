@@ -106,6 +106,17 @@ blocks, never silently PASSes). Two real gate-logic gaps were found and fixed:
 Also: the latest-marker tie-break moved from lexical `CreatedAt` compare (which inverts on an exact-zero
 nanosecond second) to **last-recorded-wins** (append order), the safer direction for a re-review downgrade.
 
-Deferred as follow-ups: verifying `--from-run`'s recorded verdict/head; crediting a marker for a dirty
-working tree under `--include-working-tree`; surfacing a distinct "store unreadable" diagnostic instead of
-the generic "no review recorded" when `runs.jsonl` is corrupt.
+### Follow-up resolution (2026-09-04)
+
+The three deferred items are now closed:
+
+- **`--from-run` provenance** — `record-lenses --mode subagent-adjudicated` now validates that the referenced
+  run's init reviewed the same `base..head` AND that the run reached a **passing terminal transition**
+  (`clean|reviewed|fixed`); an empty, wrong-diff, incomplete, or failed run is rejected. (Full hash-chain
+  fold is still not required — a lenient event scan is proportionate to the local-honor-system threat.)
+- **`--include-working-tree` currency** — a marker attests the committed `base..HEAD` only, so a run that
+  folds in a dirty working tree now BLOCKS on a distinct `working-tree-unattested` reviewer despite a valid
+  marker; commit the changes (or drop the flag) to be credited.
+- **Corrupt-store diagnostic** — dropped as unnecessary: a corrupt `.metareview/runs.jsonl` makes the run
+  projection fail *first* with the parse error (exit 1), so the gate fails closed loudly and never reaches
+  the "no review recorded" path. Verified by test; no separate diagnostic is needed.

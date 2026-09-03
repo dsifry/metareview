@@ -196,7 +196,12 @@ func Create(root string, options Options) (Result, error) {
 	// review). Resolve the review-evidence marker the FSM review-loop records; RunPRReady blocks when it is
 	// missing/not-clean unless the mechanical-pass escape is set.
 	reviewerCtx.RequireLenses = reviewstate.RequireAdjudicatedReview()
-	reviewerCtx.Adversarial = reviewers.AdversarialReviewStatus{HeadSHA: git.HeadSHA}
+	reviewerCtx.Adversarial = reviewers.AdversarialReviewStatus{
+		HeadSHA: git.HeadSHA,
+		// A marker attests the committed base..HEAD only; when this run folds in a dirty working tree, that
+		// content is unattested and the marker must not satisfy the gate.
+		WorkingTreeUnattested: options.IncludeWorkingTree && len(dirtyFiles) > 0,
+	}
 	// A corrupt runs.jsonl never reaches here silently: the run projection above reads the same file and
 	// fails the whole review loudly with the parse error first (fail-closed). So a read error here can only
 	// mean "no marker" — treat it as absent.

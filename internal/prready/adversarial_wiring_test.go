@@ -51,6 +51,32 @@ func TestPRReadyRequireLensesSatisfiedByMarker(t *testing.T) {
 	}
 }
 
+// Even a valid, passing marker must NOT satisfy pr-ready when --include-working-tree folds in uncommitted
+// changes: the marker attests the committed base..HEAD only (issue A2). The gate blocks on the working-tree
+// reviewer despite the marker.
+func TestPRReadyRequireLensesBlocksUnattestedWorkingTree(t *testing.T) {
+	root := shardedRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "") // the gate under test must not be opted out by an inherited env
+	base, head := diffEndpoints(t, root)
+	if err := reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
+		ReviewedScope: "pr-ready", BaseSHA: base, HeadSHA: head,
+		AdjudicatedVerdict: "PASS", ExecutionMode: reviewstate.ReviewModeSubagentAdjudicated,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Dirty the tree so --include-working-tree pulls in uncommitted content the marker cannot attest.
+	if err := os.WriteFile(filepath.Join(root, "uncommitted.go"), []byte("package p\nvar Dirty = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Create(root, Options{Base: "main", IncludeWorkingTree: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prReviewBody(t, root, result), "does not cover the working tree") {
+		t.Fatal("a dirty --include-working-tree run must block despite a committed-diff marker")
+	}
+}
+
 // The mirror: with no marker at HEAD the gate blocks on the adversarial-review reviewer.
 func TestPRReadyRequireLensesBlocksWithoutMarker(t *testing.T) {
 	root := shardedRepo(t)
