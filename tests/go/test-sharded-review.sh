@@ -4,6 +4,10 @@
 # with one file over the shard budget.
 set -euo pipefail
 
+# This exercises the sharding/context-risk layer of the deterministic gate. The adversarial-review
+# requirement (build B) is tested separately in test-require-adjudicated-review.sh, so opt out here.
+export METAREVIEW_ALLOW_MECHANICAL_PASS=1
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

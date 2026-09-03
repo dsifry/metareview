@@ -101,3 +101,38 @@ func TestDiscoverReviewEvidenceEmptyRepo(t *testing.T) {
 		t.Fatalf("a fresh repo has no markers; got %d", len(markers))
 	}
 }
+
+// A corrupt runs.jsonl surfaces the read error rather than silently reporting "no review" — and the error
+// propagates through LatestReviewEvidence, which the gate must not mistake for "not present".
+func TestReviewEvidenceReadErrorPropagates(t *testing.T) {
+	root := t.TempDir()
+	runs := filepath.Join(root, ".metareview", "runs.jsonl")
+	if err := os.MkdirAll(filepath.Dir(runs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(runs, []byte("{not valid json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DiscoverReviewEvidence(root); err == nil {
+		t.Fatal("a malformed runs.jsonl must surface a read error")
+	}
+	if _, ok, err := LatestReviewEvidence(root, "pr-ready", "abc"); err == nil || ok {
+		t.Fatalf("the read error must propagate (not present-false); ok=%v err=%v", ok, err)
+	}
+}
+
+// The feature flag: required by default, opted out only by METAREVIEW_ALLOW_MECHANICAL_PASS=1.
+func TestRequireAdjudicatedReview(t *testing.T) {
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "")
+	if !RequireAdjudicatedReview() {
+		t.Fatal("the adjudicated review is required by default")
+	}
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
+	if RequireAdjudicatedReview() {
+		t.Fatal("=1 must opt out of the requirement")
+	}
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "0")
+	if !RequireAdjudicatedReview() {
+		t.Fatal("only the exact value 1 opts out")
+	}
+}

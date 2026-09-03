@@ -43,26 +43,35 @@ parent intent, not a code diff. See `internal/reviewers/epicready.go`, `rubrics/
 
 ## 3. Two review engines — and the gap between them
 
-There are **two** ways a real-vs-mechanical review happens, and they are not yet unified:
+There are **two** engines that produce a review, joined by a **review-evidence marker**:
 
 1. **Deterministic gate** (`review pr-ready` / `task-done`) — `ExecutionMode: deterministic-local`. Its
    "reviewers" are **structural checks**: validation evidence present, no unresolved prior blockers, clean
    working tree, mutation report clean, PR-evidence section readable. **No model call.** Fast, reproducible,
-   runs in a git hook / CI. ⚠️ It reports PASS for *structurally clean*, which is **not the same as
-   *adversarially reviewed*** — a small diff can PASS with no AI review at all.
+   runs in a git hook / CI. On its own it reports PASS for *structurally clean*, which is **not the same as
+   *adversarially reviewed*** — so it no longer stands alone (see the require-lenses gate below).
 
 2. **FSM review-lenses** (`metareview fsm --workflow …`) — the `review-lenses` node runs the adversarial
    lenses as **subagents with a real `$REVIEWER` model**, then `match-then-adjudicate` judges them. This is
    the genuine AI adversarial review. Its findings live in the **FSM run store**
    (`.metareview/runs/<id>/audit.jsonl`, carried as `FoldState.Findings`) — **not** in the
-   `.metareview/findings.jsonl` that the deterministic gate reconciles and reads. There is no bridge between
-   the two today; wiring them together is part of the intended direction below.
+   `.metareview/findings.jsonl` that the deterministic gate reconciles and reads.
 
-Only `artifact` review requires the real thing today (it scaffolds `NOT_REVIEWED` and blocks until the agent
-fills real reviewer rows). `pr-ready`/`task-done` deterministic-pass their lens rows. **The intended
-direction:** make the gate *require the adjudicated lens review* (reuse the FSM's `review-lenses` →
-`adjudicate` engine) instead of auto-passing — unify the two entry points rather than build a third.
-`in-session-emulated` stays as an explicitly-labeled *weaker* fallback (as artifact review allows).
+**The bridge (require-lenses gate).** `pr-ready`/`task-done` now **require** an adjudicated lens review by
+default. After a real review the agent records a **review-evidence marker** —
+`metareview review record-lenses --scope pr-ready|task-done [--from-run <fsm-run-id>]` — a record in
+`.metareview/runs.jsonl` (`scope="review-evidence"`, `Kind="review-evidence"`) carrying the adjudicated
+verdict, confirmed finding IDs, lens set, execution mode, and the **HEAD SHA it reviewed**. The gate
+(`internal/reviewers/adversarial.go`) looks up the latest marker for the scope **at the current HEAD** via
+`reviewstate.LatestReviewEvidence`; a marker for a stale HEAD does not count. It blocks with
+`adversarial-review-reviewer` when no current marker is present, blocks when the adjudicated verdict is not
+`PASS`/`PASS_ADVISORY`, and emits an **advisory** finding (not a block) when the marker is
+`in-session-emulated` rather than `subagent-adjudicated`. The FSM stays scope-agnostic: the **agent**
+bridges its run into a marker with `--from-run`, rather than the FSM emitting scope-specific markers.
+
+**Escape hatch.** `METAREVIEW_ALLOW_MECHANICAL_PASS=1` opts a single run out of the requirement, restoring
+the old deterministic-only pass (`reviewstate.RequireAdjudicatedReview()`). `artifact` review is unchanged —
+it still scaffolds `NOT_REVIEWED` and blocks until the agent fills real reviewer rows.
 
 ## 4. The FSM — a scope-agnostic review/fix loop
 

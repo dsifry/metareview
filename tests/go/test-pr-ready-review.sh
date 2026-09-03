@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This script exercises the DETERMINISTIC pr-ready/task-done layer (evidence, blockers, verdicts).
+# The adversarial-review requirement (build B) is tested separately in test-require-adjudicated-review.sh,
+# so opt out of it here to keep these assertions focused.
+export METAREVIEW_ALLOW_MECHANICAL_PASS=1
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

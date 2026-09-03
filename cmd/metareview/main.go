@@ -54,6 +54,7 @@ Usage:
   metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--shard-result <path>]... [--cross-shard-result <path>]
   metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]...
   metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
+  metareview review record-lenses [--scope pr-ready|task-done] [--base <ref>] [--verdict <v>] [--mode subagent-adjudicated|in-session-emulated] [--lenses a,b,c] [--from-run <fsm-run-id>]
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
 
 Commands:
@@ -75,6 +76,7 @@ Commands:
   review task-done <target>  Run task-done code review
   review epic-ready <target> Run epic-ready integration review
   review pr-ready            Run PR-ready branch review
+  review record-lenses       Record an adjudicated lens review over HEAD (satisfies the require-lenses gate)
   learn --post-merge         Curate post-merge repository learning
 `, version.Version)
 }

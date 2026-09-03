@@ -16,15 +16,16 @@ func blockingCount(fs []Finding) (blocking, advisory int) {
 // The core of build B: the gate must REQUIRE an adjudicated lens review over this head.
 func TestAdversarialReviewFindings(t *testing.T) {
 	cases := []struct {
-		name          string
-		require       bool
-		status        AdversarialReviewStatus
-		wantBlocking  int
-		wantAdvisory  int
-		wantFinding   string // substring in the (first) finding's Title, "" = no findings
+		name         string
+		require      bool
+		status       AdversarialReviewStatus
+		wantBlocking int
+		wantAdvisory int
+		wantFinding  string // substring in the (first) finding's Title, "" = no findings
 	}{
 		{"flag off allows the mechanical pass", false, AdversarialReviewStatus{}, 0, 0, ""},
 		{"required + no marker blocks", true, AdversarialReviewStatus{HeadSHA: "abc"}, 1, 0, "No adjudicated lens review"},
+		{"required + no marker + empty head still blocks", true, AdversarialReviewStatus{}, 1, 0, "No adjudicated lens review"},
 		{"required + marker not passing blocks", true, AdversarialReviewStatus{Present: true, Verdict: "NEEDS_REVISION", HeadSHA: "abc"}, 1, 0, "unresolved findings"},
 		{"required + passing independent marker satisfies", true, AdversarialReviewStatus{Present: true, Verdict: "PASS", HeadSHA: "abc"}, 0, 0, ""},
 		{"required + PASS_ADVISORY satisfies", true, AdversarialReviewStatus{Present: true, Verdict: "PASS_ADVISORY", HeadSHA: "abc"}, 0, 0, ""},
