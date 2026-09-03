@@ -192,6 +192,19 @@ func Create(root string, options Options) (Result, error) {
 		return Result{}, err
 	}
 	reviewerCtx := reviewerContext(analysisGit, profile, knowledgeContext, reviewLogs, evidenceText, prEvidence, ghCtx, options.IncludeWorkingTree, dirtyFiles, manifestContext(manifest, aggregate))
+	// Build B: require a real adjudicated lens review over THIS head (the deterministic checks above are not a
+	// review). Resolve the review-evidence marker the FSM review-loop records; RunPRReady blocks when it is
+	// missing/not-clean unless the mechanical-pass escape is set.
+	reviewerCtx.RequireLenses = reviewstate.RequireAdjudicatedReview()
+	reviewerCtx.Adversarial = reviewers.AdversarialReviewStatus{HeadSHA: git.HeadSHA}
+	// A corrupt runs.jsonl never reaches here silently: the run projection above reads the same file and
+	// fails the whole review loudly with the parse error first (fail-closed). So a read error here can only
+	// mean "no marker" — treat it as absent.
+	if ev, ok, evErr := reviewstate.LatestReviewEvidence(root, "pr-ready", git.BaseSHA, git.HeadSHA); evErr == nil && ok {
+		reviewerCtx.Adversarial.Present = true
+		reviewerCtx.Adversarial.Verdict = ev.AdjudicatedVerdict
+		reviewerCtx.Adversarial.Emulated = ev.IsEmulated()
+	}
 	reviewerCtx.Mutation = mutationContext
 	rawFindings := reviewers.RunPRReady(reviewerCtx)
 	run := findings.Run{ID: runID, Scope: "pr-ready", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}

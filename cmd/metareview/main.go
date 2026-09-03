@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	fsmcli "github.com/dsifry/metareview/internal/fsm/cli"
+	fsmrun "github.com/dsifry/metareview/internal/fsm/run"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +29,7 @@ import (
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/reviewprompt"
+	"github.com/dsifry/metareview/internal/reviewstate"
 	"github.com/dsifry/metareview/internal/setup"
 	"github.com/dsifry/metareview/internal/status"
 	"github.com/dsifry/metareview/internal/taskdone"
@@ -53,6 +56,7 @@ Usage:
   metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--shard-result <path>]... [--cross-shard-result <path>]
   metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]...
   metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
+  metareview review record-lenses [--scope pr-ready|task-done] [--base <ref>] [--verdict <v>] [--mode subagent-adjudicated|in-session-emulated] [--lenses a,b,c] [--from-run <fsm-run-id>]
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
 
 Commands:
@@ -74,6 +78,7 @@ Commands:
   review task-done <target>  Run task-done code review
   review epic-ready <target> Run epic-ready integration review
   review pr-ready            Run PR-ready branch review
+  review record-lenses       Record an adjudicated lens review over HEAD (satisfies the require-lenses gate)
   learn --post-merge         Curate post-merge repository learning
 `, version.Version)
 }
@@ -328,6 +333,90 @@ func main() {
 		fmt.Print(reviewprompt.Build(label, scope.Files, status.ChangeKinds(root, base, nil)))
 		os.Exit(0)
 	}
+	if len(args) >= 2 && args[0] == "review" && args[1] == "record-lenses" {
+		// Record that an adjudicated lens review ran over the current head, satisfying the pr-ready/task-done
+		// require-lenses gate (build B). The FSM review-loop records this automatically on completion; this
+		// seam lets the agent record an in-session-emulated review (the labeled weaker escape hatch) when
+		// subagents are unavailable, or mirror an FSM run with --mode subagent-adjudicated --from-run.
+		scope, base, verdict := "pr-ready", "", "PASS"
+		mode, lensesCSV, fromRun := reviewstate.ReviewModeInSessionEmulated, "", ""
+		for i := 2; i < len(args); i++ {
+			switch args[i] {
+			case "--scope":
+				scope = flagValue(args, i, "--scope")
+				i++
+			case "--base":
+				base = flagValue(args, i, "--base")
+				i++
+			case "--verdict":
+				verdict = flagValue(args, i, "--verdict")
+				i++
+			case "--mode":
+				mode = flagValue(args, i, "--mode")
+				i++
+			case "--lenses":
+				lensesCSV = flagValue(args, i, "--lenses")
+				i++
+			case "--from-run":
+				fromRun = flagValue(args, i, "--from-run")
+				i++
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
+				os.Exit(2)
+			}
+		}
+		if scope != "pr-ready" && scope != "task-done" {
+			fmt.Fprintln(os.Stderr, "record-lenses: --scope must be pr-ready or task-done")
+			os.Exit(2)
+		}
+		if mode != reviewstate.ReviewModeSubagentAdjudicated && mode != reviewstate.ReviewModeInSessionEmulated {
+			fmt.Fprintln(os.Stderr, "record-lenses: --mode must be subagent-adjudicated or in-session-emulated")
+			os.Exit(2)
+		}
+		root := repo.RootOr(mustCwd())
+		gc, err := gitcontext.Collect(root, base)
+		exitOnErr(err) // a repo with no HEAD/base fails here ("invalid git base"), so gc.HeadSHA is non-empty below
+		// A CLI seam cannot witness that independent subagents actually ran, so it must not let a hand-typed
+		// `--mode subagent-adjudicated` launder a self-attested review as independent, full-strength evidence
+		// (the gate would then trust it with no advisory trace). subagent-adjudicated is therefore admitted
+		// only when it mirrors a real FSM review run: --from-run must name a run whose init records the SAME
+		// base..head this marker claims. A self-attested review has no such run and must record the labeled,
+		// advisory in-session-emulated mode.
+		if mode == reviewstate.ReviewModeSubagentAdjudicated {
+			if fromRun == "" {
+				fmt.Fprintln(os.Stderr, "record-lenses: --mode subagent-adjudicated requires --from-run naming the FSM review run it mirrors; use --mode in-session-emulated for a self-attested review")
+				os.Exit(2)
+			}
+			// A run id is a single path segment under .metareview/runs/; reject separators/traversal so the
+			// audit read can't be pointed outside the run store.
+			if strings.ContainsAny(fromRun, `/\`) || fromRun == ".." {
+				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: not a valid run id\n", fromRun)
+				os.Exit(2)
+			}
+			if err := validateFromRunDiff(root, fromRun, gc.BaseSHA, gc.HeadSHA); err != nil {
+				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: %v\n", fromRun, err)
+				os.Exit(2)
+			}
+		}
+		var lenses []string
+		for _, l := range strings.Split(lensesCSV, ",") {
+			if l = strings.TrimSpace(l); l != "" {
+				lenses = append(lenses, l)
+			}
+		}
+		// A review with no named lens is not evidence a lens ran; a PASS marker with an empty lens set would
+		// let the gate pass on nothing. Require at least one.
+		if len(lenses) == 0 {
+			fmt.Fprintln(os.Stderr, "record-lenses: --lenses must name at least one lens that ran (e.g. --lenses security,correctness)")
+			os.Exit(2)
+		}
+		exitOnErr(reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
+			ReviewedScope: scope, HeadSHA: gc.HeadSHA, BaseSHA: gc.BaseSHA,
+			LensSet: lenses, AdjudicatedVerdict: verdict, ExecutionMode: mode, FromFSMRunID: fromRun,
+		}))
+		fmt.Printf("Recorded %s review-evidence at head %s (mode=%s, verdict=%s).\n", scope, gc.HeadSHA, mode, verdict)
+		os.Exit(0)
+	}
 	if len(args) >= 2 && args[0] == "review" && args[1] == "gate" {
 		base, push, all := "", false, false
 		for i := 2; i < len(args); i++ {
@@ -543,6 +632,55 @@ func mustCwd() string {
 // told the operator they had review findings, while emitting no JSON and so no blockers to act
 // on — an unreadable review log became "you have work to do, and I cannot say what". A check that
 // did not run must never be reported as a check that found something.
+// validateFromRunDiff confirms that the FSM run named by --from-run exists and its init event records the
+// SAME base..head the marker claims, so a subagent-adjudicated marker cannot be pointed at an empty audit or
+// at a real run that reviewed a different diff. It reads only the first (init) line — cheap and lenient, in
+// the spirit of the FSM's own peek; validating the run's terminal *verdict* is a recorded follow-up.
+func validateFromRunDiff(root, runID, wantBase, wantHead string) error {
+	path := filepath.Join(root, ".metareview", "runs", runID, "audit.jsonl")
+	raw, err := os.ReadFile(path) // #nosec G304 -- runID is validated to a single path segment by the caller
+	if err != nil {
+		return errors.New("no such FSM run under .metareview/runs/")
+	}
+	line := raw
+	if i := indexByte(raw, '\n'); i >= 0 {
+		line = raw[:i]
+	}
+	if len(line) == 0 {
+		return errors.New("its audit.jsonl is empty (not a real run)")
+	}
+	var ev fsmrun.Event
+	if json.Unmarshal(line, &ev) != nil || ev.Type != fsmrun.TypeInit {
+		return errors.New("its audit.jsonl does not start with a valid init event")
+	}
+	var d fsmrun.InitData
+	if json.Unmarshal(ev.Data, &d) != nil {
+		return errors.New("its init event is unreadable")
+	}
+	if d.Head != wantHead || d.BaseSHA != wantBase {
+		return fmt.Errorf("it reviewed a different diff (run base..head %s..%s, marker %s..%s)", short(d.BaseSHA), short(d.Head), short(wantBase), short(wantHead))
+	}
+	return nil
+}
+
+// indexByte reports the first index of b in s, or -1.
+func indexByte(s []byte, b byte) int {
+	for i, c := range s {
+		if c == b {
+			return i
+		}
+	}
+	return -1
+}
+
+// short trims a SHA to its first 12 chars for a diagnostic, leaving shorter strings untouched.
+func short(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
 func exitGateBroken(err error) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

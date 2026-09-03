@@ -18,6 +18,7 @@ import (
 	"github.com/dsifry/metareview/internal/reviewers"
 	"github.com/dsifry/metareview/internal/reviewlog"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
+	"github.com/dsifry/metareview/internal/reviewstate"
 	"github.com/dsifry/metareview/internal/runchain"
 	"github.com/dsifry/metareview/internal/shardpack"
 	"github.com/dsifry/metareview/internal/state"
@@ -155,6 +156,17 @@ func Create(root, target string, options Options) (Result, error) {
 	}
 	reviewerCtx := reviewerContext(task, reviewGit, profile, knowledgeContext, evidenceText, manifestContext(manifest, aggregate))
 	reviewerCtx.Mutation = mutationContext
+	// Build B: require a real adjudicated lens review over THIS head (see internal/reviewstate).
+	reviewerCtx.RequireLenses = reviewstate.RequireAdjudicatedReview()
+	reviewerCtx.Adversarial = reviewers.AdversarialReviewStatus{HeadSHA: git.HeadSHA}
+	// A corrupt runs.jsonl never reaches here silently: the run projection above reads the same file and
+	// fails the whole review loudly with the parse error first (fail-closed). So a read error here can only
+	// mean "no marker" — treat it as absent.
+	if ev, ok, evErr := reviewstate.LatestReviewEvidence(root, "task-done", git.BaseSHA, git.HeadSHA); evErr == nil && ok {
+		reviewerCtx.Adversarial.Present = true
+		reviewerCtx.Adversarial.Verdict = ev.AdjudicatedVerdict
+		reviewerCtx.Adversarial.Emulated = ev.IsEmulated()
+	}
 	rawFindings := reviewers.RunTaskDone(reviewerCtx)
 	targetRecord := map[string]string{"type": taskTargetType(task), "id": task.ID}
 	run := findings.Run{ID: runID, Scope: "task-done", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}

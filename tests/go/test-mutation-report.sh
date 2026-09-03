@@ -7,6 +7,10 @@
 # so the worse the configuration the better the score. metareview must refuse that run.
 set -euo pipefail
 
+# This exercises mutation-report handling in the deterministic gate. The adversarial-review requirement
+# (build B) is tested separately in test-require-adjudicated-review.sh, so opt out of it here.
+export METAREVIEW_ALLOW_MECHANICAL_PASS=1
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

@@ -37,6 +37,7 @@ if [ -f tests/go/test-metaswarm-integration.sh ]; then bash tests/go/test-metasw
 if [ -f tests/go/test-pr-evidence.sh ]; then bash tests/go/test-pr-evidence.sh; fi
 if [ -f tests/go/test-prready-reviewers.sh ]; then bash tests/go/test-prready-reviewers.sh; fi
 if [ -f tests/go/test-pr-ready-review.sh ]; then bash tests/go/test-pr-ready-review.sh; fi
+if [ -f tests/go/test-require-adjudicated-review.sh ]; then bash tests/go/test-require-adjudicated-review.sh; fi
 if [ -f tests/go/test-learn-source.sh ]; then bash tests/go/test-learn-source.sh; fi
 if [ -f tests/go/test-session-history.sh ]; then bash tests/go/test-session-history.sh; fi
 if [ -f tests/go/test-learning-candidates.sh ]; then bash tests/go/test-learning-candidates.sh; fi

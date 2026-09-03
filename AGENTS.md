@@ -17,6 +17,21 @@ Run metareview before claiming completion:
 - PR ready to push or merge: `metareview review pr-ready --base <base-ref>`.
 - After PR merge: `metareview learn --post-merge <pr-number> --base <pre-merge-ref>`.
 
+`task-done` and `pr-ready` **require an adjudicated adversarial lens review** (the structural checks no
+longer PASS alone). After the real review, record a HEAD-scoped marker so the gate sees it — re-record after
+any new commit:
+
+```bash
+metareview review record-lenses --scope pr-ready --base <base-ref> \
+  --verdict PASS --mode subagent-adjudicated --from-run <fsm-run-id> --lenses security,correctness
+```
+
+Use `--scope task-done` for the task-done gate; `--lenses` is required. The marker is scoped to the exact
+base..HEAD diff — re-record after a new commit or a different `--base`. `--mode subagent-adjudicated`
+requires `--from-run` naming a real FSM run whose init records the same base..head; use
+`--mode in-session-emulated` (no `--from-run`) for a self-attested in-session review — it passes but is
+advisory-flagged. `METAREVIEW_ALLOW_MECHANICAL_PASS=1` opts a run out to a structural-only pass.
+
 Use `go run ./cmd/metareview ...` when running from a source checkout without a built `bin/metareview`.
 
 ## Blocker Policy

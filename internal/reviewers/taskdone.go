@@ -19,6 +19,10 @@ type Context struct {
 	Manifest     ManifestContext
 	Mutation     MutationContext
 	EvidenceText string
+	// RequireLenses gates whether a real adjudicated lens review is required to pass (build B; default on).
+	// Adversarial is the resolved review-evidence for the current head, supplied by the caller.
+	RequireLenses bool
+	Adversarial   AdversarialReviewStatus
 }
 
 // ManifestContext is what the review manifest says about the shard results
@@ -191,6 +195,7 @@ func RunTaskDone(context Context) []Finding {
 	}
 
 	results = append(results, duplicatePathFindings(context.Knowledge, changedSource)...)
+	results = append(results, adversarialReviewFindings(context.RequireLenses, context.Adversarial)...)
 	return results
 }
 
