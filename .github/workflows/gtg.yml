@@ -175,29 +175,54 @@ jobs:
           cat gtg-output.txt
           echo "::endgroup::"
 
+          # Surface the verdict in the JOB SUMMARY so the reason is visible in the PR's Checks tab without
+          # opening the raw log. A gtg run waits several minutes for CI + both review bots before it can
+          # judge thread state, so from the outside it looks like a silent hang; when it then fails, the
+          # cause ("N unresolved review threads") was previously buried in the log. This makes it prominent.
+          {
+            echo "## Merge Ready (gtg)"
+            echo ""
+            echo "gtg waits for CI and both review bots to report before judging, so a multi-minute pending window here is normal — not a hang."
+            echo ""
+            echo '```'
+            grep -E 'READY|UNRESOLVED|CI:|Threads:|Action required:|unresolved review threads|actionable comment' gtg-output.txt || echo "(see the GTG Check Details log)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
           case $EXIT_CODE in
             0)
               echo "::notice::PR #$PR is ready to merge"
+              echo "> ✅ **Ready to merge** — CI green and all review threads resolved." >> "$GITHUB_STEP_SUMMARY"
               ;;
             1)
               # Exit 1 = actionable comments. gtg still classifies dismissed bot
               # review summaries as actionable, so this is a warning, not a failure.
               echo "::warning::PR may have actionable comments — review the GTG output above"
+              echo "> ⚠️ **Possible actionable comments** — review the GTG output above (this is a warning, not a block)." >> "$GITHUB_STEP_SUMMARY"
               ;;
             2)
-              echo "::error::PR has unresolved review threads"
+              echo "::error::PR has unresolved review threads — see the job summary"
+              # The single most common gtg failure when every other check is green.
+              {
+                echo "> ❌ **Blocked on unresolved review threads.** Every other check is green — gtg fails only because review threads are still open."
+                echo ">"
+                echo "> Fix or reply to each thread, then **mark it Resolved** (the GitHub UI's *Resolve conversation*, or \`gh api graphql … resolveReviewThread\`). gtg re-runs on the next push/sync and passes once 0 remain."
+              } >> "$GITHUB_STEP_SUMMARY"
               exit 2
               ;;
             3)
               echo "::error::PR has failing CI checks"
+              echo "> ❌ **Failing CI checks** — see the checks above." >> "$GITHUB_STEP_SUMMARY"
               exit 3
               ;;
             4)
               echo "::error::Error fetching PR data from GitHub API"
+              echo "> ❌ **Could not fetch PR data from the GitHub API** (transient) — re-run the check." >> "$GITHUB_STEP_SUMMARY"
               exit 4
               ;;
             *)
               echo "::error::GTG check failed with unexpected exit code: $EXIT_CODE"
+              echo "> ❌ **gtg failed with unexpected exit code $EXIT_CODE.**" >> "$GITHUB_STEP_SUMMARY"
               exit $EXIT_CODE
               ;;
           esac

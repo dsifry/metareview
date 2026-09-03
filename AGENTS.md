@@ -34,6 +34,15 @@ advisory-flagged. `METAREVIEW_ALLOW_MECHANICAL_PASS=1` opts a run out to a struc
 
 Use `go run ./cmd/metareview ...` when running from a source checkout without a built `bin/metareview`.
 
+## PR checks: the `gtg` (Merge Ready) gate
+
+When the **`gtg` (Merge Ready)** check is pending or failing while every *other* check (test, CodeRabbit,
+Bugbot) is green, it is almost always **unresolved review threads**: gtg blocks on `Threads: N/M resolved`.
+Fix or reply to each thread, then **mark it resolved** (GitHub UI, or `gh api graphql … resolveReviewThread`);
+gtg re-runs on the next push and passes once 0 remain. gtg first *waits* for CI and both review bots to
+report before judging, so a multi-minute pending window after a push is normal, not a hang; the job summary
+states the reason.
+
 ## Blocker Policy
 
 Do not claim completion while any blocking finding remains open.
