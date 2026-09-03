@@ -10,6 +10,10 @@ type AdversarialReviewStatus struct {
 	Verdict  string // the adjudicated verdict of the recorded review, when Present
 	Emulated bool   // true = in-session-emulated (weaker, non-independent evidence)
 	HeadSHA  string
+	// WorkingTreeUnattested is set when this review includes uncommitted working-tree changes
+	// (--include-working-tree over a dirty tree). The marker attests only the committed base..HEAD, so it
+	// cannot vouch for that content and must not satisfy the gate.
+	WorkingTreeUnattested bool
 }
 
 // adversarialReviewFindings enforces that a real adjudicated lens review ran over THIS head. When required and
@@ -47,6 +51,19 @@ func adversarialReviewFindings(require bool, s AdversarialReviewStatus) []Findin
 			Found:          "The latest review-evidence marker for HEAD " + head + " has verdict " + s.Verdict + ".",
 			Recommendation: "Clear the review's findings and re-run the review loop, then re-run this gate.",
 			Fingerprint:    "review:adjudicated-review-not-clean",
+		})}
+	}
+	if s.WorkingTreeUnattested {
+		// The review covers uncommitted content the marker (base..HEAD only) cannot vouch for.
+		return []Finding{finding(Finding{
+			Reviewer:       "adversarial-review-reviewer",
+			Severity:       "high",
+			Title:          "Adjudicated review does not cover the working tree",
+			Finding:        "This run includes uncommitted working-tree changes (--include-working-tree over a dirty tree), but the recorded review-evidence marker attests only the committed base..HEAD diff — it cannot vouch for uncommitted content.",
+			Expected:       "The reviewed content is committed (so the marker's base..HEAD covers it), or a fresh review is recorded over the working tree.",
+			Found:          "A marker for HEAD " + head + " exists, but the working tree has uncommitted changes it does not attest.",
+			Recommendation: "Commit (or stash/discard) the working-tree changes and re-run the review over the committed diff, or drop --include-working-tree.",
+			Fingerprint:    "review:working-tree-unattested",
 		})}
 	}
 	if s.Emulated {

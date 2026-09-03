@@ -632,45 +632,65 @@ func mustCwd() string {
 // told the operator they had review findings, while emitting no JSON and so no blockers to act
 // on — an unreadable review log became "you have work to do, and I cannot say what". A check that
 // did not run must never be reported as a check that found something.
-// validateFromRunDiff confirms that the FSM run named by --from-run exists and its init event records the
-// SAME base..head the marker claims, so a subagent-adjudicated marker cannot be pointed at an empty audit or
-// at a real run that reviewed a different diff. It reads only the first (init) line — cheap and lenient, in
-// the spirit of the FSM's own peek; validating the run's terminal *verdict* is a recorded follow-up.
+// validateFromRunDiff confirms that the FSM run named by --from-run is a real review run that (a) reviewed
+// the SAME base..head the marker claims (its init event) and (b) reached a PASSING terminal transition
+// (outcome clean|reviewed|fixed). This keeps a subagent-adjudicated marker from being pointed at an empty
+// audit, a run over a different diff, or a run that reviewed the diff and did NOT come out clean. It scans
+// events leniently (in the spirit of the FSM's own peek) rather than folding the full chain.
 func validateFromRunDiff(root, runID, wantBase, wantHead string) error {
 	path := filepath.Join(root, ".metareview", "runs", runID, "audit.jsonl")
 	raw, err := os.ReadFile(path) // #nosec G304 -- runID is validated to a single path segment by the caller
 	if err != nil {
 		return errors.New("no such FSM run under .metareview/runs/")
 	}
-	line := raw
-	if i := indexByte(raw, '\n'); i >= 0 {
-		line = raw[:i]
+	var events []fsmrun.Event
+	for _, line := range strings.Split(string(raw), "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		var ev fsmrun.Event
+		if json.Unmarshal([]byte(line), &ev) != nil {
+			return errors.New("its audit.jsonl has a malformed event")
+		}
+		events = append(events, ev)
 	}
-	if len(line) == 0 {
-		return errors.New("its audit.jsonl is empty (not a real run)")
-	}
-	var ev fsmrun.Event
-	if json.Unmarshal(line, &ev) != nil || ev.Type != fsmrun.TypeInit {
+	if len(events) == 0 || events[0].Type != fsmrun.TypeInit {
 		return errors.New("its audit.jsonl does not start with a valid init event")
 	}
 	var d fsmrun.InitData
-	if json.Unmarshal(ev.Data, &d) != nil {
+	if json.Unmarshal(events[0].Data, &d) != nil {
 		return errors.New("its init event is unreadable")
 	}
 	if d.Head != wantHead || d.BaseSHA != wantBase {
 		return fmt.Errorf("it reviewed a different diff (run base..head %s..%s, marker %s..%s)", short(d.BaseSHA), short(d.Head), short(wantBase), short(wantHead))
 	}
-	return nil
-}
-
-// indexByte reports the first index of b in s, or -1.
-func indexByte(s []byte, b byte) int {
-	for i, c := range s {
-		if c == b {
-			return i
+	// The LAST outcome-bearing transition is the run's verdict: a run that was `reviewed` and then looped and
+	// came out `failed` must be rejected, so we cannot accept the first passing outcome we see. Unreadable
+	// transition payloads are rejected rather than skipped (a run we cannot parse is not a run we can trust).
+	var lastOutcome fsmrun.Outcome
+	sawOutcome := false
+	for _, ev := range events {
+		if ev.Type != fsmrun.TypeTransition {
+			continue
+		}
+		var td fsmrun.TransitionData
+		if json.Unmarshal(ev.Data, &td) != nil {
+			return errors.New("its audit.jsonl has an unreadable transition event")
+		}
+		if td.Outcome != "" {
+			lastOutcome, sawOutcome = td.Outcome, true
 		}
 	}
-	return -1
+	if sawOutcome && isPassingReviewOutcome(lastOutcome) {
+		return nil // the run's final verdict was a passing review over the right diff
+	}
+	return errors.New("its final outcome is not a passing review (clean|reviewed|fixed)")
+}
+
+// isPassingReviewOutcome reports whether an FSM terminal outcome means the review passed — a clean review,
+// an adjudicated review, or a completed fix — as opposed to stalled/overflow/failed.
+func isPassingReviewOutcome(o fsmrun.Outcome) bool {
+	return o == fsmrun.OutcomeClean || o == fsmrun.OutcomeReviewed || o == fsmrun.OutcomeFixed
 }
 
 // short trims a SHA to its first 12 chars for a diagnostic, leaving shorter strings untouched.

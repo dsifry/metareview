@@ -8,9 +8,12 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dsifry/metareview/internal/repo"
 )
 
 type RunOptions struct {
@@ -19,6 +22,34 @@ type RunOptions struct {
 	Covers []string
 	Env    []string
 	Now    func() time.Time
+}
+
+// redactCWD turns an absolute working directory into a form safe to commit in a shareable receipt: the path
+// relative to the repository root when the command ran inside one (usually "." — the repo root), otherwise
+// the home directory collapsed to "~", otherwise just the leaf directory. The receipt's CWD is metadata
+// only (never read back as a path), so this never affects where the command runs — it keeps the operator's
+// username and filesystem layout out of committed artifacts (issue #80).
+func redactCWD(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	if root, err := repo.Root(cwd); err == nil {
+		if rel, err := filepath.Rel(root, cwd); err == nil && !strings.HasPrefix(rel, "..") {
+			return rel // "." at the repo root, "internal/foo" below it
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if rel, err := filepath.Rel(home, cwd); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return filepath.ToSlash(filepath.Join("~", rel))
+		}
+	}
+	// Last resort: the leaf directory only — never a full path. A filesystem root (`/`, or a Windows volume
+	// root like `C:\`) has no meaningful leaf, so collapse it to neutral "." rather than leaking an absolute.
+	clean := filepath.Clean(cwd)
+	if clean == string(filepath.Separator) || clean == filepath.VolumeName(clean)+string(filepath.Separator) {
+		return "."
+	}
+	return filepath.Base(clean)
 }
 
 func Run(ctx context.Context, command []string, options RunOptions) (Receipt, error) {
@@ -66,7 +97,7 @@ func Run(ctx context.Context, command []string, options RunOptions) (Receipt, er
 		SchemaVersion: 1,
 		Kind:          kind,
 		Command:       command,
-		CWD:           cwd,
+		CWD:           redactCWD(cwd),
 		ExitCode:      exitCode,
 		StartedAt:     started,
 		FinishedAt:    finished,
