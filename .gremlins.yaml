@@ -1,0 +1,19 @@
+# gremlins mutation-testing config (go-gremlins). Discovered automatically at the repo root, so
+# `gremlins unleash ./internal/<pkg>/` uses these without repeating flags. Override any value on the CLI.
+#
+# Why these values (measured on this 10-core machine, 2026-09-03):
+#   - This repo's slow packages (internal/status, internal/fsm/…) run REAL git/subprocess integration tests:
+#     the status suite EXECUTES in ~13s (a recompile is only ~0.1s — the cost is runtime, not build).
+#   - gremlins derives each mutant's timeout from a baseline it measures with a WARM test cache (~0.3s), but
+#     every mutant runs cache-MISS (~13s). With the old `timeout-coefficient: 30` the per-mutant ceiling was
+#     ~8s < 13s, so mutants on the slow packages TIMED OUT en masse (inconclusive, not KILLED). A large
+#     coefficient makes the ceiling comfortably exceed the real runtime (incl. worker contention).
+#   - workers: 8 uses the 10 cores (leaving headroom for the OS + git subprocesses) instead of serializing.
+#   - test-cpu: 2 caps GOMAXPROCS per test run so 8 concurrent runs don't oversubscribe the 10 cores.
+#
+# Fast, unit-only packages finish quickly regardless; the high coefficient only raises a ceiling, it does not
+# slow a mutant that resolves fast. If a machine has fewer cores, lower `workers` (and you may lower the
+# coefficient toward the point where baseVerdict×coeff still exceeds the slowest package's execution time).
+workers: 8
+test-cpu: 2
+timeout-coefficient: 150
