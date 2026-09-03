@@ -197,7 +197,7 @@ func Create(root string, options Options) (Result, error) {
 	// missing/not-clean unless the mechanical-pass escape is set.
 	reviewerCtx.RequireLenses = reviewstate.RequireAdjudicatedReview()
 	reviewerCtx.Adversarial = reviewers.AdversarialReviewStatus{HeadSHA: git.HeadSHA}
-	if ev, ok, evErr := reviewstate.LatestReviewEvidence(root, "pr-ready", git.HeadSHA); evErr == nil && ok {
+	if ev, ok, evErr := reviewstate.LatestReviewEvidence(root, "pr-ready", git.BaseSHA, git.HeadSHA); evErr == nil && ok {
 		reviewerCtx.Adversarial.Present = true
 		reviewerCtx.Adversarial.Verdict = ev.AdjudicatedVerdict
 		reviewerCtx.Adversarial.Emulated = ev.IsEmulated()

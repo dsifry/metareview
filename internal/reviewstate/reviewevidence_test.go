@@ -55,52 +55,58 @@ func TestReviewEvidenceRecordDiscoverRoundTrip(t *testing.T) {
 	}
 }
 
-// The gate query is head-scoped: a marker satisfies only its own (reviewedScope, headSHA). A different head,
-// or a different scope, does not — a new commit requires a fresh review.
-func TestLatestReviewEvidenceIsHeadAndScopeScoped(t *testing.T) {
+// The gate query is scoped to the exact base..head diff: a marker satisfies only its own
+// (reviewedScope, baseSHA, headSHA). A different head, a different BASE, or a different scope does not — a
+// new commit needs a fresh review, and a review of a narrow base must not be credited for a wider one.
+func TestLatestReviewEvidenceIsBaseHeadAndScopeScoped(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".metareview"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	mustRecord := func(scope, head, mode, created string) {
+	mustRecord := func(scope, base, head, mode string) {
 		if err := RecordReviewEvidence(root, ReviewEvidence{
-			ReviewedScope: scope, HeadSHA: head, ExecutionMode: mode, AdjudicatedVerdict: "PASS", CreatedAt: created,
+			ReviewedScope: scope, BaseSHA: base, HeadSHA: head, ExecutionMode: mode, AdjudicatedVerdict: "PASS",
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	mustRecord("pr-ready", "head-1", ReviewModeSubagentAdjudicated, "2026-09-03T00:00:01Z")
-	mustRecord("pr-ready", "head-1", ReviewModeInSessionEmulated, "2026-09-03T00:00:02Z") // later, same head
-	mustRecord("task-done", "head-1", ReviewModeSubagentAdjudicated, "2026-09-03T00:00:03Z")
+	mustRecord("pr-ready", "base-1", "head-1", ReviewModeSubagentAdjudicated)
+	mustRecord("pr-ready", "base-1", "head-1", ReviewModeInSessionEmulated) // later record, same base+head
+	mustRecord("task-done", "base-1", "head-1", ReviewModeSubagentAdjudicated)
 
-	// Matches head-1 pr-ready → the LATEST (the emulated one, by CreatedAt).
-	m, ok, err := LatestReviewEvidence(root, "pr-ready", "head-1")
+	// Matches base-1..head-1 pr-ready → the LAST-recorded (the emulated one).
+	m, ok, err := LatestReviewEvidence(root, "pr-ready", "base-1", "head-1")
 	if err != nil || !ok {
-		t.Fatalf("expected a pr-ready marker for head-1; ok=%v err=%v", ok, err)
+		t.Fatalf("expected a pr-ready marker for base-1..head-1; ok=%v err=%v", ok, err)
 	}
 	if !m.IsEmulated() {
-		t.Fatalf("expected the later (emulated) marker to win by CreatedAt; got %+v", m)
+		t.Fatalf("expected the last-recorded (emulated) marker to win; got %+v", m)
 	}
 	// A different head is not satisfied.
-	if _, ok, _ := LatestReviewEvidence(root, "pr-ready", "head-2"); ok {
+	if _, ok, _ := LatestReviewEvidence(root, "pr-ready", "base-1", "head-2"); ok {
 		t.Fatal("a marker for head-1 must not satisfy head-2")
 	}
+	// A different BASE is not satisfied (a narrow review must not be credited for a wider diff).
+	if _, ok, _ := LatestReviewEvidence(root, "pr-ready", "base-0", "head-1"); ok {
+		t.Fatal("a marker over base-1 must not satisfy a gate run over base-0")
+	}
 	// A different scope is not satisfied by the pr-ready marker.
-	if _, ok, _ := LatestReviewEvidence(root, "epic-ready", "head-1"); ok {
+	if _, ok, _ := LatestReviewEvidence(root, "epic-ready", "base-1", "head-1"); ok {
 		t.Fatal("no epic-ready marker exists; must not be satisfied")
 	}
 }
 
-// Two markers with the SAME CreatedAt (same scope+head) must resolve deterministically: the strict `>`
-// keeps the first-recorded one (a later duplicate does not silently displace it). This pins the tie-break
-// boundary — `>=` would let the last-appended marker win instead.
-func TestLatestReviewEvidenceTieBreakKeepsFirstRecorded(t *testing.T) {
+// Of several markers over the same base..head, the LAST-recorded wins: re-reviewing an unchanged head lets
+// the newer verdict supersede the older. This also sidesteps the RFC3339Nano string-compare trap (a stamp
+// on an exact-zero-nanosecond second sorts after a later fractional one), so an identical-timestamp pair is
+// resolved by record order, not lexical compare.
+func TestLatestReviewEvidenceLastRecordedWins(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".metareview"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	const same = "2026-09-03T12:00:00Z"
-	// First-recorded is the PASS; a later duplicate at the identical timestamp is NEEDS_REVISION.
+	// An earlier PASS, then a later re-review at the identical timestamp downgrades to NEEDS_REVISION.
 	if err := RecordReviewEvidence(root, ReviewEvidence{
 		ReviewedScope: "pr-ready", HeadSHA: "head-1", AdjudicatedVerdict: "PASS", CreatedAt: same,
 	}); err != nil {
@@ -111,12 +117,12 @@ func TestLatestReviewEvidenceTieBreakKeepsFirstRecorded(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	m, ok, err := LatestReviewEvidence(root, "pr-ready", "head-1")
+	m, ok, err := LatestReviewEvidence(root, "pr-ready", "", "head-1")
 	if err != nil || !ok {
 		t.Fatalf("expected a marker; ok=%v err=%v", ok, err)
 	}
-	if m.AdjudicatedVerdict != "PASS" {
-		t.Fatalf("on an identical-timestamp tie the first-recorded marker must win; got verdict %q", m.AdjudicatedVerdict)
+	if m.AdjudicatedVerdict != "NEEDS_REVISION" {
+		t.Fatalf("the last-recorded verdict must win (the newer downgrade); got %q", m.AdjudicatedVerdict)
 	}
 }
 
@@ -145,7 +151,7 @@ func TestReviewEvidenceReadErrorPropagates(t *testing.T) {
 	if _, err := DiscoverReviewEvidence(root); err == nil {
 		t.Fatal("a malformed runs.jsonl must surface a read error")
 	}
-	if _, ok, err := LatestReviewEvidence(root, "pr-ready", "abc"); err == nil || ok {
+	if _, ok, err := LatestReviewEvidence(root, "pr-ready", "base", "abc"); err == nil || ok {
 		t.Fatalf("the read error must propagate (not present-false); ok=%v err=%v", ok, err)
 	}
 }

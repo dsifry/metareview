@@ -2,34 +2,34 @@ package taskdone
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/reviewstate"
 )
 
-// headSHA returns the repo's current HEAD, the SHA the marker must match.
-func headSHA(t *testing.T, root string) string {
+// diffEndpoints returns the exact (base, head) SHAs the gate computes for base ref "main", the pair a marker
+// must carry to satisfy the currency check.
+func diffEndpoints(t *testing.T, root string) (base, head string) {
 	t.Helper()
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = root
-	out, err := cmd.Output()
+	gc, err := gitcontext.Collect(root, "main")
 	if err != nil {
-		t.Fatalf("git rev-parse HEAD: %v", err)
+		t.Fatalf("gitcontext.Collect: %v", err)
 	}
-	return strings.TrimSpace(string(out))
+	return gc.BaseSHA, gc.HeadSHA
 }
 
-// A recorded adjudicated marker at THIS head satisfies build B's require-lenses gate: the run reaches the
-// present-and-passing branch, so the adversarial-review blocker is not raised. This is the marker-present
-// path in Create() that the flag-opt-out tests never exercise.
+// A recorded adjudicated marker over THIS base..head satisfies build B's require-lenses gate: the run
+// reaches the present-and-passing branch, so the adversarial-review blocker is not raised. This is the
+// marker-present path in Create() that the flag-opt-out tests never exercise.
 func TestTaskDoneRequireLensesSatisfiedByMarker(t *testing.T) {
 	root := shardedTaskRepo(t)
-	// A PASS, subagent-adjudicated marker at HEAD — the review-lenses evidence the gate now demands.
+	base, head := diffEndpoints(t, root)
+	// A PASS, subagent-adjudicated marker over base..head — the review-lenses evidence the gate now demands.
 	if err := reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
-		ReviewedScope: "task-done", HeadSHA: headSHA(t, root),
+		ReviewedScope: "task-done", BaseSHA: base, HeadSHA: head,
 		AdjudicatedVerdict: "PASS", ExecutionMode: reviewstate.ReviewModeSubagentAdjudicated,
 	}); err != nil {
 		t.Fatal(err)
@@ -57,8 +57,9 @@ func TestTaskDoneRequireLensesSatisfiedByMarker(t *testing.T) {
 // adversarial-review blocker (the "unresolved findings" branch of the reviewer).
 func TestTaskDoneRequireLensesRejectsNonPassMarker(t *testing.T) {
 	root := shardedTaskRepo(t)
+	base, head := diffEndpoints(t, root)
 	if err := reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
-		ReviewedScope: "task-done", HeadSHA: headSHA(t, root),
+		ReviewedScope: "task-done", BaseSHA: base, HeadSHA: head,
 		AdjudicatedVerdict: "NEEDS_REVISION", ExecutionMode: reviewstate.ReviewModeSubagentAdjudicated,
 	}); err != nil {
 		t.Fatal(err)

@@ -86,3 +86,24 @@ opt-out) for one release so in-flight repos aren't wedged.
 - epic-ready judgment lenses (fast-follow).
 - Rewiring the FSM's internal audit storage (only add the outward marker).
 - An MCP server (separate track).
+
+## Post-review hardening (dogfood, 2026-09-03)
+
+Three independent adversarial reviewers (security, correctness, test-integrity) ran over the implementation
+diff before merge. The correctness reviewer confirmed the gate **fails closed** (a corrupt `runs.jsonl`
+blocks, never silently PASSes). Two real gate-logic gaps were found and fixed:
+
+- **Forged independence.** A hand-typed `record-lenses --mode subagent-adjudicated --verdict PASS` satisfied
+  the gate as full-strength independent evidence with no advisory trace. Fixed: `subagent-adjudicated` is
+  admitted only with a `--from-run` naming an FSM run that exists on disk; a self-attested review has no such
+  run and must record `in-session-emulated` (advisory). Verifying the referenced run's own verdict/head is a
+  documented follow-up.
+- **Base blindness.** Currency matched on HEAD only, so a review over a narrow `HEAD~1..HEAD` satisfied a
+  gate run over a wider `main..HEAD`. Fixed: `LatestReviewEvidence` matches the exact `base..HEAD` pair.
+
+Also: the latest-marker tie-break moved from lexical `CreatedAt` compare (which inverts on an exact-zero
+nanosecond second) to **last-recorded-wins** (append order), the safer direction for a re-review downgrade.
+
+Deferred as follow-ups: verifying `--from-run`'s recorded verdict/head; crediting a marker for a dirty
+working tree under `--include-working-tree`; surfacing a distinct "store unreadable" diagnostic instead of
+the generic "no review recorded" when `runs.jsonl` is corrupt.

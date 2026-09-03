@@ -75,10 +75,14 @@ func DiscoverReviewEvidence(root string) ([]ReviewEvidence, error) {
 	return markers, nil
 }
 
-// LatestReviewEvidence returns the most recent marker (by CreatedAt) covering reviewedScope at headSHA, if
-// any. A marker for a DIFFERENT head does not satisfy the gate: a new commit requires a fresh review, which
-// is how the push gate already reasons about currency.
-func LatestReviewEvidence(root, reviewedScope, headSHA string) (ReviewEvidence, bool, error) {
+// LatestReviewEvidence returns the marker covering reviewedScope over the exact baseSHA..headSHA diff, if
+// any. Currency is BOTH endpoints: a marker for a different head does not satisfy the gate (a new commit
+// requires a fresh review), and neither does one adjudicated over a different base — a review of a narrow
+// base..head must not be credited for a wider one. Of several matching markers the LAST-RECORDED wins
+// (append order in runs.jsonl is record order): re-reviewing an unchanged head lets the newer verdict
+// supersede the older, and it avoids the string-compare tie-break trap where an RFC3339Nano stamp on an
+// exact-zero-nanosecond second sorts after a later fractional one.
+func LatestReviewEvidence(root, reviewedScope, baseSHA, headSHA string) (ReviewEvidence, bool, error) {
 	markers, err := DiscoverReviewEvidence(root)
 	if err != nil {
 		return ReviewEvidence{}, false, err
@@ -86,10 +90,8 @@ func LatestReviewEvidence(root, reviewedScope, headSHA string) (ReviewEvidence, 
 	var best ReviewEvidence
 	found := false
 	for _, m := range markers {
-		if m.ReviewedScope == reviewedScope && m.HeadSHA == headSHA {
-			if !found || m.CreatedAt > best.CreatedAt {
-				best, found = m, true
-			}
+		if m.ReviewedScope == reviewedScope && m.BaseSHA == baseSHA && m.HeadSHA == headSHA {
+			best, found = m, true // last matching marker wins
 		}
 	}
 	return best, found, nil

@@ -9,6 +9,7 @@ import (
 	fsmcli "github.com/dsifry/metareview/internal/fsm/cli"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -372,8 +373,23 @@ func main() {
 			os.Exit(2)
 		}
 		root := repo.RootOr(mustCwd())
+		// A CLI seam cannot witness that independent subagents actually ran, so it must not let a hand-typed
+		// `--mode subagent-adjudicated` launder a self-attested review as independent, full-strength evidence
+		// (the gate would then trust it with no advisory trace). subagent-adjudicated is therefore admitted
+		// only when it mirrors a real FSM review run: --from-run must name a run that exists on disk. A
+		// self-attested review has no such run and must record the labeled, advisory in-session-emulated mode.
+		if mode == reviewstate.ReviewModeSubagentAdjudicated {
+			if fromRun == "" {
+				fmt.Fprintln(os.Stderr, "record-lenses: --mode subagent-adjudicated requires --from-run naming the FSM review run it mirrors; use --mode in-session-emulated for a self-attested review")
+				os.Exit(2)
+			}
+			if _, statErr := os.Stat(filepath.Join(root, ".metareview", "runs", fromRun, "audit.jsonl")); statErr != nil {
+				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: no such FSM run under .metareview/runs/\n", fromRun)
+				os.Exit(2)
+			}
+		}
 		gc, err := gitcontext.Collect(root, base)
-		exitOnErr(err)
+		exitOnErr(err) // a repo with no HEAD/base fails here ("invalid git base"), so gc.HeadSHA is non-empty below
 		var lenses []string
 		for _, l := range strings.Split(lensesCSV, ",") {
 			if l = strings.TrimSpace(l); l != "" {

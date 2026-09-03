@@ -39,11 +39,13 @@ engine, or emulated in-session), record it so the gate can see it:
 
 ```bash
 metareview review record-lenses --scope pr-ready|task-done --base <base-ref> \
-  --verdict PASS --mode subagent-adjudicated [--from-run <fsm-run-id>] [--lenses a,b,c]
+  --verdict PASS --mode subagent-adjudicated --from-run <fsm-run-id> [--lenses a,b,c]
 ```
 
-The marker is HEAD-scoped: re-record after any new commit. Use `--mode in-session-emulated` when the lenses
-ran in-session rather than as adjudicated subagents — it passes but is flagged advisory. To opt a single run
+The marker is scoped to the exact **base..HEAD** diff: re-record after any new commit **and** whenever the
+gate's `--base` differs from the one you reviewed. `--mode subagent-adjudicated` requires `--from-run` naming
+a real FSM run (it cannot be hand-typed to fake independent review); for a self-attested in-session review
+use `--mode in-session-emulated` (no `--from-run`), which passes but is flagged advisory. To opt a single run
 out of the requirement (structural-only pass), set `METAREVIEW_ALLOW_MECHANICAL_PASS=1`.
 
 Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. For `metareview fsm`: `3` = the FSM needs the host to do a node's work; `1` + `GATE_FAILED` = run `resume_hint` (it forks a child — a new run id); `1` + `ERR_*` = read `code` (`detail` is data); `2` = nothing was recorded, fix the input and retry unless it is a consent or escalation code, which waits for a human; `STOPPED`/`DONE` are terminal. FSM escalation is per fork lineage: forking an ancestor or re-running `init` on the same base is a human decision.

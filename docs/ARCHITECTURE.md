@@ -61,13 +61,22 @@ There are **two** engines that produce a review, joined by a **review-evidence m
 default. After a real review the agent records a **review-evidence marker** —
 `metareview review record-lenses --scope pr-ready|task-done [--from-run <fsm-run-id>]` — a record in
 `.metareview/runs.jsonl` (`scope="review-evidence"`, `Kind="review-evidence"`) carrying the adjudicated
-verdict, confirmed finding IDs, lens set, execution mode, and the **HEAD SHA it reviewed**. The gate
-(`internal/reviewers/adversarial.go`) looks up the latest marker for the scope **at the current HEAD** via
-`reviewstate.LatestReviewEvidence`; a marker for a stale HEAD does not count. It blocks with
-`adversarial-review-reviewer` when no current marker is present, blocks when the adjudicated verdict is not
-`PASS`/`PASS_ADVISORY`, and emits an **advisory** finding (not a block) when the marker is
-`in-session-emulated` rather than `subagent-adjudicated`. The FSM stays scope-agnostic: the **agent**
-bridges its run into a marker with `--from-run`, rather than the FSM emitting scope-specific markers.
+verdict, confirmed finding IDs, lens set, execution mode, and the **base..HEAD SHAs it reviewed**. The gate
+(`internal/reviewers/adversarial.go`) looks up the latest marker for the scope over the **exact
+base..HEAD diff** via `reviewstate.LatestReviewEvidence`; a marker for a stale HEAD *or a different base*
+does not count (a review of a narrow `HEAD~1..HEAD` must not be credited for a wider `main..HEAD`). It blocks
+with `adversarial-review-reviewer` when no current marker is present, blocks when the adjudicated verdict is
+not `PASS`/`PASS_ADVISORY`, and emits an **advisory** finding (not a block) when the marker is
+`in-session-emulated` rather than `subagent-adjudicated`. Of several markers over one base..head, the
+**last-recorded** wins (append order = record order), so a re-review's newer verdict supersedes the older.
+
+The FSM stays scope-agnostic: the **agent** bridges its run into a marker with `--from-run`, rather than the
+FSM emitting scope-specific markers. Because a CLI seam cannot witness that independent subagents actually
+ran, `record-lenses --mode subagent-adjudicated` is admitted **only** when `--from-run` names an FSM run that
+exists on disk (`.metareview/runs/<id>/`); a self-attested review has no such run and must record the
+labeled, advisory `in-session-emulated` mode. This keeps a hand-typed one-liner from laundering a fake review
+as full-strength independent evidence. (`--from-run` verifying the referenced run's *verdict* and head, and
+crediting a marker for a dirty working tree under `--include-working-tree`, are known follow-ups.)
 
 **Escape hatch.** `METAREVIEW_ALLOW_MECHANICAL_PASS=1` opts a single run out of the requirement, restoring
 the old deterministic-only pass (`reviewstate.RequireAdjudicatedReview()`). `artifact` review is unchanged —

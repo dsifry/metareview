@@ -23,10 +23,12 @@ any new commit:
 
 ```bash
 metareview review record-lenses --scope pr-ready|task-done --base <base-ref> \
-  --verdict PASS --mode subagent-adjudicated [--from-run <fsm-run-id>]
+  --verdict PASS --mode subagent-adjudicated --from-run <fsm-run-id>
 ```
 
-Use `--mode in-session-emulated` for an in-session (non-subagent) review — it passes but is advisory-flagged.
+The marker is scoped to the exact base..HEAD diff — re-record after a new commit or a different `--base`.
+`--mode subagent-adjudicated` requires `--from-run` (a real FSM run); use `--mode in-session-emulated` (no
+`--from-run`) for a self-attested in-session review — it passes but is advisory-flagged.
 `METAREVIEW_ALLOW_MECHANICAL_PASS=1` opts a run out to a structural-only pass.
 
 Use `go run ./cmd/metareview ...` when running from a source checkout without a built `bin/metareview`.

@@ -2,24 +2,23 @@ package prready
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/reviewstate"
 )
 
-// headSHA returns the repo's current HEAD, the SHA a marker must match to satisfy the gate.
-func headSHA(t *testing.T, root string) string {
+// diffEndpoints returns the exact (base, head) SHAs the gate computes for base ref "main", the pair a marker
+// must carry to satisfy the currency check.
+func diffEndpoints(t *testing.T, root string) (base, head string) {
 	t.Helper()
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = root
-	out, err := cmd.Output()
+	gc, err := gitcontext.Collect(root, "main")
 	if err != nil {
-		t.Fatalf("git rev-parse HEAD: %v", err)
+		t.Fatalf("gitcontext.Collect: %v", err)
 	}
-	return strings.TrimSpace(string(out))
+	return gc.BaseSHA, gc.HeadSHA
 }
 
 func prReviewBody(t *testing.T, root string, result Result) string {
@@ -35,8 +34,9 @@ func prReviewBody(t *testing.T, root string, result Result) string {
 // PASS marker recorded at HEAD clears the adversarial-review blocker; without one the blocker is present.
 func TestPRReadyRequireLensesSatisfiedByMarker(t *testing.T) {
 	root := shardedRepo(t)
+	base, head := diffEndpoints(t, root)
 	if err := reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
-		ReviewedScope: "pr-ready", HeadSHA: headSHA(t, root),
+		ReviewedScope: "pr-ready", BaseSHA: base, HeadSHA: head,
 		AdjudicatedVerdict: "PASS", ExecutionMode: reviewstate.ReviewModeSubagentAdjudicated,
 	}); err != nil {
 		t.Fatal(err)
