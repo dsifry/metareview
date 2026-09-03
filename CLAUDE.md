@@ -52,6 +52,16 @@ flagged advisory. To opt a single run out of the requirement (structural-only pa
 
 Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. For `metareview fsm`: `3` = the FSM needs the host to do a node's work; `1` + `GATE_FAILED` = run `resume_hint` (it forks a child — a new run id); `1` + `ERR_*` = read `code` (`detail` is data); `2` = nothing was recorded, fix the input and retry unless it is a consent or escalation code, which waits for a human; `STOPPED`/`DONE` are terminal. FSM escalation is per fork lineage: forking an ancestor or re-running `init` on the same base is a human decision.
 
+## PR checks: the `gtg` (Merge Ready) gate
+
+When shepherding a PR, if the **`gtg` (Merge Ready)** check is pending or failing while every *other* check
+(test, CodeRabbit, Bugbot) is green, it is almost always **unresolved review threads** — gtg blocks on
+`Threads: N/M resolved` and exits with "PR has unresolved review threads". Fix or reply to each thread, then
+**mark it resolved** (GitHub UI *Resolve conversation*, or `gh api graphql … resolveReviewThread`); gtg
+re-runs on the next push and passes once 0 remain. gtg also *waits* for CI and both review bots to report
+before it judges, so a multi-minute pending window right after a push is normal, not a hang. The job summary
+now states the reason explicitly.
+
 ## Process Overrides
 
 A blocking finding is normally cleared by fixing it. When that is not possible and the workflow is

@@ -326,3 +326,36 @@ on test-gaps and why the ladder (which also trusts flash's confident True) edges
 - **For test-gap ("invariant nothing holds") findings, don't rely on the adjudicator at all** — have the
   analyzer prove deletability by mutation, which is what closes them in the coverage campaign.
 - Raw round-3 analyzer sets and ladder rows: `docs/metareview/self-review-matrix-data/round3/`.
+
+---
+
+# Round 4: build-B gate dogfood — recall gaps on our own new code (2026-09-03)
+
+Build B (require an adjudicated adversarial lens review; PRs **#89**, **#90**) was itself run through
+metareview's own gate before opening each PR. #89's review was **3 independent Opus subagents** (security /
+correctness / test-integrity) — it caught **2 real BLOCKING gate-logic gaps** (forged-independence,
+base-blindness) that CI + Bugbot + CodeRabbit + gremlins all missed, and the bots then found **nothing** on
+#89. #90's review was a **lighter in-session self-review** (recorded `in-session-emulated`, no subagents) —
+and CodeRabbit then found **4** residual issues our review missed. That contrast is itself the headline
+lesson: **dogfood recall scales with review rigor** — the 3-subagent adversarial pass had near-total recall;
+the single-pass in-session review did not.
+
+## Recall gaps the external bots caught (append to the R-series)
+
+| # | Source | PR | Gap | metareview lesson |
+| --- | --- | --- | --- | --- |
+| R4 | CodeRabbit | #90 | `validateFromRunDiff` accepted the **first** passing FSM transition, so a run that was `reviewed` then looped and came out `failed` would still mint a `subagent-adjudicated` marker. Fixed to classify the **last** outcome-bearing transition; unreadable transitions now rejected, not skipped. | Correctness lens: on any "scan a sequence for a match" the authoritative element is often the **last/terminal** one — probe first-vs-last and construct the adversarial "passes-then-fails" input. A distinguishing-case miss (same family as the mutation-testing discipline), and our own tests only exercised single-outcome runs. |
+| R5 | CodeRabbit | #90 | The review-artifacts commit **rendered 6 stale cross-head findings into the committed `FINDINGS.md`** while the run reported 0 blockers — a self-contradictory artifact. Cleared the cross-head ledger; FINDINGS.md restored to its clean state. | metareview does not review its **own generated/committed artifacts** for internal consistency. Extends R1 (context pack leaks cwd): add a "generated-artifact hygiene" check — when a PR commits `docs/metareview/*`, verify the render matches current state (no findings listed while the gate reports zero). Root cause is the local ledger accumulating across heads; worth a louder reconcile. |
+| R6 | CodeRabbit | #90 | `redactCWD`'s leaf fallback returned `"/"` for a filesystem root (and `C:\` for a volume root) — a boundary the redaction (the #80 fix itself) left leaking an absolute path. Normalized roots to `.`. | Security/correctness lens: a redaction/normalization function must be probed at its **boundary inputs** (root `/`, volume root, empty) — the same completeness gap as R1/R3, and a case of "the fix introduced its own edge-case bug." |
+| R7 | CodeRabbit | #90 | The new home-dir test set `HOME`, which `os.UserHomeDir` ignores on Windows (`USERPROFILE`), so the test asserted nothing cross-platform. Made it platform-aware. | Testing-quality lens: flag **platform-specific env setup** in tests (HOME vs USERPROFILE) as a portability gap — a test that silently no-ops on another OS is a near-miss of the "assertion that cannot fail" lens. |
+
+**Meta-observations:**
+- **3 of the 4 (R4, R6, R7) are in code written *this cycle while fixing R1's class*** — the fix-introduces-its-own-bug pattern the `sdlc-loop-clean` re-review exists to catch. A fresh adversarial re-review of the *fix diff* (not just the original) would likely have surfaced R4 and R6.
+- **R5 is a genuinely new blind-spot class:** metareview reviews the *code* diff but not the *review artifacts it itself commits*. That is the highest-value new lens target from this round.
+- **Process fix already in hand:** run the full multi-subagent adversarial pass (as on #89), not a single in-session read, before opening a PR whose diff changes the gate itself.
+
+## Fold-back
+
+#89 and #90 are merged. Fold R4–R7 into calibration the same way as R1–R3 (`learn --post-merge` on #90, or
+directly curate `.metareview/knowledge/metareview.jsonl`), with R5 tracked as a candidate new
+"generated-artifact hygiene" lens.
