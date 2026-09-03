@@ -2,6 +2,11 @@
 
 Use metareview as the local review harness for artifacts, code chunks, epics, PR readiness, and post-merge learning.
 
+**Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first** — the map of metareview's shapes and patterns
+(the nested review types task-done → pr-ready → epic-ready; the two review engines — deterministic gate vs
+FSM `review-lenses`; the git-native gate; state/evidence model; cross-agent integration; the durable
+conventions and gotchas). It exists so you don't reinvent wheels; keep it current when those shapes change.
+
 ## Commands
 
 - `/setup` checks repository mode and prerequisites.

@@ -1,6 +1,8 @@
 # Metaswarm Integration
 
-Metareview extends metaswarm review gates without taking ownership of metaswarm lifecycle files or hooks.
+Metareview extends metaswarm review gates without taking ownership of metaswarm lifecycle files or task state.
+For the broader picture — the review types, engines, gate, and state model — see
+[ARCHITECTURE.md](../ARCHITECTURE.md); this page is the metaswarm-specific flow contract.
 
 ## Inspected Surfaces
 
@@ -29,4 +31,8 @@ For lifecycle gates, `NEEDS_REVISION` means metaswarm should repair and re-run t
 
 Post-merge learning is advisory by default. In normal mode, a learning failure should be recorded and release cleanup may continue. In strict mode, the caller treats a nonzero learning exit as blocking release cleanup until the learning run succeeds or is explicitly waived.
 
-Automatic hook installation is out of scope for this slice. Metaswarm remains the lifecycle owner; metareview supplies commands, review artifacts, and knowledge updates that metaswarm can invoke explicitly.
+Since 0.10.0, metareview also ships a **git-native review gate** (`metareview setup --install-hooks`) that
+enforces review-before-push independently of any harness — see [ARCHITECTURE.md §5](../ARCHITECTURE.md) and
+[INSTALL.md](../../INSTALL.md). Metaswarm remains the lifecycle owner (Beads task state, PR shepherding);
+metareview supplies the review gates, durable review artifacts, knowledge updates, and the optional git-native
+enforcement, which metaswarm can invoke or install explicitly.

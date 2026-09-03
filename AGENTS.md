@@ -2,6 +2,11 @@
 
 These instructions apply to coding agents working in this repository or in repositories that install metareview.
 
+**Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first** — the map of metareview's shapes and patterns
+(the nested review types, the two review engines — deterministic gate vs FSM `review-lenses` — the
+git-native gate, the state/evidence model, cross-agent integration, and the durable conventions and
+gotchas). It exists so you don't reinvent wheels; keep it current when those shapes change.
+
 ## Required Review Gates
 
 Run metareview before claiming completion:
