@@ -5,7 +5,7 @@ metareview supports Codex as a plugin and as a direct CLI.
 ## Install
 
 ```bash
-codex plugin marketplace add dsifry/metareview-marketplace
+codex plugin marketplace add dsifry/metareview
 codex
 ```
 
