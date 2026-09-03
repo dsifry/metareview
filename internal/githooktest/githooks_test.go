@@ -215,8 +215,16 @@ func TestSessionStartCheckNormalizesEquivalentHooksPath(t *testing.T) {
 		}
 	}
 	git("init", "-q", "-b", "main")
-	if err := os.MkdirAll(filepath.Join(root, "hooks", "git"), 0o755); err != nil {
+	// The installer's materialized target with EXECUTABLE hook scripts — what session-start-check.sh must
+	// recognize as "installed" (config match AND scripts present).
+	target := filepath.Join(root, ".metareview", "git-hooks")
+	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
+	}
+	for _, name := range []string{"pre-push", "post-commit"} {
+		if err := os.WriteFile(filepath.Join(target, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	run := func() string {
 		c := exec.Command("bash", repoHook(t, "session-start-check.sh"))
@@ -228,9 +236,18 @@ func TestSessionStartCheckNormalizesEquivalentHooksPath(t *testing.T) {
 	if out := run(); !strings.Contains(out, "NOT installed") {
 		t.Fatalf("an unset core.hooksPath must produce the not-installed reminder; got %q", out)
 	}
-	// A non-canonical but EQUIVALENT spelling must read as installed → no reminder (the normalization fix).
-	git("config", "core.hooksPath", root+"/./hooks/git")
+	// A non-canonical but EQUIVALENT spelling of the materialized target, with scripts present, reads as
+	// installed → no reminder.
+	git("config", "core.hooksPath", root+"/./.metareview/git-hooks")
 	if out := run(); out != "" {
-		t.Fatalf("$ROOT/./hooks/git is equivalent to $ROOT/hooks/git and must read as installed; got %q", out)
+		t.Fatalf("$ROOT/./.metareview/git-hooks with scripts present must read as installed; got %q", out)
+	}
+	// Config still points at the target but the git-ignored scripts have vanished → the reminder MUST fire
+	// (an inert gate), never stay silent on a config match alone.
+	if err := os.Remove(filepath.Join(target, "pre-push")); err != nil {
+		t.Fatal(err)
+	}
+	if out := run(); !strings.Contains(out, "NOT installed") {
+		t.Fatalf("missing hook scripts must trigger the reminder even when core.hooksPath matches; got %q", out)
 	}
 }

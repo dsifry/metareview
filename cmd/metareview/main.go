@@ -714,7 +714,7 @@ func handleHookInstall(uninstall, yes, force, dryRun bool) {
 	}
 
 	exitOnErr(setup.ApplyHookInstall(root, plan, force, nil))
-	fmt.Println("\nInstalled — core.hooksPath = " + plan.Target)
+	fmt.Println("\nInstalled — hook scripts written to " + plan.Target + " and core.hooksPath set to it.")
 	fmt.Println("The pre-push gate (blocks an unreviewed push) and post-commit review nudge are now active on this repo.")
 }
 
@@ -724,11 +724,13 @@ func printHookPlan(plan setup.HookInstallPlan) {
 		current = "unset (git uses the default .git/hooks)"
 	}
 	fmt.Println("metareview review gate — git-native hooks")
-	fmt.Println("  Will set:  core.hooksPath = " + plan.Target + "   (this clone only)")
-	fmt.Println("  Currently: core.hooksPath = " + current)
-	fmt.Println("  Effect:    git runs hooks/git/pre-push (BLOCKS an unreviewed push) and")
-	fmt.Println("             hooks/git/post-commit (review-owed nudge) on this repo.")
-	fmt.Println("  Flags:     --dry-run (preview, no change) · --yes (install without prompting) · --force (override a conflict)")
+	fmt.Println("  Will write: the pre-push + post-commit hook scripts into " + plan.Target)
+	fmt.Println("  Will set:   core.hooksPath = " + plan.Target + "   (this clone only)")
+	fmt.Println("  Will add:   .metareview/git-hooks/ to .gitignore (if not already ignored)")
+	fmt.Println("  Currently:  core.hooksPath = " + current)
+	fmt.Println("  Effect:     git runs the pre-push gate (BLOCKS an unreviewed push) and the")
+	fmt.Println("              post-commit review-owed nudge on this repo.")
+	fmt.Println("  Flags:      --dry-run (preview, no change) · --yes (install without prompting) · --force (override a conflict)")
 }
 
 // isTTY reports whether f is an interactive terminal, so a prompt is appropriate. A pipe, a file, or

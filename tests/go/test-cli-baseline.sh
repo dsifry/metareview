@@ -248,6 +248,19 @@ printf '%s' "$inst" | grep -q 'Installed' \
   || { echo "FAIL: --install-hooks --yes must install: $inst"; exit 1; }
 test -n "$( (cd "$hookrepo" && git config --local --get core.hooksPath) )" \
   || { echo "FAIL: --yes must set core.hooksPath"; exit 1; }
+# ...and it MATERIALIZES executable hook scripts into THIS repo's .metareview/git-hooks (the consumer-repo
+# gate must actually fire, not point at a non-existent hooks dir). $hookrepo is a fresh `git init` with no
+# committed hooks/git of its own. Compare the RESOLVED real paths (both sides through pwd -P) so the check is
+# exact — not a loose suffix — yet robust when mktemp hands back a symlinked dir (e.g. /var -> /private/var).
+hp="$( (cd "$hookrepo" && git config --local --get core.hooksPath) )"
+hp_real="$( (cd "$hp" 2>/dev/null && pwd -P) )"
+want_real="$( (cd "$hookrepo" && pwd -P) )/.metareview/git-hooks"
+if [ "$hp_real" != "$want_real" ]; then
+  echo "FAIL: hooks must materialize at \$hookrepo/.metareview/git-hooks; got $hp_real want $want_real"; exit 1
+fi
+if [ ! -x "$hp/pre-push" ] || [ ! -x "$hp/post-commit" ]; then
+  echo "FAIL: install must materialize executable pre-push and post-commit into $hp"; exit 1
+fi
 
 # Idempotent: a second --yes reports already-installed, no error.
 again="$( (cd "$hookrepo" && "$clean/mrv" setup --install-hooks --yes) )"
@@ -263,8 +276,8 @@ forced="$( (cd "$hookrepo" && "$clean/mrv" setup --install-hooks --yes --force) 
 printf '%s' "$forced" | grep -q 'Installed' \
   || { echo "FAIL: --force must override a conflict: $forced"; exit 1; }
 
-# Uninstall honors --dry-run (previews, changes nothing) — it must NOT unset core.hooksPath.
-(cd "$hookrepo" && git config --local core.hooksPath "$hookrepo/hooks/git") # our own, so uninstall would act
+# After the forced install above, core.hooksPath is our materialized .metareview/git-hooks. Uninstall honors
+# --dry-run (previews, changes nothing) — it must NOT unset core.hooksPath.
 un_dry="$( (cd "$hookrepo" && "$clean/mrv" setup --uninstall-hooks --dry-run) )"
 printf '%s' "$un_dry" | grep -q 'dry run' \
   || { echo "FAIL: --uninstall-hooks --dry-run must preview: $un_dry"; exit 1; }

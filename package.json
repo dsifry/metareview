@@ -10,6 +10,8 @@
     "cli/",
     "cmd/",
     "internal/",
+    "githookassets.go",
+    "hooks/",
     "go.mod",
     "skills/",
     "commands/",
