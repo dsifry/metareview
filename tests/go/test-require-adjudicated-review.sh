@@ -65,10 +65,11 @@ mkfsmrun() { # <run-id> : init + a PASSING terminal transition
   printf '{"type":"transition","data":{"from":"adjudicate","to":"done","gate":"confirmed_nonempty","outcome":"reviewed","head":"%s"}}\n' \
     "$(git rev-parse HEAD)" >> ".metareview/runs/$1/audit.jsonl"
 }
-mkfsmrun_failed() { # <run-id> : init + a NON-passing terminal transition
+mkfsmrun_failed() { # <run-id> : init + a PASSING transition FOLLOWED BY a failing one — the LAST verdict wins
   mkfsmrun_init "$1"
-  printf '{"type":"transition","data":{"from":"verify","to":"done","gate":"stuck","outcome":"failed","head":"%s"}}\n' \
-    "$(git rev-parse HEAD)" >> ".metareview/runs/$1/audit.jsonl"
+  { printf '{"type":"transition","data":{"from":"adjudicate","to":"done","gate":"confirmed_nonempty","outcome":"reviewed","head":"%s"}}\n' "$(git rev-parse HEAD)";
+    printf '{"type":"transition","data":{"from":"verify","to":"done","gate":"stuck","outcome":"failed","head":"%s"}}\n' "$(git rev-parse HEAD)";
+  } >> ".metareview/runs/$1/audit.jsonl"
 }
 rec='"$BIN" review record-lenses --scope pr-ready --base main --lenses security'
 
@@ -151,7 +152,7 @@ repo="$(mktemp -d)"
   mkfsmrun_init incomplete
   # shellcheck disable=SC2086
   reject reject-incomplete  $base --mode subagent-adjudicated --from-run incomplete
-  # A run over the right diff whose terminal outcome was non-clean (failed) is rejected.
+  # A run with a PASSING transition followed by a FAILING one is rejected (the LAST verdict wins, not the first).
   mkfsmrun_failed failedrun
   # shellcheck disable=SC2086
   reject reject-failed      $base --mode subagent-adjudicated --from-run failedrun

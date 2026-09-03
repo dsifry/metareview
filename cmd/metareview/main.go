@@ -664,16 +664,27 @@ func validateFromRunDiff(root, runID, wantBase, wantHead string) error {
 	if d.Head != wantHead || d.BaseSHA != wantBase {
 		return fmt.Errorf("it reviewed a different diff (run base..head %s..%s, marker %s..%s)", short(d.BaseSHA), short(d.Head), short(wantBase), short(wantHead))
 	}
+	// The LAST outcome-bearing transition is the run's verdict: a run that was `reviewed` and then looped and
+	// came out `failed` must be rejected, so we cannot accept the first passing outcome we see. Unreadable
+	// transition payloads are rejected rather than skipped (a run we cannot parse is not a run we can trust).
+	var lastOutcome fsmrun.Outcome
+	sawOutcome := false
 	for _, ev := range events {
 		if ev.Type != fsmrun.TypeTransition {
 			continue
 		}
 		var td fsmrun.TransitionData
-		if json.Unmarshal(ev.Data, &td) == nil && isPassingReviewOutcome(td.Outcome) {
-			return nil // reached a passing terminal transition over the right diff
+		if json.Unmarshal(ev.Data, &td) != nil {
+			return errors.New("its audit.jsonl has an unreadable transition event")
+		}
+		if td.Outcome != "" {
+			lastOutcome, sawOutcome = td.Outcome, true
 		}
 	}
-	return errors.New("it has no passing terminal transition (the review did not complete clean/reviewed/fixed)")
+	if sawOutcome && isPassingReviewOutcome(lastOutcome) {
+		return nil // the run's final verdict was a passing review over the right diff
+	}
+	return errors.New("its final outcome is not a passing review (clean|reviewed|fixed)")
 }
 
 // isPassingReviewOutcome reports whether an FSM terminal outcome means the review passed — a clean review,

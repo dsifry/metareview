@@ -43,7 +43,13 @@ func redactCWD(cwd string) string {
 			return filepath.ToSlash(filepath.Join("~", rel))
 		}
 	}
-	return filepath.Base(cwd)
+	// Last resort: the leaf directory only — never a full path. A filesystem root (`/`, or a Windows volume
+	// root like `C:\`) has no meaningful leaf, so collapse it to neutral "." rather than leaking an absolute.
+	clean := filepath.Clean(cwd)
+	if clean == string(filepath.Separator) || clean == filepath.VolumeName(clean)+string(filepath.Separator) {
+		return "."
+	}
+	return filepath.Base(clean)
 }
 
 func Run(ctx context.Context, command []string, options RunOptions) (Receipt, error) {

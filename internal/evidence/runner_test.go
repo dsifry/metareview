@@ -4,9 +4,20 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+// setHomeEnv points os.UserHomeDir at dir on whichever platform the test runs on.
+func setHomeEnv(t *testing.T, dir string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+		return
+	}
+	t.Setenv("HOME", dir)
+}
 
 // A committed receipt must not leak the operator's absolute path/username (issue #80): inside a repo the CWD
 // is stored relative to the repo root, and never as an absolute path.
@@ -32,8 +43,12 @@ func TestRedactCWDHomeAndEmpty(t *testing.T) {
 	if got := redactCWD(""); got != "" {
 		t.Fatalf("empty cwd should stay empty, got %q", got)
 	}
+	// A filesystem root must not leak as an absolute path — it collapses to neutral ".".
+	if got := redactCWD(string(filepath.Separator)); got != "." {
+		t.Fatalf("filesystem root should collapse to %q, got %q", ".", got)
+	}
 	home := t.TempDir() // no repo markers above it, so the repo-relative branch won't fire
-	t.Setenv("HOME", home)
+	setHomeEnv(t, home) // os.UserHomeDir reads $HOME on unix/darwin, %USERPROFILE% on Windows
 	got := redactCWD(filepath.Join(home, "work", "proj"))
 	if got != "~/work/proj" {
 		t.Fatalf("a path under $HOME should collapse to %q, got %q", "~/work/proj", got)
