@@ -383,6 +383,12 @@ func main() {
 				fmt.Fprintln(os.Stderr, "record-lenses: --mode subagent-adjudicated requires --from-run naming the FSM review run it mirrors; use --mode in-session-emulated for a self-attested review")
 				os.Exit(2)
 			}
+			// A run id is a single path segment under .metareview/runs/; reject separators/traversal so the
+			// existence check can't be pointed at an audit.jsonl outside the run store.
+			if strings.ContainsAny(fromRun, `/\`) || fromRun == ".." {
+				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: not a valid run id\n", fromRun)
+				os.Exit(2)
+			}
 			if _, statErr := os.Stat(filepath.Join(root, ".metareview", "runs", fromRun, "audit.jsonl")); statErr != nil {
 				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: no such FSM run under .metareview/runs/\n", fromRun)
 				os.Exit(2)

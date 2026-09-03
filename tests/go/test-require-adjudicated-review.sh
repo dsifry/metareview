@@ -113,6 +113,9 @@ repo="$(mktemp -d)"
   status=0
   "$BIN" review record-lenses --scope pr-ready --base main --mode subagent-adjudicated --from-run nope >/dev/null 2>&1 || status=$?
   if [ "$status" -eq 0 ]; then echo "FAIL: [reject-bad-fromrun] subagent-adjudicated was accepted for a nonexistent run"; exit 1; fi
+  status=0
+  "$BIN" review record-lenses --scope pr-ready --base main --mode subagent-adjudicated --from-run '../../etc' >/dev/null 2>&1 || status=$?
+  if [ "$status" -eq 0 ]; then echo "FAIL: [reject-traversal-fromrun] a path-traversal run id was accepted"; exit 1; fi
   echo "ok: cli-rejects-forged-subagent-adjudicated"
 )
 rm -rf "$repo"
