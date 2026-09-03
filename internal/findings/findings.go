@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/dsifry/metareview/internal/jsonl"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -165,7 +166,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	if err := writeJSONL(path, all); err != nil {
 		return Result{}, err
 	}
-	if err := RenderIndexWithRecords(root, all); err != nil {
+	if err := RenderIndexWithRecords(root, all, run.GitHead); err != nil {
 		return Result{}, err
 	}
 	activeCurrent := make([]Record, 0, len(current))
@@ -289,29 +290,47 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// RenderIndex re-renders FINDINGS.md from the ledger. It has no run context (no current head/target), so it
+// cannot do the target-scoped stale-head partition — it renders every open blocker in the main list
+// (fail-visible). The partition that matters happens in Reconcile, which knows the run's head and target and
+// re-renders FINDINGS.md after every review.
 func RenderIndex(root string) error {
 	records, err := readJSONL(findingsPath(root))
 	if err != nil {
 		return err
 	}
-	return RenderIndexWithRecords(root, records)
+	return RenderIndexWithRecords(root, records, realGitHead(root))
 }
 
-func RenderIndexWithRecords(root string, records []Record) error {
-	blockers := unresolvedBlockingFrom(records)
+// RenderIndexWithRecords writes docs/metareview/FINDINGS.md, partitioning open blockers by whether they were
+// recorded against currentHead (R5, head-scoped). Current-HEAD blockers are the unresolved list; stale-HEAD
+// blockers (recorded against a commit that is no longer HEAD — which the moved head invalidates) render under
+// a labeled Stale section and are NOT counted in the main unresolved list. This kills the #90
+// self-contradiction: a cross-head/cross-scope ledger that accumulated stale findings no longer renders them
+// as current unresolved blockers while the current run (which is HEAD-current) reports a pass. An empty
+// currentHead (HEAD unresolvable) renders every blocker in the main list (fail-visible: never hide a blocker
+// on missing data). It is head-scoped, not target-scoped, on purpose: the #90 cruft was cross-TARGET (a
+// pass run reports zero for its target while the repo-wide index shows other-scope stale findings), so the
+// partition must span targets to catch it.
+func RenderIndexWithRecords(root string, records []Record, currentHead string) error {
 	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	current := currentHeadBlockers(records, currentHead)
+	stale := staleHeadBlockers(records, currentHead)
 	body := "No unresolved findings recorded yet."
-	if len(blockers) > 0 {
-		lines := make([]string, 0, len(blockers))
-		for _, finding := range blockers {
-			lines = append(lines, fmt.Sprintf("- %s [%s] %s (%s)", finding.ID, finding.Severity, finding.Title, finding.Reviewer))
-		}
-		body = strings.Join(lines, "\n")
+	if len(current) > 0 {
+		body = blockerLines(current)
 	}
 	document := "# metareview Findings\n\n" + body + "\n"
+	if len(stale) > 0 {
+		document += "\n## Stale (recorded against a prior HEAD — re-review or clear)\n\n" +
+			"These blockers were recorded against a commit that is no longer HEAD; a new HEAD invalidates them. " +
+			"Re-review at the current head (a fresh review supersedes via `--previous-run`), or clear the " +
+			"cross-head ledger (`: > .metareview/findings.jsonl`). They are NOT counted in the current unresolved list.\n\n" +
+			blockerLines(stale) + "\n"
+	}
 	if overrides := overrideLines(records); len(overrides) > 0 {
 		document += "\n## Process Overrides\n\n" +
 			"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
@@ -320,12 +339,90 @@ func RenderIndexWithRecords(root string, records []Record) error {
 	return os.WriteFile(path, []byte(document), 0o644)
 }
 
+func blockerLines(blockers []Record) string {
+	lines := make([]string, 0, len(blockers))
+	for _, finding := range blockers {
+		lines = append(lines, fmt.Sprintf("- %s [%s] %s (%s)", finding.ID, finding.Severity, finding.Title, finding.Reviewer))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// staleHeadBlockers returns the open blocking records recorded against a HEAD other than currentHead (any
+// target). A record with an empty GitHead, or an empty currentHead (HEAD unresolvable), is never stale
+// (fail-visible: never move a blocker out of the current list on missing data).
+func staleHeadBlockers(records []Record, currentHead string) []Record {
+	head := strings.TrimSpace(currentHead)
+	if head == "" {
+		return nil
+	}
+	stale := make([]Record, 0)
+	for _, record := range unresolvedBlockingFrom(records) {
+		if rh := strings.TrimSpace(record.GitHead); rh != "" && rh != head {
+			stale = append(stale, record)
+		}
+	}
+	return stale
+}
+
+// currentHeadBlockers returns the open blocking records that are NOT stale-head — the current unresolved list.
+func currentHeadBlockers(records []Record, currentHead string) []Record {
+	staleIDs := map[string]bool{}
+	for _, record := range staleHeadBlockers(records, currentHead) {
+		staleIDs[record.ID] = true
+	}
+	current := make([]Record, 0)
+	for _, record := range unresolvedBlockingFrom(records) {
+		if !staleIDs[record.ID] {
+			current = append(current, record)
+		}
+	}
+	return current
+}
+
+// realGitHead resolves the repo's current HEAD SHA for the standalone/override re-render paths (Reconcile
+// already knows the run's head). An unresolvable HEAD returns "" — the render then treats every blocker as
+// current (fail-visible).
+func realGitHead(root string) string {
+	out, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output() // #nosec G204 -- fixed args, root is the repo
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func UnresolvedBlocking(root string) ([]Record, error) {
 	records, err := readJSONL(findingsPath(root))
 	if err != nil {
 		return nil, err
 	}
 	return unresolvedBlockingFrom(records), nil
+}
+
+// StaleHeadBlockersInLedger reads the ledger and returns the open blocking records that are ORPHANED stale-head
+// cruft (R5): recorded against a HEAD other than currentHead AND not part of the current run's reconcile set
+// (its previous-run chain plus escalation-reset runs). The pr-ready/task-done reviewer sets read the ledger
+// BEFORE Reconcile runs, so a finding this run is about to reconcile (fix, carry via --previous-run, or clear
+// via an escalation reset) is still at its old head but is legitimately handled, not orphaned cruft —
+// reconcileRunIDs excludes it. Head-scoped (any target): the #90 self-contradiction was cross-TARGET, so this
+// must span targets to surface it. Used for the ADVISORY hygiene note; it never blocks the gate.
+func StaleHeadBlockersInLedger(root, currentHead string, reconcileRunIDs []string) ([]Record, error) {
+	records, err := readJSONL(findingsPath(root))
+	if err != nil {
+		return nil, err
+	}
+	handled := map[string]bool{}
+	for _, id := range reconcileRunIDs {
+		if id != "" {
+			handled[id] = true
+		}
+	}
+	orphaned := make([]Record, 0)
+	for _, record := range staleHeadBlockers(records, currentHead) {
+		if !handled[record.RunID] {
+			orphaned = append(orphaned, record)
+		}
+	}
+	return orphaned, nil
 }
 
 func normalize(run Run, finding Input, index int, createdAt string) Record {

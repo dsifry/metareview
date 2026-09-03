@@ -170,7 +170,7 @@ func mutateFinding(root, findingID string, apply func(*Record) error) error {
 	if err := saveRecords(path, records); err != nil {
 		return err
 	}
-	return RenderIndexWithRecords(root, records)
+	return RenderIndexWithRecords(root, records, realGitHead(root))
 }
 
 // overrideLines renders the process-exception section of the findings index.

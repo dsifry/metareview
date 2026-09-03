@@ -23,6 +23,9 @@ type Context struct {
 	// Adversarial is the resolved review-evidence for the current head, supplied by the caller.
 	RequireLenses bool
 	Adversarial   AdversarialReviewStatus
+	// Hygiene carries the generated-artifact hygiene inputs (R5): stale-head blockers that would pollute the
+	// committed FINDINGS.md, resolved by the caller from the ledger against the current head.
+	Hygiene HygieneContext
 }
 
 // ManifestContext is what the review manifest says about the shard results
@@ -195,6 +198,7 @@ func RunTaskDone(context Context) []Finding {
 	}
 
 	results = append(results, duplicatePathFindings(context.Knowledge, changedSource)...)
+	results = append(results, generatedArtifactHygieneFindings(context.Hygiene)...)
 	results = append(results, adversarialReviewFindings(context.RequireLenses, context.Adversarial)...)
 	return results
 }

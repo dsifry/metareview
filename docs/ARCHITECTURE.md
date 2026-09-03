@@ -139,7 +139,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
 - **Durable, committed** under `docs/metareview/`: review logs (`reviews/`), context packs (`context/`),
   shard results (`shards/`), FSM export bundles (`fsm/`), findings render (`FINDINGS.md`). ⚠️ Context packs
   can leak an absolute `cwd` (issue #80) — do not commit a leaking context artifact; the review `.md` is
-  clean.
+  clean. `FINDINGS.md` is **head-partitioned** (R5): open blockers recorded against a HEAD other than the
+  current one render under a labeled "Stale" section, not the current unresolved list, so a cross-head/cross-
+  scope ledger can't render a self-contradictory index (blockers listed while a HEAD-current run passes). The
+  stale cruft is also surfaced as a non-blocking `generated-artifact-hygiene-reviewer` advisory.
 - **Transient, local (git-ignored)** under `.metareview/`: `findings.jsonl`, `runs.jsonl`, `runs/`,
   `shards/`, `git-hooks/`. A `mock: true` FSM run never satisfies a gate.
 - **Run lineage:** a NEEDS_REVISION parent is retired when a clean same-target+same-kind child links via

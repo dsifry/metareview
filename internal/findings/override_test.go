@@ -195,7 +195,7 @@ func TestOverridesAreRenderedInTheIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := RenderIndexWithRecords(root, records); err != nil {
+	if err := RenderIndexWithRecords(root, records, ""); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(filepath.Join(root, "docs", "metareview", "FINDINGS.md"))
@@ -434,7 +434,7 @@ func TestTheIndexRendersFullOverrideProvenance(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := RenderIndexWithRecords(root, records); err != nil {
+		if err := RenderIndexWithRecords(root, records, ""); err != nil {
 			t.Fatal(err)
 		}
 		body, err := os.ReadFile(filepath.Join(root, "docs", "metareview", "FINDINGS.md"))

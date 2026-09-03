@@ -167,8 +167,30 @@ func Create(root, target string, options Options) (Result, error) {
 		reviewerCtx.Adversarial.Verdict = ev.AdjudicatedVerdict
 		reviewerCtx.Adversarial.Emulated = ev.IsEmulated()
 	}
-	rawFindings := reviewers.RunTaskDone(reviewerCtx)
 	targetRecord := map[string]string{"type": taskTargetType(task), "id": task.ID}
+	// Resolve the previous-run chain before the reviewer so the R5 hygiene check can exclude findings this run
+	// is reconciling (they are stale-head until Reconcile runs, but legitimately carried, not orphaned cruft).
+	chain, err := runchain.Resolve(root, runchain.Options{
+		Scope:         "task-done",
+		Target:        targetRecord,
+		PreviousRunID: options.PreviousRunID,
+		MaxAttempts:   options.MaxAttempts,
+		HeadSHA:       git.HeadSHA,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	previousRunIDs := make([]string, 0, len(chain.Chain))
+	for _, link := range chain.Chain {
+		previousRunIDs = append(previousRunIDs, link.ID)
+	}
+	// R5: surface ORPHANED stale-head cruft (a prior head, not in this run's reconcile set) as an advisory —
+	// they render into the FINDINGS.md "Stale" section. Head-scoped (any target/scope), excluding the runs this
+	// run reconciles (chain + escalation resets) so the normal fix-flow isn't noised.
+	if stale, staleErr := findings.StaleHeadBlockersInLedger(root, git.HeadSHA, append(append([]string{}, previousRunIDs...), chain.ResetRunIDs...)); staleErr == nil {
+		reviewerCtx.Hygiene.StaleHeadBlockers = stale
+	}
+	rawFindings := reviewers.RunTaskDone(reviewerCtx)
 	run := findings.Run{ID: runID, Scope: "task-done", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
 
 	packDir := ""
@@ -203,20 +225,6 @@ func Create(root, target string, options Options) (Result, error) {
 		}
 		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, profile, shardPlan, packDir, manifest, aggregate, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
 			return err
-		}
-		chain, err := runchain.Resolve(root, runchain.Options{
-			Scope:         "task-done",
-			Target:        targetRecord,
-			PreviousRunID: options.PreviousRunID,
-			MaxAttempts:   options.MaxAttempts,
-			HeadSHA:       git.HeadSHA,
-		})
-		if err != nil {
-			return err
-		}
-		previousRunIDs := make([]string, 0, len(chain.Chain))
-		for _, link := range chain.Chain {
-			previousRunIDs = append(previousRunIDs, link.ID)
 		}
 		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{
 			PreviousRunID:  options.PreviousRunID,

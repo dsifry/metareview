@@ -24,6 +24,9 @@ type PRReadyContext struct {
 	// review-evidence for the current head, supplied by the caller.
 	RequireLenses bool
 	Adversarial   AdversarialReviewStatus
+	// Hygiene carries the generated-artifact hygiene inputs (R5): stale-head blockers that would pollute the
+	// committed FINDINGS.md, resolved by the caller from the ledger against the current head.
+	Hygiene HygieneContext
 }
 
 type PRReviewLog struct {
@@ -104,6 +107,7 @@ func RunPRReady(context PRReadyContext) []Finding {
 	}
 	results = append(results, branchDiffFindings(context)...)
 	results = append(results, externalGitHubFindings(context.GitHub)...)
+	results = append(results, generatedArtifactHygieneFindings(context.Hygiene)...)
 	results = append(results, adversarialReviewFindings(context.RequireLenses, context.Adversarial)...)
 	return results
 }

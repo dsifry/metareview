@@ -3,10 +3,169 @@ package findings
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// R5: the render partitions open blockers by whether they were recorded against the current HEAD (head-scoped,
+// ANY target), so a cross-head/cross-scope ledger cannot render stale findings as current unresolved blockers
+// while a HEAD-current pass reports zero (the #90 self-contradiction, which was cross-TARGET).
+
+func TestRenderIndexPartitionsStaleHeadBlockers(t *testing.T) {
+	root := t.TempDir()
+	otherScope := map[string]string{"type": "beads-task", "id": "task-9"}
+	records := []Record{
+		{ID: "mrvf-cur-001", Status: "open", Classification: "blocking", Severity: "high", Title: "Current bug", Reviewer: "security-reviewer", GitHead: "HEADNOW"},
+		// A stale blocker from a DIFFERENT scope/target must still be partitioned into Stale (head-scoped) —
+		// this is the actual #90 cruft (a pass run's repo-wide index showing other-scope stale findings).
+		{ID: "mrvf-old-001", Status: "open", Classification: "blocking", Severity: "high", Title: "Stale bug", Reviewer: "code-quality-reviewer", GitHead: "OLDHEAD", Target: otherScope},
+	}
+	if err := RenderIndexWithRecords(root, records, "HEADNOW"); err != nil {
+		t.Fatal(err)
+	}
+	index := mustRead(t, filepath.Join(root, "docs", "metareview", "FINDINGS.md"))
+	staleIdx := strings.Index(index, "## Stale")
+	if staleIdx < 0 {
+		t.Fatalf("a stale-head blocker must render a Stale section:\n%s", index)
+	}
+	if !strings.Contains(index[:staleIdx], "mrvf-cur-001") {
+		t.Fatalf("current-head blocker must be in the unresolved list:\n%s", index)
+	}
+	if !strings.Contains(index[staleIdx:], "mrvf-old-001") || strings.Contains(index[:staleIdx], "mrvf-old-001") {
+		t.Fatalf("stale-head blocker (any target) must be under Stale, not the unresolved list:\n%s", index)
+	}
+}
+
+func TestRenderIndexNoStaleSectionWhenAllCurrent(t *testing.T) {
+	root := t.TempDir()
+	records := []Record{{ID: "mrvf-cur-001", Status: "open", Classification: "blocking", Severity: "high", Title: "Bug", Reviewer: "r", GitHead: "H"}}
+	if err := RenderIndexWithRecords(root, records, "H"); err != nil {
+		t.Fatal(err)
+	}
+	index := mustRead(t, filepath.Join(root, "docs", "metareview", "FINDINGS.md"))
+	if strings.Contains(index, "## Stale") {
+		t.Fatalf("no stale-head blocker must mean no Stale section:\n%s", index)
+	}
+	if strings.Contains(index, "## Process Overrides") {
+		t.Fatalf("no override records must mean no Process Overrides section:\n%s", index)
+	}
+	if !strings.Contains(index, "mrvf-cur-001") {
+		t.Fatalf("the current blocker must render:\n%s", index)
+	}
+}
+
+// Fail-visible: an empty currentHead (HEAD unresolvable) or an empty record head must NOT be treated as stale —
+// never move a blocker out of the current list on missing data.
+func TestRenderIndexEmptyHeadRendersAllCurrent(t *testing.T) {
+	root := t.TempDir()
+	records := []Record{
+		{ID: "mrvf-a", Status: "open", Classification: "blocking", Severity: "high", Title: "A", Reviewer: "r", GitHead: "OLD"},
+		{ID: "mrvf-b", Status: "open", Classification: "blocking", Severity: "high", Title: "B", Reviewer: "r", GitHead: ""},
+	}
+	if err := RenderIndexWithRecords(root, records, ""); err != nil {
+		t.Fatal(err)
+	}
+	index := mustRead(t, filepath.Join(root, "docs", "metareview", "FINDINGS.md"))
+	if strings.Contains(index, "## Stale") {
+		t.Fatalf("empty currentHead must render all blockers in the main list (fail-visible):\n%s", index)
+	}
+	if !strings.Contains(index, "mrvf-a") || !strings.Contains(index, "mrvf-b") {
+		t.Fatalf("all blockers must render:\n%s", index)
+	}
+	// A record with an empty GitHead is never stale even when currentHead is set.
+	if len(staleHeadBlockers(records, "SOMEHEAD")) != 1 || staleHeadBlockers(records, "SOMEHEAD")[0].ID != "mrvf-a" {
+		t.Fatalf("only the differing non-empty head is stale: %+v", staleHeadBlockers(records, "SOMEHEAD"))
+	}
+}
+
+func TestStaleAndCurrentHeadBlockersPartition(t *testing.T) {
+	records := []Record{
+		{ID: "cur", Status: "open", Classification: "blocking", Severity: "high", GitHead: "H"},
+		{ID: "stale", Status: "open", Classification: "blocking", Severity: "high", GitHead: "OLD"},
+		{ID: "advisory", Status: "open", Classification: "advisory", Severity: "low", GitHead: "OLD"}, // non-blocking → neither list
+		{ID: "fixed", Status: "fixed", Classification: "blocking", Severity: "high", GitHead: "OLD"},  // not open → neither
+	}
+	cur := currentHeadBlockers(records, "H")
+	stale := staleHeadBlockers(records, "H")
+	if len(stale) != 1 || stale[0].ID != "stale" {
+		t.Fatalf("only the stale-head blocker is stale: %+v", stale)
+	}
+	if len(cur) != 1 || cur[0].ID != "cur" {
+		t.Fatalf("current list holds only the current-head open blocker: %+v", cur)
+	}
+}
+
+// StaleHeadBlockersInLedger (advisory input) is head-scoped and excludes findings in this run's reconcile set
+// (previous-run chain + escalation resets): those are stale-head until Reconcile runs but legitimately handled,
+// not orphaned cruft. Only orphaned ones are surfaced.
+func TestStaleHeadBlockersInLedgerExcludesReconcileRuns(t *testing.T) {
+	root := t.TempDir()
+	records := []Record{
+		{ID: "mrvf-carried", RunID: "mrv-prev", Status: "open", Classification: "blocking", Severity: "high", GitHead: "OLD"},
+		{ID: "mrvf-reset", RunID: "mrv-escalated", Status: "open", Classification: "blocking", Severity: "high", GitHead: "OLD"},
+		{ID: "mrvf-orphan", RunID: "mrv-abandoned", Status: "open", Classification: "blocking", Severity: "high", GitHead: "OLD"},
+	}
+	if err := writeJSONL(findingsPath(root), records); err != nil {
+		t.Fatal(err)
+	}
+	// The chained AND the escalation-reset run are excluded; only the abandoned run is orphaned cruft.
+	got, err := StaleHeadBlockersInLedger(root, "NEW", []string{"mrv-prev", "mrv-escalated"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "mrvf-orphan" {
+		t.Fatalf("only the orphaned (non-reconciled) stale blocker must be returned: %+v", got)
+	}
+	// With no reconcile set, all three are orphaned cruft. An empty id in the set excludes nothing.
+	got, _ = StaleHeadBlockersInLedger(root, "NEW", []string{""})
+	if len(got) != 3 {
+		t.Fatalf("with no reconcile runs all three stale blockers are cruft, got %+v", got)
+	}
+}
+
+// RenderIndex(root) resolves the real HEAD via realGitHead and partitions accordingly; outside a git repo
+// realGitHead returns "" (fail-visible → all in main list).
+func TestRenderIndexResolvesRealHead(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	run("config", "user.email", "t@e")
+	run("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "f.txt")
+	run("-c", "commit.gpgsign=false", "commit", "-qm", "base")
+	head := realGitHead(root)
+	if head == "" {
+		t.Fatal("realGitHead must resolve a real repo's HEAD")
+	}
+	records := []Record{
+		{ID: "mrvf-cur", Status: "open", Classification: "blocking", Severity: "high", Title: "Cur", Reviewer: "r", GitHead: head},
+		{ID: "mrvf-stale", Status: "open", Classification: "blocking", Severity: "high", Title: "Stale", Reviewer: "r", GitHead: "0000000000000000000000000000000000000000"},
+	}
+	if err := writeJSONL(findingsPath(root), records); err != nil {
+		t.Fatal(err)
+	}
+	if err := RenderIndex(root); err != nil {
+		t.Fatal(err)
+	}
+	index := mustRead(t, filepath.Join(root, "docs", "metareview", "FINDINGS.md"))
+	staleIdx := strings.Index(index, "## Stale")
+	if staleIdx < 0 || !strings.Contains(index[staleIdx:], "mrvf-stale") || strings.Contains(index[:staleIdx], "mrvf-stale") {
+		t.Fatalf("RenderIndex must partition via the resolved HEAD:\n%s", index)
+	}
+	if realGitHead(t.TempDir()) != "" {
+		t.Fatal("realGitHead outside a repo must be empty")
+	}
+}
 
 func TestCountByClassSeparatesBlockersAdvisoriesFollowUpsAndWarnings(t *testing.T) {
 	records := []Record{

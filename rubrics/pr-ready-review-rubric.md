@@ -12,4 +12,9 @@ Block when:
 - The generated PR evidence section is missing or unreadable.
 - Available GitHub review context contains unresolved requested changes or blocker comments.
 
+Advisory (does not block): orphaned stale-head findings the ledger accumulated across heads are surfaced as a
+`generated-artifact-hygiene-reviewer` advisory (R5) and partitioned into the committed `FINDINGS.md` "Stale"
+section, so the index stays consistent with a passing run. Re-review at the current head or clear the
+cross-head ledger.
+
 GitHub context is optional in local mode. Its absence should be recorded as unavailable evidence, not as a blocker.

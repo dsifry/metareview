@@ -210,6 +210,12 @@ func Create(root string, options Options) (Result, error) {
 		reviewerCtx.Adversarial.Verdict = ev.AdjudicatedVerdict
 		reviewerCtx.Adversarial.Emulated = ev.IsEmulated()
 	}
+	// R5: block on stale-head blockers the ledger accumulated — they would render into the committed
+	// FINDINGS.md and contradict this run. Read from the same ledger the projection above already read (so a
+	// corrupt store has already failed loudly); a read miss here means an empty ledger.
+	if stale, staleErr := findings.StaleHeadBlockersInLedger(root, git.HeadSHA, append(append([]string{}, previousRunIDs...), chain.ResetRunIDs...)); staleErr == nil {
+		reviewerCtx.Hygiene.StaleHeadBlockers = stale
+	}
 	reviewerCtx.Mutation = mutationContext
 	rawFindings := reviewers.RunPRReady(reviewerCtx)
 	run := findings.Run{ID: runID, Scope: "pr-ready", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
