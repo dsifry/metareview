@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	hookassets "github.com/dsifry/metareview"
 )
 
 // GitRunner is the git seam so the install logic is testable without a real repo; nil uses the real binary.
@@ -15,6 +17,88 @@ type GitRunner func(root string, args ...string) ([]byte, error)
 func realGitRunner(root string, args ...string) ([]byte, error) {
 	full := append([]string{"-C", root}, args...)
 	return exec.Command("git", full...).Output() // #nosec G204 -- args are literals and a resolved path
+}
+
+// gitHookScripts maps each materialized hook filename to the embedded source it is written from. Only the
+// two GIT hooks belong in core.hooksPath; session-start-check.sh is a Claude SessionStart hook, wired
+// separately through the plugin / .claude/settings.json.
+var gitHookScripts = map[string]string{
+	"pre-push":    "hooks/git/pre-push",
+	"post-commit": "hooks/git/post-commit",
+}
+
+// hookTargetDir is where the gate's hook scripts are MATERIALIZED: a metareview-owned dir inside .metareview
+// (already git-ignored, so the per-clone install artifacts are never committed). Absolute, because a relative
+// core.hooksPath is resolved inconsistently by git.
+func hookTargetDir(root string) (string, error) {
+	return filepath.Abs(filepath.Join(root, ".metareview", "git-hooks"))
+}
+
+// legacyHookTargetDir is the pre-0.11 install target: the committed hooks/git of metareview's OWN checkout.
+// It is recognised as "ours" so an existing metareview clone upgrades cleanly instead of seeing a conflict.
+func legacyHookTargetDir(root string) (string, error) {
+	return filepath.Abs(filepath.Join(root, "hooks", "git"))
+}
+
+// materializeHooks writes the embedded hook scripts into dir, each executable. This is what lets the gate
+// reach a CONSUMER repo: the scripts are compiled into the binary, not assumed to already exist on disk.
+func materializeHooks(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	for name, src := range gitHookScripts {
+		body, err := hookassets.GitHookAssets.ReadFile(src)
+		if err != nil {
+			return fmt.Errorf("reading embedded hook %s: %w", src, err)
+		}
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, body, 0o755); err != nil { //nolint:gosec // a git hook must be executable
+			return err
+		}
+		if err := os.Chmod(p, 0o755); err != nil { // WriteFile perms are umask-masked; force the exec bit
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureHooksGitignored keeps the per-clone materialized hooks out of the consumer's commits. It is a no-op
+// when git already ignores the dir (e.g. metareview's own .metareview/* rule) or the line is already present,
+// and it is best-effort: the gate works regardless of gitignore state, so callers do not fail on its error.
+func ensureHooksGitignored(root string, git GitRunner) error {
+	const rel = ".metareview/git-hooks"
+	if _, err := git(root, "check-ignore", "-q", rel); err == nil {
+		return nil // git already ignores it
+	}
+	gitignore := filepath.Join(root, ".gitignore")
+	existing, _ := os.ReadFile(gitignore)
+	line := rel + "/"
+	if strings.Contains(string(existing), line) {
+		return nil
+	}
+	prefix := ""
+	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
+		prefix = "\n"
+	}
+	f, err := os.OpenFile(gitignore, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // repo-local path
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	_, err = f.WriteString(prefix + "# metareview: per-clone materialized git-native review-gate hooks\n" + line + "\n")
+	return err
+}
+
+// hooksMaterialized reports whether dir holds an executable copy of EVERY gate hook — the check the CLI runs
+// to confirm the gate is genuinely active before it says so (git silently ignores a missing/empty hooksPath).
+func hooksMaterialized(dir string) bool {
+	for name := range gitHookScripts {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil || info.Mode()&0o100 == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // HookInstallPlan is what installing the git-native review gate WOULD do, computed read-only. A non-empty
@@ -42,7 +126,7 @@ func PlanHookInstall(root string, git GitRunner) (HookInstallPlan, error) {
 	if git == nil {
 		git = realGitRunner
 	}
-	target, err := filepath.Abs(filepath.Join(root, "hooks", "git"))
+	target, err := hookTargetDir(root)
 	if err != nil {
 		return HookInstallPlan{}, err
 	}
@@ -63,13 +147,18 @@ func PlanHookInstall(root string, git GitRunner) (HookInstallPlan, error) {
 	effOut, _ := git(root, "config", "--get", "core.hooksPath")
 	plan.Current = strings.TrimSpace(string(effOut))
 
-	// Ours, set locally → already installed.
-	if local != "" && sameHookPath(root, local, target) {
+	// Ours, set locally → already installed ONLY if the scripts are actually present. .metareview/git-hooks is
+	// git-ignored, so the materialized scripts can be deleted or go stale while core.hooksPath still points at
+	// them; treating that as "done" would leave the gate inert (git ignores an empty hooksPath) — the exact
+	// failure this whole change closes. When they are missing we fall through and reinstall (rematerialize).
+	if local != "" && sameHookPath(root, local, target) && hooksMaterialized(target) {
 		plan.AlreadyDone = true
 		return plan, nil
 	}
-	// A foreign value in effect — local, global, or system — must not be overridden.
-	if plan.Current != "" && !sameHookPath(root, plan.Current, target) {
+	// A foreign value in effect — local, global, or system — must not be overridden. The legacy metareview
+	// target (committed hooks/git of an older clone) is NOT foreign: it is ours, so an upgrade replaces it
+	// rather than refusing (AlreadyDone stayed false above, so install proceeds to the new target).
+	if plan.Current != "" && !isOurHookPath(root, plan.Current, target) {
 		scope := "core.hooksPath"
 		if local == "" {
 			scope = "a global or system core.hooksPath"
@@ -125,10 +214,55 @@ func ApplyHookInstall(root string, plan HookInstallPlan, force bool, git GitRunn
 				strings.Join(fresh.Conflicts, "; "))
 		}
 	}
+	// Materialize the embedded hook scripts into the target dir BEFORE pointing git at it, so core.hooksPath
+	// never references an empty/absent directory — git silently ignores that, which is exactly how the gate
+	// was inert in a consumer repo while the CLI still reported it "active".
+	if err := materializeHooks(plan.Target); err != nil {
+		return fmt.Errorf("writing hook scripts to %s: %w", plan.Target, err)
+	}
+	// Best-effort: keep the per-clone materialized hooks out of the consumer's commits. Never fatal.
+	_ = ensureHooksGitignored(root, git)
 	if _, err := git(root, "config", "--local", "core.hooksPath", plan.Target); err != nil {
 		return fmt.Errorf("setting core.hooksPath: %w", err)
 	}
+	// Verify the gate is genuinely in place before the caller says so.
+	if !hooksMaterialized(plan.Target) {
+		return fmt.Errorf("hook scripts were not written to %s; the gate is NOT active", plan.Target)
+	}
 	return nil
+}
+
+// isOurHookPath reports whether a core.hooksPath value is one metareview manages: the current materialized
+// target, or the legacy committed hooks/git of an older metareview clone. The legacy path is claimed ONLY
+// when its pre-push is genuinely metareview's (content marker) — a consumer repo may legitimately keep its
+// OWN hooks in <root>/hooks/git, and install must never silently replace, nor uninstall unset, those.
+func isOurHookPath(root, current, target string) bool {
+	if sameHookPath(root, current, target) {
+		return true
+	}
+	if legacy, err := legacyHookTargetDir(root); err == nil && sameHookPath(root, current, legacy) {
+		return legacyHooksAreOurs(legacy)
+	}
+	return false
+}
+
+// legacyHooksAreOurs reports whether dir/pre-push is metareview's own gate script, by a distinctive marker
+// its body always contains. This is the ownership check that keeps the legacy-upgrade path from claiming a
+// consumer's unrelated hooks/git.
+func legacyHooksAreOurs(dir string) bool {
+	// The ENTIRE legacy dir is absent → the original-bug case: core.hooksPath pointed at a hooks/git that never
+	// existed. Nothing of the consumer's is there, so reclaim it (install rematerializes and recovers the
+	// broken clone without --force).
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return true
+	}
+	// The dir EXISTS. It may hold the consumer's own hooks (commit-msg, etc.) even without a pre-push, so claim
+	// it ONLY when its pre-push carries metareview's marker — never on a missing pre-push alone.
+	body, err := os.ReadFile(filepath.Join(dir, "pre-push"))
+	if err != nil {
+		return false // no readable metareview pre-push in an existing dir → not ours; leave it alone
+	}
+	return strings.Contains(string(body), "metareview") && strings.Contains(string(body), "review gate --push")
 }
 
 // UninstallStatus is what uninstalling WOULD do, computed read-only, so the CLI can honour --dry-run and the
@@ -145,7 +279,7 @@ func UninstallPreview(root string, git GitRunner) (UninstallStatus, error) {
 	if git == nil {
 		git = realGitRunner
 	}
-	target, err := filepath.Abs(filepath.Join(root, "hooks", "git"))
+	target, err := hookTargetDir(root)
 	if err != nil {
 		return UninstallStatus{}, err
 	}
@@ -154,7 +288,7 @@ func UninstallPreview(root string, git GitRunner) (UninstallStatus, error) {
 	}
 	out, _ := git(root, "config", "--local", "--get", "core.hooksPath")
 	current := strings.TrimSpace(string(out))
-	return UninstallStatus{Current: current, WouldChange: current != "" && sameHookPath(root, current, target)}, nil
+	return UninstallStatus{Current: current, WouldChange: current != "" && isOurHookPath(root, current, target)}, nil
 }
 
 // UninstallHookInstall unsets core.hooksPath, but ONLY when it currently points at metareview's hooks/git —
@@ -163,7 +297,7 @@ func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 	if git == nil {
 		git = realGitRunner
 	}
-	target, err := filepath.Abs(filepath.Join(root, "hooks", "git"))
+	target, err := hookTargetDir(root)
 	if err != nil {
 		return false, err
 	}
@@ -172,11 +306,16 @@ func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 	if current == "" {
 		return false, nil
 	}
-	if !sameHookPath(root, current, target) {
-		return false, fmt.Errorf("core.hooksPath is %s, not metareview's hooks/git — leaving it unchanged", current)
+	if !isOurHookPath(root, current, target) {
+		return false, fmt.Errorf("core.hooksPath is %s, not metareview's — leaving it unchanged", current)
 	}
 	if _, err := git(root, "config", "--local", "--unset", "core.hooksPath"); err != nil {
 		return false, err
+	}
+	// Remove the materialized hook dir we own, so uninstall leaves no dangling scripts. A non-existent or
+	// legacy (committed) dir is left alone: RemoveAll on the materialized target only.
+	if mine, e := hookTargetDir(root); e == nil {
+		_ = os.RemoveAll(mine)
 	}
 	return true, nil
 }

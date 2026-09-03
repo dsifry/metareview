@@ -102,9 +102,12 @@ metareview setup --uninstall-hooks          # reverse it (only if it is metarevi
 ```
 
 With no TTY and no `--yes` (an agent or CI), it prints the plan and the flags and **changes nothing** rather
-than hanging on a prompt. Install sets `core.hooksPath` to this clone's `hooks/git`; git hooks are per-clone
-and never auto-install (git's security model), so each clone runs this once. Keep `bin/metareview` built (or
-`metareview` on `PATH`, or `METAREVIEW_BIN` set) — the pre-push gate fails closed if it cannot run.
+than hanging on a prompt. Install **materializes** the hook scripts into `.metareview/git-hooks/` (embedded in
+the binary, so this works in *any* repo — not just metareview's own checkout), points `core.hooksPath` there,
+and adds `.metareview/git-hooks/` to the repo's `.gitignore` (idempotently) so the per-clone scripts are not
+committed. Git hooks are per-clone and never auto-install (git's security model), so each clone runs this
+once. Keep `bin/metareview` built (or `metareview` on `PATH`, or `METAREVIEW_BIN` set) — the pre-push gate
+fails closed if it cannot run.
 
 ## Standalone Setup
 
