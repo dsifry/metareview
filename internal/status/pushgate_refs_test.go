@@ -180,6 +180,28 @@ func TestPushGateForRefs_TwoFieldLineParses(t *testing.T) {
 	}
 }
 
+// A 3-field ref line (local-ref, local-sha, remote-ref — no remote-sha) must use f[2] as the remote ref, NOT
+// fall through to "(unknown remote ref)". This pins the len(f) >= 3 boundary: a 2-field line has no remote
+// ref, a 3-field line does. (Kills the CONDITIONALS_BOUNDARY mutant at the >= 3 check that the 2- and 4-field
+// tests alone leave alive.)
+func TestPushGateForRefs_ThreeFieldLineUsesRemoteRef(t *testing.T) {
+	head := "1111111111111111111111111111111111111111"
+	stdin := "refs/heads/evil 2222222222222222222222222222222222222222 refs/heads/main\n"
+	blocked, msg, err := PushGateForRefs("/root", "", stdin, runReturning(head))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !blocked {
+		t.Fatal("a 3-field non-HEAD ref must block")
+	}
+	if !strings.Contains(msg, "refs/heads/main") {
+		t.Fatalf("a 3-field line must name f[2] (refs/heads/main) as the remote ref; got:\n%s", msg)
+	}
+	if strings.Contains(msg, "unknown remote ref") {
+		t.Fatalf("a 3-field line has a remote ref (f[2]) and must not report it unknown; got:\n%s", msg)
+	}
+}
+
 // When every non-deletion pushed sha EQUALS the checked-out HEAD, PushGateForRefs delegates to PushGate — the
 // pushed content IS the checked-out branch, so it is gated exactly as before. gateRepo's work branch has an
 // unreviewed work.go, so the delegated PushGate blocks with its own "across this branch" message: reaching
