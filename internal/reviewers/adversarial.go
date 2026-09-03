@@ -58,7 +58,7 @@ func adversarialReviewFindings(require bool, s AdversarialReviewStatus) []Findin
 			Finding:        "The recorded adjudicated review of this head returned " + s.Verdict + ", not a pass.",
 			Expected:       "The adversarial review's blocking findings are fixed and re-reviewed (a fresh marker), or explicitly human-accepted.",
 			Found:          "The latest review-evidence marker for HEAD " + head + " has verdict " + s.Verdict + ".",
-			Recommendation: "Clear the review's findings and re-run the review loop, then re-run this gate.",
+			Recommendation: "Clear the review's findings and re-run `metareview fsm --workflow " + workflow + "`, then re-run this gate.",
 			Fingerprint:    "review:adjudicated-review-not-clean",
 		})}
 	}

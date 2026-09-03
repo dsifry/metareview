@@ -82,6 +82,13 @@ func TestAdversarialReviewFindingsWorkflowHint(t *testing.T) {
 	if len(em) != 1 || !contains(em[0].Recommendation, "epic-review-loop") {
 		t.Fatalf("emulated note must carry the hint: %+v", em)
 	}
+	// The NON-PASS (existing failing marker) path must ALSO name the epic workflow, and never the default —
+	// else an agent clearing a failing epic marker is steered to the task-done-rubric review-loop (caught by
+	// Cursor Bugbot on the first PR revision).
+	np := adversarialReviewFindings(true, AdversarialReviewStatus{Present: true, Verdict: "NEEDS_REVISION", HeadSHA: "abc", WorkflowHint: "epic-review-loop"})
+	if len(np) != 1 || !contains(np[0].Recommendation, "epic-review-loop") || contains(np[0].Recommendation, "--workflow review-loop") {
+		t.Fatalf("non-pass recommendation must name the epic workflow, not the default: %+v", np)
+	}
 }
 
 func contains(s, sub string) bool {
