@@ -34,6 +34,7 @@ func prReviewBody(t *testing.T, root string, result Result) string {
 // PASS marker recorded at HEAD clears the adversarial-review blocker; without one the blocker is present.
 func TestPRReadyRequireLensesSatisfiedByMarker(t *testing.T) {
 	root := shardedRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "") // the gate under test must not be opted out by an inherited env
 	base, head := diffEndpoints(t, root)
 	if err := reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
 		ReviewedScope: "pr-ready", BaseSHA: base, HeadSHA: head,
@@ -53,6 +54,7 @@ func TestPRReadyRequireLensesSatisfiedByMarker(t *testing.T) {
 // The mirror: with no marker at HEAD the gate blocks on the adversarial-review reviewer.
 func TestPRReadyRequireLensesBlocksWithoutMarker(t *testing.T) {
 	root := shardedRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "") // the gate under test must not be opted out by an inherited env
 	result, err := Create(root, Options{Base: "main"})
 	if err != nil {
 		t.Fatal(err)

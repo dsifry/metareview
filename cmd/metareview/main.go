@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	fsmcli "github.com/dsifry/metareview/internal/fsm/cli"
+	fsmrun "github.com/dsifry/metareview/internal/fsm/run"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -373,34 +374,41 @@ func main() {
 			os.Exit(2)
 		}
 		root := repo.RootOr(mustCwd())
+		gc, err := gitcontext.Collect(root, base)
+		exitOnErr(err) // a repo with no HEAD/base fails here ("invalid git base"), so gc.HeadSHA is non-empty below
 		// A CLI seam cannot witness that independent subagents actually ran, so it must not let a hand-typed
 		// `--mode subagent-adjudicated` launder a self-attested review as independent, full-strength evidence
 		// (the gate would then trust it with no advisory trace). subagent-adjudicated is therefore admitted
-		// only when it mirrors a real FSM review run: --from-run must name a run that exists on disk. A
-		// self-attested review has no such run and must record the labeled, advisory in-session-emulated mode.
+		// only when it mirrors a real FSM review run: --from-run must name a run whose init records the SAME
+		// base..head this marker claims. A self-attested review has no such run and must record the labeled,
+		// advisory in-session-emulated mode.
 		if mode == reviewstate.ReviewModeSubagentAdjudicated {
 			if fromRun == "" {
 				fmt.Fprintln(os.Stderr, "record-lenses: --mode subagent-adjudicated requires --from-run naming the FSM review run it mirrors; use --mode in-session-emulated for a self-attested review")
 				os.Exit(2)
 			}
 			// A run id is a single path segment under .metareview/runs/; reject separators/traversal so the
-			// existence check can't be pointed at an audit.jsonl outside the run store.
+			// audit read can't be pointed outside the run store.
 			if strings.ContainsAny(fromRun, `/\`) || fromRun == ".." {
 				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: not a valid run id\n", fromRun)
 				os.Exit(2)
 			}
-			if _, statErr := os.Stat(filepath.Join(root, ".metareview", "runs", fromRun, "audit.jsonl")); statErr != nil {
-				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: no such FSM run under .metareview/runs/\n", fromRun)
+			if err := validateFromRunDiff(root, fromRun, gc.BaseSHA, gc.HeadSHA); err != nil {
+				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: %v\n", fromRun, err)
 				os.Exit(2)
 			}
 		}
-		gc, err := gitcontext.Collect(root, base)
-		exitOnErr(err) // a repo with no HEAD/base fails here ("invalid git base"), so gc.HeadSHA is non-empty below
 		var lenses []string
 		for _, l := range strings.Split(lensesCSV, ",") {
 			if l = strings.TrimSpace(l); l != "" {
 				lenses = append(lenses, l)
 			}
+		}
+		// A review with no named lens is not evidence a lens ran; a PASS marker with an empty lens set would
+		// let the gate pass on nothing. Require at least one.
+		if len(lenses) == 0 {
+			fmt.Fprintln(os.Stderr, "record-lenses: --lenses must name at least one lens that ran (e.g. --lenses security,correctness)")
+			os.Exit(2)
 		}
 		exitOnErr(reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
 			ReviewedScope: scope, HeadSHA: gc.HeadSHA, BaseSHA: gc.BaseSHA,
@@ -624,6 +632,55 @@ func mustCwd() string {
 // told the operator they had review findings, while emitting no JSON and so no blockers to act
 // on — an unreadable review log became "you have work to do, and I cannot say what". A check that
 // did not run must never be reported as a check that found something.
+// validateFromRunDiff confirms that the FSM run named by --from-run exists and its init event records the
+// SAME base..head the marker claims, so a subagent-adjudicated marker cannot be pointed at an empty audit or
+// at a real run that reviewed a different diff. It reads only the first (init) line — cheap and lenient, in
+// the spirit of the FSM's own peek; validating the run's terminal *verdict* is a recorded follow-up.
+func validateFromRunDiff(root, runID, wantBase, wantHead string) error {
+	path := filepath.Join(root, ".metareview", "runs", runID, "audit.jsonl")
+	raw, err := os.ReadFile(path) // #nosec G304 -- runID is validated to a single path segment by the caller
+	if err != nil {
+		return errors.New("no such FSM run under .metareview/runs/")
+	}
+	line := raw
+	if i := indexByte(raw, '\n'); i >= 0 {
+		line = raw[:i]
+	}
+	if len(line) == 0 {
+		return errors.New("its audit.jsonl is empty (not a real run)")
+	}
+	var ev fsmrun.Event
+	if json.Unmarshal(line, &ev) != nil || ev.Type != fsmrun.TypeInit {
+		return errors.New("its audit.jsonl does not start with a valid init event")
+	}
+	var d fsmrun.InitData
+	if json.Unmarshal(ev.Data, &d) != nil {
+		return errors.New("its init event is unreadable")
+	}
+	if d.Head != wantHead || d.BaseSHA != wantBase {
+		return fmt.Errorf("it reviewed a different diff (run base..head %s..%s, marker %s..%s)", short(d.BaseSHA), short(d.Head), short(wantBase), short(wantHead))
+	}
+	return nil
+}
+
+// indexByte reports the first index of b in s, or -1.
+func indexByte(s []byte, b byte) int {
+	for i, c := range s {
+		if c == b {
+			return i
+		}
+	}
+	return -1
+}
+
+// short trims a SHA to its first 12 chars for a diagnostic, leaving shorter strings untouched.
+func short(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
 func exitGateBroken(err error) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

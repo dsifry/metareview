@@ -59,7 +59,7 @@ There are **two** engines that produce a review, joined by a **review-evidence m
 
 **The bridge (require-lenses gate).** `pr-ready`/`task-done` now **require** an adjudicated lens review by
 default. After a real review the agent records a **review-evidence marker** —
-`metareview review record-lenses --scope pr-ready|task-done [--from-run <fsm-run-id>]` — a record in
+`metareview review record-lenses --scope <pr-ready|task-done> --lenses <names> [--from-run <fsm-run-id>]` — a record in
 `.metareview/runs.jsonl` (`scope="review-evidence"`, `Kind="review-evidence"`) carrying the adjudicated
 verdict, confirmed finding IDs, lens set, execution mode, and the **base..HEAD SHAs it reviewed**. The gate
 (`internal/reviewers/adversarial.go`) looks up the latest marker for the scope over the **exact

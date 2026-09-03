@@ -25,24 +25,26 @@ review does. epic-ready stays structural for now (§4 of ARCHITECTURE: its judgm
 The gate cannot see FSM runs today. Bridge them with a small, durable **review-evidence marker** that the
 deterministic gate already-reads path can check:
 
-1. **Producing it:** when an FSM `review-loop`/`sdlc-loop-clean` run reaches its terminal adjudicated state,
-   it writes a `reviewEvidence` record into `.metareview/runs.jsonl` (the log `reviewlog.Discover` /
-   `runchain` already read) — NOT into the private audit log. Fields: `{kind: "review-evidence", scope:
-   "pr-ready"|"task-done", headSha, baseSha, lensSet: [...], adjudicatedVerdict, confirmedFindingIds,
-   executionMode: "subagent-adjudicated" | "in-session-emulated", fromFsmRunId}`. A thin recorder in
-   `internal/reviewstate` (new) writes it; the FSM `done`/terminal handler calls it, and a CLI seam
-   (`metareview review record-lenses …`, or folded into `fsm`) lets the agent record an
-   `in-session-emulated` one when subagents are unavailable.
+1. **Producing it:** a `review-evidence` record is written into `.metareview/runs.jsonl` (the log
+   `reviewlog.Discover` / `runchain` already read) — NOT into the private audit log. It shares the file with
+   ordinary run records but carries its own `kind`, so scope-filtered readers skip it. Fields as shipped:
+   `{schemaVersion, kind: "review-evidence", scope: "review-evidence", reviewedScope: "pr-ready"|"task-done",
+   headSha, baseSha, lensSet: [...], adjudicatedVerdict, confirmedFindingIds, executionMode:
+   "subagent-adjudicated" | "in-session-emulated", fromFsmRunId, createdAt}`. (The record's own `scope` is
+   the literal `"review-evidence"`; the reviewed gate scope lives in `reviewedScope`.) A thin recorder in
+   `internal/reviewstate` writes it; the CLI seam `metareview review record-lenses …` records it (the FSM
+   stays scope-agnostic — the agent bridges its run via `--from-run`, see the hardening note below).
 
-2. **Requiring it:** add a new reviewer to `reviewers.RunPRReady` (and the task-done equivalent):
+2. **Requiring it:** a new reviewer in `reviewers.RunPRReady` (and the task-done equivalent),
    `adversarial-review-reviewer`. It BLOCKS ("no adjudicated lens review recorded for HEAD <sha>") unless a
-   `review-evidence` marker exists whose `headSha` == the current review head and `scope` matches. Its
-   confirmed findings are folded in as blocking/advisory so a review that *found* bugs also blocks until
-   they're fixed+re-reviewed. `in-session-emulated` satisfies the requirement but is rendered in the review
-   `.md` as weaker, non-independent evidence.
+   marker exists whose `reviewedScope` matches and whose `baseSha..headSha` equals the current review diff.
+   A recorded non-pass verdict also blocks (a review that *found* bugs blocks until fixed+re-reviewed).
+   `in-session-emulated` satisfies the requirement but is rendered as weaker, non-independent (advisory) evidence.
 
-3. **Currency:** the marker is keyed on `headSha`; any new commit invalidates it (a fresh review is required),
-   matching how the push gate already reasons about the branch head. Editing a file → new head → re-review.
+3. **Currency:** the marker is keyed on the exact `baseSha..headSha` pair, not head alone — any new commit
+   *or a wider base* invalidates it (a narrow `HEAD~1..HEAD` review must not be credited for `main..HEAD`).
+   Of several markers over one diff, the **last-recorded** wins (append order), so a re-review's newer verdict
+   supersedes the older. Editing a file → new head → re-review.
 
 ## Injection points (verified in-tree)
 

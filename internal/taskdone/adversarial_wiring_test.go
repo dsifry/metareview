@@ -26,6 +26,7 @@ func diffEndpoints(t *testing.T, root string) (base, head string) {
 // marker-present path in Create() that the flag-opt-out tests never exercise.
 func TestTaskDoneRequireLensesSatisfiedByMarker(t *testing.T) {
 	root := shardedTaskRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "") // the gate under test must not be opted out by an inherited env
 	base, head := diffEndpoints(t, root)
 	// A PASS, subagent-adjudicated marker over base..head — the review-lenses evidence the gate now demands.
 	if err := reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
@@ -57,6 +58,7 @@ func TestTaskDoneRequireLensesSatisfiedByMarker(t *testing.T) {
 // adversarial-review blocker (the "unresolved findings" branch of the reviewer).
 func TestTaskDoneRequireLensesRejectsNonPassMarker(t *testing.T) {
 	root := shardedTaskRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "") // the gate under test must not be opted out by an inherited env
 	base, head := diffEndpoints(t, root)
 	if err := reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
 		ReviewedScope: "task-done", BaseSHA: base, HeadSHA: head,

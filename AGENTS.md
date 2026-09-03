@@ -22,14 +22,15 @@ longer PASS alone). After the real review, record a HEAD-scoped marker so the ga
 any new commit:
 
 ```bash
-metareview review record-lenses --scope pr-ready|task-done --base <base-ref> \
-  --verdict PASS --mode subagent-adjudicated --from-run <fsm-run-id>
+metareview review record-lenses --scope pr-ready --base <base-ref> \
+  --verdict PASS --mode subagent-adjudicated --from-run <fsm-run-id> --lenses security,correctness
 ```
 
-The marker is scoped to the exact base..HEAD diff — re-record after a new commit or a different `--base`.
-`--mode subagent-adjudicated` requires `--from-run` (a real FSM run); use `--mode in-session-emulated` (no
-`--from-run`) for a self-attested in-session review — it passes but is advisory-flagged.
-`METAREVIEW_ALLOW_MECHANICAL_PASS=1` opts a run out to a structural-only pass.
+Use `--scope task-done` for the task-done gate; `--lenses` is required. The marker is scoped to the exact
+base..HEAD diff — re-record after a new commit or a different `--base`. `--mode subagent-adjudicated`
+requires `--from-run` naming a real FSM run whose init records the same base..head; use
+`--mode in-session-emulated` (no `--from-run`) for a self-attested in-session review — it passes but is
+advisory-flagged. `METAREVIEW_ALLOW_MECHANICAL_PASS=1` opts a run out to a structural-only pass.
 
 Use `go run ./cmd/metareview ...` when running from a source checkout without a built `bin/metareview`.
 

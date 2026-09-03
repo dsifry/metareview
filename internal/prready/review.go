@@ -197,6 +197,9 @@ func Create(root string, options Options) (Result, error) {
 	// missing/not-clean unless the mechanical-pass escape is set.
 	reviewerCtx.RequireLenses = reviewstate.RequireAdjudicatedReview()
 	reviewerCtx.Adversarial = reviewers.AdversarialReviewStatus{HeadSHA: git.HeadSHA}
+	// A corrupt runs.jsonl never reaches here silently: the run projection above reads the same file and
+	// fails the whole review loudly with the parse error first (fail-closed). So a read error here can only
+	// mean "no marker" — treat it as absent.
 	if ev, ok, evErr := reviewstate.LatestReviewEvidence(root, "pr-ready", git.BaseSHA, git.HeadSHA); evErr == nil && ok {
 		reviewerCtx.Adversarial.Present = true
 		reviewerCtx.Adversarial.Verdict = ev.AdjudicatedVerdict

@@ -159,6 +159,9 @@ func Create(root, target string, options Options) (Result, error) {
 	// Build B: require a real adjudicated lens review over THIS head (see internal/reviewstate).
 	reviewerCtx.RequireLenses = reviewstate.RequireAdjudicatedReview()
 	reviewerCtx.Adversarial = reviewers.AdversarialReviewStatus{HeadSHA: git.HeadSHA}
+	// A corrupt runs.jsonl never reaches here silently: the run projection above reads the same file and
+	// fails the whole review loudly with the parse error first (fail-closed). So a read error here can only
+	// mean "no marker" — treat it as absent.
 	if ev, ok, evErr := reviewstate.LatestReviewEvidence(root, "task-done", git.BaseSHA, git.HeadSHA); evErr == nil && ok {
 		reviewerCtx.Adversarial.Present = true
 		reviewerCtx.Adversarial.Verdict = ev.AdjudicatedVerdict
