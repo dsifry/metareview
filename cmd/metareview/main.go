@@ -27,6 +27,7 @@ import (
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/reviewprompt"
+	"github.com/dsifry/metareview/internal/reviewstate"
 	"github.com/dsifry/metareview/internal/setup"
 	"github.com/dsifry/metareview/internal/status"
 	"github.com/dsifry/metareview/internal/taskdone"
@@ -326,6 +327,62 @@ func main() {
 			}
 		}
 		fmt.Print(reviewprompt.Build(label, scope.Files, status.ChangeKinds(root, base, nil)))
+		os.Exit(0)
+	}
+	if len(args) >= 2 && args[0] == "review" && args[1] == "record-lenses" {
+		// Record that an adjudicated lens review ran over the current head, satisfying the pr-ready/task-done
+		// require-lenses gate (build B). The FSM review-loop records this automatically on completion; this
+		// seam lets the agent record an in-session-emulated review (the labeled weaker escape hatch) when
+		// subagents are unavailable, or mirror an FSM run with --mode subagent-adjudicated --from-run.
+		scope, base, verdict := "pr-ready", "", "PASS"
+		mode, lensesCSV, fromRun := reviewstate.ReviewModeInSessionEmulated, "", ""
+		for i := 2; i < len(args); i++ {
+			switch args[i] {
+			case "--scope":
+				scope = flagValue(args, i, "--scope")
+				i++
+			case "--base":
+				base = flagValue(args, i, "--base")
+				i++
+			case "--verdict":
+				verdict = flagValue(args, i, "--verdict")
+				i++
+			case "--mode":
+				mode = flagValue(args, i, "--mode")
+				i++
+			case "--lenses":
+				lensesCSV = flagValue(args, i, "--lenses")
+				i++
+			case "--from-run":
+				fromRun = flagValue(args, i, "--from-run")
+				i++
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
+				os.Exit(2)
+			}
+		}
+		if scope != "pr-ready" && scope != "task-done" {
+			fmt.Fprintln(os.Stderr, "record-lenses: --scope must be pr-ready or task-done")
+			os.Exit(2)
+		}
+		if mode != reviewstate.ReviewModeSubagentAdjudicated && mode != reviewstate.ReviewModeInSessionEmulated {
+			fmt.Fprintln(os.Stderr, "record-lenses: --mode must be subagent-adjudicated or in-session-emulated")
+			os.Exit(2)
+		}
+		root := repo.RootOr(mustCwd())
+		gc, err := gitcontext.Collect(root, base)
+		exitOnErr(err)
+		var lenses []string
+		for _, l := range strings.Split(lensesCSV, ",") {
+			if l = strings.TrimSpace(l); l != "" {
+				lenses = append(lenses, l)
+			}
+		}
+		exitOnErr(reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
+			ReviewedScope: scope, HeadSHA: gc.HeadSHA, BaseSHA: gc.BaseSHA,
+			LensSet: lenses, AdjudicatedVerdict: verdict, ExecutionMode: mode, FromFSMRunID: fromRun,
+		}))
+		fmt.Printf("Recorded %s review-evidence at head %s (mode=%s, verdict=%s).\n", scope, gc.HeadSHA, mode, verdict)
 		os.Exit(0)
 	}
 	if len(args) >= 2 && args[0] == "review" && args[1] == "gate" {

@@ -1,6 +1,7 @@
 package reviewstate
 
 import (
+	"os"
 	"path/filepath"
 	"time"
 
@@ -92,4 +93,11 @@ func LatestReviewEvidence(root, reviewedScope, headSHA string) (ReviewEvidence, 
 		}
 	}
 	return best, found, nil
+}
+
+// RequireAdjudicatedReview reports whether the gate must require a real adjudicated lens review (build B).
+// Default true; set METAREVIEW_ALLOW_MECHANICAL_PASS=1 to restore the legacy deterministic pass — a one-release
+// migration escape so in-flight branches are not suddenly wedged.
+func RequireAdjudicatedReview() bool {
+	return os.Getenv("METAREVIEW_ALLOW_MECHANICAL_PASS") != "1"
 }

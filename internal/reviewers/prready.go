@@ -19,6 +19,11 @@ type PRReadyContext struct {
 	GitHub                PRGitHubContext
 	IncludeWorkingTree    bool
 	WorkingTreeDirtyFiles []string
+	// RequireLenses gates whether a real adjudicated lens review is required to pass (build B; default on,
+	// off restores the legacy deterministic pass for one migration release). Adversarial is the resolved
+	// review-evidence for the current head, supplied by the caller.
+	RequireLenses bool
+	Adversarial   AdversarialReviewStatus
 }
 
 type PRReviewLog struct {
@@ -99,6 +104,7 @@ func RunPRReady(context PRReadyContext) []Finding {
 	}
 	results = append(results, branchDiffFindings(context)...)
 	results = append(results, externalGitHubFindings(context.GitHub)...)
+	results = append(results, adversarialReviewFindings(context.RequireLenses, context.Adversarial)...)
 	return results
 }
 

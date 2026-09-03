@@ -211,6 +211,9 @@ func TestTaskDonePackRollbackRunsWhenTheReviewFails(t *testing.T) {
 // Prune and GC are housekeeping after the run is already recorded: their failure
 // must not discard the run the caller needs.
 func TestTaskDoneHousekeepingFailuresDoNotDiscardTheRun(t *testing.T) {
+	// This test exercises housekeeping (GC/prune) reachability, not the adversarial-review requirement, so it
+	// opts out of build B's require-lenses gate (which would otherwise block the gc case before GC is reached).
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
 	for _, tc := range []struct {
 		name   string
 		writer *fakeWriter
