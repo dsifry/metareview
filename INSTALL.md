@@ -72,6 +72,14 @@ claude plugin install metareview@metareview
 
 Then use `/setup`, `/review-task-done`, `/review-epic-ready`, `/review-pr-ready`, `/review-artifact`, `/learn-post-merge`, `/status`, and `/fsm`.
 
+## Pi
+
+[Pi](https://github.com/earendil-works/pi) consumes metareview through the **Agent Skills** standard — the
+same `SKILL.md` skills used above. Install the CLI (`npm install -g metareview`) and make the bundled skills
+discoverable to Pi under `.agents/skills/` (this repo) or `~/.agents/skills/` (global); Pi then invokes them
+as `/skill:review-task-done`, etc. See **[docs/README.pi.md](docs/README.pi.md)** for the exact steps. Pi has
+no MCP by design — a CLI plus a documenting skill is its intended model, which is exactly metareview's.
+
 ## Enforce the review gate (git hooks)
 
 metareview can enforce review-before-push with **git-native hooks**. Because git runs them on the real
