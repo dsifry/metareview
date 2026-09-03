@@ -27,14 +27,14 @@ const (
 )
 
 // ReviewEvidence is the durable marker that an adjudicated lens review ran over a diff AT a specific head.
-// The deterministic gate (pr-ready/task-done) requires one matching the current head before it can PASS — it
+// The deterministic gate (pr-ready/task-done/epic-ready) requires one matching the current head before it can PASS — it
 // is the bridge from the FSM's review-lenses/adjudicate engine to the gate. Written to .metareview/runs.jsonl
 // (the log the gate already reads). See docs/specs/2026-09-03-require-adjudicated-review.md.
 type ReviewEvidence struct {
 	SchemaVersion       int      `json:"schemaVersion"`
 	Kind                string   `json:"kind"`          // always ReviewEvidenceKind
 	Scope               string   `json:"scope"`         // always ReviewEvidenceScope, so run readers skip it
-	ReviewedScope       string   `json:"reviewedScope"` // the gate this satisfies: "pr-ready" | "task-done"
+	ReviewedScope       string   `json:"reviewedScope"` // the gate this satisfies: "pr-ready" | "task-done" | "epic-ready"
 	HeadSHA             string   `json:"headSha"`       // the diff head the review covered
 	BaseSHA             string   `json:"baseSha,omitempty"`
 	LensSet             []string `json:"lensSet"`            // the lenses that ran

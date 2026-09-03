@@ -16,6 +16,13 @@ type EpicReadyContext struct {
 	Knowledge    EpicKnowledgeContext
 	Mutation     MutationContext
 	EvidenceText string
+	// RequireLenses gates whether a real adjudicated lens review is required to pass (build B fast-follow;
+	// default on, off restores the legacy deterministic pass for one migration release). Adversarial is the
+	// resolved review-evidence for the epic's integration diff at this head, supplied by the caller. The
+	// marker attests the integration diff; roll-up freshness is guarded separately by the deterministic
+	// pre-checks below, which re-read current child logs/evidence/intent every run.
+	RequireLenses bool
+	Adversarial   AdversarialReviewStatus
 }
 
 type EpicContext struct {
@@ -152,6 +159,11 @@ func RunEpicReady(context EpicReadyContext) []Finding {
 			Fingerprint:    "epic:missing-service-inventory:" + strings.Join(missing, "|"),
 		}))
 	}
+	// Build B fast-follow: require an adjudicated adversarial review over the epic's integration diff at this
+	// head. This runs on the normal path only — the context-risk early return above already blocks, so a
+	// redundant adversarial block there buys nothing and would be unreachable. The shared reviewer is
+	// scope-agnostic; the caller (epicready.Create) resolves the review-evidence marker into context.Adversarial.
+	results = append(results, adversarialReviewFindings(context.RequireLenses, context.Adversarial)...)
 	return results
 }
 

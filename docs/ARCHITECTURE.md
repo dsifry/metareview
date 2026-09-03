@@ -35,11 +35,13 @@ abbreviated — task-done/epic-ready/pr-ready also take `--evidence <file>` (a v
 | **artifact** | `review artifact <path>` | a spec/plan/design/doc (no code yet) | **agent lenses** (scaffold → subagents fill rows; `NOT_REVIEWED` until done) |
 | **task-done** | `review task-done <id> --base <ref>` | one task's diff (small) | deterministic-local gate ⚠️ |
 | **pr-ready** | `review pr-ready --base <ref>` | the whole branch diff (sharded over 120 KB) | deterministic-local gate ⚠️ |
-| **epic-ready** | `review epic-ready <id>` | **roll-up over already-reviewed children** — child evidence present? contradictions? intent drift? registry coverage? — *not a diff* | fully deterministic today (its contradiction + intent-drift checks are heuristics; a real judgment review is a §4 candidate) |
+| **epic-ready** | `review epic-ready <id>` | the epic's **integration diff** (base..HEAD, the union of the children's changes), **with the roll-up as context** — child evidence present? contradictions? intent drift? registry coverage? | deterministic heuristics (roll-up freshness) **+ a required adjudicated review** over the integration diff (base..HEAD) via the `epic-review-loop` workflow — same require-lenses gate as pr-ready/task-done |
 | **learn** | `learn --post-merge <pr>` | what the merged PR + bot findings teach us | learning extraction |
 
-`epic-ready` runs *after* every child task is task-done-reviewed; it reads child review logs + evidence + the
-parent intent, not a code diff. See `internal/reviewers/epicready.go`, `rubrics/epic-ready-review-rubric.md`.
+`epic-ready` runs *after* every child task is task-done-reviewed. It reviews the epic's **integration diff**
+(base..HEAD, the union of the children's changes) **with the roll-up — child review logs, evidence, parent
+intent — as context**; the roll-up's own freshness is guarded by the deterministic pre-checks (re-read every
+run). See `internal/reviewers/epicready.go`, `rubrics/epic-ready-review-rubric.md`.
 
 ## 3. Two review engines — and the gap between them
 
@@ -57,9 +59,9 @@ There are **two** engines that produce a review, joined by a **review-evidence m
    (`.metareview/runs/<id>/audit.jsonl`, carried as `FoldState.Findings`) — **not** in the
    `.metareview/findings.jsonl` that the deterministic gate reconciles and reads.
 
-**The bridge (require-lenses gate).** `pr-ready`/`task-done` now **require** an adjudicated lens review by
-default. After a real review the agent records a **review-evidence marker** —
-`metareview review record-lenses --scope <pr-ready|task-done> --lenses <names> [--from-run <fsm-run-id>]` — a record in
+**The bridge (require-lenses gate).** `pr-ready`/`task-done`/`epic-ready` now **require** an adjudicated lens
+review by default. After a real review the agent records a **review-evidence marker** —
+`metareview review record-lenses --scope <pr-ready|task-done|epic-ready> --lenses <names> [--from-run <fsm-run-id>]` — a record in
 `.metareview/runs.jsonl` (`scope="review-evidence"`, `Kind="review-evidence"`) carrying the adjudicated
 verdict, confirmed finding IDs, lens set, execution mode, and the **base..HEAD SHAs it reviewed**. The gate
 (`internal/reviewers/adversarial.go`) looks up the latest marker for the scope over the **exact
@@ -100,9 +102,15 @@ Workflows: `review-loop` (discover → adjudicate → done: a one-shot review, n
 a fresh review is clean; the loop MUST target a review node), `sdlc-loop-proved` (adds `prove`). The loop is
 defined by the *graph*, not flags; a loop reset clears findings.
 
-epic-ready is **not** an FSM workflow: the FSM is a code-diff review-and-fix loop, and epic-ready reviews
-child *readiness*, which has no "find-bug-fix-in-loop" shape. A one-shot `review-loop` over the roll-up is the
-natural home for its two judgment lenses (contradiction, intent-drift).
+epic-ready is **not** a fix-loop: it reviews child *readiness*, which has no "find-bug-fix-in-loop" shape. Its
+adjudicated review is a **one-shot** `epic-review-loop` (a `review-loop` variant) the agent drives over the
+epic's **integration diff** (base..HEAD, the union of the children's changes); its `discover` node carries a
+`rubric: rubrics/epic-ready-review-rubric.md` param so the epic lenses (integration, acceptance-vs-intent,
+cross-child regression, architecture coherence) are configured independently of the pr-ready/task-done lens
+set — the `review-lenses` node's rubric is a per-workflow param defaulting to the task-done rubric.
+**Division of labor:** the marker attests the integration-diff review (base..HEAD currency); the roll-up's
+own freshness (child logs/evidence/intent, which live outside the diff) is guarded by the deterministic
+pre-checks in `RunEpicReady`, which re-read current state on every gate run.
 
 Exit contract (`metareview fsm`): `3` = the FSM needs the host to do a node's work; `1`+`GATE_FAILED` = run
 `resume_hint` (forks a child = new run id); `1`+`ERR_*` = read `code`; `2` = nothing recorded (fix input and

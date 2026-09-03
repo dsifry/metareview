@@ -1,0 +1,23 @@
+workflow: epic-review-loop
+version: 1
+# A one-shot review-loop (discover -> adjudicate -> done) for epic-ready: the same shape as review-loop, but
+# its discover node applies the epic-ready rubric so the epic lenses (integration, acceptance-vs-intent,
+# cross-child regression, architecture coherence) do NOT move in lockstep with the default task-done lenses.
+# The agent drives this workflow over the epic's INTEGRATION DIFF (base..head, the union of the children's
+# changes), then bridges the run into an epic-ready review-evidence marker with
+# `record-lenses --scope epic-ready --from-run <run>` (identical --base on both sides).
+vars:
+  REVIEWER:     {default: claude-opus-5}
+  JUDGE:        {required: true}
+  REV_EFFORT:   {default: low}
+  JUDGE_EFFORT: {required: true}   # Pareto-selected with JUDGE (spec §17); pinned to medium under --calibration
+states: [discover, adjudicate, done, failed]
+transitions:
+  - {from: discover,   to: done,       gate: findings_empty,     outcome: clean}
+  - {from: discover,   to: adjudicate, gate: findings_nonempty}
+  - {from: adjudicate, to: done,       gate: confirmed_empty,    outcome: clean}
+  - {from: adjudicate, to: done,       gate: confirmed_nonempty, outcome: reviewed}
+nodes:
+  discover:   {kind: review-lenses,        exec: subagent, model: $REVIEWER, effort: $REV_EFFORT, rubric: rubrics/epic-ready-review-rubric.md}
+  adjudicate: {kind: match-then-adjudicate, exec: fork,     model: $JUDGE, effort: $JUDGE_EFFORT}
+repo_mode: advisory

@@ -175,6 +175,120 @@ func TestViolatesNoEvalIntentUsesWordBoundary(t *testing.T) {
 	}
 }
 
+// Build B fast-follow: epic-ready requires an adjudicated lens review over its integration diff. The
+// require-lenses wiring mirrors pr-ready/task-done — the CALLER resolves the review-evidence marker and
+// supplies AdversarialReviewStatus; RunEpicReady appends the shared adversarial reviewer on the
+// non-context-risk path.
+
+func TestEpicReadyRequiresAdjudicatedReviewWhenNoMarker(t *testing.T) {
+	findings := RunEpicReady(EpicReadyContext{
+		Epic:          EpicContext{ID: "epic-1", Body: "Parse JSON safely."},
+		Children:      []EpicChild{{ID: "task-1", Body: "Use JSON parser."}},
+		ReviewLogs:    []EpicReviewLog{{Target: "task-1", Verdict: "PASS"}},
+		EvidenceText:  "task-1 passed\n",
+		RequireLenses: true,
+		Adversarial:   AdversarialReviewStatus{Present: false, HeadSHA: "deadbee"},
+	})
+	assertEpicFinding(t, findings, "adversarial-review-reviewer", "No adjudicated lens review recorded")
+}
+
+func TestEpicReadyPassesWithMatchingPassingMarker(t *testing.T) {
+	findings := RunEpicReady(cleanEpicContextWithReview(AdversarialReviewStatus{Present: true, Verdict: "PASS", HeadSHA: "deadbee"}))
+	for _, f := range findings {
+		if f.Reviewer == "adversarial-review-reviewer" {
+			t.Fatalf("a passing marker must not produce an adversarial finding: %+v", f)
+		}
+	}
+}
+
+func TestEpicReadyBlocksOnNonPassMarkerVerdict(t *testing.T) {
+	findings := RunEpicReady(cleanEpicContextWithReview(AdversarialReviewStatus{Present: true, Verdict: "NEEDS_REVISION", HeadSHA: "deadbee"}))
+	assertEpicFinding(t, findings, "adversarial-review-reviewer", "unresolved findings")
+}
+
+func TestEpicReadyEmulatedMarkerIsAdvisoryNotBlocking(t *testing.T) {
+	findings := RunEpicReady(cleanEpicContextWithReview(AdversarialReviewStatus{Present: true, Verdict: "PASS", Emulated: true, HeadSHA: "deadbee"}))
+	var found *Finding
+	for i := range findings {
+		if findings[i].Reviewer == "adversarial-review-reviewer" {
+			found = &findings[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("an emulated marker must record the weaker-evidence advisory note")
+	}
+	if found.Classification != "advisory" {
+		t.Fatalf("emulated review note must be advisory, not %q", found.Classification)
+	}
+}
+
+func TestEpicReadyBlocksWorkingTreeUnattested(t *testing.T) {
+	findings := RunEpicReady(cleanEpicContextWithReview(AdversarialReviewStatus{Present: true, Verdict: "PASS", WorkingTreeUnattested: true, HeadSHA: "deadbee"}))
+	assertEpicFinding(t, findings, "adversarial-review-reviewer", "does not cover the working tree")
+}
+
+func TestEpicReadyOptOutSkipsAdversarialRequirement(t *testing.T) {
+	findings := RunEpicReady(cleanEpicContextWithReview(AdversarialReviewStatus{Present: false, HeadSHA: "deadbee"}, func(c *EpicReadyContext) { c.RequireLenses = false }))
+	for _, f := range findings {
+		if f.Reviewer == "adversarial-review-reviewer" {
+			t.Fatalf("RequireLenses=false must not require an adjudicated review: %+v", f)
+		}
+	}
+}
+
+// The adversarial requirement is independent of the deterministic pre-checks: a missing marker AND a missing
+// child-evidence pre-check both fire (the pre-check guards roll-up freshness, the adversarial block guards the
+// integration review).
+func TestEpicReadyAdversarialAndPrecheckCoexist(t *testing.T) {
+	findings := RunEpicReady(EpicReadyContext{
+		Epic:          EpicContext{ID: "epic-1", Body: "Ship parser."},
+		Children:      []EpicChild{{ID: "task-1", Body: "Parser."}},
+		EvidenceText:  "task-1 still needs review\n",
+		RequireLenses: true,
+		Adversarial:   AdversarialReviewStatus{Present: false, HeadSHA: "deadbee"},
+	})
+	assertEpicFinding(t, findings, "acceptance-reviewer", "Missing child acceptance evidence")
+	assertEpicFinding(t, findings, "adversarial-review-reviewer", "No adjudicated lens review recorded")
+}
+
+// context-risk pre-empts by design: the early return short-circuits before the adversarial append, so a
+// context-risk epic shows only the context-risk block (it already blocks; a redundant adversarial block adds
+// nothing and would be unreachable after the early return).
+func TestEpicReadyContextRiskPreemptsAdversarial(t *testing.T) {
+	findings := RunEpicReady(EpicReadyContext{
+		Epic:          EpicContext{ID: "epic-1", Body: "Ship parser."},
+		Children:      []EpicChild{{ID: "task-1", Body: "Parser."}},
+		Git:           EpicGitContext{RiskLevel: "context-risk", RiskReasons: []string{"LARGE_DIFF"}},
+		RequireLenses: true,
+		Adversarial:   AdversarialReviewStatus{Present: false, HeadSHA: "deadbee"},
+	})
+	assertEpicFinding(t, findings, "architecture-reviewer", "Review context risk")
+	for _, f := range findings {
+		if f.Reviewer == "adversarial-review-reviewer" {
+			t.Fatalf("context-risk must pre-empt the adversarial reviewer, got %+v", f)
+		}
+	}
+}
+
+// cleanEpicContextWithReview returns an otherwise-clean epic-ready context (no pre-check findings) with
+// RequireLenses on and the given adversarial status, so tests isolate the adversarial reviewer's behavior.
+func cleanEpicContextWithReview(adv AdversarialReviewStatus, mutators ...func(*EpicReadyContext)) EpicReadyContext {
+	ctx := EpicReadyContext{
+		Epic:          EpicContext{ID: "epic-1", Body: "Parse JSON safely."},
+		Children:      []EpicChild{{ID: "task-1", Body: "Use JSON parser."}},
+		Git:           EpicGitContext{ChangedFiles: []string{"internal/parser/parser.go"}, Diff: "+return json.Valid(input)\n"},
+		ReviewLogs:    []EpicReviewLog{{Target: "task-1", Verdict: "PASS"}},
+		Knowledge:     EpicKnowledgeContext{ServiceInventory: "Parser: `internal/parser/parser.go`"},
+		EvidenceText:  "task-1 passed\n",
+		RequireLenses: true,
+		Adversarial:   adv,
+	}
+	for _, m := range mutators {
+		m(&ctx)
+	}
+	return ctx
+}
+
 func assertEpicFinding(t *testing.T, findings []Finding, reviewer, titlePart string) {
 	t.Helper()
 	for _, finding := range findings {

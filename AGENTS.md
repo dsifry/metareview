@@ -17,20 +17,26 @@ Run metareview before claiming completion:
 - PR ready to push or merge: `metareview review pr-ready --base <base-ref>`.
 - After PR merge: `metareview learn --post-merge <pr-number> --base <pre-merge-ref>`.
 
-`task-done` and `pr-ready` **require an adjudicated adversarial lens review** (the structural checks no
-longer PASS alone). After the real review, record a HEAD-scoped marker so the gate sees it — re-record after
-any new commit:
+`task-done`, `pr-ready`, and `epic-ready` **require an adjudicated adversarial lens review** (the structural
+checks no longer PASS alone). After the real review, record a HEAD-scoped marker so the gate sees it —
+re-record after any new commit:
 
 ```bash
 metareview review record-lenses --scope pr-ready --base <base-ref> \
   --verdict PASS --mode subagent-adjudicated --from-run <fsm-run-id> --lenses security,correctness
 ```
 
-Use `--scope task-done` for the task-done gate; `--lenses` is required. The marker is scoped to the exact
-base..HEAD diff — re-record after a new commit or a different `--base`. `--mode subagent-adjudicated`
-requires `--from-run` naming a real FSM run whose init records the same base..head; use
+Use `--scope task-done` for task-done and `--scope epic-ready` for epic-ready; `--lenses` is required. The
+marker is scoped to the exact base..HEAD diff — re-record after a new commit or a different `--base`. `--mode
+subagent-adjudicated` requires `--from-run` naming a real FSM run whose init records the same base..head; use
 `--mode in-session-emulated` (no `--from-run`) for a self-attested in-session review — it passes but is
 advisory-flagged. `METAREVIEW_ALLOW_MECHANICAL_PASS=1` opts a run out to a structural-only pass.
+
+epic-ready reviews the **integration diff** (base..HEAD, the union of the children's changes) with the roll-up
+as context; drive it with `fsm --workflow epic-review-loop` (lenses apply `rubrics/epic-ready-review-rubric.md`,
+independent of the pr-ready/task-done set). Pass the **identical explicit `--base`** to the gate, the workflow,
+and the recorder — epic-ready's default base is `merge-base(HEAD,main)` while `--base main` is the tip, so a
+mismatch silently wedges the marker. A dirty tree blocks on `working-tree-unattested`; commit first.
 
 Use `go run ./cmd/metareview ...` when running from a source checkout without a built `bin/metareview`.
 

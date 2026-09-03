@@ -56,7 +56,7 @@ Usage:
   metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--shard-result <path>]... [--cross-shard-result <path>]
   metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]...
   metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
-  metareview review record-lenses [--scope pr-ready|task-done] [--base <ref>] [--verdict <v>] [--mode subagent-adjudicated|in-session-emulated] [--lenses a,b,c] [--from-run <fsm-run-id>]
+  metareview review record-lenses [--scope pr-ready|task-done|epic-ready] [--base <ref>] [--verdict <v>] [--mode subagent-adjudicated|in-session-emulated] [--lenses a,b,c] [--from-run <fsm-run-id>]
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
 
 Commands:
@@ -334,8 +334,8 @@ func main() {
 		os.Exit(0)
 	}
 	if len(args) >= 2 && args[0] == "review" && args[1] == "record-lenses" {
-		// Record that an adjudicated lens review ran over the current head, satisfying the pr-ready/task-done
-		// require-lenses gate (build B). The FSM review-loop records this automatically on completion; this
+		// Record that an adjudicated lens review ran over the current head, satisfying the pr-ready/task-done/
+		// epic-ready require-lenses gate (build B). The FSM review-loop records this automatically on completion; this
 		// seam lets the agent record an in-session-emulated review (the labeled weaker escape hatch) when
 		// subagents are unavailable, or mirror an FSM run with --mode subagent-adjudicated --from-run.
 		scope, base, verdict := "pr-ready", "", "PASS"
@@ -365,8 +365,8 @@ func main() {
 				os.Exit(2)
 			}
 		}
-		if scope != "pr-ready" && scope != "task-done" {
-			fmt.Fprintln(os.Stderr, "record-lenses: --scope must be pr-ready or task-done")
+		if scope != "pr-ready" && scope != "task-done" && scope != "epic-ready" {
+			fmt.Fprintln(os.Stderr, "record-lenses: --scope must be pr-ready, task-done, or epic-ready")
 			os.Exit(2)
 		}
 		if mode != reviewstate.ReviewModeSubagentAdjudicated && mode != reviewstate.ReviewModeInSessionEmulated {
@@ -393,7 +393,13 @@ func main() {
 				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: not a valid run id\n", fromRun)
 				os.Exit(2)
 			}
-			if err := validateFromRunDiff(root, fromRun, gc.BaseSHA, gc.HeadSHA); err != nil {
+			// epic-ready subagent evidence must come from the epic review workflow (its lenses apply the epic
+			// rubric); pr-ready/task-done accept any review workflow (they share the default rubric).
+			wantWorkflow := ""
+			if scope == "epic-ready" {
+				wantWorkflow = "epic-review-loop"
+			}
+			if err := validateFromRunDiff(root, fromRun, gc.BaseSHA, gc.HeadSHA, wantWorkflow); err != nil {
 				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: %v\n", fromRun, err)
 				os.Exit(2)
 			}
@@ -637,7 +643,7 @@ func mustCwd() string {
 // (outcome clean|reviewed|fixed). This keeps a subagent-adjudicated marker from being pointed at an empty
 // audit, a run over a different diff, or a run that reviewed the diff and did NOT come out clean. It scans
 // events leniently (in the spirit of the FSM's own peek) rather than folding the full chain.
-func validateFromRunDiff(root, runID, wantBase, wantHead string) error {
+func validateFromRunDiff(root, runID, wantBase, wantHead, wantWorkflow string) error {
 	path := filepath.Join(root, ".metareview", "runs", runID, "audit.jsonl")
 	raw, err := os.ReadFile(path) // #nosec G304 -- runID is validated to a single path segment by the caller
 	if err != nil {
@@ -663,6 +669,13 @@ func validateFromRunDiff(root, runID, wantBase, wantHead string) error {
 	}
 	if d.Head != wantHead || d.BaseSHA != wantBase {
 		return fmt.Errorf("it reviewed a different diff (run base..head %s..%s, marker %s..%s)", short(d.BaseSHA), short(d.Head), short(wantBase), short(wantHead))
+	}
+	// For a scope whose lenses must apply a scope-specific rubric (epic-ready), the run must have been produced
+	// by that scope's review workflow — otherwise a generic review-loop run (task-done rubric) over the same
+	// diff could be recorded as subagent-adjudicated evidence for the epic gate, silently crediting a review
+	// that never applied the epic lenses. wantWorkflow is empty for pr-ready/task-done (no constraint).
+	if wantWorkflow != "" && d.Workflow != wantWorkflow {
+		return fmt.Errorf("it was produced by workflow %q, but this scope requires %q (whose lenses apply the scope's rubric)", d.Workflow, wantWorkflow)
 	}
 	// The LAST outcome-bearing transition is the run's verdict: a run that was `reviewed` and then looped and
 	// came out `failed` must be rejected, so we cannot accept the first passing outcome we see. Unreadable
