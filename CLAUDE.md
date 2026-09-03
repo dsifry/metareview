@@ -33,22 +33,32 @@ Before saying work is done, run the appropriate metareview gate.
 - `NEEDS_REVISION` repairs via `--previous-run <run-id>`.
 - `ESCALATED` stops same-target retries; human must narrow, split, or redesign the target.
 
-`pr-ready` and `task-done` **require an adjudicated adversarial lens review** — the deterministic structural
-checks no longer PASS on their own. After running the real review (the FSM `review-lenses` → `adjudicate`
-engine, or emulated in-session), record it so the gate can see it:
+`pr-ready`, `task-done`, and `epic-ready` **require an adjudicated adversarial lens review** — the
+deterministic structural checks no longer PASS on their own. After running the real review (the FSM
+`review-lenses` → `adjudicate` engine, or emulated in-session), record it so the gate can see it:
 
 ```bash
 metareview review record-lenses --scope pr-ready --base <base-ref> \
   --verdict PASS --mode subagent-adjudicated --from-run <fsm-run-id> --lenses security,correctness
 ```
 
-Use `--scope task-done` for the task-done gate. `--lenses` is required — name the lenses that actually ran.
-The marker is scoped to the exact **base..HEAD** diff: re-record after any new commit **and** whenever the
-gate's `--base` differs from the one you reviewed. `--mode subagent-adjudicated` requires `--from-run` naming
-a real FSM run whose init records the same base..head (it cannot be hand-typed to fake independent review);
-for a self-attested in-session review use `--mode in-session-emulated` (no `--from-run`), which passes but is
-flagged advisory. To opt a single run out of the requirement (structural-only pass), set
-`METAREVIEW_ALLOW_MECHANICAL_PASS=1`.
+Use `--scope task-done` for the task-done gate and `--scope epic-ready` for the epic-ready gate. `--lenses` is
+required — name the lenses that actually ran. The marker is scoped to the exact **base..HEAD** diff: re-record
+after any new commit **and** whenever the gate's `--base` differs from the one you reviewed. `--mode
+subagent-adjudicated` requires `--from-run` naming a real FSM run whose init records the same base..head (it
+cannot be hand-typed to fake independent review); for a self-attested in-session review use `--mode
+in-session-emulated` (no `--from-run`), which passes but is flagged advisory. To opt a single run out of the
+requirement (structural-only pass), set `METAREVIEW_ALLOW_MECHANICAL_PASS=1`.
+
+**epic-ready specifics.** epic-ready reviews the epic's **integration diff** (base..HEAD — the union of the
+children's changes) with the roll-up (child logs, parent intent) as context; drive it with the
+`epic-review-loop` workflow (`metareview fsm --workflow epic-review-loop --base <base>`), whose lenses apply
+`rubrics/epic-ready-review-rubric.md` — independent of the pr-ready/task-done lens set. **Base-consistency
+rule:** epic-ready's default base is `merge-base(HEAD, main)`, but `record-lenses --base main` resolves the
+*tip* of main; once main advances these differ and the marker will never match. Always pass the **identical
+explicit `--base`** to `review epic-ready`, `fsm --workflow epic-review-loop`, and `record-lenses --scope
+epic-ready`. epic-ready folds the working tree into its reviewed surface, so a dirty tree blocks on
+`working-tree-unattested` even with a valid marker — commit first.
 
 Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. For `metareview fsm`: `3` = the FSM needs the host to do a node's work; `1` + `GATE_FAILED` = run `resume_hint` (it forks a child — a new run id); `1` + `ERR_*` = read `code` (`detail` is data); `2` = nothing was recorded, fix the input and retry unless it is a consent or escalation code, which waits for a human; `STOPPED`/`DONE` are terminal. FSM escalation is per fork lineage: forking an ancestor or re-running `init` on the same base is a human decision.
 

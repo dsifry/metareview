@@ -147,6 +147,13 @@ func TestK7Registry(t *testing.T) {
 	if rl(map[string]any{"zzz": 1}) == nil || info[AgentEdit].ValidateParams(map[string]any{"modle": "x"}) == nil || info[Cmd].ValidateParams(map[string]any{}) != nil {
 		t.Fatal("unknown params refused on every kind")
 	}
+	// rubric param: a non-empty string is accepted (the epic-ready lens seam); a non-string or empty is refused.
+	if rl(map[string]any{"rubric": "rubrics/epic-ready-review-rubric.md"}) != nil {
+		t.Error("a non-empty rubric string must be accepted")
+	}
+	if rl(map[string]any{"rubric": ""}) == nil || rl(map[string]any{"rubric": 7}) == nil {
+		t.Error("an empty or non-string rubric must be refused")
+	}
 }
 
 type plainErrJudge struct{}
@@ -590,6 +597,17 @@ func TestK5Instructions(t *testing.T) {
 	ins, _ = rl.Instructions(snap, &workflow.Node{Name: "discover", Params: map[string]any{}}, d, "n1")
 	if ins.Input["lenses"] != 9 || !strings.Contains(ins.Text, "Mechanical-precision") {
 		t.Fatal("default 9 lenses")
+	}
+	// Default rubric is the task-done rubric when no rubric param is given.
+	if !strings.Contains(ins.Text, Rubric) || ins.Input["rubric"] != Rubric {
+		t.Fatalf("default rubric must be %q: %s", Rubric, ins.Text)
+	}
+	// A rubric param points the SAME node at a scope-specific rubric (epic-ready) — the lens seam that keeps
+	// epic reviews from moving in lockstep with the default set.
+	epicRubric := "rubrics/epic-ready-review-rubric.md"
+	ins, _ = rl.Instructions(snap, &workflow.Node{Name: "discover", Params: map[string]any{"rubric": epicRubric}}, d, "n1")
+	if !strings.Contains(ins.Text, epicRubric) || ins.Input["rubric"] != epicRubric || strings.Contains(ins.Text, Rubric) {
+		t.Fatalf("rubric param must override the default: %s", ins.Text)
 	}
 	ae, _ := r.Kind(AgentEdit)
 	ins, err = ae.Instructions(snap, &workflow.Node{Name: "fix"}, d, "n2")

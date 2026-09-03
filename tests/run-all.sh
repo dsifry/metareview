@@ -32,6 +32,7 @@ if [ -f tests/go/test-reviewlog.sh ]; then bash tests/go/test-reviewlog.sh; fi
 if [ -f tests/go/test-epic-source.sh ]; then bash tests/go/test-epic-source.sh; fi
 if [ -f tests/go/test-epicready-reviewers.sh ]; then bash tests/go/test-epicready-reviewers.sh; fi
 if [ -f tests/go/test-epic-ready-review.sh ]; then bash tests/go/test-epic-ready-review.sh; fi
+if [ -f tests/go/test-epic-ready-adjudicated-review.sh ]; then bash tests/go/test-epic-ready-adjudicated-review.sh; fi
 if [ -f tests/go/test-github-context.sh ]; then bash tests/go/test-github-context.sh; fi
 if [ -f tests/go/test-metaswarm-integration.sh ]; then bash tests/go/test-metaswarm-integration.sh; fi
 if [ -f tests/go/test-pr-evidence.sh ]; then bash tests/go/test-pr-evidence.sh; fi

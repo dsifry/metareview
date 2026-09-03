@@ -56,7 +56,7 @@ Usage:
   metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--shard-result <path>]... [--cross-shard-result <path>]
   metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]...
   metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
-  metareview review record-lenses [--scope pr-ready|task-done] [--base <ref>] [--verdict <v>] [--mode subagent-adjudicated|in-session-emulated] [--lenses a,b,c] [--from-run <fsm-run-id>]
+  metareview review record-lenses [--scope pr-ready|task-done|epic-ready] [--base <ref>] [--verdict <v>] [--mode subagent-adjudicated|in-session-emulated] [--lenses a,b,c] [--from-run <fsm-run-id>]
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
 
 Commands:
@@ -334,8 +334,8 @@ func main() {
 		os.Exit(0)
 	}
 	if len(args) >= 2 && args[0] == "review" && args[1] == "record-lenses" {
-		// Record that an adjudicated lens review ran over the current head, satisfying the pr-ready/task-done
-		// require-lenses gate (build B). The FSM review-loop records this automatically on completion; this
+		// Record that an adjudicated lens review ran over the current head, satisfying the pr-ready/task-done/
+		// epic-ready require-lenses gate (build B). The FSM review-loop records this automatically on completion; this
 		// seam lets the agent record an in-session-emulated review (the labeled weaker escape hatch) when
 		// subagents are unavailable, or mirror an FSM run with --mode subagent-adjudicated --from-run.
 		scope, base, verdict := "pr-ready", "", "PASS"
@@ -365,8 +365,8 @@ func main() {
 				os.Exit(2)
 			}
 		}
-		if scope != "pr-ready" && scope != "task-done" {
-			fmt.Fprintln(os.Stderr, "record-lenses: --scope must be pr-ready or task-done")
+		if scope != "pr-ready" && scope != "task-done" && scope != "epic-ready" {
+			fmt.Fprintln(os.Stderr, "record-lenses: --scope must be pr-ready, task-done, or epic-ready")
 			os.Exit(2)
 		}
 		if mode != reviewstate.ReviewModeSubagentAdjudicated && mode != reviewstate.ReviewModeInSessionEmulated {

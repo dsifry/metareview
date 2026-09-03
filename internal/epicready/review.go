@@ -17,6 +17,7 @@ import (
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewers"
 	"github.com/dsifry/metareview/internal/reviewlog"
+	"github.com/dsifry/metareview/internal/reviewstate"
 	"github.com/dsifry/metareview/internal/runchain"
 	"github.com/dsifry/metareview/internal/state"
 	"github.com/dsifry/metareview/internal/tasksource"
@@ -141,6 +142,13 @@ func Create(root, target string, options Options) (Result, error) {
 	}
 	reviewerCtx := reviewerContext(epic, children, reviewGit, profile, knowledgeContext, childLogs, evidenceText)
 	reviewerCtx.Mutation = mutationContext
+	// Build B fast-follow: require an adjudicated adversarial review over the epic's integration diff at this
+	// head. The marker attests the committed base..head; roll-up freshness (child logs/evidence/intent) is
+	// guarded separately by the deterministic pre-checks above, which re-read current state every run. A
+	// corrupt runs.jsonl never reaches here silently — the runchain resolve below reads the same file and
+	// fails the run loudly first — so a read miss here means "no marker", treated as absent.
+	reviewerCtx.RequireLenses = reviewstate.RequireAdjudicatedReview()
+	reviewerCtx.Adversarial = adversarialStatus(root, git, reviewGit)
 	rawFindings := reviewers.RunEpicReady(reviewerCtx)
 	targetRecord := map[string]string{"type": epicTargetType(epic), "id": epic.ID}
 	run := findings.Run{ID: runID, Scope: "epic-ready", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
@@ -231,6 +239,42 @@ func Create(root, target string, options Options) (Result, error) {
 		return Result{}, err
 	}
 	return result, nil
+}
+
+// adversarialStatus resolves the review-evidence marker for the epic-ready gate over the exact
+// git.BaseSHA..git.HeadSHA integration span (last-recorded-wins; a stale head or different base does not
+// count), and flags an unattested working tree. epic-ready folds staged/working/untracked content into the
+// reviewed surface unconditionally (unlike pr-ready, which gates it behind --include-working-tree), so any
+// uncommitted content in the reviewed (generated-filtered) surface means the committed-only marker cannot
+// vouch for what was reviewed.
+func adversarialStatus(root string, git, reviewGit gitcontext.Context) reviewers.AdversarialReviewStatus {
+	status := reviewers.AdversarialReviewStatus{
+		HeadSHA:               git.HeadSHA,
+		WorkingTreeUnattested: hasUncommittedContent(reviewGit),
+		// A blocked epic-ready must be steered to epic-review-loop (its lenses apply the epic rubric), not the
+		// default review-loop (task-done rubric) that would then be credited for epic-ready.
+		WorkflowHint: "epic-review-loop",
+	}
+	if ev, ok, err := reviewstate.LatestReviewEvidence(root, "epic-ready", git.BaseSHA, git.HeadSHA); err == nil && ok {
+		status.Present = true
+		status.Verdict = ev.AdjudicatedVerdict
+		status.Emulated = ev.IsEmulated()
+	}
+	return status
+}
+
+// hasUncommittedContent reports whether the reviewed surface carries staged, working-tree, or untracked
+// content — what epicready folds in alongside the committed diff. reviewGit is already generated-path-filtered,
+// so metareview's own uncommitted artifacts do not count. It keys on BOTH the uncommitted diff strings AND the
+// uncommitted file LISTS: a diff string alone misses content that produces no excerpt (an untracked symlink or
+// directory, a staged empty/mode-only change), and for a gate the fail-closed direction — block a dirty tree
+// the committed-only marker cannot attest — is the safe one.
+func hasUncommittedContent(git gitcontext.Context) bool {
+	return len(git.StagedFiles) > 0 || len(git.UnstagedFiles) > 0 ||
+		len(git.WorkingTreeFiles) > 0 || len(git.UntrackedFiles) > 0 ||
+		strings.TrimSpace(git.StagedDiff) != "" ||
+		strings.TrimSpace(git.WorkingTreeDiff) != "" ||
+		strings.TrimSpace(git.UntrackedExcerpts) != ""
 }
 
 func reviewerContext(epic epicsource.Source, children []tasksource.Source, git gitcontext.Context, profile contextprofile.Profile, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string) reviewers.EpicReadyContext {

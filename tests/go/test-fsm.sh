@@ -59,7 +59,9 @@ VARS=(--var JUDGE=gpt-5.2 --var JUDGE_EFFORT=medium)
 # ---- --help, workflows, --agent-prompt, forbidden phrase ---------------------------------------------
 $MRV --help | grep 'metareview fsm' >/dev/null
 fsm workflows; expect OK 0
-assert_eq "$(field 'workflows.1.name')" sdlc-loop "workflows lists sdlc-loop"
+# Sorted by name: epic-review-loop, review-loop, sdlc-loop, sdlc-loop-clean, sdlc-loop-proved.
+assert_eq "$(field 'workflows.0.name')" epic-review-loop "workflows lists epic-review-loop first"
+assert_eq "$(field 'workflows.2.name')" sdlc-loop "workflows lists sdlc-loop"
 [ "$(field 'workflows.0.hash')" != "" ]
 $MRV fsm --agent-prompt > "$WORK/prompt.txt"
 cmp "$WORK/prompt.txt" "$ROOT/testdata/fsm/agent-prompt.golden"

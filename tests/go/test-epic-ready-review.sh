@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This suite exercises the DETERMINISTIC epic-ready heuristics (contradiction, child-evidence, blockers,
+# intent-drift, service inventory) in isolation. The adjudicated-review requirement (build B fast-follow) is
+# opted out here so a clean epic still PASSes on its structural merits; the require-lenses gate for epic-ready
+# has its own suite (test-epic-ready-adjudicated-review.sh).
+export METAREVIEW_ALLOW_MECHANICAL_PASS=1
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

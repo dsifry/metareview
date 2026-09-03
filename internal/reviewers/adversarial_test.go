@@ -62,6 +62,28 @@ func TestAdversarialReviewFindings(t *testing.T) {
 	}
 }
 
+// The remediation message must steer each scope to the workflow whose lenses apply ITS rubric: epic-ready to
+// epic-review-loop, the default (empty hint) to review-loop. Steering epic-ready to review-loop would credit a
+// task-done-rubric run for the epic gate, defeating the lens-independence seam.
+func TestAdversarialReviewFindingsWorkflowHint(t *testing.T) {
+	def := adversarialReviewFindings(true, AdversarialReviewStatus{HeadSHA: "abc"})
+	if len(def) != 1 || !contains(def[0].Recommendation, "--workflow review-loop ") {
+		t.Fatalf("default hint must recommend review-loop: %+v", def)
+	}
+	epic := adversarialReviewFindings(true, AdversarialReviewStatus{HeadSHA: "abc", WorkflowHint: "epic-review-loop"})
+	if len(epic) != 1 || !contains(epic[0].Recommendation, "--workflow epic-review-loop ") {
+		t.Fatalf("epic hint must recommend epic-review-loop: %+v", epic)
+	}
+	if contains(epic[0].Recommendation, "--workflow review-loop ") {
+		t.Fatalf("epic recommendation must not name the default review-loop: %q", epic[0].Recommendation)
+	}
+	// The emulated advisory note also carries the per-scope hint.
+	em := adversarialReviewFindings(true, AdversarialReviewStatus{Present: true, Verdict: "PASS", Emulated: true, HeadSHA: "abc", WorkflowHint: "epic-review-loop"})
+	if len(em) != 1 || !contains(em[0].Recommendation, "epic-review-loop") {
+		t.Fatalf("emulated note must carry the hint: %+v", em)
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)
 }
