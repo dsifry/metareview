@@ -22,14 +22,15 @@ func TestAdversarialReviewFindings(t *testing.T) {
 		wantBlocking int
 		wantAdvisory int
 		wantFinding  string // substring in the (first) finding's Title, "" = no findings
+		wantHeadText string // substring the finding body must name for the head, "" = don't check
 	}{
-		{"flag off allows the mechanical pass", false, AdversarialReviewStatus{}, 0, 0, ""},
-		{"required + no marker blocks", true, AdversarialReviewStatus{HeadSHA: "abc"}, 1, 0, "No adjudicated lens review"},
-		{"required + no marker + empty head still blocks", true, AdversarialReviewStatus{}, 1, 0, "No adjudicated lens review"},
-		{"required + marker not passing blocks", true, AdversarialReviewStatus{Present: true, Verdict: "NEEDS_REVISION", HeadSHA: "abc"}, 1, 0, "unresolved findings"},
-		{"required + passing independent marker satisfies", true, AdversarialReviewStatus{Present: true, Verdict: "PASS", HeadSHA: "abc"}, 0, 0, ""},
-		{"required + PASS_ADVISORY satisfies", true, AdversarialReviewStatus{Present: true, Verdict: "PASS_ADVISORY", HeadSHA: "abc"}, 0, 0, ""},
-		{"required + passing emulated is advisory, not blocking", true, AdversarialReviewStatus{Present: true, Verdict: "PASS", Emulated: true, HeadSHA: "abc"}, 0, 1, "in-session-emulated"},
+		{"flag off allows the mechanical pass", false, AdversarialReviewStatus{}, 0, 0, "", ""},
+		{"required + no marker blocks", true, AdversarialReviewStatus{HeadSHA: "abc"}, 1, 0, "No adjudicated lens review", "HEAD abc"},
+		{"required + no marker + empty head still blocks", true, AdversarialReviewStatus{}, 1, 0, "No adjudicated lens review", "the current head"},
+		{"required + marker not passing blocks", true, AdversarialReviewStatus{Present: true, Verdict: "NEEDS_REVISION", HeadSHA: "abc"}, 1, 0, "unresolved findings", "HEAD abc"},
+		{"required + passing independent marker satisfies", true, AdversarialReviewStatus{Present: true, Verdict: "PASS", HeadSHA: "abc"}, 0, 0, "", ""},
+		{"required + PASS_ADVISORY satisfies", true, AdversarialReviewStatus{Present: true, Verdict: "PASS_ADVISORY", HeadSHA: "abc"}, 0, 0, "", ""},
+		{"required + passing emulated is advisory, not blocking", true, AdversarialReviewStatus{Present: true, Verdict: "PASS", Emulated: true, HeadSHA: "abc"}, 0, 1, "in-session-emulated", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -49,6 +50,12 @@ func TestAdversarialReviewFindings(t *testing.T) {
 			}
 			if got[0].Reviewer != "adversarial-review-reviewer" {
 				t.Fatalf("wrong reviewer: %q", got[0].Reviewer)
+			}
+			// The body must name the head it reviewed (the real SHA, or the empty-head fallback phrase) —
+			// in whichever field carries it (Finding for the no-marker branch, Found for the not-a-pass one).
+			body := got[0].Finding + " " + got[0].Found
+			if c.wantHeadText != "" && !contains(body, c.wantHeadText) {
+				t.Fatalf("finding must name the head as %q; got %q", c.wantHeadText, body)
 			}
 		})
 	}

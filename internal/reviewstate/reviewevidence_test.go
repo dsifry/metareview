@@ -91,6 +91,35 @@ func TestLatestReviewEvidenceIsHeadAndScopeScoped(t *testing.T) {
 	}
 }
 
+// Two markers with the SAME CreatedAt (same scope+head) must resolve deterministically: the strict `>`
+// keeps the first-recorded one (a later duplicate does not silently displace it). This pins the tie-break
+// boundary — `>=` would let the last-appended marker win instead.
+func TestLatestReviewEvidenceTieBreakKeepsFirstRecorded(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".metareview"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const same = "2026-09-03T12:00:00Z"
+	// First-recorded is the PASS; a later duplicate at the identical timestamp is NEEDS_REVISION.
+	if err := RecordReviewEvidence(root, ReviewEvidence{
+		ReviewedScope: "pr-ready", HeadSHA: "head-1", AdjudicatedVerdict: "PASS", CreatedAt: same,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordReviewEvidence(root, ReviewEvidence{
+		ReviewedScope: "pr-ready", HeadSHA: "head-1", AdjudicatedVerdict: "NEEDS_REVISION", CreatedAt: same,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m, ok, err := LatestReviewEvidence(root, "pr-ready", "head-1")
+	if err != nil || !ok {
+		t.Fatalf("expected a marker; ok=%v err=%v", ok, err)
+	}
+	if m.AdjudicatedVerdict != "PASS" {
+		t.Fatalf("on an identical-timestamp tie the first-recorded marker must win; got verdict %q", m.AdjudicatedVerdict)
+	}
+}
+
 // No runs.jsonl at all → no markers, no error (a fresh repo).
 func TestDiscoverReviewEvidenceEmptyRepo(t *testing.T) {
 	markers, err := DiscoverReviewEvidence(t.TempDir())
