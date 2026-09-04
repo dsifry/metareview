@@ -30,6 +30,7 @@ type fakeWriter struct {
 	gcErr       error
 	found       shardpack.Found
 	discoverErr error
+	rollbackErr error
 	// satisfy makes Discover synthesise a passing result for every shard in the
 	// plan, so the review does not block and the after-gate housekeeping runs.
 	satisfy bool
@@ -62,7 +63,7 @@ func (f *fakeWriter) Write(root string, plan contextprofile.ShardPlan, header sh
 	f.lastPlan, f.lastHdr, f.lastFiles = plan, header, files
 	rollback := func() error {
 		f.rollbacks++
-		return nil
+		return f.rollbackErr
 	}
 	if f.writeErr != nil {
 		// Write can fail after the pack set is already in place, so it returns a
@@ -95,10 +96,14 @@ func (f *fakeWriter) GC(root, scope, targetID string, plan contextprofile.ShardP
 func shardedTaskRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
+	// Isolate git config so the fixture is deterministic on any runner (no inherited commit.gpgsign,
+	// hooksPath, or sha256 object format), matching smallTaskRepo.
+	env := append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = root
+		cmd.Env = env
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 		}

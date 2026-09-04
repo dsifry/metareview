@@ -37,7 +37,7 @@ internal/setup 89.8
 internal/shardpack 100.0
 internal/state 100.0
 internal/status 100.0
-internal/taskdone 89.4
+internal/taskdone 100.0
 internal/tasksource 100.0
 internal/testconv 100.0
 cmd/covergate 100.0

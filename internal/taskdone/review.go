@@ -87,6 +87,20 @@ type fileSnapshot struct {
 
 var reviewerNames = []string{"code-quality-reviewer", "security-reviewer", "test-reviewer", "architecture-reviewer"}
 
+// Seams over the collaborator and stdlib calls whose error branches in Create are otherwise
+// unreachable through realistic inputs (a healthy repo produces no shard-plan, knowledge, mkdir, or
+// write failure). Each defaults to the real function and is overridden — then restored via
+// t.Cleanup — in tests, so production behavior is identical to calling the wrapped function.
+var (
+	collectKnowledge  = knowledge.Collect
+	planShards        = contextprofile.PlanShards
+	resolveChain      = runchain.Resolve
+	reconcileFindings = findings.Reconcile
+	appendJSONL       = state.AppendJSONL
+	mkdirAll          = os.MkdirAll
+	writeFile         = os.WriteFile
+)
+
 func Create(root, target string, options Options) (Result, error) {
 	now := options.Now
 	if now.IsZero() {
@@ -107,7 +121,7 @@ func Create(root, target string, options Options) (Result, error) {
 		reviewGit = filterGeneratedGitContext(git)
 	}
 	profile := contextprofile.FromGit(reviewGit, contextprofile.Options{})
-	shardPlan, err := contextprofile.PlanShards(profile, reviewGit.BranchFiles, contextprofile.ShardOptions{
+	shardPlan, err := planShards(profile, reviewGit.BranchFiles, contextprofile.ShardOptions{
 		MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard,
 		Scope:            "task-done",
 		TargetID:         task.ID,
@@ -115,7 +129,7 @@ func Create(root, target string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	knowledgeContext, err := knowledge.Collect(root)
+	knowledgeContext, err := collectKnowledge(root)
 	if err != nil {
 		return Result{}, err
 	}
@@ -124,10 +138,7 @@ func Create(root, target string, options Options) (Result, error) {
 		return Result{}, err
 	}
 
-	runID, contextRel, reviewRel, err := uniquePaths(root, target, now)
-	if err != nil {
-		return Result{}, err
-	}
+	runID, contextRel, reviewRel := uniquePaths(root, target, now)
 	contextPath := filepath.Join(root, filepath.FromSlash(contextRel))
 	reviewPath := filepath.Join(root, filepath.FromSlash(reviewRel))
 	runsPath := filepath.Join(root, ".metareview", "runs.jsonl")
@@ -195,16 +206,16 @@ func Create(root, target string, options Options) (Result, error) {
 
 	result := Result{RunID: runID, ReviewRel: reviewRel, ContextRel: contextRel}
 	err = func() error {
-		if err := os.MkdirAll(filepath.Dir(contextPath), 0o755); err != nil {
+		if err := mkdirAll(filepath.Dir(contextPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
+		if err := mkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, profile, shardPlan, packDir, manifest, aggregate, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
+		if err := writeFile(contextPath, []byte(contextMarkdown(runID, task, reviewGit, profile, shardPlan, packDir, manifest, aggregate, knowledgeContext, evidenceText, gateEffect)), 0o644); err != nil {
 			return err
 		}
-		chain, err := runchain.Resolve(root, runchain.Options{
+		chain, err := resolveChain(root, runchain.Options{
 			Scope:         "task-done",
 			Target:        targetRecord,
 			PreviousRunID: options.PreviousRunID,
@@ -218,7 +229,7 @@ func Create(root, target string, options Options) (Result, error) {
 		for _, link := range chain.Chain {
 			previousRunIDs = append(previousRunIDs, link.ID)
 		}
-		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{
+		reconciled, err := reconcileFindings(root, run, rawFindings, findings.Options{
 			PreviousRunID:  options.PreviousRunID,
 			PreviousRunIDs: previousRunIDs,
 			ResetRunIDs:    chain.ResetRunIDs,
@@ -259,7 +270,7 @@ func Create(root, target string, options Options) (Result, error) {
 			RepoRoot:             root,
 			GitHead:              git.HeadSHA,
 		}
-		if err := state.AppendJSONL(runsPath, record); err != nil {
+		if err := appendJSONL(runsPath, record); err != nil {
 			return err
 		}
 		meta := reviewMetadata{
@@ -271,7 +282,7 @@ func Create(root, target string, options Options) (Result, error) {
 			FollowUpFindingCount: counts.FollowUp,
 			WarningFindingCount:  counts.Warnings,
 		}
-		return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, target, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
+		return writeFile(reviewPath, []byte(reviewMarkdown(runID, target, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
 	}()
 	if err != nil {
 		restoreSnapshots(snapshots)
@@ -490,14 +501,17 @@ func readEvidence(path string) (string, error) {
 	return text, nil
 }
 
-func uniquePaths(root, target string, at time.Time) (string, string, string, error) {
+// uniquePaths returns the first run ID (and its derived context/review paths) whose review log does
+// not already exist, advancing the timestamp by a nanosecond on each collision. It cannot fail: a
+// non-IsNotExist Stat error simply keeps searching, so there is no error to return.
+func uniquePaths(root, target string, at time.Time) (string, string, string) {
 	runAt := at
 	for {
 		runID := state.RunID("task-done", target, runAt)
 		contextRel := filepath.ToSlash(filepath.Join("docs", "metareview", "context", runID+"-context.md"))
 		reviewRel := filepath.ToSlash(filepath.Join("docs", "metareview", "reviews", runID+".md"))
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(reviewRel))); os.IsNotExist(err) {
-			return runID, contextRel, reviewRel, nil
+			return runID, contextRel, reviewRel
 		}
 		runAt = runAt.Add(time.Nanosecond)
 	}
@@ -662,16 +676,17 @@ func classifiedFindingsMarkdown(records []findings.Record) string {
 
 func classForDisplay(record findings.Record) string {
 	counts := findings.CountByClass([]findings.Record{record})
-	switch {
-	case counts.Blocking > 0:
+	// if/else-if rather than a tagless switch: Go's cover profile emits no counter for a
+	// tagless-switch case expression, so the boundary mutants on these comparisons would be
+	// reported "not covered" and stay unkillable. See the #104/#106 precedent.
+	if counts.Blocking > 0 {
 		return "blocking"
-	case counts.Advisory > 0:
+	} else if counts.Advisory > 0 {
 		return "advisory"
-	case counts.FollowUp > 0:
+	} else if counts.FollowUp > 0 {
 		return "follow-up"
-	default:
-		return "warning"
 	}
+	return "warning"
 }
 
 func runChainMarkdown(runID, verdict string, meta reviewMetadata) string {
