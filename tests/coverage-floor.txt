@@ -1,47 +1,39 @@
 # Per-package combined coverage floor (unit + shell suite). Regenerate: bash tests/coverage.sh --update-floor
-# 2026-08-29: findings/runchain/state lowered when the JSONL scanner moved to internal/jsonl
-# (100%, floored). Measured base -> head: state 58 -> 53 statements, runchain 107 -> 102,
-# findings likewise - about five statements each, not the "~1" this note first claimed. Nothing
-# became less tested; the covered code left the package.
-# 2026-08-29: sessionhistory 86.3 -> 85.2. The old value was only reachable on a machine holding
-# real ~/.claude session data: sessionhistory scans the home in addition to --session-root, so CI
-# measured 79.1 from identical code and could never pass. tests/go/test-learn-post-merge.sh now
-# supplies a fixture HOME, so 85.2 is the same everywhere - six points better than CI ever saw.
-cmd/metareview 81.2
-internal/artifactreview 80.4
-internal/contextpack 76.1
+cmd/covergate 100.0
+cmd/metareview 85.2
+internal/artifactreview 84.1
+internal/classify 100.0
+internal/contextpack 80.3
 internal/contextprofile 96.3
-internal/epicready 81.6
-internal/epicsource 83.2
-internal/evidence 85.2
-internal/findings 92.7
-internal/gitcontext 86.8
+internal/covergate 100.0
+internal/epicready 85.7
+internal/epicsource 84.0
+internal/evidence 86.1
+internal/findings 93.1
+internal/gitcontext 89.7
 internal/githubcontext 100.0
+internal/gitpolicy 100.0
 internal/integration 100.0
 internal/jsonl 100.0
 internal/knowledge 77.8
-internal/learning 90.8
+internal/learning 91.1
 internal/learnsource 70.8
 internal/lens 100.0
-internal/markdown 86.7
-internal/mutation 94.2
-internal/prready 89.2
-internal/repo 87.9
-internal/reviewers 97.7
-internal/reviewlog 91.1
+internal/markdown 100.0
+internal/mutation 95.6
+internal/prready 93.0
+internal/repo 89.4
+internal/reviewers 98.2
+internal/reviewlog 92.6
 internal/reviewmanifest 97.0
-internal/reviewstate 92.1
+internal/reviewprompt 100.0
+internal/reviewstate 96.1
 internal/runchain 92.2
-internal/sessionhistory 85.2
-internal/setup 89.8
+internal/sessionhistory 86.3
+internal/setup 91.3
 internal/shardpack 100.0
-internal/state 84.9
+internal/state 88.7
 internal/status 100.0
-internal/taskdone 89.4
+internal/taskdone 89.9
 internal/tasksource 100.0
 internal/testconv 100.0
-cmd/covergate 100.0
-internal/covergate 100.0
-internal/gitpolicy 100.0
-internal/classify 100.0
-internal/reviewprompt 100.0
