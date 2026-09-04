@@ -248,6 +248,20 @@ exit 1
 	if !strings.Contains(string(body), "Current target blocker") {
 		t.Fatalf("current blocker must remain visible in the third review:\n%s", body)
 	}
+	fourth, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 3, 4, 0, 3, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 4 || fourth.Reused || !fourth.Blocking || fourth.Verdict != "NEEDS_REVISION" {
+		t.Fatalf("same-head dedup must not erase the sole inherited blocker: calls=%d result=%+v", calls, fourth)
+	}
+	body, err = os.ReadFile(filepath.Join(root, filepath.FromSlash(fourth.ReviewRel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Current target blocker") {
+		t.Fatalf("inherited current blocker must remain visible after same-head dedup:\n%s", body)
+	}
 }
 
 func TestExplicitPreviousRunRejectsStalePersistedDigest(t *testing.T) {

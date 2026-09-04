@@ -39,6 +39,47 @@ type EnforcementStatus struct {
 	Remediation string `json:"remediation,omitempty"`
 }
 
+// GitGateStatus reports whether the git-native review gate — the pre-push hook that blocks an unreviewed
+// push — is installed and current on this clone. This is the PRIMARY, push-time enforcement; the Stop hook
+// (EnforcementStatus) is a distinct, additional layer that gates session COMPLETION. setup --check reported
+// only the Stop hook, so a repo with the git gate fully installed still read "nothing stops a host... the
+// Completion Rule is advisory" — under-stating the posture. Reporting both is what makes the check honest.
+type GitGateStatus struct {
+	// Installed is true when core.hooksPath points at metareview's materialized, byte-current hook scripts —
+	// so `git push` is blocked until the branch is review-clean.
+	Installed bool `json:"installed"`
+	// HooksPath is this clone's effective core.hooksPath, empty when unset.
+	HooksPath   string `json:"hooksPath,omitempty"`
+	Remediation string `json:"remediation,omitempty"`
+}
+
+// gitGateStatus reports the git-native gate's install state, read-only. It reuses PlanHookInstall, whose
+// AlreadyDone is true exactly when core.hooksPath is ours AND the materialized scripts are byte-current with
+// the embed. A repo that is not usable for git returns not-installed with a reason rather than an error.
+func gitGateStatus(root string, git GitRunner) GitGateStatus {
+	plan, err := PlanHookInstall(root, git)
+	if err != nil {
+		return GitGateStatus{Remediation: "Not a usable git repository here, so the git-native review gate cannot be installed."}
+	}
+	// The gate is ACTIVE when the hooks are ours and current — independent of the .gitignore block, which
+	// AlreadyDone also requires. `git push` is gated by the hook whether or not the ignore line exists.
+	if plan.HooksCurrent {
+		return GitGateStatus{Installed: true, HooksPath: plan.Current}
+	}
+	// A CONFLICT (a foreign core.hooksPath, or active .git/hooks a redirect would bypass) makes a plain
+	// `setup --install-hooks` REFUSE. Surface the reasons so the remediation is actionable, not misleading.
+	if len(plan.Conflicts) > 0 {
+		return GitGateStatus{
+			HooksPath:   plan.Current,
+			Remediation: "The git-native review gate is not installed — " + strings.Join(plan.Conflicts, "; ") + ". Resolve that, or run `metareview setup --install-hooks --force` to override.",
+		}
+	}
+	return GitGateStatus{
+		HooksPath:   plan.Current,
+		Remediation: "The git-native review gate is not installed (or its scripts are stale). Run `metareview setup --install-hooks` so `git push` is blocked until the branch is review-clean.",
+	}
+}
+
 // hookSettingsFiles are the places a Stop hook can be registered, nearest first. Project settings
 // win for a source checkout; the user's own settings cover a plugin or a manual install.
 func hookSettingsFiles(root, home string) []string {
@@ -49,7 +90,7 @@ func hookSettingsFiles(root, home string) []string {
 	}
 }
 
-func enforcementStatus(root, home, pluginRoot string) EnforcementStatus {
+func enforcementStatus(root, home, pluginRoot string, gitGateInstalled bool) EnforcementStatus {
 	s := EnforcementStatus{}
 	scriptRoot := root
 	// Executable, not merely present: the host runs this file, and a script it cannot execute
@@ -81,15 +122,26 @@ func enforcementStatus(root, home, pluginRoot string) EnforcementStatus {
 			s.Foreign = path
 		}
 	}
+	// The Stop-hook-specific detail. Framed by the git gate below: the two are different enforcement layers.
 	switch {
 	case !s.Active && s.Foreign != "":
-		s.Remediation = "A Stop hook is registered in " + s.Foreign + " but it does not run metareview, so it enforces nothing about reviews. Add metareview's hook alongside it, or install metareview as a plugin so hooks/hooks.json applies."
+		s.Remediation = "A Stop hook is registered in " + s.Foreign + " but it does not run metareview, so it does not gate session completion. Add metareview's hook alongside it, or install metareview as a plugin so hooks/hooks.json applies."
 	case s.Active && !s.ScriptPresent:
 		s.Remediation = "A Stop hook is registered in " + s.Source + " but hooks/pre-finish.sh is missing, so the host will report a hook error instead of a review verdict."
 	case !s.Active && s.ScriptPresent:
 		s.Remediation = "hooks/pre-finish.sh exists but no settings file registers it, so it never runs. Add a Stop hook to .claude/settings.json, or install metareview as a plugin so hooks/hooks.json applies."
 	case !s.Active:
-		s.Remediation = "No Stop hook is registered, so nothing stops a host from finishing with unresolved blockers. The Completion Rule is advisory until one is."
+		s.Remediation = "No Stop hook is registered, so session completion (an agent declaring work done) is not gated. Install metareview as a plugin, or add a Stop hook to .claude/settings.json."
+	}
+	// The git-native gate is the DISTINCT push-time layer. Frame EVERY inactive-Stop-hook state by whether it
+	// is installed — so the report never implies pushes are ungated when they are gated, nor claims a push
+	// gate that is absent. (An ACTIVE-but-broken Stop hook is handled by its own case and the chmod override.)
+	if !s.Active {
+		if gitGateInstalled {
+			s.Remediation = "The git-native pre-push gate is installed and blocks an unreviewed push; only session completion is not additionally gated. " + s.Remediation
+		} else {
+			s.Remediation += " The git-native pre-push gate is not installed either, so nothing stops a host from finishing with unresolved blockers — run `metareview setup --install-hooks`."
+		}
 	}
 	if s.Active && !s.ScriptPresent {
 		// Overwrites the case above deliberately: an unreadable script is the more specific fact.

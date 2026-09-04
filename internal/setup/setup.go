@@ -23,13 +23,16 @@ type Options struct {
 }
 
 type Report struct {
-	Mode          string              `json:"mode"`
-	Capabilities  repo.Capabilities   `json:"capabilities"`
-	Files         repo.Files          `json:"files"`
-	Prerequisites Prerequisites       `json:"prerequisites"`
-	Install       InstallStatus       `json:"install"`
-	Enforcement   EnforcementStatus   `json:"enforcement"`
-	Standalone    StandaloneReadiness `json:"standalone"`
+	Mode          string            `json:"mode"`
+	Capabilities  repo.Capabilities `json:"capabilities"`
+	Files         repo.Files        `json:"files"`
+	Prerequisites Prerequisites     `json:"prerequisites"`
+	Install       InstallStatus     `json:"install"`
+	Enforcement   EnforcementStatus `json:"enforcement"`
+	// GitGate is the push-time enforcement (the pre-push review gate), distinct from Enforcement's
+	// session-completion Stop hook. Reporting both keeps setup --check from understating the posture.
+	GitGate    GitGateStatus       `json:"gitGate"`
+	Standalone StandaloneReadiness `json:"standalone"`
 }
 
 type Prerequisites struct {
@@ -92,13 +95,16 @@ func Check(root string, options Options) Report {
 	}
 	missing := missingFullMetaswarmPrereqs(prereqs)
 
+	gitGate := gitGateStatus(root, nil)
+
 	return Report{
 		Mode:          base.Mode,
 		Capabilities:  base.Capabilities,
 		Files:         base.Files,
 		Prerequisites: prereqs,
 		Install:       InstallStatus{Path: options.ExecutablePath},
-		Enforcement:   enforcementStatus(root, home, pluginRoot(home)),
+		Enforcement:   enforcementStatus(root, home, pluginRoot(home), gitGate.Installed),
+		GitGate:       gitGate,
 		Standalone: StandaloneReadiness{
 			AdvisoryOnly:             len(missing) > 0,
 			FullMetaswarmReady:       len(missing) == 0,

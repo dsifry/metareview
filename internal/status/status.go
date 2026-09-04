@@ -19,6 +19,7 @@ import (
 
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewlog"
+	"github.com/dsifry/metareview/internal/reviewstate"
 	"github.com/dsifry/metareview/internal/version"
 )
 
@@ -123,8 +124,16 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 	// cleared. Without this, a first review that found anything blocks forever — the gate could only
 	// ever clear a change that passed on its first look, which no real change does.
 	superseded := supersededRuns(logs)
+	// Same-head dedup (issue #97): re-running the SAME review over the SAME (kind, target, head) records a
+	// fresh log each time. supersededRuns only clears an ancestor of a CLEAN child, so three NEEDS_REVISION
+	// re-runs over one commit would otherwise render the branch as three identical blockers that never clear.
+	// The latest same-head run supersedes the earlier ones (a fix loop reviews a DIFFERENT commit, so it is
+	// untouched). Shared with the projector so the gate and pr-ready agree.
+	for id := range reviewstate.StaleSameHeadRunIDs(logs) {
+		superseded[id] = true
+	}
 	for _, s := range logs {
-		if !s.HasUnresolvedBlockers {
+		if !reviewstate.LogBlocks(s) { // unresolved blockers OR an ESCALATED verdict — one shared predicate
 			continue
 		}
 		if superseded[s.RunID] {
@@ -480,8 +489,15 @@ func buildForBranch(root, base string, run RunGit, committedOnly bool) (Report, 
 	// Stop/commit hook actually uses — blocks a successfully-repaired branch forever, which is exactly the
 	// "reach clean after a repair" this change exists to enable.
 	superseded := supersededRuns(all)
+	// Same-head dedup (issue #97): the LATEST re-run of a review over a given (kind, target, head) supersedes
+	// the earlier ones, so re-running `review pr-ready` over one commit renders the branch as a single blocker
+	// rather than one per run. Computed over the FULL log set (all), like supersededRuns, so lineage is
+	// complete. Shared with Build and the projector.
+	for id := range reviewstate.StaleSameHeadRunIDs(all) {
+		superseded[id] = true
+	}
 	for _, s := range scoped {
-		if !s.HasUnresolvedBlockers || superseded[s.RunID] {
+		if !reviewstate.LogBlocks(s) || superseded[s.RunID] { // unresolved blockers OR ESCALATED — shared predicate
 			continue
 		}
 		r.MustClear = append(r.MustClear, Blocker{
