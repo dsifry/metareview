@@ -149,7 +149,8 @@ printf "bash tests/run-all.sh exited 0\n" > "$TMP/unrelated-artifact-evidence.md
 unrelated_artifact_review="$(cat "$TMP/unrelated-artifact.out")"
 grep -q "PASS" "$repo/$unrelated_artifact_review"
 grep -q "Unresolved review blockers" "$repo/$unrelated_artifact_review" && exit 1
-grep -q "docs/spec.md" "$repo/$unrelated_artifact_review" && exit 1
+grep -q "Repository Health Advisory" "$repo/$unrelated_artifact_review"
+grep -q "Unrelated artifact blocker (docs/spec.md)" "$repo/$unrelated_artifact_review"
 
 repo="$TMP/unrelated-artifact-working-tree"
 init_repo "$repo"
@@ -184,7 +185,8 @@ printf "bash tests/run-all.sh exited 0\n" > "$TMP/unrelated-artifact-working-tre
 unrelated_artifact_working_tree_review="$(cat "$TMP/unrelated-artifact-working-tree.out")"
 grep -q "PASS" "$repo/$unrelated_artifact_working_tree_review"
 grep -q "Unresolved review blockers" "$repo/$unrelated_artifact_working_tree_review" && exit 1
-grep -q "docs/spec.md" "$repo/$unrelated_artifact_working_tree_review" && exit 1
+grep -q "Repository Health Advisory" "$repo/$unrelated_artifact_working_tree_review"
+grep -q "Unrelated artifact blocker (docs/spec.md)" "$repo/$unrelated_artifact_working_tree_review"
 
 repo="$TMP/unrelated-path-finding-no-log"
 init_repo "$repo"
@@ -201,7 +203,8 @@ printf "bash tests/run-all.sh exited 0\n" > "$TMP/unrelated-path-finding-no-log-
 unrelated_path_finding_no_log_review="$(cat "$TMP/unrelated-path-finding-no-log.out")"
 grep -q "PASS" "$repo/$unrelated_path_finding_no_log_review"
 grep -q "Unresolved review blockers" "$repo/$unrelated_path_finding_no_log_review" && exit 1
-grep -q "docs/spec.md" "$repo/$unrelated_path_finding_no_log_review" && exit 1
+grep -q "Repository Health Advisory" "$repo/$unrelated_path_finding_no_log_review"
+grep -q "Unrelated path blocker (docs/spec.md)" "$repo/$unrelated_path_finding_no_log_review"
 
 repo="$TMP/wrong-scope-previous"
 init_repo "$repo"
@@ -249,12 +252,97 @@ missing_review="$(cat "$TMP/missing-validation.out")"
 grep -q "Missing validation evidence" "$repo/$missing_review"
 previous_missing_run="$(basename "$missing_review" .md)"
 printf "bash tests/run-all.sh exited 0\n" > "$TMP/fixed-validation.md"
-rm .metareview/runs.jsonl
 "$TMP/metareview" review pr-ready --base "$base" --previous-run "$previous_missing_run" --evidence "$TMP/fixed-validation.md" > "$TMP/fixed-validation.out"
 fixed_review="$(cat "$TMP/fixed-validation.out")"
 grep -q "PASS" "$repo/$fixed_review"
+grep -q 'Execution mode: `deterministic-local`' "$repo/$fixed_review"
 grep -q "Unresolved review blockers" "$repo/$fixed_review" && exit 1
 grep -q "Missing validation evidence" "$repo/$fixed_review" && exit 1
+
+repo="$TMP/target-aware"
+init_repo "$repo"
+base="$(git rev-parse HEAD)"
+git checkout -qb feature-target-aware
+printf "'use strict';\nmodule.exports = input => JSON.parse(input); // target aware\n" > lib/parser.js
+git add .
+git commit -qm "target-aware branch change"
+mkdir -p docs/metareview/reviews .metareview
+cat > docs/metareview/reviews/old-task.md <<'REVIEW'
+# metareview: task-done review
+
+Run ID: `mrv-old-task`
+
+Target: `GUIDE-old`
+
+Covered paths: `["docs/old.md"]`
+
+## Verdict
+
+NEEDS_REVISION
+REVIEW
+cat > docs/metareview/reviews/current-task.md <<'REVIEW'
+# metareview: task-done review
+
+Run ID: `mrv-current-task`
+
+Target: `GUIDE-current`
+
+Covered paths: `["lib/parser.js"]`
+
+## Verdict
+
+NEEDS_REVISION
+REVIEW
+cat > docs/metareview/reviews/prior-pass.md <<'REVIEW'
+# metareview: pr-ready review
+
+Run ID: `mrv-prior-pass`
+
+Target: `current branch`
+
+Covered paths: `["lib/parser.js"]`
+
+## Verdict
+
+PASS
+REVIEW
+cat > .metareview/findings.jsonl <<'JSONL'
+{"schemaVersion":1,"id":"mrvf-old-task","runId":"mrv-old-task","status":"open","classification":"blocking","severity":"high","title":"Old unrelated task blocker","target":{"type":"beads-task","id":"GUIDE-old"}}
+{"schemaVersion":1,"id":"mrvf-current-task","runId":"mrv-current-task","status":"open","classification":"blocking","severity":"high","title":"Current linked task blocker","target":{"type":"beads-task","id":"GUIDE-current"}}
+{"schemaVersion":1,"id":"mrvf-other-branch","runId":"mrv-other-branch","status":"open","classification":"blocking","severity":"high","title":"Other branch blocker","target":{"type":"branch","id":"other-branch"}}
+JSONL
+printf "bash tests/run-all.sh exited 0\n" > "$TMP/target-aware-evidence.md"
+set +e
+"$TMP/metareview" review pr-ready --base "$base" --evidence "$TMP/target-aware-evidence.md" > "$TMP/target-aware.out" 2> "$TMP/target-aware.err"
+target_aware_code=$?
+set -e
+test "$target_aware_code" -eq 1
+target_aware_review="$(cat "$TMP/target-aware.out")"
+grep -q "Current linked task blocker" "$repo/$target_aware_review"
+grep -q "Old unrelated task blocker (GUIDE-old)" "$repo/$target_aware_review"
+grep -q "Other branch blocker (other-branch)" "$repo/$target_aware_review"
+grep -q "Old unrelated task blocker.*does not block this target" "$repo/$target_aware_review"
+
+repo="$TMP/unchanged-reuse"
+init_repo "$repo"
+git remote add origin https://github.com/acme/repo.git
+base="$(git rev-parse HEAD)"
+git checkout -qb feature-reuse
+printf "'use strict';\nmodule.exports = input => JSON.parse(input); // reusable\n" > lib/parser.js
+git add .
+git commit -qm "reusable branch change"
+printf "bash tests/run-all.sh exited 0\n" > "$TMP/reuse-evidence.md"
+write_mock_gh "$TMP/reuse-bin"
+PATH="$TMP/reuse-bin:$PATH" "$TMP/metareview" review pr-ready --base "$base" --evidence "$TMP/reuse-evidence.md" --github-pr 99 > "$TMP/reuse-first.out"
+reuse_first_review="$(cat "$TMP/reuse-first.out")"
+reuse_first_run="$(basename "$reuse_first_review" .md)"
+PATH="$TMP/reuse-bin:$PATH" "$TMP/metareview" review pr-ready --base "$base" --evidence "$TMP/reuse-evidence.md" --github-pr 99 > "$TMP/reuse-second.out"
+reuse_second_review="$(cat "$TMP/reuse-second.out")"
+grep -q "Execution mode: \`deterministic-local-reused\`" "$repo/$reuse_second_review"
+grep -q "Reused verdict from: \`$reuse_first_run\`" "$repo/$reuse_second_review"
+grep -q "reviewer-input digest is unchanged" "$repo/$reuse_second_review"
+tail -n 1 .metareview/runs.jsonl | grep -q '"executionMode":"deterministic-local-reused"'
+tail -n 1 .metareview/runs.jsonl | grep -q "\"reusedFromRunId\":\"$reuse_first_run\""
 
 repo="$TMP/cross-branch-current-log"
 init_repo "$repo"

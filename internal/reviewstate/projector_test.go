@@ -264,11 +264,11 @@ func TestProjectTreatsMismatchedBranchRunAsHistorical(t *testing.T) {
 	if len(projection.CurrentReviewLogs()) != 0 {
 		t.Fatalf("mismatched branch review log should not remain current: %+v", projection.CurrentReviewLogs())
 	}
-	if len(projection.CurrentBlockers()) != 1 || projection.CurrentBlockers()[0].RunID != "mrv-task" {
-		t.Fatalf("expected task blocker to remain current and branch blocker historical: %+v", projection.CurrentBlockers())
+	if len(projection.CurrentBlockers()) != 0 {
+		t.Fatalf("unlinked task and mismatched branch blockers should both be historical: %+v", projection.CurrentBlockers())
 	}
-	if len(projection.HistoricalBlockers()) != 1 || projection.HistoricalBlockers()[0].RunID != "mrv-branch-a" {
-		t.Fatalf("expected branch blocker to be historical: %+v", projection.HistoricalBlockers())
+	if len(projection.HistoricalBlockers()) != 2 {
+		t.Fatalf("expected branch and unlinked task blockers to be historical: %+v", projection.HistoricalBlockers())
 	}
 }
 
@@ -296,5 +296,37 @@ func TestProjectKeepsRelevantArtifactLogCurrent(t *testing.T) {
 
 	if len(projection.CurrentReviewLogs()) != 1 || projection.CurrentReviewLogs()[0].RunID != "mrv-artifact" {
 		t.Fatalf("expected changed-path artifact to remain current: %+v", projection.CurrentReviewLogs())
+	}
+}
+
+func TestPRReadyProjectionKeepsOnlyCurrentTargetLinkedFindingsBlocking(t *testing.T) {
+	logs := []reviewlog.Summary{
+		{RunID: "mrv-old-task", Kind: "task-done", Target: "GUIDE-old", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true, CoveredPaths: []string{"docs/old.md"}, CoveredPathsKnown: true},
+		{RunID: "mrv-current-task", Kind: "task-done", Target: "GUIDE-current", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true, CoveredPaths: []string{"internal/prready/review.go"}, CoveredPathsKnown: true},
+		{RunID: "mrv-prior-pass", Kind: "pr-ready", Target: "current branch", Verdict: "PASS", CoveredPaths: []string{"internal/prready/review.go"}, CoveredPathsKnown: true},
+	}
+	blockers := []findings.Record{
+		{ID: "mrvf-old-task", RunID: "mrv-old-task", Status: "open", Classification: "blocking", Severity: "high", Target: map[string]any{"type": "beads-task", "id": "GUIDE-old"}},
+		{ID: "mrvf-current-task", RunID: "mrv-current-task", Status: "open", Classification: "blocking", Severity: "high", Target: map[string]any{"type": "beads-task", "id": "GUIDE-current"}},
+		{ID: "mrvf-other-branch", RunID: "mrv-other-branch", Status: "open", Classification: "blocking", Severity: "high", Target: map[string]any{"type": "branch", "id": "other"}},
+		{ID: "mrvf-current-pr", RunID: "mrv-current-pr", Status: "open", Classification: "blocking", Severity: "high", Target: map[string]any{"type": "pull-request", "id": "42"}},
+	}
+
+	projection := ProjectRecords(logs, blockers, Options{
+		Scope:         "pr-ready",
+		ChangedPaths:  []string{"internal/prready/review.go"},
+		CurrentTarget: map[string]string{"type": "branch", "id": "feature"},
+		LinkedTargets: []map[string]string{{"type": "pull-request", "id": "42"}},
+	})
+
+	if got := projection.CurrentReviewLogs(); len(got) != 1 || got[0].RunID != "mrv-current-task" {
+		t.Fatalf("only the task review linked by the current diff should remain current: %+v", got)
+	}
+	got := projection.CurrentBlockers()
+	if len(got) != 2 || got[0].ID != "mrvf-current-task" || got[1].ID != "mrvf-current-pr" {
+		t.Fatalf("only current task/PR-linked findings should block: %+v", got)
+	}
+	if len(projection.HistoricalBlockers()) != 2 {
+		t.Fatalf("unrelated blockers must remain visible as historical repository health: %+v", projection.HistoricalBlockers())
 	}
 }

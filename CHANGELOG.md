@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed
+
+- **PR-ready now selects findings for the target under review.** Findings linked to the current
+  branch, live pull request, or a task review whose covered paths overlap the current diff retain
+  their blocking effect. Unrelated historical blockers remain visible as repository-health
+  advisories and in the findings index without blocking a different release target.
+- **Unchanged PR-ready verdicts are reused from authenticated local run evidence.** Each run records
+  a canonical digest binding target, head/base, diff, live pull-request state, evidence, reviewer
+  implementation, and relevant finding frontier. A byte-identical rerun writes a receipt naming
+  the reused run without invoking reviewers; any changed input starts a fresh review, and stale or
+  cross-target explicit previous runs fail closed.
+
 ### Added
 
 - **Mechanical-precision lens (9th required artifact-review lens).** Artifact review now runs a

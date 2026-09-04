@@ -2,15 +2,18 @@ package prready
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dsifry/metareview/internal/contextprofile"
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/githubcontext"
 	"github.com/dsifry/metareview/internal/knowledge"
+	"github.com/dsifry/metareview/internal/reviewers"
 	"github.com/dsifry/metareview/internal/reviewlog"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/runchain"
@@ -78,6 +81,155 @@ func TestRunChainMarkdownIncludesEscalationDetails(t *testing.T) {
 			t.Fatalf("run chain markdown missing %q:\n%s", required, md)
 		}
 	}
+}
+
+func TestReviewMarkdownIdentifiesReuseAndHistoricalRepositoryHealth(t *testing.T) {
+	md := reviewMarkdown("mrv-pr", "ctx.md", "", "gate", "PASS", []string{"internal/foo.go"}, nil, "evidence", "", reviewMetadata{
+		ReviewInputDigest:  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ReusedFromRunID:    "mrv-prior",
+		HistoricalBlockers: []findings.Record{{ID: "mrvf-old", Title: "Old unrelated blocker", Target: map[string]any{"type": "beads-task", "id": "GUIDE-old"}}},
+	})
+	for _, want := range []string{"Execution mode: `deterministic-local-reused`", "Reused verdict from: `mrv-prior`", "Reviewer input digest: `sha256:aaaa", "## Repository Health Advisory", "Old unrelated blocker", "does not block this target"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("review markdown missing %q:\n%s", want, md)
+		}
+	}
+}
+
+func TestCreateReusesAuthenticatedUnchangedVerdictWithoutReviewerInvocation(t *testing.T) {
+	root := smallPRReadyRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
+	evidence := filepath.Join(t.TempDir(), "evidence.md")
+	if err := os.WriteFile(evidence, []byte("go test ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	original := runPRReadyReviewers
+	calls := 0
+	runPRReadyReviewers = func(ctx reviewers.PRReadyContext) []reviewers.Finding {
+		calls++
+		return original(ctx)
+	}
+	t.Cleanup(func() { runPRReadyReviewers = original })
+
+	first, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 3, 1, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 3, 1, 0, 1, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("reviewers invoked %d times, want once for byte-identical inputs", calls)
+	}
+	if !second.Reused || second.ReusedFromRunID != first.RunID || second.Verdict != first.Verdict {
+		t.Fatalf("second result did not identify authenticated reuse: first=%+v second=%+v", first, second)
+	}
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(second.ReviewRel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Reused verdict from: `"+first.RunID+"`") {
+		t.Fatalf("reused review does not name its source:\n%s", body)
+	}
+}
+
+func TestChangedReviewerInputsStartFreshReview(t *testing.T) {
+	root := smallPRReadyRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
+	evidence := filepath.Join(t.TempDir(), "evidence.md")
+	if err := os.WriteFile(evidence, []byte("go test ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original := runPRReadyReviewers
+	calls := 0
+	runPRReadyReviewers = func(ctx reviewers.PRReadyContext) []reviewers.Finding {
+		calls++
+		return original(ctx)
+	}
+	t.Cleanup(func() { runPRReadyReviewers = original })
+	first, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 3, 2, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(evidence, []byte("go test ./... and go vet ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Create(root, Options{Base: "main", EvidencePath: evidence, PreviousRunID: first.RunID, Now: time.Date(2026, 9, 3, 2, 0, 1, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || second.Reused {
+		t.Fatalf("changed evidence must execute a fresh review: calls=%d result=%+v", calls, second)
+	}
+}
+
+func TestExplicitPreviousRunRejectsStalePersistedDigest(t *testing.T) {
+	root := smallPRReadyRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
+	evidence := filepath.Join(t.TempDir(), "evidence.md")
+	if err := os.WriteFile(evidence, []byte("go test ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 3, 3, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, filepath.FromSlash(first.ReviewRel))
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Replace(string(body), "sha256:", "sha256:b", 1)
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Create(root, Options{Base: "main", EvidencePath: evidence, PreviousRunID: first.RunID, Now: time.Date(2026, 9, 3, 3, 0, 1, 0, time.UTC)})
+	if err == nil || !strings.Contains(err.Error(), "stale or unauthenticated reviewer input digest") {
+		t.Fatalf("expected stale explicit previous run to fail, got %v", err)
+	}
+}
+
+func TestLatestLogsByTargetReturnsDeterministicTargetOrder(t *testing.T) {
+	logs := []reviewlog.Summary{
+		{Target: "task-z", RunID: "mrv-20260901-older", Path: "docs/metareview/reviews/2026-09-01-older.md"},
+		{Target: "task-a", RunID: "mrv-20260902-only", Path: "docs/metareview/reviews/2026-09-02-only.md"},
+		{Target: "task-z", RunID: "mrv-20260903-newer", Path: "docs/metareview/reviews/2026-09-03-newer.md"},
+	}
+
+	got := latestLogsByTarget(logs)
+	if len(got) != 2 || got[0].Target != "task-a" || got[1].Target != "task-z" || got[1].RunID != "mrv-20260903-newer" {
+		t.Fatalf("latest logs must use stable target order and retain the latest run: %+v", got)
+	}
+}
+
+func smallPRReadyRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("init", "-b", "main")
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "Test User")
+	run("add", ".")
+	run("commit", "-m", "initial")
+	run("checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(root, "seed.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-m", "change")
+	return root
 }
 
 func TestContextMarkdownIncludesReviewManifest(t *testing.T) {

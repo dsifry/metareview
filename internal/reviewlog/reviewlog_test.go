@@ -594,6 +594,48 @@ func TestSummaryCarriesHeadAndCoveredPathsFromTheRunRecord(t *testing.T) {
 	}
 }
 
+func TestSummaryAuthenticatesReviewerInputMetadataAgainstLocalRunRecord(t *testing.T) {
+	root := t.TempDir()
+	rel := "docs/metareview/reviews/mrv-pr.md"
+	mustWrite(t, filepath.Join(root, rel),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-pr`\n\nTarget: `current branch`\n\nReviewer input digest: `sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\n## Verdict\n\nPASS\n")
+	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-pr","scope":"pr-ready","target":{"type":"branch","id":"feature"},"status":"passed","verdict":"PASS","executionMode":"deterministic-local","baseSha":"base","headSha":"head","reviewLogPath":"docs/metareview/reviews/mrv-pr.md","reviewers":["one","two"],"reviewInputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`+"\n")
+
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := logs[0]
+	if !got.RunRecordAuthenticated || got.BaseSHA != "base" || got.ReviewInputDigest == "" {
+		t.Fatalf("expected authenticated input metadata from matching local record: %+v", got)
+	}
+	if got.TargetRecord["id"] != "feature" || len(got.Reviewers) != 2 {
+		t.Fatalf("expected target and reviewer identity from local record: %+v", got)
+	}
+
+	// The local record is not allowed to authenticate an edited committed verdict.
+	mustWrite(t, filepath.Join(root, rel),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-pr`\n\nTarget: `current branch`\n\nReviewer input digest: `sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	logs, err = Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logs[0].RunRecordAuthenticated {
+		t.Fatalf("a verdict mismatch must make reuse metadata unauthenticated: %+v", logs[0])
+	}
+
+	mustWrite(t, filepath.Join(root, rel),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-pr`\n\nTarget: `current branch`\n\nReviewer input digest: `sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`\n\n## Verdict\n\nPASS\n")
+	logs, err = Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logs[0].RunRecordAuthenticated {
+		t.Fatalf("a stale committed digest must not authenticate the local run: %+v", logs[0])
+	}
+}
+
 // Scoping has to survive leaving the machine that produced the review. HeadSHA and CoveredPaths
 // lived only in .metareview/runs.jsonl, which is untracked — so a clone, a fresh worktree or a
 // CI checkout had review logs it could not attribute to any commit, every file read as

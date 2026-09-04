@@ -6,7 +6,9 @@ Run the local PR-ready review gate:
 metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
 ```
 
-Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. `NEEDS_REVISION` means fix blockers and rerun with `--previous-run`; `ESCALATED` means stop same-target retries and ask the human to narrow, split, or redesign. Use the generated `metareview PR Evidence` section after a passing verdict.
+Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. `NEEDS_REVISION` means fix blockers and rerun with `--previous-run`; changed reviewer inputs execute a fresh review within that authenticated chain, while byte-identical inputs may reuse the prior verdict. A cross-target previous run or one whose persisted digest no longer matches its local run record is rejected. `ESCALATED` means stop same-target retries and ask the human to narrow, split, or redesign. Use the generated `metareview PR Evidence` section after a passing verdict.
+
+PR-ready selects blockers for the current branch, live PR, and task reviews whose covered paths overlap the current diff. Unrelated open findings remain visible under `Repository Health Advisory` and in `docs/metareview/FINDINGS.md`, but do not block this target. A second invocation with the same target, head/base, diff, live PR state, evidence, reviewer implementation, and relevant finding frontier reuses the authenticated prior verdict without invoking reviewers. The new review log identifies the source run and canonical reviewer-input digest. Any identity change invokes reviewers again.
 
 ## Sharded review
 
@@ -27,7 +29,8 @@ hash, and `resultsDir`.
    plan holds a single cross-shard slot; `--shard-result` does **not** — an explicit path is
    ingested alongside the `resultsDir` listing, so passing a shard whose result is already
    committed raises a `duplicate shard result` blocker. Replace the committed file instead.
-4. Re-run with `--previous-run <run-id>`. With every shard covered and the aggregate passing, the
+4. Re-run with `--previous-run <run-id>`. Adding shard results changes the reviewer input, so the
+   gate executes reviewers rather than reusing the prior verdict. With every shard covered and the aggregate passing, the
    context-risk blocker becomes advisory and the lints run over the whole branch diff.
 5. Commit the results in `docs/metareview/shards/` with the review log. Editing a file changes only
    its own bucket's shards, unless the total branch diff crosses a bits boundary, which re-cuts every

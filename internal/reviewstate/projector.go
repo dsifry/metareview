@@ -17,6 +17,7 @@ type Options struct {
 	HistoricalRunIDs []string
 	ChangedPaths     []string
 	CurrentTarget    map[string]string
+	LinkedTargets    []map[string]string
 	CurrentRunID     string
 }
 
@@ -72,10 +73,15 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 	previous := stringSet(options.PreviousRunIDs)
 	historical := stringSet(options.HistoricalRunIDs)
 	changed := normalizedPathSet(options.ChangedPaths)
+	linked := targetSet(options.LinkedTargets)
 	historicalRunIDs := map[string]bool{}
+	currentRunIDs := map[string]bool{}
 	currentTarget := options.CurrentTarget
 	if len(currentTarget) == 0 {
 		currentTarget = options.Target
+	}
+	if key := findingTargetKey(currentTarget); key != "" {
+		linked[key] = true
 	}
 	projection := Projection{
 		targetKeyValue:       TargetKey(options.Scope, currentTarget),
@@ -96,7 +102,7 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 			projection.historicalLogs = append(projection.historicalLogs, log)
 			continue
 		}
-		if unrelatedArtifact(log, changed) {
+		if (options.Scope == "pr-ready" && log.Kind == "pr-ready") || unrelatedTargetLog(log, changed, linked) {
 			if log.RunID != "" {
 				historicalRunIDs[log.RunID] = true
 			}
@@ -104,6 +110,9 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 			continue
 		}
 		projection.currentReviewLogs = append(projection.currentReviewLogs, log)
+		if log.RunID != "" {
+			currentRunIDs[log.RunID] = true
+		}
 	}
 	for _, blocker := range blockers {
 		if previous[blocker.RunID] {
@@ -114,7 +123,7 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 			projection.historicalBlockers = append(projection.historicalBlockers, blocker)
 			continue
 		}
-		if historical[blocker.RunID] || unrelatedBranchBlocker(blocker, currentTarget) || unrelatedPathBlocker(blocker, changed) {
+		if historical[blocker.RunID] || unrelatedFindingTarget(blocker, currentRunIDs, changed, linked) {
 			projection.historicalBlockers = append(projection.historicalBlockers, blocker)
 			continue
 		}
@@ -229,6 +238,30 @@ func unrelatedArtifact(log reviewlog.Summary, changed map[string]bool) bool {
 	return !reviewedPathOverlaps(changed, target)
 }
 
+func unrelatedTargetLog(log reviewlog.Summary, changed, linked map[string]bool) bool {
+	if unrelatedArtifact(log, changed) {
+		return true
+	}
+	if log.Kind != "task-done" {
+		return false
+	}
+	if linked[canonicalTargetKey("task", log.Target)] {
+		return false
+	}
+	// A legacy log with no coverage identity remains current (fail closed). Once a
+	// task review records what it covered, only an overlap with this target's diff
+	// makes it part of the PR-ready decision.
+	if !log.CoveredPathsKnown {
+		return false
+	}
+	for _, target := range log.CoveredPaths {
+		if reviewedPathOverlaps(changed, normalizePath(target)) {
+			return false
+		}
+	}
+	return true
+}
+
 func unrelatedBranchBlocker(blocker findings.Record, current map[string]string) bool {
 	if current["type"] != "branch" || current["id"] == "" {
 		return false
@@ -247,6 +280,61 @@ func unrelatedPathBlocker(blocker findings.Record, changed map[string]bool) bool
 		return false
 	}
 	return !reviewedPathOverlaps(changed, target)
+}
+
+func unrelatedFindingTarget(blocker findings.Record, currentRunIDs, changed, linked map[string]bool) bool {
+	if currentRunIDs[blocker.RunID] {
+		return false
+	}
+	targetType, targetID := findingTarget(blocker.Target)
+	switch canonicalTargetType(targetType) {
+	case "branch", "task", "pull-request":
+		return targetID != "" && !linked[canonicalTargetKey(targetType, targetID)]
+	case "path":
+		return unrelatedPathBlocker(blocker, changed)
+	default:
+		// Unknown and unscoped records stay blocking. Target-aware selection must
+		// not turn missing provenance into an accidental pass.
+		return false
+	}
+}
+
+func targetSet(targets []map[string]string) map[string]bool {
+	result := map[string]bool{}
+	for _, target := range targets {
+		if key := findingTargetKey(target); key != "" {
+			result[key] = true
+		}
+	}
+	return result
+}
+
+func findingTargetKey(target map[string]string) string {
+	return canonicalTargetKey(target["type"], firstNonEmpty(target["id"], target["path"]))
+}
+
+func canonicalTargetKey(targetType, targetID string) string {
+	targetType = canonicalTargetType(targetType)
+	targetID = strings.TrimSpace(targetID)
+	if targetType == "" || targetID == "" {
+		return ""
+	}
+	return targetType + ":" + targetID
+}
+
+func canonicalTargetType(targetType string) string {
+	switch strings.ToLower(strings.TrimSpace(targetType)) {
+	case "beads", "beads-task", "task":
+		return "task"
+	case "pr", "github-pr", "pull-request":
+		return "pull-request"
+	case "branch":
+		return "branch"
+	case "path", "markdown":
+		return "path"
+	default:
+		return strings.ToLower(strings.TrimSpace(targetType))
+	}
 }
 
 func reviewedPathOverlaps(changed map[string]bool, target string) bool {
