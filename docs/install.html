@@ -92,7 +92,7 @@ metareview review artifact docs/spec.md</code></pre>
         <div class="panel">
           <pre><code># interactive; --yes headless, --dry-run to preview
 metareview setup --install-hooks</code></pre>
-          <p>Installs deterministic git hooks: <strong><code>git push</code> is blocked</strong> until the branch is review-clean (fail-closed; <code>git push --no-verify</code> escapes), and <strong>metareview never blocks a commit</strong> — its <code>post-commit</code> hook cannot (it runs after the commit); it just names the files it wrote so you review them before pushing. Git invokes the hooks on the real operation, so no <em>spelling</em> of the push command walks around the gate (it gates the checked-out branch; pushing a different ref is <a href="https://github.com/dsifry/metareview/issues/82">#82</a>). Install is non-destructive and reversible (<code>--uninstall-hooks</code>).</p>
+          <p>Installs deterministic git hooks: <strong><code>git push</code> is blocked</strong> until the branch is review-clean (fail-closed; <code>git push --no-verify</code> escapes), and <strong>metareview never blocks a commit</strong> — its <code>post-commit</code> hook cannot (it runs after the commit); it just names the files it wrote so you review them before pushing. Git invokes the hooks on the real operation, so no <em>spelling</em> of the push command walks around the gate, and pushing a ref that is <em>not</em> the checked-out branch is blocked rather than silently waved through (<a href="https://github.com/dsifry/metareview/issues/82">#82</a>). Install is non-destructive and reversible (<code>--uninstall-hooks</code>); the <code>.gitignore</code> block it adds stays put (remove it by hand).</p>
         </div>
       </div>
     </section>

@@ -463,9 +463,10 @@ func TestHookInstallDoesNotClaimConsumerDirWithoutPrePush(t *testing.T) {
 	}
 }
 
-// Install keeps the per-clone materialized hooks out of a consumer's commits by adding a .gitignore entry
-// (the docs promise they are not committed). It is idempotent and a no-op when already ignored (Cursor:
-// INSTALL.md — consumer gitignore does not cover hooks).
+// Install keeps metareview's ephemeral per-clone state out of a consumer's commits by adding the allowlist
+// .gitignore block (the docs promise it is not committed). The materialized hooks are covered by `.metareview/*`;
+// the block is idempotent and a no-op when already ignored (Cursor: INSTALL.md — consumer gitignore does not
+// cover the ephemeral state).
 func TestHookInstallGitignoresMaterializedHooks(t *testing.T) {
 	root, g := tempRepo(t) // fresh repo: no .gitignore yet
 	plan, err := PlanHookInstall(root, g)
@@ -479,10 +480,10 @@ func TestHookInstallGitignoresMaterializedHooks(t *testing.T) {
 		t.Fatalf("install must cause .metareview/git-hooks to be git-ignored: %v", err)
 	}
 	body, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
-	if strings.Count(string(body), ".metareview/git-hooks/") != 1 {
-		t.Fatalf(".gitignore must have exactly one entry; got %q", body)
+	if strings.Count(string(body), ".metareview/*") != 1 {
+		t.Fatalf(".gitignore must have exactly one ephemeral-ignore block; got %q", body)
 	}
-	// Reinstall (scripts removed → not AlreadyDone) must NOT duplicate the entry.
+	// Reinstall (scripts removed → not AlreadyDone) must NOT duplicate the block.
 	if err := os.RemoveAll(plan.Target); err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +495,7 @@ func TestHookInstallGitignoresMaterializedHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	body2, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
-	if strings.Count(string(body2), ".metareview/git-hooks/") != 1 {
-		t.Fatalf(".gitignore entry must not be duplicated on reinstall; got %q", body2)
+	if strings.Count(string(body2), ".metareview/*") != 1 {
+		t.Fatalf(".gitignore block must not be duplicated on reinstall; got %q", body2)
 	}
 }
