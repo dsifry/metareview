@@ -184,7 +184,7 @@ func TestLegacyPreviousRunIDsForPRReady(t *testing.T) {
 
 // TestResolveRunChainRecoversLegacyPreviousRun drives the legacy recovery branch of resolveRunChain: the
 // run record for the named previous run is absent from runs.jsonl (so runchain.Resolve fails recoverably),
-// but the committed review logs still describe the chain, so the ids are recovered and a fresh chain resolved.
+// but the committed review logs still describe the chain, so the ids and continued attempt identity are recovered.
 func TestResolveRunChainRecoversLegacyPreviousRun(t *testing.T) {
 	root := t.TempDir() // no .metareview/runs.jsonl, so the previous run is "not found" (a recoverable error)
 	targetRecord := map[string]string{"type": "branch", "id": "feature"}
@@ -198,8 +198,8 @@ func TestResolveRunChainRecoversLegacyPreviousRun(t *testing.T) {
 	if len(previousRunIDs) != 1 || previousRunIDs[0] != "mrv-1" {
 		t.Fatalf("previousRunIDs = %v, want [mrv-1]", previousRunIDs)
 	}
-	if chain.AttemptNumber != 1 {
-		t.Fatalf("fallback chain should resolve a fresh attempt, got %d", chain.AttemptNumber)
+	if chain.AttemptNumber != 2 {
+		t.Fatalf("fallback chain should continue after its recovered predecessor, got attempt %d", chain.AttemptNumber)
 	}
 }
 
