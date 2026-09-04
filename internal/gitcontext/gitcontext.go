@@ -434,7 +434,12 @@ var Deadline = 20 * time.Second
 // another argument and a stall never is.
 var ErrTimeout = errors.New("git timed out")
 
-func git(root string, args ...string) (string, error) {
+// git is a package var wrapping gitReal so tests can drive collect/resolveBase's per-call error and
+// timeout branches (fail on the Nth invocation, or return an ErrTimeout-wrapped error) without a
+// real repository stuck in each of those states. Production always uses gitReal.
+var git = gitReal
+
+func gitReal(root string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), Deadline)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", hardenDiff(args)...)
@@ -505,8 +510,13 @@ func splitLines(value string) []string {
 	return result
 }
 
+// filepathAbs is a seam over filepath.Abs so a test can force the (otherwise unreachable, since the
+// inputs are already absolute) path-resolution failures readUntrackedExcerpts and safeJoin defend
+// against.
+var filepathAbs = filepath.Abs
+
 func readUntrackedExcerpts(root string, files []string) (string, int, int, int, error) {
-	rootAbs, err := filepath.Abs(root)
+	rootAbs, err := filepathAbs(root)
 	if err != nil {
 		return "", 0, 0, 0, err
 	}
@@ -554,7 +564,7 @@ func safeJoin(rootAbs, rel string) (string, error) {
 		return "", fmt.Errorf("untracked file is outside repository root: %s", rel)
 	}
 	path := filepath.Join(rootAbs, clean)
-	pathAbs, err := filepath.Abs(path)
+	pathAbs, err := filepathAbs(path)
 	if err != nil {
 		return "", err
 	}
