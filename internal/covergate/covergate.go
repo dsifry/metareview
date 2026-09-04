@@ -159,14 +159,16 @@ func Gate(in GateInput) (rows []Row, failures int) {
 			}
 		default:
 			floor, has := in.Floor[pkg]
-			switch {
-			case !has:
+			// An if/else-if chain rather than a tagless `switch {}` so the guards are coverage-
+			// instrumentable (Go's cover tool emits no counter for a tagless-switch case expression);
+			// behaviour is identical.
+			if !has {
 				rows = append(rows, Row{pkg, pctStr, "FAIL (no floor: add a line to tests/coverage-floor.txt, or run --update-floor)", true})
 				failures++
-			case pct1(cov.Pct()) < floor:
+			} else if pct1(cov.Pct()) < floor {
 				rows = append(rows, Row{pkg, pctStr, fmt.Sprintf("FAIL (floor %s)", strconv.FormatFloat(floor, 'f', -1, 64)), true})
 				failures++
-			default:
+			} else {
 				rows = append(rows, Row{pkg, pctStr, "ok", false})
 			}
 		}
