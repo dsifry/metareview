@@ -23,12 +23,12 @@ type Options struct {
 }
 
 type Report struct {
-	Mode          string              `json:"mode"`
-	Capabilities  repo.Capabilities   `json:"capabilities"`
-	Files         repo.Files          `json:"files"`
-	Prerequisites Prerequisites       `json:"prerequisites"`
-	Install       InstallStatus       `json:"install"`
-	Enforcement   EnforcementStatus   `json:"enforcement"`
+	Mode          string            `json:"mode"`
+	Capabilities  repo.Capabilities `json:"capabilities"`
+	Files         repo.Files        `json:"files"`
+	Prerequisites Prerequisites     `json:"prerequisites"`
+	Install       InstallStatus     `json:"install"`
+	Enforcement   EnforcementStatus `json:"enforcement"`
 	// GitGate is the push-time enforcement (the pre-push review gate), distinct from Enforcement's
 	// session-completion Stop hook. Reporting both keeps setup --check from understating the posture.
 	GitGate    GitGateStatus       `json:"gitGate"`
