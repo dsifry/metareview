@@ -117,6 +117,11 @@ type HookInstallPlan struct {
 	Current string
 	// AlreadyDone is true when Current already points at Target — install is a no-op.
 	AlreadyDone bool
+	// HooksCurrent is true when core.hooksPath is OURS and the materialized scripts are byte-current with the
+	// embed — i.e. the pre-push gate is ACTIVE — regardless of the .gitignore block. AlreadyDone is stricter
+	// (it also requires the gitpolicy block, so a reinstall restores it); a report of whether `git push` is
+	// gated must not be dragged to false by a missing ignore line, so it reads HooksCurrent, not AlreadyDone.
+	HooksCurrent bool
 	// Conflicts are human-readable reasons an install would disturb the user's setup. Non-empty ⇒ refuse
 	// without force.
 	Conflicts []string
@@ -158,7 +163,8 @@ func PlanHookInstall(root string, git GitRunner) (HookInstallPlan, error) {
 	// the gitignore block existed) has current hooks but no block — short-circuiting there would never write it,
 	// so a reinstall could not restore Gap B for an already-installed repo. All three must hold, or we fall
 	// through and ApplyHookInstall re-materializes the scripts and (re)writes the gitignore block.
-	if local != "" && sameHookPath(root, local, target) && hooksCurrent(target) && gitpolicy.Present(root) {
+	plan.HooksCurrent = local != "" && sameHookPath(root, local, target) && hooksCurrent(target)
+	if plan.HooksCurrent && gitpolicy.Present(root) {
 		plan.AlreadyDone = true
 		return plan, nil
 	}
