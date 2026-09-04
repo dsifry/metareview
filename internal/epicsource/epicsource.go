@@ -10,6 +10,20 @@ import (
 	"strings"
 )
 
+// Seams over the filesystem primitives whose error branches are otherwise unreachable in tests:
+// filepath.Abs only fails when os.Getwd fails on a relative path, filepath.Rel only fails on
+// mismatched abs/rel operands the callers never produce, and os.Stat's error path in
+// resolveMarkdown sits behind a successful filepath.EvalSymlinks (which already fails for a
+// missing path), and evalSymlinks(rootAbs) can't fail for a root that exists. Overriding these
+// lets a test force each defensive branch. (openFile/absPath seam pattern, per the repo
+// convention.)
+var (
+	filepathAbs  = filepath.Abs
+	filepathRel  = filepath.Rel
+	osStat       = os.Stat
+	evalSymlinks = filepath.EvalSymlinks
+)
+
 type Source struct {
 	Kind     string   `json:"kind"`
 	ID       string   `json:"id"`
@@ -103,7 +117,7 @@ func resolveMarkdown(root, target string) (Source, error) {
 	if err != nil {
 		return Source{}, err
 	}
-	info, err := os.Stat(path)
+	info, err := osStat(path)
 	if err != nil {
 		return Source{}, fmt.Errorf("epic path not found: %s", target)
 	}
@@ -119,7 +133,7 @@ func resolveMarkdown(root, target string) (Source, error) {
 }
 
 func containedPath(root, target string) (string, string, error) {
-	rootAbs, err := filepath.Abs(root)
+	rootAbs, err := filepathAbs(root)
 	if err != nil {
 		return "", "", err
 	}
@@ -129,25 +143,25 @@ func containedPath(root, target string) (string, string, error) {
 	} else {
 		candidate = filepath.Join(rootAbs, filepath.Clean(target))
 	}
-	candidateAbs, err := filepath.Abs(candidate)
+	candidateAbs, err := filepathAbs(candidate)
 	if err != nil {
 		return "", "", err
 	}
 	if candidateAbs != rootAbs && !strings.HasPrefix(candidateAbs, rootAbs+string(filepath.Separator)) {
 		return "", "", fmt.Errorf("epic path is outside repository root: %s", target)
 	}
-	realRoot, err := filepath.EvalSymlinks(rootAbs)
+	realRoot, err := evalSymlinks(rootAbs)
 	if err != nil {
 		return "", "", err
 	}
-	realCandidate, err := filepath.EvalSymlinks(candidateAbs)
+	realCandidate, err := evalSymlinks(candidateAbs)
 	if err != nil {
 		return "", "", err
 	}
 	if realCandidate != realRoot && !strings.HasPrefix(realCandidate, realRoot+string(filepath.Separator)) {
 		return "", "", fmt.Errorf("epic path is outside repository root: %s", target)
 	}
-	rel, err := filepath.Rel(rootAbs, candidateAbs)
+	rel, err := filepathRel(rootAbs, candidateAbs)
 	if err != nil {
 		return "", "", err
 	}

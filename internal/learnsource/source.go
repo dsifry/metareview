@@ -7,6 +7,17 @@ import (
 	"github.com/dsifry/metareview/internal/reviewlog"
 )
 
+// Collaborator seams over the context collectors Collect fans out to. Production uses the real
+// package functions; tests override one at a time to exercise Collect's error-propagation branches
+// (each collector failing must abort the whole collection) without contriving a repo/gh/knowledge
+// state that makes the real function fail.
+var (
+	discoverLogs     = reviewlog.Discover
+	collectGit       = gitcontext.CollectWithExcludes
+	collectGitHub    = githubcontext.Collect
+	collectKnowledge = knowledge.Collect
+)
+
 type Options struct {
 	Base     string
 	GitHubPR string
@@ -22,7 +33,7 @@ type Context struct {
 }
 
 func Collect(root string, options Options) (Context, error) {
-	logs, err := reviewlog.Discover(root)
+	logs, err := discoverLogs(root)
 	if err != nil {
 		return Context{}, err
 	}
@@ -31,18 +42,18 @@ func Collect(root string, options Options) (Context, error) {
 	// docs/metareview/fsm/ arrived with the FSM work and has to be excluded for
 	// the same reason the shard results are — otherwise a run's own redacted
 	// event log is ingested as code to learn from.
-	git, err := gitcontext.CollectWithExcludes(root, options.Base, []string{
+	git, err := collectGit(root, options.Base, []string{
 		"docs/metareview/shards", "docs/metareview/shards/**",
 		"docs/metareview/fsm", "docs/metareview/fsm/**",
 	})
 	if err != nil {
 		return Context{}, err
 	}
-	gh, err := githubcontext.Collect(root, options.GitHubPR)
+	gh, err := collectGitHub(root, options.GitHubPR)
 	if err != nil {
 		return Context{}, err
 	}
-	knowledgeContext, err := knowledge.Collect(root)
+	knowledgeContext, err := collectKnowledge(root)
 	if err != nil {
 		return Context{}, err
 	}
