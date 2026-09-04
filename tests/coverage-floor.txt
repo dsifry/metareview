@@ -24,7 +24,7 @@ internal/learning 90.8
 internal/learnsource 100.0
 internal/lens 100.0
 internal/markdown 100.0
-internal/mutation 94.2
+internal/mutation 100.0
 internal/prready 89.2
 internal/repo 100.0
 internal/reviewers 100.0

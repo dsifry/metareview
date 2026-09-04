@@ -242,12 +242,16 @@ func tail(s string) string {
 	return strings.ReplaceAll(s, "\n", " / ")
 }
 
+// copyTreeRel is a seam over filepath.Rel so a test can force the (otherwise unreachable, since
+// Walk only ever yields paths under src) relative-path failure copyTree defends against.
+var copyTreeRel = filepath.Rel
+
 func copyTree(src, dst string) error {
 	return filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(src, p)
+		rel, err := copyTreeRel(src, p)
 		if err != nil {
 			return err
 		}
