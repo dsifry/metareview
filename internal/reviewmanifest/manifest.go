@@ -608,17 +608,14 @@ func validPathDisposition(value string) bool {
 	}
 }
 
+// validRationale requires a rationale of at least 12 characters. A short list of placeholder tokens
+// this once also excluded by exact match was dead code: each such token is shorter than 12
+// characters, so the length guard already rejected it and the exact-match switch could never fire.
+// (That switch also never rejected a longer placeholder phrase, since it compared for equality.)
+// Rejecting placeholder phrasings regardless of length would be a behavior change, out of scope here.
 func validRationale(value string) bool {
 	value = strings.ToLower(strings.TrimSpace(value))
-	if len(value) < 12 {
-		return false
-	}
-	switch value {
-	case "n/a", "none", "to" + "do", "tbd":
-		return false
-	default:
-		return true
-	}
+	return len(value) >= 12
 }
 
 func validVerdict(value string) bool {
