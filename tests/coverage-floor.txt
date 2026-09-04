@@ -3,10 +3,11 @@
 # (100%, floored). Measured base -> head: state 58 -> 53 statements, runchain 107 -> 102,
 # findings likewise - about five statements each, not the "~1" this note first claimed. Nothing
 # became less tested; the covered code left the package.
-# 2026-08-29: sessionhistory 86.3 -> 85.2. The old value was only reachable on a machine holding
-# real ~/.claude session data: sessionhistory scans the home in addition to --session-root, so CI
-# measured 79.1 from identical code and could never pass. tests/go/test-learn-post-merge.sh now
-# supplies a fixture HOME, so 85.2 is the same everywhere - six points better than CI ever saw.
+# 2026-09-04: sessionhistory 85.2 -> 100.0. Its home lookup is injectable (Options.HomeDir), so the
+# coverage tests now drive discovery/parsing against a fixture HOME with deterministic session
+# fixtures - never the machine's real ~/.claude. That makes 100% CI-reproducible (local coverage is
+# a superset of CI's), retiring the old env-sensitive floor. (Historical note: 85.2 was the earlier
+# fixture-HOME floor after CI once measured 79.1 from identical code on a home without session data.)
 cmd/metareview 81.2
 internal/artifactreview 100.0
 internal/contextpack 100.0
@@ -32,7 +33,7 @@ internal/reviewlog 91.1
 internal/reviewmanifest 100.0
 internal/reviewstate 92.1
 internal/runchain 92.2
-internal/sessionhistory 85.2
+internal/sessionhistory 100.0
 internal/setup 89.8
 internal/shardpack 100.0
 internal/state 100.0
