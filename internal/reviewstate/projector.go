@@ -387,14 +387,6 @@ func unrelatedTargetLog(log reviewlog.Summary, changed, linked map[string]bool) 
 	return true
 }
 
-func unrelatedBranchBlocker(blocker findings.Record, current map[string]string) bool {
-	if current["type"] != "branch" || current["id"] == "" {
-		return false
-	}
-	targetType, targetID := findingTarget(blocker.Target)
-	return targetType == "branch" && targetID != "" && targetID != current["id"]
-}
-
 func unrelatedPathBlocker(blocker findings.Record, changed map[string]bool) bool {
 	targetType, targetID := findingTarget(blocker.Target)
 	if targetType != "path" {
