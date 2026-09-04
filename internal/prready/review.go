@@ -770,16 +770,19 @@ func parsePRReadyContextIdentity(text string) legacyPRReadyContextIdentity {
 			section = strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
 			continue
 		}
-		switch {
-		case section == "" && strings.HasPrefix(trimmed, "Run ID:") && identity.RunID == "":
+		// An if/else-if chain rather than a tagless `switch {}`: Go's coverage tool emits no counter for a
+		// tagless-switch case expression, so these guards read as permanently uncovered and mutation testing
+		// can never exercise them. As `if` conditions they are covered and mutation-killable. The prefixes are
+		// mutually exclusive per line, so the chain matches exactly what the switch did (first match wins).
+		if section == "" && strings.HasPrefix(trimmed, "Run ID:") && identity.RunID == "" {
 			identity.RunID = firstInlineCodeValue(trimmed)
-		case section == "Git" && strings.HasPrefix(trimmed, "- Base:") && identity.Base == "":
+		} else if section == "Git" && strings.HasPrefix(trimmed, "- Base:") && identity.Base == "" {
 			identity.Base = firstInlineCodeValue(trimmed)
-		case section == "Git" && strings.HasPrefix(trimmed, "- Head:") && identity.Head == "":
+		} else if section == "Git" && strings.HasPrefix(trimmed, "- Head:") && identity.Head == "" {
 			identity.Head = firstInlineCodeValue(trimmed)
-		case section == "Git" && strings.HasPrefix(trimmed, "- Branch:") && identity.Branch == "":
+		} else if section == "Git" && strings.HasPrefix(trimmed, "- Branch:") && identity.Branch == "" {
 			identity.Branch = firstInlineCodeValue(trimmed)
-		case section == "Git" && strings.HasPrefix(trimmed, "- "+reviewlog.ReviewerInputDigestLabel) && identity.ReviewInputDigest == "":
+		} else if section == "Git" && strings.HasPrefix(trimmed, "- "+reviewlog.ReviewerInputDigestLabel) && identity.ReviewInputDigest == "" {
 			identity.ReviewInputDigest = firstInlineCodeValue(trimmed)
 		}
 	}
@@ -963,11 +966,11 @@ func latestLogsByTarget(logs []reviewlog.Summary) []reviewlog.Summary {
 	for _, log := range latest {
 		result = append(result, log)
 	}
+	// `latest` is keyed by Target, so every entry in result has a distinct, non-empty Target — sorting by
+	// Target alone is already a total order. (A logSortKey tie-break would be dead code: no two entries can
+	// share a Target, so it could never run, and mutation testing could never exercise it.)
 	sort.Slice(result, func(i, j int) bool {
-		if result[i].Target != result[j].Target {
-			return result[i].Target < result[j].Target
-		}
-		return logSortKey(result[i]) < logSortKey(result[j])
+		return result[i].Target < result[j].Target
 	})
 	return result
 }
