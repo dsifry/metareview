@@ -148,7 +148,7 @@ func StaleSameHeadRunIDs(logs []reviewlog.Summary) map[string]bool {
 		if log.RunID > latestAll[key] {
 			latestAll[key] = log.RunID
 		}
-		if logBlocks(log) && log.RunID > latestBlocking[key] {
+		if LogBlocks(log) && log.RunID > latestBlocking[key] {
 			latestBlocking[key] = log.RunID
 		}
 	}
@@ -158,7 +158,7 @@ func StaleSameHeadRunIDs(logs []reviewlog.Summary) map[string]bool {
 			continue
 		}
 		key := sameHeadKey(log)
-		if logBlocks(log) {
+		if LogBlocks(log) {
 			// A blocker is retired ONLY by a LATER blocking run — never by a clean re-look at the same code.
 			if log.RunID != latestBlocking[key] {
 				stale[log.RunID] = true
@@ -173,10 +173,13 @@ func StaleSameHeadRunIDs(logs []reviewlog.Summary) map[string]bool {
 	return stale
 }
 
-// logBlocks reports whether a review log holds work that must clear before the branch is done: open
+// LogBlocks reports whether a review log holds work that must clear before the branch is done: open
 // unresolved blockers, OR an ESCALATED verdict (a hard stop that a later clean re-run must not erase, even if
-// the log records no open finding count).
-func logBlocks(log reviewlog.Summary) bool {
+// the log records no open finding count). It is the ONE verdict-aware blocking predicate — shared by the
+// same-head dedup here and by the status gate's must_clear builders — so the "what supersedes what" decision
+// and the "what blocks" decision can never drift apart (reviewlog already forces HasUnresolvedBlockers for an
+// ESCALATED verdict, so this is also defense-in-depth against that guarantee changing).
+func LogBlocks(log reviewlog.Summary) bool {
 	return log.HasUnresolvedBlockers || strings.EqualFold(strings.TrimSpace(log.Verdict), "ESCALATED")
 }
 

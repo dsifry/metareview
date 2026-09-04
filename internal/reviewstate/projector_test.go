@@ -129,6 +129,27 @@ func TestProjectFiltersPreviousRunChainState(t *testing.T) {
 	}
 }
 
+// LogBlocks is the ONE shared blocking predicate (dedup + gate). An ESCALATED verdict blocks even with no
+// recorded open-blocker flag (a hard stop must never be skipped), open blockers block, and a clean PASS does not.
+func TestLogBlocks(t *testing.T) {
+	cases := []struct {
+		name string
+		log  reviewlog.Summary
+		want bool
+	}{
+		{"escalated without findings still blocks", reviewlog.Summary{Verdict: "ESCALATED"}, true},
+		{"escalated is case-insensitive", reviewlog.Summary{Verdict: "escalated"}, true},
+		{"open blockers block", reviewlog.Summary{Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true}, true},
+		{"clean pass does not block", reviewlog.Summary{Verdict: "PASS"}, false},
+		{"clean with no verdict does not block", reviewlog.Summary{}, false},
+	}
+	for _, c := range cases {
+		if got := LogBlocks(c.log); got != c.want {
+			t.Fatalf("%s: LogBlocks=%v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // Re-running the SAME review over the SAME (kind, target, head) must not stack duplicate blockers (issue
 // #97): only the LATEST run is current; earlier same-head re-runs are superseded, so `review pr-ready` run
 // three times renders the branch as one blocker, not three.

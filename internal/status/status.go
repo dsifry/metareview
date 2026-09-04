@@ -133,7 +133,7 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 		superseded[id] = true
 	}
 	for _, s := range logs {
-		if !s.HasUnresolvedBlockers {
+		if !reviewstate.LogBlocks(s) { // unresolved blockers OR an ESCALATED verdict — one shared predicate
 			continue
 		}
 		if superseded[s.RunID] {
@@ -497,7 +497,7 @@ func buildForBranch(root, base string, run RunGit, committedOnly bool) (Report, 
 		superseded[id] = true
 	}
 	for _, s := range scoped {
-		if !s.HasUnresolvedBlockers || superseded[s.RunID] {
+		if !reviewstate.LogBlocks(s) || superseded[s.RunID] { // unresolved blockers OR ESCALATED — shared predicate
 			continue
 		}
 		r.MustClear = append(r.MustClear, Blocker{
