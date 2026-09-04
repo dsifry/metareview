@@ -34,18 +34,23 @@ type Summary struct {
 	AdvisoryFindingCount  int      `json:"advisoryFindingCount,omitempty"`
 	FollowUpFindingCount  int      `json:"followUpFindingCount,omitempty"`
 	WarningFindingCount   int      `json:"warningFindingCount,omitempty"`
-	// HeadSHA is the commit the review ran against. Read from the committed log's header so a
-	// clone can answer, and overridden by the local run record where one exists. It is what lets
-	// a caller ask "does this blocker belong to the branch in hand" instead of matching target
-	// strings — which never worked, because no review records a source path as its target.
+	// HeadSHA is the commit the review ran against. In practice it comes only from the local run
+	// record (runs.jsonl) via mergeRunMetadata: no current review-log writer emits a Head: line into
+	// docs/metareview/reviews/*.md (the "- Head:" bullet is written only into the context pack, which
+	// Discover does not read), so the HeadLabel parse below is a defensive path with no producer today
+	// and is inert for the logs these writers make. It is what lets a caller ask "does this blocker
+	// belong to the branch in hand" instead of matching target strings — which never worked, because
+	// no review records a source path as its target. Consequence: on a clone/CI with no runs.jsonl a
+	// review log carries no head (see BaseSHA).
 	HeadSHA string `json:"headSha,omitempty"`
 	// BaseSHA is the base the review's diff was measured from. The same-head dedup identity is
 	// really (kind, target, baseSha, headSha): two reviews at the SAME head but a DIFFERENT base
 	// (main advanced, so merge-base(HEAD, main) moved) reviewed DIFFERENT diffs and must not
-	// collapse into one group (issue #99). It comes ONLY from the local run record (runs.jsonl) —
-	// there is no committed-markdown base parse, unlike HeadLabel — so a record with no runs.jsonl
-	// (a clone/CI checkout) carries no base and is not grouped. No production review writer emits a
-	// committed base for these scopes, so real committed-only logs are never grouped anyway.
+	// collapse into one group (issue #99). Like HeadSHA it comes ONLY from the local run record
+	// (runs.jsonl) — there is no committed-markdown base parse at all — so a record with no runs.jsonl
+	// (a clone/CI checkout) carries no base (nor head) and is not grouped. Keeping base out of the
+	// committed markdown is also deliberate: that text is editable by anyone who can commit, whereas
+	// the gitignored run record is not.
 	BaseSHA string `json:"baseSha,omitempty"`
 	// CoveredPaths are the source files the review actually looked at, and CoveredPathsKnown says
 	// whether the review answered that question AT ALL. Empty-and-known means "examined nothing";
@@ -197,9 +202,12 @@ func parseMarkdown(rel, text string) Summary {
 				summary.ContextRel = markdown.FirstInlineCode(line)
 			}
 		case inHeader && strings.HasPrefix(line, HeadLabel):
-			// Read from the COMMITTED log, so a clone, a fresh worktree or a CI checkout can
-			// still say which commit a review covered. This lived only in the untracked run
-			// record, so scoping evaporated the moment the review left the machine that made it.
+			// A defensive parse for a committed Head: line: were one present it would let a clone or
+			// CI checkout say which commit a review covered without the untracked run record. NOTE: no
+			// current review-log writer actually emits a Head: line into docs/metareview/reviews/ (the
+			// "- Head:" bullet goes only into the context pack, which Discover does not read), so today
+			// this branch never fires for the logs those writers produce and HeadSHA comes solely from
+			// mergeRunMetadata. Kept so a future writer (or a hand-authored log) round-trips correctly.
 			if sha := markdown.FirstInlineCode(line); sha != UnknownHead && summary.HeadSHA == "" {
 				summary.HeadSHA = sha
 			}
