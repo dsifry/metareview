@@ -1,12 +1,13 @@
 package prready
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/dsifry/metareview/internal/mutation"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/dsifry/metareview/internal/githubcontext"
 	"github.com/dsifry/metareview/internal/knowledge"
 	"github.com/dsifry/metareview/internal/markdown"
+	"github.com/dsifry/metareview/internal/mutation"
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewers"
 	"github.com/dsifry/metareview/internal/reviewlog"
@@ -144,7 +146,7 @@ func canonicalFindingFrontier(records []findings.Record) []findings.Record {
 	return result
 }
 
-func validateExplicitPreviousRunInput(logs []reviewlog.Summary, previousRunID string) error {
+func validateExplicitPreviousRunInput(root string, logs []reviewlog.Summary, previousRunID string, targetRecord map[string]string, git gitcontext.Context) error {
 	previousRunID = strings.TrimSpace(previousRunID)
 	if previousRunID == "" {
 		return nil
@@ -153,7 +155,7 @@ func validateExplicitPreviousRunInput(logs []reviewlog.Summary, previousRunID st
 		if log.RunID != previousRunID {
 			continue
 		}
-		if !log.RunRecordAuthenticated {
+		if !log.RunRecordAuthenticated && !committedPRReadyInputAuthenticated(root, log, targetRecord, git) {
 			return fmt.Errorf("previous run %s has a stale or unauthenticated reviewer input digest", previousRunID)
 		}
 		return nil
@@ -252,7 +254,7 @@ func Create(root string, options Options) (Result, error) {
 		return Result{}, err
 	}
 	linkedTargets := []map[string]string{}
-	if ghCtx.Available && ghCtx.PRNumber != "" {
+	if ghCtx.PRNumber != "" {
 		linkedTargets = append(linkedTargets, map[string]string{"type": "pull-request", "id": ghCtx.PRNumber})
 	}
 	projection := reviewstate.ProjectRecords(logs, blockers, reviewstate.Options{
@@ -341,10 +343,16 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if err := validateExplicitPreviousRunInput(logs, options.PreviousRunID); err != nil {
+	if err := validateExplicitPreviousRunInput(root, logs, options.PreviousRunID, targetRecord, git); err != nil {
 		return Result{}, err
 	}
 	reused, hasReusableVerdict := reusableVerdict(logs, targetRecord, git.BaseSHA, git.HeadSHA, reviewInputDigest)
+	// An explicit predecessor denotes a fix-chain transition. Reviewers must run
+	// so Reconcile can close (or preserve) findings from that predecessor; an
+	// older matching PASS cannot establish that the newer blocker was fixed.
+	if strings.TrimSpace(options.PreviousRunID) != "" {
+		hasReusableVerdict = false
+	}
 	var rawFindings []reviewers.Finding
 	if !hasReusableVerdict {
 		rawFindings = runPRReadyReviewers(reviewerCtx)
@@ -384,7 +392,7 @@ func Create(root string, options Options) (Result, error) {
 		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, shardPlan, packDir, manifest, aggregate, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect)), 0o644); err != nil {
+		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, shardPlan, packDir, manifest, aggregate, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect, reviewInputDigest)), 0o644); err != nil {
 			return err
 		}
 		if hasReusableVerdict {
@@ -592,6 +600,7 @@ func resolveRunChain(root string, targetRecord map[string]string, options Option
 	if fallbackErr != nil {
 		return runchain.Decision{}, nil, fallbackErr
 	}
+	fallback.AttemptNumber = len(previousRunIDs) + 1
 	return fallback, previousRunIDs, nil
 }
 
@@ -645,7 +654,9 @@ func legacyPRReadyTargetMatch(root string, log reviewlog.Summary, targetRecord m
 		return false, true
 	}
 	if git.HeadSHA != "" && identity.Head != "" && identity.Head != git.HeadSHA {
-		return false, true
+		if !validGitObjectID(identity.Head) || !validGitObjectID(git.HeadSHA) || !gitCommitIsAncestor(root, identity.Head, git.HeadSHA) {
+			return false, true
+		}
 	}
 	return true, true
 }
@@ -682,8 +693,11 @@ func legacyEscalatedPRReadyForTarget(root string, logs []reviewlog.Summary, targ
 }
 
 type legacyPRReadyContextIdentity struct {
-	Branch string
-	Head   string
+	RunID             string
+	Base              string
+	Branch            string
+	Head              string
+	ReviewInputDigest string
 }
 
 func readLegacyPRReadyContextIdentity(root, rel string) (legacyPRReadyContextIdentity, error) {
@@ -695,23 +709,102 @@ func readLegacyPRReadyContextIdentity(root, rel string) (legacyPRReadyContextIde
 	if clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
 		return legacyPRReadyContextIdentity{}, fmt.Errorf("legacy context path escapes repository: %s", rel)
 	}
-	bytes, err := os.ReadFile(filepath.Join(root, clean))
+	content, err := os.ReadFile(filepath.Join(root, clean))
 	if err != nil {
 		return legacyPRReadyContextIdentity{}, err
 	}
-	var identity legacyPRReadyContextIdentity
-	for _, line := range strings.Split(string(bytes), "\n") {
-		switch {
-		case strings.HasPrefix(line, "- Branch:"):
-			identity.Branch = firstInlineCodeValue(line)
-		case strings.HasPrefix(line, "- Head:"):
-			identity.Head = firstInlineCodeValue(line)
-		}
-	}
+	identity := parsePRReadyContextIdentity(string(content))
 	if identity.Branch == "" && identity.Head == "" {
 		return legacyPRReadyContextIdentity{}, fmt.Errorf("legacy context lacks branch and head identity")
 	}
 	return identity, nil
+}
+
+func parsePRReadyContextIdentity(text string) legacyPRReadyContextIdentity {
+	var identity legacyPRReadyContextIdentity
+	section := ""
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			section = strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
+			continue
+		}
+		switch {
+		case section == "" && strings.HasPrefix(trimmed, "Run ID:") && identity.RunID == "":
+			identity.RunID = firstInlineCodeValue(trimmed)
+		case section == "Git" && strings.HasPrefix(trimmed, "- Base:") && identity.Base == "":
+			identity.Base = firstInlineCodeValue(trimmed)
+		case section == "Git" && strings.HasPrefix(trimmed, "- Head:") && identity.Head == "":
+			identity.Head = firstInlineCodeValue(trimmed)
+		case section == "Git" && strings.HasPrefix(trimmed, "- Branch:") && identity.Branch == "":
+			identity.Branch = firstInlineCodeValue(trimmed)
+		case section == "Git" && strings.HasPrefix(trimmed, "- "+reviewlog.ReviewerInputDigestLabel) && identity.ReviewInputDigest == "":
+			identity.ReviewInputDigest = firstInlineCodeValue(trimmed)
+		}
+	}
+	return identity
+}
+
+func committedPRReadyInputAuthenticated(root string, log reviewlog.Summary, targetRecord map[string]string, git gitcontext.Context) bool {
+	if log.Kind != "pr-ready" || strings.TrimSpace(log.Target) != "current branch" ||
+		strings.TrimSpace(log.RunID) == "" || !validSHA256Digest(log.DeclaredInputDigest) ||
+		git.Branch == "" || targetRecord["type"] != "branch" || targetRecord["id"] != git.Branch {
+		return false
+	}
+	committedReview, ok := committedFile(root, log.Path)
+	if !ok {
+		return false
+	}
+	workingReview, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(log.Path)))
+	if err != nil || !bytes.Equal(committedReview, workingReview) {
+		return false
+	}
+	committedContext, ok := committedFile(root, log.ContextRel)
+	if !ok {
+		return false
+	}
+	identity := parsePRReadyContextIdentity(string(committedContext))
+	if identity.RunID != log.RunID || identity.Base == "" || identity.Base != git.BaseSHA ||
+		identity.Branch != git.Branch || identity.Head == "" || !validGitObjectID(identity.Head) ||
+		identity.ReviewInputDigest != log.DeclaredInputDigest {
+		return false
+	}
+	return identity.Head == git.HeadSHA || (validGitObjectID(git.HeadSHA) && gitCommitIsAncestor(root, identity.Head, git.HeadSHA))
+}
+
+func committedFile(root, rel string) ([]byte, bool) {
+	clean := filepath.Clean(strings.TrimSpace(rel))
+	if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return nil, false
+	}
+	cmd := exec.Command("git", "show", "HEAD:"+filepath.ToSlash(clean))
+	cmd.Dir = root
+	content, err := cmd.Output()
+	return content, err == nil
+}
+
+func gitCommitIsAncestor(root, ancestor, descendant string) bool {
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestor, descendant)
+	cmd.Dir = root
+	return cmd.Run() == nil
+}
+
+func validSHA256Digest(value string) bool {
+	const prefix = "sha256:"
+	return strings.HasPrefix(value, prefix) && len(value) == len(prefix)+64 && validHex(value[len(prefix):])
+}
+
+func validGitObjectID(value string) bool {
+	return (len(value) == 40 || len(value) == 64) && validHex(value)
+}
+
+func validHex(value string) bool {
+	for _, char := range value {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			return false
+		}
+	}
+	return value != ""
 }
 
 func firstInlineCodeValue(line string) string {
@@ -1096,7 +1189,7 @@ func uniquePaths(root string, at time.Time) (string, string, string, error) {
 	}
 }
 
-func contextMarkdown(runID string, git gitcontext.Context, profile contextprofile.Profile, plan contextprofile.ShardPlan, packDir string, manifest reviewmanifest.Manifest, aggregate reviewmanifest.AggregateResult, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string, ghCtx githubcontext.Context, prEvidence, gateEffect string) string {
+func contextMarkdown(runID string, git gitcontext.Context, profile contextprofile.Profile, plan contextprofile.ShardPlan, packDir string, manifest reviewmanifest.Manifest, aggregate reviewmanifest.AggregateResult, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string, ghCtx githubcontext.Context, prEvidence, gateEffect, reviewInputDigest string) string {
 	changed := append([]string{}, git.ChangedFiles...)
 	changed = append(changed, git.StagedFiles...)
 	changed = append(changed, git.WorkingTreeFiles...)
@@ -1107,6 +1200,7 @@ func contextMarkdown(runID string, git gitcontext.Context, profile contextprofil
 		"- Base: " + markdown.InlineCode(git.BaseSHA) + "\n" +
 		"- Head: " + markdown.InlineCode(git.HeadSHA) + "\n" +
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
+		"- " + reviewlog.ReviewerInputDigestLabel + " " + markdown.InlineCode(reviewInputDigest) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		contextprofile.Markdown(profile) + "\n\n" +
 		contextprofile.ShardPlanMarkdown(plan, shardpack.Rel(packDir)) + "\n\n" +

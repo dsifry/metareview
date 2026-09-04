@@ -165,6 +165,183 @@ func TestChangedReviewerInputsStartFreshReview(t *testing.T) {
 	}
 }
 
+func TestExplicitPreviousRunWithOpenFindingCannotReuseOlderPass(t *testing.T) {
+	root := smallPRReadyRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
+	evidence := filepath.Join(t.TempDir(), "evidence.md")
+	if err := os.WriteFile(evidence, []byte("go test ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original := runPRReadyReviewers
+	calls := 0
+	runPRReadyReviewers = func(reviewers.PRReadyContext) []reviewers.Finding {
+		calls++
+		if calls != 2 {
+			return nil
+		}
+		return []reviewers.Finding{{
+			Reviewer:       "security-reviewer",
+			Severity:       "high",
+			Classification: "blocking",
+			Title:          "Predecessor blocker",
+			Finding:        "The predecessor still records a release risk.",
+			Expected:       "An explicit fix run must execute reviewers before reconciling it.",
+			Found:          "An older successful digest is otherwise reusable.",
+			Recommendation: "Run the review and reconcile the predecessor finding.",
+			Fingerprint:    "security:predecessor-blocker",
+		}}
+	}
+	t.Cleanup(func() { runPRReadyReviewers = original })
+
+	first, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 3, 3, 30, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Blocking {
+		t.Fatalf("first run must establish the older reusable success: %+v", first)
+	}
+	if err := os.WriteFile(evidence, []byte("go test ./... and go vet ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 3, 3, 30, 1, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.Blocking {
+		t.Fatalf("second run must record the predecessor blocker: %+v", second)
+	}
+	if err := os.WriteFile(evidence, []byte("go test ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	third, err := Create(root, Options{Base: "main", EvidencePath: evidence, PreviousRunID: second.RunID, Now: time.Date(2026, 9, 3, 3, 30, 2, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 3 || third.Reused || third.Blocking {
+		t.Fatalf("explicit fix run must execute and reconcile instead of reusing an older PASS: calls=%d result=%+v", calls, third)
+	}
+	open, err := findings.UnresolvedBlocking(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 0 {
+		t.Fatalf("successful explicit fix run must reconcile the predecessor finding: %+v", open)
+	}
+}
+
+func TestCommittedPreviousRunContinuesInFreshCloneWithAuthenticatedContext(t *testing.T) {
+	root := smallPRReadyRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
+	evidence := filepath.Join(t.TempDir(), "evidence.md")
+	if err := os.WriteFile(evidence, []byte("go test ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original := runPRReadyReviewers
+	calls := 0
+	runPRReadyReviewers = func(reviewers.PRReadyContext) []reviewers.Finding {
+		calls++
+		if calls != 1 {
+			return nil
+		}
+		return []reviewers.Finding{{
+			Reviewer:       "security-reviewer",
+			Severity:       "high",
+			Classification: "blocking",
+			Title:          "Committed predecessor blocker",
+			Finding:        "The first committed revision still has a release risk.",
+			Expected:       "A later commit can continue this authenticated committed chain.",
+			Found:          "The local run record will be absent in a fresh clone.",
+			Recommendation: "Commit the review evidence and fix the source.",
+			Fingerprint:    "security:committed-predecessor",
+		}}
+	}
+	t.Cleanup(func() { runPRReadyReviewers = original })
+
+	first, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 3, 3, 40, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Blocking {
+		t.Fatalf("first run must record the committed predecessor blocker: %+v", first)
+	}
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	runGit("add", "docs/metareview")
+	runGit("commit", "-m", "record predecessor review")
+	if err := os.WriteFile(filepath.Join(root, "seed.txt"), []byte("fixed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "seed.txt")
+	runGit("commit", "-m", "fix predecessor finding")
+	if err := os.RemoveAll(filepath.Join(root, ".metareview")); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := Create(root, Options{Base: "main", EvidencePath: evidence, PreviousRunID: first.RunID, Now: time.Date(2026, 9, 3, 3, 40, 1, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || second.Reused || second.Blocking {
+		t.Fatalf("fresh clone must continue the authenticated committed fix chain with a new review: calls=%d result=%+v", calls, second)
+	}
+	runs, err := os.ReadFile(filepath.Join(root, ".metareview", "runs.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(runs), `"previousRunId":"`+first.RunID+`"`) || !strings.Contains(string(runs), `"attemptNumber":2`) {
+		t.Fatalf("fresh-clone continuation must retain predecessor and attempt identity:\n%s", runs)
+	}
+}
+
+func TestExplicitPRBlockerRemainsCurrentWhenGitHubIsUnavailable(t *testing.T) {
+	root := smallPRReadyRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
+	remote := exec.Command("git", "remote", "add", "origin", "https://github.com/acme/repo.git")
+	remote.Dir = root
+	if out, err := remote.CombinedOutput(); err != nil {
+		t.Fatalf("add origin: %v\n%s", err, out)
+	}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := os.MkdirAll(filepath.Join(root, ".metareview"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".metareview", "findings.jsonl"), []byte(`{"schemaVersion":1,"id":"mrvf-pr-99","runId":"mrv-pr-99","scope":"pr-ready","reviewer":"security-reviewer","severity":"high","classification":"blocking","status":"open","title":"PR-linked blocker","fingerprint":"security:pr-99","target":{"type":"pull-request","id":"99"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	evidence := filepath.Join(t.TempDir(), "evidence.md")
+	if err := os.WriteFile(evidence, []byte("go test ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original := runPRReadyReviewers
+	var reviewedEvidence string
+	runPRReadyReviewers = func(ctx reviewers.PRReadyContext) []reviewers.Finding {
+		reviewedEvidence = ctx.PREvidenceMarkdown
+		if !strings.Contains(reviewedEvidence, "PR-linked blocker") {
+			return nil
+		}
+		return []reviewers.Finding{{Reviewer: "security-reviewer", Severity: "high", Classification: "blocking", Title: "PR-linked blocker", Fingerprint: "security:pr-99-current"}}
+	}
+	t.Cleanup(func() { runPRReadyReviewers = original })
+
+	result, err := Create(root, Options{Base: "main", EvidencePath: evidence, GitHubPR: "99", Now: time.Date(2026, 9, 3, 3, 50, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reviewedEvidence, "PR-linked blocker") || !result.Blocking {
+		t.Fatalf("explicit PR identity must retain its blocker when live GitHub context is unavailable: evidence=%q result=%+v", reviewedEvidence, result)
+	}
+}
+
 func TestPriorCurrentTargetBlockerSurvivesMissingGitHubContextAndPreventsReuse(t *testing.T) {
 	root := smallPRReadyRepo(t)
 	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
@@ -348,6 +525,7 @@ func TestContextMarkdownIncludesReviewManifest(t *testing.T) {
 		githubcontext.Context{},
 		"## metareview PR Evidence\n\nvalidation",
 		"gate",
+		"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	)
 
 	for _, required := range []string{
@@ -382,6 +560,7 @@ func TestContextMarkdownDispositionsGeneratedReviewArtifacts(t *testing.T) {
 		githubcontext.Context{},
 		"## metareview PR Evidence\n\nvalidation",
 		"gate",
+		"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	)
 
 	for _, required := range []string{
