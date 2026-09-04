@@ -272,19 +272,37 @@ func TestRemoveEmptyLearningDirs(t *testing.T) {
 
 // RunPostMerge restores the tree and aborts when a write fails: pre-placing a FILE where the
 // learning directory must be created makes MkdirAll fail, exercising the error/restore branch.
+// A failure in a LATE write (calibration) must roll the run back: the accepted log written earlier
+// is removed, and a file that pre-existed the run keeps its original content. This asserts the
+// documented rollback postcondition, not merely that an error was returned.
 func TestRunPostMergeRestoresOnWriteFailure(t *testing.T) {
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	pr := "9"
+	_, acceptedRel, _ := learningPaths(pr, now)
 	root := newLearningRepo(t)
-	// docs/metareview/learning as a FILE blocks the MkdirAll for the accepted log's parent.
-	learning := filepath.Join(root, "docs", "metareview", "learning")
-	if err := os.MkdirAll(filepath.Dir(learning), 0o755); err != nil {
+	// A ledger yielding a calibration candidate so WriteCalibration actually attempts (and fails).
+	ledger := `{"schemaVersion":1,"id":"mrvf-fp","status":"false-positive","title":"was a false positive","finding":"not real"}` + "\n"
+	if err := os.WriteFile(filepath.Join(root, ".metareview", "findings.jsonl"), []byte(ledger), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(learning, []byte("not a dir"), 0o644); err != nil {
+	// A pre-existing runs ledger with sentinel content: the run must NOT leave it altered on failure.
+	runsPath := filepath.Join(root, ".metareview", "learning-runs.jsonl")
+	if err := os.WriteFile(runsPath, []byte("SENTINEL\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RunPostMerge(root, ReviewOptions{PostMergePR: "9", Base: "HEAD", HomeDir: t.TempDir(),
-		Now: time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)}); err == nil {
+	// Block the (late) calibration write so accepted/discard/knowledge succeed first, then it fails.
+	mustDir(t, filepath.Join(root, ".metareview", "calibration.jsonl"))
+
+	if _, err := RunPostMerge(root, ReviewOptions{PostMergePR: pr, Base: "HEAD", HomeDir: t.TempDir(), Now: now}); err == nil {
 		t.Fatalf("a write failure must surface an error")
+	}
+	// The accepted log was written before calibration failed; rollback must remove it.
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(acceptedRel))); !os.IsNotExist(err) {
+		t.Fatalf("the accepted log written before the failure must be rolled back, stat err=%v", err)
+	}
+	// The pre-existing runs ledger must be restored to its original content.
+	if body, err := os.ReadFile(runsPath); err != nil || string(body) != "SENTINEL\n" {
+		t.Fatalf("a pre-existing file must survive rollback unchanged, got %q err=%v", body, err)
 	}
 }
 
@@ -351,8 +369,14 @@ func TestWriteKnowledgeAndCalibrationSurfaceWriteErrors(t *testing.T) {
 // ledger.
 func TestRunPostMergeEarlyBranches(t *testing.T) {
 	root := newLearningRepo(t)
-	if _, err := RunPostMerge(root, ReviewOptions{PostMergePR: "1", Base: "HEAD", HomeDir: t.TempDir()}); err != nil {
+	res, err := RunPostMerge(root, ReviewOptions{PostMergePR: "1", Base: "HEAD", HomeDir: t.TempDir()})
+	if err != nil {
 		t.Fatalf("a zero Now should default to the wall clock: %v", err)
+	}
+	// The substitution actually happened: the run-id is not the one a zero-value clock would produce.
+	zeroRunID, _, _ := learningPaths("1", time.Time{})
+	if res.RunID == zeroRunID || res.RunID == "" {
+		t.Fatalf("a zero Now must be replaced by the wall clock, got run id %q (zero-clock id %q)", res.RunID, zeroRunID)
 	}
 
 	if _, err := RunPostMerge(newLearningRepo(t), ReviewOptions{PostMergePR: "1", Base: "a..b", HomeDir: t.TempDir()}); err == nil {
@@ -412,6 +436,12 @@ func TestRunPostMergeInnerWriteErrors(t *testing.T) {
 		setup func(root string)
 	}{
 		{"git policy", func(root string) { mustDir(t, filepath.Join(root, ".gitignore")) }},
+		{"learning dir", func(root string) { // a FILE where the learning dir must be created -> MkdirAll fails
+			mustDir(t, filepath.Join(root, "docs", "metareview"))
+			if err := os.WriteFile(filepath.Join(root, "docs", "metareview", "learning"), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
 		{"accepted log", func(root string) { mustDir(t, filepath.Join(root, filepath.FromSlash(acceptedRel))) }},
 		{"discard log", func(root string) { mustDir(t, filepath.Join(root, filepath.FromSlash(discardRel))) }},
 		{"knowledge", func(root string) { mustDir(t, filepath.Join(root, filepath.FromSlash(knowledgeRelPath(root)))) }},
