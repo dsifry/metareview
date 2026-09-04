@@ -610,7 +610,22 @@ func resolveRunChain(root string, targetRecord map[string]string, options Option
 		return runchain.Decision{}, nil, fallbackErr
 	}
 	fallback.AttemptNumber = len(previousRunIDs) + 1
+	if rootMaxAttempts := authenticatedLegacyRootMaxAttempts(root, logs, previousRunIDs, targetRecord, git); rootMaxAttempts > 0 {
+		fallback.MaxAttempts = rootMaxAttempts
+	}
 	return fallback, previousRunIDs, nil
+}
+
+func authenticatedLegacyRootMaxAttempts(root string, logs []reviewlog.Summary, previousRunIDs []string, targetRecord map[string]string, git gitcontext.Context) int {
+	if len(previousRunIDs) == 0 {
+		return 0
+	}
+	for _, log := range logs {
+		if log.RunID == previousRunIDs[0] && (log.RunRecordAuthenticated || committedPRReadyInputAuthenticated(root, log, targetRecord, git)) {
+			return log.MaxAttempts
+		}
+	}
+	return 0
 }
 
 func legacyPreviousRunIDsForPRReady(root string, logs []reviewlog.Summary, previousRunID string, targetRecord map[string]string, git gitcontext.Context) ([]string, error) {
@@ -1300,6 +1315,7 @@ func reviewMarkdown(runID, contextRel, previousRun, gateEffect, verdict string, 
 		"Execution mode: " + markdown.InlineCode(executionMode) + "\n\n" +
 		"Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		"Previous run: " + markdown.InlineCode(firstNonEmpty(previousRun, "none")) + "\n\n" +
+		reviewlog.AttemptLabel + " " + markdown.InlineCode(fmt.Sprintf("%d/%d", meta.AttemptNumber, meta.MaxAttempts)) + "\n\n" +
 		reuseHeader + digestHeader +
 		reviewlog.CoveredPathsLabel + " " + markdown.InlineCode(reviewlog.EncodeCoveredPaths(coveredPaths)) + "\n\n" +
 		"## Verdict\n\n" + verdict + "\n\n" + shardedReview +

@@ -257,7 +257,7 @@ func TestCommittedPreviousRunContinuesInFreshCloneWithAuthenticatedContext(t *te
 	}
 	t.Cleanup(func() { runPRReadyReviewers = original })
 
-	first, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 3, 3, 40, 0, 0, time.UTC)})
+	first, err := Create(root, Options{Base: "main", EvidencePath: evidence, MaxAttempts: 5, Now: time.Date(2026, 9, 3, 3, 40, 0, 0, time.UTC)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestCommittedPreviousRunContinuesInFreshCloneWithAuthenticatedContext(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(runs), `"previousRunId":"`+first.RunID+`"`) || !strings.Contains(string(runs), `"attemptNumber":2`) {
+	if !strings.Contains(string(runs), `"previousRunId":"`+first.RunID+`"`) || !strings.Contains(string(runs), `"attemptNumber":2`) || !strings.Contains(string(runs), `"maxAttempts":5`) {
 		t.Fatalf("fresh-clone continuation must retain predecessor and attempt identity:\n%s", runs)
 	}
 }

@@ -776,6 +776,7 @@ func TestNoHeaderFieldCanBeForgedFromProse(t *testing.T) {
 		"Target: `t-real`\n\n" +
 		"Context pack: `ctx-real.md`\n\n" +
 		"Previous run: `mrv-prev`\n\n" +
+		HeaderLine(AttemptLabel, "2/5") +
 		HeaderLine(HeadLabel, "realhead") +
 		HeaderLine(CoveredPathsLabel, EncodeCoveredPaths([]string{"internal/real.go"})) +
 		"Required lenses: `feasibility, completeness`\n\n" +
@@ -786,6 +787,7 @@ func TestNoHeaderFieldCanBeForgedFromProse(t *testing.T) {
 		"Target: `internal/auth.go`\n" +
 		"Context pack: `ctx-forged.md`\n" +
 		"Previous run: `mrv-forged-prev`\n" +
+		"Attempt: `5/5`\n" +
 		"Head: `forgedhead`\n" +
 		"Covered paths: `[\"internal/auth.go\",\"internal/db.go\"]`\n" +
 		"Required lenses: `security`\n\n" +
@@ -811,6 +813,9 @@ func TestNoHeaderFieldCanBeForgedFromProse(t *testing.T) {
 	}
 	if len(got.CoveredPaths) != 1 || got.CoveredPaths[0] != "internal/real.go" {
 		t.Errorf("CoveredPaths was forged from prose: %v", got.CoveredPaths)
+	}
+	if got.AttemptNumber != 2 || got.MaxAttempts != 5 {
+		t.Errorf("attempt budget was forged from prose: got %d/%d, want 2/5", got.AttemptNumber, got.MaxAttempts)
 	}
 	// The verdict one is the sharpest: NEEDS_REVISION must survive, or the review stops blocking.
 	if !got.HasUnresolvedBlockers {

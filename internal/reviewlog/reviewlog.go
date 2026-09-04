@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -93,7 +94,10 @@ type findingRecord struct {
 var findingIDPattern = regexp.MustCompile(`mrvf-[A-Za-z0-9._@/-]+`)
 var reviewInputDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-const ReviewerInputDigestLabel = "Reviewer input digest:"
+const (
+	ReviewerInputDigestLabel = "Reviewer input digest:"
+	AttemptLabel             = "Attempt:"
+)
 
 func Discover(root string) ([]Summary, error) {
 	records, err := readFindings(root)
@@ -184,6 +188,10 @@ func parseMarkdown(rel, text string) Summary {
 			if summary.PreviousRunID == "" {
 				summary.PreviousRunID = previousRunID(markdown.FirstInlineCode(line))
 			}
+		case inHeader && strings.HasPrefix(line, AttemptLabel):
+			if summary.AttemptNumber == 0 && summary.MaxAttempts == 0 {
+				summary.AttemptNumber, summary.MaxAttempts = decodeAttempt(markdown.FirstInlineCode(line))
+			}
 		case inHeader && strings.HasPrefix(line, "Context pack:"):
 			if summary.ContextRel == "" {
 				summary.ContextRel = markdown.FirstInlineCode(line)
@@ -242,6 +250,19 @@ func previousRunID(value string) string {
 		return ""
 	}
 	return value
+}
+
+func decodeAttempt(value string) (int, int) {
+	attemptText, maxText, ok := strings.Cut(strings.TrimSpace(value), "/")
+	if !ok || strings.Contains(maxText, "/") {
+		return 0, 0
+	}
+	attempt, attemptErr := strconv.Atoi(attemptText)
+	maxAttempts, maxErr := strconv.Atoi(maxText)
+	if attemptErr != nil || maxErr != nil || attempt <= 0 || maxAttempts <= 0 {
+		return 0, 0
+	}
+	return attempt, maxAttempts
 }
 
 func reviewKind(line string) string {
