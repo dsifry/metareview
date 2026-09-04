@@ -198,8 +198,12 @@ func TestResolveRunChainRecoversLegacyPreviousRun(t *testing.T) {
 	if len(previousRunIDs) != 1 || previousRunIDs[0] != "mrv-1" {
 		t.Fatalf("previousRunIDs = %v, want [mrv-1]", previousRunIDs)
 	}
-	if chain.AttemptNumber != 1 {
-		t.Fatalf("fallback chain should resolve a fresh attempt, got %d", chain.AttemptNumber)
+	// The recovered chain's attempt number reflects the chain length: one prior run (mrv-1) recovered from
+	// the committed logs makes this the SECOND attempt, not a fresh first. (Before the fresh-clone recovery
+	// landed, the fallback undercounted this as attempt 1; resolveRunChain now sets it to
+	// len(previousRunIDs)+1.)
+	if chain.AttemptNumber != 2 {
+		t.Fatalf("recovered chain attempt should be len(previousRunIDs)+1 = 2, got %d", chain.AttemptNumber)
 	}
 }
 
