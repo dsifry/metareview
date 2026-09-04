@@ -249,6 +249,67 @@ func TestBuildForBranchSupersedesRepairedParent(t *testing.T) {
 	}
 }
 
+// Issue #97: re-running `review pr-ready` over the SAME branch head records a fresh log each time. The gate
+// (BuildForBranch) must render the branch as ONE blocker (the latest run), not one per re-run — otherwise a
+// user who re-runs the review to re-check gets an ever-growing, never-clearing blocker list. supersededRuns
+// alone does not cover this (it needs a CLEAN child); the same-head dedup does. This pins the GATE path
+// specifically, which builds must_clear separately from the unscoped Build.
+func TestBuildForBranchDedupsSameHeadReruns(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	for _, id := range []string{"mrv-1", "mrv-2", "mrv-3"} {
+		mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", id+".md"),
+			"# metareview: pr-ready review\n\nRun ID: `"+id+"`\nTarget: `current branch`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	}
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-1","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`"}`+"\n"+
+			`{"id":"mrv-2","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`"}`+"\n"+
+			`{"id":"mrv-3","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`"}`+"\n")
+
+	got, err := BuildForBranch(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reviewBlockers []Blocker
+	for _, b := range got.MustClear {
+		if b.Target == "current branch" && b.Verdict == "NEEDS_REVISION" {
+			reviewBlockers = append(reviewBlockers, b)
+		}
+	}
+	if len(reviewBlockers) != 1 || reviewBlockers[0].RunID != "mrv-3" {
+		t.Fatalf("three identical same-head re-runs must render as ONE blocker (the latest); got %+v", reviewBlockers)
+	}
+}
+
+// FALSE-CLEAR GUARD at the GATE (#97 review): a later CLEAN pr-ready re-run over the SAME branch head must
+// NOT supersede an earlier NEEDS_REVISION over the same commit (the code is byte-identical, so a clean second
+// look is a reviewer miss, not a fix — and CI reads exactly these committed logs). The branch must stay
+// blocked. Only a later BLOCKING run, or an explicit repair lineage, may retire the earlier blocker.
+func TestBuildForBranchKeepsSameHeadBlockerDespiteLaterCleanRerun(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "mrv-1.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-1`\nTarget: `current branch`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	// A later, UNLINKED clean re-run at the SAME head (no previousRunId — a naive re-run).
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "mrv-2.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-2`\nTarget: `current branch`\n\n## Verdict\n\nPASS\n")
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-1","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`"}`+"\n"+
+			`{"id":"mrv-2","scope":"pr-ready","verdict":"PASS","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"]}`+"\n")
+
+	got, err := BuildForBranch(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := false
+	for _, b := range got.MustClear {
+		if b.RunID == "mrv-1" && b.Verdict == "NEEDS_REVISION" {
+			blocked = true
+		}
+	}
+	if !blocked {
+		t.Fatalf("a later clean same-head re-run must NOT clear the earlier NEEDS_REVISION (false-CLEAR); must_clear=%+v", got.MustClear)
+	}
+}
+
 // BuildForBranch computes supersede over the FULL log set, not the branch-scoped subset: a repair whose
 // CLEAN child sits at a commit OFF this branch (out of scope) must still retire the in-scope open parent it
 // links back to. A mutation narrowing supersededRuns(all) -> supersededRuns(scoped) drops that child and

@@ -77,6 +77,12 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 	if len(currentTarget) == 0 {
 		currentTarget = options.Target
 	}
+	// Same-head dedup (issue #97): re-running the SAME review over the SAME (kind, target, headSha) must
+	// REPLACE the prior run, not stack another blocker. Without this, `review pr-ready` run three times over
+	// one commit lands three review logs, and the gate renders the branch as three blockers that never clear.
+	// Keyed on head, so a fix-loop that reviews a DIFFERENT commit each attempt is untouched; skipped for logs
+	// with no headSha (legacy), where we cannot tell whether two logs are the same review.
+	staleSameHead := StaleSameHeadRunIDs(logs)
 	projection := Projection{
 		targetKeyValue:       TargetKey(options.Scope, currentTarget),
 		currentReviewLogs:    make([]reviewlog.Summary, 0, len(logs)),
@@ -87,7 +93,7 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 		supersededFindingIDs: map[string]bool{},
 	}
 	for _, log := range logs {
-		if previous[log.RunID] {
+		if previous[log.RunID] || staleSameHead[log.RunID] {
 			projection.supersededRunIDs[log.RunID] = true
 			projection.historicalLogs = append(projection.historicalLogs, log)
 			continue
@@ -106,7 +112,7 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 		projection.currentReviewLogs = append(projection.currentReviewLogs, log)
 	}
 	for _, blocker := range blockers {
-		if previous[blocker.RunID] {
+		if previous[blocker.RunID] || staleSameHead[blocker.RunID] {
 			projection.supersededFindingIDs[blocker.ID] = true
 			continue
 		}
@@ -121,6 +127,64 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 		projection.currentBlockers = append(projection.currentBlockers, blocker)
 	}
 	return projection
+}
+
+// StaleSameHeadRunIDs returns the run IDs that an idempotent re-run of the SAME review over the SAME commit
+// supersedes (issue #97) — so `review pr-ready` run three times over one head renders as ONE blocker, not
+// three. It is deliberately VERDICT-AWARE to avoid a false-CLEAR: because the head is byte-identical, a later
+// CLEAN re-look can never represent a FIX (only a non-deterministic reviewer miss), so a BLOCKING run is
+// retired ONLY by a later BLOCKING run of the same (kind, target, headSha); a clean run may be retired by any
+// later run of the group. Logs with no headSha or run ID are never grouped (we cannot prove two are the same
+// review). "Latest" is the lexicographically greatest run ID, which orders by the timestamp its `mrv-<ts>-…`
+// id encodes.
+func StaleSameHeadRunIDs(logs []reviewlog.Summary) map[string]bool {
+	latestAll := map[string]string{}      // latest run of the group, regardless of verdict
+	latestBlocking := map[string]string{} // latest BLOCKING run of the group
+	for _, log := range logs {
+		if log.HeadSHA == "" || log.RunID == "" {
+			continue
+		}
+		key := sameHeadKey(log)
+		if log.RunID > latestAll[key] {
+			latestAll[key] = log.RunID
+		}
+		if LogBlocks(log) && log.RunID > latestBlocking[key] {
+			latestBlocking[key] = log.RunID
+		}
+	}
+	stale := map[string]bool{}
+	for _, log := range logs {
+		if log.HeadSHA == "" || log.RunID == "" {
+			continue
+		}
+		key := sameHeadKey(log)
+		if LogBlocks(log) {
+			// A blocker is retired ONLY by a LATER blocking run — never by a clean re-look at the same code.
+			if log.RunID != latestBlocking[key] {
+				stale[log.RunID] = true
+			}
+			continue
+		}
+		// A clean run is just an old look; the newest run of the group (any verdict) supersedes it.
+		if log.RunID != latestAll[key] {
+			stale[log.RunID] = true
+		}
+	}
+	return stale
+}
+
+// LogBlocks reports whether a review log holds work that must clear before the branch is done: open
+// unresolved blockers, OR an ESCALATED verdict (a hard stop that a later clean re-run must not erase, even if
+// the log records no open finding count). It is the ONE verdict-aware blocking predicate — shared by the
+// same-head dedup here and by the status gate's must_clear builders — so the "what supersedes what" decision
+// and the "what blocks" decision can never drift apart (reviewlog already forces HasUnresolvedBlockers for an
+// ESCALATED verdict, so this is also defense-in-depth against that guarantee changing).
+func LogBlocks(log reviewlog.Summary) bool {
+	return log.HasUnresolvedBlockers || strings.EqualFold(strings.TrimSpace(log.Verdict), "ESCALATED")
+}
+
+func sameHeadKey(log reviewlog.Summary) string {
+	return log.Kind + "\x00" + log.Target + "\x00" + log.HeadSHA
 }
 
 func TargetKey(scope string, target map[string]string) string {
