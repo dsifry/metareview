@@ -135,6 +135,77 @@ func TestCreateReusesAuthenticatedUnchangedVerdictWithoutReviewerInvocation(t *t
 	}
 }
 
+func TestCreateTreatsResolvedOverlappingReviewAsHistoricalAdvisory(t *testing.T) {
+	root := smallPRReadyRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
+	evidence := filepath.Join(t.TempDir(), "evidence.md")
+	if err := os.WriteFile(evidence, []byte("go test ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reviewDir := filepath.Join(root, "docs", "metareview", "reviews")
+	if err := os.MkdirAll(reviewDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldReview := "# metareview: task-done review\n\n" +
+		"Run ID: `mrv-historical-task`\n\n" +
+		"Target: `TASK-historical`\n\n" +
+		"Covered paths: `" + reviewlog.EncodeCoveredPaths([]string{"seed.txt"}) + "`\n\n" +
+		"## Verdict\n\nNEEDS_REVISION\n\n" +
+		"## Findings\n\n### mrvf-historical-001: Blocked\n"
+	if err := os.WriteFile(filepath.Join(reviewDir, "historical-task.md"), []byte(oldReview), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".metareview"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".metareview", "findings.jsonl"), []byte(`{"id":"mrvf-historical-001","runId":"mrv-historical-task","status":"fixed","classification":"blocking","severity":"high","target":{"type":"beads-task","id":"TASK-historical"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 4, 1, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Blocking {
+		t.Fatalf("a fixed historical finding overlapping the diff must remain advisory, got %+v", result)
+	}
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(result.ReviewRel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "historical; resolved") {
+		t.Fatalf("resolved historical finding must remain visible as an advisory:\n%s", body)
+	}
+}
+
+func TestGateReviewLogsKeepsOpenCurrentAndPRLinkedFindings(t *testing.T) {
+	logs := []reviewlog.Summary{
+		{Target: "TASK-current", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true, FindingIDs: []string{"mrvf-current-001"}},
+		{Target: "42", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true, FindingIDs: []string{"mrvf-pr-001"}},
+	}
+	ledger := []findings.Record{
+		{ID: "mrvf-current-001", Status: "open", Classification: "blocking", Severity: "high"},
+		{ID: "mrvf-pr-001", Status: "open", Classification: "blocking", Severity: "high"},
+	}
+
+	got := gateReviewLogs(logs, ledger)
+	if len(got) != 2 {
+		t.Fatalf("open current and PR-linked findings must remain gate inputs: %+v", got)
+	}
+	results := reviewers.RunPRReady(reviewers.PRReadyContext{
+		EvidenceText:       "go test ./... exited 0",
+		PREvidenceMarkdown: "## metareview PR Evidence\n\n### Validation\n\n- go test ./... exited 0",
+		ReviewLogs:         reviewerLogs(got),
+	})
+	for _, result := range results {
+		if result.Title == "Unresolved review blockers" {
+			return
+		}
+	}
+	t.Fatalf("open current and PR-linked findings must block PR-ready: %+v", results)
+}
+
 func TestChangedReviewerInputsStartFreshReview(t *testing.T) {
 	root := smallPRReadyRepo(t)
 	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")

@@ -275,6 +275,7 @@ func Create(root string, options Options) (Result, error) {
 		LinkedTargets:    linkedTargets,
 	})
 	reviewLogs := append(latestLogsByTarget(projection.CurrentReviewLogs()), blockerLogs(projection.CurrentBlockers())...)
+	blockingReviewLogs := gateReviewLogs(reviewLogs, allFindings)
 	prEvidence := RenderEvidence(EvidenceInput{
 		Summary:     branchSummary(analysisGit),
 		Validation:  validationLines(evidenceText),
@@ -317,7 +318,7 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	reviewerCtx := reviewerContext(analysisGit, profile, knowledgeContext, reviewLogs, evidenceText, prEvidence, ghCtx, options.IncludeWorkingTree, dirtyFiles, manifestContext(manifest, aggregate))
+	reviewerCtx := reviewerContext(analysisGit, profile, knowledgeContext, blockingReviewLogs, evidenceText, prEvidence, ghCtx, options.IncludeWorkingTree, dirtyFiles, manifestContext(manifest, aggregate))
 	// Build B: require a real adjudicated lens review over THIS head (the deterministic checks above are not a
 	// review). Resolve the review-evidence marker the FSM review-loop records; RunPRReady blocks when it is
 	// missing/not-clean unless the mechanical-pass escape is set.
@@ -931,6 +932,22 @@ func reviewerLogs(logs []reviewlog.Summary) []reviewers.PRReviewLog {
 			FindingIDs:            log.FindingIDs,
 			HasUnresolvedBlockers: log.HasUnresolvedBlockers,
 		})
+	}
+	return result
+}
+
+// gateReviewLogs excludes review logs whose own blocker-class findings have
+// already been resolved. The report still receives the unfiltered logs and
+// renders those historical records with their resolver, but a path overlap
+// cannot make a cleared finding block a new PR-ready target.
+func gateReviewLogs(logs []reviewlog.Summary, ledger []findings.Record) []reviewlog.Summary {
+	byID := indexFindings(ledger)
+	result := make([]reviewlog.Summary, 0, len(logs))
+	for _, log := range logs {
+		if reconcileReview(FromReviewLog(log), byID).Resolved {
+			continue
+		}
+		result = append(result, log)
 	}
 	return result
 }
