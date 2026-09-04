@@ -20,7 +20,7 @@ internal/githubcontext 100.0
 internal/integration 100.0
 internal/jsonl 100.0
 internal/knowledge 77.8
-internal/learning 90.8
+internal/learning 100.0
 internal/learnsource 100.0
 internal/lens 100.0
 internal/markdown 100.0
