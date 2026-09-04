@@ -151,12 +151,14 @@ func PlanHookInstall(root string, git GitRunner) (HookInstallPlan, error) {
 	effOut, _ := git(root, "config", "--get", "core.hooksPath")
 	plan.Current = strings.TrimSpace(string(effOut))
 
-	// Ours, set locally → already installed ONLY if the scripts are present AND byte-current with the embed.
-	// .metareview/git-hooks is git-ignored, so the materialized scripts can be deleted (missing) or predate a
-	// binary upgrade (present-but-stale) while core.hooksPath still points at them; treating either as "done"
-	// leaves the gate inert or running an old hook — the exact failure this closes. hooksCurrent covers both:
-	// missing OR content-drifted ⇒ not done ⇒ we fall through and reinstall (rematerialize the current scripts).
-	if local != "" && sameHookPath(root, local, target) && hooksCurrent(target) {
+	// Ours, set locally → already installed ONLY if the scripts are present AND byte-current with the embed AND
+	// the ephemeral-state .gitignore block is in place. .metareview/git-hooks is git-ignored, so the scripts can
+	// be deleted (missing) or predate a binary upgrade (present-but-stale) while core.hooksPath still points at
+	// them; treating either as "done" leaves the gate inert or running an old hook. And an EARLIER install (before
+	// the gitignore block existed) has current hooks but no block — short-circuiting there would never write it,
+	// so a reinstall could not restore Gap B for an already-installed repo. All three must hold, or we fall
+	// through and ApplyHookInstall re-materializes the scripts and (re)writes the gitignore block.
+	if local != "" && sameHookPath(root, local, target) && hooksCurrent(target) && gitpolicy.Present(root) {
 		plan.AlreadyDone = true
 		return plan, nil
 	}

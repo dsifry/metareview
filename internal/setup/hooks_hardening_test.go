@@ -125,5 +125,34 @@ func TestInstallGitignoresEphemeralStateAllowlist(t *testing.T) {
 	}
 }
 
-// (The .gitignore block's own edge cases — idempotency, newline handling, upgrading a blanket ignore — live
-// with its single source in internal/gitpolicy. Here we assert only that INSTALL applies it, above.)
+// Gap B for an ALREADY-installed repo: if the hook scripts are byte-current but the .gitignore block is
+// missing (an install that predates Gap B, or the user deleted the block), a reinstall must NOT report
+// AlreadyDone — it must fall through and restore the block. Without folding gitpolicy.Present into the
+// AlreadyDone decision, the ephemeral-state ignore would never reach these repos.
+func TestReinstallRestoresMissingGitignoreBlock(t *testing.T) {
+	root, g := tempRepo(t)
+	plan, err := PlanHookInstall(root, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyHookInstall(root, plan, false, g); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a pre-Gap-B install: hooks current, but the block removed from .gitignore.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("node_modules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan2, err := PlanHookInstall(root, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan2.AlreadyDone {
+		t.Fatal("current hooks but a missing gitignore block must NOT be AlreadyDone — the block would never be restored")
+	}
+	if err := ApplyHookInstall(root, plan2, false, g); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g(root, "check-ignore", "-q", ".metareview/runs.jsonl"); err != nil {
+		t.Fatalf("reinstall must restore the ephemeral-state ignore: %v", err)
+	}
+}

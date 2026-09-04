@@ -1,6 +1,7 @@
 package gitpolicy
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,6 +99,96 @@ func TestEnsureUpgradesBlanketIgnore(t *testing.T) {
 	}
 	if !strings.Contains(string(body), ".metareview/*") {
 		t.Fatalf("the allowlist block must be present; got:\n%s", body)
+	}
+}
+
+// Present reports whether the block's Marker is in .gitignore — the signal setup uses to decide whether a
+// reinstall must restore the block.
+func TestPresent(t *testing.T) {
+	root := t.TempDir()
+	if Present(root) {
+		t.Fatal("no .gitignore → not present")
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("node_modules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if Present(root) {
+		t.Fatal("a .gitignore without our marker → not present")
+	}
+	if err := Ensure(root); err != nil {
+		t.Fatal(err)
+	}
+	if !Present(root) {
+		t.Fatal("after Ensure, the block must be Present")
+	}
+}
+
+// fakeTempFile is an injectable tempFile whose Write/Close fail on demand — the only way to exercise those
+// defensive branches, since a small write to a real fresh temp file never fails.
+type fakeTempFile struct {
+	name     string
+	writeErr error
+	closeErr error
+}
+
+func (f *fakeTempFile) Write(p []byte) (int, error) {
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
+	return len(p), nil
+}
+func (f *fakeTempFile) Close() error { return f.closeErr }
+func (f *fakeTempFile) Name() string { return f.name }
+
+// Every failure step of the atomic write must PROPAGATE the error and never leave a half-written .gitignore.
+// Each case injects one failure via the file-operation seams (DI), the same way the codebase seams git.
+func TestAtomicWritePropagatesEachFailure(t *testing.T) {
+	boom := errors.New("boom")
+	saveCreate, saveChmod, saveRename := fsCreateTemp, fsChmod, fsRename
+	defer func() { fsCreateTemp, fsChmod, fsRename = saveCreate, saveChmod, saveRename }()
+
+	cases := []struct {
+		name  string
+		setup func(dir string)
+	}{
+		{"create-temp fails", func(string) {
+			fsCreateTemp = func(string, string) (tempFile, error) { return nil, boom }
+		}},
+		{"write fails", func(dir string) {
+			fsCreateTemp = func(string, string) (tempFile, error) {
+				return &fakeTempFile{name: filepath.Join(dir, ".x.tmp"), writeErr: boom}, nil
+			}
+		}},
+		{"close fails", func(dir string) {
+			fsCreateTemp = func(string, string) (tempFile, error) {
+				return &fakeTempFile{name: filepath.Join(dir, ".x.tmp"), closeErr: boom}, nil
+			}
+		}},
+		{"chmod fails", func(string) {
+			fsChmod = func(string, os.FileMode) error { return boom }
+		}},
+		{"rename fails", func(string) {
+			fsRename = func(string, string) error { return boom }
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fsCreateTemp, fsChmod, fsRename = saveCreate, saveChmod, saveRename // reset per case
+			dir := t.TempDir()
+			original := "keep-me/\n"
+			path := filepath.Join(dir, ".gitignore")
+			if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			c.setup(dir)
+			if err := atomicWrite(path, []byte("new\n")); err == nil {
+				t.Fatalf("%s: atomicWrite must return the error, not swallow it", c.name)
+			}
+			// The original .gitignore must be untouched — the atomic write never clobbers it on failure.
+			if got, _ := os.ReadFile(path); string(got) != original {
+				t.Fatalf("%s: a failed atomic write must leave the original intact; got %q", c.name, got)
+			}
+		})
 	}
 }
 
