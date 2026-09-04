@@ -29,7 +29,7 @@ internal/prready 89.2
 internal/repo 100.0
 internal/reviewers 100.0
 internal/reviewlog 91.1
-internal/reviewmanifest 97.0
+internal/reviewmanifest 100.0
 internal/reviewstate 92.1
 internal/runchain 92.2
 internal/sessionhistory 85.2
