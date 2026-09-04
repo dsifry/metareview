@@ -15,8 +15,9 @@ when the shapes below change.
 
 A **review harness and quality-gate engine for coding agents.** It runs adversarial reviews over artifacts,
 code diffs, PR readiness, and post-merge learning; records durable Markdown review logs + JSONL state; and
-enforces **review-before-push for the checked-out branch** through a git-native gate (fail-closed;
-`git push --no-verify` is the deliberate escape hatch; a different pushed ref is not yet gated — see §5). It runs standalone or as a deeper review layer
+enforces **review-before-push** through a git-native gate (fail-closed;
+`git push --no-verify` is the deliberate escape hatch; a pushed ref that is not the checked-out branch is
+blocked rather than silently waved through — see §5). It runs standalone or as a deeper review layer
 inside a metaswarm/Beads/Superpowers repo. Distributed as an npm package and as Claude Code / Codex plugins.
 
 **Division of labor (remember this).** Deterministic machinery runs *outside* the model — anywhere, including
@@ -123,8 +124,13 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
 `internal/setup/hooks.go`, `internal/githooktest/`.
 
 - **pre-push** = the HARD gate: runs `review gate --push` (deterministic), BLOCKS an unreviewed/unresolved
-  branch, **fails closed**; `git push --no-verify` is the escape hatch. It gates the **checked-out branch**
-  (a different pushed ref is not yet gated — issue #82); a pure ref *deletion* is skipped.
+  branch, **fails closed**; `git push --no-verify` is the escape hatch. It forwards git's pushed-ref stdin to
+  the gate (`--pre-push-stdin`) and gates the **pushed refs**: a ref whose local sha equals the checked-out
+  HEAD is gated as that branch (the common `git push` / `git push origin HEAD`); a **non-checked-out** ref
+  (`git push origin other:main`, `HEAD~3:main`) is **BLOCKED** — the gate measures the checkout and cannot
+  verify a different ref's content, so it fails closed with a check-it-out-or-`--no-verify` remedy (issue #82,
+  Option B). A pure ref *deletion* is skipped. (Reviewing a non-checked-out ref's *own* content — so a reviewed
+  cross-ref push passes without `--no-verify` — is the Option A follow-up.)
 - **post-commit** = NEVER blocks (a commit saves work). Names the files it wrote + a review-owed nudge.
 - **Commit-always, enforce-at-push:** saving work must never be held hostage to the reviewer being down;
   the enforcement lives at push, where not-pushing loses nothing.

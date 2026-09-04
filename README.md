@@ -104,8 +104,9 @@ metareview is built around review patterns that work well when humans and coding
   the review gate is enforced by git itself: `git push` is **blocked** until the branch is review-clean
   (fail-closed; `--no-verify` escapes), while metareview **never blocks a commit** — its `post-commit` hook
   just nudges you to review the files it wrote. Because git invokes the hooks on the real operation, no
-  *spelling* of the push command walks around the gate (it gates the checked-out branch; pushing a different
-  ref is [#82](https://github.com/dsifry/metareview/issues/82)). Install is interactive, non-destructive, and reversible.
+  *spelling* of the push command walks around the gate, and pushing a ref that is **not** the checked-out
+  branch is blocked rather than silently waved through ([#82](https://github.com/dsifry/metareview/issues/82)).
+  Install is interactive, non-destructive, and reversible.
 
 See **[USAGE.md](USAGE.md)** for how to use all of this, and [CHANGELOG.md](CHANGELOG.md) for full notes.
 

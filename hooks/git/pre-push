@@ -10,21 +10,26 @@
 set -uo pipefail
 
 # git streams the refs being pushed on stdin, one per line: `<local-ref> <local-sha> <remote-ref> <remote-sha>`.
-# A ref DELETION has an all-zero local sha and sends NO content, so there is nothing to review: if every
-# pushed ref is a deletion we exit 0 without gating (a `git push --delete` of a merged branch must not be
-# blocked). Otherwise this gate measures the CURRENTLY CHECKED-OUT branch (via merge-base) — the ref the
-# overwhelmingly common `git push` / `git push origin HEAD` sends, so on that path it gates exactly what is
-# pushed. It does NOT yet gate a DIFFERENT non-deletion ref (`git push origin some-other-branch`, `HEAD~3:main`)
-# against its own content — that ref is evaluated against the checked-out branch, a known limitation (issue #82;
-# per-ref gating is the follow-up). We must consume stdin regardless, or git can see a broken pipe.
+# We CAPTURE it (not merely drain it) so it can be forwarded to the gate, which now gates the PUSHED refs, not
+# just the checked-out branch (issue #82): a ref whose local sha != the checked-out HEAD is BLOCKED, closing
+# the silent `git push origin other:main` bypass. `git push --no-verify` remains the escape hatch. We must
+# consume stdin regardless, or git can see a broken pipe.
+STDIN="$(cat)"
+# A ref DELETION has an all-zero local sha and sends NO content, so there is nothing to review. If EVERY pushed
+# ref is a deletion, exit 0 here WITHOUT the binary — a `git push --delete` of a merged branch must succeed
+# even when metareview is not installed. (A mixed deletion + content push is forwarded; the gate skips the
+# deletion lines itself.)
 have_content=0
-while read -r _local_ref local_sha _remote_ref _remote_sha; do
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+  [ -z "$local_ref" ] && continue # blank line — nothing on it
   case "$local_sha" in
-    "") : ;;             # blank line
+    "") have_content=1 ;;    # a non-blank line with no sha is MALFORMED — forward it so the Go gate fails closed
     *[!0]*) have_content=1 ;; # a non-zero sha → a real (non-deletion) push has content to gate
-    *) : ;;              # all zeros → a deletion, nothing to review
+    *) : ;;                  # all zeros → a deletion, nothing to review
   esac
-done
+done <<EOF
+$STDIN
+EOF
 if [ "$have_content" -eq 0 ]; then
   exit 0 # only ref deletions (or an empty ref list) — no content to review
 fi
@@ -53,8 +58,12 @@ if command -v timeout >/dev/null 2>&1; then TO="timeout 30"; elif command -v gti
 BASEARG=""
 [ -n "${METAREVIEW_BASE:-}" ] && BASEARG="--base ${METAREVIEW_BASE}"
 
+# Forward git's ref lines to the gate so it gates each PUSHED ref (issue #82), not just the checked-out branch.
 # shellcheck disable=SC2086
-OUT="$($TO "$BIN" review gate --push $BASEARG 2>&1)"
+OUT="$($TO "$BIN" review gate --push --pre-push-stdin $BASEARG <<EOF 2>&1
+$STDIN
+EOF
+)"
 CODE=$?
 if [ "$CODE" -eq 0 ]; then
   exit 0 # branch is reviewed and clean — allow the push

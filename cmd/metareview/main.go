@@ -8,6 +8,7 @@ import (
 	"fmt"
 	fsmcli "github.com/dsifry/metareview/internal/fsm/cli"
 	fsmrun "github.com/dsifry/metareview/internal/fsm/run"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -424,7 +425,7 @@ func main() {
 		os.Exit(0)
 	}
 	if len(args) >= 2 && args[0] == "review" && args[1] == "gate" {
-		base, push, all := "", false, false
+		base, push, all, prePushStdin := "", false, false, false
 		for i := 2; i < len(args); i++ {
 			switch args[i] {
 			case "--base":
@@ -434,6 +435,12 @@ func main() {
 				push = true // whole-branch (pre-push) scope instead of the staged (pre-commit) scope
 			case "--all":
 				all = true // mirror `git commit -a`: gate every tracked change, not just the staged index
+			case "--pre-push-stdin":
+				// Hook-internal: the pre-push hook forwards git's ref lines
+				// ("<local-ref> <local-sha> <remote-ref> <remote-sha>") on stdin so the gate can gate the
+				// PUSHED refs, not just the checked-out branch (issue #82). A human never passes this, so a
+				// manual `review gate --push` never blocks on a tty stdin read.
+				prePushStdin = true
 			default:
 				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
 				os.Exit(2)
@@ -448,6 +455,14 @@ func main() {
 		var message string
 		var err error
 		switch {
+		case push && prePushStdin:
+			// Read git's pre-push ref lines from stdin and gate each PUSHED ref (issue #82). The hook is the
+			// only caller; if stdin is empty (nothing to push) PushGateForRefs returns not-blocked.
+			var raw []byte
+			raw, err = io.ReadAll(os.Stdin)
+			if err == nil {
+				blocked, message, err = status.PushGateForRefs(root, base, string(raw), nil)
+			}
 		case push:
 			blocked, message, err = status.PushGate(root, base, nil)
 		case all:

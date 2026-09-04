@@ -85,9 +85,11 @@ no MCP by design — a CLI plus a documenting skill is its intended model, which
 metareview can enforce review-before-push with **git-native hooks**. Because git runs them on the real
 operation, no *spelling* of the push command walks around the gate — a plain command, a compound `a && b`, a
 subshell, an alias, `eval`, a push from a plain terminal all reach it, which a command-string parser cannot
-say. Two deliberate, honest limits: `git push --no-verify` skips the hook git-natively (the intended escape
-hatch), and the gate measures the **checked-out branch** — pushing a *different* ref (`git push origin
-other-branch`) is not yet gated ([#82](https://github.com/dsifry/metareview/issues/82)). It is split:
+say. `git push --no-verify` skips the hook git-natively — the intended, honest escape hatch. Pushing a ref
+that is **not** the checked-out branch (`git push origin other:main`, `HEAD~3:main`) is **blocked** rather
+than silently waved through: the gate measures the checkout and cannot verify a different ref's content, so it
+fails closed and asks you to check that ref out and push it (or `--no-verify`)
+([#82](https://github.com/dsifry/metareview/issues/82), Option B). It is split:
 
 - **`git push` is blocked** until the branch is review-clean. The `pre-push` hook runs `metareview review
   gate --push` (deterministic — no model call); a nonzero result aborts the push *before* anything leaves.
