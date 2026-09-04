@@ -38,6 +38,14 @@ type Summary struct {
 	// a caller ask "does this blocker belong to the branch in hand" instead of matching target
 	// strings — which never worked, because no review records a source path as its target.
 	HeadSHA string `json:"headSha,omitempty"`
+	// BaseSHA is the base the review's diff was measured from. The same-head dedup identity is
+	// really (kind, target, baseSha, headSha): two reviews at the SAME head but a DIFFERENT base
+	// (main advanced, so merge-base(HEAD, main) moved) reviewed DIFFERENT diffs and must not
+	// collapse into one group (issue #99). It comes ONLY from the local run record (runs.jsonl) —
+	// there is no committed-markdown base parse, unlike HeadLabel — so a record with no runs.jsonl
+	// (a clone/CI checkout) carries no base and is not grouped. No production review writer emits a
+	// committed base for these scopes, so real committed-only logs are never grouped anyway.
+	BaseSHA string `json:"baseSha,omitempty"`
 	// CoveredPaths are the source files the review actually looked at, and CoveredPathsKnown says
 	// whether the review answered that question AT ALL. Empty-and-known means "examined nothing";
 	// empty-and-unknown means the log predates the field. Only the second must be barred from
@@ -487,6 +495,12 @@ func mergeRunMetadata(summary *Summary, runs []runchain.Record) {
 	// against the commit that actually contains it.
 	if current.HeadSHA != "" {
 		summary.HeadSHA = current.HeadSHA
+	}
+	// The base travels with the head from the same local run record, so same-head dedup can key on the
+	// full (kind, target, baseSha, headSha) identity (issue #99). Like the head, it is authoritative from
+	// the gitignored run record; a clone/CI log carries neither and so is never grouped.
+	if current.BaseSHA != "" {
+		summary.BaseSHA = current.BaseSHA
 	}
 	if len(current.CoveredPaths) > 0 {
 		summary.CoveredPaths = append([]string(nil), current.CoveredPaths...)

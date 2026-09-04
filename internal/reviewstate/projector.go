@@ -77,11 +77,13 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 	if len(currentTarget) == 0 {
 		currentTarget = options.Target
 	}
-	// Same-head dedup (issue #97): re-running the SAME review over the SAME (kind, target, headSha) must
-	// REPLACE the prior run, not stack another blocker. Without this, `review pr-ready` run three times over
-	// one commit lands three review logs, and the gate renders the branch as three blockers that never clear.
-	// Keyed on head, so a fix-loop that reviews a DIFFERENT commit each attempt is untouched; skipped for logs
-	// with no headSha (legacy), where we cannot tell whether two logs are the same review.
+	// Same-head dedup (issue #97): re-running the SAME review over the SAME (kind, target, baseSha, headSha)
+	// must REPLACE the prior run, not stack another blocker. Without this, `review pr-ready` run three times
+	// over one commit lands three review logs, and the gate renders the branch as three blockers that never
+	// clear. Keyed on base AND head (issue #99), so a fix-loop that reviews a different commit each attempt is
+	// untouched AND two runs at the same head but a different base — different diffs — are not collapsed;
+	// skipped for logs missing either sha (legacy/clone), where we cannot tell whether two logs are the same
+	// review.
 	staleSameHead := StaleSameHeadRunIDs(logs)
 	projection := Projection{
 		targetKeyValue:       TargetKey(options.Scope, currentTarget),
@@ -129,19 +131,20 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 	return projection
 }
 
-// StaleSameHeadRunIDs returns the run IDs that an idempotent re-run of the SAME review over the SAME commit
-// supersedes (issue #97) — so `review pr-ready` run three times over one head renders as ONE blocker, not
-// three. It is deliberately VERDICT-AWARE to avoid a false-CLEAR: because the head is byte-identical, a later
-// CLEAN re-look can never represent a FIX (only a non-deterministic reviewer miss), so a BLOCKING run is
-// retired ONLY by a later BLOCKING run of the same (kind, target, headSha); a clean run may be retired by any
-// later run of the group. Logs with no headSha or run ID are never grouped (we cannot prove two are the same
-// review). "Latest" is the lexicographically greatest run ID, which orders by the timestamp its `mrv-<ts>-…`
-// id encodes.
+// StaleSameHeadRunIDs returns the run IDs that an idempotent re-run of the SAME review over the SAME diff
+// supersedes (issue #97) — so `review pr-ready` run three times over one base..head renders as ONE blocker,
+// not three. It is deliberately VERDICT-AWARE to avoid a false-CLEAR: because the diff is byte-identical, a
+// later CLEAN re-look can never represent a FIX (only a non-deterministic reviewer miss), so a BLOCKING run is
+// retired ONLY by a later BLOCKING run of the same (kind, target, baseSha, headSha); a clean run may be
+// retired by any later run of the group. Logs missing a run ID, a headSha OR a baseSha are never grouped: the
+// base is part of the identity (issue #99 — same head, different base is a different diff), and without either
+// sha we cannot prove two logs are the same review. "Latest" is the lexicographically greatest run ID, which
+// orders by the timestamp its `mrv-<ts>-…` id encodes.
 func StaleSameHeadRunIDs(logs []reviewlog.Summary) map[string]bool {
 	latestAll := map[string]string{}      // latest run of the group, regardless of verdict
 	latestBlocking := map[string]string{} // latest BLOCKING run of the group
 	for _, log := range logs {
-		if log.HeadSHA == "" || log.RunID == "" {
+		if !groupableSameHead(log) {
 			continue
 		}
 		key := sameHeadKey(log)
@@ -154,7 +157,7 @@ func StaleSameHeadRunIDs(logs []reviewlog.Summary) map[string]bool {
 	}
 	stale := map[string]bool{}
 	for _, log := range logs {
-		if log.HeadSHA == "" || log.RunID == "" {
+		if !groupableSameHead(log) {
 			continue
 		}
 		key := sameHeadKey(log)
@@ -183,8 +186,20 @@ func LogBlocks(log reviewlog.Summary) bool {
 	return log.HasUnresolvedBlockers || strings.EqualFold(strings.TrimSpace(log.Verdict), "ESCALATED")
 }
 
+// groupableSameHead reports whether a log can take part in same-head dedup at all. It needs a run ID and
+// BOTH a head and a base: the dedup identity is (kind, target, baseSha, headSha), and a log missing either
+// cannot be proven to review the same diff as another, so it is never grouped — the same conservative stance
+// the empty-head skip took. In practice head and base arrive together from the local run record (runs.jsonl);
+// no production review writer records a committed head/base for these scopes, so a committed-only log (a
+// clone/CI checkout with no runs.jsonl) carries neither and is not grouped.
+func groupableSameHead(log reviewlog.Summary) bool {
+	return log.RunID != "" && log.HeadSHA != "" && log.BaseSHA != ""
+}
+
+// sameHeadKey is the dedup identity: (kind, target, baseSha, headSha). Base is part of it because two
+// reviews at the same head but a different base measured different diffs (issue #99) and must not collapse.
 func sameHeadKey(log reviewlog.Summary) string {
-	return log.Kind + "\x00" + log.Target + "\x00" + log.HeadSHA
+	return log.Kind + "\x00" + log.Target + "\x00" + log.BaseSHA + "\x00" + log.HeadSHA
 }
 
 func TargetKey(scope string, target map[string]string) string {
