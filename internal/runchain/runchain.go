@@ -43,6 +43,10 @@ type Record struct {
 	AttemptNumber int               `json:"attemptNumber"`
 	MaxAttempts   int               `json:"maxAttempts"`
 	HeadSHA       string            `json:"headSha"`
+	// BaseSHA is the base the review's diff was measured from. It is written to runs.jsonl by every
+	// review writer (prready/taskdone/epicready) and read back so same-head dedup can key on the full
+	// (kind, target, baseSha, headSha) identity (issue #99). runchain itself does not branch on it.
+	BaseSHA string `json:"baseSha"`
 	// CoveredPaths are the source files this review examined. Recorded so a later question about
 	// one file can be answered by the reviews that actually looked at it: target strings are
 	// things like `current branch` or a task id, never a path, so scoping by target matched

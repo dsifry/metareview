@@ -154,11 +154,11 @@ func TestLogBlocks(t *testing.T) {
 // #97): only the LATEST run is current; earlier same-head re-runs are superseded, so `review pr-ready` run
 // three times renders the branch as one blocker, not three.
 func TestProjectDedupsSameHeadReruns(t *testing.T) {
-	head := "abc123"
+	head, base := "abc123", "base-a"
 	logs := []reviewlog.Summary{
-		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
-		{RunID: "mrv-3", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
-		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: base, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+		{RunID: "mrv-3", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: base, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: base, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
 	}
 	blockers := []findings.Record{
 		{ID: "mrvf-1", RunID: "mrv-1", Status: "open", Classification: "blocking", Severity: "high", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
@@ -186,10 +186,10 @@ func TestProjectDedupsSameHeadReruns(t *testing.T) {
 // BLOCKING run. The code is byte-identical, so a clean second look is a reviewer miss (adversarial reviews
 // are non-deterministic), never a fix — the blocker must survive. Only a later BLOCKING run may retire it.
 func TestProjectCleanRerunDoesNotSupersedeSameHeadBlocker(t *testing.T) {
-	head := "abc123"
+	head, base := "abc123", "base-a"
 	logs := []reviewlog.Summary{
-		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
-		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "PASS"}, // later, CLEAN, no blockers
+		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: base, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: base, Verdict: "PASS"}, // later, CLEAN, no blockers
 	}
 	blockers := []findings.Record{
 		{ID: "mrvf-1", RunID: "mrv-1", Status: "open", Classification: "blocking", Severity: "high", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
@@ -208,10 +208,10 @@ func TestProjectCleanRerunDoesNotSupersedeSameHeadBlocker(t *testing.T) {
 // A later CLEAN re-run must not supersede an earlier ESCALATED run over the same commit — an escalation is a
 // hard stop, and dedup is verdict-aware so it treats ESCALATED as blocking even if HasUnresolvedBlockers is unset.
 func TestProjectCleanRerunDoesNotSupersedeSameHeadEscalation(t *testing.T) {
-	head := "abc123"
+	head, base := "abc123", "base-a"
 	logs := []reviewlog.Summary{
-		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "ESCALATED"},
-		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "PASS"},
+		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: base, Verdict: "ESCALATED"},
+		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: base, Verdict: "PASS"},
 	}
 
 	projection := ProjectRecords(logs, nil, Options{CurrentTarget: map[string]string{"type": "branch", "id": "feature"}})
@@ -224,10 +224,10 @@ func TestProjectCleanRerunDoesNotSupersedeSameHeadEscalation(t *testing.T) {
 // Two CLEAN re-runs over the same head collapse to the latest (harmless — neither blocks), so the projection
 // carries one current log, not two. Exercises the clean-run supersede path.
 func TestProjectDedupsSameHeadCleanReruns(t *testing.T) {
-	head := "abc123"
+	head, base := "abc123", "base-a"
 	logs := []reviewlog.Summary{
-		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "PASS"},
-		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "PASS"},
+		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: base, Verdict: "PASS"},
+		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: base, Verdict: "PASS"},
 	}
 
 	projection := ProjectRecords(logs, nil, Options{CurrentTarget: map[string]string{"type": "branch", "id": "feature"}})
@@ -252,6 +252,68 @@ func TestProjectDoesNotDedupAcrossHeads(t *testing.T) {
 
 	if len(projection.CurrentReviewLogs()) != 2 {
 		t.Fatalf("logs at different heads must both remain current (no cross-head dedup): %+v", projection.CurrentReviewLogs())
+	}
+}
+
+// Issue #99: two reviews at the SAME head but a DIFFERENT base reviewed DIFFERENT diffs (main advanced, so
+// merge-base(HEAD, main) moved). They must NOT be deduped — the later must not supersede the earlier's
+// base-specific blocking findings. Same head, same base still dedups (that is #97).
+func TestProjectDoesNotDedupSameHeadDifferentBase(t *testing.T) {
+	head := "abc123"
+	logs := []reviewlog.Summary{
+		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: "base-a", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: "base-b", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+	}
+	blockers := []findings.Record{
+		{ID: "mrvf-1", RunID: "mrv-1", Status: "open", Classification: "blocking", Severity: "high", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
+		{ID: "mrvf-2", RunID: "mrv-2", Status: "open", Classification: "blocking", Severity: "high", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
+	}
+
+	projection := ProjectRecords(logs, blockers, Options{CurrentTarget: map[string]string{"type": "branch", "id": "feature"}})
+
+	if n := len(projection.CurrentReviewLogs()); n != 2 {
+		t.Fatalf("same head, different base reviewed different diffs and must both stay current; got %d: %+v", n, projection.CurrentReviewLogs())
+	}
+	if projection.SupersededRunIDs()["mrv-1"] || projection.SupersededRunIDs()["mrv-2"] {
+		t.Fatalf("neither same-head/different-base run may be superseded: %+v", projection.SupersededRunIDs())
+	}
+	if n := len(projection.CurrentBlockers()); n != 2 {
+		t.Fatalf("both base-specific blockers must stay current; got %d: %+v", n, projection.CurrentBlockers())
+	}
+}
+
+// Same head AND same base still dedups (issue #97 unchanged): two re-runs over the identical diff collapse.
+func TestProjectDedupsSameHeadSameBase(t *testing.T) {
+	head := "abc123"
+	logs := []reviewlog.Summary{
+		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: "base-a", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: "base-a", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+	}
+
+	projection := ProjectRecords(logs, nil, Options{CurrentTarget: map[string]string{"type": "branch", "id": "feature"}})
+
+	if !projection.SupersededRunIDs()["mrv-1"] {
+		t.Fatalf("same head AND same base must still dedup (#97): %+v", projection.SupersededRunIDs())
+	}
+	if n := len(projection.CurrentReviewLogs()); n != 1 || projection.CurrentReviewLogs()[0].RunID != "mrv-2" {
+		t.Fatalf("only the latest same-head/same-base run remains current; got %d: %+v", n, projection.CurrentReviewLogs())
+	}
+}
+
+// A log with a head but NO base (a legacy run record written before baseSha was threaded) must NOT be
+// grouped: keying on an empty base would either collapse unrelated legacy logs or, worse, group a legacy
+// blocking log with a current one. Mirror the empty-head skip.
+func TestProjectDoesNotDedupSameHeadEmptyBase(t *testing.T) {
+	head := "abc123"
+	logs := []reviewlog.Summary{
+		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+	}
+
+	projection := ProjectRecords(logs, nil, Options{CurrentTarget: map[string]string{"type": "branch", "id": "feature"}})
+
+	if len(projection.CurrentReviewLogs()) != 2 {
+		t.Fatalf("head-only logs with no base must not be deduped: %+v", projection.CurrentReviewLogs())
 	}
 }
 
