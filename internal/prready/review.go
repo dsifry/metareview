@@ -264,7 +264,6 @@ func Create(root string, options Options) (Result, error) {
 		CurrentTarget:    targetRecord,
 		LinkedTargets:    linkedTargets,
 	})
-	priorPRReadyRunIDs := currentTargetPRReadyRunIDs(root, logs, targetRecord, git)
 	reviewLogs := append(latestLogsByTarget(projection.CurrentReviewLogs()), blockerLogs(projection.CurrentBlockers())...)
 	prEvidence := RenderEvidence(EvidenceInput{
 		Summary:     branchSummary(analysisGit),
@@ -441,7 +440,7 @@ func Create(root string, options Options) (Result, error) {
 		}
 		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{
 			PreviousRunID:  options.PreviousRunID,
-			PreviousRunIDs: append(append([]string(nil), previousRunIDs...), priorPRReadyRunIDs...),
+			PreviousRunIDs: previousRunIDs,
 			ResetRunIDs:    chain.ResetRunIDs,
 		})
 		if err != nil {
@@ -657,6 +656,12 @@ func historicalPRReadyRunIDsForCurrentTarget(root string, logs []reviewlog.Summa
 		if log.RunID == "" || log.Kind != "pr-ready" {
 			continue
 		}
+		if log.RunRecordAuthenticated {
+			if !sameTarget(log.TargetRecord, targetRecord) {
+				ids = append(ids, log.RunID)
+			}
+			continue
+		}
 		matches, known := legacyPRReadyTargetMatch(root, log, targetRecord, git)
 		if known && !matches {
 			ids = append(ids, log.RunID)
@@ -664,24 +669,6 @@ func historicalPRReadyRunIDsForCurrentTarget(root string, logs []reviewlog.Summa
 	}
 	return ids
 }
-
-func currentTargetPRReadyRunIDs(root string, logs []reviewlog.Summary, targetRecord map[string]string, git gitcontext.Context) []string {
-	var ids []string
-	for _, log := range logs {
-		if log.RunID == "" || log.Kind != "pr-ready" {
-			continue
-		}
-		if log.RunRecordAuthenticated && sameTarget(log.TargetRecord, targetRecord) {
-			ids = append(ids, log.RunID)
-			continue
-		}
-		if legacyPRReadyTargetMatches(root, log, targetRecord, git) {
-			ids = append(ids, log.RunID)
-		}
-	}
-	return uniqueStrings(ids)
-}
-
 func legacyEscalatedPRReadyForTarget(root string, logs []reviewlog.Summary, targetRecord map[string]string, git gitcontext.Context) (string, bool) {
 	for _, log := range logs {
 		if log.RunID == "" || log.Kind != "pr-ready" || !strings.EqualFold(log.Verdict, "ESCALATED") {

@@ -165,6 +165,91 @@ func TestChangedReviewerInputsStartFreshReview(t *testing.T) {
 	}
 }
 
+func TestPriorCurrentTargetBlockerSurvivesMissingGitHubContextAndPreventsReuse(t *testing.T) {
+	root := smallPRReadyRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
+	remote := exec.Command("git", "remote", "add", "origin", "https://github.com/acme/repo.git")
+	remote.Dir = root
+	if out, err := remote.CombinedOutput(); err != nil {
+		t.Fatalf("add origin: %v\n%s", err, out)
+	}
+	bin := t.TempDir()
+	gh := filepath.Join(bin, "gh")
+	if err := os.WriteFile(gh, []byte(`#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  printf '%s\n' '{"number":99,"url":"https://github.com/acme/repo/pull/99","title":"Current target","body":"","reviewDecision":"APPROVED","comments":[],"reviews":[]}'
+  exit 0
+fi
+exit 1
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	evidence := filepath.Join(t.TempDir(), "evidence.md")
+	if err := os.WriteFile(evidence, []byte("go test ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	original := runPRReadyReviewers
+	calls := 0
+	runPRReadyReviewers = func(reviewers.PRReadyContext) []reviewers.Finding {
+		calls++
+		if calls != 2 {
+			return nil
+		}
+		return []reviewers.Finding{{
+			Reviewer:       "security-reviewer",
+			Severity:       "high",
+			Classification: "blocking",
+			Title:          "Current target blocker",
+			Finding:        "The current branch still has an unresolved release risk.",
+			Expected:       "The risk remains blocking until an explicit fix run supersedes it.",
+			Found:          "The risk is still open.",
+			Recommendation: "Resolve the current-target risk and continue its run chain.",
+			Fingerprint:    "security:current-target-blocker",
+		}}
+	}
+	t.Cleanup(func() { runPRReadyReviewers = original })
+
+	first, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 3, 4, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Blocking || (first.Verdict != "PASS" && first.Verdict != "PASS_ADVISORY") {
+		t.Fatalf("first run must establish the otherwise reusable PASS: %+v", first)
+	}
+	if err := os.WriteFile(evidence, []byte("go test ./... and go vet ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Create(root, Options{Base: "main", EvidencePath: evidence, GitHubPR: "99", Now: time.Date(2026, 9, 3, 4, 0, 1, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.Blocking || second.Verdict != "NEEDS_REVISION" {
+		t.Fatalf("second run must record the current-target blocker: %+v", second)
+	}
+	if err := os.WriteFile(evidence, []byte("go test ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	third, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 3, 4, 0, 2, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 3 || third.Reused || !third.Blocking || third.Verdict != "NEEDS_REVISION" {
+		t.Fatalf("missing GitHub context must not erase the current blocker or reuse the old PASS: calls=%d result=%+v", calls, third)
+	}
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(third.ReviewRel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Current target blocker") {
+		t.Fatalf("current blocker must remain visible in the third review:\n%s", body)
+	}
+}
+
 func TestExplicitPreviousRunRejectsStalePersistedDigest(t *testing.T) {
 	root := smallPRReadyRepo(t)
 	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")

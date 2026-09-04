@@ -102,7 +102,19 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 			projection.historicalLogs = append(projection.historicalLogs, log)
 			continue
 		}
-		if (options.Scope == "pr-ready" && log.Kind == "pr-ready") || unrelatedTargetLog(log, changed, linked) {
+		unrelated := unrelatedTargetLog(log, changed, linked)
+		if options.Scope == "pr-ready" && log.Kind == "pr-ready" {
+			// Prior PR-ready logs are outcomes, not reviewer prerequisites, so keep
+			// them out of the current reviewer input. Only an unrelated target makes
+			// that run's findings historical; current-target findings remain part of
+			// the live frontier until an explicit fix chain supersedes them.
+			if unrelated && log.RunID != "" {
+				historicalRunIDs[log.RunID] = true
+			}
+			projection.historicalLogs = append(projection.historicalLogs, log)
+			continue
+		}
+		if unrelated {
 			if log.RunID != "" {
 				historicalRunIDs[log.RunID] = true
 			}
@@ -241,6 +253,10 @@ func unrelatedArtifact(log reviewlog.Summary, changed map[string]bool) bool {
 func unrelatedTargetLog(log reviewlog.Summary, changed, linked map[string]bool) bool {
 	if unrelatedArtifact(log, changed) {
 		return true
+	}
+	if log.Kind == "pr-ready" {
+		key := findingTargetKey(log.TargetRecord)
+		return key != "" && !linked[key]
 	}
 	if log.Kind != "task-done" {
 		return false
