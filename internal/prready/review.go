@@ -1071,16 +1071,19 @@ func classifiedFindingsMarkdown(records []findings.Record) string {
 
 func classForDisplay(record findings.Record) string {
 	counts := findings.CountByClass([]findings.Record{record})
-	switch {
-	case counts.Blocking > 0:
+	// An if-chain rather than a tagless `switch {}`: Go's coverage tool emits no counter for a
+	// tagless-switch case expression, so its guards read as permanently uncovered and mutation testing
+	// can never exercise them. As plain `if` conditions they are both covered and mutation-killable.
+	if counts.Blocking > 0 {
 		return "blocking"
-	case counts.Advisory > 0:
-		return "advisory"
-	case counts.FollowUp > 0:
-		return "follow-up"
-	default:
-		return "warning"
 	}
+	if counts.Advisory > 0 {
+		return "advisory"
+	}
+	if counts.FollowUp > 0 {
+		return "follow-up"
+	}
+	return "warning"
 }
 
 func runChainMarkdown(runID, verdict string, meta reviewMetadata) string {

@@ -181,9 +181,13 @@ func parseMarkdown(rel, text string) Summary {
 			if declaredLenses == nil {
 				declaredLenses = splitLenses(markdown.FirstInlineCode(line))
 			}
-		case strings.TrimSpace(line) == "## Verdict":
+		case isVerdictHeading(line):
 			// The FIRST verdict section only. This one cannot use inHeader — it is itself a
-			// heading — so it carries its own guard.
+			// heading — so it carries its own guard. The guard is a named predicate, not an inline
+			// case expression, because Go's coverage tool emits no counter for a tagless-switch case
+			// expression: inline, the "## Verdict" match is executed by every parse yet reported
+			// forever uncovered (so mutation testing can never exercise it). In a function body it is
+			// both covered and mutation-killable.
 			if summary.Verdict == "" {
 				summary.Verdict = nextNonEmpty(lines, i+1)
 			}
@@ -562,6 +566,13 @@ func isOpenBlocker(record findingRecord) bool {
 		return true
 	}
 	return record.Classification == "blocking" && (record.Severity == "critical" || record.Severity == "high")
+}
+
+// isVerdictHeading reports whether a line is the verdict section heading. It exists as a named
+// predicate so the "## Verdict" match sits in a coverage-instrumented function body rather than an
+// (uninstrumentable) tagless-switch case expression — see the call site.
+func isVerdictHeading(line string) bool {
+	return strings.TrimSpace(line) == "## Verdict"
 }
 
 func nextNonEmpty(lines []string, start int) string {
