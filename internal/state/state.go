@@ -44,8 +44,12 @@ func AppendJSONL(path string, record any) (err error) {
 	return err
 }
 
+// openFile is a seam (like closeFile) so ReadJSONL's non-NotExist os.Open error branch — otherwise
+// only reachable via a permission failure, which a root test runner does not hit — can be exercised.
+var openFile = os.Open
+
 func ReadJSONL[T any](path string) ([]T, error) {
-	file, err := os.Open(path)
+	file, err := openFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}

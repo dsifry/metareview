@@ -35,7 +35,7 @@ internal/runchain 92.2
 internal/sessionhistory 85.2
 internal/setup 89.8
 internal/shardpack 100.0
-internal/state 84.9
+internal/state 100.0
 internal/status 100.0
 internal/taskdone 89.4
 internal/tasksource 100.0
