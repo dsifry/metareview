@@ -57,6 +57,13 @@ type fileSnapshot struct {
 	content []byte
 }
 
+// readFindings is a seam over the findings-ledger read. Its error branch is otherwise unreachable:
+// learnsource.Collect (via reviewlog) reads the same .metareview/findings.jsonl earlier in the run,
+// so a genuinely broken ledger always fails there first.
+var readFindings = func(root string) ([]findings.Record, error) {
+	return state.ReadJSONL[findings.Record](filepath.Join(root, ".metareview", "findings.jsonl"))
+}
+
 func RunPostMerge(root string, options ReviewOptions) (ReviewResult, error) {
 	now := options.Now
 	if now.IsZero() {
@@ -74,7 +81,7 @@ func RunPostMerge(root string, options ReviewOptions) (ReviewResult, error) {
 	if err != nil {
 		return ReviewResult{}, err
 	}
-	records, err := state.ReadJSONL[findings.Record](filepath.Join(root, ".metareview", "findings.jsonl"))
+	records, err := readFindings(root)
 	if err != nil {
 		return ReviewResult{}, err
 	}
