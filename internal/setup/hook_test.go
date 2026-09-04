@@ -38,7 +38,7 @@ func TestSetupReportsWhetherEnforcementIsActive(t *testing.T) {
 
 	// The state this repository was actually in: script present, nothing registering it.
 	root := newRepo(t, true)
-	got := enforcementStatus(root, t.TempDir(), "")
+	got := enforcementStatus(root, t.TempDir(), "", false)
 	if got.Active {
 		t.Error("a hook script with no registration is not active")
 	}
@@ -51,14 +51,14 @@ func TestSetupReportsWhetherEnforcementIsActive(t *testing.T) {
 
 	// Registered in project settings.
 	register(t, root, stopHook)
-	if got := enforcementStatus(root, t.TempDir(), ""); !got.Active || got.Source == "" {
+	if got := enforcementStatus(root, t.TempDir(), "", false); !got.Active || got.Source == "" {
 		t.Errorf("a project-registered Stop hook must be reported active: %+v", got)
 	}
 
 	// Registered in the user's own settings instead.
 	home := t.TempDir()
 	register(t, home, stopHook)
-	if got := enforcementStatus(newRepo(t, true), home, ""); !got.Active {
+	if got := enforcementStatus(newRepo(t, true), home, "", false); !got.Active {
 		t.Error("a Stop hook in the user's settings must count")
 	}
 
@@ -66,7 +66,7 @@ func TestSetupReportsWhetherEnforcementIsActive(t *testing.T) {
 	// shape most likely to be mistaken for enforcement, because the file exists and mentions hooks.
 	other := newRepo(t, true)
 	register(t, other, `{"hooks":{"PreToolUse":[{"matcher":"","hooks":[{"type":"command","command":"x"}]}]}}`)
-	if enforcementStatus(other, t.TempDir(), "").Active {
+	if enforcementStatus(other, t.TempDir(), "", false).Active {
 		t.Error("hooks that are not Stop hooks do not enforce the Completion Rule")
 	}
 	for name, body := range map[string]string{
@@ -78,7 +78,7 @@ func TestSetupReportsWhetherEnforcementIsActive(t *testing.T) {
 	} {
 		r := newRepo(t, true)
 		register(t, r, body)
-		if enforcementStatus(r, t.TempDir(), "").Active {
+		if enforcementStatus(r, t.TempDir(), "", false).Active {
 			t.Errorf("%s must not read as a registered gate", name)
 		}
 	}
@@ -87,7 +87,7 @@ func TestSetupReportsWhetherEnforcementIsActive(t *testing.T) {
 	// error rather than a review verdict, so it must be called out separately.
 	noScript := newRepo(t, false)
 	register(t, noScript, stopHook)
-	got = enforcementStatus(noScript, t.TempDir(), "")
+	got = enforcementStatus(noScript, t.TempDir(), "", false)
 	if !got.Active || got.ScriptPresent {
 		t.Fatalf("expected registered-but-missing-script: %+v", got)
 	}
@@ -124,7 +124,7 @@ func TestEnforcementIsNotCertifiedByHooksThatCannotEnforceIt(t *testing.T) {
 
 	// Somebody else's Stop hook enforces nothing about reviews. It used to set Active, because the
 	// check accepted ANY Stop entry with a non-empty command.
-	got := enforcementStatus(repoWith(t, 0o755, theirs), t.TempDir(), "")
+	got := enforcementStatus(repoWith(t, 0o755, theirs), t.TempDir(), "", false)
 	if got.Active {
 		t.Error("a formatter's Stop hook must not certify metareview's enforcement as active")
 	}
@@ -138,7 +138,7 @@ func TestEnforcementIsNotCertifiedByHooksThatCannotEnforceIt(t *testing.T) {
 	// A script the host cannot execute fails exactly like a missing one, and used to report as
 	// present because only os.Stat's IsRegular was checked. An archive, a copy or a restrictive
 	// umask is enough to lose the bit.
-	got = enforcementStatus(repoWith(t, 0o644, ours), t.TempDir(), "")
+	got = enforcementStatus(repoWith(t, 0o644, ours), t.TempDir(), "", false)
 	if got.ScriptPresent {
 		t.Error("a non-executable hook script is not a usable one")
 	}
@@ -147,7 +147,7 @@ func TestEnforcementIsNotCertifiedByHooksThatCannotEnforceIt(t *testing.T) {
 	}
 
 	// And the working case still works, so the tightening did not just break the check.
-	got = enforcementStatus(repoWith(t, 0o755, ours), t.TempDir(), "")
+	got = enforcementStatus(repoWith(t, 0o755, ours), t.TempDir(), "", false)
 	if !got.Active || !got.ScriptPresent || got.Remediation != "" || got.Foreign != "" {
 		t.Errorf("a correctly installed hook must certify cleanly: %+v", got)
 	}
@@ -172,7 +172,7 @@ func TestAPluginInstallCountsAsEnforcement(t *testing.T) {
 	}
 
 	// The repository under review has no hook of its own — the ordinary case for a plugin user.
-	got := enforcementStatus(t.TempDir(), t.TempDir(), plugin)
+	got := enforcementStatus(t.TempDir(), t.TempDir(), plugin, false)
 	if !got.Active {
 		t.Error("a plugin install registers the hook and must count as active")
 	}
@@ -196,7 +196,7 @@ func TestAPluginInstallCountsAsEnforcement(t *testing.T) {
 		[]byte(`{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"npx prettier ."}]}]}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if enforcementStatus(t.TempDir(), t.TempDir(), other).Active {
+	if enforcementStatus(t.TempDir(), t.TempDir(), other, false).Active {
 		t.Error("another plugin's Stop hook must not certify metareview's gate")
 	}
 }
