@@ -202,6 +202,47 @@ func TestEscalatedVerdictIsUnresolved(t *testing.T) {
 	}
 }
 
+func TestIsVerdictHeading(t *testing.T) {
+	cases := map[string]bool{
+		"## Verdict":     true,
+		"  ## Verdict  ": true, // trimmed
+		"## Verdicts":    false,
+		"## Findings":    false,
+		"# Verdict":      false,
+		"Verdict":        false,
+		"":               false,
+	}
+	for line, want := range cases {
+		if got := isVerdictHeading(line); got != want {
+			t.Fatalf("isVerdictHeading(%q) = %v, want %v", line, got, want)
+		}
+	}
+}
+
+// The verdict is read from the "## Verdict" section only — a different "## " heading whose first line
+// happens to be a verdict-shaped token must not be adopted as the verdict.
+func TestVerdictComesFromVerdictHeadingOnly(t *testing.T) {
+	root := t.TempDir()
+	md := "# metareview: task-done review\n\n" +
+		"Run ID: `mrv-1`\n\n" +
+		"Target: `task-1`\n\n" +
+		"## Summary\n\nESCALATED\n\n" + // a decoy: verdict-shaped text under a non-verdict heading
+		"## Verdict\n\nPASS\n\n" +
+		"## Findings\n\nNo blocking findings.\n"
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), md)
+
+	logs, err := ForTarget(root, "task-1")
+	if err != nil {
+		t.Fatalf("target logs: %v", err)
+	}
+	if len(logs) != 1 || logs[0].Verdict != "PASS" {
+		t.Fatalf("verdict must come from the ## Verdict section (PASS), got %+v", logs)
+	}
+	if logs[0].HasUnresolvedBlockers {
+		t.Fatalf("a PASS review must not be flagged unresolved (the decoy ESCALATED must be ignored): %+v", logs)
+	}
+}
+
 func TestDiscoverMergesRunAttemptMetadata(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "task.md"), reviewMarkdown("mrv-task", "task-1", "ESCALATED", ""))
