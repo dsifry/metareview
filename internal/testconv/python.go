@@ -97,19 +97,20 @@ func (pythonConvention) ParseReport(code int, stdout, stderr string) (TestReport
 	for _, s := range suites {
 		for _, c := range s.Cases {
 			id := pytestNodeID(c)
-			switch {
-			case c.Error != nil:
+			// An if/else-if chain rather than a tagless `switch {}`: Go's coverage tool emits no counter
+			// for a tagless-switch case expression, so these guards read as permanently uncovered and
+			// mutation testing can never exercise them. As `if` conditions they are covered and killable;
+			// behaviour is identical (first true branch wins).
+			if c.Error != nil {
 				// A crash or collection/setup error: no assertion was reached. Mark the run build-failed
 				// and leave the test absent, so Classify reports ClsCompile for it (never a valid fail-before).
 				rep.BuildFailed = true
-			case c.Failure != nil:
+			} else if c.Failure != nil {
 				rep.Tests[id] = Failed
-			case c.Skipped != nil:
+			} else if c.Skipped != nil {
 				// did not execute → absent
-			default:
-				if rep.Tests[id] != Failed { // a failure is authoritative and never masked by a pass
-					rep.Tests[id] = Passed
-				}
+			} else if rep.Tests[id] != Failed { // a failure is authoritative and never masked by a pass
+				rep.Tests[id] = Passed
 			}
 		}
 	}

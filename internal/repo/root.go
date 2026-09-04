@@ -20,8 +20,12 @@ import (
 // reads, so a checkout carrying review logs is a repository even where the transient state has
 // been cleaned away; and `.git` as the fallback for the first run, matched as either a directory
 // or a file so that worktrees and submodules resolve too.
+// absPath is a seam over filepath.Abs so the error branch below — which filepath.Abs reaches only
+// when os.Getwd fails, unreproducible in a normal test — can be exercised.
+var absPath = filepath.Abs
+
 func Root(start string) (string, error) {
-	dir, err := filepath.Abs(start)
+	dir, err := absPath(start)
 	if err != nil {
 		return "", err
 	}
