@@ -111,13 +111,22 @@ metareview setup --install-hooks --force    # override a detected conflict
 metareview setup --uninstall-hooks          # reverse it (only if it is metareview's)
 ```
 
+`--uninstall-hooks` unsets `core.hooksPath` and removes the materialized `.metareview/git-hooks/` scripts, but
+**leaves the `.gitignore` block in place** — editing a user's `.gitignore` on uninstall is riskier than
+leaving inert ignore lines. To remove it, delete the block marked `# metareview: keep ephemeral review state
+local …` from `.gitignore` by hand. Re-running install (or `learn --post-merge`) re-adds it.
+
 With no TTY and no `--yes` (an agent or CI), it prints the plan and the flags and **changes nothing** rather
 than hanging on a prompt. Install **materializes** the hook scripts into `.metareview/git-hooks/` (embedded in
 the binary, so this works in *any* repo — not just metareview's own checkout), points `core.hooksPath` there,
-and adds `.metareview/git-hooks/` to the repo's `.gitignore` (idempotently) so the per-clone scripts are not
-committed. Git hooks are per-clone and never auto-install (git's security model), so each clone runs this
-once. Keep `bin/metareview` built (or `metareview` on `PATH`, or `METAREVIEW_BIN` set) — the pre-push gate
-fails closed if it cannot run.
+and adds metareview's **ephemeral-state ignore block** to the repo's `.gitignore` (idempotently) so the
+per-clone scripts *and the rest of metareview's ephemeral state* (`runs.jsonl`, `findings.jsonl`, `runs/`,
+`shards/`) are never committed, while the **durable** learning state (`knowledge/metareview.jsonl`,
+`calibration.jsonl`, `learning-runs.jsonl`) stays committable. Re-running install **refreshes materialized
+hooks whose content has drifted** from the current binary (an upgrade), and `--force` always re-materializes —
+so a hook fix reaches an already-installed repo. Git hooks are per-clone and never auto-install (git's security
+model), so each clone runs this once. Keep `bin/metareview` built (or `metareview` on `PATH`, or
+`METAREVIEW_BIN` set) — the pre-push gate fails closed if it cannot run.
 
 ## Standalone Setup
 

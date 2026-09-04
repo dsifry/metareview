@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	hookassets "github.com/dsifry/metareview"
+	"github.com/dsifry/metareview/internal/gitpolicy"
 )
 
 // GitRunner is the git seam so the install logic is testable without a real repo; nil uses the real binary.
@@ -62,32 +64,9 @@ func materializeHooks(dir string) error {
 	return nil
 }
 
-// ensureHooksGitignored keeps the per-clone materialized hooks out of the consumer's commits. It is a no-op
-// when git already ignores the dir (e.g. metareview's own .metareview/* rule) or the line is already present,
-// and it is best-effort: the gate works regardless of gitignore state, so callers do not fail on its error.
-func ensureHooksGitignored(root string, git GitRunner) error {
-	const rel = ".metareview/git-hooks"
-	if _, err := git(root, "check-ignore", "-q", rel); err == nil {
-		return nil // git already ignores it
-	}
-	gitignore := filepath.Join(root, ".gitignore")
-	existing, _ := os.ReadFile(gitignore)
-	line := rel + "/"
-	if strings.Contains(string(existing), line) {
-		return nil
-	}
-	prefix := ""
-	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
-		prefix = "\n"
-	}
-	f, err := os.OpenFile(gitignore, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // repo-local path
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	_, err = f.WriteString(prefix + "# metareview: per-clone materialized git-native review-gate hooks\n" + line + "\n")
-	return err
-}
+// (The .gitignore block that keeps metareview's ephemeral state out of a consumer's commits lives in
+// internal/gitpolicy — one source shared with the learning post-merge writer. ApplyHookInstall calls
+// gitpolicy.Ensure directly.)
 
 // hooksMaterialized reports whether dir holds an executable copy of EVERY gate hook — the check the CLI runs
 // to confirm the gate is genuinely active before it says so (git silently ignores a missing/empty hooksPath).
@@ -95,6 +74,31 @@ func hooksMaterialized(dir string) bool {
 	for name := range gitHookScripts {
 		info, err := os.Stat(filepath.Join(dir, name))
 		if err != nil || info.Mode()&0o100 == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// hooksCurrent is stricter than hooksMaterialized: every gate hook must be present, executable, AND
+// byte-identical to the CURRENT embed. The materialized scripts live in git-ignored .metareview/git-hooks, so
+// an UPGRADED binary carries a newer hook body while the on-disk script predates the upgrade — present-but-
+// stale. Treating that as "installed" (hooksMaterialized alone) leaves the consumer running the old hook
+// forever, so a hook fix (e.g. the #82 per-ref gate) never reaches an already-installed repo. Content drift ⇒
+// not current ⇒ PlanHookInstall does NOT report AlreadyDone ⇒ re-install rematerializes.
+func hooksCurrent(dir string) bool {
+	for name, src := range gitHookScripts {
+		p := filepath.Join(dir, name)
+		info, err := os.Stat(p)
+		if err != nil || info.Mode()&0o100 == 0 {
+			return false
+		}
+		want, err := hookassets.GitHookAssets.ReadFile(src)
+		if err != nil {
+			return false
+		}
+		got, err := os.ReadFile(p)
+		if err != nil || !bytes.Equal(got, want) {
 			return false
 		}
 	}
@@ -147,11 +151,14 @@ func PlanHookInstall(root string, git GitRunner) (HookInstallPlan, error) {
 	effOut, _ := git(root, "config", "--get", "core.hooksPath")
 	plan.Current = strings.TrimSpace(string(effOut))
 
-	// Ours, set locally → already installed ONLY if the scripts are actually present. .metareview/git-hooks is
-	// git-ignored, so the materialized scripts can be deleted or go stale while core.hooksPath still points at
-	// them; treating that as "done" would leave the gate inert (git ignores an empty hooksPath) — the exact
-	// failure this whole change closes. When they are missing we fall through and reinstall (rematerialize).
-	if local != "" && sameHookPath(root, local, target) && hooksMaterialized(target) {
+	// Ours, set locally → already installed ONLY if the scripts are present AND byte-current with the embed AND
+	// the ephemeral-state .gitignore block is in place. .metareview/git-hooks is git-ignored, so the scripts can
+	// be deleted (missing) or predate a binary upgrade (present-but-stale) while core.hooksPath still points at
+	// them; treating either as "done" leaves the gate inert or running an old hook. And an EARLIER install (before
+	// the gitignore block existed) has current hooks but no block — short-circuiting there would never write it,
+	// so a reinstall could not restore Gap B for an already-installed repo. All three must hold, or we fall
+	// through and ApplyHookInstall re-materializes the scripts and (re)writes the gitignore block.
+	if local != "" && sameHookPath(root, local, target) && hooksCurrent(target) && gitpolicy.Present(root) {
 		plan.AlreadyDone = true
 		return plan, nil
 	}
@@ -191,7 +198,9 @@ func ApplyHookInstall(root string, plan HookInstallPlan, force bool, git GitRunn
 	if git == nil {
 		git = realGitRunner
 	}
-	if plan.AlreadyDone {
+	// --force ALWAYS re-materializes: it is the explicit "rewrite the scripts now" override, for a
+	// hand-tampered or partially-updated hook that a read-only plan happened to call AlreadyDone.
+	if plan.AlreadyDone && !force {
 		return nil
 	}
 	if len(plan.Conflicts) > 0 && !force {
@@ -220,8 +229,9 @@ func ApplyHookInstall(root string, plan HookInstallPlan, force bool, git GitRunn
 	if err := materializeHooks(plan.Target); err != nil {
 		return fmt.Errorf("writing hook scripts to %s: %w", plan.Target, err)
 	}
-	// Best-effort: keep the per-clone materialized hooks out of the consumer's commits. Never fatal.
-	_ = ensureHooksGitignored(root, git)
+	// Best-effort: keep metareview's ephemeral per-clone state out of the consumer's commits (the shared
+	// gitpolicy block — one source with the learning post-merge writer). Never fatal.
+	_ = gitpolicy.Ensure(root)
 	if _, err := git(root, "config", "--local", "core.hooksPath", plan.Target); err != nil {
 		return fmt.Errorf("setting core.hooksPath: %w", err)
 	}

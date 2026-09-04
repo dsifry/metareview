@@ -865,9 +865,12 @@ func handleHookInstall(uninstall, yes, force, dryRun bool) {
 	exitOnErr(err)
 	printHookPlan(plan)
 
-	if plan.AlreadyDone {
-		fmt.Println("\nAlready installed — no changes made.")
+	if plan.AlreadyDone && !force {
+		fmt.Println("\nAlready installed — no changes made (use --force to re-materialize the hook scripts).")
 		return
+	}
+	if plan.AlreadyDone && force {
+		fmt.Println("\nAlready installed — --force will re-materialize the hook scripts from the current binary.")
 	}
 	if len(plan.Conflicts) > 0 && !force {
 		fmt.Println("\nCONFLICT — no changes made:")
@@ -912,7 +915,9 @@ func printHookPlan(plan setup.HookInstallPlan) {
 	fmt.Println("metareview review gate — git-native hooks")
 	fmt.Println("  Will write: the pre-push + post-commit hook scripts into " + plan.Target)
 	fmt.Println("  Will set:   core.hooksPath = " + plan.Target + "   (this clone only)")
-	fmt.Println("  Will add:   .metareview/git-hooks/ to .gitignore (if not already ignored)")
+	fmt.Println("  Will add:   metareview's ephemeral-state block to .gitignore — ignore .metareview/* (runs,")
+	fmt.Println("              findings, shards, the hook scripts) while keeping the durable learning files")
+	fmt.Println("              (knowledge/metareview.jsonl, calibration.jsonl, learning-runs.jsonl) committable")
 	fmt.Println("  Currently:  core.hooksPath = " + current)
 	fmt.Println("  Effect:     git runs the pre-push gate (BLOCKS an unreviewed push) and the")
 	fmt.Println("              post-commit review-owed nudge on this repo.")
