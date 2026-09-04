@@ -133,6 +133,14 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// The full ledger (every status) lets the evidence renderer reconcile a
+	// historical review against how its findings were actually cleared (#40). Read
+	// before this run reconciles: the overrides/fixes that clear a historical
+	// review were recorded by earlier runs and are already on disk.
+	allFindings, err := findings.All(root)
+	if err != nil {
+		return Result{}, err
+	}
 	evidenceText, err := readEvidence(options.EvidencePath)
 	if err != nil {
 		return Result{}, err
@@ -157,6 +165,7 @@ func Create(root string, options Options) (Result, error) {
 		EpicReviews: epicReviewEvidence(reviewLogs),
 		Blockers:    blockerEvidence(projection.CurrentBlockers()),
 		GitHub:      ghCtx,
+		Findings:    allFindings,
 	})
 
 	runID, contextRel, reviewRel, err := uniquePaths(root, now)

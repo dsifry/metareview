@@ -55,6 +55,37 @@ func TestReconcileTracksOpenFindingsAcrossAncestorChain(t *testing.T) {
 	}
 }
 
+func TestAllReturnsEveryStatus(t *testing.T) {
+	root := t.TempDir()
+	if got, err := All(root); err != nil || len(got) != 0 {
+		t.Fatalf("empty ledger: got %d records, err %v", len(got), err)
+	}
+	target := map[string]string{"type": "beads-task", "id": "task-1"}
+	run := Run{ID: "mrv-a", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	if _, err := Reconcile(root, run, []Input{unsafeEval("eval is introduced.")}, Options{}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := GrantOverride(root, "mrvf-a-001", OverrideGrant{By: "boss", Reason: "accepted for release", Now: "2026-09-04T00:00:00Z"}); err != nil {
+		t.Fatalf("grant override: %v", err)
+	}
+	all, err := All(root)
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(all) != 1 || all[0].Status != StatusOverridden {
+		t.Fatalf("All should return the overridden record regardless of status: %+v", all)
+	}
+	// An overridden finding is not an unresolved blocker, so All and
+	// UnresolvedBlocking must disagree — proving All is not just the blocker set.
+	blockers, err := UnresolvedBlocking(root)
+	if err != nil {
+		t.Fatalf("UnresolvedBlocking: %v", err)
+	}
+	if len(blockers) != 0 {
+		t.Fatalf("overridden finding should not be an unresolved blocker: %+v", blockers)
+	}
+}
+
 func TestReconcileReturnsOpenFindingsForCurrentTarget(t *testing.T) {
 	root := t.TempDir()
 	target := map[string]string{"type": "beads-task", "id": "task-1"}
