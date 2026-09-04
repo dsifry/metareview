@@ -634,6 +634,20 @@ func TestSummaryAuthenticatesReviewerInputMetadataAgainstLocalRunRecord(t *testi
 	if logs[0].RunRecordAuthenticated {
 		t.Fatalf("a stale committed digest must not authenticate the local run: %+v", logs[0])
 	}
+
+	// A matching digest and verdict still cannot let one run record authenticate
+	// a different review document.
+	mustWrite(t, filepath.Join(root, rel),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-pr`\n\nTarget: `current branch`\n\nReviewer input digest: `sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n\n## Verdict\n\nPASS\n")
+	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-pr","scope":"pr-ready","target":{"type":"branch","id":"feature"},"status":"passed","verdict":"PASS","executionMode":"deterministic-local","baseSha":"base","headSha":"head","reviewLogPath":"docs/metareview/reviews/other.md","reviewers":["one","two"],"reviewInputDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`+"\n")
+	logs, err = Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logs[0].RunRecordAuthenticated {
+		t.Fatalf("a run record naming another review must not authenticate: %+v", logs[0])
+	}
 }
 
 // Scoping has to survive leaving the machine that produced the review. HeadSHA and CoveredPaths

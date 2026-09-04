@@ -411,6 +411,23 @@ func TestProjectTreatsUnrelatedPathBlockerWithoutLogAsHistorical(t *testing.T) {
 	}
 }
 
+func TestProjectTreatsUnrelatedMarkdownBlockerWithoutLogAsHistorical(t *testing.T) {
+	blocker := findings.Record{
+		ID:             "mrvf-markdown-001",
+		RunID:          "mrv-markdown",
+		Status:         "open",
+		Classification: "blocking",
+		Severity:       "high",
+		Target:         map[string]any{"type": "markdown", "path": "docs/spec.md"},
+	}
+
+	projection := ProjectRecords(nil, []findings.Record{blocker}, Options{ChangedPaths: []string{"lib/parser.js"}})
+
+	if len(projection.CurrentBlockers()) != 0 || len(projection.HistoricalBlockers()) != 1 {
+		t.Fatalf("markdown must share path-target scoping: current=%+v historical=%+v", projection.CurrentBlockers(), projection.HistoricalBlockers())
+	}
+}
+
 func TestProjectKeepsRelevantPathBlockerCurrent(t *testing.T) {
 	blockers := []findings.Record{
 		{ID: "mrvf-path-001", RunID: "mrv-path", Status: "open", Classification: "blocking", Severity: "high", Target: map[string]any{"type": "path", "path": "lib/parser.js"}},

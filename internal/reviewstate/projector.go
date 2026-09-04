@@ -76,10 +76,7 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 	linked := targetSet(options.LinkedTargets)
 	historicalRunIDs := map[string]bool{}
 	currentRunIDs := map[string]bool{}
-	currentTarget := options.CurrentTarget
-	if len(currentTarget) == 0 {
-		currentTarget = options.Target
-	}
+	currentTarget := targetForRunchain(options)
 	if key := findingTargetKey(currentTarget); key != "" {
 		linked[key] = true
 	}
@@ -387,18 +384,6 @@ func unrelatedTargetLog(log reviewlog.Summary, changed, linked map[string]bool) 
 	return true
 }
 
-func unrelatedPathBlocker(blocker findings.Record, changed map[string]bool) bool {
-	targetType, targetID := findingTarget(blocker.Target)
-	if targetType != "path" {
-		return false
-	}
-	target := normalizePath(targetID)
-	if target == "" {
-		return false
-	}
-	return !reviewedPathOverlaps(changed, target)
-}
-
 func unrelatedFindingTarget(blocker findings.Record, currentRunIDs, changed, linked map[string]bool) bool {
 	if currentRunIDs[blocker.RunID] {
 		return false
@@ -408,7 +393,8 @@ func unrelatedFindingTarget(blocker findings.Record, currentRunIDs, changed, lin
 	case "branch", "task", "pull-request":
 		return targetID != "" && !linked[canonicalTargetKey(targetType, targetID)]
 	case "path":
-		return unrelatedPathBlocker(blocker, changed)
+		target := normalizePath(targetID)
+		return target != "" && !reviewedPathOverlaps(changed, target)
 	default:
 		// Unknown and unscoped records stay blocking. Target-aware selection must
 		// not turn missing provenance into an accidental pass.

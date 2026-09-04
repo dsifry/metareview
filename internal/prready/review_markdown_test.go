@@ -342,6 +342,42 @@ func TestExplicitPRBlockerRemainsCurrentWhenGitHubIsUnavailable(t *testing.T) {
 	}
 }
 
+func TestSmallPRReadyRepoIgnoresGlobalSigningAndHooks(t *testing.T) {
+	settings := t.TempDir()
+	hooks := filepath.Join(settings, "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "pre-commit"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	globalConfig := filepath.Join(settings, "gitconfig")
+	configure := func(key, value string) {
+		t.Helper()
+		cmd := exec.Command("git", "config", "--file", globalConfig, key, value)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("configure global Git %s: %v\n%s", key, err, out)
+		}
+	}
+	configure("commit.gpgsign", "true")
+	configure("gpg.program", "/usr/bin/false")
+	configure("core.hooksPath", hooks)
+	t.Setenv("GIT_CONFIG_GLOBAL", globalConfig)
+
+	root := smallPRReadyRepo(t)
+	for key, want := range map[string]string{
+		"commit.gpgsign": "false",
+		"core.hooksPath": filepath.Join(root, ".git", "hooks"),
+	} {
+		cmd := exec.Command("git", "config", "--local", "--get", key)
+		cmd.Dir = root
+		out, err := cmd.Output()
+		if err != nil || strings.TrimSpace(string(out)) != want {
+			t.Fatalf("fixture-local %s = %q, want %q (err=%v)", key, strings.TrimSpace(string(out)), want, err)
+		}
+	}
+}
+
 func TestPriorCurrentTargetBlockerSurvivesMissingGitHubContextAndPreventsReuse(t *testing.T) {
 	root := smallPRReadyRepo(t)
 	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
@@ -495,6 +531,8 @@ func smallPRReadyRepo(t *testing.T) string {
 		t.Fatal(err)
 	}
 	run("init", "-b", "main")
+	run("config", "--local", "commit.gpgsign", "false")
+	run("config", "--local", "core.hooksPath", filepath.Join(root, ".git", "hooks"))
 	run("config", "user.email", "test@example.com")
 	run("config", "user.name", "Test User")
 	run("add", ".")
