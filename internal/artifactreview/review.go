@@ -43,6 +43,16 @@ type runRecord struct {
 	GitHead       string              `json:"gitHead"`
 }
 
+// Seams over the stdlib and cross-package calls whose error branches below are otherwise reachable
+// only through a filesystem or permission failure a normal (non-root) test runner cannot force.
+// Each defaults to the real function and is overridden — then restored via t.Cleanup — in tests, so
+// the behavior in production is identical to calling the wrapped function directly.
+var (
+	buildContext = contextpack.Build
+	mkdirAll     = os.MkdirAll
+	writeFile    = os.WriteFile
+)
+
 func gitHead(root string) string {
 	cmd := exec.Command("git", "rev-parse", "HEAD")
 	cmd.Dir = root
@@ -54,11 +64,11 @@ func gitHead(root string) string {
 }
 
 func ensureEmpty(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := mkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return os.WriteFile(path, []byte{}, 0o644)
+		return writeFile(path, []byte{}, 0o644)
 	}
 	return nil
 }
@@ -68,10 +78,10 @@ func ensureFindingsIndex(root string) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := mkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte("# metareview Findings\n\nNo unresolved findings recorded yet.\n"), 0o644)
+	return writeFile(path, []byte("# metareview Findings\n\nNo unresolved findings recorded yet.\n"), 0o644)
 }
 
 // rubricLinks maps a lens Slug to its dedicated rubric, for the lenses that have one. The rest
@@ -115,14 +125,14 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
 		}
 		runAt = runAt.Add(time.Nanosecond)
 	}
-	ctx, err := contextpack.Build(root, target, runAt)
+	ctx, err := buildContext(root, target, runAt)
 	if err != nil {
 		return Result{}, err
 	}
 	if ctx.RunID != runID {
 		return Result{}, fmt.Errorf("context pack run ID mismatch: expected %s, got %s", runID, ctx.RunID)
 	}
-	if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
+	if err := mkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 		return Result{}, err
 	}
 	head := gitHead(root)
@@ -170,7 +180,7 @@ func Create(root, target, previousRun string, at time.Time) (Result, error) {
 		"## Orchestrator Notes (not findings)\n\n" +
 		"Orchestrator context and synthesis go here (e.g. checkout sparse, filtered file-not-found artifacts, consolidation narrative). This section is audit trail only — it is NOT a finding stream. Do not extract sentences from here as review findings; only the `## Findings` section and its classified `## Blocking Findings`, `## Advisory Findings`, `## Follow-up Findings`, and `## Warnings` sections contain review findings.\n\n" +
 		"## Findings\n\nNo reviewer findings recorded yet.\n"
-	if err := os.WriteFile(reviewPath, []byte(content), 0o644); err != nil {
+	if err := writeFile(reviewPath, []byte(content), 0o644); err != nil {
 		return Result{}, err
 	}
 	if err := state.AppendJSONL(filepath.Join(root, ".metareview", "runs.jsonl"), record); err != nil {
