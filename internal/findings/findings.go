@@ -328,6 +328,14 @@ func UnresolvedBlocking(root string) ([]Record, error) {
 	return unresolvedBlockingFrom(records), nil
 }
 
+// All returns every recorded finding regardless of status. The report
+// reconciliation layer (#40) needs the resolved, overridden and superseded rows
+// too, not just the unresolved blockers, so a historical review can be rendered
+// against how its findings were actually cleared.
+func All(root string) ([]Record, error) {
+	return readJSONL(findingsPath(root))
+}
+
 func normalize(run Run, finding Input, index int, createdAt string) Record {
 	owner := finding.Owner
 	if owner == "" {
@@ -366,11 +374,22 @@ func unresolvedBlockingFrom(records []Record) []Record {
 		if !Blocks(record.Status) {
 			continue
 		}
-		if classForCount(record.Classification, record.Severity) == "blocking" {
+		if IsBlockingClass(record) {
 			blockers = append(blockers, record)
 		}
 	}
 	return blockers
+}
+
+// IsBlockingClass reports whether a finding's classification and severity put it
+// in the gate-closing blocker class (a spec-contract, or a blocking finding at
+// critical/high severity). It is the SAME predicate UnresolvedBlocking uses, so
+// a consumer that reconciles a review against the blocker set — the report
+// renderer in #40 — classifies a finding exactly as the blocker set does, rather
+// than on Blocks(status) alone (which is true for any open finding, advisory
+// included, and so disagreed with the blocker-status section).
+func IsBlockingClass(record Record) bool {
+	return classForCount(record.Classification, record.Severity) == "blocking"
 }
 
 type ClassCounts struct {

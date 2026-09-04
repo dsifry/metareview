@@ -124,11 +124,12 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 	// cleared. Without this, a first review that found anything blocks forever — the gate could only
 	// ever clear a change that passed on its first look, which no real change does.
 	superseded := supersededRuns(logs)
-	// Same-head dedup (issue #97): re-running the SAME review over the SAME (kind, target, head) records a
-	// fresh log each time. supersededRuns only clears an ancestor of a CLEAN child, so three NEEDS_REVISION
-	// re-runs over one commit would otherwise render the branch as three identical blockers that never clear.
-	// The latest same-head run supersedes the earlier ones (a fix loop reviews a DIFFERENT commit, so it is
-	// untouched). Shared with the projector so the gate and pr-ready agree.
+	// Same-head dedup (issue #97): re-running the SAME review over the SAME (kind, target, baseSha, headSha)
+	// records a fresh log each time. supersededRuns only clears an ancestor of a CLEAN child, so three
+	// NEEDS_REVISION re-runs over one diff would otherwise render the branch as three identical blockers that
+	// never clear. The latest same-head/same-base run supersedes the earlier ones (a fix loop reviews a
+	// DIFFERENT commit, and two runs at the same head but a DIFFERENT base — different diffs — are not
+	// collapsed, issue #99). Shared with the projector so the gate and pr-ready agree.
 	for id := range reviewstate.StaleSameHeadRunIDs(logs) {
 		superseded[id] = true
 	}

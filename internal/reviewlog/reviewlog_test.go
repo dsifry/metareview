@@ -564,7 +564,7 @@ func TestSummaryCarriesHeadAndCoveredPathsFromTheRunRecord(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "one.md"), reviewMarkdown("mrv-1", "t-1", "PASS", ""))
 	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
-		`{"id":"mrv-1","scope":"task-done","verdict":"PASS","headSha":"abc1234def","coveredPaths":["internal/a.go","internal/b.go"]}`+"\n")
+		`{"id":"mrv-1","scope":"task-done","verdict":"PASS","headSha":"abc1234def","baseSha":"base9999","coveredPaths":["internal/a.go","internal/b.go"]}`+"\n")
 
 	logs, err := Discover(root)
 	if err != nil {
@@ -575,6 +575,10 @@ func TestSummaryCarriesHeadAndCoveredPathsFromTheRunRecord(t *testing.T) {
 	}
 	if logs[0].HeadSHA != "abc1234def" {
 		t.Errorf("HeadSHA = %q, want the run record's", logs[0].HeadSHA)
+	}
+	// Base joins from the run record alongside head so same-head dedup can key on the full identity (#99).
+	if logs[0].BaseSHA != "base9999" {
+		t.Errorf("BaseSHA = %q, want the run record's", logs[0].BaseSHA)
 	}
 	if len(logs[0].CoveredPaths) != 2 || logs[0].CoveredPaths[0] != "internal/a.go" {
 		t.Errorf("CoveredPaths = %v, want the run record's", logs[0].CoveredPaths)
@@ -588,7 +592,7 @@ func TestSummaryCarriesHeadAndCoveredPathsFromTheRunRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, l := range logs {
-		if l.RunID == "mrv-0" && (l.HeadSHA != "" || len(l.CoveredPaths) != 0) {
+		if l.RunID == "mrv-0" && (l.HeadSHA != "" || l.BaseSHA != "" || len(l.CoveredPaths) != 0) {
 			t.Errorf("a legacy review must carry nothing: %+v", l)
 		}
 	}
