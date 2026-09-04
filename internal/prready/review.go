@@ -685,11 +685,28 @@ func legacyEscalatedPRReadyForTarget(root string, logs []reviewlog.Summary, targ
 		if log.RunID == "" || log.Kind != "pr-ready" || !strings.EqualFold(log.Verdict, "ESCALATED") {
 			continue
 		}
-		if legacyPRReadyTargetMatches(root, log, targetRecord, git) {
+		if legacyPRReadyTargetMatches(root, log, targetRecord, git) && legacyEscalationLocksCurrentHead(root, log, git) {
 			return log.RunID, true
 		}
 	}
 	return "", false
+}
+
+func legacyEscalationLocksCurrentHead(root string, log reviewlog.Summary, git gitcontext.Context) bool {
+	currentHead := strings.TrimSpace(git.HeadSHA)
+	if currentHead == "" {
+		return true
+	}
+	if reviewedHead := strings.TrimSpace(log.HeadSHA); reviewedHead != "" {
+		return reviewedHead == currentHead
+	}
+	identity, err := readLegacyPRReadyContextIdentity(root, log.ContextRel)
+	if err != nil || strings.TrimSpace(identity.Head) == "" {
+		// Without a reviewed head, there is no evidence that the escalation is
+		// stale. Preserve the hard stop rather than guessing.
+		return true
+	}
+	return identity.Head == currentHead
 }
 
 type legacyPRReadyContextIdentity struct {

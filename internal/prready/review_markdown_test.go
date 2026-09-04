@@ -299,6 +299,59 @@ func TestCommittedPreviousRunContinuesInFreshCloneWithAuthenticatedContext(t *te
 	}
 }
 
+func TestEscalatedReviewAtAncestorHeadDoesNotLockNewBranchCommit(t *testing.T) {
+	root := smallPRReadyRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
+	evidence := filepath.Join(t.TempDir(), "evidence.md")
+	if err := os.WriteFile(evidence, []byte("go test ./... exited 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original := runPRReadyReviewers
+	runPRReadyReviewers = func(reviewers.PRReadyContext) []reviewers.Finding {
+		return []reviewers.Finding{{
+			Reviewer:       "security-reviewer",
+			Severity:       "high",
+			Classification: "blocking",
+			Title:          "Persistent blocker",
+			Fingerprint:    "security:persistent-blocker",
+		}}
+	}
+	t.Cleanup(func() { runPRReadyReviewers = original })
+
+	first, err := Create(root, Options{Base: "main", EvidencePath: evidence, MaxAttempts: 2, Now: time.Date(2026, 9, 3, 3, 45, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Create(root, Options{Base: "main", EvidencePath: evidence, PreviousRunID: first.RunID, MaxAttempts: 2, Now: time.Date(2026, 9, 3, 3, 45, 1, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Verdict != "ESCALATED" {
+		t.Fatalf("second attempt must establish the old-head escalation: %+v", second)
+	}
+	if err := os.WriteFile(filepath.Join(root, "seed.txt"), []byte("redesigned\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", "seed.txt")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "redesign after escalation")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	third, err := Create(root, Options{Base: "main", EvidencePath: evidence, MaxAttempts: 2, Now: time.Date(2026, 9, 3, 3, 45, 2, 0, time.UTC)})
+	if err != nil {
+		t.Fatalf("a new branch commit must start a fresh attempt budget: %v", err)
+	}
+	if third.Verdict != "NEEDS_REVISION" {
+		t.Fatalf("new head must be attempt 1 rather than inherit escalation: %+v", third)
+	}
+}
+
 func TestExplicitPRBlockerRemainsCurrentWhenGitHubIsUnavailable(t *testing.T) {
 	root := smallPRReadyRepo(t)
 	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
