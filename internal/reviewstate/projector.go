@@ -17,6 +17,7 @@ type Options struct {
 	HistoricalRunIDs []string
 	ChangedPaths     []string
 	CurrentTarget    map[string]string
+	LinkedTargets    []map[string]string
 	CurrentRunID     string
 }
 
@@ -72,10 +73,12 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 	previous := stringSet(options.PreviousRunIDs)
 	historical := stringSet(options.HistoricalRunIDs)
 	changed := normalizedPathSet(options.ChangedPaths)
+	linked := targetSet(options.LinkedTargets)
 	historicalRunIDs := map[string]bool{}
-	currentTarget := options.CurrentTarget
-	if len(currentTarget) == 0 {
-		currentTarget = options.Target
+	currentRunIDs := map[string]bool{}
+	currentTarget := targetForRunchain(options)
+	if key := findingTargetKey(currentTarget); key != "" {
+		linked[key] = true
 	}
 	// Same-head dedup (issue #97): re-running the SAME review over the SAME (kind, target, baseSha, headSha)
 	// must REPLACE the prior run, not stack another blocker. Without this, `review pr-ready` run three times
@@ -85,6 +88,7 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 	// skipped for logs missing either sha (legacy/clone), where we cannot tell whether two logs are the same
 	// review.
 	staleSameHead := StaleSameHeadRunIDs(logs)
+	staleSameHeadFindings := staleSameHeadFindingIDs(logs, blockers)
 	projection := Projection{
 		targetKeyValue:       TargetKey(options.Scope, currentTarget),
 		currentReviewLogs:    make([]reviewlog.Summary, 0, len(logs)),
@@ -104,7 +108,19 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 			projection.historicalLogs = append(projection.historicalLogs, log)
 			continue
 		}
-		if unrelatedArtifact(log, changed) {
+		unrelated := unrelatedTargetLog(log, changed, linked)
+		if options.Scope == "pr-ready" && log.Kind == "pr-ready" {
+			// Prior PR-ready logs are outcomes, not reviewer prerequisites, so keep
+			// them out of the current reviewer input. Only an unrelated target makes
+			// that run's findings historical; current-target findings remain part of
+			// the live frontier until an explicit fix chain supersedes them.
+			if unrelated && log.RunID != "" {
+				historicalRunIDs[log.RunID] = true
+			}
+			projection.historicalLogs = append(projection.historicalLogs, log)
+			continue
+		}
+		if unrelated {
 			if log.RunID != "" {
 				historicalRunIDs[log.RunID] = true
 			}
@@ -112,9 +128,12 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 			continue
 		}
 		projection.currentReviewLogs = append(projection.currentReviewLogs, log)
+		if log.RunID != "" {
+			currentRunIDs[log.RunID] = true
+		}
 	}
 	for _, blocker := range blockers {
-		if previous[blocker.RunID] || staleSameHead[blocker.RunID] {
+		if previous[blocker.RunID] || staleSameHeadFindings[blocker.ID] {
 			projection.supersededFindingIDs[blocker.ID] = true
 			continue
 		}
@@ -122,7 +141,7 @@ func ProjectRecords(logs []reviewlog.Summary, blockers []findings.Record, option
 			projection.historicalBlockers = append(projection.historicalBlockers, blocker)
 			continue
 		}
-		if historical[blocker.RunID] || unrelatedBranchBlocker(blocker, currentTarget) || unrelatedPathBlocker(blocker, changed) {
+		if historical[blocker.RunID] || unrelatedFindingTarget(blocker, currentRunIDs, changed, linked) {
 			projection.historicalBlockers = append(projection.historicalBlockers, blocker)
 			continue
 		}
@@ -176,6 +195,44 @@ func StaleSameHeadRunIDs(logs []reviewlog.Summary) map[string]bool {
 	return stale
 }
 
+// staleSameHeadFindingIDs deduplicates only findings whose stable fingerprint
+// is repeated by a later blocking run over the same target, base and head. A
+// later run can inherit an earlier finding without writing a duplicate record,
+// so run-level staleness alone is not enough to retire the sole durable finding.
+func staleSameHeadFindingIDs(logs []reviewlog.Summary, blockers []findings.Record) map[string]bool {
+	runGroups := map[string]string{}
+	for _, log := range logs {
+		if !groupableSameHead(log) || !LogBlocks(log) {
+			continue
+		}
+		runGroups[log.RunID] = sameHeadKey(log)
+	}
+	latestByFingerprint := map[string]string{}
+	for _, blocker := range blockers {
+		group := runGroups[blocker.RunID]
+		fingerprint := strings.TrimSpace(blocker.Fingerprint)
+		if group == "" || fingerprint == "" {
+			continue
+		}
+		key := group + "\x00" + fingerprint
+		if blocker.RunID > latestByFingerprint[key] {
+			latestByFingerprint[key] = blocker.RunID
+		}
+	}
+	stale := map[string]bool{}
+	for _, blocker := range blockers {
+		group := runGroups[blocker.RunID]
+		fingerprint := strings.TrimSpace(blocker.Fingerprint)
+		if group == "" || fingerprint == "" {
+			continue
+		}
+		if blocker.RunID != latestByFingerprint[group+"\x00"+fingerprint] {
+			stale[blocker.ID] = true
+		}
+	}
+	return stale
+}
+
 // LogBlocks reports whether a review log holds work that must clear before the branch is done: open
 // unresolved blockers, OR an ESCALATED verdict (a hard stop that a later clean re-run must not erase, even if
 // the log records no open finding count). It is the ONE verdict-aware blocking predicate — shared by the
@@ -199,7 +256,13 @@ func groupableSameHead(log reviewlog.Summary) bool {
 // sameHeadKey is the dedup identity: (kind, target, baseSha, headSha). Base is part of it because two
 // reviews at the same head but a different base measured different diffs (issue #99) and must not collapse.
 func sameHeadKey(log reviewlog.Summary) string {
-	return log.Kind + "\x00" + log.Target + "\x00" + log.BaseSHA + "\x00" + log.HeadSHA
+	target := strings.TrimSpace(log.Target)
+	if log.RunRecordAuthenticated {
+		if key := findingTargetKey(log.TargetRecord); key != "" {
+			target = key
+		}
+	}
+	return log.Kind + "\x00" + target + "\x00" + log.BaseSHA + "\x00" + log.HeadSHA
 }
 
 func TargetKey(scope string, target map[string]string) string {
@@ -308,24 +371,88 @@ func unrelatedArtifact(log reviewlog.Summary, changed map[string]bool) bool {
 	return !reviewedPathOverlaps(changed, target)
 }
 
-func unrelatedBranchBlocker(blocker findings.Record, current map[string]string) bool {
-	if current["type"] != "branch" || current["id"] == "" {
+func unrelatedTargetLog(log reviewlog.Summary, changed, linked map[string]bool) bool {
+	if unrelatedArtifact(log, changed) {
+		return true
+	}
+	if log.Kind == "pr-ready" {
+		key := findingTargetKey(log.TargetRecord)
+		return key != "" && !linked[key]
+	}
+	if log.Kind != "task-done" {
 		return false
 	}
-	targetType, targetID := findingTarget(blocker.Target)
-	return targetType == "branch" && targetID != "" && targetID != current["id"]
+	if linked[canonicalTargetKey("task", log.Target)] {
+		return false
+	}
+	// A legacy log with no coverage identity remains current (fail closed). Once a
+	// task review records what it covered, only an overlap with this target's diff
+	// makes it part of the PR-ready decision.
+	if !log.CoveredPathsKnown {
+		return false
+	}
+	for _, target := range log.CoveredPaths {
+		if reviewedPathOverlaps(changed, normalizePath(target)) {
+			return false
+		}
+	}
+	return true
 }
 
-func unrelatedPathBlocker(blocker findings.Record, changed map[string]bool) bool {
+func unrelatedFindingTarget(blocker findings.Record, currentRunIDs, changed, linked map[string]bool) bool {
+	if currentRunIDs[blocker.RunID] {
+		return false
+	}
 	targetType, targetID := findingTarget(blocker.Target)
-	if targetType != "path" {
+	switch canonicalTargetType(targetType) {
+	case "branch", "task", "pull-request":
+		return targetID != "" && !linked[canonicalTargetKey(targetType, targetID)]
+	case "path":
+		target := normalizePath(targetID)
+		return target != "" && !reviewedPathOverlaps(changed, target)
+	default:
+		// Unknown and unscoped records stay blocking. Target-aware selection must
+		// not turn missing provenance into an accidental pass.
 		return false
 	}
-	target := normalizePath(targetID)
-	if target == "" {
-		return false
+}
+
+func targetSet(targets []map[string]string) map[string]bool {
+	result := map[string]bool{}
+	for _, target := range targets {
+		if key := findingTargetKey(target); key != "" {
+			result[key] = true
+		}
 	}
-	return !reviewedPathOverlaps(changed, target)
+	return result
+}
+
+func findingTargetKey(target map[string]string) string {
+	return canonicalTargetKey(target["type"], firstNonEmpty(target["id"], target["path"]))
+}
+
+func canonicalTargetKey(targetType, targetID string) string {
+	targetType = canonicalTargetType(targetType)
+	targetID = strings.TrimSpace(targetID)
+	if targetType == "" || targetID == "" {
+		return ""
+	}
+	return targetType + ":" + targetID
+}
+
+func canonicalTargetType(targetType string) string {
+	switch strings.ToLower(strings.TrimSpace(targetType)) {
+	case "beads", "beads-task", "task":
+		return "task"
+	case "pr", "github-pr", "pull-request":
+		return "pull-request"
+	case "branch":
+		return "branch"
+	case "path", "markdown":
+		return "path"
+	default:
+		return strings.ToLower(strings.TrimSpace(targetType))
+	}
 }
 
 func reviewedPathOverlaps(changed map[string]bool, target string) bool {

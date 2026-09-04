@@ -161,9 +161,9 @@ func TestProjectDedupsSameHeadReruns(t *testing.T) {
 		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: base, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
 	}
 	blockers := []findings.Record{
-		{ID: "mrvf-1", RunID: "mrv-1", Status: "open", Classification: "blocking", Severity: "high", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
-		{ID: "mrvf-2", RunID: "mrv-2", Status: "open", Classification: "blocking", Severity: "high", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
-		{ID: "mrvf-3", RunID: "mrv-3", Status: "open", Classification: "blocking", Severity: "high", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
+		{ID: "mrvf-1", RunID: "mrv-1", Status: "open", Classification: "blocking", Severity: "high", Fingerprint: "security:duplicate", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
+		{ID: "mrvf-2", RunID: "mrv-2", Status: "open", Classification: "blocking", Severity: "high", Fingerprint: "security:duplicate", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
+		{ID: "mrvf-3", RunID: "mrv-3", Status: "open", Classification: "blocking", Severity: "high", Fingerprint: "security:duplicate", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
 	}
 
 	projection := ProjectRecords(logs, blockers, Options{CurrentTarget: map[string]string{"type": "branch", "id": "feature"}})
@@ -244,8 +244,8 @@ func TestProjectDedupsSameHeadCleanReruns(t *testing.T) {
 // head is handled elsewhere (HistoricalRunIDs). Same-head dedup must not collapse across commits.
 func TestProjectDoesNotDedupAcrossHeads(t *testing.T) {
 	logs := []reviewlog.Summary{
-		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: "head-a", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
-		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: "head-b", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: "head-a", BaseSHA: "base-a", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: "head-b", BaseSHA: "base-a", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
 	}
 
 	projection := ProjectRecords(logs, nil, Options{CurrentTarget: map[string]string{"type": "branch", "id": "feature"}})
@@ -317,6 +317,24 @@ func TestProjectDoesNotDedupSameHeadEmptyBase(t *testing.T) {
 	}
 }
 
+func TestProjectDoesNotDedupSameHeadFindingWithEmptyBase(t *testing.T) {
+	head := "abc123"
+	logs := []reviewlog.Summary{
+		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+	}
+	blockers := []findings.Record{
+		{ID: "mrvf-1", RunID: "mrv-1", Status: "open", Classification: "blocking", Severity: "high", Fingerprint: "security:duplicate", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
+		{ID: "mrvf-2", RunID: "mrv-2", Status: "open", Classification: "blocking", Severity: "high", Fingerprint: "security:duplicate", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
+	}
+
+	projection := ProjectRecords(logs, blockers, Options{CurrentTarget: map[string]string{"type": "branch", "id": "feature"}})
+
+	if len(projection.CurrentBlockers()) != 2 || len(projection.SupersededFindingIDs()) != 0 {
+		t.Fatalf("findings without a reviewed base must not be deduped: current=%+v superseded=%+v", projection.CurrentBlockers(), projection.SupersededFindingIDs())
+	}
+}
+
 // A log with no HeadSHA (a legacy log that predates the field) must NOT be deduped — we cannot tell whether
 // two headless logs are the same review, so collapsing them could hide a live blocker.
 func TestProjectDoesNotDedupHeadlessLogs(t *testing.T) {
@@ -329,6 +347,41 @@ func TestProjectDoesNotDedupHeadlessLogs(t *testing.T) {
 
 	if len(projection.CurrentReviewLogs()) != 2 {
 		t.Fatalf("headless legacy logs must not be deduped: %+v", projection.CurrentReviewLogs())
+	}
+}
+
+func TestProjectKeepsSoleInheritedFindingWhenSameHeadOutcomeReruns(t *testing.T) {
+	head, base := "abc123", "base-a"
+	logs := []reviewlog.Summary{
+		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: base, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", HeadSHA: head, BaseSHA: base, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+	}
+	blockers := []findings.Record{
+		{ID: "mrvf-1", RunID: "mrv-1", Status: "open", Classification: "blocking", Severity: "high", Fingerprint: "security:inherited", GitHead: head, Target: map[string]any{"type": "branch", "id": "feature"}},
+	}
+
+	projection := ProjectRecords(logs, blockers, Options{CurrentTarget: map[string]string{"type": "branch", "id": "feature"}})
+
+	if !projection.SupersededRunIDs()["mrv-1"] {
+		t.Fatal("the earlier same-head outcome should be superseded")
+	}
+	if projection.SupersededFindingIDs()["mrvf-1"] {
+		t.Fatal("a later outcome that inherited the finding must not supersede its sole record")
+	}
+	if n := len(projection.CurrentBlockers()); n != 1 || projection.CurrentBlockers()[0].ID != "mrvf-1" {
+		t.Fatalf("the sole inherited finding must remain current; got %d: %+v", n, projection.CurrentBlockers())
+	}
+}
+
+func TestStaleSameHeadDoesNotCrossAuthenticatedBranchTargets(t *testing.T) {
+	head, base := "abc123", "base-a"
+	logs := []reviewlog.Summary{
+		{RunID: "mrv-1", Kind: "pr-ready", Target: "current branch", TargetRecord: map[string]string{"type": "branch", "id": "feature-a"}, RunRecordAuthenticated: true, HeadSHA: head, BaseSHA: base, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+		{RunID: "mrv-2", Kind: "pr-ready", Target: "current branch", TargetRecord: map[string]string{"type": "branch", "id": "feature-b"}, RunRecordAuthenticated: true, HeadSHA: head, BaseSHA: base, Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true},
+	}
+
+	if stale := StaleSameHeadRunIDs(logs); len(stale) != 0 {
+		t.Fatalf("authenticated branch targets sharing a head must remain distinct: %+v", stale)
 	}
 }
 
@@ -438,6 +491,23 @@ func TestProjectTreatsUnrelatedPathBlockerWithoutLogAsHistorical(t *testing.T) {
 	}
 }
 
+func TestProjectTreatsUnrelatedMarkdownBlockerWithoutLogAsHistorical(t *testing.T) {
+	blocker := findings.Record{
+		ID:             "mrvf-markdown-001",
+		RunID:          "mrv-markdown",
+		Status:         "open",
+		Classification: "blocking",
+		Severity:       "high",
+		Target:         map[string]any{"type": "markdown", "path": "docs/spec.md"},
+	}
+
+	projection := ProjectRecords(nil, []findings.Record{blocker}, Options{ChangedPaths: []string{"lib/parser.js"}})
+
+	if len(projection.CurrentBlockers()) != 0 || len(projection.HistoricalBlockers()) != 1 {
+		t.Fatalf("markdown must share path-target scoping: current=%+v historical=%+v", projection.CurrentBlockers(), projection.HistoricalBlockers())
+	}
+}
+
 func TestProjectKeepsRelevantPathBlockerCurrent(t *testing.T) {
 	blockers := []findings.Record{
 		{ID: "mrvf-path-001", RunID: "mrv-path", Status: "open", Classification: "blocking", Severity: "high", Target: map[string]any{"type": "path", "path": "lib/parser.js"}},
@@ -467,11 +537,11 @@ func TestProjectTreatsMismatchedBranchRunAsHistorical(t *testing.T) {
 	if len(projection.CurrentReviewLogs()) != 0 {
 		t.Fatalf("mismatched branch review log should not remain current: %+v", projection.CurrentReviewLogs())
 	}
-	if len(projection.CurrentBlockers()) != 1 || projection.CurrentBlockers()[0].RunID != "mrv-task" {
-		t.Fatalf("expected task blocker to remain current and branch blocker historical: %+v", projection.CurrentBlockers())
+	if len(projection.CurrentBlockers()) != 0 {
+		t.Fatalf("unlinked task and mismatched branch blockers should both be historical: %+v", projection.CurrentBlockers())
 	}
-	if len(projection.HistoricalBlockers()) != 1 || projection.HistoricalBlockers()[0].RunID != "mrv-branch-a" {
-		t.Fatalf("expected branch blocker to be historical: %+v", projection.HistoricalBlockers())
+	if len(projection.HistoricalBlockers()) != 2 {
+		t.Fatalf("expected branch and unlinked task blockers to be historical: %+v", projection.HistoricalBlockers())
 	}
 }
 
@@ -499,5 +569,37 @@ func TestProjectKeepsRelevantArtifactLogCurrent(t *testing.T) {
 
 	if len(projection.CurrentReviewLogs()) != 1 || projection.CurrentReviewLogs()[0].RunID != "mrv-artifact" {
 		t.Fatalf("expected changed-path artifact to remain current: %+v", projection.CurrentReviewLogs())
+	}
+}
+
+func TestPRReadyProjectionKeepsOnlyCurrentTargetLinkedFindingsBlocking(t *testing.T) {
+	logs := []reviewlog.Summary{
+		{RunID: "mrv-old-task", Kind: "task-done", Target: "GUIDE-old", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true, CoveredPaths: []string{"docs/old.md"}, CoveredPathsKnown: true},
+		{RunID: "mrv-current-task", Kind: "task-done", Target: "GUIDE-current", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true, CoveredPaths: []string{"internal/prready/review.go"}, CoveredPathsKnown: true},
+		{RunID: "mrv-prior-pass", Kind: "pr-ready", Target: "current branch", Verdict: "PASS", CoveredPaths: []string{"internal/prready/review.go"}, CoveredPathsKnown: true},
+	}
+	blockers := []findings.Record{
+		{ID: "mrvf-old-task", RunID: "mrv-old-task", Status: "open", Classification: "blocking", Severity: "high", Target: map[string]any{"type": "beads-task", "id": "GUIDE-old"}},
+		{ID: "mrvf-current-task", RunID: "mrv-current-task", Status: "open", Classification: "blocking", Severity: "high", Target: map[string]any{"type": "beads-task", "id": "GUIDE-current"}},
+		{ID: "mrvf-other-branch", RunID: "mrv-other-branch", Status: "open", Classification: "blocking", Severity: "high", Target: map[string]any{"type": "branch", "id": "other"}},
+		{ID: "mrvf-current-pr", RunID: "mrv-current-pr", Status: "open", Classification: "blocking", Severity: "high", Target: map[string]any{"type": "pull-request", "id": "42"}},
+	}
+
+	projection := ProjectRecords(logs, blockers, Options{
+		Scope:         "pr-ready",
+		ChangedPaths:  []string{"internal/prready/review.go"},
+		CurrentTarget: map[string]string{"type": "branch", "id": "feature"},
+		LinkedTargets: []map[string]string{{"type": "pull-request", "id": "42"}},
+	})
+
+	if got := projection.CurrentReviewLogs(); len(got) != 1 || got[0].RunID != "mrv-current-task" {
+		t.Fatalf("only the task review linked by the current diff should remain current: %+v", got)
+	}
+	got := projection.CurrentBlockers()
+	if len(got) != 2 || got[0].ID != "mrvf-current-task" || got[1].ID != "mrvf-current-pr" {
+		t.Fatalf("only current task/PR-linked findings should block: %+v", got)
+	}
+	if len(projection.HistoricalBlockers()) != 2 {
+		t.Fatalf("unrelated blockers must remain visible as historical repository health: %+v", projection.HistoricalBlockers())
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,10 +52,34 @@ type Summary struct {
 	// empty-and-unknown means the log predates the field. Only the second must be barred from
 	// vouching for a path, and without the flag the two were the same value — a distinction three
 	// comments claimed and no code implemented.
-	CoveredPaths      []string          `json:"coveredPaths,omitempty"`
-	CoveredPathsKnown bool              `json:"coveredPathsKnown,omitempty"`
-	RunChain          []runchain.Record `json:"runChain,omitempty"`
-	Warnings          []string          `json:"warnings,omitempty"`
+	CoveredPaths           []string          `json:"coveredPaths,omitempty"`
+	CoveredPathsKnown      bool              `json:"coveredPathsKnown,omitempty"`
+	RunChain               []runchain.Record `json:"runChain,omitempty"`
+	Warnings               []string          `json:"warnings,omitempty"`
+	Status                 string            `json:"status,omitempty"`
+	ExecutionMode          string            `json:"executionMode,omitempty"`
+	TargetRecord           map[string]string `json:"targetRecord,omitempty"`
+	Reviewers              []string          `json:"reviewers,omitempty"`
+	ReviewInputDigest      string            `json:"reviewInputDigest,omitempty"`
+	DeclaredInputDigest    string            `json:"declaredInputDigest,omitempty"`
+	ReusedFromRunID        string            `json:"reusedFromRunId,omitempty"`
+	RunRecordAuthenticated bool              `json:"runRecordAuthenticated,omitempty"`
+}
+
+type localRunMetadata struct {
+	ID                string            `json:"id"`
+	Scope             string            `json:"scope"`
+	Target            map[string]string `json:"target"`
+	Status            string            `json:"status"`
+	Verdict           string            `json:"verdict"`
+	ExecutionMode     string            `json:"executionMode"`
+	BaseSHA           string            `json:"baseSha"`
+	HeadSHA           string            `json:"headSha"`
+	ContextPath       string            `json:"contextPackPath"`
+	ReviewPath        string            `json:"reviewLogPath"`
+	Reviewers         []string          `json:"reviewers"`
+	ReviewInputDigest string            `json:"reviewInputDigest"`
+	ReusedFromRunID   string            `json:"reusedFromRunId"`
 }
 
 type findingRecord struct {
@@ -67,6 +92,12 @@ type findingRecord struct {
 }
 
 var findingIDPattern = regexp.MustCompile(`mrvf-[A-Za-z0-9._@/-]+`)
+var reviewInputDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+const (
+	ReviewerInputDigestLabel = "Reviewer input digest:"
+	AttemptLabel             = "Attempt:"
+)
 
 func Discover(root string) ([]Summary, error) {
 	records, err := readFindings(root)
@@ -74,6 +105,10 @@ func Discover(root string) ([]Summary, error) {
 		return nil, err
 	}
 	runs, err := runchain.ReadRuns(root)
+	if err != nil {
+		return nil, err
+	}
+	localRuns, err := readLocalRunMetadata(root)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +133,7 @@ func Discover(root string) ([]Summary, error) {
 		}
 		summary := parseMarkdown(rel, string(bytes))
 		mergeFindings(&summary, records)
-		mergeRunMetadata(&summary, runs)
+		mergeRunMetadata(&summary, runs, localRuns)
 		logs = append(logs, summary)
 	}
 	return logs, nil
@@ -153,6 +188,10 @@ func parseMarkdown(rel, text string) Summary {
 			if summary.PreviousRunID == "" {
 				summary.PreviousRunID = previousRunID(markdown.FirstInlineCode(line))
 			}
+		case inHeader && strings.HasPrefix(line, AttemptLabel):
+			if summary.AttemptNumber == 0 && summary.MaxAttempts == 0 {
+				summary.AttemptNumber, summary.MaxAttempts = decodeAttempt(markdown.FirstInlineCode(line))
+			}
 		case inHeader && strings.HasPrefix(line, "Context pack:"):
 			if summary.ContextRel == "" {
 				summary.ContextRel = markdown.FirstInlineCode(line)
@@ -176,6 +215,10 @@ func parseMarkdown(rel, text string) Summary {
 					summary.Warnings = append(summary.Warnings,
 						"covered paths could not be read; this review cannot vouch for any file")
 				}
+			}
+		case inHeader && strings.HasPrefix(line, ReviewerInputDigestLabel):
+			if summary.DeclaredInputDigest == "" {
+				summary.DeclaredInputDigest = markdown.FirstInlineCode(line)
 			}
 		case inHeader && strings.HasPrefix(line, "Required lenses:"):
 			if declaredLenses == nil {
@@ -211,6 +254,19 @@ func previousRunID(value string) string {
 		return ""
 	}
 	return value
+}
+
+func decodeAttempt(value string) (int, int) {
+	attemptText, maxText, ok := strings.Cut(strings.TrimSpace(value), "/")
+	if !ok || strings.Contains(maxText, "/") {
+		return 0, 0
+	}
+	attempt, attemptErr := strconv.Atoi(attemptText)
+	maxAttempts, maxErr := strconv.Atoi(maxText)
+	if attemptErr != nil || maxErr != nil || attempt <= 0 || maxAttempts <= 0 {
+		return 0, 0
+	}
+	return attempt, maxAttempts
 }
 
 func reviewKind(line string) string {
@@ -479,7 +535,7 @@ func mergeFindings(summary *Summary, records []findingRecord) {
 	}
 }
 
-func mergeRunMetadata(summary *Summary, runs []runchain.Record) {
+func mergeRunMetadata(summary *Summary, runs []runchain.Record, metadata []localRunMetadata) {
 	if summary.RunID == "" {
 		return
 	}
@@ -522,12 +578,73 @@ func mergeRunMetadata(summary *Summary, runs []runchain.Record) {
 	if current.Verdict == "ESCALATED" {
 		summary.HasUnresolvedBlockers = true
 	}
+	for _, local := range metadata {
+		if local.ID != summary.RunID {
+			continue
+		}
+		summary.BaseSHA = local.BaseSHA
+		summary.Status = local.Status
+		summary.ExecutionMode = local.ExecutionMode
+		summary.TargetRecord = cloneTarget(local.Target)
+		summary.Reviewers = append([]string(nil), local.Reviewers...)
+		summary.ReviewInputDigest = local.ReviewInputDigest
+		summary.ReusedFromRunID = local.ReusedFromRunID
+		summary.RunRecordAuthenticated = localRunAuthenticatesSummary(local, *summary)
+		break
+	}
 	chain, err := runchain.ChainTo(runs, summary.RunID)
 	if err != nil {
 		summary.Warnings = append(summary.Warnings, fmt.Sprintf("run chain unavailable: %v", err))
 		return
 	}
 	summary.RunChain = chain
+}
+
+func localRunAuthenticatesSummary(run localRunMetadata, summary Summary) bool {
+	return filepath.ToSlash(filepath.Clean(run.ReviewPath)) == filepath.ToSlash(filepath.Clean(summary.Path)) &&
+		run.Scope == summary.Kind && strings.EqualFold(strings.TrimSpace(run.Verdict), strings.TrimSpace(summary.Verdict)) &&
+		run.BaseSHA != "" && run.HeadSHA != "" && len(run.Target) > 0 && len(run.Reviewers) > 0 &&
+		reviewInputDigestPattern.MatchString(run.ReviewInputDigest) && run.ReviewInputDigest == summary.DeclaredInputDigest
+}
+
+func cloneTarget(target map[string]string) map[string]string {
+	if len(target) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(target))
+	for key, value := range target {
+		result[key] = value
+	}
+	return result
+}
+
+func readLocalRunMetadata(root string) ([]localRunMetadata, error) {
+	path := filepath.Join(root, ".metareview", "runs.jsonl")
+	file, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	var records []localRunMetadata
+	scanner := jsonl.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var record localRunMetadata
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return records, nil
 }
 
 func readFindings(root string) ([]findingRecord, error) {

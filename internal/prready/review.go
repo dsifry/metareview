@@ -1,11 +1,15 @@
 package prready
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/dsifry/metareview/internal/mutation"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,6 +21,7 @@ import (
 	"github.com/dsifry/metareview/internal/githubcontext"
 	"github.com/dsifry/metareview/internal/knowledge"
 	"github.com/dsifry/metareview/internal/markdown"
+	"github.com/dsifry/metareview/internal/mutation"
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewers"
 	"github.com/dsifry/metareview/internal/reviewlog"
@@ -25,6 +30,7 @@ import (
 	"github.com/dsifry/metareview/internal/runchain"
 	"github.com/dsifry/metareview/internal/shardpack"
 	"github.com/dsifry/metareview/internal/state"
+	"github.com/dsifry/metareview/internal/version"
 )
 
 type Options struct {
@@ -47,11 +53,13 @@ type Options struct {
 }
 
 type Result struct {
-	RunID      string
-	ReviewRel  string
-	ContextRel string
-	Verdict    string
-	Blocking   bool
+	RunID           string
+	ReviewRel       string
+	ContextRel      string
+	Verdict         string
+	Blocking        bool
+	Reused          bool
+	ReusedFromRunID string
 }
 
 type runRecord struct {
@@ -82,6 +90,8 @@ type runRecord struct {
 	UpdatedAt            string              `json:"updatedAt"`
 	RepoRoot             string              `json:"repoRoot"`
 	GitHead              string              `json:"gitHead"`
+	ReviewInputDigest    string              `json:"reviewInputDigest"`
+	ReusedFromRunID      string              `json:"reusedFromRunId,omitempty"`
 }
 
 type fileSnapshot struct {
@@ -90,6 +100,108 @@ type fileSnapshot struct {
 }
 
 var reviewerNames = []string{"pr-readiness-reviewer", "validation-reviewer", "security-reviewer", "code-quality-reviewer", "architecture-reviewer", "external-reviewer"}
+var runPRReadyReviewers = reviewers.RunPRReady
+
+type reviewerInput struct {
+	SchemaVersion          int                      `json:"schemaVersion"`
+	Target                 map[string]string        `json:"target"`
+	BaseSHA                string                   `json:"baseSha"`
+	HeadSHA                string                   `json:"headSha"`
+	GitHub                 githubcontext.Context    `json:"github"`
+	EvidenceDigest         string                   `json:"evidenceDigest"`
+	ReviewerImplementation string                   `json:"reviewerImplementation"`
+	ReviewerNames          []string                 `json:"reviewers"`
+	Context                reviewers.PRReadyContext `json:"context"`
+	RelevantFindings       []findings.Record        `json:"relevantFindingFrontier"`
+	GateEffect             string                   `json:"gateEffect"`
+}
+
+func canonicalReviewerInputDigest(input reviewerInput) (string, error) {
+	input.SchemaVersion = 1
+	// Metareview's own generated logs are deliberately excluded from the
+	// reviewed diff. Their raw byte count and diagnostic path list change after
+	// the first run, but they are not reviewer inputs and must not defeat reuse.
+	input.Context.Git.RawDiffBytes = input.Context.Git.FilteredDiffBytes
+	input.Context.Git.GeneratedExcludedFiles = nil
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return "", fmt.Errorf("encode canonical reviewer input: %w", err)
+	}
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("sha256:%x", digest), nil
+}
+
+func contentDigest(content string) string {
+	digest := sha256.Sum256([]byte(content))
+	return fmt.Sprintf("sha256:%x", digest)
+}
+
+func canonicalFindingFrontier(records []findings.Record) []findings.Record {
+	result := append([]findings.Record(nil), records...)
+	sort.Slice(result, func(i, j int) bool {
+		left := result[i].ID + "\x00" + result[i].RunID + "\x00" + result[i].Fingerprint
+		right := result[j].ID + "\x00" + result[j].RunID + "\x00" + result[j].Fingerprint
+		return left < right
+	})
+	return result
+}
+
+func validateExplicitPreviousRunInput(root string, logs []reviewlog.Summary, previousRunID string, targetRecord map[string]string, git gitcontext.Context) error {
+	previousRunID = strings.TrimSpace(previousRunID)
+	if previousRunID == "" {
+		return nil
+	}
+	for _, log := range logs {
+		if log.RunID != previousRunID {
+			continue
+		}
+		if !log.RunRecordAuthenticated && !committedPRReadyInputAuthenticated(root, log, targetRecord, git) {
+			return fmt.Errorf("previous run %s has a stale or unauthenticated reviewer input digest", previousRunID)
+		}
+		return nil
+	}
+	return fmt.Errorf("previous run %s not found", previousRunID)
+}
+
+func reusableVerdict(logs []reviewlog.Summary, target map[string]string, baseSHA, headSHA, digest string) (reviewlog.Summary, bool) {
+	for i := len(logs) - 1; i >= 0; i-- {
+		log := logs[i]
+		if !log.RunRecordAuthenticated || log.Kind != "pr-ready" || log.Status != "passed" {
+			continue
+		}
+		if log.Verdict != "PASS" && log.Verdict != "PASS_ADVISORY" {
+			continue
+		}
+		if log.BaseSHA != baseSHA || log.HeadSHA != headSHA || log.ReviewInputDigest != digest || !sameTarget(log.TargetRecord, target) {
+			continue
+		}
+		if !sameStrings(log.Reviewers, reviewerNames) {
+			continue
+		}
+		if log.ExecutionMode != "deterministic-local" && log.ExecutionMode != "deterministic-local-reused" {
+			continue
+		}
+		return log, true
+	}
+	return reviewlog.Summary{}, false
+}
+
+func sameTarget(left, right map[string]string) bool {
+	return strings.TrimSpace(left["type"]) == strings.TrimSpace(right["type"]) &&
+		strings.TrimSpace(firstNonEmpty(left["id"], left["path"])) == strings.TrimSpace(firstNonEmpty(right["id"], right["path"]))
+}
+
+func sameStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
 
 func Create(root string, options Options) (Result, error) {
 	now := options.Now
@@ -149,6 +261,10 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	linkedTargets := []map[string]string{}
+	if ghCtx.PRNumber != "" {
+		linkedTargets = append(linkedTargets, map[string]string{"type": "pull-request", "id": ghCtx.PRNumber})
+	}
 	projection := reviewstate.ProjectRecords(logs, blockers, reviewstate.Options{
 		Scope:            "pr-ready",
 		Target:           targetRecord,
@@ -156,6 +272,7 @@ func Create(root string, options Options) (Result, error) {
 		HistoricalRunIDs: historicalPRReadyRunIDsForCurrentTarget(root, logs, targetRecord, git),
 		ChangedPaths:     reviewedPaths(analysisGit),
 		CurrentTarget:    targetRecord,
+		LinkedTargets:    linkedTargets,
 	})
 	reviewLogs := append(latestLogsByTarget(projection.CurrentReviewLogs()), blockerLogs(projection.CurrentBlockers())...)
 	prEvidence := RenderEvidence(EvidenceInput{
@@ -220,7 +337,35 @@ func Create(root string, options Options) (Result, error) {
 		reviewerCtx.Adversarial.Emulated = ev.IsEmulated()
 	}
 	reviewerCtx.Mutation = mutationContext
-	rawFindings := reviewers.RunPRReady(reviewerCtx)
+	reviewInputDigest, err := canonicalReviewerInputDigest(reviewerInput{
+		Target:                 targetRecord,
+		BaseSHA:                git.BaseSHA,
+		HeadSHA:                git.HeadSHA,
+		GitHub:                 ghCtx,
+		EvidenceDigest:         contentDigest(evidenceText),
+		ReviewerImplementation: version.Version,
+		ReviewerNames:          reviewerNames,
+		Context:                reviewerCtx,
+		RelevantFindings:       canonicalFindingFrontier(projection.CurrentBlockers()),
+		GateEffect:             gateEffect,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	if err := validateExplicitPreviousRunInput(root, logs, options.PreviousRunID, targetRecord, git); err != nil {
+		return Result{}, err
+	}
+	reused, hasReusableVerdict := reusableVerdict(logs, targetRecord, git.BaseSHA, git.HeadSHA, reviewInputDigest)
+	// An explicit predecessor denotes a fix-chain transition. Reviewers must run
+	// so Reconcile can close (or preserve) findings from that predecessor; an
+	// older matching PASS cannot establish that the newer blocker was fixed.
+	if strings.TrimSpace(options.PreviousRunID) != "" {
+		hasReusableVerdict = false
+	}
+	var rawFindings []reviewers.Finding
+	if !hasReusableVerdict {
+		rawFindings = runPRReadyReviewers(reviewerCtx)
+	}
 	run := findings.Run{ID: runID, Scope: "pr-ready", Target: targetRecord, RepoRoot: root, GitHead: git.HeadSHA}
 
 	packDir := ""
@@ -245,7 +390,10 @@ func Create(root string, options Options) (Result, error) {
 		}
 	}
 
-	result := Result{RunID: runID, ReviewRel: reviewRel, ContextRel: contextRel}
+	result := Result{RunID: runID, ReviewRel: reviewRel, ContextRel: contextRel, Reused: hasReusableVerdict}
+	if hasReusableVerdict {
+		result.ReusedFromRunID = reused.RunID
+	}
 	err = func() error {
 		if err := os.MkdirAll(filepath.Dir(contextPath), 0o755); err != nil {
 			return err
@@ -253,8 +401,59 @@ func Create(root string, options Options) (Result, error) {
 		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, shardPlan, packDir, manifest, aggregate, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect)), 0o644); err != nil {
+		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, shardPlan, packDir, manifest, aggregate, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect, reviewInputDigest)), 0o644); err != nil {
 			return err
+		}
+		if hasReusableVerdict {
+			result.Verdict = reused.Verdict
+			result.Blocking = false
+			record := runRecord{
+				SchemaVersion:        1,
+				ID:                   runID,
+				Scope:                "pr-ready",
+				Target:               targetRecord,
+				Status:               "passed",
+				Verdict:              reused.Verdict,
+				ExecutionMode:        "deterministic-local-reused",
+				PreviousRunID:        options.PreviousRunID,
+				AttemptNumber:        chain.AttemptNumber,
+				MaxAttempts:          chain.MaxAttempts,
+				BaseSHA:              git.BaseSHA,
+				HeadSHA:              git.HeadSHA,
+				ContextPath:          contextRel,
+				ReviewPath:           reviewRel,
+				Reviewers:            append([]string(nil), reviewerNames...),
+				FindingIDs:           append([]string(nil), reused.FindingIDs...),
+				SourceRefs:           []map[string]string{{"type": "branch", "id": targetRecord["id"]}},
+				GateEffect:           gateEffect,
+				BlockingFindingCount: reused.BlockingFindingCount,
+				AdvisoryFindingCount: reused.AdvisoryFindingCount,
+				FollowUpFindingCount: reused.FollowUpFindingCount,
+				WarningFindingCount:  reused.WarningFindingCount,
+				CreatedAt:            now.UTC().Format(time.RFC3339Nano),
+				UpdatedAt:            now.UTC().Format(time.RFC3339Nano),
+				RepoRoot:             root,
+				GitHead:              git.HeadSHA,
+				ReviewInputDigest:    reviewInputDigest,
+				ReusedFromRunID:      reused.RunID,
+			}
+			if err := state.AppendJSONL(runsPath, record); err != nil {
+				return err
+			}
+			meta := reviewMetadata{
+				AttemptNumber:        chain.AttemptNumber,
+				MaxAttempts:          chain.MaxAttempts,
+				RunChain:             chain.Chain,
+				BlockingFindingCount: reused.BlockingFindingCount,
+				AdvisoryFindingCount: reused.AdvisoryFindingCount,
+				FollowUpFindingCount: reused.FollowUpFindingCount,
+				WarningFindingCount:  reused.WarningFindingCount,
+				ReviewInputDigest:    reviewInputDigest,
+				ReusedFromRunID:      reused.RunID,
+				ReusedFromReviewPath: reused.Path,
+				HistoricalBlockers:   projection.HistoricalBlockers(),
+			}
+			return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, reused.Verdict, reviewGit.ChangedFiles, nil, prEvidence, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
 		}
 		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{
 			PreviousRunID:  options.PreviousRunID,
@@ -296,6 +495,7 @@ func Create(root string, options Options) (Result, error) {
 			UpdatedAt:            now.UTC().Format(time.RFC3339Nano),
 			RepoRoot:             root,
 			GitHead:              git.HeadSHA,
+			ReviewInputDigest:    reviewInputDigest,
 		}
 		if err := state.AppendJSONL(runsPath, record); err != nil {
 			return err
@@ -308,6 +508,8 @@ func Create(root string, options Options) (Result, error) {
 			AdvisoryFindingCount: counts.Advisory,
 			FollowUpFindingCount: counts.FollowUp,
 			WarningFindingCount:  counts.Warnings,
+			ReviewInputDigest:    reviewInputDigest,
+			HistoricalBlockers:   projection.HistoricalBlockers(),
 		}
 		return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, prEvidence, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
 	}()
@@ -407,7 +609,23 @@ func resolveRunChain(root string, targetRecord map[string]string, options Option
 	if fallbackErr != nil {
 		return runchain.Decision{}, nil, fallbackErr
 	}
+	fallback.AttemptNumber = len(previousRunIDs) + 1
+	if rootMaxAttempts := authenticatedLegacyRootMaxAttempts(root, logs, previousRunIDs, targetRecord, git); rootMaxAttempts > 0 {
+		fallback.MaxAttempts = rootMaxAttempts
+	}
 	return fallback, previousRunIDs, nil
+}
+
+func authenticatedLegacyRootMaxAttempts(root string, logs []reviewlog.Summary, previousRunIDs []string, targetRecord map[string]string, git gitcontext.Context) int {
+	if len(previousRunIDs) == 0 {
+		return 0
+	}
+	for _, log := range logs {
+		if log.RunID == previousRunIDs[0] && (log.RunRecordAuthenticated || committedPRReadyInputAuthenticated(root, log, targetRecord, git)) {
+			return log.MaxAttempts
+		}
+	}
+	return 0
 }
 
 func legacyPreviousRunIDsForPRReady(root string, logs []reviewlog.Summary, previousRunID string, targetRecord map[string]string, git gitcontext.Context) ([]string, error) {
@@ -460,7 +678,9 @@ func legacyPRReadyTargetMatch(root string, log reviewlog.Summary, targetRecord m
 		return false, true
 	}
 	if git.HeadSHA != "" && identity.Head != "" && identity.Head != git.HeadSHA {
-		return false, true
+		if !validGitObjectID(identity.Head) || !validGitObjectID(git.HeadSHA) || !gitCommitIsAncestor(root, identity.Head, git.HeadSHA) {
+			return false, true
+		}
 	}
 	return true, true
 }
@@ -471,6 +691,12 @@ func historicalPRReadyRunIDsForCurrentTarget(root string, logs []reviewlog.Summa
 		if log.RunID == "" || log.Kind != "pr-ready" {
 			continue
 		}
+		if log.RunRecordAuthenticated {
+			if !sameTarget(log.TargetRecord, targetRecord) {
+				ids = append(ids, log.RunID)
+			}
+			continue
+		}
 		matches, known := legacyPRReadyTargetMatch(root, log, targetRecord, git)
 		if known && !matches {
 			ids = append(ids, log.RunID)
@@ -478,22 +704,41 @@ func historicalPRReadyRunIDsForCurrentTarget(root string, logs []reviewlog.Summa
 	}
 	return ids
 }
-
 func legacyEscalatedPRReadyForTarget(root string, logs []reviewlog.Summary, targetRecord map[string]string, git gitcontext.Context) (string, bool) {
 	for _, log := range logs {
 		if log.RunID == "" || log.Kind != "pr-ready" || !strings.EqualFold(log.Verdict, "ESCALATED") {
 			continue
 		}
-		if legacyPRReadyTargetMatches(root, log, targetRecord, git) {
+		if legacyPRReadyTargetMatches(root, log, targetRecord, git) && legacyEscalationLocksCurrentHead(root, log, git) {
 			return log.RunID, true
 		}
 	}
 	return "", false
 }
 
+func legacyEscalationLocksCurrentHead(root string, log reviewlog.Summary, git gitcontext.Context) bool {
+	currentHead := strings.TrimSpace(git.HeadSHA)
+	if currentHead == "" {
+		return true
+	}
+	if reviewedHead := strings.TrimSpace(log.HeadSHA); reviewedHead != "" {
+		return reviewedHead == currentHead
+	}
+	identity, err := readLegacyPRReadyContextIdentity(root, log.ContextRel)
+	if err != nil || strings.TrimSpace(identity.Head) == "" {
+		// Without a reviewed head, there is no evidence that the escalation is
+		// stale. Preserve the hard stop rather than guessing.
+		return true
+	}
+	return identity.Head == currentHead
+}
+
 type legacyPRReadyContextIdentity struct {
-	Branch string
-	Head   string
+	RunID             string
+	Base              string
+	Branch            string
+	Head              string
+	ReviewInputDigest string
 }
 
 func readLegacyPRReadyContextIdentity(root, rel string) (legacyPRReadyContextIdentity, error) {
@@ -505,23 +750,102 @@ func readLegacyPRReadyContextIdentity(root, rel string) (legacyPRReadyContextIde
 	if clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
 		return legacyPRReadyContextIdentity{}, fmt.Errorf("legacy context path escapes repository: %s", rel)
 	}
-	bytes, err := os.ReadFile(filepath.Join(root, clean))
+	content, err := os.ReadFile(filepath.Join(root, clean))
 	if err != nil {
 		return legacyPRReadyContextIdentity{}, err
 	}
-	var identity legacyPRReadyContextIdentity
-	for _, line := range strings.Split(string(bytes), "\n") {
-		switch {
-		case strings.HasPrefix(line, "- Branch:"):
-			identity.Branch = firstInlineCodeValue(line)
-		case strings.HasPrefix(line, "- Head:"):
-			identity.Head = firstInlineCodeValue(line)
-		}
-	}
+	identity := parsePRReadyContextIdentity(string(content))
 	if identity.Branch == "" && identity.Head == "" {
 		return legacyPRReadyContextIdentity{}, fmt.Errorf("legacy context lacks branch and head identity")
 	}
 	return identity, nil
+}
+
+func parsePRReadyContextIdentity(text string) legacyPRReadyContextIdentity {
+	var identity legacyPRReadyContextIdentity
+	section := ""
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			section = strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
+			continue
+		}
+		switch {
+		case section == "" && strings.HasPrefix(trimmed, "Run ID:") && identity.RunID == "":
+			identity.RunID = firstInlineCodeValue(trimmed)
+		case section == "Git" && strings.HasPrefix(trimmed, "- Base:") && identity.Base == "":
+			identity.Base = firstInlineCodeValue(trimmed)
+		case section == "Git" && strings.HasPrefix(trimmed, "- Head:") && identity.Head == "":
+			identity.Head = firstInlineCodeValue(trimmed)
+		case section == "Git" && strings.HasPrefix(trimmed, "- Branch:") && identity.Branch == "":
+			identity.Branch = firstInlineCodeValue(trimmed)
+		case section == "Git" && strings.HasPrefix(trimmed, "- "+reviewlog.ReviewerInputDigestLabel) && identity.ReviewInputDigest == "":
+			identity.ReviewInputDigest = firstInlineCodeValue(trimmed)
+		}
+	}
+	return identity
+}
+
+func committedPRReadyInputAuthenticated(root string, log reviewlog.Summary, targetRecord map[string]string, git gitcontext.Context) bool {
+	if log.Kind != "pr-ready" || strings.TrimSpace(log.Target) != "current branch" ||
+		strings.TrimSpace(log.RunID) == "" || !validSHA256Digest(log.DeclaredInputDigest) ||
+		git.Branch == "" || targetRecord["type"] != "branch" || targetRecord["id"] != git.Branch {
+		return false
+	}
+	committedReview, ok := committedFile(root, log.Path)
+	if !ok {
+		return false
+	}
+	workingReview, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(log.Path)))
+	if err != nil || !bytes.Equal(committedReview, workingReview) {
+		return false
+	}
+	committedContext, ok := committedFile(root, log.ContextRel)
+	if !ok {
+		return false
+	}
+	identity := parsePRReadyContextIdentity(string(committedContext))
+	if identity.RunID != log.RunID || identity.Base == "" || identity.Base != git.BaseSHA ||
+		identity.Branch != git.Branch || identity.Head == "" || !validGitObjectID(identity.Head) ||
+		identity.ReviewInputDigest != log.DeclaredInputDigest {
+		return false
+	}
+	return identity.Head == git.HeadSHA || (validGitObjectID(git.HeadSHA) && gitCommitIsAncestor(root, identity.Head, git.HeadSHA))
+}
+
+func committedFile(root, rel string) ([]byte, bool) {
+	clean := filepath.Clean(strings.TrimSpace(rel))
+	if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return nil, false
+	}
+	cmd := exec.Command("git", "show", "HEAD:"+filepath.ToSlash(clean))
+	cmd.Dir = root
+	content, err := cmd.Output()
+	return content, err == nil
+}
+
+func gitCommitIsAncestor(root, ancestor, descendant string) bool {
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestor, descendant)
+	cmd.Dir = root
+	return cmd.Run() == nil
+}
+
+func validSHA256Digest(value string) bool {
+	const prefix = "sha256:"
+	return strings.HasPrefix(value, prefix) && len(value) == len(prefix)+64 && validHex(value[len(prefix):])
+}
+
+func validGitObjectID(value string) bool {
+	return (len(value) == 40 || len(value) == 64) && validHex(value)
+}
+
+func validHex(value string) bool {
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return value != ""
 }
 
 func firstInlineCodeValue(line string) string {
@@ -639,6 +963,12 @@ func latestLogsByTarget(logs []reviewlog.Summary) []reviewlog.Summary {
 	for _, log := range latest {
 		result = append(result, log)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Target != result[j].Target {
+			return result[i].Target < result[j].Target
+		}
+		return logSortKey(result[i]) < logSortKey(result[j])
+	})
 	return result
 }
 
@@ -900,7 +1230,7 @@ func uniquePaths(root string, at time.Time) (string, string, string, error) {
 	}
 }
 
-func contextMarkdown(runID string, git gitcontext.Context, profile contextprofile.Profile, plan contextprofile.ShardPlan, packDir string, manifest reviewmanifest.Manifest, aggregate reviewmanifest.AggregateResult, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string, ghCtx githubcontext.Context, prEvidence, gateEffect string) string {
+func contextMarkdown(runID string, git gitcontext.Context, profile contextprofile.Profile, plan contextprofile.ShardPlan, packDir string, manifest reviewmanifest.Manifest, aggregate reviewmanifest.AggregateResult, knowledgeContext knowledge.Context, logs []reviewlog.Summary, evidenceText string, ghCtx githubcontext.Context, prEvidence, gateEffect, reviewInputDigest string) string {
 	changed := append([]string{}, git.ChangedFiles...)
 	changed = append(changed, git.StagedFiles...)
 	changed = append(changed, git.WorkingTreeFiles...)
@@ -911,6 +1241,7 @@ func contextMarkdown(runID string, git gitcontext.Context, profile contextprofil
 		"- Base: " + markdown.InlineCode(git.BaseSHA) + "\n" +
 		"- Head: " + markdown.InlineCode(git.HeadSHA) + "\n" +
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
+		"- " + reviewlog.ReviewerInputDigestLabel + " " + markdown.InlineCode(reviewInputDigest) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		contextprofile.Markdown(profile) + "\n\n" +
 		contextprofile.ShardPlanMarkdown(plan, shardpack.Rel(packDir)) + "\n\n" +
@@ -932,6 +1263,10 @@ type reviewMetadata struct {
 	AdvisoryFindingCount int
 	FollowUpFindingCount int
 	WarningFindingCount  int
+	ReviewInputDigest    string
+	ReusedFromRunID      string
+	ReusedFromReviewPath string
+	HistoricalBlockers   []findings.Record
 }
 
 func verdictForCounts(counts findings.ClassCounts, gateEffect string, attemptNumber, maxAttempts int) (string, string, bool, string) {
@@ -956,22 +1291,58 @@ func reviewMarkdown(runID, contextRel, previousRun, gateEffect, verdict string, 
 	if shardedReview != "" {
 		shardedReview += "\n\n"
 	}
+	executionMode := "deterministic-local"
+	reuseHeader := ""
+	reviewerResults := "## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n" +
+		reviewerTable(records) + "\n\n" + findingsMarkdown(records) + "\n"
+	if meta.ReusedFromRunID != "" {
+		executionMode = "deterministic-local-reused"
+		reuseHeader = "Reused verdict from: " + markdown.InlineCode(meta.ReusedFromRunID) + "\n\n"
+		reviewerResults = "## Reviewer Results\n\nReviewer execution was skipped because the authenticated reviewer-input digest is unchanged. Prior review: " +
+			markdown.InlineCode(meta.ReusedFromReviewPath) + ".\n\n" +
+			"## Findings\n\nFinding counts and verdict were reused from " + markdown.InlineCode(meta.ReusedFromRunID) + ".\n"
+	}
+	digestHeader := ""
+	if meta.ReviewInputDigest != "" {
+		digestHeader = reviewlog.ReviewerInputDigestLabel + " " + markdown.InlineCode(meta.ReviewInputDigest) + "\n\n"
+	}
 	// Covered paths: the exclude-filtered source files this review examined, so `status` can credit a
 	// clean review for the files it read (see reviewlog.DecodeCoveredPaths / status coverage accounting).
 	return "# metareview: pr-ready review\n\n" +
 		"Run ID: " + markdown.InlineCode(runID) + "\n\n" +
 		"Target: `current branch`\n\n" +
 		"Context pack: " + markdown.InlineCode(contextRel) + "\n\n" +
-		"Execution mode: " + markdown.InlineCode("deterministic-local") + "\n\n" +
+		"Execution mode: " + markdown.InlineCode(executionMode) + "\n\n" +
 		"Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		"Previous run: " + markdown.InlineCode(firstNonEmpty(previousRun, "none")) + "\n\n" +
+		reviewlog.AttemptLabel + " " + markdown.InlineCode(fmt.Sprintf("%d/%d", meta.AttemptNumber, meta.MaxAttempts)) + "\n\n" +
+		reuseHeader + digestHeader +
 		reviewlog.CoveredPathsLabel + " " + markdown.InlineCode(reviewlog.EncodeCoveredPaths(coveredPaths)) + "\n\n" +
 		"## Verdict\n\n" + verdict + "\n\n" + shardedReview +
-		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n" +
-		reviewerTable(records) + "\n\n" +
-		findingsMarkdown(records) + "\n" +
+		reviewerResults +
 		"\n## Suggested PR Evidence\n\n" + prEvidence + "\n" +
+		repositoryHealthMarkdown(meta.HistoricalBlockers) +
 		runChainMarkdown(runID, verdict, meta)
+}
+
+func repositoryHealthMarkdown(records []findings.Record) string {
+	if len(records) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(records))
+	for _, record := range records {
+		title := strings.TrimSpace(strings.NewReplacer("\n", " ", "\r", " ").Replace(record.Title))
+		if title == "" {
+			title = "Unresolved historical finding"
+		}
+		target := findingTargetID(record.Target)
+		if target != "" {
+			title += " (" + target + ")"
+		}
+		lines = append(lines, "- "+title+": remains visible in `docs/metareview/FINDINGS.md` but does not block this target.")
+	}
+	sort.Strings(lines)
+	return "\n## Repository Health Advisory\n\n" + strings.Join(lines, "\n") + "\n"
 }
 
 func reviewLogsMarkdown(logs []reviewlog.Summary) string {

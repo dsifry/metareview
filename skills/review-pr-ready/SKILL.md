@@ -13,7 +13,7 @@ Run this before pushing a PR branch or asking external reviewers to spend time.
 metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
 ```
 
-Use `--base` for the reviewed branch diff, `--previous-run` after fixes, and `--evidence` for validation output. Use `--max-attempts` only on the first run; it sets the chain budget (default 3), with the first blocker run as attempt 1. Use `--github-pr` to include available GitHub PR context. By default, PR-ready reviews the committed branch diff and blocks on non-generated working-tree changes; use `--include-working-tree` only when those changes intentionally belong to the review.
+Use `--base` for the reviewed branch diff, `--previous-run` after fixes, and `--evidence` for validation output. Changed diff, PR state, evidence, shard results, reviewer version, or relevant findings execute a fresh review within the authenticated run chain; byte-identical inputs may reuse the prior verdict. A cross-target previous run or one whose persisted digest no longer matches its local run record is rejected. Use `--max-attempts` only on the first run; it sets the chain budget (default 3), with the first blocker run as attempt 1. Use `--github-pr` to include available GitHub PR context. By default, PR-ready reviews the committed branch diff and blocks on non-generated working-tree changes; use `--include-working-tree` only when those changes intentionally belong to the review.
 
 Prefer structured evidence receipts:
 
@@ -34,6 +34,8 @@ Freeform evidence remains accepted as a fallback, but receipts preserve command,
 
 GitHub context is optional in local mode. Missing `gh`, auth, remote, or PR number is recorded as unavailable context rather than a blocker.
 
+PR-ready considers current-branch findings, findings linked to the live PR, and task reviews whose covered paths overlap the current diff. Unrelated historical findings stay visible as repository-health advisories and in `docs/metareview/FINDINGS.md`, but do not block the current target. When target, head/base, diff, live PR state, evidence, reviewer implementation, and relevant finding frontier are all unchanged, PR-ready reuses the authenticated local verdict without invoking reviewers. Any identity change invokes reviewers again. Verify the new log's `Execution mode`, `Reused verdict from`, and `Reviewer input digest` headers.
+
 ## Sharded review
 
 When the branch diff exceeds the review context limit, the gate returns `NEEDS_REVISION` with the
@@ -53,7 +55,8 @@ hash, and `resultsDir`.
    plan holds a single cross-shard slot; `--shard-result` does **not** — an explicit path is
    ingested alongside the `resultsDir` listing, so passing a shard whose result is already
    committed raises a `duplicate shard result` blocker. Replace the committed file instead.
-4. Re-run with `--previous-run <run-id>`. With every shard covered and the aggregate passing, the
+4. Re-run with `--previous-run <run-id>`. Adding shard results changes the reviewer input, so the
+   gate executes reviewers rather than reusing the prior verdict. With every shard covered and the aggregate passing, the
    context-risk blocker becomes advisory and the lints run over the whole branch diff.
 5. Commit the results in `docs/metareview/shards/` with the review log. Editing a file changes only
    its own bucket's shards, unless the total branch diff crosses a bits boundary, which re-cuts every
