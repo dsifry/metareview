@@ -16,6 +16,10 @@ import (
 	"github.com/dsifry/metareview/internal/repo"
 )
 
+// getwd is a seam over os.Getwd so a test can force the (otherwise unreachable) working-directory
+// lookup failure Run falls back to when no explicit CWD is given.
+var getwd = os.Getwd
+
 type RunOptions struct {
 	Kind   string
 	CWD    string
@@ -63,7 +67,7 @@ func Run(ctx context.Context, command []string, options RunOptions) (Receipt, er
 	cwd := options.CWD
 	if cwd == "" {
 		var err error
-		cwd, err = os.Getwd()
+		cwd, err = getwd()
 		if err != nil {
 			return Receipt{}, err
 		}

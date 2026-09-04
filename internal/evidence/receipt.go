@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"time"
@@ -268,11 +269,16 @@ func (bundle Bundle) ValidationSummaries() []string {
 	return summaries
 }
 
+// encodeReceiptLine is a seam over the JSON encoder so a test can force the (otherwise unreachable,
+// since Receipt is always marshalable) encode failure JSONL propagates.
+var encodeReceiptLine = func(w io.Writer, receipt Receipt) error {
+	return json.NewEncoder(w).Encode(receipt)
+}
+
 func (bundle Bundle) JSONL() ([]byte, error) {
 	var out bytes.Buffer
-	encoder := json.NewEncoder(&out)
 	for _, receipt := range bundle.Receipts {
-		if err := encoder.Encode(receipt); err != nil {
+		if err := encodeReceiptLine(&out, receipt); err != nil {
 			return nil, err
 		}
 	}

@@ -69,6 +69,8 @@ func checkSucceeded(check ghCheck) bool {
 	return state == "success" || state == "successful" || state == "pass" || state == "passed"
 }
 
-func defaultRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
+// defaultRunner shells out to `gh` when ImportGitHubChecks is called without an injected Runner.
+// It is a package var so a test can exercise the nil-Runner fallback path without invoking gh.
+var defaultRunner CommandRunner = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).Output()
 }
