@@ -44,12 +44,21 @@ func gitValue(root string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// Seams over the stdlib calls whose error branches below are otherwise unreachable: filepath.Abs
+// only fails when os.Getwd fails, and os.Stat cannot fail on a path filepath.EvalSymlinks just
+// resolved. Each defaults to the real function and is overridden — then restored via t.Cleanup — in
+// tests, so production behavior is identical to calling the wrapped function directly.
+var (
+	filepathAbs = filepath.Abs
+	osStat      = os.Stat
+)
+
 func assertInsideFile(root, target string) (string, error) {
-	rootAbs, err := filepath.Abs(root)
+	rootAbs, err := filepathAbs(root)
 	if err != nil {
 		return "", err
 	}
-	targetAbs, err := filepath.Abs(filepath.Join(rootAbs, target))
+	targetAbs, err := filepathAbs(filepath.Join(rootAbs, target))
 	if err != nil {
 		return "", err
 	}
@@ -64,7 +73,7 @@ func assertInsideFile(root, target string) (string, error) {
 	if targetReal != rootReal && !strings.HasPrefix(targetReal, rootReal+string(filepath.Separator)) {
 		return "", fmt.Errorf("target artifact is outside repository root: %s", target)
 	}
-	info, err := os.Stat(targetReal)
+	info, err := osStat(targetReal)
 	if err != nil {
 		return "", fmt.Errorf("target artifact not found: %s", target)
 	}

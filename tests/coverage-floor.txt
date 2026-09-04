@@ -9,7 +9,7 @@
 # supplies a fixture HOME, so 85.2 is the same everywhere - six points better than CI ever saw.
 cmd/metareview 81.2
 internal/artifactreview 100.0
-internal/contextpack 76.1
+internal/contextpack 100.0
 internal/contextprofile 96.3
 internal/epicready 81.6
 internal/epicsource 100.0
