@@ -27,7 +27,7 @@ internal/markdown 100.0
 internal/mutation 94.2
 internal/prready 89.2
 internal/repo 100.0
-internal/reviewers 97.7
+internal/reviewers 100.0
 internal/reviewlog 91.1
 internal/reviewmanifest 97.0
 internal/reviewstate 92.1
