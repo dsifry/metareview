@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0-2-31a6e425698dec98",
+  "kind": "shard",
+  "shardId": "shard-0-2",
+  "shardHash": "31a6e425698dec98",
+  "planHash": "19d06474ee19addd",
+  "verdict": "PASS",
+  "reviewer": "sonnet-shard-reviewer",
+  "reviewedAt": "2026-09-05T16:48:22Z",
+  "evidence": [
+    {
+      "note": "Read shard-0-2.md in full (docs/specs/2026-09-04-lights-out-sdlc-factory.md part 2/4, sections 5.5-6): checked for secrets/credential values, absolute local paths, personal data, TODO/FIXME/placeholder tokens, and internal contradictions within this shard's text; found none."
+    },
+    {
+      "note": "grep -niE for TODO|FIXME|XXX|placeholder|api_key|secret|password|BEGIN (RSA|OPENSSH|PGP)|/Users/|/home/ over the shard matched only the design's own prose describing secret-detection controls (job.credentials scanning, secret_in_diff), not actual secret values or TODO markers."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}
