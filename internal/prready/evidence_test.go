@@ -39,6 +39,11 @@ func TestRenderEvidenceIncludesRequiredSections(t *testing.T) {
 		"epic-1",
 		"mrvf-1",
 		"GitHub context unavailable: gh-unavailable",
+		// The blocker-status section names its scope (recorded evidence) and points
+		// to the live gate's own findings, so a clear status can't be misread as the
+		// gate verdict (#135).
+		"### Recorded-Evidence Blocker Status",
+		"findings this gate run raised are under `## Blocking Findings` above.",
 	} {
 		if !strings.Contains(markdown, required) {
 			t.Fatalf("rendered evidence missing %q:\n%s", required, markdown)
@@ -398,7 +403,7 @@ func TestRenderEvidenceHistoricalTaskAgreesWithBlockerStatus(t *testing.T) {
 			OverrideGrantReason: "documented exception",
 		}},
 	})
-	if !strings.Contains(body, "No unresolved blockers discovered.") {
+	if !strings.Contains(body, "No unresolved blockers in the recorded review evidence.") {
 		t.Fatalf("expected clear blocker status:\n%s", body)
 	}
 	if strings.Contains(body, "with unresolved blockers") {
