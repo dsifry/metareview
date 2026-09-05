@@ -1084,7 +1084,11 @@ push origin <job-branch>:<job-branch>` — never force, never
 → `protected_paths[]`; `pushed` = `pushed_sha ≠ ""` ∧ `protected_paths = []` ∧ ¬`dry_run`; a remote
 refusal is `push_rejected` with `stderr_sha256`), `merge` (the job's PR), `file-issue {items}` (one issue
 per item of the `comment-triage.file_issue` list, idempotent per thread — it searches for an open issue
-whose `Metareview-Origin:` trailer names the thread URL and returns it instead of filing twice; label
+**authored by `factory_login`** (the factory's own identity) whose `Metareview-Origin:` trailer names the
+thread URL and returns it instead of filing twice. The author scope is load-bearing: the trailer is
+attacker-mintable, so a match on an issue opened by anyone else is ignored — otherwise a third party could
+pre-open an issue carrying `Metareview-Origin: <url>` and capture the binding (this is the file-issue side
+of §5.13's intake refusal, which already rejects such issues as *intents*). Label
 `factory:filed`, trailer `Metareview-Origin: <url>`; output `{filed[{thread_id?, number, url}], dry_run}`), `close-issue` (numbers in the job record
 only). Replies carry metaswarm's attribution line. `comment-triage` routes are exclusive: `fix_now` =
 `findings ≠ []`; `file_issue` = `findings == [] ∧ file_issue ≠ []`; `reply_only` = otherwise (`replies`
@@ -2261,7 +2265,9 @@ child output gains `goldens[]`; `@iter` dropped there); `task-build-loop` declar
 `GOLDENS` var so `retry_narrowed` re-supplies projected findings; `ask-integration`
 (`ESC_INTEGRATION_ESCALATED`) separates integration escalations from task ones; `ask-split` for a
 split author's questions; `factory.build` relies on the `child-park` default; `file-issue` idempotent
-per thread and `pr-reply` per filed thread; `merge-check` blocks on the poll; the dispositions source
+per thread — matching only an open issue authored by `factory_login`, so an attacker-minted
+`Metareview-Origin:` trailer on another author's issue is ignored and a fresh issue is filed — and
+`pr-reply` per filed thread; `merge-check` blocks on the poll; the dispositions source
 sits second so truncation never cuts it and `ERR_GOLDENS_OVERFLOW` bounds `$GOLDENS`; `author` shared;
 `size_simple` only for building intakes. Revision 9 carried all of it.
 
