@@ -34,7 +34,11 @@ func TestProjectRecordsPrReadyUnrelatedHistorical(t *testing.T) {
 		// An unrelated pr-ready target (its TargetRecord is not linked to the current review).
 		{RunID: "mrv-old", Kind: "pr-ready", Verdict: "NEEDS_REVISION", TargetRecord: map[string]string{"type": "path", "id": "src/other.go"}, HasUnresolvedBlockers: true},
 	}
-	proj := ProjectRecords(logs, nil, Options{
+	// A blocker from that unrelated run must follow it into the historical set — this is the
+	// downstream effect of recording its run id as historical (a nil blocker set would leave the
+	// reclassification unverified).
+	blockers := []findings.Record{{ID: "f1", RunID: "mrv-old"}}
+	proj := ProjectRecords(logs, blockers, Options{
 		Scope:        "pr-ready",
 		ChangedPaths: []string{"src/current.go"},
 	})
@@ -43,6 +47,12 @@ func TestProjectRecordsPrReadyUnrelatedHistorical(t *testing.T) {
 	}
 	if len(proj.historicalLogs) != 1 {
 		t.Fatalf("the unrelated pr-ready log must be historical: %+v", proj.historicalLogs)
+	}
+	if len(proj.currentBlockers) != 0 {
+		t.Fatalf("the unrelated run's blocker must not stay current: %+v", proj.currentBlockers)
+	}
+	if len(proj.historicalBlockers) != 1 || proj.historicalBlockers[0].ID != "f1" {
+		t.Fatalf("the unrelated run's blocker must be reclassified historical: %+v", proj.historicalBlockers)
 	}
 }
 
