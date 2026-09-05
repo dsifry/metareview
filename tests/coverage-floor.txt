@@ -34,7 +34,7 @@ internal/reviewmanifest 100.0
 internal/reviewstate 92.1
 internal/runchain 92.2
 internal/sessionhistory 100.0
-internal/setup 89.8
+internal/setup 100.0
 internal/shardpack 100.0
 internal/state 100.0
 internal/status 100.0
