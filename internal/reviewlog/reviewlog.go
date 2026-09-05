@@ -104,6 +104,8 @@ const (
 	AttemptLabel             = "Attempt:"
 )
 
+var readLocalRuns = readLocalRunMetadata
+
 func Discover(root string) ([]Summary, error) {
 	records, err := readFindings(root)
 	if err != nil {
@@ -113,7 +115,7 @@ func Discover(root string) ([]Summary, error) {
 	if err != nil {
 		return nil, err
 	}
-	localRuns, err := readLocalRunMetadata(root)
+	localRuns, err := readLocalRuns(root)
 	if err != nil {
 		return nil, err
 	}

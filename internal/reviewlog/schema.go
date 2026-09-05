@@ -37,12 +37,9 @@ func EncodeCoveredPaths(paths []string) string {
 	if len(paths) == 0 {
 		return NoCoveredPaths
 	}
-	b, err := json.Marshal(paths)
-	if err != nil {
-		// Unreachable for []string, and a lie would be worse than a refusal: say nothing is known
-		// rather than emit a line that parses to the wrong set.
-		return NoCoveredPaths
-	}
+	// json.Marshal of a []string never fails, so the error is discarded rather than guarded with an
+	// unreachable branch: b is always a valid non-empty JSON array here.
+	b, _ := json.Marshal(paths)
 	return string(b)
 }
 
