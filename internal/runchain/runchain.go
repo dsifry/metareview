@@ -92,10 +92,9 @@ func Resolve(root string, options Options) (Decision, error) {
 			return Decision{}, fmt.Errorf("same target already escalated in run %s", escalated.ID)
 		}
 		rootRun := chain[0]
+		// ReadRuns normalizes MaxAttempts to DefaultMaxAttempts when a record carries 0, so the root
+		// run's MaxAttempts is always >= 1 here; no zero-fallback is needed (removing the dead guard).
 		max := rootRun.MaxAttempts
-		if max == 0 {
-			max = effectiveMax(options.MaxAttempts)
-		}
 		return Decision{AttemptNumber: previous.AttemptNumber + 1, MaxAttempts: max, PreviousRun: &previous, RootRun: &rootRun, Chain: chain, ResetRunIDs: resetRunIDs}, nil
 	}
 	if escalated, ok := escalatedForTarget(records, options.Scope, options.Target, options.HeadSHA); ok {
