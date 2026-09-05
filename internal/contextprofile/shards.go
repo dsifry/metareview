@@ -220,10 +220,10 @@ func PlanShards(profile Profile, branchFiles []gitcontext.BranchFile, options Sh
 			return chunks[i].Path < chunks[j].Path
 		})
 		part, bytes, index := []Chunk{}, 0, 1
+		// flush is only ever called with a non-empty part: chunksOf caps every chunk at budget, so
+		// the first over-budget flush below can never fire on the empty initial part, and the
+		// end-of-bucket flush always carries the accumulated tail (each bucket holds >=1 chunk).
 		flush := func() {
-			if len(part) == 0 {
-				return
-			}
 			shardID := id
 			if index > 1 {
 				shardID = fmt.Sprintf("%s-%d", id, index)
