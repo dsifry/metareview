@@ -1,0 +1,25 @@
+# Packages excluded from the require-100 coverage gate (make cover -> cmd/covergate).
+#
+# The gate requires EVERY package `go list ./...` reports to be at exactly 100.0% statement coverage,
+# EXCEPT the ones listed here. The Makefile subtracts these from `go list ./...` to build the required
+# set, so a NEW package is required by default (fail-closed: an untested new package fails the gate, the
+# way internal/mutation once shipped an entire subsystem ungated). Add a line here only for a package that
+# genuinely has no coverable statements or is a value-less delegate — and say why.
+#
+# One module-qualified import path per line (as `go list ./...` prints them). Blank lines and #-comments
+# are ignored.
+
+# Module-root package: only a //go:embed of the git-hook assets, no executable statements — never enters
+# the coverage profile. Its embed integrity is guarded by githookassets_test.go instead.
+github.com/dsifry/metareview
+
+# A single version constant, no executable statements — a coverage test would be a tautology that breaks
+# on every version bump.
+github.com/dsifry/metareview/internal/version
+
+# A one-line delegate to internal/covergate (which IS gated at 100%). Exercised end-to-end by
+# tests/go/test-covergate.sh; a unit test here would only re-test the delegate.
+github.com/dsifry/metareview/cmd/covergate
+
+# A black-box (external) test-only package — no production statements, never in the coverage profile.
+github.com/dsifry/metareview/internal/githooktest

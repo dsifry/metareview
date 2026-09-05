@@ -1,9 +1,17 @@
 # Spec: Go-native coverage gate (`cmd/covergate` + Makefile), retiring `tests/coverage.sh`
 
-Status: **Design; maintainer-directed 2026-09-01. Phase 1 to build; Phase 2 incremental.**
+Status: **DONE. `tests/coverage.sh` retired; `make cover` is the sole gate (2026-09-04).**
 Date: 2026-09-01
 Retires: `tests/coverage.sh` (178 lines of bash gate logic). Keeps: the 37 behavioral shell tests
-(`tests/run-all.sh` → `tests/go/*.sh`, `tests/manifest/*.sh`) — Phase 2 ports those incrementally.
+(`tests/run-all.sh` → `tests/go/*.sh`, `tests/manifest/*.sh`), which `make cover` runs under coverage.
+
+> **Update (2026-09-04):** the transition is complete. `tests/coverage.sh` and the parallel/parity CI run
+> are gone; CI runs only `make cover`. The **floor mechanism described below was also removed** — after the
+> repo-wide 100% campaign, the gate no longer reads `tests/coverage-floor.txt` (deleted) and dropped the
+> `--floor`/`--update-floor`/`--allow-floor-decrease` flags and the `ParseFloor`/`UpdateFloor`/`FormatFloor`
+> logic. The gate now requires **every** package `go list ./...` reports to be at exactly 100% except the
+> explicit `tests/coverage-exclude.txt` list. The invariants below are historical; §1 rules 8, 13–16 (floor
+> semantics) no longer apply, and rules 7/9–12 are subsumed by "required = all-minus-exclude, each at 100%".
 
 > **Why.** metareview is a Go project driving its test gate through `bash tests/coverage.sh` and a
 > `package.json` `scripts.test` — the JS convention, not the Go one (and the exact oddity that confused

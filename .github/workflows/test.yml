@@ -61,12 +61,9 @@ jobs:
       - name: Unit tests
         run: go test ./...
       - name: Behavioral suite and coverage gate
-        # On this branch `npm test` also runs tests/coverage.sh, which holds
-        # internal/fsm and workflows at 100% and floors the rest.
-        run: npm test
-      - name: Coverage gate (Go-native, parity run)
-        # Transition step (spec docs/specs/2026-09-01-covergate-go-native.md §3): `make cover` is the
-        # Go-native replacement — it runs the same suite and hands the merged profile to cmd/covergate.
-        # Running it beside `npm test` proves the two gates agree on real runs; once stable, coverage.sh
-        # and the `npm test` step are deleted and this becomes the only gate. A divergence fails here.
+        # `make cover` (spec docs/specs/2026-09-01-covergate-go-native.md) is the sole coverage gate: it
+        # runs the unit tests and the behavioral shell suite under coverage, merges them, and hands the
+        # profile to cmd/covergate, which requires every package `go list ./...` reports to be at exactly
+        # 100.0% except those in tests/coverage-exclude.txt. (The transitional bash gate tests/coverage.sh
+        # and its per-package floor were removed once the repo-wide 100% campaign reached the bar.)
         run: make cover

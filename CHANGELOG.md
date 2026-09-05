@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Changed
+
+- **Coverage gate is now require-100 for the whole repository.** After the repo-wide campaign brought
+  every package to 100% statement coverage with zero surviving mutants, the per-package floor
+  (`tests/coverage-floor.txt`) and the transitional bash gate (`tests/coverage.sh`, with its
+  `--update-floor`/`--allow-floor-decrease` flags) were removed. `make cover` (logic in
+  `internal/covergate`) is now the sole gate: it requires every package `go list ./...` reports to be at
+  exactly 100.0% of statements, except the packages named in the new `tests/coverage-exclude.txt`
+  (the embed-only module root, `internal/version`, `cmd/covergate`, and the black-box
+  `internal/githooktest`). A new package is required at 100% by default; excluding one is a deliberate,
+  commented line. The module-root package's embedded git-hook assets are now guarded by a dedicated
+  `githookassets_test.go` embed-integrity test.
+
 ### Fixed
 
 - **PR-ready now selects findings for the target under review.** Findings linked to the current
@@ -65,9 +78,11 @@
 - **`no_fixation_progress` now measures whether the bugs it entered with got cleared**, rather
   than comparing totals. Discovering more bugs than you fix is no longer read as a stall, and
   fixing nothing is no longer hidden by a rising discovery count.
-- **A package with no coverage floor now fails the coverage gate** instead of passing unmeasured;
-  `bash tests/coverage.sh --update-floor` writes the missing lines and exits 0. `internal/mutation`
-  shipped an entire subsystem ungated before this.
+- **A new package is gated at 100% by default** instead of passing unmeasured: the coverage gate
+  requires every package `go list ./...` reports to be at 100% except those explicitly named in
+  `tests/coverage-exclude.txt`, so a package added without tests fails the gate. `internal/mutation`
+  shipped an entire subsystem ungated before this fail-closed protection existed. (See the
+  require-100 entry above; this supersedes the earlier per-package-floor form of the same protection.)
 
 ## 0.10.0 - 2026-08-29
 

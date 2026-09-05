@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# The covergate binary end to end: it is the Go-native coverage gate that replaces the parse+enforce
-# half of tests/coverage.sh (spec docs/specs/2026-09-01-covergate-go-native.md). The unit tests in
-# internal/covergate cover the logic; this drives the actual CLI so main() and the flag wiring are
-# exercised (and, run under the coverage harness, counted), and so a wiring regression is caught.
+# The covergate binary end to end: it is the Go-native coverage gate (spec
+# docs/specs/2026-09-01-covergate-go-native.md). The unit tests in internal/covergate cover the logic;
+# this drives the actual CLI so main() and the flag wiring are exercised (and, run under the coverage
+# harness, counted), and so a wiring regression is caught.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -12,17 +12,16 @@ trap 'rm -rf "$TMP"' EXIT
 MODULE="github.com/dsifry/metareview"
 (cd "$ROOT" && go build -o "$TMP/covergate" ./cmd/covergate)
 
-# A profile with a required package at 100% and a floored package at 100%.
+# A profile with a required package at 100% and an unrequired (excluded) package below 100%.
 cat > "$TMP/profile.txt" <<EOF
 mode: atomic
 $MODULE/internal/fsm/kind/kind.go:1.1,2.2 4 4
-$MODULE/internal/a/a.go:1.1,2.2 8 8
+$MODULE/cmd/covergate/main.go:1.1,2.2 8 6
 EOF
-printf 'internal/a 80\n' > "$TMP/floor.txt"
 printf '%s/internal/fsm/kind\n' "$MODULE" > "$TMP/require.txt"
 
-# Pass case.
-if ! "$TMP/covergate" --profile "$TMP/profile.txt" --floor "$TMP/floor.txt" \
+# Pass case: the required package is 100%; the excluded one is not gated.
+if ! "$TMP/covergate" --profile "$TMP/profile.txt" \
 	--module "$MODULE" --require-100 "$TMP/require.txt" > "$TMP/out" 2>&1; then
 	echo "covergate: expected PASS, got failure:" >&2; cat "$TMP/out" >&2; exit 1
 fi
@@ -34,7 +33,7 @@ mode: atomic
 $MODULE/internal/fsm/kind/kind.go:1.1,2.2 3 1
 $MODULE/internal/fsm/kind/kind.go:3.1,4.2 1 0
 EOF
-if "$TMP/covergate" --profile "$TMP/profile-fail.txt" --floor "$TMP/floor.txt" \
+if "$TMP/covergate" --profile "$TMP/profile-fail.txt" \
 	--module "$MODULE" --require-100 "$TMP/require.txt" > "$TMP/out2" 2>&1; then
 	echo "covergate: expected FAIL for a sub-100% required package, but it passed" >&2; cat "$TMP/out2" >&2; exit 1
 fi

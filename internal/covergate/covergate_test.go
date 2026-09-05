@@ -80,49 +80,21 @@ func TestParseProfileScannerError(t *testing.T) {
 	}
 }
 
-func TestParseFloor(t *testing.T) {
-	in := "# header\n\ncmd/metareview 81.2\ninternal/findings 92.7\n"
-	got, err := ParseFloor(strings.NewReader(in))
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if got["cmd/metareview"] != 81.2 || got["internal/findings"] != 92.7 {
-		t.Errorf("got %+v", got)
-	}
-}
-
-func TestParseFloorErrors(t *testing.T) {
-	if _, err := ParseFloor(strings.NewReader("only-one-field\n")); err == nil {
-		t.Error("want malformed error")
-	}
-	if _, err := ParseFloor(strings.NewReader("pkg notanumber\n")); err == nil {
-		t.Error("want bad-pct error")
-	}
-	if _, err := ParseFloor(&errReader{data: "pkg 50\n"}); err == nil {
-		t.Error("want scanner error")
-	}
-}
-
+// TestGate exercises the require-100 model: required packages must be exactly 100% and present in the
+// profile; a package absent from the required set is explicitly excluded and reported without gating.
 func TestGate(t *testing.T) {
 	in := GateInput{
 		Profile: map[string]PkgCov{
 			"internal/fsm/kind": {Covered: 5, Total: 5},  // required, exact -> ok
-			"internal/fsm/mach": {Covered: 4, Total: 5},  // required, not exact -> FAIL rule 7
-			"internal/a":        {Covered: 8, Total: 10}, // 80%, floor 80 -> ok
-			"internal/b":        {Covered: 7, Total: 10}, // 70%, floor 80 -> FAIL rule 8
-			"internal/c":        {Covered: 5, Total: 10}, // no floor -> FAIL rule 9
+			"internal/fsm/mach": {Covered: 4, Total: 5},  // required, not exact -> FAIL
+			"cmd/covergate":     {Covered: 8, Total: 10}, // not required (excluded) -> ok (excluded), even below 100
 		},
-		Floor: map[string]float64{
-			"internal/a":    80,
-			"internal/b":    80,
-			"internal/gone": 50, // floored but not in profile -> FAIL rule 12
-		},
-		Require100: []string{"internal/fsm/kind", "internal/fsm/mach", "internal/fsm/absent"}, // absent -> FAIL rule 11
+		Required: []string{"internal/fsm/kind", "internal/fsm/mach", "internal/fsm/absent"}, // absent -> FAIL
 	}
 	rows, failures := Gate(in)
-	// FAILs: mach(7), b(8), c(9), fsm/absent(11), gone(12) = 5
-	if failures != 5 {
-		t.Fatalf("failures=%d want 5; rows=%+v", failures, rows)
+	// FAILs: mach (not exact), fsm/absent (required but not in profile) = 2
+	if failures != 2 {
+		t.Fatalf("failures=%d want 2; rows=%+v", failures, rows)
 	}
 	// sorted by pkg
 	for i := 1; i < len(rows); i++ {
@@ -135,106 +107,25 @@ func TestGate(t *testing.T) {
 		byPkg[r.Pkg] = r
 	}
 	if byPkg["internal/fsm/kind"].Fail {
-		t.Error("kind should pass")
+		t.Error("kind (required, exact) should pass")
 	}
-	if !byPkg["internal/c"].Fail || !strings.Contains(byPkg["internal/c"].Status, "no floor") {
-		t.Errorf("c should FAIL no-floor: %+v", byPkg["internal/c"])
+	if !byPkg["internal/fsm/mach"].Fail || !strings.Contains(byPkg["internal/fsm/mach"].Status, "every statement") {
+		t.Errorf("mach should FAIL not-exact: %+v", byPkg["internal/fsm/mach"])
 	}
-	if byPkg["internal/fsm/absent"].Pct != "absent" {
-		t.Errorf("absent required should read 'absent': %+v", byPkg["internal/fsm/absent"])
+	if byPkg["cmd/covergate"].Fail || !strings.Contains(byPkg["cmd/covergate"].Status, "excluded") {
+		t.Errorf("cmd/covergate (excluded) should pass and read excluded even below 100: %+v", byPkg["cmd/covergate"])
 	}
-}
-
-// TestGateFloorRounding guards the parity bug the make-cover run caught: a package sitting exactly at
-// its (1-decimal) floor must pass, because coverage.sh compares the %.1f-rounded pct, not the raw value.
-func TestGateFloorRounding(t *testing.T) {
-	in := GateInput{
-		Profile: map[string]PkgCov{
-			"internal/atfloor": {Covered: 7, Total: 9},    // 77.777…% -> rounds to 77.8
-			"internal/below":   {Covered: 77, Total: 100}, // 77.0% -> below 77.8
-		},
-		Floor:      map[string]float64{"internal/atfloor": 77.8, "internal/below": 77.8},
-		Require100: []string{"internal/x"}, // non-empty; absent -> its own FAIL, ignored below
-	}
-	rows, _ := Gate(in)
-	byPkg := map[string]Row{}
-	for _, r := range rows {
-		byPkg[r.Pkg] = r
-	}
-	if byPkg["internal/atfloor"].Fail {
-		t.Errorf("77.777%% must pass floor 77.8 (rounds to 77.8): %+v", byPkg["internal/atfloor"])
-	}
-	if !byPkg["internal/below"].Fail {
-		t.Errorf("77.0%% must FAIL floor 77.8: %+v", byPkg["internal/below"])
+	if !byPkg["internal/fsm/absent"].Fail || byPkg["internal/fsm/absent"].Pct != "absent" {
+		t.Errorf("absent required should FAIL and read 'absent': %+v", byPkg["internal/fsm/absent"])
 	}
 }
 
 func TestGateEmptyRequired(t *testing.T) {
-	rows, failures := Gate(GateInput{Profile: map[string]PkgCov{}, Require100: nil})
+	rows, failures := Gate(GateInput{Profile: map[string]PkgCov{}, Required: nil})
 	if failures != 1 {
 		t.Fatalf("empty require set should fail once, got %d", failures)
 	}
 	if rows[0].Pkg != "<require-100>" {
 		t.Errorf("want the require-100 sentinel row, got %+v", rows[0])
-	}
-}
-
-func TestUpdateFloor(t *testing.T) {
-	profile := map[string]PkgCov{
-		"internal/fsm/kind": {Covered: 5, Total: 5}, // required, excluded
-		"internal/a":        {Covered: 9, Total: 10},
-		"internal/b":        {Covered: 6, Total: 10},
-	}
-	old := map[string]float64{"internal/a": 80, "internal/b": 50}
-	nf, err := UpdateFloor(profile, old, []string{"internal/fsm/kind"}, false)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if _, ok := nf["internal/fsm/kind"]; ok {
-		t.Error("required package must be excluded from the floor")
-	}
-	if nf["internal/a"] != 90 || nf["internal/b"] != 60 {
-		t.Errorf("regenerated floor wrong: %+v", nf)
-	}
-}
-
-func TestUpdateFloorRefuseLower(t *testing.T) {
-	profile := map[string]PkgCov{"internal/a": {Covered: 7, Total: 10}} // 70%
-	old := map[string]float64{"internal/a": 80}                         // would lower 80 -> 70
-	if _, err := UpdateFloor(profile, old, nil, false); err == nil {
-		t.Fatal("want refuse-lower error")
-	}
-	nf, err := UpdateFloor(profile, old, nil, true) // allow decrease
-	if err != nil {
-		t.Fatalf("allowDecrease should succeed: %v", err)
-	}
-	if nf["internal/a"] != 70 {
-		t.Errorf("want 70, got %v", nf["internal/a"])
-	}
-}
-
-func TestUpdateFloorRefuseVanished(t *testing.T) {
-	profile := map[string]PkgCov{"internal/a": {Covered: 9, Total: 10}}
-	old := map[string]float64{"internal/a": 80, "internal/gone": 50} // gone not in profile
-	_, err := UpdateFloor(profile, old, nil, false)
-	if err == nil || !strings.Contains(err.Error(), "internal/gone") {
-		t.Fatalf("want vanished-package refusal naming internal/gone, got %v", err)
-	}
-}
-
-func TestFormatFloor(t *testing.T) {
-	out := FormatFloor(map[string]float64{"internal/b": 60, "internal/a": 90})
-	if !strings.HasPrefix(out, "# Per-package") {
-		t.Error("missing header")
-	}
-	ai := strings.Index(out, "internal/a 90.0")
-	bi := strings.Index(out, "internal/b 60.0")
-	if ai < 0 || bi < 0 || ai > bi {
-		t.Errorf("floor not sorted/rendered: %q", out)
-	}
-	// round-trips through ParseFloor
-	back, err := ParseFloor(strings.NewReader(out))
-	if err != nil || back["internal/a"] != 90 || back["internal/b"] != 60 {
-		t.Errorf("round-trip failed: %+v err=%v", back, err)
 	}
 }
