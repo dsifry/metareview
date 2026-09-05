@@ -265,8 +265,8 @@ are listed in §5.3/§13 (all `omitempty`, empty when folding a pre-revision log
 | `build` | `implement`, `mutate`, `task-close` |
 | `taskset` | `taskset-load`, `next-ready-task`, `inventory-update`, `integrate-branch` (7a) |
 | `artifact` | `author` |
-| `shepherd` | `open-pr`, `pr-observe`, `branch-observe`, `comment-triage`, `pr-reply`, `pr-resolve`, `push`, `merge-check`, `merge`, `merge-from-base`, `resolve-conflicts`, `runtime-check`, `rollback`, `close-issue`, `beads-commit`, `learn` |
-| `factory` | `intake`, `curate`, `curate-commit`, `task-close` |
+| `shepherd` | `open-pr`, `pr-observe`, `branch-observe`, `comment-triage`, `pr-reply`, `pr-resolve`, `push`, `merge-check`, `merge`, `merge-from-base`, `resolve-conflicts`, `runtime-check`, `rollback`, `close-issue`, `task-close` (the post-rollback `reopen`), `beads-commit`, `learn` |
+| `factory` | `intake`, `curate`, `curate-commit`, `task-close`, `beads-commit` |
 | shared | `child-workflow`, `await`, `record-marker`, `marker-check`, `gate-review`, `sync-branch`, `verify-tdd` (`mode: task` in `build`, `mode: suite` — written `validate` in §6 — anywhere), `author` (`resplit` uses it in `taskset`), `file-issue` |
 
 Trade stated: `converge.Payload` strips `NodeOutputs`, so a `cmd` convergence atom cannot see family
@@ -475,7 +475,9 @@ append a `task-state {id, state: built | skipped | overridden | split, run}` row
 `epic-build-loop` never re-schedules a built, skipped, overridden, or split task (in plan-file mode this
 is the only ledger of built-ness; a split task's un-renumbered id is retired by its `split` row, and
 `taskset_valid` refuses a retired id in the `depends_on` of the new ids). `task-close` outputs `{id,
-prior_status, …}` and refuses to reopen (or re-close) an issue once the job's PR is merged.
+prior_status, …}` and refuses to reopen (or re-close) an issue once the job's PR is merged — except the
+single sanctioned `reopen: true` call on the `release-loop` post-rollback path (§5.10), which is the one
+reopen allowed after the merge.
 
 **Interpolation.** Params and child `vars:`/`base:`/`goldens:` may reference `${<state>.<field>}` where
 `<state>` is a state **of the same workflow** and `<field>` ∈ that kind's `OutputFields` (string, int,
@@ -1512,14 +1514,14 @@ default (§5.3): its `retry` restores the tree to the child's checkpoint before 
 | `implement` | inline/subagent/fork(runner) | build | `context`, `max_node_attempts`, `brief_extra` | §5.8 | MutatesTree, FixEntry · clone | 1 |
 | `verify-tdd` | fork | shared | `mode`, `cmds?` | `{receipts{red[{id, fail_before}], green[], suite, lint?, typecheck?, coverage?}, scope, secrets, failures[{check, file, line, desc}], fail_before}` | — · throwaway | 1 |
 | `mutate` | fork | build | `mutate_cmd` | `{killed, survived, uncovered, unresolved, per_file[]}` | — · throwaway | 1 |
-| `task-close` | fork | build/factory | `epic?` | `{id, prior_status, bd_closed, ledger_line, closed_ids[]}` | — · driver (DB only) | 1 |
+| `task-close` | fork | build/factory/shepherd | `epic?`, `reopen?` | `{id, prior_status, bd_closed, ledger_line, closed_ids[]}` | — · driver (DB only) | 1 · 5a (`reopen`) |
 | `taskset-load` | fork | taskset | `source` | `{tasks[], baseline, credentials_missing[], tasks_missing_credentials[], protected_paths[], taskset_invalid, on_default_branch, created_ids[]}` | — · driver | 2 |
 | `next-ready-task` | fork | taskset | `order` | union `{task_id, base, brief_path, checkpoint, advisory[]}` \| `{none, blocked_ids[], advisory[]}` | — · driver | 2 |
 | `inventory-update` | inline/subagent/fork(runner) | taskset | — | `{path, appended}` | MutatesTree · clone | 2 |
 | `author` | inline/subagent/fork(runner) | artifact | `template` (registry), `mode`, `path`, `source?`, `note?`, `task?`, `findings?` | `{path, commit, base, approaches[], questions[], invalid_reasons[]}` | MutatesTree · clone | 3 |
 | `intake` | fork | factory | — | `{entry, size, source, doc_path, spec_doc, intent_sha256, issue, spec_path, plan_path, pr_number, trusted}` | — · driver | 3 |
 | `file-issue`, `close-issue` | fork | shared / shepherd | `template?` (default `issue`), `items?` (list; one issue each) | `{filed[{thread_id?, number, url, body_sha256}], dry_run}` / `{number, url, dry_run}` | — · driver | 3 / 5a |
-| `open-pr`, `pr-observe`, `branch-observe`, `pr-reply`, `pr-resolve`, `push`, `merge-from-base`, `merge-check`, `merge`, `runtime-check`, `rollback`, `beads-commit`, `learn` | fork | shepherd | fixed per §5.10; `ref`; `threads`+`filed?` (pr-reply: a filed issue's URL is appended to its thread's reply); `findings`+`fixed`+`sources`+`replied` (pr-resolve); `pr`; `health_cmd`; `rollback_cmd` | `PrState` (incl. `closed_by`) / `{ref, head_sha, checks[]}` / `{replied[], dry_run}` / `{resolved[], dry_run}` / `{pushed_sha, protected_paths[], stderr_sha256, dry_run}` / `{merged_clean, conflicts[]}` / `{conditions_met, approval_required, pending, failed, reasons[]}` / `{merged_sha, already_merged, dry_run}` / runtime receipt / `{exit, receipt}` / `{commit, changed}` / `{learned}` | push, merge-from-base, beads-commit: MutatesTree · driver; runtime-check, rollback: throwaway (egress) | 4–5a |
+| `open-pr`, `pr-observe`, `branch-observe`, `pr-reply`, `pr-resolve`, `push`, `merge-from-base`, `merge-check`, `merge`, `runtime-check`, `rollback`, `beads-commit`, `learn` | fork | shepherd (`beads-commit` also `factory`) | fixed per §5.10; `ref`; `threads`+`filed?` (pr-reply: a filed issue's URL is appended to its thread's reply); `findings`+`fixed`+`sources`+`replied` (pr-resolve); `pr`; `health_cmd`; `rollback_cmd` | `PrState` (incl. `closed_by`) / `{ref, head_sha, checks[]}` / `{replied[], dry_run}` / `{resolved[], dry_run}` / `{pushed_sha, protected_paths[], stderr_sha256, dry_run}` / `{merged_clean, conflicts[]}` / `{conditions_met, approval_required, pending, failed, reasons[]}` / `{merged_sha, already_merged, dry_run}` / runtime receipt / `{exit, receipt}` / `{commit, changed}` / `{learned}` | push, merge-from-base, beads-commit: MutatesTree · driver; runtime-check, rollback: throwaway (egress) | 4–5a |
 | `resolve-conflicts` | inline/subagent/fork(runner) | shepherd | — | `{resolved, commit}` | MutatesTree · clone | 4 |
 | `comment-triage` | inline/subagent/fork(runner) | shepherd | — | `{findings[{thread_id, file, line, desc}], replies[{thread_id, body}], file_issue[{thread_id, title, body}]}` (trusted threads only) | — · clone (reads) | 4 |
 | `curate` | inline/subagent/fork(runner) | factory | — | `{accepted[{fact, supersedes[]}], discarded[{reason}]}` | — · clone (reads) | 5b |
@@ -1715,7 +1717,7 @@ Phase 7). Exits are the two forms of §8.2 plus the named negatives.
   `internal/coverage`; production-source predicate; secrets scan with raw tails; throwaway trees in their own
   sandbox; `failures[]`), `mutate` (per-source-file rule; `no-tests` waiver), `record-marker` (currency
   rule incl. dispositioned children, `verdict`, refusals), `task-close` (`prior_status`; no reopen after
-  merge), `validate`; `fix-loop-proved-clean` with `confirmed_fixable` and `CONTEXT`; `review-lenses`
+  merge except the sanctioned `reopen: true` rollback path), `validate`; `fix-loop-proved-clean` with `confirmed_fixable` and `CONTEXT`; `review-lenses`
   `context:` param; the `plan-mandated` label; `await` `context:` maps on the three task awaits; the
   prompt validator; the implementer prompt (Superpowers 5-part recipe + metaswarm Coder rules +
   `systematic-debugging`; "uncommitted work is discarded"); `triage` → goldens; `plan_conflict`/
@@ -1885,8 +1887,8 @@ Phase 7). Exits are the two forms of §8.2 plus the named negatives.
   `rollback` cmd through the proxy, a non-zero rollback re-parks, `extend` re-observes main, `keep`
   closes, and `rollback` is refused when `cmds.rollback` is undeclared; an `allowed_signers` file edited
   after job creation does not change what verifies (the copy does); `policy.finish: pr` removes the
-  job's trees after `done[released]` and `keep` leaves them; a `task-close` after the merge refuses to
-  reopen; a failed health check blocks; a non-factory `review
+  job's trees after `done[released]` and `keep` leaves them; a `task-close` without `reopen: true` after the merge refuses to
+  reopen (the sanctioned `reopen: true` rollback path is the one exception); a failed health check blocks; a non-factory `review
   pr-ready` on a PR whose body claims "deployed" blocks without a runtime receipt; the Beads epic close is
   in the merged diff.
 
