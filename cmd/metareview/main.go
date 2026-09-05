@@ -37,8 +37,69 @@ import (
 	"github.com/dsifry/metareview/internal/version"
 )
 
+// Injectable process IO and working directory, so run() — and thus the whole command dispatch and
+// its helpers — is testable without touching the real process. Defaults mirror the os values;
+// run() overwrites all four per call. Tests run serially (no t.Parallel), so the shared state is safe.
+var (
+	stdout  io.Writer = os.Stdout
+	stderr  io.Writer = os.Stderr
+	stdin   io.Reader = os.Stdin
+	workdir string
+)
+
+// exitCode is the panic sentinel run() recovers into its return value, so the dispatch and its
+// helpers can end a command with a status code exactly as os.Exit did — but recoverably, under test.
+type exitCode struct{ code int }
+
+// exit ends the current command with the given status code. It replaces os.Exit throughout so the
+// dispatch is testable; run() turns the panic back into a return value.
+func exit(code int) { panic(exitCode{code}) }
+
+// osExit and getwd are seams so main and realMain are testable without ending the test process.
+// The evidence/import/executable seams default to the real functions and let tests drive the
+// branches that would otherwise need a subprocess, the gh CLI + network, or an os.Executable failure.
+var (
+	osExit               = os.Exit
+	getwd                = os.Getwd
+	evidenceRun          = evidence.Run
+	importGitHubChecks   = evidence.ImportGitHubChecks
+	osExecutable         = os.Executable
+	uninstallHookInstall = setup.UninstallHookInstall
+)
+
+func main() { osExit(realMain(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
+
+// realMain resolves the working directory and delegates to run, returning the process exit code. It
+// is the testable body of main (main itself is only the os.Exit wrapper around it).
+func realMain(args []string, in io.Reader, out, errw io.Writer) int {
+	cwd, err := getwd()
+	if err != nil {
+		_, _ = fmt.Fprintln(errw, err)
+		return 1
+	}
+	return run(args, in, out, errw, cwd)
+}
+
+// run dispatches one command with explicit IO and working directory, returning its exit code. It is
+// the testable core of main: it recovers the exit() sentinel so a command that would have called
+// os.Exit(n) instead returns n.
+func run(args []string, in io.Reader, out, errw io.Writer, cwd string) (code int) {
+	stdin, stdout, stderr, workdir = in, out, errw, cwd
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := r.(exitCode); ok {
+				code = e.code
+				return
+			}
+			panic(r)
+		}
+	}()
+	dispatch(args)
+	return 0
+}
+
 func printHelp() {
-	fmt.Printf(`metareview %s
+	_, _ = fmt.Fprintf(stdout, `metareview %s
 
 Usage:
   metareview setup --check
@@ -85,7 +146,7 @@ Commands:
 }
 
 func printLearnHelp() {
-	fmt.Printf(`metareview learn
+	_, _ = fmt.Fprintf(stdout, `metareview learn
 
 Usage:
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
@@ -95,15 +156,14 @@ Commands:
 `)
 }
 
-func main() {
-	args := os.Args[1:]
+func dispatch(args []string) {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		printHelp()
 		return
 	}
 
 	if args[0] == "--version" || args[0] == "-v" {
-		fmt.Println(version.Version)
+		_, _ = fmt.Fprintln(stdout, version.Version)
 		return
 	}
 
@@ -113,7 +173,7 @@ func main() {
 	}
 
 	if args[0] == "fsm" {
-		os.Exit(fsmcli.Run(context.Background(), args[1:], os.Stdin, os.Stdout, os.Stderr, mustCwd(), fsmcli.RealDeps()))
+		exit(fsmcli.Run(context.Background(), args[1:], stdin, stdout, stderr, workdir, fsmcli.RealDeps()))
 	}
 
 	// status --json is the contract a host hook branches on: one machine-readable answer to
@@ -124,49 +184,52 @@ func main() {
 		// review history, so a hook wired to it refuses an agent because of work it never
 		// touched - a livelock rather than a gate.
 		target, scopeBranch, base := "", false, ""
-		switch {
-		case len(args) == 2:
-		case len(args) == 4 && args[2] == "--target":
+		// if/else-if rather than a tagless switch: Go's cover profile emits no counter for a
+		// tagless-switch case expression, so the boundary mutants on these len/arg comparisons would
+		// be reported not-covered and stay unkillable. See the #104/#106 precedent.
+		if len(args) == 2 {
+			// bare `status --json`: whole-history scope, no narrowing.
+		} else if len(args) == 4 && args[2] == "--target" {
 			target = args[3]
-		case len(args) == 3 && args[2] == "--scope=branch":
+		} else if len(args) == 3 && args[2] == "--scope=branch" {
 			scopeBranch = true
-		case len(args) == 4 && args[2] == "--scope" && args[3] == "branch":
+		} else if len(args) == 4 && args[2] == "--scope" && args[3] == "branch" {
 			scopeBranch = true
-		case len(args) == 6 && args[2] == "--scope" && args[3] == "branch" && args[4] == "--base":
+		} else if len(args) == 6 && args[2] == "--scope" && args[3] == "branch" && args[4] == "--base" {
 			scopeBranch, base = true, args[5]
-		default:
-			fmt.Fprintln(os.Stderr, "Usage: metareview status --json [--target <path> | --scope branch [--base <ref>]]")
-			os.Exit(2)
+		} else {
+			_, _ = fmt.Fprintln(stderr, "Usage: metareview status --json [--target <path> | --scope branch [--base <ref>]]")
+			exit(2)
 		}
 		if scopeBranch {
 			// The scope a Stop hook wants: this branch's own commits and the files it changed.
-			code, err := status.EmitForBranch(repo.RootOr(mustCwd()), base, nil, os.Stdout)
+			code, err := status.EmitForBranch(repo.RootOr(workdir), base, nil, stdout)
 			exitGateBroken(err)
 			if code != 0 {
-				os.Exit(code)
+				exit(code)
 			}
 			return
 		}
 		// Resolved from the repository root, not the process cwd. A Stop hook inherits whatever
 		// directory the session is standing in, and resolving there found no review logs and
 		// reported nothing to clear — the gate was bypassed by working in a subdirectory.
-		code, err := status.EmitFor(repo.RootOr(mustCwd()), target, os.Stdout)
+		code, err := status.EmitFor(repo.RootOr(workdir), target, stdout)
 		exitGateBroken(err)
 		if code != 0 {
-			os.Exit(code)
+			exit(code)
 		}
 		return
 	}
 
 	if len(args) == 1 && args[0] == "status" {
-		report := repo.Detect(mustCwd())
-		fmt.Printf("metareview %s\n", version.Version)
-		fmt.Printf("mode: %s\n", report.Mode)
-		fmt.Printf("git: %s\n", present(report.Capabilities.Git))
-		fmt.Printf("beads: %s\n", present(report.Capabilities.Beads))
-		fmt.Printf("metaswarm: %s\n", present(report.Capabilities.Metaswarm))
-		for _, line := range fsmcli.StatusLines(context.Background(), fsmcli.RealDeps(), mustCwd()) {
-			fmt.Println(line)
+		report := repo.Detect(workdir)
+		_, _ = fmt.Fprintf(stdout, "metareview %s\n", version.Version)
+		_, _ = fmt.Fprintf(stdout, "mode: %s\n", report.Mode)
+		_, _ = fmt.Fprintf(stdout, "git: %s\n", present(report.Capabilities.Git))
+		_, _ = fmt.Fprintf(stdout, "beads: %s\n", present(report.Capabilities.Beads))
+		_, _ = fmt.Fprintf(stdout, "metaswarm: %s\n", present(report.Capabilities.Metaswarm))
+		for _, line := range fsmcli.StatusLines(context.Background(), fsmcli.RealDeps(), workdir) {
+			_, _ = fmt.Fprintln(stdout, line)
 		}
 		return
 	}
@@ -177,9 +240,9 @@ func main() {
 	}
 
 	if len(args) == 3 && args[0] == "context" && args[1] == "build" {
-		result, err := contextpack.Build(mustCwd(), args[2], time.Now())
+		result, err := contextpack.Build(workdir, args[2], time.Now())
 		exitOnErr(err)
-		fmt.Println(result.ContextRel)
+		_, _ = fmt.Fprintln(stdout, result.ContextRel)
 		return
 	}
 
@@ -191,14 +254,14 @@ func main() {
 				i++
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-			os.Exit(2)
+			_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
+			exit(2)
 		}
-		result, err := gitcontext.Collect(mustCwd(), base)
+		result, err := gitcontext.Collect(workdir, base)
 		exitOnErr(err)
 		bytes, err := json.MarshalIndent(result, "", "  ")
 		exitOnErr(err)
-		fmt.Println(string(bytes))
+		_, _ = fmt.Fprintln(stdout, string(bytes))
 		return
 	}
 
@@ -220,16 +283,16 @@ func main() {
 				scaffoldOnly = true
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-			os.Exit(2)
+			_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
+			exit(2)
 		}
-		result, err := artifactreview.Create(mustCwd(), args[2], previousRun, time.Now())
+		result, err := artifactreview.Create(workdir, args[2], previousRun, time.Now())
 		exitOnErr(err)
-		fmt.Println(result.ReviewRel)
+		_, _ = fmt.Fprintln(stdout, result.ReviewRel)
 		if !scaffoldOnly {
-			fmt.Fprintln(os.Stderr, "Artifact review scaffold created but not completed.")
-			fmt.Fprintln(os.Stderr, "Complete all required reviewer rows and update the verdict to PASS or PASS_ADVISORY with zero blockers, or re-run with --scaffold-only when only scaffold creation is intended.")
-			os.Exit(1)
+			_, _ = fmt.Fprintln(stderr, "Artifact review scaffold created but not completed.")
+			_, _ = fmt.Fprintln(stderr, "Complete all required reviewer rows and update the verdict to PASS or PASS_ADVISORY with zero blockers, or re-run with --scaffold-only when only scaffold creation is intended.")
+			exit(1)
 		}
 		return
 	}
@@ -260,15 +323,15 @@ func main() {
 				options.CrossShardResultPaths = appendCrossShardResult(options.CrossShardResultPaths, flagValue(args, i, "--cross-shard-result"))
 				i++
 			default:
-				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-				os.Exit(2)
+				_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
+				exit(2)
 			}
 		}
-		result, err := taskdone.Create(mustCwd(), args[2], options)
+		result, err := taskdone.Create(workdir, args[2], options)
 		exitOnErr(err)
-		fmt.Println(result.ReviewRel)
+		_, _ = fmt.Fprintln(stdout, result.ReviewRel)
 		if result.Blocking {
-			os.Exit(1)
+			exit(1)
 		}
 		return
 	}
@@ -293,15 +356,15 @@ func main() {
 				options.MutationReportPaths = append(options.MutationReportPaths, mustMutationReport(flagValue(args, i, "--mutation-report")))
 				i++
 			default:
-				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-				os.Exit(2)
+				_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
+				exit(2)
 			}
 		}
-		result, err := epicready.Create(mustCwd(), args[2], options)
+		result, err := epicready.Create(workdir, args[2], options)
 		exitOnErr(err)
-		fmt.Println(result.ReviewRel)
+		_, _ = fmt.Fprintln(stdout, result.ReviewRel)
 		if result.Blocking {
-			os.Exit(1)
+			exit(1)
 		}
 		return
 	}
@@ -314,14 +377,14 @@ func main() {
 				base = flagValue(args, i, "--base")
 				i++
 			default:
-				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-				os.Exit(2)
+				_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
+				exit(2)
 			}
 		}
 		// The same set the coverage gate measures: this branch's changed files (committed + staged +
 		// working + untracked), exclude-filtered. Classifying that set keeps the prompt and the gate
 		// talking about exactly the same files.
-		root := repo.RootOr(mustCwd())
+		root := repo.RootOr(workdir)
 		scope, err := status.ResolveBranchScope(root, base, nil)
 		exitOnErr(err)
 		label := base
@@ -331,8 +394,8 @@ func main() {
 				label = label[:12]
 			}
 		}
-		fmt.Print(reviewprompt.Build(label, scope.Files, status.ChangeKinds(root, base, nil)))
-		os.Exit(0)
+		_, _ = fmt.Fprint(stdout, reviewprompt.Build(label, scope.Files, status.ChangeKinds(root, base, nil)))
+		exit(0)
 	}
 	if len(args) >= 2 && args[0] == "review" && args[1] == "record-lenses" {
 		// Record that an adjudicated lens review ran over the current head, satisfying the pr-ready/task-done/
@@ -362,19 +425,19 @@ func main() {
 				fromRun = flagValue(args, i, "--from-run")
 				i++
 			default:
-				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-				os.Exit(2)
+				_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
+				exit(2)
 			}
 		}
 		if scope != "pr-ready" && scope != "task-done" && scope != "epic-ready" {
-			fmt.Fprintln(os.Stderr, "record-lenses: --scope must be pr-ready, task-done, or epic-ready")
-			os.Exit(2)
+			_, _ = fmt.Fprintln(stderr, "record-lenses: --scope must be pr-ready, task-done, or epic-ready")
+			exit(2)
 		}
 		if mode != reviewstate.ReviewModeSubagentAdjudicated && mode != reviewstate.ReviewModeInSessionEmulated {
-			fmt.Fprintln(os.Stderr, "record-lenses: --mode must be subagent-adjudicated or in-session-emulated")
-			os.Exit(2)
+			_, _ = fmt.Fprintln(stderr, "record-lenses: --mode must be subagent-adjudicated or in-session-emulated")
+			exit(2)
 		}
-		root := repo.RootOr(mustCwd())
+		root := repo.RootOr(workdir)
 		gc, err := gitcontext.Collect(root, base)
 		exitOnErr(err) // a repo with no HEAD/base fails here ("invalid git base"), so gc.HeadSHA is non-empty below
 		// A CLI seam cannot witness that independent subagents actually ran, so it must not let a hand-typed
@@ -385,14 +448,14 @@ func main() {
 		// advisory in-session-emulated mode.
 		if mode == reviewstate.ReviewModeSubagentAdjudicated {
 			if fromRun == "" {
-				fmt.Fprintln(os.Stderr, "record-lenses: --mode subagent-adjudicated requires --from-run naming the FSM review run it mirrors; use --mode in-session-emulated for a self-attested review")
-				os.Exit(2)
+				_, _ = fmt.Fprintln(stderr, "record-lenses: --mode subagent-adjudicated requires --from-run naming the FSM review run it mirrors; use --mode in-session-emulated for a self-attested review")
+				exit(2)
 			}
 			// A run id is a single path segment under .metareview/runs/; reject separators/traversal so the
 			// audit read can't be pointed outside the run store.
 			if strings.ContainsAny(fromRun, `/\`) || fromRun == ".." {
-				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: not a valid run id\n", fromRun)
-				os.Exit(2)
+				_, _ = fmt.Fprintf(stderr, "record-lenses: --from-run %q: not a valid run id\n", fromRun)
+				exit(2)
 			}
 			// epic-ready subagent evidence must come from the epic review workflow (its lenses apply the epic
 			// rubric); pr-ready/task-done accept any review workflow (they share the default rubric).
@@ -401,8 +464,8 @@ func main() {
 				wantWorkflow = "epic-review-loop"
 			}
 			if err := validateFromRunDiff(root, fromRun, gc.BaseSHA, gc.HeadSHA, wantWorkflow); err != nil {
-				fmt.Fprintf(os.Stderr, "record-lenses: --from-run %q: %v\n", fromRun, err)
-				os.Exit(2)
+				_, _ = fmt.Fprintf(stderr, "record-lenses: --from-run %q: %v\n", fromRun, err)
+				exit(2)
 			}
 		}
 		var lenses []string
@@ -414,15 +477,15 @@ func main() {
 		// A review with no named lens is not evidence a lens ran; a PASS marker with an empty lens set would
 		// let the gate pass on nothing. Require at least one.
 		if len(lenses) == 0 {
-			fmt.Fprintln(os.Stderr, "record-lenses: --lenses must name at least one lens that ran (e.g. --lenses security,correctness)")
-			os.Exit(2)
+			_, _ = fmt.Fprintln(stderr, "record-lenses: --lenses must name at least one lens that ran (e.g. --lenses security,correctness)")
+			exit(2)
 		}
 		exitOnErr(reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
 			ReviewedScope: scope, HeadSHA: gc.HeadSHA, BaseSHA: gc.BaseSHA,
 			LensSet: lenses, AdjudicatedVerdict: verdict, ExecutionMode: mode, FromFSMRunID: fromRun,
 		}))
-		fmt.Printf("Recorded %s review-evidence at head %s (mode=%s, verdict=%s).\n", scope, gc.HeadSHA, mode, verdict)
-		os.Exit(0)
+		_, _ = fmt.Fprintf(stdout, "Recorded %s review-evidence at head %s (mode=%s, verdict=%s).\n", scope, gc.HeadSHA, mode, verdict)
+		exit(0)
 	}
 	if len(args) >= 2 && args[0] == "review" && args[1] == "gate" {
 		base, push, all, prePushStdin := "", false, false, false
@@ -442,15 +505,15 @@ func main() {
 				// manual `review gate --push` never blocks on a tty stdin read.
 				prePushStdin = true
 			default:
-				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-				os.Exit(2)
+				_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
+				exit(2)
 			}
 		}
 		// All the judgement is in status.CommitGate*/PushGate (tested); this is the thin CLI over it. The
 		// block reason goes to STDERR so a PreToolUse hook surfaces it verbatim. --all is the -a/pathspec
 		// scope: a commit that writes tracked working-tree content the index does not hold must be measured
 		// against that content, or `git commit -am` slips the whole thing past a staged-only gate.
-		root := repo.RootOr(mustCwd())
+		root := repo.RootOr(workdir)
 		var blocked bool
 		var message string
 		var err error
@@ -459,7 +522,7 @@ func main() {
 			// Read git's pre-push ref lines from stdin and gate each PUSHED ref (issue #82). The hook is the
 			// only caller; if stdin is empty (nothing to push) PushGateForRefs returns not-blocked.
 			var raw []byte
-			raw, err = io.ReadAll(os.Stdin)
+			raw, err = io.ReadAll(stdin)
 			if err == nil {
 				blocked, message, err = status.PushGateForRefs(root, base, string(raw), nil)
 			}
@@ -472,10 +535,10 @@ func main() {
 		}
 		exitOnErr(err)
 		if blocked {
-			fmt.Fprint(os.Stderr, message)
-			os.Exit(1)
+			_, _ = fmt.Fprint(stderr, message)
+			exit(1)
 		}
-		os.Exit(0)
+		exit(0)
 	}
 	if len(args) >= 2 && args[0] == "review" && args[1] == "pr-ready" {
 		options := prready.Options{}
@@ -508,15 +571,15 @@ func main() {
 			case "--include-working-tree":
 				options.IncludeWorkingTree = true
 			default:
-				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-				os.Exit(2)
+				_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
+				exit(2)
 			}
 		}
-		result, err := prready.Create(mustCwd(), options)
+		result, err := prready.Create(workdir, options)
 		exitOnErr(err)
-		fmt.Println(result.ReviewRel)
+		_, _ = fmt.Fprintln(stdout, result.ReviewRel)
 		if result.Blocking {
-			os.Exit(1)
+			exit(1)
 		}
 		return
 	}
@@ -542,29 +605,29 @@ func main() {
 				options.SessionRoot = flagValue(args, i, "--session-root")
 				i++
 			default:
-				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-				os.Exit(2)
+				_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
+				exit(2)
 			}
 		}
 		if options.PostMergePR == "" {
-			fmt.Fprintln(os.Stderr, "Missing value for --post-merge")
-			os.Exit(2)
+			_, _ = fmt.Fprintln(stderr, "Missing value for --post-merge")
+			exit(2)
 		}
-		result, err := learning.RunPostMerge(mustCwd(), options)
+		result, err := learning.RunPostMerge(workdir, options)
 		exitOnErr(err)
-		fmt.Println(result.AcceptedRel)
+		_, _ = fmt.Fprintln(stdout, result.AcceptedRel)
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "Unknown command: %s\n", args[0])
+	_, _ = fmt.Fprintf(stderr, "Unknown command: %s\n", args[0])
 	printHelp()
-	os.Exit(2)
+	exit(2)
 }
 
 func handleEvidence(args []string) {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Println("Usage: metareview evidence run -- <command> [args...]")
-		fmt.Println("       metareview evidence import --github-checks <pr-number> [--repo <owner/repo>]")
+		_, _ = fmt.Fprintln(stdout, "Usage: metareview evidence run -- <command> [args...]")
+		_, _ = fmt.Fprintln(stdout, "       metareview evidence import --github-checks <pr-number> [--repo <owner/repo>]")
 		return
 	}
 	switch args[0] {
@@ -577,25 +640,25 @@ func handleEvidence(args []string) {
 			}
 		}
 		if separator == -1 || separator+1 >= len(args) {
-			fmt.Fprintln(os.Stderr, "Usage: metareview evidence run -- <command> [args...]")
-			os.Exit(2)
+			_, _ = fmt.Fprintln(stderr, "Usage: metareview evidence run -- <command> [args...]")
+			exit(2)
 		}
-		receipt, runErr := evidence.Run(context.Background(), args[separator+1:], evidence.RunOptions{})
+		receipt, runErr := evidenceRun(context.Background(), args[separator+1:], evidence.RunOptions{})
 		if runErr != nil && receipt.SchemaVersion == 0 {
 			exitOnErr(runErr)
 		}
 		bytes, err := json.Marshal(receipt)
 		exitOnErr(err)
-		fmt.Println(string(bytes))
+		_, _ = fmt.Fprintln(stdout, string(bytes))
 		if runErr != nil {
-			fmt.Fprintln(os.Stderr, runErr)
+			_, _ = fmt.Fprintln(stderr, runErr)
 			if receipt.ExitCode != 0 {
-				os.Exit(receipt.ExitCode)
+				exit(receipt.ExitCode)
 			}
-			os.Exit(1)
+			exit(1)
 		}
 		if receipt.ExitCode != 0 {
-			os.Exit(receipt.ExitCode)
+			exit(receipt.ExitCode)
 		}
 	case "import":
 		pr := ""
@@ -609,25 +672,25 @@ func handleEvidence(args []string) {
 				repository = flagValue(args, i, "--repo")
 				i++
 			default:
-				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-				os.Exit(2)
+				_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
+				exit(2)
 			}
 		}
 		if pr == "" {
-			fmt.Fprintln(os.Stderr, "Missing value for --github-checks")
-			os.Exit(2)
+			_, _ = fmt.Fprintln(stderr, "Missing value for --github-checks")
+			exit(2)
 		}
-		bundle, err := evidence.ImportGitHubChecks(context.Background(), pr, evidence.GitHubCheckOptions{Repo: repository})
+		bundle, err := importGitHubChecks(context.Background(), pr, evidence.GitHubCheckOptions{Repo: repository})
 		exitOnErr(err)
 		bytes, err := bundle.JSONL()
 		exitOnErr(err)
-		fmt.Print(string(bytes))
+		_, _ = fmt.Fprint(stdout, string(bytes))
 		if bundleExitCode(bundle) != 0 {
-			os.Exit(1)
+			exit(1)
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown evidence command: %s\n", args[0])
-		os.Exit(2)
+		_, _ = fmt.Fprintf(stderr, "Unknown evidence command: %s\n", args[0])
+		exit(2)
 	}
 }
 
@@ -638,12 +701,6 @@ func bundleExitCode(bundle evidence.Bundle) int {
 		}
 	}
 	return 0
-}
-
-func mustCwd() string {
-	cwd, err := os.Getwd()
-	exitOnErr(err)
-	return cwd
 }
 
 // exitGateBroken ends a `status` run that could not produce an answer at all.
@@ -731,15 +788,15 @@ func short(sha string) string {
 
 func exitGateBroken(err error) {
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		_, _ = fmt.Fprintln(stderr, err)
+		exit(2)
 	}
 }
 
 func exitOnErr(err error) {
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		_, _ = fmt.Fprintln(stderr, err)
+		exit(1)
 	}
 }
 
@@ -749,10 +806,10 @@ func handleSetup(args []string) {
 		// `setup --check` report enforcement ACTIVE at the top of a checkout and INACTIVE two
 		// directories down — same repo, same commit, opposite answers — which is the exact
 		// inversion this layer exists to remove, left behind at one call site.
-		report := setup.Check(repo.RootOr(mustCwd()), setup.Options{ExecutablePath: executablePath()})
+		report := setup.Check(repo.RootOr(workdir), setup.Options{ExecutablePath: executablePath()})
 		bytes, err := json.MarshalIndent(report, "", "  ")
 		exitOnErr(err)
-		fmt.Println(string(bytes))
+		_, _ = fmt.Fprintln(stdout, string(bytes))
 		return
 	}
 
@@ -772,14 +829,14 @@ func handleSetup(args []string) {
 		case "--force":
 			force = true
 		default:
-			fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-			os.Exit(2)
+			_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
+			exit(2)
 		}
 	}
 
 	if installHooks && uninstallHooks {
-		fmt.Fprintln(os.Stderr, "Choose one of --install-hooks or --uninstall-hooks, not both.")
-		os.Exit(2)
+		_, _ = fmt.Fprintln(stderr, "Choose one of --install-hooks or --uninstall-hooks, not both.")
+		exit(2)
 	}
 	if installHooks || uninstallHooks {
 		handleHookInstall(uninstallHooks, yes, force, dryRun)
@@ -787,20 +844,20 @@ func handleSetup(args []string) {
 	}
 
 	if !bootstrap {
-		fmt.Fprintln(os.Stderr, "Usage: metareview setup --check | --install-hooks [--dry-run|--yes|--force] | --uninstall-hooks [--dry-run|--yes] | --bootstrap-prereqs [--dry-run] [--confirm-bootstrap-prereqs]")
-		os.Exit(2)
+		_, _ = fmt.Fprintln(stderr, "Usage: metareview setup --check | --install-hooks [--dry-run|--yes|--force] | --uninstall-hooks [--dry-run|--yes] | --bootstrap-prereqs [--dry-run] [--confirm-bootstrap-prereqs]")
+		exit(2)
 	}
 	options := setup.BootstrapOptions{DryRun: dryRun, Confirm: yes}
-	plan, err := setup.BootstrapPrereqs(mustCwd(), options)
+	plan, err := setup.BootstrapPrereqs(workdir, options)
 	if errors.Is(err, setup.ErrConfirmationRequired) {
-		fmt.Fprintln(os.Stderr, "setup --bootstrap-prereqs requires --confirm-bootstrap-prereqs without --dry-run")
-		os.Exit(2)
+		_, _ = fmt.Fprintln(stderr, "setup --bootstrap-prereqs requires --confirm-bootstrap-prereqs without --dry-run")
+		exit(2)
 	}
 	exitOnErr(err)
-	fmt.Printf("metareview prerequisite bootstrap plan\n")
-	fmt.Printf("dry-run: %t\n", plan.DryRun)
+	_, _ = fmt.Fprintf(stdout, "metareview prerequisite bootstrap plan\n")
+	_, _ = fmt.Fprintf(stdout, "dry-run: %t\n", plan.DryRun)
 	for _, action := range plan.Actions {
-		fmt.Printf("- %s\n", action)
+		_, _ = fmt.Fprintf(stdout, "- %s\n", action)
 	}
 }
 
@@ -810,7 +867,7 @@ func handleSetup(args []string) {
 // nothing rather than hanging on a prompt. --yes installs headlessly, --dry-run previews, --force overrides a
 // conflict.
 func handleHookInstall(uninstall, yes, force, dryRun bool) {
-	root := repo.RootOr(mustCwd())
+	root := repo.RootOr(workdir)
 	if uninstall {
 		// Uninstall disables the gate, so it runs through the SAME guards as install: a read-only preview,
 		// --dry-run, and the [y/N] / --yes / no-TTY gating. The old path unset core.hooksPath immediately,
@@ -821,15 +878,15 @@ func handleHookInstall(uninstall, yes, force, dryRun bool) {
 		if current == "" {
 			current = "unset"
 		}
-		fmt.Println("metareview review gate — uninstall (git-native hooks)")
-		fmt.Println("  Currently: core.hooksPath = " + current)
+		_, _ = fmt.Fprintln(stdout, "metareview review gate — uninstall (git-native hooks)")
+		_, _ = fmt.Fprintln(stdout, "  Currently: core.hooksPath = "+current)
 		if !status.WouldChange {
-			fmt.Println("\nNothing to uninstall — core.hooksPath is not metareview's hooks/git. No changes made.")
+			_, _ = fmt.Fprintln(stdout, "\nNothing to uninstall — core.hooksPath is not metareview's hooks/git. No changes made.")
 			return
 		}
-		fmt.Println("  Will UNSET core.hooksPath — the pre-push gate and post-commit nudge stop running on this repo.")
+		_, _ = fmt.Fprintln(stdout, "  Will UNSET core.hooksPath — the pre-push gate and post-commit nudge stop running on this repo.")
 		if dryRun {
-			fmt.Println("\n(dry run — no changes made.)")
+			_, _ = fmt.Fprintln(stdout, "\n(dry run — no changes made.)")
 			return
 		}
 		proceed := yes
@@ -838,25 +895,25 @@ func handleHookInstall(uninstall, yes, force, dryRun bool) {
 				proceed = promptYesNo("Uninstall the review gate?")
 			} else {
 				// No TTY and no --yes: almost certainly an agent. Show the directions, change NOTHING.
-				fmt.Println("\nNo TTY and no --yes, so NOTHING was changed.")
-				fmt.Println("  uninstall: metareview setup --uninstall-hooks --yes")
-				fmt.Println("  preview:   metareview setup --uninstall-hooks --dry-run")
+				_, _ = fmt.Fprintln(stdout, "\nNo TTY and no --yes, so NOTHING was changed.")
+				_, _ = fmt.Fprintln(stdout, "  uninstall: metareview setup --uninstall-hooks --yes")
+				_, _ = fmt.Fprintln(stdout, "  preview:   metareview setup --uninstall-hooks --dry-run")
 				return
 			}
 		}
 		if !proceed {
-			fmt.Println("No changes made — core.hooksPath left as is. Re-run with --yes to uninstall.")
+			_, _ = fmt.Fprintln(stdout, "No changes made — core.hooksPath left as is. Re-run with --yes to uninstall.")
 			return
 		}
-		changed, err := setup.UninstallHookInstall(root, nil)
+		changed, err := uninstallHookInstall(root, nil)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "metareview: "+err.Error())
-			os.Exit(1)
+			_, _ = fmt.Fprintln(stderr, "metareview: "+err.Error())
+			exit(1)
 		}
 		if changed {
-			fmt.Println("metareview: uninstalled — core.hooksPath unset; the git-native review gate no longer runs.")
+			_, _ = fmt.Fprintln(stdout, "metareview: uninstalled — core.hooksPath unset; the git-native review gate no longer runs.")
 		} else {
-			fmt.Println("metareview: nothing to uninstall — core.hooksPath was not metareview's hooks/git.")
+			_, _ = fmt.Fprintln(stdout, "metareview: nothing to uninstall — core.hooksPath was not metareview's hooks/git.")
 		}
 		return
 	}
@@ -866,22 +923,22 @@ func handleHookInstall(uninstall, yes, force, dryRun bool) {
 	printHookPlan(plan)
 
 	if plan.AlreadyDone && !force {
-		fmt.Println("\nAlready installed — no changes made (use --force to re-materialize the hook scripts).")
+		_, _ = fmt.Fprintln(stdout, "\nAlready installed — no changes made (use --force to re-materialize the hook scripts).")
 		return
 	}
 	if plan.AlreadyDone && force {
-		fmt.Println("\nAlready installed — --force will re-materialize the hook scripts from the current binary.")
+		_, _ = fmt.Fprintln(stdout, "\nAlready installed — --force will re-materialize the hook scripts from the current binary.")
 	}
 	if len(plan.Conflicts) > 0 && !force {
-		fmt.Println("\nCONFLICT — no changes made:")
+		_, _ = fmt.Fprintln(stdout, "\nCONFLICT — no changes made:")
 		for _, c := range plan.Conflicts {
-			fmt.Println("  - " + c)
+			_, _ = fmt.Fprintln(stdout, "  - "+c)
 		}
-		fmt.Println("Resolve it, or re-run with --force to override.")
-		os.Exit(1)
+		_, _ = fmt.Fprintln(stdout, "Resolve it, or re-run with --force to override.")
+		exit(1)
 	}
 	if dryRun {
-		fmt.Println("\n(dry run — no changes made.)")
+		_, _ = fmt.Fprintln(stdout, "\n(dry run — no changes made.)")
 		return
 	}
 
@@ -891,20 +948,20 @@ func handleHookInstall(uninstall, yes, force, dryRun bool) {
 			proceed = promptYesNo("Proceed?")
 		} else {
 			// No TTY and no --yes: almost certainly an agent. Show the directions, change NOTHING, never hang.
-			fmt.Println("\nNo TTY and no --yes, so NOTHING was changed.")
-			fmt.Println("  install: metareview setup --install-hooks --yes      (add --force to override a conflict)")
-			fmt.Println("  preview: metareview setup --install-hooks --dry-run")
+			_, _ = fmt.Fprintln(stdout, "\nNo TTY and no --yes, so NOTHING was changed.")
+			_, _ = fmt.Fprintln(stdout, "  install: metareview setup --install-hooks --yes      (add --force to override a conflict)")
+			_, _ = fmt.Fprintln(stdout, "  preview: metareview setup --install-hooks --dry-run")
 			return
 		}
 	}
 	if !proceed {
-		fmt.Println("No changes made — core.hooksPath was not set. Re-run with --yes to install.")
+		_, _ = fmt.Fprintln(stdout, "No changes made — core.hooksPath was not set. Re-run with --yes to install.")
 		return
 	}
 
 	exitOnErr(setup.ApplyHookInstall(root, plan, force, nil))
-	fmt.Println("\nInstalled — hook scripts written to " + plan.Target + " and core.hooksPath set to it.")
-	fmt.Println("The pre-push gate (blocks an unreviewed push) and post-commit review nudge are now active on this repo.")
+	_, _ = fmt.Fprintln(stdout, "\nInstalled — hook scripts written to "+plan.Target+" and core.hooksPath set to it.")
+	_, _ = fmt.Fprintln(stdout, "The pre-push gate (blocks an unreviewed push) and post-commit review nudge are now active on this repo.")
 }
 
 func printHookPlan(plan setup.HookInstallPlan) {
@@ -912,35 +969,37 @@ func printHookPlan(plan setup.HookInstallPlan) {
 	if current == "" {
 		current = "unset (git uses the default .git/hooks)"
 	}
-	fmt.Println("metareview review gate — git-native hooks")
-	fmt.Println("  Will write: the pre-push + post-commit hook scripts into " + plan.Target)
-	fmt.Println("  Will set:   core.hooksPath = " + plan.Target + "   (this clone only)")
-	fmt.Println("  Will add:   metareview's ephemeral-state block to .gitignore — ignore .metareview/* (runs,")
-	fmt.Println("              findings, shards, the hook scripts) while keeping the durable learning files")
-	fmt.Println("              (knowledge/metareview.jsonl, calibration.jsonl, learning-runs.jsonl) committable")
-	fmt.Println("  Currently:  core.hooksPath = " + current)
-	fmt.Println("  Effect:     git runs the pre-push gate (BLOCKS an unreviewed push) and the")
-	fmt.Println("              post-commit review-owed nudge on this repo.")
-	fmt.Println("  Flags:      --dry-run (preview, no change) · --yes (install without prompting) · --force (override a conflict)")
+	_, _ = fmt.Fprintln(stdout, "metareview review gate — git-native hooks")
+	_, _ = fmt.Fprintln(stdout, "  Will write: the pre-push + post-commit hook scripts into "+plan.Target)
+	_, _ = fmt.Fprintln(stdout, "  Will set:   core.hooksPath = "+plan.Target+"   (this clone only)")
+	_, _ = fmt.Fprintln(stdout, "  Will add:   metareview's ephemeral-state block to .gitignore — ignore .metareview/* (runs,")
+	_, _ = fmt.Fprintln(stdout, "              findings, shards, the hook scripts) while keeping the durable learning files")
+	_, _ = fmt.Fprintln(stdout, "              (knowledge/metareview.jsonl, calibration.jsonl, learning-runs.jsonl) committable")
+	_, _ = fmt.Fprintln(stdout, "  Currently:  core.hooksPath = "+current)
+	_, _ = fmt.Fprintln(stdout, "  Effect:     git runs the pre-push gate (BLOCKS an unreviewed push) and the")
+	_, _ = fmt.Fprintln(stdout, "              post-commit review-owed nudge on this repo.")
+	_, _ = fmt.Fprintln(stdout, "  Flags:      --dry-run (preview, no change) · --yes (install without prompting) · --force (override a conflict)")
 }
 
 // isTTY reports whether f is an interactive terminal, so a prompt is appropriate. A pipe, a file, or
 // /dev/null (an agent, CI) is not, and must never be prompted. term.IsTerminal is a real ioctl check, so it
 // correctly excludes /dev/null (which os.ModeCharDevice alone does not).
-func isTTY(f *os.File) bool {
+// isTTY is a seam (a var, not a plain func) so a test can drive the interactive-prompt branch
+// deterministically; in production it is the real terminal check.
+var isTTY = func(f *os.File) bool {
 	return term.IsTerminal(int(f.Fd()))
 }
 
 // promptYesNo asks a yes/no question defaulting to NO: a bare Return (empty line) does nothing.
 func promptYesNo(question string) bool {
-	fmt.Printf("%s [y/N] ", question)
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	_, _ = fmt.Fprintf(stdout, "%s [y/N] ", question)
+	line, _ := bufio.NewReader(stdin).ReadString('\n')
 	answer := strings.ToLower(strings.TrimSpace(line))
 	return answer == "y" || answer == "yes"
 }
 
 func executablePath() string {
-	path, err := os.Executable()
+	path, err := osExecutable()
 	if err != nil {
 		return ""
 	}
@@ -949,8 +1008,8 @@ func executablePath() string {
 
 func flagValue(args []string, index int, name string) string {
 	if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
-		fmt.Fprintf(os.Stderr, "Missing value for %s\n", name)
-		os.Exit(2)
+		_, _ = fmt.Fprintf(stderr, "Missing value for %s\n", name)
+		exit(2)
 	}
 	return args[index+1]
 }
@@ -958,8 +1017,8 @@ func flagValue(args []string, index int, name string) string {
 func mustPositiveInt(value, name string) int {
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed < 1 {
-		fmt.Fprintf(os.Stderr, "%s must be an integer greater than 0\n", name)
-		os.Exit(2)
+		_, _ = fmt.Fprintf(stderr, "%s must be an integer greater than 0\n", name)
+		exit(2)
 	}
 	return parsed
 }
@@ -977,10 +1036,10 @@ func present(value bool) string {
 // and CI stays red while any request is unacknowledged.
 func handleOverride(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: metareview override request|grant|list")
-		os.Exit(2)
+		_, _ = fmt.Fprintln(stderr, "Usage: metareview override request|grant|list")
+		exit(2)
 	}
-	root := mustCwd()
+	root := workdir
 	switch args[0] {
 	case "list":
 		pendingOnly := false
@@ -988,8 +1047,8 @@ func handleOverride(args []string) {
 			// A silently ignored option (a misspelled --pending, say) would make a
 			// CI check look green while overrides were still unacknowledged.
 			if arg != "--pending" {
-				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", arg)
-				os.Exit(2)
+				_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", arg)
+				exit(2)
 			}
 			pendingOnly = true
 		}
@@ -1006,16 +1065,16 @@ func handleOverride(args []string) {
 			printOverride(record)
 		}
 		if len(records) == 0 {
-			fmt.Println("no process overrides recorded")
+			_, _ = fmt.Fprintln(stdout, "no process overrides recorded")
 		}
 		if pendingOnly && pending > 0 {
-			fmt.Fprintf(os.Stderr, "%d override(s) awaiting acknowledgement\n", pending)
-			os.Exit(1)
+			_, _ = fmt.Fprintf(stderr, "%d override(s) awaiting acknowledgement\n", pending)
+			exit(1)
 		}
 	case "request", "grant":
 		if len(args) < 2 {
-			fmt.Fprintf(os.Stderr, "Usage: metareview override %s <finding-id> --reason \"<text>\"\n", args[0])
-			os.Exit(2)
+			_, _ = fmt.Fprintf(stderr, "Usage: metareview override %s <finding-id> --reason \"<text>\"\n", args[0])
+			exit(2)
 		}
 		id := args[1]
 		reason, by, escalation := "", "", ""
@@ -1037,8 +1096,8 @@ func handleOverride(args []string) {
 					i++
 				}
 			default:
-				fmt.Fprintf(os.Stderr, "Unknown option: %s\n", args[i])
-				os.Exit(2)
+				_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
+				exit(2)
 			}
 		}
 		if by == "" {
@@ -1049,24 +1108,24 @@ func handleOverride(args []string) {
 			exitOnErr(findings.RequestOverride(root, id, findings.OverrideRequest{
 				By: by, Reason: reason, Escalation: escalation, Now: now,
 			}))
-			fmt.Printf("%s: override requested by %s (still blocking until granted)\n", id, by)
+			_, _ = fmt.Fprintf(stdout, "%s: override requested by %s (still blocking until granted)\n", id, by)
 			return
 		}
 		exitOnErr(findings.GrantOverride(root, id, findings.OverrideGrant{By: by, Reason: reason, Now: now}))
-		fmt.Printf("%s: override granted by %s\n", id, by)
+		_, _ = fmt.Fprintf(stdout, "%s: override granted by %s\n", id, by)
 	default:
-		fmt.Fprintln(os.Stderr, "Usage: metareview override request|grant|list")
-		os.Exit(2)
+		_, _ = fmt.Fprintln(stderr, "Usage: metareview override request|grant|list")
+		exit(2)
 	}
 }
 
 func printOverride(record findings.Record) {
 	switch record.Status {
 	case findings.StatusOverridePending:
-		fmt.Printf("%s  pending  %s\n    requested by %s at %s: %s\n",
+		_, _ = fmt.Fprintf(stdout, "%s  pending  %s\n    requested by %s at %s: %s\n",
 			record.ID, record.Title, record.OverrideRequestedBy, record.OverrideRequestedAt, record.OverrideRequestReason)
 	default:
-		fmt.Printf("%s  granted  %s\n    granted by %s at %s: %s\n",
+		_, _ = fmt.Fprintf(stdout, "%s  granted  %s\n    granted by %s at %s: %s\n",
 			record.ID, record.Title, record.OverrideGrantedBy, record.OverrideGrantedAt, record.OverrideGrantReason)
 	}
 }
@@ -1074,7 +1133,7 @@ func printOverride(record findings.Record) {
 // defaultActor identifies who is acting, from git config.
 func defaultActor() string {
 	cmd := exec.Command("git", "config", "user.email")
-	cmd.Dir = mustCwd()
+	cmd.Dir = workdir
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -1087,8 +1146,8 @@ func defaultActor() string {
 // matching file win silently, making the outcome depend on flag order.
 func appendCrossShardResult(existing []string, path string) []string {
 	if len(existing) > 0 {
-		fmt.Fprintln(os.Stderr, "Repeated --cross-shard-result: a plan has one cross-shard result")
-		os.Exit(2)
+		_, _ = fmt.Fprintln(stderr, "Repeated --cross-shard-result: a plan has one cross-shard result")
+		exit(2)
 	}
 	return append(existing, mustResultFile(path))
 }
@@ -1097,8 +1156,8 @@ func appendCrossShardResult(existing []string, path string) []string {
 // runs, so a bad path exits 2 with nothing written.
 func mustResultFile(path string) string {
 	reject := func(reason string) {
-		fmt.Fprintf(os.Stderr, "Invalid result file %s: %s\n", path, reason)
-		os.Exit(2)
+		_, _ = fmt.Fprintf(stderr, "Invalid result file %s: %s\n", path, reason)
+		exit(2)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -1122,8 +1181,8 @@ func mustResultFile(path string) string {
 // exactly like a clean one.
 func mustMutationReport(path string) string {
 	reject := func(reason string) {
-		fmt.Fprintf(os.Stderr, "Invalid mutation report %s: %s\n", path, reason)
-		os.Exit(2)
+		_, _ = fmt.Fprintf(stderr, "Invalid mutation report %s: %s\n", path, reason)
+		exit(2)
 	}
 	info, err := os.Stat(path)
 	if err != nil {

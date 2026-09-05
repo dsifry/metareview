@@ -8,7 +8,7 @@
 # fixtures - never the machine's real ~/.claude. That makes 100% CI-reproducible (local coverage is
 # a superset of CI's), retiring the old env-sensitive floor. (Historical note: 85.2 was the earlier
 # fixture-HOME floor after CI once measured 79.1 from identical code on a home without session data.)
-cmd/metareview 81.2
+cmd/metareview 100.0
 internal/artifactreview 100.0
 internal/contextpack 100.0
 internal/contextprofile 96.3
