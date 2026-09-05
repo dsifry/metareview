@@ -199,14 +199,17 @@ list below is illustrative, omitting e.g. `judge`, `gate`, `converge`, `export`)
 
 ## 9. Build process & conventions
 
-- **TDD, dependency injection, mock-AI, enforced coverage.** Two distinct mechanisms (`Makefile` `cover`,
-  `internal/covergate`): (a) a dynamically-generated **require-100 set** — `go list ./internal/fsm/... ./workflows`
-  — is held at exactly 100% of statements and is **not** listed in the floor file; (b) every *other* package
-  has a **ratcheting per-package floor at its measured level** in `tests/coverage-floor.txt` (most are well
-  below 100 — e.g. `internal/knowledge 77.8`), which `--update-floor` raises but never lowers. So a new
-  non-FSM package needs a floor line; a new `internal/fsm/...` package is auto-required at 100% instead.
-  `make cover` / `tests/coverage.sh` merge unit + a behavioral shell suite via `go tool covdata`. A package
-  with **no statements** stays out of the profile (e.g. the embed-only root package) — don't floor it.
+- **TDD, dependency injection, mock-AI, enforced 100% coverage.** `make cover` (logic in
+  `internal/covergate`) merges unit + a behavioral shell suite via `go tool covdata`, then requires **every**
+  package `go list ./...` reports to be at exactly 100% of statements, **except** the packages named in
+  `tests/coverage-exclude.txt` (the embed-only root package, `internal/version`, `cmd/covergate`, and the
+  black-box `internal/githooktest` — each genuinely statement-free or a value-less delegate). A new package is
+  required at 100% by default (fail-closed: an untested new package fails the gate — the way `internal/mutation`
+  once shipped an entire subsystem ungated); excluding one is a deliberate, commented line. A package with **no
+  statements** stays out of the profile (e.g. the embed-only root package) — exclude it rather than trying to
+  cover it. (History: the gate was a ratcheting per-package floor in `tests/coverage-floor.txt` plus a sibling
+  bash gate `tests/coverage.sh`; both were removed once the repo-wide 100% campaign brought every package to
+  the bar.)
 - **The command-seam DI pattern:** git access goes through an injectable `RunGit`/`GitRunner` func so logic is
   hermetically testable without a real repo; `nil` uses the real binary. Mirror it for any external command.
 - **Embed + materialize:** ship scripts/templates via `go:embed`, write them into the target on demand,
@@ -229,5 +232,6 @@ list below is illustrative, omitting e.g. `judge`, `gate`, `converge`, `export`)
 - Differential proof binds against `base..head`, not the fix diff — bind against `FixEntryHead..head`.
 - task-done scans untracked files: a finding's own TODO text can self-reference; clear via `--previous-run`
   to the opening run, and an untracked file over 4,000 bytes raises `UNTRACKED_TRUNCATED`.
-- The module-root package's coverage label differs between `coverage.sh` and `make cover` — keep it
-  statement-free so it's out of the profile.
+- The module-root package is embed-only (no statements) so it stays out of the coverage profile — keep it
+  that way and leave it in `tests/coverage-exclude.txt`; its embed integrity is guarded by
+  `githookassets_test.go` instead of by coverage.

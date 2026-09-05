@@ -57,6 +57,6 @@
   "scripts": {
     "build": "go build -o bin/metareview ./cmd/metareview",
     "prepack": "npm run build",
-    "test": "bash tests/coverage.sh"
+    "test": "make cover"
   }
 }
