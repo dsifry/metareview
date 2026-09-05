@@ -2265,9 +2265,10 @@ child output gains `goldens[]`; `@iter` dropped there); `task-build-loop` declar
 `GOLDENS` var so `retry_narrowed` re-supplies projected findings; `ask-integration`
 (`ESC_INTEGRATION_ESCALATED`) separates integration escalations from task ones; `ask-split` for a
 split author's questions; `factory.build` relies on the `child-park` default; `file-issue` idempotent
-per thread — matching only an open issue authored by `factory_login`, so an attacker-minted
-`Metareview-Origin:` trailer on another author's issue is ignored and a fresh issue is filed — and
-`pr-reply` per filed thread; `merge-check` blocks on the poll; the dispositions source
+per thread — it reuses an open `factory:filed` issue carrying the thread's `Metareview-Origin:` trailer
+**only when that issue is authored by `factory_login`**, and files a fresh issue when the sole trailer
+match is on another author's issue (an attacker-minted trailer is ignored) — and `pr-reply` per filed
+thread; `merge-check` blocks on the poll; the dispositions source
 sits second so truncation never cuts it and `ERR_GOLDENS_OVERFLOW` bounds `$GOLDENS`; `author` shared;
 `size_simple` only for building intakes. Revision 9 carried all of it.
 
