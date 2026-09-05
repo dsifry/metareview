@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-19d06474ee19addd",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "19d06474ee19addd",
+  "verdict": "PASS",
+  "reviewer": "sonnet-cross-shard-reviewer",
+  "reviewedAt": "2026-09-05T18:30:00Z",
+  "evidence": [
+    {
+      "note": "Reconstructed the exact diff patch (git diff c0b933b..7d451ce -- docs/specs/2026-09-04-lights-out-sdlc-factory.md, 215417 bytes, matching plan.json's shard byte total) and inspected all three shard boundaries (59961, 119928, 179912) at the byte level: each split falls cleanly between two complete diff lines, never mid-line. Boundary 1 (shard-0/shard-0-2) splits a single fenced YAML routing/profile block mid-block (opens before the split, closes just after in shard-0-2); boundaries 2 and 3 fall in plain prose, not inside any code fence, table, or list. None of the four shard results (all PASS/0 findings) mistook the split fenced block for a defect."
+    },
+    {
+      "note": "Checked cross-references for breakage: decision 12.5 and 12.7 both resolve to real numbered items (5, 7) in the Section 12 decisions list; section refs §5.1-§5.12 and §5.12.1-§5.12.8 resolve (the .N suffixes are the numbered list items inside §5.12's prose, a consistent convention, not missing subheadings); §6/§7 kind usage cross-checked against the §7 Kinds table (lines 1503-1527) - `agent-edit`, `match-then-adjudicate`, `prove`, and `review-lenses` are used as kind names in §6 workflow definitions but are absent from the §7 catalogue table; verified this is intentional, not broken: §3 ('What metareview already brings') explicitly documents all four as pre-existing kinds with real source locations (internal/fsm/kind, internal/fsm/kind/prove*.go), and §7's catalogue is scoped to kinds newly introduced/changed by this spec, not a full inventory of every kind in the system."
+    },
+    {
+      "note": "Ran grep for secret/credential patterns (AKIA, sk-, BEGIN RSA/PGP/OPENSSH keys), absolute local paths (/Users/<name>, /home/<name>), and personal data over the full raw document (not diff): no matches anywhere in the 2275-line file."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

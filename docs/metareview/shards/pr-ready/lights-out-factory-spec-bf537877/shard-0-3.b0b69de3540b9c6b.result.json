@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0-3-b0b69de3540b9c6b",
+  "kind": "shard",
+  "shardId": "shard-0-3",
+  "shardHash": "b0b69de3540b9c6b",
+  "planHash": "19d06474ee19addd",
+  "verdict": "PASS",
+  "reviewer": "sonnet-shard-reviewer",
+  "reviewedAt": "2026-09-05T16:48:42Z",
+  "evidence": [
+    {
+      "note": "Read the full shard (lines 1-613, doc bytes 119928-179912) covering workflow defs (finalize-loop, pr-shepherd-loop, release-loop, factory), the kinds/atoms catalogue (S7), cross-cutting requirements (S8), and Phase 0a-4 of the phased plan (S9)."
+    },
+    {
+      "note": "Grepped for secret/credential patterns (AKIA, sk-, BEGIN PGP/RSA/OPENSSH, ghp_, xox tokens), TODO/FIXME markers, and absolute local paths (home-directory prefixes and user handles); all hits were the spec's own prose describing its secrets-scanner/TODO-detection features, not embedded values."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0-4-b7171d2ea4d865a3",
+  "kind": "shard",
+  "shardId": "shard-0-4",
+  "shardHash": "b7171d2ea4d865a3",
+  "planHash": "19d06474ee19addd",
+  "verdict": "PASS",
+  "reviewer": "sonnet-shard-reviewer",
+  "reviewedAt": "2026-09-05T16:49:00Z",
+  "evidence": [
+    {
+      "note": "Read shard-0-4.md in full (part 4/4, covering doc sections 9 tail through 15); scanned for secrets/credentials, absolute local paths, personal data, TODO/FIXME/placeholder markers, and internal contradictions within this shard's text."
+    },
+    {
+      "path": "docs/specs/2026-09-04-lights-out-sdlc-factory.md",
+      "line": 150,
+      "note": "TodoWrite ban / Beads-only todo policy line is prose describing a design decision, not a literal TODO/FIXME marker; no actual placeholder tokens found in this shard."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}
