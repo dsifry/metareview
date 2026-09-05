@@ -12,6 +12,11 @@ import (
 	"github.com/dsifry/metareview/internal/repo"
 )
 
+// filepathAbs is a seam over filepath.Abs (which fails only when os.Getwd fails) so containedPath's
+// otherwise-unreachable error branches are testable. It defaults to the real function and is
+// overridden — then restored via t.Cleanup — in tests.
+var filepathAbs = filepath.Abs
+
 type Context struct {
 	ServiceInventoryPath string `json:"serviceInventoryPath,omitempty"`
 	ServiceInventory     string `json:"serviceInventory,omitempty"`
@@ -84,19 +89,19 @@ func collectFacts(root string) ([]Fact, error) {
 			_ = file.Close()
 			return nil, err
 		}
-		if err := file.Close(); err != nil {
-			return nil, err
-		}
+		// Read-only path: a Close error carries nothing actionable to the caller (the repo's
+		// convention for read-only file handles — see internal/state ReadJSONL), so it is discarded.
+		_ = file.Close()
 	}
 	return facts, nil
 }
 
 func containedPath(root, rel string) (string, error) {
-	rootAbs, err := filepath.Abs(root)
+	rootAbs, err := filepathAbs(root)
 	if err != nil {
 		return "", err
 	}
-	candidateAbs, err := filepath.Abs(filepath.Join(rootAbs, filepath.Clean(rel)))
+	candidateAbs, err := filepathAbs(filepath.Join(rootAbs, filepath.Clean(rel)))
 	if err != nil {
 		return "", err
 	}
