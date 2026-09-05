@@ -11,7 +11,7 @@
 cmd/metareview 100.0
 internal/artifactreview 100.0
 internal/contextpack 100.0
-internal/contextprofile 96.3
+internal/contextprofile 100.0
 internal/epicready 81.6
 internal/epicsource 100.0
 internal/evidence 100.0
