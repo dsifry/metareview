@@ -9,6 +9,15 @@ import (
 	"github.com/dsifry/metareview/internal/runchain"
 )
 
+// discoverLogs and unresolvedBlocking are seams over the two disk reads Project performs, so each of
+// its error branches is independently reachable in tests (both real functions parse .metareview
+// state, so a single corrupt file would fail the first read and shadow the second). Each defaults to
+// the real function and is overridden — then restored via t.Cleanup — in tests.
+var (
+	discoverLogs       = reviewlog.Discover
+	unresolvedBlocking = findings.UnresolvedBlocking
+)
+
 type Options struct {
 	Scope            string
 	Target           map[string]string
@@ -32,11 +41,11 @@ type Projection struct {
 }
 
 func Project(root string, options Options) (Projection, error) {
-	logs, err := reviewlog.Discover(root)
+	logs, err := discoverLogs(root)
 	if err != nil {
 		return Projection{}, err
 	}
-	blockers, err := findings.UnresolvedBlocking(root)
+	blockers, err := unresolvedBlocking(root)
 	if err != nil {
 		return Projection{}, err
 	}

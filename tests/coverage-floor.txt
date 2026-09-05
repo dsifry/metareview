@@ -31,8 +31,8 @@ internal/repo 100.0
 internal/reviewers 100.0
 internal/reviewlog 91.1
 internal/reviewmanifest 100.0
-internal/reviewstate 92.1
-internal/runchain 92.2
+internal/reviewstate 100.0
+internal/runchain 100.0
 internal/sessionhistory 100.0
 internal/setup 100.0
 internal/shardpack 100.0
