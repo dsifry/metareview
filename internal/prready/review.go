@@ -102,6 +102,26 @@ type fileSnapshot struct {
 var reviewerNames = []string{"pr-readiness-reviewer", "validation-reviewer", "security-reviewer", "code-quality-reviewer", "architecture-reviewer", "external-reviewer"}
 var runPRReadyReviewers = reviewers.RunPRReady
 
+// Collaborator seams. Each defaults to the real function so production is
+// unchanged; a test overrides one (with a t.Cleanup restore) to exercise a
+// cross-package error branch in Create that is otherwise unreachable through
+// realistic inputs. restoreSnapshots/snapshot deliberately keep os.* directly so
+// a mkdirAll/writeFile override in a Create-error test cannot corrupt rollback.
+var (
+	marshalJSON        = json.Marshal
+	planShards         = contextprofile.PlanShards
+	collectKnowledge   = knowledge.Collect
+	discoverLogs       = reviewlog.Discover
+	unresolvedBlocking = findings.UnresolvedBlocking
+	allFindingsFn      = findings.All
+	collectGitHub      = githubcontext.Collect
+	resolveChainFn     = runchain.Resolve
+	reconcileFindings  = findings.Reconcile
+	appendJSONL        = state.AppendJSONL
+	mkdirAll           = os.MkdirAll
+	writeFile          = os.WriteFile
+)
+
 type reviewerInput struct {
 	SchemaVersion          int                      `json:"schemaVersion"`
 	Target                 map[string]string        `json:"target"`
@@ -123,7 +143,7 @@ func canonicalReviewerInputDigest(input reviewerInput) (string, error) {
 	// the first run, but they are not reviewer inputs and must not defeat reuse.
 	input.Context.Git.RawDiffBytes = input.Context.Git.FilteredDiffBytes
 	input.Context.Git.GeneratedExcludedFiles = nil
-	encoded, err := json.Marshal(input)
+	encoded, err := marshalJSON(input)
 	if err != nil {
 		return "", fmt.Errorf("encode canonical reviewer input: %w", err)
 	}
@@ -220,7 +240,7 @@ func Create(root string, options Options) (Result, error) {
 		analysisGit = branchOnlyGitContext(reviewGit)
 	}
 	profile := contextprofile.FromGit(analysisGit, contextprofile.Options{})
-	shardPlan, err := contextprofile.PlanShards(profile, analysisGit.BranchFiles, contextprofile.ShardOptions{
+	shardPlan, err := planShards(profile, analysisGit.BranchFiles, contextprofile.ShardOptions{
 		MaxBytesPerShard: contextprofile.DefaultMaxBytesPerShard,
 		Scope:            "pr-ready",
 		TargetID:         shardTargetID(analysisGit),
@@ -228,12 +248,12 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	knowledgeContext, err := knowledge.Collect(root)
+	knowledgeContext, err := collectKnowledge(root)
 	if err != nil {
 		return Result{}, err
 	}
 	targetRecord := map[string]string{"type": "branch", "id": firstNonEmpty(git.Branch, git.HeadSHA)}
-	logs, err := reviewlog.Discover(root)
+	logs, err := discoverLogs(root)
 	if err != nil {
 		return Result{}, err
 	}
@@ -241,7 +261,7 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	blockers, err := findings.UnresolvedBlocking(root)
+	blockers, err := unresolvedBlocking(root)
 	if err != nil {
 		return Result{}, err
 	}
@@ -249,7 +269,7 @@ func Create(root string, options Options) (Result, error) {
 	// historical review against how its findings were actually cleared (#40). Read
 	// before this run reconciles: the overrides/fixes that clear a historical
 	// review were recorded by earlier runs and are already on disk.
-	allFindings, err := findings.All(root)
+	allFindings, err := allFindingsFn(root)
 	if err != nil {
 		return Result{}, err
 	}
@@ -257,7 +277,7 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	ghCtx, err := githubcontext.Collect(root, options.GitHubPR)
+	ghCtx, err := collectGitHub(root, options.GitHubPR)
 	if err != nil {
 		return Result{}, err
 	}
@@ -286,10 +306,7 @@ func Create(root string, options Options) (Result, error) {
 		Findings:    allFindings,
 	})
 
-	runID, contextRel, reviewRel, err := uniquePaths(root, now)
-	if err != nil {
-		return Result{}, err
-	}
+	runID, contextRel, reviewRel := uniquePaths(root, now)
 	contextPath := filepath.Join(root, filepath.FromSlash(contextRel))
 	reviewPath := filepath.Join(root, filepath.FromSlash(reviewRel))
 	runsPath := filepath.Join(root, ".metareview", "runs.jsonl")
@@ -396,13 +413,13 @@ func Create(root string, options Options) (Result, error) {
 		result.ReusedFromRunID = reused.RunID
 	}
 	err = func() error {
-		if err := os.MkdirAll(filepath.Dir(contextPath), 0o755); err != nil {
+		if err := mkdirAll(filepath.Dir(contextPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
+		if err := mkdirAll(filepath.Dir(reviewPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, shardPlan, packDir, manifest, aggregate, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect, reviewInputDigest)), 0o644); err != nil {
+		if err := writeFile(contextPath, []byte(contextMarkdown(runID, analysisGit, profile, shardPlan, packDir, manifest, aggregate, knowledgeContext, reviewLogs, evidenceText, ghCtx, prEvidence, gateEffect, reviewInputDigest)), 0o644); err != nil {
 			return err
 		}
 		if hasReusableVerdict {
@@ -438,7 +455,7 @@ func Create(root string, options Options) (Result, error) {
 				ReviewInputDigest:    reviewInputDigest,
 				ReusedFromRunID:      reused.RunID,
 			}
-			if err := state.AppendJSONL(runsPath, record); err != nil {
+			if err := appendJSONL(runsPath, record); err != nil {
 				return err
 			}
 			meta := reviewMetadata{
@@ -454,9 +471,9 @@ func Create(root string, options Options) (Result, error) {
 				ReusedFromReviewPath: reused.Path,
 				HistoricalBlockers:   projection.HistoricalBlockers(),
 			}
-			return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, reused.Verdict, reviewGit.ChangedFiles, nil, prEvidence, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
+			return writeFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, reused.Verdict, reviewGit.ChangedFiles, nil, prEvidence, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
 		}
-		reconciled, err := findings.Reconcile(root, run, rawFindings, findings.Options{
+		reconciled, err := reconcileFindings(root, run, rawFindings, findings.Options{
 			PreviousRunID:  options.PreviousRunID,
 			PreviousRunIDs: previousRunIDs,
 			ResetRunIDs:    chain.ResetRunIDs,
@@ -498,7 +515,7 @@ func Create(root string, options Options) (Result, error) {
 			GitHead:              git.HeadSHA,
 			ReviewInputDigest:    reviewInputDigest,
 		}
-		if err := state.AppendJSONL(runsPath, record); err != nil {
+		if err := appendJSONL(runsPath, record); err != nil {
 			return err
 		}
 		meta := reviewMetadata{
@@ -512,7 +529,7 @@ func Create(root string, options Options) (Result, error) {
 			ReviewInputDigest:    reviewInputDigest,
 			HistoricalBlockers:   projection.HistoricalBlockers(),
 		}
-		return os.WriteFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, prEvidence, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
+		return writeFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, prEvidence, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
 	}()
 	if err != nil {
 		restoreSnapshots(snapshots)
@@ -576,7 +593,7 @@ func manifestContext(manifest reviewmanifest.Manifest, aggregate reviewmanifest.
 }
 
 func resolveRunChain(root string, targetRecord map[string]string, options Options, logs []reviewlog.Summary, git gitcontext.Context) (runchain.Decision, []string, error) {
-	chain, err := runchain.Resolve(root, runchain.Options{
+	chain, err := resolveChainFn(root, runchain.Options{
 		Scope:         "pr-ready",
 		Target:        targetRecord,
 		PreviousRunID: options.PreviousRunID,
@@ -601,7 +618,7 @@ func resolveRunChain(root string, targetRecord map[string]string, options Option
 	if len(previousRunIDs) == 0 {
 		return runchain.Decision{}, nil, err
 	}
-	fallback, fallbackErr := runchain.Resolve(root, runchain.Options{
+	fallback, fallbackErr := resolveChainFn(root, runchain.Options{
 		Scope:       "pr-ready",
 		Target:      targetRecord,
 		MaxAttempts: options.MaxAttempts,
@@ -1237,14 +1254,20 @@ func readEvidence(path string) (string, error) {
 	return text, nil
 }
 
-func uniquePaths(root string, at time.Time) (string, string, string, error) {
+// uniquePaths returns a run id and its context/review paths that do not yet
+// exist under root, advancing the timestamp by a nanosecond on the rare
+// collision. It never errors: the loop's only exit is os.IsNotExist, and any
+// other Stat error (a real path that is not "not found") simply means the file
+// exists, so the loop advances — so the previous (string, string, string, error)
+// signature always returned a nil error and the error return was dead.
+func uniquePaths(root string, at time.Time) (string, string, string) {
 	runAt := at
 	for {
 		runID := state.RunID("pr-ready", "branch", runAt)
 		contextRel := filepath.ToSlash(filepath.Join("docs", "metareview", "context", runID+"-context.md"))
 		reviewRel := filepath.ToSlash(filepath.Join("docs", "metareview", "reviews", runID+".md"))
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(reviewRel))); os.IsNotExist(err) {
-			return runID, contextRel, reviewRel, nil
+			return runID, contextRel, reviewRel
 		}
 		runAt = runAt.Add(time.Nanosecond)
 	}
