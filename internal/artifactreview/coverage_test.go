@@ -33,7 +33,7 @@ func TestGitHeadReturnsHeadInRealRepo(t *testing.T) {
 	root := t.TempDir()
 	// Neutralise the machine's global/system git config so the fixture is deterministic on any
 	// runner: no inherited commit.gpgsign, hooksPath, or sha256 object format to break or skew it.
-	gitEnv := append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	gitEnv := append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_OPTIONAL_LOCKS=0", "GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_0=gc.auto", "GIT_CONFIG_VALUE_0=0", "GIT_CONFIG_KEY_1=maintenance.auto", "GIT_CONFIG_VALUE_1=false")
 	runGit := func(args ...string) []byte {
 		t.Helper()
 		cmd := exec.Command("git", args...)

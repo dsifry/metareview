@@ -28,7 +28,7 @@ func writeFileAt(t *testing.T, path, content string) {
 // hooksPath, or sha256 object format).
 func initFixtureRepo(t *testing.T, root string) {
 	t.Helper()
-	env := append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	env := append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_OPTIONAL_LOCKS=0", "GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_0=gc.auto", "GIT_CONFIG_VALUE_0=0", "GIT_CONFIG_KEY_1=maintenance.auto", "GIT_CONFIG_VALUE_1=false")
 	for _, args := range [][]string{
 		{"init"},
 		{"config", "user.email", "test@example.com"},
