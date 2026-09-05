@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/dsifry/metareview/internal/githubcontext"
 	"github.com/dsifry/metareview/internal/jsonl"
@@ -51,6 +50,16 @@ type candidate struct {
 	confidence string
 	priority   int
 }
+
+// Seams over the stdlib calls whose error branches below are otherwise hard to force
+// deterministically: filepath.Abs only fails when os.Getwd fails, and a WalkDir traversal error
+// needs an unreadable directory (a permission trick a root test runner bypasses). Each defaults to
+// the real function and is overridden — then restored via t.Cleanup — in tests, so production
+// behavior is identical to calling the wrapped function directly.
+var (
+	filepathAbs = filepath.Abs
+	walkDir     = filepath.WalkDir
+)
 
 func Collect(root string, options Options) (Context, error) {
 	home, err := homeDir(options.HomeDir)
@@ -132,7 +141,7 @@ func scanSessionPath(path, sourceType string, priority int) ([]candidate, error)
 		return nil, nil
 	}
 	var candidates []candidate
-	err = filepath.WalkDir(path, func(path string, entry os.DirEntry, err error) error {
+	err = walkDir(path, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -330,11 +339,11 @@ func relativeTo(base, path string) (string, bool) {
 	if base == "" {
 		return "", false
 	}
-	baseAbs, err := filepath.Abs(base)
+	baseAbs, err := filepathAbs(base)
 	if err != nil {
 		return "", false
 	}
-	pathAbs, err := filepath.Abs(path)
+	pathAbs, err := filepathAbs(path)
 	if err != nil {
 		return "", false
 	}
@@ -351,11 +360,9 @@ func excerpt(value string) string {
 	if len(runes) <= MaxExcerptRunes {
 		return value
 	}
-	truncated := string(runes[:MaxExcerptRunes])
-	for !utf8.ValidString(truncated) && len(truncated) > 0 {
-		truncated = truncated[:len(truncated)-1]
-	}
-	return strings.TrimSpace(truncated)
+	// Truncation is on a rune boundary, so string(runes[:N]) is always valid UTF-8; no further
+	// validity trimming is needed. (A prior utf8.ValidString loop here was dead for that reason.)
+	return strings.TrimSpace(string(runes[:MaxExcerptRunes]))
 }
 
 func unavailable(reason string, introspect bool) Context {
