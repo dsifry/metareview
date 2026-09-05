@@ -308,10 +308,10 @@ func pluginRoot(home string) string {
 		filepath.Join(base, "*", "hooks", "hooks.json"),
 		filepath.Join(base, "*", "*", "hooks", "hooks.json"),
 	} {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			continue
-		}
+		// The patterns are literal but for the single `*` segments, which are always well-formed, so
+		// filepath.Glob never returns ErrBadPattern here; on any (impossible) error matches is nil and
+		// the loop below is simply skipped, so the error needs no separate branch.
+		matches, _ := filepath.Glob(pattern)
 		for _, m := range matches {
 			// It must be METAREVIEW's manifest, not any plugin that happens to register a Stop
 			// hook: another plugin's gate says nothing about whether this one runs.

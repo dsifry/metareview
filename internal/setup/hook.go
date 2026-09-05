@@ -122,15 +122,17 @@ func enforcementStatus(root, home, pluginRoot string, gitGateInstalled bool) Enf
 			s.Foreign = path
 		}
 	}
-	// The Stop-hook-specific detail. Framed by the git gate below: the two are different enforcement layers.
-	switch {
-	case !s.Active && s.Foreign != "":
+	// The Stop-hook-specific detail. Framed by the git gate below: the two are different enforcement
+	// layers. if/else-if rather than a tagless switch: Go's cover profile emits no counter for a
+	// tagless-switch case expression, so these boundary mutants would be reported not-covered and stay
+	// unkillable (the #104/#106 precedent).
+	if !s.Active && s.Foreign != "" {
 		s.Remediation = "A Stop hook is registered in " + s.Foreign + " but it does not run metareview, so it does not gate session completion. Add metareview's hook alongside it, or install metareview as a plugin so hooks/hooks.json applies."
-	case s.Active && !s.ScriptPresent:
+	} else if s.Active && !s.ScriptPresent {
 		s.Remediation = "A Stop hook is registered in " + s.Source + " but hooks/pre-finish.sh is missing, so the host will report a hook error instead of a review verdict."
-	case !s.Active && s.ScriptPresent:
+	} else if !s.Active && s.ScriptPresent {
 		s.Remediation = "hooks/pre-finish.sh exists but no settings file registers it, so it never runs. Add a Stop hook to .claude/settings.json, or install metareview as a plugin so hooks/hooks.json applies."
-	case !s.Active:
+	} else if !s.Active {
 		s.Remediation = "No Stop hook is registered, so session completion (an agent declaring work done) is not gated. Install metareview as a plugin, or add a Stop hook to .claude/settings.json."
 	}
 	// The git-native gate is the DISTINCT push-time layer. Frame EVERY inactive-Stop-hook state by whether it
@@ -258,15 +260,15 @@ func isOursScoped(cmd string, allowProject bool, roots ...string) bool {
 	for _, tok := range executed {
 		p := clean(tok)
 		var prefix string
-		switch {
-		case p == rel:
+		// if/else-if rather than a tagless switch so the boundary mutants on these comparisons are
+		// killable (the #104/#106 precedent). The separator in "/"+rel is required, though the
+		// TrimSuffix would also refuse a match without one (its prefix would then match no accepted
+		// root). Kept explicit because the two lines have to agree.
+		if p == rel {
 			prefix = ""
-		// The separator is required, though the TrimSuffix would also refuse a match without one
-		// (its prefix would then match no accepted root). Kept explicit because the two lines
-		// have to agree.
-		case strings.HasSuffix(p, "/"+rel):
+		} else if strings.HasSuffix(p, "/"+rel) {
 			prefix = strings.TrimSuffix(p, "/"+rel)
-		default:
+		} else {
 			continue
 		}
 		switch prefix {

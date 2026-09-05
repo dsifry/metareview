@@ -21,6 +21,18 @@ func realGitRunner(root string, args ...string) ([]byte, error) {
 	return exec.Command("git", full...).Output() // #nosec G204 -- args are literals and a resolved path
 }
 
+// Seams over the stdlib/embed calls whose error branches below are otherwise unreachable: the
+// embedded hook assets always read, filepath.Abs only fails when os.Getwd fails, os.Chmod cannot
+// fail on a file just written, and materializeHooks does not "succeed" while leaving the target
+// unmaterialized. Each defaults to the real function and is overridden — then restored via
+// t.Cleanup — in tests, so production behavior is identical to calling the wrapped function.
+var (
+	readHookAsset    = hookassets.GitHookAssets.ReadFile
+	filepathAbs      = filepath.Abs
+	osChmod          = os.Chmod
+	applyMaterialize = materializeHooks
+)
+
 // gitHookScripts maps each materialized hook filename to the embedded source it is written from. Only the
 // two GIT hooks belong in core.hooksPath; session-start-check.sh is a Claude SessionStart hook, wired
 // separately through the plugin / .claude/settings.json.
@@ -33,7 +45,7 @@ var gitHookScripts = map[string]string{
 // (already git-ignored, so the per-clone install artifacts are never committed). Absolute, because a relative
 // core.hooksPath is resolved inconsistently by git.
 func hookTargetDir(root string) (string, error) {
-	return filepath.Abs(filepath.Join(root, ".metareview", "git-hooks"))
+	return filepathAbs(filepath.Join(root, ".metareview", "git-hooks"))
 }
 
 // legacyHookTargetDir is the pre-0.11 install target: the committed hooks/git of metareview's OWN checkout.
@@ -49,7 +61,7 @@ func materializeHooks(dir string) error {
 		return err
 	}
 	for name, src := range gitHookScripts {
-		body, err := hookassets.GitHookAssets.ReadFile(src)
+		body, err := readHookAsset(src)
 		if err != nil {
 			return fmt.Errorf("reading embedded hook %s: %w", src, err)
 		}
@@ -57,7 +69,7 @@ func materializeHooks(dir string) error {
 		if err := os.WriteFile(p, body, 0o755); err != nil { //nolint:gosec // a git hook must be executable
 			return err
 		}
-		if err := os.Chmod(p, 0o755); err != nil { // WriteFile perms are umask-masked; force the exec bit
+		if err := osChmod(p, 0o755); err != nil { // WriteFile perms are umask-masked; force the exec bit
 			return err
 		}
 	}
@@ -93,7 +105,7 @@ func hooksCurrent(dir string) bool {
 		if err != nil || info.Mode()&0o100 == 0 {
 			return false
 		}
-		want, err := hookassets.GitHookAssets.ReadFile(src)
+		want, err := readHookAsset(src)
 		if err != nil {
 			return false
 		}
@@ -232,7 +244,7 @@ func ApplyHookInstall(root string, plan HookInstallPlan, force bool, git GitRunn
 	// Materialize the embedded hook scripts into the target dir BEFORE pointing git at it, so core.hooksPath
 	// never references an empty/absent directory — git silently ignores that, which is exactly how the gate
 	// was inert in a consumer repo while the CLI still reported it "active".
-	if err := materializeHooks(plan.Target); err != nil {
+	if err := applyMaterialize(plan.Target); err != nil {
 		return fmt.Errorf("writing hook scripts to %s: %w", plan.Target, err)
 	}
 	// Best-effort: keep metareview's ephemeral per-clone state out of the consumer's commits (the shared
