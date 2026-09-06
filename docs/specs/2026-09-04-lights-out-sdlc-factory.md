@@ -1,8 +1,9 @@
 # A lights-out software factory on the metareview FSM
 
-**Status:** reviewed, revision 10 (after nine artifact-review rounds; see §15) · **Date:** 2026-09-04
-(rev 6: 2026-09-05) · **Builds on:** issue #2 (*epic: make metareview verdicts stateful, shardable, and
-evidence-backed*), `docs/ARCHITECTURE.md`, the 0.9.0 FSM specs.
+**Status:** reviewed, revision 11 (nine artifact-review rounds closed at rev 10, §15; rev 11 adds the
+two artifact lenses of §5.1) · **Date:** 2026-09-04 (rev 6: 2026-09-05; rev 11: 2026-09-06) · **Builds
+on:** issue #2 (*epic: make metareview verdicts stateful, shardable, and evidence-backed*),
+`docs/ARCHITECTURE.md`, the 0.9.0 FSM specs.
 
 **Supersedes in part (declared, see §13):** (a) the "review gates only, metaswarm owns the lifecycle"
 boundary in `docs/integrations/metaswarm.md`, `CLAUDE.md` *Durable Output*, `AGENTS.md` *Metaswarm Fit*,
@@ -19,7 +20,8 @@ cooperating agent, so §5.12 adds a trust boundary.
 > **unattended up to a PR that is ready to merge**, with every invariant that metaswarm and Superpowers
 > currently ask a model to honor turned into a machine-checked gate, and every "ask the human" moment
 > turned into either a policy default or a typed escalation that parks durably and resumes in place.
-> Merge itself always requires one act the factory cannot perform (§5.12.5; decision §12.8, accepted).
+> Merge itself requires, under the default `policy.answers: signed`, one act the factory cannot
+> perform (§5.12.5; decision §12.8 — the default, not an invariant, per §12.7).
 > "Deploy" is verified through runtime receipts from declared commands; the factory does not own a
 > pipeline (§11).
 
@@ -128,7 +130,7 @@ to a version and verified during Phase 1 / Phase 4 decomposition before use.
 | Convergence DSL | `internal/fsm/converge` | per-run circuit breakers; routed in family loops (§5.3) |
 | Evidence receipts | `internal/evidence` | validation is a typed receipt |
 | Sharded review | `internal/shardpack` | large epics are reviewable |
-| Nine artifact lenses; epic-ready's four integration lenses | `rubrics/*`, `internal/lens` | richer than metaswarm's gates |
+| Nine artifact lenses at inventory (eleven after §5.1's rev-11 extension: non-functional requirements, C4 architecture); epic-ready's four integration lenses | `rubrics/*`, `internal/lens` | richer than metaswarm's gates |
 | Require-lenses gate + review-evidence marker over exact `base..HEAD` | `internal/reviewers/adversarial.go` | a gate cannot PASS on structure alone |
 | Overrides with requester ≠ granter | `internal/findings/override.go` | the privileged disposition of an escalated task's findings (§5.3) |
 | Git-native pre-push gate (fail-closed) | `hooks/git`, `internal/status` | enforcement outside any model |
@@ -149,10 +151,10 @@ invariant ids (G-*) or metaswarm rules this stage makes machine-checkable.
 | S0 prime | inject repo knowledge + recovery state | `context build`; knowledge never reaches node prompts | PARTIAL | 5b | — |
 | S1 entry / triage | recovery check, Simple/Complex, issue → DoD | none (`tasksource` drops arrays, labels, parent, deps) | MISSING | 3 | Simple path = one-task decomposition; size class from policy |
 | S2 brainstorm / design | Socratic design; hard gate before code | nothing authors | MISSING | 3 | G-BS-1/5/6/7/8 |
-| S3 design review gate | 5–6 personas, ALL approve, 3 iterations | `review artifact` with 9 lenses — stronger, but scaffold-only (#2 §E) | PARTIAL | 3 | 3-iteration cap → `ESC_DESIGN_ITERATIONS` |
+| S3 design review gate | 5–6 personas, ALL approve, 3 iterations | `review artifact` with the 11-lens artifact set (§5.1) — stronger, but scaffold-only (#2 §E) | PARTIAL | 3 | 3-iteration cap → `ESC_DESIGN_ITERATIONS` |
 | S4 decompose / plan | plan with WUs, deps, file scope, interfaces, checkpoints | none | MISSING | 3 | G-WP-1..9; dep graph acyclic |
 | S5 plan review gate | 3 reviewers, 3 iterations | `review artifact` (no plan rubric; no dep validation) | PARTIAL | 3 | any BLOCKING → FAIL; `ESC_PLAN_ITERATIONS` |
-| S6 WU tracking | Beads read+write; ledger | reads `.beads/issues.jsonl` only; never runs `bd` | PARTIAL | 1 (write-through) / 3 (`bd create`) | one task `in_progress`; close-with-reason on PASS |
+| S6 WU tracking | Beads read+write; ledger | reads `.beads/issues.jsonl` only; never runs `bd` | PARTIAL | 1 (write-through) / 2 (`bd create` via `taskset-load`) | one task `in_progress`; close-with-reason on PASS |
 | S7 execution method | human choice | n/a | — | 1 | PD: `task-build-loop` |
 | S8 worktree isolation | per-task worktree, ignored, baseline green, never on `main` | fork asks the human to `git worktree add`; concurrent loops need isolation (`CLAUDE.md` Lifecycle Placement) | PARTIAL | 0b | G-WT-1..7; `on_default_branch` |
 | S9 implement | brief → TDD → commit → status | `agent-edit` fixes *known bugs*; no implement-from-brief | MISSING | 1 | G-TDD-1/2/3 engine-verified (§5.8); G-SDD-3/4/5/6 |
@@ -247,6 +249,85 @@ reviewer and judge classes may carry a tier floor in the routing profile (data, 
 refused by a **prompt validator** in the `review-lenses` dispatch path (Phase 1); exact values live only in
 the brief, never restated.
 
+**The two rev-11 artifact lenses.** The canonical artifact-review set grows from nine to eleven; both
+lenses take the rubric's adversarial stance and may return NOT_APPLICABLE for a document their level does
+not reach (a decomposition's C4 review is the component level; a runbook's NFR review is the operational
+categories):
+
+- **Non-functional requirements** (`non-functional-requirements`) — the artifact states, or consciously
+  defers with a recorded decision, the quality attributes and operating constraints of what it designs:
+  performance (latency, throughput, startup time), scalability (users, requests/sec, data volume),
+  reliability and availability (uptime, failure recovery, fault tolerance), maintainability
+  (modularity, testability, ease of change), observability (logs, metrics, tracing, debuggability),
+  usability and accessibility, compliance and privacy, cost efficiency, portability and interoperability.
+  The finding is the unstated surface — a design that says only *what* the system does, never how well
+  or under what constraints it must operate. Security stays the Security lens's deep check and
+  Completeness stays functional; this lens owns the quality-attribute dimension, and the rubric's
+  anti-overlap suppression section states the split.
+- **C4 architecture** (`c4-architecture`) — the design establishes architecture at every zoom level before
+  implementation detail, in Simon Brown's C4 order, and defines what *good* means at each level:
+  **Context** (the system in its environment — who uses it, which external systems it interacts with,
+  what it is responsible for; business boundaries and ownership clear), **Container** (the
+  deployable/runnable pieces — services, data stores, queues, workers — and whether their boundaries,
+  reliability, scaling, and security are sensible), **Component** (the major parts inside a container — is
+  responsibility well-factored and maintainable), **Code** (implementation detail — clean, tested,
+  understandable). The finding is a design that jumps straight to code-level detail without first
+  establishing context, container, and component, or one where a level's notion of good is left
+  undefined. The existing Architecture lens judges whether the chosen architecture is *sound*; this lens
+  judges whether it is *presented and reasoned about at every level* — the split goes in the
+  anti-overlap section. metaswarm's UI-FLOWS/UX reviewer stays DON'T (§4.2): this is structural zoom,
+  not visual design.
+
+**Proportionality — declared once, judged against the declaration, consumed downstream.** Both lenses
+judge an artifact against its *own declared operating envelope*, never against an absolute enterprise
+bar. The NFR lens's finding is a mismatch or a silence, not the absence of maximum rigor: a spec that
+declares *prototype — internal feedback, a handful of users, discardable* and skips transactional
+gating, redundancy, or scaling is a **recorded deferral** (a PASS on that axis), while the same design
+under a declared *production — millions of users, thousands of concurrent sessions* envelope with no
+concurrency, failure-recovery, or data-volume story is a blocker — the rigor demanded is a function of
+the envelope, and where a spec exists the envelope itself is required (its silence is the finding). The
+**spec** author template therefore elicits an explicit envelope — audience, expected scale, durability
+tier (prototype | small-scale production | scaled production), and per-category target or deferral —
+and the C4 lens's depth expectation scales the same way (a prototype's container level may be one box on
+one host). The envelope then *flows forward and is consumed, never re-derived*: the decomposition
+author carries the envelope's testable targets into per-task `acceptance` entries (§5.7) — a deferral
+stays recorded in the spec's declaration and simply yields no acceptance entry, and `no-tests` is never
+its carrier (§5.8 keeps that label what it is: an agent-authored waiver of coverage and mutation,
+refused on production-source tasks without human approval); the plan rubric's NFR review, where the
+subtree holds a spec, treats a declared envelope target with no corresponding acceptance entry as a
+finding, and an envelope tier, deferral, or per-category target that contradicts or undercuts an NFR
+stated in the job's intake is a finding — the declaring author does not get to lower a bar the intake
+set — the epic-ready acceptance matrix (§5.8)
+checks the targets like any acceptance cell, and the fix loops and code reviews carry neither lens (Scope
+below) — the only NFR-adjacent gates left late in the loop are the mechanical ones (suite, coverage,
+mutation), which are scale-independent. **No envelope, no mismatch:** the NFR lens returns
+NOT_APPLICABLE for an envelope-less document — a `simple-task` or decomposition authored where the
+job's run subtree holds no spec (neither `intake.spec_path` supplied nor `design.path` authored:
+`intent`/`issue`/`plan_path` intakes that skipped `design`, and `size: simple` runs where no
+`spec_path` was supplied; the plan rubric still applies the C4 lens at the component level). The
+applicability is mechanical, not judgment — the binary honours the plan rubric's NFR section only when
+the subtree holds a spec, read through the `InvokedBy` chain the `DecodeIn` seam already opens (§5.3;
+a binary-side keying analogous to §13's content-class rule, but keyed to the run subtree rather than
+the artifact's class), and an envelope-less document records the decision as a `NOT_APPLICABLE`
+reviewer row in its log, so the require-lenses demand stays a pure function of the committed log
+(§13) — and the factory binds a supplied spec
+as the `decompose`/`simple` authors' `SOURCE_PATH` (§6), so where the lens applies it is satisfiable
+by construction. A bug fix never blocks on an NFR the issue did not state; where an envelope exists,
+its obligations reached the code at design time or not at all.
+
+Scope: **artifact family only** — `review artifact`, `artifact-review-loop`, the `artifact`/`plan`
+rubrics. The task-done/pr-ready code sets stay the nine (their code-level concerns are the Security,
+Testing-quality, and Architecture lenses' job there, and every fix-loop iteration pays per lens) and the
+epic-ready four integration lenses are untouched (integration-level structure is the
+architecture-coherence lens's job); the `review-lenses` default the fix loops apply without a `rubric:` is
+frozen at the pre-extension nine and pinned by a test, so the split cannot drift the way `internal/lens`
+exists to prevent. Both ship as a standalone metareview change ahead of the phases — `lens.All` plus the
+two `rubrics/artifact-review-rubric.md` sections and their anti-overlap entries plus a frozen `v11Lenses` reviewlog era dated at ship,
+so older completed logs stay judged by their own set (§13) — meaning metareview's own artifact reviews
+(including revisions of this spec) gain them immediately; Phase 3's `artifact-loop` inherits them through
+the `artifact`/`plan` rubrics, and its **spec** author template elicits the NFR categories and the C4
+levels so the lens gate is satisfiable by construction.
+
 ### 5.2 Workflow families are namespaces, not fold state
 
 The bug loop's fold (`Findings → Confirmed → Status → Pins → Commit`) is the only cross-iteration
@@ -265,9 +346,9 @@ are listed in §5.3/§13 (all `omitempty`, empty when folding a pre-revision log
 | `build` | `implement`, `mutate`, `task-close` |
 | `taskset` | `taskset-load`, `next-ready-task`, `inventory-update`, `integrate-branch` (7a) |
 | `artifact` | `author` |
-| `shepherd` | `open-pr`, `pr-observe`, `branch-observe`, `comment-triage`, `pr-reply`, `pr-resolve`, `push`, `merge-check`, `merge`, `merge-from-base`, `resolve-conflicts`, `runtime-check`, `rollback`, `close-issue`, `task-close` (the post-rollback `reopen`), `beads-commit`, `learn` |
+| `shepherd` | `open-pr`, `pr-observe`, `branch-observe`, `comment-triage`, `pr-reply`, `pr-resolve`, `push`, `merge-check`, `merge`, `merge-from-base`, `sync-branch`, `resolve-conflicts`, `runtime-check`, `rollback`, `close-issue`, `task-close` (the post-rollback `reopen`), `beads-commit`, `learn` |
 | `factory` | `intake`, `curate`, `curate-commit`, `task-close`, `beads-commit` |
-| shared | `child-workflow`, `await`, `record-marker`, `marker-check`, `gate-review`, `sync-branch`, `verify-tdd` (`mode: task` in `build`, `mode: suite` — written `validate` in §6 — anywhere), `author` (`resplit` uses it in `taskset`), `file-issue` |
+| shared | `child-workflow`, `await`, `record-marker`, `marker-check`, `gate-review`, `verify-tdd` (`mode: task` in `build`, `mode: suite` — written `validate` in §6 — anywhere), `author` (`resplit` uses it in `taskset`), `file-issue` |
 
 Trade stated: `converge.Payload` strips `NodeOutputs`, so a `cmd` convergence atom cannot see family
 state; family loops use `max_iterations`/`budget`/`wall_clock`.
@@ -476,7 +557,7 @@ append a `task-state {id, state: built | skipped | overridden | split, run}` row
 is the only ledger of built-ness; a split task's un-renumbered id is retired by its `split` row, and
 `taskset_valid` refuses a retired id in the `depends_on` of the new ids). `task-close` outputs `{id,
 prior_status, …}` and refuses to reopen (or re-close) an issue once the job's PR is merged — except the
-single sanctioned `reopen: true` call on the `release-loop` post-rollback path (§5.10), which is the one
+single sanctioned `reopen: true` call on the `release-loop` post-rollback path (§6, `release-loop`), which is the one
 reopen allowed after the merge.
 
 **Interpolation.** Params and child `vars:`/`base:`/`goldens:` may reference `${<state>.<field>}` where
@@ -688,7 +769,10 @@ path), `sandboxed: true|false` and the self-test result, the driver's `{pid, sta
 cancel` signals only a process whose start time matches), and the append-row kinds, each a JSONL row
 with a `kind` discriminator: `task-state`, `allowance`, `gate-run`, `review-run`, `rollback`,
 `add-credential`, `budget-raised`, `consent-accepted`. `factory run` refuses an existing `job_id` without `--resume` (`ERR_JOB_EXISTS`), and `author`
-refuses a pre-existing `DOC_PATH` it did not write in this job. **The run store is authoritative**;
+refuses a pre-existing `DOC_PATH` it did not write in this job (the single exception: `resplit` editing
+in place the supplied plan when `build`'s `DOC_PATH` resolves to it — a `plan_path` intake where neither
+`decompose` nor `simple` authored, §5.7 — the operator hands the factory that document precisely so the
+job can split into it). **The run store is authoritative**;
 `factory status` is a projection folded from the run subtree; write order: run event first, job row
 second; `factory resume` repairs a stale job row.
 
@@ -754,7 +838,7 @@ choices, each routed in §6. Codes are registered per family (§5.3). Privileged
 | `ESC_LEARNING_REVIEW` | `factory.ask-learn` when `curation.review: human` ∧ proposals non-empty | `accept_all`†, `select`† (note = a JSON list of proposal ids), `reject_all` | |
 | — Execution method, worktree consent, finish menu | PD | — | discard only via `factory cancel --discard` |
 
-Anything a human is asked that is not in a family's registered code table is a bug (§12).
+Anything a human is asked that is not in a family's registered code table is a bug (§5.3).
 
 ### 5.7 Task sources and the decomposition artifact
 
@@ -773,12 +857,18 @@ checkpoint, files, credentials — issue #2 D1):
   **order** — on a conflicting `merge-from-base` the driver first resolves `.beads/**` via `bd`, commits
   that resolution alone, publishes, and only then is the agent briefed to merge the rest (§5.9 step 6).
   In Beads mode `taskset-load` still needs the decomposition document (the source of `bd create`); it
-  locates it through the job record (`docs.dir`/`job_id`, or `intake.plan_path`) exactly as
-  `record-marker` does. Readiness is re-queried each scheduler iteration; the fold caches only decision
+  locates it through the job record (`docs.dir`/`job_id`, else `intake.plan_path`) — the same fallback
+  `record-marker` applies in plan-file mode; in Beads mode `record-marker` reads the Beads epic itself
+  (§5.8). Readiness is re-queried each scheduler iteration; the fold caches only decision
   records. The worktree manager refuses to remove a driver worktree with dirty tracked `.beads/*`.
 - **Plan file** (no Beads): exactly one fenced block ```` ```yaml metareview:taskset ```` in the
   decomposition document at `<docs.dir>/<job_id>-decomposition.md` (or `-simple-task.md`) — the path
-  `intake` emits as `doc_path` and `author` is briefed to write. `intake.source` is `beads` when `.beads/`
+  `intake` emits as `doc_path` and `author` is briefed to write — or, when neither `decompose` nor
+  `simple` authored (the `DOC_PATH` chain's plan term), the supplied plan itself, edited in place by
+  `resplit`; an
+  authored decomposition always wins (`build`'s `DOC_PATH` falls back `decompose.path`/
+  `simple.path` → `plan_path` → `doc_path`, and `taskset-load` locates the authored document first —
+  `docs.dir`/`job_id`, else `intake.plan_path` — in both modes). `intake.source` is `beads` when `.beads/`
   exists, else `plan_path` when the intake supplied one, else `doc_path`:
 
 ```yaml
@@ -880,8 +970,10 @@ fixed (`Status`) or covered by a `disposition` record (incl. policy `advisory`) 
 `fromFsmRunId = leaf`; `executionMode = subagent-adjudicated` when every `review-lenses` node ran via
 `runner`/`subagent`, else `in-session-emulated`. For `scope: epic-ready` it also computes the **acceptance
 coverage matrix** (acceptance item → its `files`/`tests` refs → engine receipts → review child) from the
-taskset it locates through the job record (`docs.dir`/`job_id` or the Beads epic) — an intake with no
-taskset (`entry_ship`, `pr_number`) yields an explicitly recorded `matrix{absent: true}`, never a vacuous
+taskset it locates through the job record (`docs.dir`/`job_id`, else `intake.plan_path`, in plan-file
+mode; the Beads epic in Beads mode) — an intake with no taskset (`entry_ship`, `pr_number` — taskset-less
+by entry whatever else its `job.yaml` supplied: both enter below `build`, so nothing authored and no plan
+is consulted) yields an explicitly recorded `matrix{absent: true}`, never a vacuous
 pass — and outputs
 `matrix{covered, uncovered[], absent}`; `marker_recorded` requires every cell covered or dispositioned
 (an absent matrix records `absent: true` and mints `PASS_ADVISORY`), else `matrix_uncovered`. Refuses
@@ -1088,7 +1180,7 @@ per item of the `comment-triage.file_issue` list, idempotent per thread — it s
 thread URL and returns it instead of filing twice. The author scope is load-bearing: the trailer is
 attacker-mintable, so a match on an issue opened by anyone else is ignored — otherwise a third party could
 pre-open an issue carrying `Metareview-Origin: <url>` and capture the binding (this is the file-issue side
-of §5.13's intake refusal, which already rejects such issues as *intents*). Label
+of §5.12.4's intake refusal, which already rejects such issues as *intents*). Label
 `factory:filed`, trailer `Metareview-Origin: <url>`; output `{filed[{thread_id?, number, url}], dry_run}`), `close-issue` (numbers in the job record
 only). Replies carry metaswarm's attribution line. `comment-triage` routes are exclusive: `fix_now` =
 `findings ≠ []`; `file_issue` = `findings == [] ∧ file_issue ≠ []`; `reply_only` = otherwise (`replies`
@@ -1296,7 +1388,9 @@ epic-ready marker is minted once per job, not twice.)
 
 **`artifact-review-loop`** (family `artifact`, Phase 3; vars `RUBRIC`) — review only; what `review artifact`
 inits: `discover(review-lenses, rubric:$RUBRIC) → adjudicate → done[clean|reviewed]`. It has no `await`,
-so runner exhaustion is a driver `tool-park` on the parent (§5.3), as for bug-family children.
+so runner exhaustion is a driver `tool-park` on the parent (§5.3), as for bug-family children. The
+`artifact` and `plan` rubrics' fixed sets include the two rev-11 lenses (§5.1), the plan rubric's NFR
+section honoured only when the job's run subtree holds a spec.
 
 **`artifact-loop`** (family `artifact`, Phase 3; vars `TEMPLATE`, `RUBRIC`, `APPROVAL_CODE`,
 `ITERATIONS_CODE`, `DOC_PATH`, `SOURCE_PATH?`):
@@ -1471,11 +1565,11 @@ learning reads. `learn` is a `{learned: false}` no-op until Phase 5b.
 intake(intake)                            --size_simple--> simple ; --entry_design--> design ; --entry_decompose--> decompose ; --entry_build--> build ; --entry_ship--> finalize ; --entry_release--> release
 design(child-workflow, workflow:artifact-loop, vars:{TEMPLATE:spec, RUBRIC:artifact, APPROVAL_CODE:ESC_SPEC_APPROVAL, ITERATIONS_CODE:ESC_DESIGN_ITERATIONS, DOC_PATH:${intake.spec_doc}, SOURCE_PATH:${intake.spec_path:-""}})
    --child_pass--> decompose ; --child_escalated--> ask-factory ; --child_cancelled--> cancelled
-decompose(child-workflow, workflow:artifact-loop, vars:{TEMPLATE:decomposition, RUBRIC:plan, APPROVAL_CODE:ESC_PLAN_APPROVAL, ITERATIONS_CODE:ESC_PLAN_ITERATIONS, DOC_PATH:${intake.doc_path}, SOURCE_PATH:${intake.plan_path:-${design.path:-""}}})
+decompose(child-workflow, workflow:artifact-loop, vars:{TEMPLATE:decomposition, RUBRIC:plan, APPROVAL_CODE:ESC_PLAN_APPROVAL, ITERATIONS_CODE:ESC_PLAN_ITERATIONS, DOC_PATH:${intake.doc_path}, SOURCE_PATH:${design.path:-${intake.plan_path:-${intake.spec_path:-""}}})
    --child_pass--> build ; --child_escalated--> ask-factory ; --child_cancelled--> cancelled
-simple(child-workflow, workflow:artifact-loop, vars:{TEMPLATE:simple-task, RUBRIC:plan, APPROVAL_CODE:ESC_PLAN_APPROVAL, ITERATIONS_CODE:ESC_PLAN_ITERATIONS, DOC_PATH:${intake.doc_path}})
+simple(child-workflow, workflow:artifact-loop, vars:{TEMPLATE:simple-task, RUBRIC:plan, APPROVAL_CODE:ESC_PLAN_APPROVAL, ITERATIONS_CODE:ESC_PLAN_ITERATIONS, DOC_PATH:${intake.doc_path}, SOURCE_PATH:${intake.plan_path:-${intake.spec_path:-""}}})
    --child_pass--> build ; --child_escalated--> ask-factory ; --child_cancelled--> cancelled
-build(child-workflow, workflow:epic-build-loop, vars:{SOURCE:${intake.source}, DOC_PATH:${intake.plan_path:-${intake.doc_path}}, INTEGRATE:false})
+build(child-workflow, workflow:epic-build-loop, vars:{SOURCE:${intake.source}, DOC_PATH:${decompose.path:-${simple.path:-${intake.plan_path:-${intake.doc_path}}}}, INTEGRATE:false})
    --child_pass--> curate ; --child_escalated--> ask-factory ; --child_cancelled--> cancelled
 curate(curate)                            --curation_human--> ask-learn ; --curation_auto--> curate-commit ; --node_exhausted--> ask-tool
 ask-learn(await ESC_LEARNING_REVIEW)      --chose:accept_all--> curate-commit ; --chose:select--> curate-commit ; --chose:reject_all--> close-beads
@@ -1522,10 +1616,10 @@ default (§5.3): its `retry` restores the tree to the child's checkpoint before 
 | `taskset-load` | fork | taskset | `source` | `{tasks[], baseline, credentials_missing[], tasks_missing_credentials[], protected_paths[], taskset_invalid, on_default_branch, created_ids[]}` | — · driver | 2 |
 | `next-ready-task` | fork | taskset | `order` | union `{task_id, base, brief_path, checkpoint, advisory[]}` \| `{none, blocked_ids[], advisory[]}` | — · driver | 2 |
 | `inventory-update` | inline/subagent/fork(runner) | taskset | — | `{path, appended}` | MutatesTree · clone | 2 |
-| `author` | inline/subagent/fork(runner) | artifact | `template` (registry), `mode`, `path`, `source?`, `note?`, `task?`, `findings?` | `{path, commit, base, approaches[], questions[], invalid_reasons[]}` | MutatesTree · clone | 3 |
+| `author` | inline/subagent/fork(runner) | artifact/shared (`resplit` in `taskset`) | `template` (registry), `mode`, `path`, `source?`, `note?`, `task?`, `findings?` | `{path, commit, base, approaches[], questions[], invalid_reasons[]}` | MutatesTree · clone | 2 (`resplit`) · 3 |
 | `intake` | fork | factory | — | `{entry, size, source, doc_path, spec_doc, intent_sha256, issue, spec_path, plan_path, pr_number, trusted}` | — · driver | 3 |
-| `file-issue`, `close-issue` | fork | shared / shepherd | `template?` (default `issue`), `items?` (list; one issue each) | `{filed[{thread_id?, number, url, body_sha256}], dry_run}` / `{number, url, dry_run}` | — · driver | 3 / 5a |
-| `open-pr`, `pr-observe`, `branch-observe`, `pr-reply`, `pr-resolve`, `push`, `merge-from-base`, `merge-check`, `merge`, `runtime-check`, `rollback`, `beads-commit`, `learn` | fork | shepherd (`beads-commit` also `factory`) | fixed per §5.10; `ref`; `threads`+`filed?` (pr-reply: a filed issue's URL is appended to its thread's reply); `findings`+`fixed`+`sources`+`replied` (pr-resolve); `pr`; `health_cmd`; `rollback_cmd` | `PrState` (incl. `closed_by`) / `{ref, head_sha, checks[]}` / `{replied[], dry_run}` / `{resolved[], dry_run}` / `{pushed_sha, protected_paths[], stderr_sha256, dry_run}` / `{merged_clean, conflicts[]}` / `{conditions_met, approval_required, pending, failed, reasons[]}` / `{merged_sha, already_merged, dry_run}` / runtime receipt / `{exit, receipt}` / `{commit, changed}` / `{learned}` | push, merge-from-base, beads-commit: MutatesTree · driver; runtime-check, rollback: throwaway (egress) | 4–5a |
+| `file-issue`, `close-issue` | fork | shared / shepherd | `template?` (default `issue`), `items?` (list; one issue each) | `{filed[{thread_id?, number, url, body_sha256}], dry_run}` / `{number, url, dry_run}` | — · driver | 2 (`issue-skipped`) · 3 · 4 / 5a |
+| `open-pr`, `pr-observe`, `branch-observe`, `pr-reply`, `pr-resolve`, `push`, `merge-from-base`, `merge-check`, `merge`, `runtime-check`, `rollback`, `beads-commit`, `learn` | fork | shepherd (`beads-commit` also `factory`) | fixed per §5.10; `ref`; `threads`+`filed?` (pr-reply: a filed issue's URL is appended to its thread's reply); `goldens`+`fixed`+`sources`+`replied` (pr-resolve); `pr`; `health_cmd`; `rollback_cmd` | `PrState` (incl. `closed_by`) / `{ref, head_sha, checks[]}` / `{replied[], dry_run}` / `{resolved[], dry_run}` / `{pushed_sha, protected_paths[], stderr_sha256, dry_run}` / `{merged_clean, conflicts[]}` / `{conditions_met, approval_required, pending, failed, reasons[]}` / `{merged_sha, already_merged, dry_run}` / runtime receipt / `{exit, receipt}` / `{commit, changed}` / `{learned}` | push, merge-from-base, beads-commit: MutatesTree · driver; runtime-check, rollback: throwaway (egress) | 4–5a |
 | `resolve-conflicts` | inline/subagent/fork(runner) | shepherd | — | `{resolved, commit}` | MutatesTree · clone | 4 |
 | `comment-triage` | inline/subagent/fork(runner) | shepherd | — | `{findings[{thread_id, file, line, desc}], replies[{thread_id, body}], file_issue[{thread_id, title, body}]}` (trusted threads only) | — · clone (reads) | 4 |
 | `curate` | inline/subagent/fork(runner) | factory | — | `{accepted[{fact, supersedes[]}], discarded[{reason}]}` | — · clone (reads) | 5b |
@@ -1664,7 +1758,7 @@ Phase 7). Exits are the two forms of §8.2 plus the named negatives.
   recursive map params, `$VAR` in convergence, `--policy` fold, `wall_clock`, `MutatesTree`/`FixEntry` (+
   `ToFixEntry`, `InitialFixEntry`, `fix_baseline`), tree affinity, fork-exec tree re-read, `cmd_params`,
   `Finding.Labels`/`Bug.Labels`, the **marker-currency rule** in `LatestReviewEvidence`/
-  `validateFromRunDiff`/`record-lenses`/the hook.
+  `validateFromRunDiff`/`record-lenses`.
 - `internal/worktree` (agent clone, driver worktree, ref source with `refs/metareview/base-tip`,
   publish/mirror(destination refspecs, `checkout -B` from `refs/metareview/mirror-head`)/import(sandboxed
   upload-pack, protected-path + symlink check with the base-tip blob exemption, fsck, ff-only)/restore/
@@ -1811,8 +1905,10 @@ Phase 7). Exits are the two forms of §8.2 plus the named negatives.
 - `artifact-review-loop` (what `review artifact` inits; idempotent on content hash; resumes; structured
   ingestion; `Rubric:` header honoured only when the artifact's content class matches — #2 **E1–E6**) and
   `artifact-loop` (`DOC_PATH`, `SOURCE_PATH`, `revise` with `findings`/`note`, `doc_invalid` loop).
-- `author` templates **spec** (approaches[], questions[]), **decomposition**, **simple-task**,
-  **split-task**, **issue** — embedded registry; `rubrics/plan-review-rubric.md` embedded; `intake`
+- `author` templates **spec** (approaches[], questions[] — eliciting the NFR categories and the C4 levels
+  of §5.1 so the lens gate is satisfiable), **decomposition**, **simple-task**,
+  **split-task**, **issue** — embedded registry; `rubrics/plan-review-rubric.md` embedded (it and the
+  artifact rubric fix their lens sets incl. §5.1's two rev-11 lenses); `intake`
   (entries incl. `spec_path`/`plan_path`/`pr_number`, size, `doc_path`/`spec_doc`, trust,
   `ERR_INTAKE_UNTRUSTED`); `file-issue`.
 - **Absorbs:** #2 E (superseded in shape).
@@ -1824,7 +1920,22 @@ Phase 7). Exits are the two forms of §8.2 plus the named negatives.
   hand-edited `NOT_REVIEWED` log still parses and blocks; three failed iterations park on
   `ESC_PLAN_ITERATIONS` and `revise` re-arms the window and carries the note; a plan-rubric header on a
   spec log is not honoured; `bd create` write-through is observed (smoke); a `factory:filed` issue is
-  refused as intent.
+  refused as intent; a spec that states no quality attribute or operating constraint fails the NFR
+  lens, and one that jumps to code-level detail without context/container/component levels fails the
+  C4 lens (§5.1) — both then pass after `revise` supplies the missing sections; a prototype-envelope
+  spec that defers transactional hardening passes the NFR lens (a recorded deferral) while the same
+  design under a declared scaled-production envelope fails it; a bug-fix issue's `simple-task` document
+  is reviewed under the plan rubric but its NFR lens returns NOT_APPLICABLE (the run subtree holds no
+  spec, §5.1), so the fix never blocks on an NFR the issue did not state; a `spec_path` intake under
+  `size: simple` takes the NFR lens, the supplied spec reaching the simple-task author as its
+  `SOURCE_PATH` (§6); a log completed before the `v11Lenses` era is not failed for lacking the two
+  lenses, a post-era spec log lacking them is refused require-lenses, and an envelope-less plan log
+  records `NOT_APPLICABLE` and passes (§13); a post-era plan log whose run subtree holds a spec and
+  that records no NFR reviewer row — neither a review nor a `NOT_APPLICABLE` — is refused
+  require-lenses; a decomposition whose declared envelope target has no corresponding acceptance
+  entry fails the plan rubric's NFR review and passes once the entry is carried, and an envelope tier
+  that contradicts an NFR stated in the job's intake is a finding even when internally consistent
+  (§5.1).
 
 ### Phase 4 — Shipping: `pr-shepherd-loop`
 - `internal/github`: GraphQL threads/latest-approvals/protection/`pr_state`, checks + "ours" log tails →
@@ -1964,7 +2075,8 @@ Phase 7). Exits are the two forms of §8.2 plus the named negatives.
 - **Team Mode, `bd swarm *`, Slack daemon, weekly reports** — aspirational or absent in metaswarm.
 - **`TodoWrite` ban / Beads-only todo policy** — the run store is the ledger.
 - **Interactive (Socratic) brainstorming and its visual companion** — the host's skill, outside the factory;
-  the factory enters at `spec_path`/`decompose` (decision §12.9, not yet accepted).
+  in-factory design is the batched `author` of §12.9, and the Socratic loop's output reaches the factory
+  as `spec_path` (decision §12.9, accepted 2026-09-05).
 - **`/migrate`, `/update`** — another product's packaging (§13 covers ours).
 - **A deployment pipeline** — the factory verifies runtime receipts on the base branch after merge;
   deployment is the repo's own CI; only `health`/`rollback` are declared cmds.
@@ -2079,7 +2191,14 @@ chaining `--previous-run` per target across the loop's `artifact-review-loop` ch
 `review-run {target, run_id}` row, like `gate-run`), so an earlier iteration's `NEEDS_REVISION` log on
 the same document is superseded, not left in branch scope for the hook; lens sets are fixed per
 registered rubric by the binary and honoured only when the artifact's content class matches, so a
-header cannot reduce a spec log's requirement. Legacy hand-edited logs keep parsing and
+header cannot reduce a spec log's requirement. The two rev-11 lenses (§5.1) ship as a new reviewlog era
+dated at their ship (`v11Lenses`): a completed log stays judged by its own era's set, a declaration of
+the new lenses only strengthens a log (the declared-only-strengthens rule), and the require-lenses gate
+begins demanding them for artifacts whose run ID's date postdates the era — the NFR lens of plan-class
+artifacts only, a spec-class document always demanding it, and an envelope-less plan document recording
+a `NOT_APPLICABLE` reviewer row that satisfies the demand (the applicability decision is a property of
+the review run, recorded in the log, so the requirement stays a pure function of the committed log;
+§5.1) — the frozen task-done default the fix loops apply is unchanged. Legacy hand-edited logs keep parsing and
 blocking when `NOT_REVIEWED`; `review artifact` without a runner stays usable interactively.
 
 **Markers.** `record-lenses` survives; both writers share the head rule. **Reader change (Phase 0b):**
@@ -2282,3 +2401,23 @@ blockers to one, and the remaining Completeness advisories (missing exits for th
 `ask-integration` note carrier, the diverged-remote reconciliation, `ask-matrix` context, a scheduler
 convergence code, empty escalation contexts) are recorded in the review log as accepted advisories to
 resolve during Phase 0b/2/4 implementation rather than in further spec rounds.
+
+**Revision 11 (2026-09-06, post-closure).** Adds two artifact-review lenses — **non-functional
+requirements** and **C4 architecture** (§5.1) — to the canonical artifact set (`lens.All`, the two
+`rubrics/artifact-review-rubric.md` sections, a new reviewlog era), each judging the artifact against
+its declared operating envelope (proportionality) rather than an absolute bar, with the envelope flowing
+to task acceptance and the epic matrix and envelope-less documents — those authored where the run
+subtree holds no spec — taking NFR NOT_APPLICABLE rather than a block. A rubric/lens-era addition only: no workflow, gate, kind, or
+schema shape changes; the task-done/pr-ready defaults and the epic-ready integration set are untouched,
+and older review logs stay judged by their own era (§13). The same revision applies the corrections of
+a post-closure paragraph-level consistency pass: decision 12.9's recorded acceptance in §11, the pre-push
+hook dropped from the Phase 0b marker-currency adopters (it is not a marker reader, §5.3/§13),
+`pr-resolve`'s first param named `goldens` in §7, `sync-branch` moved to the shepherd row and `author`
+marked shared in the §5.2/§7 tables, `bd create`/`author`/`file-issue` phase labels aligned with Phase 2's
+`taskset-load`/`resplit`/`issue-skipped`, the Goal's merge clause qualified by decision §12.7, and three
+corrected section pointers (§5.12.4, §6 `release-loop`, §5.3). Successive re-review passes then
+hardened the envelope rule and the source chains: the envelope-less NOT_APPLICABLE is mechanical (the
+run-subtree spec test, §5.1/§13), `decompose`/`simple`/`build` bind authored documents before supplied
+ones (`design.path`/`decompose.path`/`simple.path` → `plan_path` → `spec_path`/`doc_path`, §6), §5.7
+states the in-place-plan case with `resplit`'s single §5.5 exemption, and §5.8's taskset location gains
+the `plan_path` fallback — var bindings and rules only, no edge, gate, kind, or schema changes.
