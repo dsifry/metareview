@@ -30,10 +30,12 @@ Not sharded.
 - Runtime assessment: static-only; runtime not assessed
 
 ### Source Paths
+
 - internal/reviewers/inventory_extension_test.go
 - internal/reviewers/taskdone.go
 
 ### Manifest Blockers
+
 No manifest blockers.
 
 ## Changed Files
