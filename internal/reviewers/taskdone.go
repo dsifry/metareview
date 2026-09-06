@@ -96,7 +96,7 @@ type KnowledgeFact struct {
 
 var evalPattern = regexp.MustCompile(`\beval\s*\(`)
 var todoPattern = regexp.MustCompile(`(?i)\b(TODO|FIXME)\b`)
-var inventoryPathPattern = regexp.MustCompile(`[A-Za-z0-9_./-]+\.(go|js|ts|tsx|jsx|py|rb)`)
+var inventoryPathPattern = regexp.MustCompile(`[A-Za-z0-9_./-]+\.(go|jsx?|tsx?|py|rb)`)
 
 func RunTaskDone(context Context) []Finding {
 	var results []Finding
