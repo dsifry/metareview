@@ -898,3 +898,30 @@ func TestRepoPassShowHeadTransportError(t *testing.T) {
 		t.Errorf("absent path = %v, %v, %v; want nil, false, nil", body, ok, err)
 	}
 }
+
+// The hallucination rollup counts claims the repo dimension MEASURED: no-clone and
+// repo-error rows are infrastructure gaps, not "without covering evidence" — folding
+// them in overstates the search's recall against hallucinations.
+func TestReportReposPassRollupExcludesInfraRows(t *testing.T) {
+	reposDir := t.TempDir()
+	gitFixture(t, reposDir, map[string]string{
+		"spec/models/widget_spec.rb": "let!(:widget) { Fabricate(:widget) }\nexpect(widget.shine).to eq(true)\n",
+	})
+	records := []record{
+		{URL: "https://github.com/org/repo/pull/7", IssueText: "the widget polish path has no test asserting the shine", NewVerdict: "hallucination", SourceLens: "lens-a"},
+		{URL: "https://github.com/org/absent/pull/1", IssueText: "zero tests exist for the helper module", NewVerdict: "hallucination", SourceLens: "lens-a"},
+	}
+	diff := "diff --git a/spec/models/widget_spec.rb b/spec/models/widget_spec.rb\n--- a/spec/models/widget_spec.rb\n+++ b/spec/models/widget_spec.rb\n@@ -5,2 +5,4 @@\n" +
+		"+    expect(widget.shine).to eq(true)\n"
+	var buf bytes.Buffer
+	if err := report(&buf, records, map[string]string{
+		"https://github.com/org/repo/pull/7": diff, "https://github.com/org/absent/pull/1": diff,
+	}, options{repos: reposDir, dir: "testdata/mini", framework: "test-fw"}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	// one hallucinated claim with evidence (both), one unmeasured on the repo dimension
+	if !strings.Contains(out, "hallucinated gap-claims with covering evidence in the diff: 1/1") {
+		t.Errorf("the rollup must exclude no-clone and repo-error rows:\n%s", out)
+	}
+}

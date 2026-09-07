@@ -330,8 +330,11 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 	halWith, halWo := matrix[[2]string{"evidence", "hallucination"}], matrix[[2]string{"no-evidence", "hallucination"}]
 	if pass != nil {
 		halWith = matrix[[2]string{"both", "hallucination"}] + matrix[[2]string{"diff-only", "hallucination"}]
-		halWo = matrix[[2]string{"repo-only", "hallucination"}] + matrix[[2]string{"no-evidence", "hallucination"}] +
-			matrix[[2]string{"no-clone", "hallucination"}] + matrix[[2]string{"repo-error", "hallucination"}]
+		// Only rows the repo dimension MEASURED enter the rollup: no-clone and repo-error
+		// are infrastructure gaps, not "the search found no covering evidence" — folding
+		// them into halWo overstates the search's recall against hallucinations. Their
+		// counts are disclosed on their own rows instead.
+		halWo = matrix[[2]string{"repo-only", "hallucination"}] + matrix[[2]string{"no-evidence", "hallucination"}]
 	}
 	if halWith+halWo > 0 {
 		out.printf("\nhallucinated gap-claims with covering evidence in the diff: %d/%d\n", halWith, halWith+halWo)

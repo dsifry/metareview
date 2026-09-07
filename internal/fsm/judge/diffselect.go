@@ -605,10 +605,14 @@ func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budge
 		}
 	}
 	if len(paths) == 0 {
-		out, truncated, hash := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget)
+		out, truncated, _ := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget)
 		if repo != nil && repo.Ran && len(repo.Evidence) == 0 {
+			// Hash the context the judge actually receives — the disclosure is part of it.
 			out = gapClaimRepoNone + out
+			sum := sha1.Sum([]byte(out))
+			return out, truncated, hex.EncodeToString(sum[:]), evidence
 		}
+		_, _, hash := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget)
 		return out, truncated, hash, evidence
 	}
 	// Same split as ContextForClaim: the declared file keeps two shares of the budget,

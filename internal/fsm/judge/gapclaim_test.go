@@ -1,6 +1,8 @@
 package judge
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -326,3 +328,20 @@ func TestContextForGapClaimRepoBodiesStayInBudget(t *testing.T) {
 // contract under test is that the VARIABLE evidence (hunks + repo bodies) sums to the
 // budget, not that fixed strings are counted against it.
 const shareSlack = 1200
+
+// The context hash must cover what the judge actually receives: prepending
+// gapClaimRepoNone to the plain context after hashing would record a hash of content the
+// adjudicator never saw.
+func TestContextForGapClaimRepoNoneIsHashed(t *testing.T) {
+	f := run.Finding{File: "app/models/topic_embed.rb", Line: 37,
+		IssueText: "nothing tests anything anywhere"}
+	_, _, hash, _ := ContextForGapClaim(repoOnlyDiff, false, f, MaxDiffBytes, &RepoEvidence{Ran: true})
+	plain, _, plainHash := ContextFor(repoOnlyDiff, false, f.File, f.Line, MaxDiffBytes)
+	if hash == plainHash {
+		t.Error("the repo-none context must hash differently from the plain context")
+	}
+	sum := sha1.Sum([]byte(gapClaimRepoNone + plain))
+	if hex.EncodeToString(sum[:]) != hash {
+		t.Error("the recorded hash must be of the disclosed context, not the pre-disclosure one")
+	}
+}
