@@ -66,3 +66,23 @@ func TestOtherKindsAreUnchanged(t *testing.T) {
 		t.Errorf("still-present system prompt changed: %q", s)
 	}
 }
+
+// Issue #146: the old caveat told the judge the evidence is "the diff, not the
+// repository", which was true before the repo-side search and is now wrong — and it let
+// a judge confirm a testing-gap claim without recording any search. The criterion now
+// requires the reasoning to carry the search record: which test files were shown (diff
+// hunks and repository-head candidates) and why none covers the claimed behavior.
+func TestGapClaimCriterionRequiresASearchRecord(t *testing.T) {
+	low := strings.ToLower(RubricAddendum)
+	if strings.Contains(low, "the evidence is the diff, not the repository") {
+		t.Error("the pre-#146 caveat is stale now that the repository head is searched")
+	}
+	for _, want := range []string{
+		"repository head was also searched", // the criterion names the repo-side search
+		"search record",                     // and demands it be recorded before confirmation
+	} {
+		if !strings.Contains(low, want) {
+			t.Errorf("gap-claim criterion missing %q", want)
+		}
+	}
+}

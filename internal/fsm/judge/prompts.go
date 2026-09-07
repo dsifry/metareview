@@ -57,10 +57,13 @@ const (
 		"- A finding that claims tests, specs or coverage are ABSENT is real only when the absence is real. When the " +
 		"evidence includes test files whose added lines reference the claimed subject, read them: a test that covers the " +
 		"claimed behavior makes the claim false, however thin the rest of the coverage is. A test that exists yet does " +
-		"not cover the claimed behavior leaves the claim real - cite the gap, not the file count. When the evidence " +
-		"carries NO test file for a subject the diff changes, remember the evidence is the diff, not the repository: " +
-		"absence is established only within what you were shown, and a finding whose claimed subject could plausibly be " +
-		"tested outside the changed files deserves that caveat in your reasoning rather than unqualified confirmation.\n" +
+		"not cover the claimed behavior leaves the claim real - cite the gap, not the file count. The repository head " +
+		"was also searched for test-shaped files referencing the claimed subject, and any matches are included in the " +
+		"evidence; weigh them the same way. A testing-gap claim is confirmable only when your reasoning carries the " +
+		"search record: which test files were shown (diff hunks and repository-head candidates, or the explicit " +
+		"nothing-matched disclosure) and why none covers the claimed behavior. When what you were given carries no " +
+		"search record for a subject the diff changes, that absence of evidence is the caveat itself: state it in " +
+		"your reasoning rather than confirming unqualified.\n" +
 		"Still answer false for a finding the code contradicts, one that restates intended behaviour, or one whose " +
 		"premise about a tool or language is wrong. If what you were given is not enough to decide, say exactly what " +
 		"was missing in your reasoning rather than guessing."
