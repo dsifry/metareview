@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/dsifry/metareview/internal/claimcheck"
 	"github.com/dsifry/metareview/internal/fsm/run"
@@ -442,5 +443,18 @@ func TestContextForGapClaimRepoHeaderReflectsDiffPresence(t *testing.T) {
 	out2, _, _, _ := ContextForGapClaim(diff, false, f, MaxDiffBytes, repo2)
 	if !strings.Contains(out2, "spec/absent_spec.rb (repository head, unchanged by this diff)") {
 		t.Errorf("an absent path keeps the unchanged label:\n%s", out2)
+	}
+}
+
+// clipBody cuts on a rune boundary: a multi-byte UTF-8 rune at the cut must not yield
+// invalid UTF-8 in the judge's prompt or the hashed context.
+func TestClipBodyIsRuneSafe(t *testing.T) {
+	body := strings.Repeat("é→中 ", 50) + "\n" + strings.Repeat("x", 200)
+	out := clipBody(body, 103)
+	if !utf8.ValidString(out) {
+		t.Errorf("clipBody produced invalid UTF-8 at the cut: %q", out[:20])
+	}
+	if len(out) > 103+60 { // marker + line-boundary trim may add a little, not much
+		t.Errorf("clipBody grew the body: %d bytes", len(out))
 	}
 }

@@ -2,6 +2,7 @@ package judge
 
 import (
 	"crypto/sha1"
+	"unicode/utf8"
 	"encoding/hex"
 	"path"
 	"regexp"
@@ -685,12 +686,17 @@ func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budge
 
 // clipBody cuts a repository file's bounded content to at most n bytes, on a line
 // boundary where one fits, with an elision marker so the judge can tell the body was
-// cut rather than the file simply ending there.
+// cut rather than the file simply ending there. The cut never splits a multi-byte UTF-8
+// rune: an invalid rune in the prompt or the hashed context corrupts what the judge
+// reads and what the audit records.
 func clipBody(body string, n int) string {
 	if len(body) <= n {
 		return body
 	}
 	cut := body[:n]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
 	if i := strings.LastIndexByte(cut, '\n'); i > 0 {
 		cut = cut[:i+1]
 	}
