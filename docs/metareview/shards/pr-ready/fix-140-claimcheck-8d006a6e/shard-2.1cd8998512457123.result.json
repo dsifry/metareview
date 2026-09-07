@@ -1,0 +1,90 @@
+{
+ "schemaVersion": 1,
+ "id": "shard-2.1cd8998512457123",
+ "kind": "shard",
+ "shardId": "shard-2",
+ "shardHash": "1cd8998512457123",
+ "planHash": "33ac073288a8645e",
+ "verdict": "PASS",
+ "reviewer": "glm-5.3-last-shard-2",
+ "reviewedAt": "2026-09-07T03:20:00Z",
+ "evidence": [
+  {
+   "path": "cmd/claimcheck-eval/main.go",
+   "line": 129,
+   "note": "Fresh execution on a temp corpus reproduced the empty-cached-diff path: exit 1 (correct fatal) but the message reads 'corrupt cached diff <path>: %!w(<nil>)' — the wrapped err is nil in the c.Diff == \"\" arm"
+  },
+  {
+   "path": "cmd/claimcheck-eval/main.go",
+   "line": 151,
+   "note": "NaN guard verified holding: report with nil records prints (0.0%) — TestReportEmptyCorpusHasNoNaN passes fresh"
+  },
+  {
+   "path": "cmd/claimcheck-eval/main.go",
+   "line": 118,
+   "note": "missing/corrupt split verified holding: all missing URLs named sorted (missingURLs join), corrupt or empty is fatal; evaluate() routes fatal to exit 1"
+  },
+  {
+   "path": "cmd/claimcheck-eval/main.go",
+   "line": 62,
+   "note": "fs.SetOutput(os.Stderr) verified: -limit notanumber exits 2 with the flag error named on stderr (TestRealMainNamesFlagErrors passes fresh)"
+  },
+  {
+   "path": "cmd/claimcheck-eval/main.go",
+   "line": 269,
+   "note": "rune-safe clip verified holding (TestClipIsRuneSafe passes fresh); errWriter surfaces a dead stream via report's return out.err"
+  },
+  {
+   "path": "cmd/claimcheck-eval/main.go",
+   "line": 213,
+   "note": "evidence cap uses judge.MaxGapEvidenceFiles — the export fix verified present and used at all three measurement call sites"
+  },
+  {
+   "path": "internal/fsm/judge/diffselect.go",
+   "line": 496,
+   "note": "ChangedBlocks verified: only hunk '+' lines, headers/context excluded (TestChangedBlocksCarriesOnlyAddedLines passes fresh); MaxGapEvidenceFiles export present with its measurement-consistency rationale"
+  },
+  {
+   "path": "internal/fsm/judge/diffselect.go",
+   "line": 555,
+   "note": "ContextForGapClaim verified: disclosure gated on len(evidence)>0, referenced-then-evidence path dedup via inPaths, primary keeps two shares, no-paths fallback returns the plain ContextFor with evidence"
+  },
+  {
+   "path": "internal/fsm/judge/testdata/evalcorpus/ai-code-review-evaluation-discourse-graphite-10.diff",
+   "line": 1,
+   "note": "Frozen-data wiring verified: 11 sections, all test-shaped (regex-checked), 43 records wired, 25 with evidence, zero dangling evidence references into records.json"
+  },
+  {
+   "path": "cmd/claimcheck-eval/testdata/mini/runs/r1/readjudication3.json",
+   "line": 1,
+   "note": "Fixture consistent with the mini cache (sha1(url)[:16]=31b12f0033dcc9fa present): one detected hallucination-with-evidence claim, one non-claim bug, one no-evidence true gap; full cmd/claimcheck-eval test suite passes fresh (-count=1)"
+  }
+ ],
+ "findings": [
+  {
+   "severity": "P2",
+   "disposition": "advisory",
+   "note": "The empty-cached-diff fatal error formats a NIL error: in loadDiffs' 'err != nil || c.Diff == \"\"' branch, the c.Diff == \"\" arm wraps a nil err, so the operator sees 'corrupt cached diff <path>: %!w(<nil>)' — a malformed diagnostic in the exact corrupt-data path whose message is the tool's only clue. Behavior (exit 1) is correct; the message should say 'empty diff' when err is nil.",
+   "evidence": [
+    {
+     "path": "cmd/claimcheck-eval/main.go",
+     "line": 129,
+     "note": "Reproduced by execution on a temp corpus: stderr = 'claimcheck-eval: corrupt cached diff /tmp/.../31b12f0033dcc9fa.json: %!w(<nil>)'"
+    }
+   ]
+  },
+  {
+   "severity": "P2",
+   "disposition": "advisory",
+   "note": "The report's 'claims by lens' ordering is nondeterministic across runs: the lens list is built from Go map iteration and sorted with unstable sort.Slice keyed only on lensClaims, so lenses with EQUAL claim counts swap order between runs — empirically 2 distinct output hashes across 6 runs over the real corpus (ties exist there: intent=2, scope-and-alignment=2). A yardstick whose reports are diffed across versions should be byte-stable; add the lens name as the tie-break.",
+   "evidence": [
+    {
+     "path": "cmd/claimcheck-eval/main.go",
+     "line": 243,
+     "note": "6 executions of 'go run ./cmd/claimcheck-eval -harnesseval ../harnesseval' produced 2 distinct md5 output hashes; sort.Slice comparator compares only lensClaims counts"
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}

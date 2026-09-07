@@ -1,0 +1,58 @@
+{
+ "schemaVersion": 1,
+ "id": "shard-2-3.3255795aaa964f3d",
+ "kind": "shard",
+ "shardId": "shard-2-3",
+ "shardHash": "3255795aaa964f3d",
+ "planHash": "33ac073288a8645e",
+ "verdict": "PASS",
+ "reviewer": "glm-5.3-last-shard-2-3",
+ "reviewedAt": "2026-09-07T03:20:00Z",
+ "evidence": [
+  {
+   "path": "internal/fsm/judge/testdata/evalcorpus/records.json",
+   "line": 1,
+   "note": "131 records, well-formed JSON, no duplicate (issue_text,diff_file) pairs; only \\u0026/\\u003e escapes (Go HTML-escaping) with raw UTF-8 elsewhere — the byte-stability fix verified by execution: a no-drift CLAIMCORPUS_UPDATE=1 regen produces zero git diff"
+  },
+  {
+   "path": "internal/fsm/judge/testdata/evalcorpus/records.json",
+   "line": 1,
+   "note": "no dangling references: every diff_file exists on disk and every evidence path exists as a file section in its referenced vendored diff (0 dangling); all vendored diff sections are test-shaped (11+4+1, zero non-test leakage)"
+  },
+  {
+   "path": "internal/fsm/judge/testdata/evalcorpus/records.json",
+   "line": 1,
+   "note": "the 58 diff_file==\"\" records all expect empty evidence (0 violations) and none mention spec/ paths — they are exactly the cal.com no-test-file population; aggregate pins intact: 21 hallucinated gap-claims, 14 with covering evidence"
+  },
+  {
+   "path": "internal/fsm/judge/gapclaim_corpus_test.go",
+   "line": 72,
+   "note": "the prior round's P1 (update path could not refresh no-diff records' detect flags) verified HOLDING by a live mutate-regen-restore cycle: flipped one no-diff record's detect to false, ran CLAIMCORPUS_UPDATE=1, flag refreshed back to true (29 no-diff detect=true records, not the stale 28 the bug produced), file restored byte-exact via git checkout"
+  },
+  {
+   "path": "internal/fsm/judge/gapclaim_corpus_test.go",
+   "line": 124,
+   "note": "corpus test passes in verify mode with zero drift across all 131 records (detect and evidence expectations both match the current implementation); TestGapClaimEvalCorpusPreservesVendorNote passes (note round-trips, 432 chars)"
+  },
+  {
+   "path": "internal/fsm/judge/gapclaim_corpus_test.go",
+   "line": 90,
+   "note": "wiring: evidence computed with judge.MaxGapEvidenceFiles (the exported product cap), not a duplicated literal — the dedup fix from the amend is present and used"
+  }
+ ],
+ "findings": [
+  {
+   "severity": "P2",
+   "disposition": "follow-up",
+   "note": "Per-record provenance (url or run_id) remains absent from records.json: a specific record's origin can only be recovered by text-searching harnesseval's readjudication3 files. Fourth consecutive pass flagging it; the note field documents the convention and re-derivation is possible, so it stays a nice-to-have for auditability, not a defect. 95 of 131 records carry \"evidence\": null (Go nil-slice form) vs [] — self-consistent and byte-stable under the writer, so cosmetic only.",
+   "evidence": [
+    {
+     "path": "internal/fsm/judge/testdata/evalcorpus/records.json",
+     "line": 1,
+     "note": "record shape is {diff_file, issue_text, lens, v2_verdict, detect, evidence} with no origin reference"
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}

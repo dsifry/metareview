@@ -1,0 +1,68 @@
+{
+ "schemaVersion": 1,
+ "id": "shard-1.b9c9c32fcb9c47df",
+ "kind": "shard",
+ "shardId": "shard-1",
+ "shardHash": "b9c9c32fcb9c47df",
+ "planHash": "33ac073288a8645e",
+ "verdict": "PASS",
+ "reviewer": "glm-5.3-last-shard-1",
+ "reviewedAt": "2026-09-07T03:20:00Z",
+ "evidence": [
+  {
+   "path": "cmd/claimcheck-eval/main_test.go",
+   "line": 25,
+   "note": "All 351 lines read against main.go's current behavior; the full suite passes fresh with -count=1 (103 tests across this shard's three packages, 0 failures)"
+  },
+  {
+   "path": "cmd/claimcheck-eval/main_test.go",
+   "line": 271,
+   "note": "Prior P2 fixes verified holding by execution: skipped-claims disclosure ('claims skipped (no cached diff): 1' prints), all missing URLs named on stderr (not one map-random victim), NaN guard, rune-safe clip, unparsable-cache hard error, empty-diff fatal error, flag errors named on stderr (exit 2 with a message captured through a real pipe)"
+  },
+  {
+   "path": "cmd/claimcheck-eval/testdata/mini/.cache/pr_diffs/31b12f0033dcc9fa.json",
+   "line": 1,
+   "note": "Fixture wiring verified by running the real tool against testdata/mini: sha1(url)[:16] matches, and the live matrix reproduces every test expectation exactly (3 claims of 4 records at 75.0%, hallucinated gap-claim 1/1 with covering evidence, important_non_bug in the no-evidence row)"
+  },
+  {
+   "path": "cmd/claimcheck-eval/testdata/mini/runs/r2/readjudication3.json",
+   "line": 1,
+   "note": "Uncached-PR fixture exercises the intended skip path: its 'nothing tests the timer' claim is detected (claims-made denominator), excluded from matrix and verbose output, and disclosed via the skipped-claims line — live output confirms all three"
+  },
+  {
+   "path": "internal/claimcheck/claimcheck_test.go",
+   "line": 1,
+   "note": "All 286 lines read; latest-round fixes verified present and passing: own-file skip in all four spellings (./, a/, b/, bare) plus the symmetric Block.Path test, camelJoin Unicode-correct for both Café-continuation and ÜberDriver-hump forms, acronym HTTPServer → http_server, score-then-path ordering, default cap 4"
+  },
+  {
+   "path": "internal/fsm/judge/gapclaim_test.go",
+   "line": 130,
+   "note": "All call sites use the exported MaxGapEvidenceFiles (the previously-duplicated literal 3 is gone); ContextForGapClaim tests pin injection+disclosure, the no-evidence byte-identical fallback to ContextFor, named-spec dedup, and ChangedBlocks' added-lines-only contract"
+  },
+  {
+   "path": "internal/fsm/judge/testdata/evalcorpus/ai-code-review-evaluation-discourse-graphite-4.diff",
+   "line": 1,
+   "note": "Frozen eval data, wiring only: 4 sections, all test-shaped (spec/), 0 non-test leakage; referenced by the corpus golden whose 21/14 pins pass — no new issues"
+  }
+ ],
+ "findings": [
+  {
+   "severity": "P2",
+   "disposition": "advisory",
+   "note": "TestReportAgainstMiniCorpus's skipped-claim comment is stale and its assertion is tautological: the comment says 'the testing-quality lens line carries only its judged claim, not the skipped one', but the live line is '2 / 2 records' (lensClaims increments before the skip, so the skipped timer claim IS carried — correct, intended claims-made semantics), and the guarded string '2 /    1 records' is impossible anyway since one record yields at most one claim. The wrong comment misleads the next maintainer about the metric's denominator semantics; the assertion guards nothing. Fix: update the comment to state that lens claim counts include skipped claims (matching the claims-made denominator), and either drop the assertion or replace it with a direct check of the disclosure line.",
+   "evidence": [
+    {
+     "path": "cmd/claimcheck-eval/main_test.go",
+     "line": 44,
+     "note": "comment asserts an exclusion the implementation deliberately does not do"
+    },
+    {
+     "path": "cmd/claimcheck-eval/main.go",
+     "line": 196,
+     "note": "claims++ and lensClaims[...]++ both precede the no-cached-diff continue"
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}

@@ -1,0 +1,90 @@
+{
+ "schemaVersion": 1,
+ "id": "cross-shard.33ac073288a8645e",
+ "kind": "cross-shard",
+ "shardId": "",
+ "shardHash": "",
+ "planHash": "33ac073288a8645e",
+ "verdict": "PASS",
+ "reviewer": "pi-session cross-shard reviewer (in-session)",
+ "reviewedAt": "2026-09-07T03:20:00Z",
+ "evidence": [
+  {
+   "note": "All gates green at HEAD 91a0190: make cover (require-100 coverage + golangci-lint + shellcheck) exit 0; go test ./... exit 0. Branch-clean tree; no files created outside the review artifacts."
+  },
+  {
+   "path": "internal/fsm/judge/testdata/evalcorpus/records.json",
+   "line": 1,
+   "note": "Cross-shard fixture consistency: 131 records, all evidence paths resolve into the three vendored minimized diffs, 58 no-diff records (cal.com population) all expect empty evidence; CLAIMCORPUS_UPDATE produces a byte-identical file (Go-writer format normalized). Aggregate pins (21 hallucinated gap-claims, 14 with covering evidence) match the full-fidelity cmd/claimcheck-eval run against ../harnesseval."
+  },
+  {
+   "path": "internal/fsm/kind/kind.go",
+   "line": 560,
+   "note": "Cross-file wiring: claimcheck.Detect (shard-3) feeds ContextForGapClaim (shard-2) and the rollup (shard-2-3); Request.Claim flows to both the primary and escalated llm_call audit rows (claim_class/claim_evidence in run/event.go); calibration prompts byte-pinned (goldens in shard-0 untouched for the calibration path)."
+  },
+  {
+   "path": "rubrics/testing-quality-rubric.md",
+   "line": 44,
+   "note": "Rubric family consistency across shards 0/1-2: all three rubrics carry the Evidence-of-Absence rule with the same search pattern list (spec/, specs/, test/, tests/, __tests__/, *.test.*, *.spec.*, *_test.go, test_*.py); the adjudication-side RubricAddendum criterion and the deterministic injection agree on the claim class."
+  },
+  {
+   "note": "Review convergence: three full review rounds (9-lens FSM pass, 6-shard pass, 7-shard pass, plus a verification pass) fixed 19 findings total; the closing 7-shard round reports zero blocking findings across all shards. Remaining advisories are recorded as follow-up findings (per-record provenance fields; sum-identity coverage for the escalation-rescued and golden-matched arms; clipCorpus rune-safety twin; nil-error formatting in the corrupt-diff message; lens-table tie-break determinism)."
+  }
+ ],
+ "findings": [
+  {
+   "severity": "P2",
+   "disposition": "follow-up",
+   "note": "Per-record provenance (url/run_id) in the vendored corpus: flagged four consecutive passes; recovery is documented in the note field via harnesseval text-search.",
+   "evidence": [
+    {
+     "path": "internal/fsm/judge/testdata/evalcorpus/records.json"
+    }
+   ]
+  },
+  {
+   "severity": "P2",
+   "disposition": "follow-up",
+   "note": "Rollup sum-identity assertions for the escalation-rescued and golden-matched arms (the two arms where a double count could hide); mechanical two-line additions.",
+   "evidence": [
+    {
+     "path": "internal/fsm/kind/kind_test.go"
+    }
+   ]
+  },
+  {
+   "severity": "P2",
+   "disposition": "follow-up",
+   "note": "clipCorpus in gapclaim_corpus_test.go byte-slices at 110 (the rune-splitting twin of the fixed cmd clip); reachable on one current record.",
+   "evidence": [
+    {
+     "path": "internal/fsm/judge/gapclaim_corpus_test.go",
+     "line": 184
+    }
+   ]
+  },
+  {
+   "severity": "P2",
+   "disposition": "follow-up",
+   "note": "loadDiffs' empty-diff arm wraps a nil err (%!w(<nil>) in the message); the corrupt-diff message should name the emptiness itself.",
+   "evidence": [
+    {
+     "path": "cmd/claimcheck-eval/main.go",
+     "line": 173
+    }
+   ]
+  },
+  {
+   "severity": "P2",
+   "disposition": "follow-up",
+   "note": "Report lens table tie-break is nondeterministic when two lenses have equal claim counts (sort.Slice keyed only on count).",
+   "evidence": [
+    {
+     "path": "cmd/claimcheck-eval/main.go",
+     "line": 232
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}

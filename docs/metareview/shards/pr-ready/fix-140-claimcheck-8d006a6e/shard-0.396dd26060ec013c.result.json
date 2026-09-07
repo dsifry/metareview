@@ -1,0 +1,68 @@
+{
+ "schemaVersion": 1,
+ "id": "shard-0.396dd26060ec013c",
+ "kind": "shard",
+ "shardId": "shard-0",
+ "shardHash": "396dd26060ec013c",
+ "planHash": "33ac073288a8645e",
+ "verdict": "PASS",
+ "reviewer": "glm-5.3-last-shard-0",
+ "reviewedAt": "2026-09-07T03:20:00Z",
+ "evidence": [
+  {
+   "path": "internal/fsm/judge/gapclaim_corpus_test.go",
+   "line": 16,
+   "note": "Header fix verified: '(minimized) vendored diffs — three Discourse test-section diffs; cal.com records carry diff_file \"\"' replaces the stale 'six PR diffs' claim"
+  },
+  {
+   "path": "internal/fsm/judge/gapclaim_corpus_test.go",
+   "line": 76,
+   "note": "Update-write-before-continue fix present and executed: CLAIMCORPUS_UPDATE refreshes no-diff records' detect/evidence before the skip; corpus test passes with 131 records, 21 hallucinated gap-claims, 14 with evidence"
+  },
+  {
+   "path": "internal/fsm/judge/gapclaim_corpus_test.go",
+   "line": 90,
+   "note": "Uses exported judge.MaxGapEvidenceFiles (no duplicated literal cap)"
+  },
+  {
+   "path": "internal/fsm/judge/testdata/evalcorpus/ai-code-review-evaluation-discourse-graphite-8.diff",
+   "line": 1,
+   "note": "Frozen eval data, wiring verified: single test-shaped section (spec/controllers/admin/groups_controller_spec.rb), 10 records wired, 2 with evidence — matches prior rounds' numbers"
+  },
+  {
+   "path": "internal/fsm/judge/judge.go",
+   "line": 58,
+   "note": "Claim/ClaimInfo verified: audit metadata only, InputHash hashes Input (AdjudicateInput) alone; import group placement is gofmt-legal"
+  },
+  {
+   "path": "internal/fsm/judge/testdata/prompts/adjudicate.fenced.golden",
+   "line": 8,
+   "note": "New absence-verification criterion byte-pinned in fenced+plain goldens; calibration golden byte-untouched (git diff vs fae8549 empty); TestJ1Goldens + TestCalibrationSendsThePureReferencePrompt pass fresh"
+  },
+  {
+   "path": "rubrics/artifact-review-rubric.md",
+   "line": 88,
+   "note": "Completeness evidence-of-absence rule present with specs/** in the search pattern (matching claimcheck.testPath); no contradiction with the section's defer lines"
+  },
+  {
+   "path": "cmd/claimcheck-eval/testdata/mini/runs/r1/readjudication3.json",
+   "line": 1,
+   "note": "Fixture wiring: sha1(url)[:16]=31b12f0033dcc9fa matches the .cache fixture file; 3 records consistent with the cmd tool's matrix expectations"
+  }
+ ],
+ "findings": [
+  {
+   "severity": "P2",
+   "disposition": "advisory",
+   "note": "clipCorpus (gapclaim_corpus_test.go:184-190) byte-slices at 110 — the same rune-splitting defect round-2's shard-2 flagged and fixed in cmd/claimcheck-eval's clip() but its test-local twin was left byte-based. Empirically reachable: 1 current records.json text has byte-110 inside a multibyte character, so a drift message would print mojibake. Test-diagnostic output only — never asserted on, never persisted — hence advisory.",
+   "evidence": [
+    {
+     "path": "internal/fsm/judge/gapclaim_corpus_test.go",
+     "line": 188,
+     "note": "return s[:110] + \"…\" — byte cut; verified by scanning records.json: one issue_text's UTF-8 byte 110 is a continuation byte (0x80-masked)"
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}

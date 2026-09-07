@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2-3.d943bd6a512a64ee",
+  "kind": "shard",
+  "shardId": "shard-2-3",
+  "shardHash": "d943bd6a512a64ee",
+  "planHash": "91904aacb42abc6d",
+  "verdict": "PASS",
+  "reviewer": "glm-5.3-final-shard-2-3",
+  "reviewedAt": "2026-09-07T03:20:00Z",
+  "evidence": [
+    {"path": "internal/fsm/kind/kind.go", "line": 564, "note": "Claim detection hoisted before the golden-match skip and the no-evidence continue: the claims-made denominator counts matched, adjudicated and kept-for-human claims alike; a matched gap claim counts confirmed but NOT confirmed_without_evidence (the match verified the finding, not the asserted absence)"},
+    {"path": "internal/fsm/kind/kind.go", "line": 649, "note": "Rollup classifies the FINAL outcome after escalation resolves, distinguishing VerdictRealButUngold (confirmed) from VerdictCheckedButUnverified (unverified); empirical mixed-run probe (gap + non-gap + parse-error arm + absent-file claim) reproduced the identity claims == confirmed + rejected + unverified exactly: {claims:3, rejected:1, unverified:2}"},
+    {"path": "internal/fsm/kind/kind.go", "line": 745, "note": "secondOpinion carries the gap-claim evidence discipline: ContextForGapClaim context, Claim on the escalated Request (audit row keeps claim_class/claim_evidence); discarded evidence return is safe — ContextForGapClaim is deterministic over the same diff/finding, and claim.Evidence from the first arm is identical"},
+    {"path": "internal/fsm/kind/kind.go", "line": 462, "note": "callAs audits req.Claim into LLMCallData for both arms; judge-error aborts return before any rollup emission, so no partial-count record can be written"},
+    {"path": "internal/fsm/run/event.go", "line": 121, "note": "ClaimClass/ClaimEvidence are omitempty additions; fold.go decodePayload (DisallowUnknownFields) decodes the same-package struct, so audit round-trip and replay are unaffected; run package tests pass fresh (-count=1)"},
+    {"path": "internal/fsm/judge/testdata/evalcorpus/records.json", "line": 1, "note": "Frozen eval data, wiring verified: 131 records, 0 duplicate (issue_text,diff_file) pairs, all diff_file references exist, 0 dangling evidence paths (every evidence path is a section in its referenced minimized diff), 58 no-diff records all expect empty evidence, note field round-trips; aggregate pins 21 hallucinated gap-claims / 14 with evidence match the full-lab measurement (cmd/claimcheck-eval: 14/21)"}
+  ],
+  "findings": [
+    {
+      "severity": "P2",
+      "disposition": "follow-up",
+      "note": "Metric semantics boundary (not a defect): with_evidence counts only claims that reached the adjudication context selection — golden-matched and absent-file gap claims are counted in claims but never searched, so with_evidence can be less than the number of claims whose diff actually carries covering tests. The code comment documents the adjudicated-claim scope; if the metric is ever used to compute a per-claim evidence rate, the denominator should be adjudicated claims (claims minus matched minus unverified-no-evidence), or matched claims should also run the (deterministic, free) evidence search.",
+      "evidence": [{"path": "internal/fsm/kind/kind.go", "line": 596, "note": "gapEvidence++ only on the adjudication path; the seen-skip and no-evidence continue increment claims without any search"}]
+    }
+  ],
+  "blockingCount": 0
+}

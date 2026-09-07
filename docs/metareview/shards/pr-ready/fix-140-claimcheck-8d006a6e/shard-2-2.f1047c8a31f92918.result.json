@@ -1,0 +1,58 @@
+{
+ "schemaVersion": 1,
+ "id": "shard-2-2.f1047c8a31f92918",
+ "kind": "shard",
+ "shardId": "shard-2-2",
+ "shardHash": "f1047c8a31f92918",
+ "planHash": "33ac073288a8645e",
+ "verdict": "PASS",
+ "reviewer": "glm-5.3-background-last-shard-2-2",
+ "reviewedAt": "2026-09-07T03:20:00Z",
+ "evidence": [
+  {
+   "path": "internal/fsm/judge/testdata/evalcorpus/records.json",
+   "line": 1,
+   "note": "Structural integrity: 131 records, top-level {source, note, records}, zero duplicate (issue_text, diff_file) pairs; note present (432 chars) documenting the CLAIMCORPUS_UPDATE regeneration contract, minimization, and the diff_file=\"\" convention"
+  },
+  {
+   "path": "internal/fsm/judge/testdata/evalcorpus/records.json",
+   "line": 1,
+   "note": "Wiring: all three referenced Discourse .diff files exist on disk; 0 dangling evidence references (every evidence path is a real file section in its referenced diff); all 58 empty-diff_file records expect empty evidence (0 violations); 29 of them detect=true (detector pin for the cal.com no-test-file population)"
+  },
+  {
+   "path": "internal/fsm/judge/testdata/evalcorpus/records.json",
+   "line": 1,
+   "note": "Aggregate pins recomputed through the real implementation (TestGapClaimEvalCorpus): 21 hallucinated gap-claims, 14 with covering evidence — identical to the pre-minimization full-corpus numbers; verdict mix 31/52/41/7 sums to 131"
+  },
+  {
+   "path": "internal/fsm/judge/testdata/evalcorpus/records.json",
+   "line": 1,
+   "note": "Format stability (prior round's finding) verified by execution: CLAIMCORPUS_UPDATE=1 no-drift regeneration produces a byte-identical file (empty git diff afterward); the 6 remaining \\uXXXX escapes are Go's canonical HTML escaping (\\u0026, \\u003e — exactly json.MarshalIndent output), while the Python minimization's \\u2014 escapes are gone (em-dashes now raw UTF-8)"
+  },
+  {
+   "path": "internal/fsm/judge/gapclaim_corpus_test.go",
+   "line": 60,
+   "note": "Update-path P1 fix (stale no-diff detect flags) re-verified by execution: flipped one no-diff record's detect to false, ran CLAIMCORPUS_UPDATE=1 — the run detected the drift ('Detect drifted... got true, want false'), rewrote all 131 records, restored the flag (29 no-diff detect=true), and the tree was restored byte-identical to HEAD 91a0190"
+  },
+  {
+   "path": "internal/fsm/judge/gapclaim_corpus_test.go",
+   "line": 137,
+   "note": "Note round-trip pinned by TestGapClaimEvalCorpusPreservesVendorNote (passes): the regeneration-contract note survives a CLAIMCORPUS_UPDATE cycle"
+  }
+ ],
+ "findings": [
+  {
+   "severity": "P2",
+   "disposition": "follow-up",
+   "note": "Per-record provenance (url or run_id) remains absent — fourth consecutive pass noting it. A record's origin is recoverable only by text-searching harnesseval's readjudication3 files; the note documents the convention and re-derivation is possible, so it stays a nice-to-have for auditability, not a defect. Re-raised only to keep the follow-up ledger continuous; recommend the parent either lands it (one regen cycle with a url field per record) or formally closes it.",
+   "evidence": [
+    {
+     "path": "internal/fsm/judge/testdata/evalcorpus/records.json",
+     "line": 1,
+     "note": "record shape is {diff_file, issue_text, lens, v2_verdict, detect, evidence} with no origin reference"
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}

@@ -1,0 +1,73 @@
+{
+ "schemaVersion": 1,
+ "id": "shard-1-2.58888c69bf3023a1",
+ "kind": "shard",
+ "shardId": "shard-1-2",
+ "shardHash": "58888c69bf3023a1",
+ "planHash": "33ac073288a8645e",
+ "verdict": "PASS",
+ "reviewer": "glm-5.3-last-shard-1-2",
+ "reviewedAt": "2026-09-07T03:20:00Z",
+ "evidence": [
+  {
+   "path": "internal/fsm/kind/kind_test.go",
+   "line": 1190,
+   "note": "Read the full +554-line delta; all 11 new tests plus helpers read line-by-line against kind.go's claimcheck wiring (escalation-carrying secondOpinion, hoisted Detect, outcome-string classification, golden-match counting)"
+  },
+  {
+   "path": "internal/fsm/kind/kind_test.go",
+   "line": 1406,
+   "note": "TestAdjudicateGapClaimRollupOutcomes verified holding fresh (-count=1): all four scripted arms pass AND each now calls assertRollupSums — the sum identity is pinned in the rejected-with-evidence, rejected-without-evidence, confirmed, and unverified arms"
+  },
+  {
+   "path": "internal/fsm/kind/kind_test.go",
+   "line": 1597,
+   "note": "TestEscalationFailureOnGapClaimCountsUnverified now pins rejected==0 alongside confirmed==0/unverified==1 (the prior round's named gap), covering both transport-error and unparseable-verdict subtests"
+  },
+  {
+   "path": "internal/fsm/kind/kind_test.go",
+   "line": 1665,
+   "note": "TestGoldenMatchedGapClaimCountsInRollup pins confirmed_without_evidence==0 (a match verifies the finding, not the absence) — prior round's named gap, fixed"
+  },
+  {
+   "path": "rubrics/task-done-review-rubric.md",
+   "line": 12,
+   "note": "Evidence-of-Absence rule present with the full search-pattern list including specs/** alongside spec/**; verified consistent with the adjudication-side net (ContextForGapClaim fires on finding text regardless of lens, so the deterministic-gate/Completeness deferral in testing-quality's Anti-Overlap is not contradicted — the adjudicated position from the dogfooded run)"
+  },
+  {
+   "path": "rubrics/testing-quality-rubric.md",
+   "line": 44,
+   "note": "Evidence-of-Absence section verified: search-shown-in-finding requirement, specific-assertion-gap-or-drop rule, paths-checked statement requirement, and the Evidence Rules closing sentence; specs/** present in the pattern list"
+  },
+  {
+   "path": "internal/fsm/kind/kind_test.go",
+   "line": 1,
+   "note": "Fresh full-package run -count=1: ok (2.65s); gofmt -l clean; go vet clean; mutation experiments reverted — git status shows no diff in internal/"
+  }
+ ],
+ "findings": [
+  {
+   "severity": "P2",
+   "disposition": "advisory",
+   "note": "The rollup sum identity (claims == confirmed + rejected + unverified) is unpinned in exactly the two arms where a double-count regression would live: the escalation-RESCUED arm and the GOLDEN-MATCHED arm. VERIFIED BY EXECUTION: (1) adding gapUnverified++ to the rescued branch (kind.go secondOpinion success path) passes the entire test suite — TestEscalatedGapClaimKeepsItsEvidenceAndCountsAsConfirmed asserts claims==1, confirmed==1, rejected==0 but not unverified==0 nor the sum, so claims=1/confirmed=1/unverified=1/rejected=0 would pass; (2) adding gapUnverified++ to the golden-match branch passes the entire suite — TestGoldenMatchedGapClaimCountsInRollup asserts claims==1, confirmed==1, confirmed_without_evidence==0 but not rejected/unverified/sum. Both mutations reverted; the committed implementation is correct — this is test-strength only. The prior round's advisory named this class and the amend fixed the two spots it listed (the escalation-FAILURE arm and the standalone sum test's rejected-only coverage), but assertRollupSums is not called in the rescued or matched arms. Fix is one line each: assertRollupSums(t, m) in both tests' rollup assertions (the helper already exists); that also makes the standalone TestGapClaimRollupSums fully redundant (its two arms are strict subsets of the four scripted arms) — delete it or extend it to the rescued/matched arms instead.",
+   "evidence": [
+    {
+     "path": "internal/fsm/kind/kind_test.go",
+     "line": 1536,
+     "note": "rescued-arm assertions stop at confirmed==1 && rejected==0; no assertRollupSums, no unverified==0"
+    },
+    {
+     "path": "internal/fsm/kind/kind_test.go",
+     "line": 1700,
+     "note": "matched-arm assertions stop at claims==1, confirmed==1, confirmed_without_evidence==0; no assertRollupSums, no rejected==0/unverified==0"
+    },
+    {
+     "path": "internal/fsm/kind/kind_test.go",
+     "line": 1718,
+     "note": "TestGapClaimRollupSums covers only the two scripted rejected arms (gapDiff, plainDiff with real:false) — subsets of TestAdjudicateGapClaimRollupOutcomes which now asserts the identity itself"
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}

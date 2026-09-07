@@ -1,0 +1,63 @@
+{
+ "schemaVersion": 1,
+ "id": "shard-3.75805877afaa1090",
+ "kind": "shard",
+ "shardId": "shard-3",
+ "shardHash": "75805877afaa1090",
+ "planHash": "33ac073288a8645e",
+ "verdict": "PASS",
+ "reviewer": "glm-5.3-last-shard-3",
+ "reviewedAt": "2026-09-07T03:20:00Z",
+ "evidence": [
+  {
+   "path": "internal/claimcheck/claimcheck.go",
+   "line": 211,
+   "note": "camelJoin Unicode fix verified by execution: TestCamelJoinNonASCIIUpper (ÜberDriver → über_driver) and TestCamelJoinNonASCII (Café no-split) both pass at -count=1; acronym rule tracks lastUpper across the original rune's case"
+  },
+  {
+   "path": "internal/claimcheck/claimcheck.go",
+   "line": 280,
+   "note": "Own-file skip now symmetric: Finding.File normalized for ./, a/, b/ spellings AND Block.Path through normalizePath (line 294) — TestEvidenceForSkipsOwnFileInAllSpellings and TestEvidenceForOwnFileSymmetricOnBothSides both pass"
+  },
+  {
+   "path": "internal/claimcheck/claimcheck.go",
+   "line": 107,
+   "note": "ident doc comment now matches its regex (≥4 chars total); the dead len>=2 guard in lineTokens is gone (words[tl] set unconditionally, line 246) — verified against regex behavior empirically in the prior round and re-read here"
+  },
+  {
+   "path": "internal/fsm/judge/prompts.go",
+   "line": 57,
+   "note": "The 4-line RubricAddendum addition is the only change to this file in the branch: product-mode only (TestCalibrationSendsThePureReferencePrompt passes; adjudicate.calibration.golden byte-untouched), vendored template strings unchanged (TestJ1Goldens, TestOtherKindsAreUnchanged pass), coherent with the pre-existing unpinned-invariant bullet per the dogfooded adjudication (0.98, with injected evidence)"
+  },
+  {
+   "path": "internal/claimcheck/claimcheck.go",
+   "line": 165,
+   "note": "Corpus pin stability: TestGapClaimEvalCorpus passes at -count=2 (131 records, 21 hallucinated gap-claims, 14 with covering evidence — deterministic ordering with path tie-break)"
+  },
+  {
+   "path": "internal/claimcheck/claimcheck.go",
+   "line": 178,
+   "note": "Probe (created, run, removed): a dotted stem from a multi-dot filename (config.test.js → 'config.test') is INERT — words/joins/concat carry no dots so it can never match — verified no misfire, no panic"
+  }
+ ],
+ "findings": [
+  {
+   "severity": "P2",
+   "disposition": "follow-up",
+   "note": "Dotted-stem inertness is a known recall limit worth one doc-comment line, not a defect: bareFile stems from multi-dot filenames (e.g. 'foo.test.tsx' → 'foo.test', 'store-test.js.es6' → 'store-test.js') can never match words/joins/concat because none of those token sets contain dots. Verified inert by probe (cannot misfire, only fails to contribute recall); the measured corpus pin (14/21) already bakes this in. Same family as the previously-adjudicated v1.2.3 version-token advisory, strictly weaker.",
+   "evidence": [
+    {
+     "path": "internal/claimcheck/claimcheck.go",
+     "line": 166,
+     "note": "stem := strings.TrimSuffix(m, \".\"+lastExt(m)) strips only the LAST extension; multi-dot names leave a dotted stem"
+    },
+    {
+     "path": "internal/claimcheck/claimcheck.go",
+     "line": 253,
+     "note": "matching is words[t] || joins[t] || strings.Contains(concat, ...) — words come from ident (no dots), joins are underscore-joined, concat is identifier concatenation: none can contain a dot"
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}
