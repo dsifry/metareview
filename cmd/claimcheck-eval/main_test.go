@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // The fixture is a miniature harnesseval: one run whose PR diff carries a covering spec
@@ -258,5 +259,42 @@ func TestEvaluateFailsOnUnparsableCacheButSkipsMissing(t *testing.T) {
 	}
 	if err := evaluate(options{dir: dir, framework: "f"}, &out, &errb); err == nil {
 		t.Fatal("an unparsable cached diff must fail the run, not silently report no-evidence")
+	}
+}
+
+// The confirmed shard-review P2s: skipped claims (no cached diff) must be disclosed in the
+// report so the matrix sums visibly; every missing URL is named; clip never splits a rune.
+func TestReportDisclosesSkippedClaims(t *testing.T) {
+	// r2's URL has no cached diff: its one claim is counted but skipped from the matrix.
+	records, err := loadRecords("testdata/mini", "test-fw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, missing, fatal := loadDiffs("testdata/mini", records)
+	if fatal != nil {
+		t.Fatal(fatal)
+	}
+	var out, errb bytes.Buffer
+	if err := evaluate(options{dir: "testdata/mini", framework: "test-fw"}, &out, &errb); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "claims skipped (no cached diff): 1") {
+		t.Errorf("the report must disclose skipped claims so the matrix visibly sums:\n%s", s)
+	}
+	// every missing URL is named on stderr, not one map-iteration-random victim
+	if !strings.Contains(errb.String(), "org/repo/pull/2") {
+		t.Errorf("the missing URL must be named:\n%s", errb.String())
+	}
+	if missing == nil || !strings.Contains(missing.Error(), "org/repo/pull/2") {
+		t.Errorf("loadDiffs' missing error must name the URL: %v", missing)
+	}
+}
+
+func TestClipIsRuneSafe(t *testing.T) {
+	// a multibyte char at the cut boundary must not be split
+	s := strings.Repeat("é", 10) // 20 bytes
+	if c := clip(s, 7); !utf8.ValidString(c) {
+		t.Errorf("clip produced invalid UTF-8: %q", c)
 	}
 }

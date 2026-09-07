@@ -567,17 +567,24 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 	// below with zero evidence found.
 	gapClaims, gapEvidence, gapConfirmed, gapConfirmedNoEvidence, gapRejected, gapRejectedEvidence, gapUnverified := 0, 0, 0, 0, 0, 0, 0
 	for c, cand := range cands {
-		if seen[c] {
-			continue
-		}
-		// #140: detect the claim class FIRST — a claim is MADE regardless of what the
-		// evidence paths below do with it, and the metric's denominator counts claims,
-		// not adjudicated claims. A gap claim kept for a human (no evidence, unparseable
-		// verdict) still shows up as made + unverified.
+		// #140: detect the claim class before ANY branch that can resolve a candidate
+		// without it — including the golden-match skip. A claim is MADE regardless of how
+		// it is resolved (matched, adjudicated, or kept for a human), and the metric's
+		// denominator counts claims, not adjudicated claims.
 		var claim *judge.ClaimInfo
 		if class, ok := claimcheck.Detect(cand.IssueText); ok {
 			claim = &judge.ClaimInfo{Class: class}
 			gapClaims++
+		}
+		if seen[c] {
+			// A golden-matched gap claim is a true positive by the eval's own standard
+			// (the golden IS the human-verified finding). It counts as made + confirmed —
+			// but not as confirmed_without_evidence, the metric's verified-absent: the
+			// match verified the finding, not the absence the claim asserts.
+			if claim != nil {
+				gapConfirmed++
+			}
+			continue
 		}
 		// No evidence, no question. The verdict schema is one boolean, so a judge that cannot
 		// see the file still has to answer true or false, and "I cannot verify this" comes back

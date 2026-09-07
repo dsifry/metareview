@@ -250,3 +250,17 @@ func TestEvidenceForOrdersByScore(t *testing.T) {
 		t.Errorf("not score-ranked: %+v", ev)
 	}
 }
+
+// A finding whose file is spelled with the diff-header "b/" prefix (reviewers quoting diff
+// headers produce exactly this) must still skip its own file as evidence.
+func TestEvidenceForSkipsOwnFileInAllSpellings(t *testing.T) {
+	blocks := []Block{
+		{Path: "spec/foo_spec.rb", Added: []string{"it \"foo_spec does x\" do"}},
+	}
+	for _, own := range []string{"spec/foo_spec.rb", "b/spec/foo_spec.rb", "./spec/foo_spec.rb", "a/spec/foo_spec.rb"} {
+		f := Finding{File: own, Text: "spec/foo_spec.rb contains no real assertion for foo_spec"}
+		if ev := EvidenceFor(blocks, f, 4); len(ev) != 0 {
+			t.Errorf("own file spelled %q was not skipped: %+v", own, ev)
+		}
+	}
+}

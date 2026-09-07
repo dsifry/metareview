@@ -1644,3 +1644,52 @@ type errJudge struct{}
 func (errJudge) Call(context.Context, judge.Request) (judge.Verdict, error) {
 	return judge.Verdict{}, errors.New("transport down")
 }
+
+// A gap claim that wins a golden match is confirmed without entering the candidate loop's
+// claim accounting; the #140 metric counts claims-made for eval/calibration runs where
+// goldens exist, so matched gap claims must not vanish from the rollup.
+func TestGoldenMatchedGapClaimCountsInRollup(t *testing.T) {
+	// recordingJudge confirms every match call (Decision true, confidence 0.9), so the
+	// gap claim wins the golden and never reaches the adjudication arm.
+	r := mustNew(t, &recordingJudge{}, false)
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	snap := run.Snapshot{RunID: "mrv-gapgold", Iteration: 1,
+		Goldens: []run.Golden{{Comment: "per-host category assignment has no test verifying an embedded topic's category"}},
+		Findings: []run.Finding{
+			{IssueText: "per-host category assignment has no test verifying an embedded topic's category", File: "app/models/topic_embed.rb", Line: 37},
+		}}
+	a := &allAudits{}
+	raw, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: snap, Node: adjNode, Diff: machine.Diff{Text: gapDiff}, StartIndex: 0, Audit: a.fn})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var out adjudicateOut
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Confirmed) != 1 || out.Confirmed[0].Verdict != run.VerdictMatched {
+		t.Fatalf("the gap claim must match the golden: %+v", out.Confirmed)
+	}
+	for _, ev := range a.events {
+		if ev.Type != run.TypeRecord {
+			continue
+		}
+		var d run.RecordData
+		if err := json.Unmarshal(ev.Data, &d); err != nil {
+			t.Fatal(err)
+		}
+		if d.Name != "claimcheck" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal(d.Data, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m["claims"].(float64) != 1 || m["confirmed"].(float64) != 1 {
+			t.Errorf("a golden-matched gap claim must count as made+confirmed: %v", m)
+		}
+		return
+	}
+	t.Fatal("no claimcheck record was audited for a golden-matched gap claim")
+}

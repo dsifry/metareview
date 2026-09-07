@@ -269,7 +269,9 @@ func EvidenceFor(blocks []Block, f Finding, max int) []Evidence {
 	if len(strong)+len(weak) == 0 {
 		return nil
 	}
-	own := strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(f.File, "./"), "a/"))
+	// "b/" joins "./" and "a/" — reviewers quoting diff headers emit all three spellings
+	// (judge.NormalizePath documents them), and each must recognize the finding's own file.
+	own := strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(f.File, "./"), "a/"), "b/"))
 	var out []Evidence
 	for _, b := range blocks {
 		if !IsTestPath(b.Path) || IsSupportPath(b.Path) {

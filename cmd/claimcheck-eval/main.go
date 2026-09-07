@@ -139,14 +139,13 @@ func loadDiffs(dir string, records []record) (diffs map[string]string, missing, 
 		urls[r.URL] = true
 	}
 	diffs = map[string]string{}
+	var missingURLs []string
 	for u := range urls {
 		sum := sha1.Sum([]byte(u))
 		p := filepath.Join(dir, ".cache", "pr_diffs", hex.EncodeToString(sum[:])[:16]+".json")
 		raw, err := os.ReadFile(p)
 		if err != nil {
-			if missing == nil {
-				missing = fmt.Errorf("diff for %s: %w", u, err)
-			}
+			missingURLs = append(missingURLs, u)
 			continue
 		}
 		var c struct {
@@ -156,6 +155,12 @@ func loadDiffs(dir string, records []record) (diffs map[string]string, missing, 
 			return nil, nil, fmt.Errorf("corrupt cached diff %s: %w", p, err)
 		}
 		diffs[u] = c.Diff
+	}
+	// Every missing URL is named, sorted: naming one map-iteration-random victim hides the
+	// rest, and the operator re-fetches only what they were told about.
+	sort.Strings(missingURLs)
+	if len(missingURLs) > 0 {
+		missing = fmt.Errorf("no cached diff for %d PR(s): %s", len(missingURLs), strings.Join(missingURLs, ", "))
 	}
 	return diffs, missing, nil
 }
@@ -183,7 +188,7 @@ func (e *errWriter) println(s string) {
 
 func report(w io.Writer, records []record, diffs map[string]string, o options) error {
 	out := &errWriter{w: w}
-	var total, claims int
+	var total, claims, skipped int
 	matrix := map[[2]string]int{}
 	lensClaims := map[string]int{}
 	byLens := map[string]int{}
@@ -197,6 +202,9 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 		lensClaims[r.SourceLens]++
 		diff, ok := diffs[r.URL]
 		if !ok {
+			// counted as a claim made, but unmeasurable without its diff: disclosed below
+			// so the matrix visibly sums to claims minus skipped.
+			skipped++
 			continue
 		}
 		ev := judge.GapClaimEvidence(diff, run.Finding{IssueText: r.IssueText}, 3)
@@ -220,6 +228,9 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 		pct = 100 * float64(claims) / float64(total)
 	}
 	out.printf("records: %d  claims detected: %d (%.1f%%)\n", total, claims, pct)
+	if skipped > 0 {
+		out.printf("claims skipped (no cached diff): %d\n", skipped)
+	}
 	verdicts := []string{"bug", "important_non_bug", "hallucination", "unresolved"}
 	out.printf("\n%-14s", "evidence\\v2")
 	for _, v := range verdicts {
@@ -255,5 +266,10 @@ func clip(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	// rune-safe: a byte cut can split a multibyte character and print mojibake
+	r := []rune(s)
+	for len(string(r)) > n && len(r) > 0 {
+		r = r[:len(r)-1]
+	}
+	return string(r) + "…"
 }

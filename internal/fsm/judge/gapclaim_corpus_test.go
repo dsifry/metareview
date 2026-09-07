@@ -66,7 +66,14 @@ func TestGapClaimEvalCorpus(t *testing.T) {
 		// A record with no diff_file comes from a PR whose diff carries no test-shaped
 		// files (the minimized corpus keeps only test sections): there is nothing to
 		// search, so its expectation is empty by construction and Detect is the pin.
+		// The update write happens BEFORE the continue so regeneration refreshes these
+		// records too — the shard review reproduced a stale detect flag surviving a
+		// "rewrote 131 records" run that had skipped them.
 		if rec.DiffFile == "" {
+			if update {
+				rec.Detect, rec.Evidence = detected, nil
+				corpus.Records[i] = rec
+			}
 			if len(rec.Evidence) != 0 {
 				t.Errorf("a record with no diff must expect no evidence: %q", clipCorpus(rec.IssueText))
 			}
