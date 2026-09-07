@@ -151,3 +151,36 @@ func TestRepoEvidencePathsFailOpen(t *testing.T) {
 		t.Errorf("paths = %v; want none on a failed search", paths)
 	}
 }
+
+// grepHead reads NUL-separated raw output: a filename with spaces survives, absence
+// (exit 1) stays distinct from failure, and a transport error surfaces.
+func TestGrepHeadNulSeparated(t *testing.T) {
+	h, c, snap := repoHarness(t)
+	grep := c.grepHead(c.ctx, h.root, snap.Head)
+	if paths, err := grep("zzz_no_such_token_zzz"); err != nil || len(paths) != 0 {
+		t.Errorf("no matches = %v, %v; want nil, nil", paths, err)
+	}
+	if paths, err := grep("topic"); err != nil || len(paths) != 1 || paths[0] != "spec/models/topic_embed_spec.rb" {
+		t.Errorf("matches = %v, %v", paths, err)
+	}
+	realExec := c.deps.Exec
+	c.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
+		return []byte(snap.Head + ":spec/with space.rb\x00"), nil, 0, nil
+	}
+	if paths, err := grep("topic"); err != nil || len(paths) != 1 || paths[0] != "spec/with space.rb" {
+		t.Errorf("NUL-separated grep output = %v, %v; want the spaced path", paths, err)
+	}
+	c.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
+		return nil, nil, 128, nil
+	}
+	if _, err := grep("topic"); err == nil {
+		t.Error("exit 128 must be an error, not an empty result")
+	}
+	c.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
+		return nil, nil, 0, context.Canceled
+	}
+	if _, err := grep("topic"); err == nil {
+		t.Error("a transport error must surface")
+	}
+	c.deps.Exec = realExec
+}

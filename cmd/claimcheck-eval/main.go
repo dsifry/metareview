@@ -222,7 +222,7 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 	var missingRepos error
 	var noClone int
 	if o.repos != "" {
-		pass, missingRepos = resolveRepos(o, records, reportGit)
+		pass, missingRepos = resolveRepos(o, records, reportGit, reportGitRaw)
 		if missingRepos != nil {
 			_, _ = fmt.Fprintln(out.w, "claimcheck-eval:", missingRepos)
 		}
@@ -253,14 +253,17 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 		ev := judge.GapClaimEvidence(diff, f, judge.MaxGapEvidenceFiles)
 		// #146: the repo-side search at the PR's pinned head, when the pass is on.
 		var repoEv judge.RepoEvidence
+		var repoErr, noCloneClaim bool
 		if pass != nil && pass.rev(r.URL) != "" {
 			var err error
 			if repoEv, err = pass.search(r.URL, f); err != nil {
 				repoErrs++
+				repoErr = true
 				repoEv = judge.RepoEvidence{Ran: false}
 			}
 		} else if pass != nil {
 			noClone++
+			noCloneClaim = true
 		}
 		var found string
 		switch {
@@ -270,6 +273,10 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 			} else {
 				found = "no-evidence"
 			}
+		case repoErr:
+			found = "repo-error"
+		case noCloneClaim:
+			found = "no-clone"
 		case len(ev) > 0 && len(repoEv.Evidence) > 0:
 			found = "both"
 		case len(ev) > 0:
@@ -303,7 +310,7 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 	}
 	rows := []string{"evidence", "no-evidence"}
 	if pass != nil {
-		rows = []string{"both", "diff-only", "repo-only", "no-evidence"}
+		rows = []string{"both", "diff-only", "repo-only", "no-evidence", "no-clone", "repo-error"}
 		out.printf("claims without a repo clone (measured on the diff only): %d\n", noClone)
 		out.printf("repo search errors: %d\n", repoErrs)
 	}
@@ -323,7 +330,8 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 	halWith, halWo := matrix[[2]string{"evidence", "hallucination"}], matrix[[2]string{"no-evidence", "hallucination"}]
 	if pass != nil {
 		halWith = matrix[[2]string{"both", "hallucination"}] + matrix[[2]string{"diff-only", "hallucination"}]
-		halWo = matrix[[2]string{"repo-only", "hallucination"}] + matrix[[2]string{"no-evidence", "hallucination"}]
+		halWo = matrix[[2]string{"repo-only", "hallucination"}] + matrix[[2]string{"no-evidence", "hallucination"}] +
+			matrix[[2]string{"no-clone", "hallucination"}] + matrix[[2]string{"repo-error", "hallucination"}]
 	}
 	if halWith+halWo > 0 {
 		out.printf("\nhallucinated gap-claims with covering evidence in the diff: %d/%d\n", halWith, halWith+halWo)

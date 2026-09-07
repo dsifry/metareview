@@ -25,18 +25,28 @@ import (
 // sites (1 = no grep matches), so they travel as code, not error.
 type gitRunner func(ctx context.Context, dir string, args ...string) (string, int, error)
 
+// gitRawRunner returns stdout byte for byte (file content, NUL-separated listings).
+type gitRawRunner func(ctx context.Context, dir string, args ...string) ([]byte, int, error)
+
 func realGit(ctx context.Context, dir string, args ...string) (string, int, error) {
+	out, code, err := realGitRaw(ctx, dir, args...)
+	return strings.TrimSpace(string(out)), code, err
+}
+
+// realGitRaw returns stdout byte for byte — a trimmed blob shifts every line below its
+// leading blank lines (the showFile lesson).
+func realGitRaw(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
-			return strings.TrimSpace(out.String()), ee.ExitCode(), nil
+			return out.Bytes(), ee.ExitCode(), nil
 		}
-		return "", -1, err
+		return nil, -1, err
 	}
-	return strings.TrimSpace(out.String()), 0, nil
+	return out.Bytes(), 0, nil
 }
 
 // prURL parses the harnesseval record URLs: github.com/<org>/<repo>/pull/<n>.
@@ -46,6 +56,7 @@ var prURL = regexp.MustCompile(`github\.com/([^/]+)/([^/]+)/pull/(\d+)$`)
 type repoPass struct {
 	reposDir string
 	runGit   gitRunner
+	runRaw   gitRawRunner
 	revs     map[string]string // url → head rev
 	dirs     map[string]string // url → clone dir
 }
@@ -54,13 +65,16 @@ type repoPass struct {
 // per-claim search-error path without a corrupted clone. Production uses realGit.
 var reportGit gitRunner = realGit
 
+// reportGitRaw is report's raw git seam (blob content, NUL-separated listings).
+var reportGitRaw gitRawRunner = realGitRaw
+
 // resolveRepos pins a head rev for every record URL that has a clone. Missing clones and
 // unparseable URLs are returned as one error naming each — the operator fetches what they
 // were told about, exactly like the missing-diff disclosure. A failed fetch or rev-parse
 // for an EXISTING clone is also a miss (pinned to nothing): measuring the wrong rev would
 // be worse than measuring none.
-func resolveRepos(o options, records []record, runGit gitRunner) (*repoPass, error) {
-	p := &repoPass{reposDir: o.repos, runGit: runGit, revs: map[string]string{}, dirs: map[string]string{}}
+func resolveRepos(o options, records []record, runGit gitRunner, runRaw gitRawRunner) (*repoPass, error) {
+	p := &repoPass{reposDir: o.repos, runGit: runGit, runRaw: runRaw, revs: map[string]string{}, dirs: map[string]string{}}
 	urls := map[string]bool{}
 	for _, r := range records {
 		urls[r.URL] = true
@@ -73,6 +87,13 @@ func resolveRepos(o options, records []record, runGit gitRunner) (*repoPass, err
 			continue
 		}
 		org, repo, n := m[1], m[2], m[3]
+		// The components join into filesystem paths and reach git as arguments, and the URL
+		// is untrusted record data: only plain name components proceed — ".." or anything
+		// with a separator must never reach dirExists or a git subprocess.
+		if !safeComponent(org) || !safeComponent(repo) {
+			missing = append(missing, fmt.Sprintf("%s/%s#%s (unsafe name)", org, repo, n))
+			continue
+		}
 		dir := ""
 		for _, cand := range []string{
 			joinDir(o.repos, org, repo),
@@ -118,11 +139,12 @@ func (p *repoPass) search(url string, f run.Finding) (judge.RepoEvidence, error)
 	return judge.RepoTestEvidence(p.grepHead(ctx, dir, rev), p.showHead(ctx, dir, rev), f, judge.MaxGapEvidenceFiles)
 }
 
-// grepHead mirrors the adjudicator's seam: git grep at the pinned rev, with the rev:
-// prefix stripped and exit 1 kept distinct from failure.
+// grepHead mirrors the adjudicator's seam: git grep at the pinned rev, NUL-separated (-z)
+// and read raw — a filename with spaces or a trailing newline must survive — and exit 1
+// stays distinct from failure.
 func (p *repoPass) grepHead(ctx context.Context, dir, rev string) judge.GrepPaths {
 	return func(pattern string) ([]string, error) {
-		out, code, err := p.runGit(ctx, dir, "grep", "-l", "-i", "-E", pattern, rev)
+		out, code, err := p.runRaw(ctx, dir, "grep", "-l", "-i", "-E", "-z", pattern, rev)
 		if err != nil {
 			return nil, err
 		}
@@ -131,11 +153,11 @@ func (p *repoPass) grepHead(ctx context.Context, dir, rev string) judge.GrepPath
 		}
 		prefix := rev + ":"
 		var paths []string
-		for _, line := range strings.Split(out, "\n") {
-			if line = strings.TrimSpace(line); line == "" {
+		for _, entry := range strings.Split(string(out), "\x00") {
+			if entry == "" {
 				continue
 			}
-			paths = append(paths, strings.TrimPrefix(line, prefix))
+			paths = append(paths, strings.TrimPrefix(entry, prefix))
 		}
 		return paths, nil
 	}
@@ -155,18 +177,35 @@ func (p *repoPass) showHead(ctx context.Context, dir, rev string) judge.ShowHead
 		if strings.Trim(listed, "\x00") == "" {
 			return nil, false, nil
 		}
-		body, code, err := p.runGit(ctx, dir, "cat-file", "blob", rev+":"+path)
+		body, code, err := p.runRaw(ctx, dir, "cat-file", "blob", rev+":"+path)
 		if err != nil {
 			return nil, false, err
 		}
 		if code != 0 {
 			return nil, false, fmt.Errorf("git cat-file blob %s:%s failed with exit code %d", rev, path, code)
 		}
-		return []byte(body), true, nil
+		return body, true, nil
 	}
 }
 
 func joinDir(parts ...string) string { return strings.Join(parts, "/") }
+
+// safeComponent accepts plain repository name components: a letter or digit first, then
+// letters, digits, dot, dash, underscore. ".." fails the first-character rule, as does
+// anything carrying a separator.
+func safeComponent(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		ok := c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || (i > 0 && (c == '.' || c == '-' || c == '_'))
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
 
 func dirExists(p string) bool {
 	st, err := os.Stat(p)

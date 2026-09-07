@@ -238,3 +238,72 @@ func TestAdjudicateRepoSearchDedupsAgainstDiffEvidence(t *testing.T) {
 		t.Errorf("claim evidence lists the covering spec %d times, want 1", n)
 	}
 }
+
+// The memo key must include the finding's own file: RepoTestEvidence skips candidates
+// equal to f.File, so two gap claims with the same subject tokens but different files
+// need different evidence — sharing one memo entry would hand finding B its own test
+// file as covering evidence (the exact own-file rule the search otherwise preserves).
+func TestAdjudicateRepoSearchMemoKeysOnOwnFile(t *testing.T) {
+	calls := 0
+	var seenFiles []string
+	r, err := New(Deps{Judge: &recordingJudge{}, RepoSearch: func(ctx context.Context, snap run.Snapshot, f run.Finding) (judge.RepoEvidence, error) {
+		calls++
+		seenFiles = append(seenFiles, f.File)
+		return judge.RepoEvidence{Ran: true}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	snap := run.Snapshot{RunID: "mrv-memo2", Iteration: 1, Findings: []run.Finding{
+		{IssueText: "parseFoo is untested", File: "pkg/parse.go", Line: 1},
+		{IssueText: "parseFoo is also untested", File: "pkg/parse_test.go", Line: 9},
+	}}
+	a := &allAudits{}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: snap, Node: adjNode, Diff: machine.Diff{Text: repoAppOnlyDiff}, StartIndex: 0, Audit: a.fn}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("RepoSearch called %d times for two claims with the same subject but different own files; want 2", calls)
+	}
+}
+
+// A repo-search seam error is recorded in the claimcheck rollup, so the audit shows the
+// searches that never ran instead of leaving them indistinguishable from zero claims.
+func TestAdjudicateRepoSearchErrorRecordedInRollup(t *testing.T) {
+	r, err := New(Deps{Judge: &recordingJudge{}, RepoSearch: func(context.Context, run.Snapshot, run.Finding) (judge.RepoEvidence, error) {
+		return judge.RepoEvidence{}, errors.New("git grep failed")
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	snap := run.Snapshot{RunID: "mrv-err2", Iteration: 1, Findings: []run.Finding{
+		{IssueText: "parseFoo is untested", File: "pkg/parse.go", Line: 1},
+	}}
+	a := &allAudits{}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: snap, Node: adjNode, Diff: machine.Diff{Text: repoAppOnlyDiff}, StartIndex: 0, Audit: a.fn}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var rollup *run.RecordData
+	for _, ev := range a.events {
+		if ev.Type != run.TypeRecord {
+			continue
+		}
+		var d run.RecordData
+		if err := json.Unmarshal(ev.Data, &d); err != nil {
+			t.Fatal(err)
+		}
+		if d.Name == "claimcheck" {
+			rollup = &d
+		}
+	}
+	if rollup == nil {
+		t.Fatal("no claimcheck record")
+	}
+	if !strings.Contains(string(rollup.Data), `"repo_search_errors":1`) {
+		t.Errorf("rollup must record the failed search: %s", rollup.Data)
+	}
+}

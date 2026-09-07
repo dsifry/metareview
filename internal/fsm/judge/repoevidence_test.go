@@ -266,3 +266,72 @@ func TestRepoTestEvidenceCandidateCap(t *testing.T) {
 		}
 	}
 }
+
+// The candidate cap must not be alphabetical: grep recalls by content, and the 65th
+// path alphabetically can be the strongest subject match. Candidates are ranked by how
+// many subject tokens their PATH carries (strong tokens weigh more) before truncation,
+// so the reads spend themselves on the likeliest covering tests.
+func TestRepoTestEvidenceCandidateCapPrefersSubjectPaths(t *testing.T) {
+	repo := &fakeRepo{grepPaths: nil, files: map[string]string{}}
+	// 64 alphabetically-early candidates whose content merely mentions the weak subject
+	for i := 0; i < MaxRepoCandidates; i++ {
+		p := "spec/a" + string(rune('a'+i%26)) + string(rune('0'+i/26)) + "_spec.rb"
+		repo.grepPaths = append(repo.grepPaths, p)
+		repo.files[p] = "it 'mentions the widget is untested here' do\nend\n"
+	}
+	// the strong-subject match sorts LAST, its path names the subject, and its content
+	// is a strong-token hit (TopicEmbed → topic_embed) so it outranks the weak matches
+	strong := "spec/topic_embed_spec.rb"
+	repo.grepPaths = append(repo.grepPaths, strong)
+	repo.files[strong] = "expect(TopicEmbed.category_for).to be_present\n"
+	ev, err := RepoTestEvidence(repo.grep, repo.show, run.Finding{File: "app/models/topic_embed.rb", IssueText: "the widget is untested"}, 3)
+	if err != nil {
+		t.Fatalf("RepoTestEvidence: %v", err)
+	}
+	for _, e := range ev.Evidence {
+		if e.Path == strong {
+			return
+		}
+	}
+	t.Errorf("the path-named candidate was truncated away: %+v", ev.Evidence)
+}
+
+// A small repo body is injected as-is (clipBody's no-op path), and path ranking weighs
+// weak token matches in the path too.
+func TestRepoTestEvidenceSmallBodyAndWeakPathScore(t *testing.T) {
+	repo := &fakeRepo{grepPaths: []string{"spec/widget_spec.rb"},
+		files: map[string]string{"spec/widget_spec.rb": "expect(widget).to be_present\nit is untested\n"}}
+	ev, err := RepoTestEvidence(repo.grep, repo.show, run.Finding{File: "app/models/topic_embed.rb", IssueText: "the widget is untested"}, 3)
+	if err != nil {
+		t.Fatalf("RepoTestEvidence: %v", err)
+	}
+	if len(ev.Evidence) != 1 {
+		t.Fatalf("evidence = %+v", ev.Evidence)
+	}
+	if !strings.Contains(ev.Content["spec/widget_spec.rb"], "expect(widget)") || len(ev.Content["spec/widget_spec.rb"]) > 100 {
+		t.Errorf("a small body must be injected whole: %q", ev.Content["spec/widget_spec.rb"])
+	}
+}
+
+// Path ranking weighs weak token matches too: a path carrying a weak subject token
+// outranks one carrying none when the cap must cut.
+func TestRepoTestEvidenceCapRanksWeakPathMatches(t *testing.T) {
+	repo := &fakeRepo{grepPaths: nil, files: map[string]string{}}
+	for i := 0; i < MaxRepoCandidates; i++ {
+		p := "spec/b" + string(rune('a'+i%26)) + string(rune('0'+i/26)) + "_spec.rb"
+		repo.grepPaths = append(repo.grepPaths, p)
+		repo.files[p] = "it 'mentions the widget here' do\nend\n" // one weak token: never admitted
+	}
+	widget := "spec/widget_edge_spec.rb"
+	repo.grepPaths = append(repo.grepPaths, widget)
+	repo.files[widget] = "it 'mentions the widget is untested here' do\nend\n"
+	// alphabetically widget_edge sorts last and falls past the cap; path ranking keeps it.
+	// Its content is also the only two-token match, so the evidence names it.
+	ev, err := RepoTestEvidence(repo.grep, repo.show, run.Finding{File: "pkg/parse.go", IssueText: "the widget is untested"}, 1)
+	if err != nil {
+		t.Fatalf("RepoTestEvidence: %v", err)
+	}
+	if len(ev.Evidence) != 1 || ev.Evidence[0].Path != widget {
+		t.Errorf("evidence = %+v; want the weak-path-named candidate", ev.Evidence)
+	}
+}

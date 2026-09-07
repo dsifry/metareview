@@ -606,24 +606,40 @@ func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budge
 	}
 	if len(paths) == 0 {
 		out, truncated, hash := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget)
-		if repo != nil && repo.Ran {
+		if repo != nil && repo.Ran && len(repo.Evidence) == 0 {
 			out = gapClaimRepoNone + out
 		}
 		return out, truncated, hash, evidence
 	}
-	// same split as ContextForClaim: the declared file keeps two shares of the budget,
-	// every corroborating file one.
-	share := budget / (len(paths) + len(repoFiles) + 2)
+	// Same split as ContextForClaim: the declared file keeps two shares of the budget,
+	// every corroborating path one. Repository candidates' paths are already IN paths
+	// (they joined the normalized dedup above), so they are not counted again here —
+	// and each repo body is CLIPPED to its share: a full head file is not bounded by the
+	// diff the way SelectDiff hunks are, and an unclipped body could push the context
+	// far past the caller's budget while the truncated flag said complete.
+	share := budget / (len(paths) + 2)
 	// The primary's truncation flag is preserved, not inferred from byte length: a small
 	// elided block is easily outweighed by the disclosure and repeated file headers, which
 	// would send partial context to the adjudicator marked complete (CodeRabbit #145).
-	primary, primaryTruncated, _ := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget-share*(len(paths)+len(repoFiles)))
+	primary, primaryTruncated, _ := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget-share*len(paths))
+	bodyClipped := false
+	for i := range repoFiles {
+		clipped := clipBody(repoFiles[i].body, share)
+		if len(clipped) != len(repoFiles[i].body) {
+			bodyClipped = true
+		}
+		repoFiles[i].body = clipped
+	}
 	var b strings.Builder
 	if len(evidence) > 0 {
 		b.WriteString(gapClaimDisclosure)
 	}
 	if len(repoFiles) > 0 {
 		b.WriteString(gapClaimRepoDisclosure)
+	} else if repo != nil && repo.Ran && len(repo.Evidence) == 0 {
+		// The main path owes the same honesty as the early return: a completed search that
+		// found nothing is the search record the criterion asks the judge to cite.
+		b.WriteString(gapClaimRepoNone)
 	}
 	b.WriteString(primary)
 	for _, p := range paths {
@@ -636,7 +652,21 @@ func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budge
 	}
 	out = b.String()
 	sum := sha1.Sum([]byte(out))
-	return out, alreadyTruncated || primaryTruncated, hex.EncodeToString(sum[:]), evidence
+	return out, alreadyTruncated || primaryTruncated || bodyClipped, hex.EncodeToString(sum[:]), evidence
+}
+
+// clipBody cuts a repository file's bounded content to at most n bytes, on a line
+// boundary where one fits, with an elision marker so the judge can tell the body was
+// cut rather than the file simply ending there.
+func clipBody(body string, n int) string {
+	if len(body) <= n {
+		return body
+	}
+	cut := body[:n]
+	if i := strings.LastIndexByte(cut, '\n'); i > 0 {
+		cut = cut[:i+1]
+	}
+	return cut + "[metareview: repository file truncated at the context budget]\n"
 }
 
 // repoFile is one repository-head candidate the diff does not already cover: its bounded

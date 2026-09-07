@@ -78,8 +78,8 @@ func TestGapClaimCriterionRequiresASearchRecord(t *testing.T) {
 		t.Error("the pre-#146 caveat is stale now that the repository head is searched")
 	}
 	for _, want := range []string{
-		"repository head was also searched", // the criterion names the repo-side search
-		"search record",                     // and demands it be recorded before confirmation
+		"the search did not run or failed", // the criterion names the un-searched case,
+		"search record",
 	} {
 		if !strings.Contains(low, want) {
 			t.Errorf("gap-claim criterion missing %q", want)

@@ -573,19 +573,24 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		}
 	}
 	var rejected []run.Bug
-	// #146: repository-side covering-test evidence, memoized by subject-token string so
-	// two gap claims about the same subject share one search. A seam error is memoized
-	// too and fails open (diff-only evidence) the way resolveErr memoizes an unavailable
-	// sandbox: the claim is adjudicated, never dropped, and a failed search never reads
-	// as evidence of absence.
+	// #146: repository-side covering-test evidence, memoized by subject-token string and
+	// normalized own file (both shape the search) so equivalent claims share one search.
+	// A seam error is memoized too and fails open (diff-only evidence) the way resolveErr
+	// memoizes an unavailable sandbox: the claim is adjudicated, never dropped, and a
+	// failed search never reads as evidence of absence — it is counted in the rollup.
 	repoMemo := map[string]judge.RepoEvidence{}
 	repoErrMemo := map[string]bool{}
+	gapRepoErrors := 0
 	searchRepo := func(cand run.Finding) *judge.RepoEvidence {
 		if e.repoSearch == nil {
 			return nil
 		}
 		strong, weak := claimcheck.SubjectTokens(claimcheck.Finding{File: cand.File, Line: cand.Line, Text: cand.IssueText})
-		key := strings.Join(append(append([]string{}, strong...), weak...), " ")
+		// The key carries the normalized own file: RepoTestEvidence skips candidates equal
+		// to the finding's file, so two gap claims with the same subject but different own
+		// files need different evidence — sharing one memo entry would hand finding B its
+		// own test file as covering evidence for B's absence claim.
+		key := strings.Join(append(append([]string{}, strong...), weak...), " ") + "|" + judge.NormalizePath(cand.File)
 		if ev, ok := repoMemo[key]; ok {
 			return &ev
 		}
@@ -595,6 +600,7 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		ev, err := e.repoSearch(ctx, snap, cand)
 		if err != nil {
 			repoErrMemo[key] = true
+			gapRepoErrors++
 			return nil
 		}
 		repoMemo[key] = ev
@@ -755,6 +761,10 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 				"rejected":                   gapRejected,
 				"rejected_with_evidence":     gapRejectedEvidence,
 				"unverified":                 gapUnverified,
+				// #146: searches that could not run. Absence of a repo record means either
+				// "searched, none matched" or "the search failed" — this count makes the
+				// second case visible instead of leaving it folded into the first.
+				"repo_search_errors": gapRepoErrors,
 			}),
 		})
 		if aerr := in.Audit(run.Event{Type: run.TypeRecord, Data: data}); aerr != nil {

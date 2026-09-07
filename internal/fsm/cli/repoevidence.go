@@ -30,12 +30,13 @@ func (c *ctxDeps) repoSearch(root string, scenario *mockai.Scenario, mode judgeM
 	}
 }
 
-// grepHead returns the paths at rev whose content matches the RE2 pattern. git grep
-// prefixes each hit with "rev:" (unless searching the index), which is stripped; exit
-// code 1 is "no matches", not a failure, while any other nonzero exit is.
+// grepHead returns the paths at rev whose content matches the RE2 pattern. Output is
+// read raw and NUL-separated (-z) — a filename with spaces or a trailing newline must
+// survive — with the "rev:" prefix stripped per entry; git's exit 1 is "no matches",
+// not a failure, while any other nonzero exit is.
 func (c *ctxDeps) grepHead(ctx context.Context, root, rev string) judge.GrepPaths {
 	return func(pattern string) ([]string, error) {
-		out, code, err := c.gitCtx(ctx, root, "grep", "-l", "-i", "-E", pattern, rev)
+		out, code, err := c.gitRawCtx(ctx, root, "grep", "-l", "-i", "-E", "-z", pattern, rev)
 		if err != nil {
 			return nil, err
 		}
@@ -44,12 +45,11 @@ func (c *ctxDeps) grepHead(ctx context.Context, root, rev string) judge.GrepPath
 		}
 		prefix := rev + ":"
 		var paths []string
-		for _, line := range strings.Split(out, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
+		for _, entry := range strings.Split(string(out), "\x00") {
+			if entry == "" {
 				continue
 			}
-			paths = append(paths, strings.TrimPrefix(line, prefix))
+			paths = append(paths, strings.TrimPrefix(entry, prefix))
 		}
 		return paths, nil
 	}
@@ -68,6 +68,11 @@ func (c *ctxDeps) showHead(ctx context.Context, root, rev string) judge.ShowHead
 // the evidence paths for the escalation tree. A seam error yields no paths (escalation
 // stays available; the primary arm already failed open the same way) and never a hard
 // failure of the escalation itself.
+//
+// Deliberately not memoized against the executor's searchRepo: the escalation resolves
+// lazily, before the executor may have searched, so the caches cannot meet. The cost is
+// bounded — one search per gap-claim finding, per registry, and escalation is opt-in —
+// and re-running keeps escalationFor a pure function of the snapshot.
 func (c *ctxDeps) repoEvidencePaths(ctx context.Context, root string, snap run.Snapshot) []string {
 	var out []string
 	for _, f := range snap.Findings {

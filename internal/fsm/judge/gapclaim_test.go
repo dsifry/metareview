@@ -275,3 +275,54 @@ func evidencePaths(ev []claimcheck.Evidence) []string {
 	}
 	return out
 }
+
+// CodeRabbit findings from the adjudicated review of this branch (run
+// mrv-20260907-205458717470000): three defects in the repo-evidence assembly.
+
+// The nothing-matched disclosure must fire on the MAIN path too: diff-side paths being
+// present does not mean the repository search record exists. Only a search that ran and
+// found nothing says so — one that found matches (even all deduped against the diff) must not.
+func TestContextForGapClaimRepoNoneOnMainPath(t *testing.T) {
+	f := run.Finding{File: "app/models/topic_embed.rb", Line: 37,
+		IssueText: "per-host category assignment has no test verifying an embedded topic's category"}
+	// repo search ran, found nothing; the diff still contributes its own file hunks
+	out, _, _, _ := ContextForGapClaim(gapDiff, false, f, MaxDiffBytes, &RepoEvidence{Ran: true})
+	if !strings.Contains(out, gapClaimRepoNone) {
+		t.Errorf("a completed empty search must be disclosed even when diff paths exist:\n%s", out)
+	}
+	// a search that found matches (here deduped into the diff) must NOT say none-matched
+	repo := &RepoEvidence{Ran: true, Evidence: []claimcheck.Evidence{
+		{Path: "spec/models/topic_embed_spec.rb", Tokens: []string{"topic", "category"}, Score: 4},
+	}}
+	out, _, _, _ = ContextForGapClaim(gapDiff, false, f, MaxDiffBytes, repo)
+	if strings.Contains(out, gapClaimRepoNone) {
+		t.Errorf("a search with matches must not be disclosed as none-matched:\n%s", out)
+	}
+}
+
+// The budget contract: the primary keeps two shares, every corroborating path (diff or
+// repo) one share, and a repo body is CLIPPED to its share — the context can never grow
+// past the budget the caller handed in, and clipping marks the context truncated.
+func TestContextForGapClaimRepoBodiesStayInBudget(t *testing.T) {
+	f := run.Finding{File: "app/models/topic_embed.rb", Line: 37,
+		IssueText: "per-host category assignment has no test verifying an embedded topic's category"}
+	big := strings.Repeat("expect(post.topic.category).to be_present\n", 1000) // ~43KB body
+	repo := &RepoEvidence{Ran: true, Evidence: []claimcheck.Evidence{
+		{Path: "spec/models/topic_embed_spec.rb", Tokens: []string{"topic", "category"}, Score: 4},
+	}, Content: map[string]string{"spec/models/topic_embed_spec.rb": big}}
+	out, truncated, _, _ := ContextForGapClaim(repoOnlyDiff, false, f, MaxDiffBytes, repo)
+	if len(out) > MaxDiffBytes+shareSlack {
+		t.Errorf("context = %d bytes, budget %d (+%d slack): repo bodies must be clipped to their share", len(out), MaxDiffBytes, shareSlack)
+	}
+	if !truncated {
+		t.Error("a clipped repo body must mark the context truncated")
+	}
+	if !strings.Contains(out, "expect(post.topic.category)") {
+		t.Error("the clipped body must still carry the subject evidence")
+	}
+}
+
+// shareSlack allows the fixed disclosures and file headers atop the byte budget: the
+// contract under test is that the VARIABLE evidence (hunks + repo bodies) sums to the
+// budget, not that fixed strings are counted against it.
+const shareSlack = 1200

@@ -498,6 +498,10 @@ func gitFixture(t *testing.T, reposDir string, files map[string]string) (cloneDi
 		}
 	}
 	run(origin, "init", "-q")
+	// hermetic identity: the repo's test helpers never depend on the operator's global
+	// git config, and neither does this fixture
+	run(origin, "config", "user.email", "fixture@example.invalid")
+	run(origin, "config", "user.name", "fixture")
 	run(origin, "add", "-A")
 	run(origin, "commit", "-q", "-m", "spec")
 	run(origin, "update-ref", "refs/pull/7/head", "HEAD")
@@ -516,7 +520,7 @@ func TestRepoPassResolvesAndSearchesThePinnedHead(t *testing.T) {
 	})
 	pass, missing := resolveRepos(options{repos: reposDir}, []record{
 		{URL: "https://github.com/org/repo/pull/7"},
-	}, realGit)
+	}, realGit, realGitRaw)
 	if missing != nil {
 		t.Fatalf("missing = %v; want none", missing)
 	}
@@ -535,7 +539,7 @@ func TestRepoPassResolvesAndSearchesThePinnedHead(t *testing.T) {
 	_, missing = resolveRepos(options{repos: reposDir}, []record{
 		{URL: "https://github.com/org/absent/pull/1"},
 		{URL: "not-a-pr-url"},
-	}, realGit)
+	}, realGit, realGitRaw)
 	if missing == nil || !strings.Contains(missing.Error(), "org/absent#1") || !strings.Contains(missing.Error(), "not-a-pr-url") {
 		t.Errorf("missing = %v; want both disclosed", missing)
 	}
@@ -635,6 +639,9 @@ func TestRepoPassFetchAndRevFailuresAreDisclosed(t *testing.T) {
 	}
 	records := []record{{URL: "https://github.com/org/repo/pull/7"}}
 	calls := 0
+	fakeRaw := func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+		return []byte("abc"), 0, nil
+	}
 	fake := func(ctx context.Context, dir string, args ...string) (string, int, error) {
 		calls++
 		if args[0] == "fetch" {
@@ -642,7 +649,7 @@ func TestRepoPassFetchAndRevFailuresAreDisclosed(t *testing.T) {
 		}
 		return "", 0, nil
 	}
-	if _, missing := resolveRepos(options{repos: reposDir}, records, fake); missing == nil || !strings.Contains(missing.Error(), "fetch failed") {
+	if _, missing := resolveRepos(options{repos: reposDir}, records, fake, fakeRaw); missing == nil || !strings.Contains(missing.Error(), "fetch failed") {
 		t.Errorf("missing = %v; want the fetch failure disclosed", missing)
 	}
 	fake = func(ctx context.Context, dir string, args ...string) (string, int, error) {
@@ -652,7 +659,7 @@ func TestRepoPassFetchAndRevFailuresAreDisclosed(t *testing.T) {
 		}
 		return "abc", 0, nil
 	}
-	if _, missing := resolveRepos(options{repos: reposDir}, records, fake); missing == nil || !strings.Contains(missing.Error(), "rev-parse failed") {
+	if _, missing := resolveRepos(options{repos: reposDir}, records, fake, fakeRaw); missing == nil || !strings.Contains(missing.Error(), "rev-parse failed") {
 		t.Errorf("missing = %v; want the rev-parse failure disclosed", missing)
 	}
 }
@@ -670,6 +677,8 @@ func TestRepoPassSearchWithoutRev(t *testing.T) {
 func TestRepoPassSeamErrors(t *testing.T) {
 	p := &repoPass{runGit: func(ctx context.Context, dir string, args ...string) (string, int, error) {
 		return "", 0, context.Canceled
+	}, runRaw: func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+		return nil, 0, context.Canceled
 	}}
 	if _, err := p.grepHead(context.Background(), "d", "rev")("pat"); err == nil {
 		t.Error("a grep transport error must surface")
@@ -677,14 +686,16 @@ func TestRepoPassSeamErrors(t *testing.T) {
 	if _, _, err := p.showHead(context.Background(), "d", "rev")("p"); err == nil {
 		t.Error("an ls-tree transport error must surface")
 	}
-	p.runGit = func(ctx context.Context, dir string, args ...string) (string, int, error) {
-		return "\n" + "rev:spec.rb" + "\n", 0, nil
+	// grep is read raw and NUL-separated (-z): a path with spaces survives, and the rev:
+	// prefix is stripped per NUL entry
+	p.runRaw = func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+		return []byte("\x00rev:spec with space.rb\x00"), 0, nil
 	}
-	if paths, err := p.grepHead(context.Background(), "d", "rev")("pat"); err != nil || len(paths) != 1 {
-		t.Errorf("blank lines in grep output = %v, %v; want one path", paths, err)
+	if paths, err := p.grepHead(context.Background(), "d", "rev")("pat"); err != nil || len(paths) != 1 || paths[0] != "spec with space.rb" {
+		t.Errorf("NUL-separated grep output = %v, %v", paths, err)
 	}
-	p.runGit = func(ctx context.Context, dir string, args ...string) (string, int, error) {
-		return "", 128, nil
+	p.runRaw = func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+		return nil, 128, nil
 	}
 	if _, err := p.grepHead(context.Background(), "d", "rev")("pat"); err == nil {
 		t.Error("a grep failure exit must surface")
@@ -700,21 +711,21 @@ func TestRepoPassSeamErrors(t *testing.T) {
 	if _, _, err := p.showHead(context.Background(), "d", "rev")("p"); err == nil {
 		t.Error("an ls-tree failure exit must surface")
 	}
-	p.runGit = func(ctx context.Context, dir string, args ...string) (string, int, error) {
+	p.runRaw = func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
 		calls++
 		if args[0] == "cat-file" {
-			return "", 1, nil
+			return nil, 1, nil
 		}
-		return revZ, 0, nil // ls-tree lists the path; cat-file then fails
+		return []byte(revZ), 0, nil // ls-tree lists the path; cat-file then fails
 	}
 	if _, _, err := p.showHead(context.Background(), "d", "rev")("p"); err == nil {
 		t.Error("a cat-file failure exit must surface")
 	}
-	p.runGit = func(ctx context.Context, dir string, args ...string) (string, int, error) {
+	p.runRaw = func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
 		if args[0] == "cat-file" {
-			return "", 0, context.Canceled
+			return nil, 0, context.Canceled
 		}
-		return revZ, 0, nil
+		return []byte(revZ), 0, nil
 	}
 	if _, _, err := p.showHead(context.Background(), "d", "rev")("p"); err == nil {
 		t.Error("a cat-file transport error must surface")
@@ -742,14 +753,14 @@ func TestReportReposPassSearchErrorsAreCounted(t *testing.T) {
 	}
 	diff := "diff --git a/app/models/widget.rb b/app/models/widget.rb\n--- a/app/models/widget.rb\n+++ b/app/models/widget.rb\n@@ -3,2 +3,4 @@\n" +
 		"+  def polish(g)\n+    g.try(:shine)\n"
-	prev := reportGit
-	reportGit = func(ctx context.Context, dir string, args ...string) (string, int, error) {
+	prev := reportGitRaw
+	reportGitRaw = func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
 		if args[0] == "grep" {
-			return "", 128, nil
+			return nil, 128, nil
 		}
 		return prev(ctx, dir, args...)
 	}
-	defer func() { reportGit = prev }()
+	defer func() { reportGitRaw = prev }()
 	var buf bytes.Buffer
 	if err := report(&buf, records, map[string]string{"https://github.com/org/repo/pull/7": diff},
 		options{repos: reposDir, dir: "testdata/mini", framework: "test-fw"}); err != nil {
@@ -761,5 +772,129 @@ func TestReportReposPassSearchErrorsAreCounted(t *testing.T) {
 	}
 	if !strings.Contains(out, "diff-only") {
 		t.Errorf("the failed-search claim stays measured on the diff:\n%s", out)
+	}
+}
+
+// A record URL whose org/repo are not plain path components is refused: the -repos pass
+// joins them into filesystem paths, and ".." (or anything shell-adjacent) must never
+// reach dirExists.
+func TestRepoPassRejectsUnsafeURLComponents(t *testing.T) {
+	reposDir := t.TempDir()
+	misleading := filepath.Join(reposDir, "..", "escape")
+	if err := os.MkdirAll(misleading, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pass, missing := resolveRepos(options{repos: reposDir}, []record{
+		{URL: "https://github.com/../escape/pull/7"},
+	}, realGit, realGitRaw)
+	if pass.rev("https://github.com/../escape/pull/7") != "" {
+		t.Error("a traversal URL must not resolve to a rev")
+	}
+	if missing == nil {
+		t.Error("the traversal URL must be disclosed as missing, not silently used")
+	}
+}
+
+// Blob reads must be byte-exact: a spec whose content has leading/trailing whitespace or
+// interior blank lines must reach the search untouched (realGit's trim would shift lines).
+func TestRepoPassShowHeadIsByteExact(t *testing.T) {
+	reposDir := t.TempDir()
+	gitFixture(t, reposDir, map[string]string{
+		"spec/models/widget_spec.rb": "\n\nlet!(:widget) { Fabricate(:widget) }\n\nexpect(widget.shine).to eq(true)\n\n",
+	})
+	pass, missing := resolveRepos(options{repos: reposDir}, []record{
+		{URL: "https://github.com/org/repo/pull/7"},
+	}, realGit, realGitRaw)
+	if missing != nil {
+		t.Fatalf("missing = %v", missing)
+	}
+	ev, err := pass.search("https://github.com/org/repo/pull/7", run.Finding{
+		File: "app/models/widget.rb", IssueText: "the widget polish path has no test asserting the shine"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	body := ev.Content["spec/models/widget_spec.rb"]
+	if !strings.HasPrefix(body, "\n\nlet!(:widget)") {
+		t.Errorf("blob content was trimmed — line numbers shift: %q", body)
+	}
+}
+
+// Claims whose PR has no clone and claims whose search errored get their OWN matrix rows,
+// so the repo dimension's gaps are explicit instead of folded into diff-only/no-evidence.
+func TestReportReposPassSeparateGapRows(t *testing.T) {
+	reposDir := t.TempDir()
+	gitFixture(t, reposDir, map[string]string{
+		"spec/models/widget_spec.rb": "let!(:widget) { Fabricate(:widget) }\nexpect(widget.shine).to eq(true)\n",
+	})
+	records := []record{
+		{URL: "https://github.com/org/repo/pull/7", IssueText: "the widget polish path has no test asserting the shine", NewVerdict: "hallucination", SourceLens: "lens-a"},
+		{URL: "https://github.com/org/absent/pull/1", IssueText: "zero tests exist for the helper module", NewVerdict: "hallucination", SourceLens: "lens-a"},
+	}
+	diff := "diff --git a/spec/models/widget_spec.rb b/spec/models/widget_spec.rb\n--- a/spec/models/widget_spec.rb\n+++ b/spec/models/widget_spec.rb\n@@ -5,2 +5,4 @@\n" +
+		"+    expect(widget.shine).to eq(true)\n"
+	prev := reportGit
+	reportGit = func(ctx context.Context, dir string, args ...string) (string, int, error) {
+		if args[0] == "grep" {
+			return "", 128, nil
+		}
+		return prev(ctx, dir, args...)
+	}
+	defer func() { reportGit = prev }()
+	var buf bytes.Buffer
+	if err := report(&buf, records, map[string]string{
+		"https://github.com/org/repo/pull/7": diff, "https://github.com/org/absent/pull/1": diff,
+	}, options{repos: reposDir, dir: "testdata/mini", framework: "test-fw"}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"no-clone", "repo-error"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report missing the %q row:\n%s", want, out)
+		}
+	}
+}
+
+// The traversal guard is character-level: separators, leading dots, and empty components
+// are refused; plain names pass.
+func TestSafeComponent(t *testing.T) {
+	yes := []string{"grafana", "my-repo", "repo.name", "repo_name", "R2"}
+	no := []string{"", ".", "..", "../x", "a/b", "-lead", ".hidden", "a b", "a\tb"}
+	for _, s := range yes {
+		if !safeComponent(s) {
+			t.Errorf("safeComponent(%q) = false; want true", s)
+		}
+	}
+	for _, s := range no {
+		if safeComponent(s) {
+			t.Errorf("safeComponent(%q) = true; want false", s)
+		}
+	}
+}
+
+// showHead keeps absence and failure distinct at the raw seam too.
+func TestRepoPassShowHeadTransportError(t *testing.T) {
+	okGit := func(ctx context.Context, dir string, args ...string) (string, int, error) {
+		return "p\x00", 0, nil
+	}
+	p := &repoPass{runGit: okGit, runRaw: func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+		return nil, 0, context.Canceled
+	}}
+	if _, _, err := p.showHead(context.Background(), "d", "rev")("p"); err == nil {
+		t.Error("a cat-file transport error must surface")
+	}
+	p.runRaw = func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+		return nil, 128, nil
+	}
+	if _, _, err := p.showHead(context.Background(), "d", "rev")("p"); err == nil {
+		t.Error("a cat-file failure exit must surface")
+	}
+	p.runRaw = func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+		return nil, 0, nil
+	}
+	p.runGit = func(ctx context.Context, dir string, args ...string) (string, int, error) {
+		return "", 0, nil // ls-tree lists nothing: the path is absent
+	}
+	if body, ok, err := p.showHead(context.Background(), "d", "rev")("p"); err != nil || ok || body != nil {
+		t.Errorf("absent path = %v, %v, %v; want nil, false, nil", body, ok, err)
 	}
 }

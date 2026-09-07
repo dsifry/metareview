@@ -61,6 +61,26 @@ type RepoEvidence struct {
 	Content  map[string]string
 }
 
+// pathSubjectScore counts the subject tokens a candidate path carries (strong tokens
+// weigh triple, matching EvidenceFor's token economics), matching on the lowercased path
+// and its underscore-stripped concat so topic_embed matches TopicEmbed and topicEmbed.
+func pathSubjectScore(path string, strong, weak []string) int {
+	norm := strings.ToLower(path)
+	concat := strings.ReplaceAll(norm, "_", "")
+	score := 0
+	for _, t := range strong {
+		if strings.Contains(norm, t) || strings.Contains(concat, strings.ReplaceAll(t, "_", "")) {
+			score += 3
+		}
+	}
+	for _, t := range weak {
+		if strings.Contains(norm, t) || strings.Contains(concat, strings.ReplaceAll(t, "_", "")) {
+			score++
+		}
+	}
+	return score
+}
+
 // RepoTestEvidence searches the repository at the pinned head for test files whose
 // content references a testing-gap claim's subject, strongest first, capped at max
 // (<= 0 means MaxGapEvidenceFiles — the same cap as the diff side, or the two searches
@@ -104,7 +124,22 @@ func RepoTestEvidence(grep GrepPaths, show ShowHead, f run.Finding, max int) (Re
 	}
 	sort.Strings(cands)
 	if len(cands) > MaxRepoCandidates {
-		cands = cands[:MaxRepoCandidates]
+		// Not alphabetical: grep recalls by content, and the strongest subject match can
+		// sort last. Rank by how many subject tokens the PATH itself carries — a covering
+		// test usually names its subject — strong tokens weighing triple, ties by path so
+		// the truncation stays deterministic — then keep the head.
+		ranked := make([]string, len(cands))
+		copy(ranked, cands)
+		sort.Slice(ranked, func(i, j int) bool {
+			si, sj := pathSubjectScore(ranked[i], strong, weak), pathSubjectScore(ranked[j], strong, weak)
+			if si != sj {
+				return si > sj
+			}
+			return ranked[i] < ranked[j]
+		})
+		ranked = ranked[:MaxRepoCandidates]
+		sort.Strings(ranked) // reads stay path-ordered for reproducible diffs
+		cands = ranked
 	}
 	if max <= 0 {
 		max = MaxGapEvidenceFiles
