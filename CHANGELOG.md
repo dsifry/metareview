@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Added
+
+- **Testing-gap claims are now verified against the repository head, not just the diff (issue #146).**
+  The #140 mechanism (PR #145) only searched covering-test evidence among added diff lines, so a
+  covering test outside every changed hunk was invisible and a false absence claim could be confirmed.
+  The adjudicator now also searches the repository at the pinned head: `claimcheck.SubjectTokens`
+  exports the subject-token logic, `judge.RepoTestEvidence` runs a two-stage grep-then-read search
+  over injectable git seams (`judge.GrepSeam`/`ShowSeam` — the single implementation of the pinned-rev
+  contract shared with the escalation sandbox and the eval), and `ContextForGapClaim` injects the
+  candidates' line-capped content under a provenance-checked disclosure. A completed-but-empty search
+  is disclosed as the search record a testing-gap confirmation must cite; a failed or skipped search
+  stays silent and is counted as `repo_search_errors` in the claimcheck rollup — an infrastructure
+  failure never reads as evidence of absence. The prompt criterion demands that search record before
+  a gap claim is confirmable. `cmd/claimcheck-eval -repos <dir>` adds the repo-side structural pass
+  over the harnesseval corpus (combined diff×repo matrix, no-clone/repo-error rows disclosed); the
+  A/B re-judge against the v2 ground truth needs model spend and stays open in the issue.
+
 ### Changed
 
 - **Coverage gate is now require-100 for the whole repository.** After the repo-wide campaign brought
