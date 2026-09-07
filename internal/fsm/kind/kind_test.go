@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dsifry/metareview/internal/claimcheck"
 	"github.com/dsifry/metareview/internal/fsm/converge"
 	"github.com/dsifry/metareview/internal/fsm/errs"
 	"github.com/dsifry/metareview/internal/fsm/judge"
@@ -1168,4 +1169,287 @@ func TestKindInfoDeclaresWhichKindsCallAJudge(t *testing.T) {
 			t.Errorf("kind %q is registered but this test does not say whether it calls a judge", name)
 		}
 	}
+}
+
+// allAudits records every event so a test can assert on non-llm_call rows (the claimcheck
+// metric record, issue #140) as well as the judge calls.
+type allAudits struct {
+	events []run.Event
+}
+
+func (a *allAudits) fn(ev run.Event) error {
+	a.events = append(a.events, ev)
+	return nil
+}
+
+// Issue #140 (eval evidence): the #1 confirmed-fabrication mode is a finding asserting
+// absent tests whose spec sits in the same diff. The adjudicate pass must (a) inject the
+// covering test's hunks into the judge's context with the gap-claim disclosure, (b) audit
+// the claim class and evidence on the llm_call row, and (c) emit the per-run claimcheck
+// record. A non-gap finding keeps the plain ContextForClaim shape.
+func TestAdjudicateInjectsCoveringTestEvidenceForGapClaims(t *testing.T) {
+	diff := "diff --git a/app/models/topic_embed.rb b/app/models/topic_embed.rb\n" +
+		"--- a/app/models/topic_embed.rb\n+++ b/app/models/topic_embed.rb\n@@ -36,3 +36,7 @@\n" +
+		"+  def category_for(eh)\n+    eh.try(:category_id)\n+  end\n" +
+		"diff --git a/spec/models/topic_embed_spec.rb b/spec/models/topic_embed_spec.rb\n" +
+		"--- a/spec/models/topic_embed_spec.rb\n+++ b/spec/models/topic_embed_spec.rb\n@@ -10,2 +10,5 @@\n" +
+		"+    let!(:embeddable_host) { Fabricate(:embeddable_host) }\n" +
+		"+    expect(post.topic.category).to eq(embeddable_host.category)\n"
+	rec := &recordingJudge{}
+	r := mustNew(t, rec, false)
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	snap := run.Snapshot{RunID: "mrv-gap", Iteration: 1, Findings: []run.Finding{
+		{IssueText: "per-host category assignment has no test verifying an embedded topic's category", File: "app/models/topic_embed.rb", Line: 37},
+		{IssueText: "the category_for method shadows a local variable", File: "app/models/topic_embed.rb", Line: 37},
+	}}
+	a := &allAudits{}
+	raw, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: snap, Node: adjNode, Diff: machine.Diff{Text: diff}, StartIndex: 0, Audit: a.fn})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(rec.diffs) != 2 {
+		t.Fatalf("judge was called %d times, want 2", len(rec.diffs))
+	}
+	gap, plain := rec.diffs[0], rec.diffs[1]
+	if !strings.Contains(gap, "expect(post.topic.category)") {
+		t.Errorf("the gap-claim call did not include the covering spec's assertion:\n%s", gap)
+	}
+	if !strings.Contains(gap, "claims tests, specs or coverage are ABSENT") {
+		t.Errorf("the gap-claim call is missing its disclosure:\n%s", gap)
+	}
+	if strings.Contains(plain, "expect(post.topic.category)") || strings.Contains(plain, "ABSENT") {
+		t.Errorf("a non-gap finding must keep the plain context shape:\n%s", plain)
+	}
+
+	var claimRows int
+	for _, ev := range a.events {
+		if ev.Type != run.TypeLLMCall {
+			continue
+		}
+		var d run.LLMCallData
+		if err := json.Unmarshal(ev.Data, &d); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case d.ClaimClass == string(claimcheck.ClassTestingGap):
+			claimRows++
+			found := false
+			for _, p := range d.ClaimEvidence {
+				if p == "spec/models/topic_embed_spec.rb" {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("claim evidence = %v, want the covering spec", d.ClaimEvidence)
+			}
+		case d.ClaimClass != "":
+			t.Errorf("unexpected claim class %q on a non-gap call", d.ClaimClass)
+		}
+	}
+	if claimRows != 1 {
+		t.Fatalf("claim-class audit rows = %d, want 1", claimRows)
+	}
+
+	var rollup *run.RecordData
+	for _, ev := range a.events {
+		if ev.Type != run.TypeRecord {
+			continue
+		}
+		var d run.RecordData
+		if err := json.Unmarshal(ev.Data, &d); err != nil {
+			t.Fatal(err)
+		}
+		if d.Name == "claimcheck" {
+			rollup = &d
+		}
+	}
+	if rollup == nil {
+		t.Fatal("no claimcheck record event was audited")
+	}
+	for _, want := range []string{`"claims":1`, `"with_evidence":1`, `"confirmed":1`} {
+		if !strings.Contains(string(rollup.Data), want) {
+			t.Errorf("claimcheck rollup %s missing %s", rollup.Data, want)
+		}
+	}
+
+	var out adjudicateOut
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(out.Confirmed) != 2 {
+		t.Errorf("confirmed = %d, want 2 (both findings are judged real by the mock)", len(out.Confirmed))
+	}
+}
+
+// A gap claim with NO covering tests in the diff is still audited as a claim made (the
+// metric's denominator, #140's "claims made vs claims verified absent"), with an empty
+// evidence list and no injected disclosure.
+func TestAdjudicateAuditsGapClaimWithoutEvidence(t *testing.T) {
+	diff := "diff --git a/app/models/topic_embed.rb b/app/models/topic_embed.rb\n" +
+		"--- a/app/models/topic_embed.rb\n+++ b/app/models/topic_embed.rb\n@@ -36,3 +36,7 @@\n" +
+		"+  def category_for(eh)\n+    eh.try(:category_id)\n+  end\n"
+	rec := &recordingJudge{}
+	r := mustNew(t, rec, false)
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	snap := run.Snapshot{RunID: "mrv-gap2", Iteration: 1, Findings: []run.Finding{
+		{IssueText: "nothing asserts the embedded topic's category", File: "app/models/topic_embed.rb", Line: 37},
+	}}
+	a := &allAudits{}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: snap, Node: adjNode, Diff: machine.Diff{Text: diff}, StartIndex: 0, Audit: a.fn}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if strings.Contains(rec.diffs[0], "ABSENT") {
+		t.Errorf("no disclosure without evidence:\n%s", rec.diffs[0])
+	}
+	var rows int
+	for _, ev := range a.events {
+		if ev.Type != run.TypeLLMCall {
+			continue
+		}
+		var d run.LLMCallData
+		if err := json.Unmarshal(ev.Data, &d); err != nil {
+			t.Fatal(err)
+		}
+		if d.ClaimClass == string(claimcheck.ClassTestingGap) {
+			rows++
+			if len(d.ClaimEvidence) != 0 {
+				t.Errorf("claim evidence = %v, want empty", d.ClaimEvidence)
+			}
+		}
+	}
+	if rows != 1 {
+		t.Fatalf("claim-class audit rows = %d, want 1", rows)
+	}
+	for _, ev := range a.events {
+		if ev.Type != run.TypeRecord {
+			continue
+		}
+		var d run.RecordData
+		if err := json.Unmarshal(ev.Data, &d); err != nil {
+			t.Fatal(err)
+		}
+		if d.Name == "claimcheck" {
+			for _, want := range []string{`"claims":1`, `"with_evidence":0`, `"confirmed_without_evidence":1`} {
+				if !strings.Contains(string(d.Data), want) {
+					t.Errorf("rollup %s missing %s", d.Data, want)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("no claimcheck record event was audited")
+}
+
+// gapDiff is the cal.com shape: a source change whose covering spec is in the same diff.
+const gapDiff = "diff --git a/app/models/topic_embed.rb b/app/models/topic_embed.rb\n" +
+	"--- a/app/models/topic_embed.rb\n+++ b/app/models/topic_embed.rb\n@@ -36,3 +36,7 @@\n" +
+	"+  def category_for(eh)\n+    eh.try(:category_id)\n+  end\n" +
+	"diff --git a/spec/models/topic_embed_spec.rb b/spec/models/topic_embed_spec.rb\n" +
+	"--- a/spec/models/topic_embed_spec.rb\n+++ b/spec/models/topic_embed_spec.rb\n@@ -10,2 +10,5 @@\n" +
+	"+    let!(:embeddable_host) { Fabricate(:embeddable_host) }\n" +
+	"+    expect(post.topic.category).to eq(embeddable_host.category)\n"
+
+// plainDiff has no test files at all: a gap claim against it finds no evidence.
+const plainDiff = "diff --git a/app/models/topic_embed.rb b/app/models/topic_embed.rb\n" +
+	"--- a/app/models/topic_embed.rb\n+++ b/app/models/topic_embed.rb\n@@ -36,3 +36,7 @@\n" +
+	"+  def category_for(eh)\n+    eh.try(:category_id)\n+  end\n"
+
+// runGapClaim executes one gap-claim finding against a diff with a scripted verdict and
+// returns the claimcheck rollup the audit recorded.
+func runGapClaim(t *testing.T, diff string, verdict scriptedJudge) map[string]any {
+	t.Helper()
+	r := mustNew(t, &verdict, false)
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	snap := run.Snapshot{RunID: "mrv-rollup", Iteration: 1, Findings: []run.Finding{
+		{IssueText: "per-host category assignment has no test verifying an embedded topic's category", File: "app/models/topic_embed.rb", Line: 37},
+	}}
+	a := &allAudits{}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: snap, Node: adjNode, Diff: machine.Diff{Text: diff}, StartIndex: 0, Audit: a.fn}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for _, ev := range a.events {
+		if ev.Type != run.TypeRecord {
+			continue
+		}
+		var d run.RecordData
+		if err := json.Unmarshal(ev.Data, &d); err != nil {
+			t.Fatal(err)
+		}
+		if d.Name == "claimcheck" {
+			var m map[string]any
+			if err := json.Unmarshal(d.Data, &m); err != nil {
+				t.Fatal(err)
+			}
+			return m
+		}
+	}
+	t.Fatal("no claimcheck record was audited")
+	return nil
+}
+
+func num(t *testing.T, m map[string]any, k string) float64 {
+	t.Helper()
+	v, ok := m[k].(float64)
+	if !ok {
+		t.Fatalf("rollup %v missing numeric %q", m, k)
+	}
+	return v
+}
+
+// The rollup's four outcomes (#140's metric): a rejected claim that HAD covering evidence
+// in view is the catch working; a rejected claim without evidence is the judge being
+// strict; a confirmed claim with evidence survived it; an unparseable verdict counts as
+// unverified, never as a rejection.
+func TestAdjudicateGapClaimRollupOutcomes(t *testing.T) {
+	rollup := runGapClaim(t, gapDiff, scriptedJudge{real: false})
+	if got := num(t, rollup, "claims"); got != 1 || num(t, rollup, "with_evidence") != 1 {
+		t.Fatalf("claims rollup = %v", rollup)
+	}
+	if num(t, rollup, "rejected") != 1 || num(t, rollup, "rejected_with_evidence") != 1 {
+		t.Errorf("a rejected claim with evidence in view must count both: %v", rollup)
+	}
+
+	rollup = runGapClaim(t, plainDiff, scriptedJudge{real: false})
+	if num(t, rollup, "with_evidence") != 0 || num(t, rollup, "rejected_with_evidence") != 0 || num(t, rollup, "rejected") != 1 {
+		t.Errorf("a rejected claim without evidence must count rejected only: %v", rollup)
+	}
+
+	rollup = runGapClaim(t, gapDiff, scriptedJudge{real: true})
+	if num(t, rollup, "confirmed") != 1 || num(t, rollup, "confirmed_without_evidence") != 0 {
+		t.Errorf("a confirmed claim with evidence must not count as verified-absent: %v", rollup)
+	}
+
+	rollup = runGapClaim(t, gapDiff, scriptedJudge{parseErr: "bad json"})
+	if num(t, rollup, "unverified") != 1 || num(t, rollup, "rejected") != 0 {
+		t.Errorf("an unparseable verdict must count unverified, not rejected: %v", rollup)
+	}
+}
+
+// The rollup is audited like every other event: a torn audit line must stop the node, not
+// be swallowed into a silent success.
+func TestAdjudicateGapClaimRollupAuditErrorStopsTheNode(t *testing.T) {
+	r := mustNew(t, &scriptedJudge{real: false}, false)
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	snap := run.Snapshot{RunID: "mrv-rollerr", Iteration: 1, Findings: []run.Finding{
+		{IssueText: "per-host category assignment has no test verifying an embedded topic's category", File: "app/models/topic_embed.rb", Line: 37},
+	}}
+	a := &errAudits{err: errors.New("torn line")}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: snap, Node: adjNode, Diff: machine.Diff{Text: gapDiff}, StartIndex: 0, Audit: a.fn}); err == nil {
+		t.Fatal("an audit error during the claimcheck rollup must fail the node")
+	}
+}
+
+// errAudits fails only record events, so the llm_call rows still land and the failure is
+// attributable to the rollup audit itself.
+type errAudits struct{ err error }
+
+func (a *errAudits) fn(ev run.Event) error {
+	if ev.Type == run.TypeRecord {
+		return a.err
+	}
+	return nil
 }

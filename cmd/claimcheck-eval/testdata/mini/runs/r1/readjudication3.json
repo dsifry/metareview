@@ -1,0 +1,31 @@
+{
+ "run_id": "r1",
+ "url": "https://github.com/org/repo/pull/1",
+ "framework": "test-fw",
+ "records": [
+  {
+   "issue_text": "the widget polish path has no test asserting the shine",
+   "source_lens": "test-fw-lens/testing-quality",
+   "old_verdict": "real_but_ungold",
+   "new_verdict": "hallucination",
+   "confidence": 0.9,
+   "rationale": "spec/models/widget_spec.rb asserts it"
+  },
+  {
+   "issue_text": "polish dereferences g without a nil guard",
+   "source_lens": "test-fw-lens/security",
+   "old_verdict": "hallucination",
+   "new_verdict": "bug",
+   "confidence": 0.8,
+   "rationale": "real nil-deref"
+  },
+  {
+   "issue_text": "zero tests exist for the helper module",
+   "source_lens": "test-fw-lens/completeness",
+   "old_verdict": "hallucination",
+   "new_verdict": "important_non_bug",
+   "confidence": 0.7,
+   "rationale": "true gap"
+  }
+ ]
+}

@@ -19,6 +19,8 @@ import (
 
 	"github.com/dsifry/metareview/internal/fsm/errs"
 	"github.com/dsifry/metareview/internal/fsm/run"
+
+	"github.com/dsifry/metareview/internal/claimcheck"
 )
 
 // Error codes.
@@ -53,6 +55,17 @@ type Request struct {
 	RunID, Node         string
 	Iter, Index         int
 	Fence, Calibration  bool
+	// Claim, when the input's candidate asserts an absence (issue #140), carries the
+	// detected claim class and the covering-test evidence the context selection found. It
+	// is audit metadata, not prompt input: the evidence itself travels inside Input's diff
+	// value, so InputHash stays a hash of exactly what the judge was asked.
+	Claim *ClaimInfo
+}
+
+// ClaimInfo names a detected absence-claim class and the diff evidence gathered for it.
+type ClaimInfo struct {
+	Class    claimcheck.Class
+	Evidence []string // test files whose added lines reference the claimed subject
 }
 
 // Verdict is the result of one call; valid alongside an error for InputHash,

@@ -1,0 +1,962 @@
+diff --git a/Gemfile b/Gemfile
+index 5fec3dde042..ccb20014592 100644
+--- a/Gemfile
++++ b/Gemfile
+@@ -206,6 +206,10 @@ gem 'unicorn', require: false
+ gem 'puma', require: false
+ gem 'rbtrace', require: false
+ 
++# required for feed importing and embedding
++gem 'ruby-readability', require: false
++gem 'simple-rss', require: false
++
+ # perftools only works on 1.9 atm
+ group :profile do
+   # travis refuses to install this, instead of fuffing, just avoid it for now
+diff --git a/Gemfile_rails4.lock b/Gemfile_rails4.lock
+index 99e514c4f74..c300914da65 100644
+--- a/Gemfile_rails4.lock
++++ b/Gemfile_rails4.lock
+@@ -117,6 +117,7 @@ GEM
+     fspath (2.0.5)
+     given_core (3.1.1)
+       sorcerer (>= 0.3.7)
++    guess_html_encoding (0.0.9)
+     handlebars-source (1.1.2)
+     hashie (2.0.5)
+     highline (1.6.20)
+@@ -309,6 +310,9 @@ GEM
+       rspec-mocks (~> 2.14.0)
+     ruby-hmac (0.4.0)
+     ruby-openid (2.3.0)
++    ruby-readability (0.5.7)
++      guess_html_encoding (>= 0.0.4)
++      nokogiri (>= 1.4.2)
+     sanitize (2.0.6)
+       nokogiri (>= 1.4.4)
+     sass (3.2.12)
+@@ -337,6 +341,7 @@ GEM
+       celluloid (>= 0.14.1)
+       ice_cube (~> 0.11.0)
+       sidekiq (~> 2.15.0)
++    simple-rss (1.3.1)
+     simplecov (0.7.1)
+       multi_json (~> 1.0)
+       simplecov-html (~> 0.7.1)
+@@ -466,6 +471,7 @@ DEPENDENCIES
+   rinku
+   rspec-given
+   rspec-rails
++  ruby-readability
+   sanitize
+   sass
+   sass-rails
+@@ -474,6 +480,7 @@ DEPENDENCIES
+   sidekiq (= 2.15.1)
+   sidekiq-failures
+   sidetiq (>= 0.3.6)
++  simple-rss
+   simplecov
+   sinatra
+   slim
+diff --git a/app/assets/javascripts/embed.js b/app/assets/javascripts/embed.js
+new file mode 100644
+index 00000000000..f0b01d79b1d
+--- /dev/null
++++ b/app/assets/javascripts/embed.js
+@@ -0,0 +1,27 @@
++/* global discourseUrl */
++/* global discourseEmbedUrl */
++(function() {
++
++  var comments = document.getElementById('discourse-comments'),
++      iframe = document.createElement('iframe');
++  iframe.src = discourseUrl + "embed/best?embed_url=" + encodeURIComponent(discourseEmbedUrl);
++  iframe.id = 'discourse-embed-frame';
++  iframe.width = "100%";
++  iframe.frameBorder = "0";
++  iframe.scrolling = "no";
++  comments.appendChild(iframe);
++
++
++  function postMessageReceived(e) {
++    if (!e) { return; }
++    if (discourseUrl.indexOf(e.origin) === -1) { return; }
++
++    if (e.data) {
++      if (e.data.type === 'discourse-resize' && e.data.height) {
++        iframe.height = e.data.height + "px";
++      }
++    }
++  }
++  window.addEventListener('message', postMessageReceived, false);
++
++})();
+diff --git a/app/assets/stylesheets/embed.css.scss b/app/assets/stylesheets/embed.css.scss
+new file mode 100644
+index 00000000000..26a77b5bb7b
+--- /dev/null
++++ b/app/assets/stylesheets/embed.css.scss
+@@ -0,0 +1,69 @@
++//= require ./vendor/normalize
++//= require ./common/foundation/base
++
++article.post {
++  border-bottom: 1px solid #ddd;
++
++  .post-date {
++    float: right;
++    color: #aaa;
++    font-size: 12px;
++    margin: 4px 4px 0 0;
++  }
++
++  .author {
++    padding: 20px 0;
++    width: 92px;
++    float: left;
++
++    text-align: center;
++
++    h3 {
++      text-align: center;
++      color: #4a6b82;
++      font-size: 13px;
++      margin: 0;
++    }
++  }
++
++  .cooked {
++    padding: 20px 0;
++    margin-left: 92px;
++
++    p {
++      margin: 0 0 1em 0;
++    }
++  }
++}
++
++header {
++  padding: 10px 10px 20px 10px;
++
++  font-size: 18px;
++
++  border-bottom: 1px solid #ddd;
++}
++
++footer {
++  font-size: 18px;
++
++  .logo {
++    margin-right: 10px;
++    margin-top: 10px;
++  }
++
++  a[href].button {
++    margin: 10px 0 0 10px;
++  }
++}
++
++.logo {
++  float: right;
++  max-height: 30px;
++}
++
++a[href].button {
++  background-color: #eee;
++  padding: 5px;
++  display: inline-block;
++}
+\ No newline at end of file
+diff --git a/app/controllers/embed_controller.rb b/app/controllers/embed_controller.rb
+new file mode 100644
+index 00000000000..1f9905ae40e
+--- /dev/null
++++ b/app/controllers/embed_controller.rb
+@@ -0,0 +1,34 @@
++class EmbedController < ApplicationController
++  skip_before_filter :check_xhr
++  skip_before_filter :preload_json
++  before_filter :ensure_embeddable
++
++  layout 'embed'
++
++  def best
++    embed_url = params.require(:embed_url)
++    topic_id = TopicEmbed.topic_id_for_embed(embed_url)
++
++    if topic_id
++      @topic_view = TopicView.new(topic_id, current_user, {best: 5})
++    else
++      Jobs.enqueue(:retrieve_topic, user_id: current_user.try(:id), embed_url: embed_url)
++      render 'loading'
++    end
++
++    discourse_expires_in 1.minute
++  end
++
++  private
++
++    def ensure_embeddable
++      raise Discourse::InvalidAccess.new('embeddable host not set') if SiteSetting.embeddable_host.blank?
++      raise Discourse::InvalidAccess.new('invalid referer host') if URI(request.referer || '').host != SiteSetting.embeddable_host
++
++      response.headers['X-Frame-Options'] = "ALLOWALL"
++    rescue URI::InvalidURIError
++      raise Discourse::InvalidAccess.new('invalid referer host')
++    end
++
++
++end
+diff --git a/app/jobs/regular/retrieve_topic.rb b/app/jobs/regular/retrieve_topic.rb
+new file mode 100644
+index 00000000000..dd3c79cf4d6
+--- /dev/null
++++ b/app/jobs/regular/retrieve_topic.rb
+@@ -0,0 +1,24 @@
++require_dependency 'email/sender'
++require_dependency 'topic_retriever'
++
++module Jobs
++
++  # Asynchronously retrieve a topic from an embedded site
++  class RetrieveTopic < Jobs::Base
++
++    def execute(args)
++      raise Discourse::InvalidParameters.new(:embed_url) unless args[:embed_url].present?
++
++      user = nil
++      if args[:user_id]
++        user = User.where(id: args[:user_id]).first
++      end
++
++      TopicRetriever.new(args[:embed_url], no_throttle: user.try(:staff?)).retrieve
++    end
++
++  end
++
++end
++
++
+diff --git a/app/jobs/scheduled/poll_feed.rb b/app/jobs/scheduled/poll_feed.rb
+new file mode 100644
+index 00000000000..2c8d9eb34ac
+--- /dev/null
++++ b/app/jobs/scheduled/poll_feed.rb
+@@ -0,0 +1,41 @@
++#
++# Creates and Updates Topics based on an RSS or ATOM feed.
++#
++require 'digest/sha1'
++require_dependency 'post_creator'
++require_dependency 'post_revisor'
++require 'open-uri'
++
++module Jobs
++  class PollFeed < Jobs::Scheduled
++    recurrence { hourly }
++    sidekiq_options retry: false
++
++    def execute(args)
++      poll_feed if SiteSetting.feed_polling_enabled? &&
++                   SiteSetting.feed_polling_url.present? &&
++                   SiteSetting.embed_by_username.present?
++    end
++
++    def feed_key
++      @feed_key ||= "feed-modified:#{Digest::SHA1.hexdigest(SiteSetting.feed_polling_url)}"
++    end
++
++    def poll_feed
++      user = User.where(username_lower: SiteSetting.embed_by_username.downcase).first
++      return if user.blank?
++
++      require 'simple-rss'
++      rss = SimpleRSS.parse open(SiteSetting.feed_polling_url)
++
++      rss.items.each do |i|
++        url = i.link
++        url = i.id if url.blank? || url !~ /^https?\:\/\//
++
++        content = CGI.unescapeHTML(i.content.scrub)
++        TopicEmbed.import(user, url, i.title, content)
++      end
++    end
++
++  end
++end
+diff --git a/app/models/post.rb b/app/models/post.rb
+index e2192a1e8d7..72ef8bd00a6 100644
+--- a/app/models/post.rb
++++ b/app/models/post.rb
+@@ -60,6 +60,10 @@ def self.types
+     @types ||= Enum.new(:regular, :moderator_action)
+   end
+ 
++  def self.cook_methods
++    @cook_methods ||= Enum.new(:regular, :raw_html)
++  end
++
+   def self.find_by_detail(key, value)
+     includes(:post_details).where(post_details: { key: key, value: value }).first
+   end
+@@ -124,6 +128,11 @@ def post_analyzer
+   end
+ 
+   def cook(*args)
++    # For some posts, for example those imported via RSS, we support raw HTML. In that
++    # case we can skip the rendering pipeline.
++    return raw if cook_method == Post.cook_methods[:raw_html]
++
++    # Default is to cook posts
+     Plugin::Filter.apply(:after_post_cook, self, post_analyzer.cook(*args))
+   end
+ 
+diff --git a/app/models/topic_embed.rb b/app/models/topic_embed.rb
+new file mode 100644
+index 00000000000..634689132e7
+--- /dev/null
++++ b/app/models/topic_embed.rb
+@@ -0,0 +1,82 @@
++require_dependency 'nokogiri'
++
++class TopicEmbed < ActiveRecord::Base
++  belongs_to :topic
++  belongs_to :post
++  validates_presence_of :embed_url
++  validates_presence_of :content_sha1
++
++  # Import an article from a source (RSS/Atom/Other)
++  def self.import(user, url, title, contents)
++    return unless url =~ /^https?\:\/\//
++
++    contents << "\n<hr>\n<small>#{I18n.t('embed.imported_from', link: "<a href='#{url}'>#{url}</a>")}</small>\n"
++
++    embed = TopicEmbed.where(embed_url: url).first
++    content_sha1 = Digest::SHA1.hexdigest(contents)
++    post = nil
++
++    # If there is no embed, create a topic, post and the embed.
++    if embed.blank?
++      Topic.transaction do
++        creator = PostCreator.new(user, title: title, raw: absolutize_urls(url, contents), skip_validations: true, cook_method: Post.cook_methods[:raw_html])
++        post = creator.create
++        if post.present?
++          TopicEmbed.create!(topic_id: post.topic_id,
++                             embed_url: url,
++                             content_sha1: content_sha1,
++                             post_id: post.id)
++        end
++      end
++    else
++      post = embed.post
++      # Update the topic if it changed
++      if content_sha1 != embed.content_sha1
++        revisor = PostRevisor.new(post)
++        revisor.revise!(user, absolutize_urls(url, contents), skip_validations: true, bypass_rate_limiter: true)
++        embed.update_column(:content_sha1, content_sha1)
++      end
++    end
++
++    post
++  end
++
++  def self.import_remote(user, url, opts=nil)
++    require 'ruby-readability'
++
++    opts = opts || {}
++    doc = Readability::Document.new(open(url).read,
++                                        tags: %w[div p code pre h1 h2 h3 b em i strong a img],
++                                        attributes: %w[href src])
++
++    TopicEmbed.import(user, url, opts[:title] || doc.title, doc.content)
++  end
++
++  # Convert any relative URLs to absolute. RSS is annoying for this.
++  def self.absolutize_urls(url, contents)
++    uri = URI(url)
++    prefix = "#{uri.scheme}://#{uri.host}"
++    prefix << ":#{uri.port}" if uri.port != 80 && uri.port != 443
++
++    fragment = Nokogiri::HTML.fragment(contents)
++    fragment.css('a').each do |a|
++      href = a['href']
++      if href.present? && href.start_with?('/')
++        a['href'] = "#{prefix}/#{href.sub(/^\/+/, '')}"
++      end
++    end
++    fragment.css('img').each do |a|
++      src = a['src']
++      if src.present? && src.start_with?('/')
++        a['src'] = "#{prefix}/#{src.sub(/^\/+/, '')}"
++      end
++    end
++
++    fragment.to_html
++  end
++
++  def self.topic_id_for_embed(embed_url)
++    TopicEmbed.where(embed_url: embed_url).pluck(:topic_id).first
++  end
++
++end
+diff --git a/app/views/embed/best.html.erb b/app/views/embed/best.html.erb
+new file mode 100644
+index 00000000000..d8298d0b1f4
+--- /dev/null
++++ b/app/views/embed/best.html.erb
+@@ -0,0 +1,30 @@
++<header>
++  <%- if @topic_view.posts.present? %>
++    <%= link_to(I18n.t('embed.title'), @topic_view.topic.url, class: 'button', target: '_blank') %>
++  <%- else %>
++    <%= link_to(I18n.t('embed.start_discussion'), @topic_view.topic.url, class: 'button', target: '_blank') %>
++  <%- end if %>
++
++  <%= link_to(image_tag(SiteSetting.logo_url, class: 'logo'), Discourse.base_url) %>
++</header>
++
++<%- if @topic_view.posts.present? %>
++  <%- @topic_view.posts.each do |post| %>
++    <article class='post'>
++      <%= link_to post.created_at.strftime("%e %b %Y"), post.url, class: 'post-date', target: "_blank" %>
++      <div class='author'>
++        <img src='<%= post.user.small_avatar_url %>'>
++        <h3><%= post.user.username %></h3>
++      </div>
++      <div class='cooked'><%= raw post.cooked %></div>
++      <div style='clear: both'></div>
++    </article>
++  <%- end %>
++
++  <footer>
++    <%= link_to(I18n.t('embed.continue'), @topic_view.topic.url, class: 'button', target: '_blank') %>
++    <%= link_to(image_tag(SiteSetting.logo_url, class: 'logo'), Discourse.base_url) %>
++  </footer>
++
++<% end %>
++
+diff --git a/app/views/embed/loading.html.erb b/app/views/embed/loading.html.erb
+new file mode 100644
+index 00000000000..e4c6ccd5d98
+--- /dev/null
++++ b/app/views/embed/loading.html.erb
+@@ -0,0 +1,12 @@
++<header>
++  <%= t 'embed.loading' %>
++  <%= link_to(image_tag(SiteSetting.logo_url, class: 'logo'), Discourse.base_url) %>
++</header>
++
++<script>
++  (function() {
++    setTimeout(function() {
++      document.location.reload();
++    }, 30000);
++  })();
++</script>
+\ No newline at end of file
+diff --git a/app/views/layouts/embed.html.erb b/app/views/layouts/embed.html.erb
+new file mode 100644
+index 00000000000..f663df07cc4
+--- /dev/null
++++ b/app/views/layouts/embed.html.erb
+@@ -0,0 +1,20 @@
++<!DOCTYPE html>
++<html>
++  <head>
++    <%= stylesheet_link_tag 'embed' %>
++
++    <script>
++      (function() {
++        window.onload = function() {
++          if (parent) {
++            // Send a post message with our loaded height
++            parent.postMessage({type: 'discourse-resize', height: document['body'].offsetHeight}, '<%= request.referer %>');
++          }
++        }
++      })();
++    </script>
++  </head>
++  <body>
++    <%= yield %>
++  </body>
++</html>
+\ No newline at end of file
+diff --git a/config/locales/client.en.yml b/config/locales/client.en.yml
+index f89e1410d4a..35971134597 100644
+--- a/config/locales/client.en.yml
++++ b/config/locales/client.en.yml
+@@ -1474,6 +1474,7 @@ en:
+           spam: 'Spam'
+           rate_limits: 'Rate Limits'
+           developer: 'Developer'
++          embedding: "Embedding"
+           uncategorized: 'Uncategorized'
+ 
+     lightbox:
+diff --git a/config/locales/server.en.yml b/config/locales/server.en.yml
+index e81402a5790..85c1f5b2304 100644
+--- a/config/locales/server.en.yml
++++ b/config/locales/server.en.yml
+@@ -29,6 +29,14 @@ en:
+ 
+   too_many_replies: "Sorry you can't reply any more times in that topic."
+ 
++  embed:
++    title: "Discussion Highlights"
++    start_discussion: "Begin the Discussion"
++    continue: "Continue the Discussion"
++    loading: "Loading Discussion..."
++    permalink: "Permalink"
++    imported_from: "Imported from: %{link}"
++
+   too_many_mentions:
+     zero: "Sorry, you can't mention other users."
+     one: "Sorry, you can only mention one other user in a post."
+@@ -757,6 +765,11 @@ en:
+     short_progress_text_threshold: "After the number of posts in a topic goes above this number, the progress bar will only show the current post number. If you change the progress bar's width, you may need to change this value."
+     default_code_lang: "Default programming language syntax highlighting applied to GitHub code blocks (lang-auto, ruby, python etc.)"
+ 
++    embeddable_host: "Host that can embed the comments from this Discourse forum"
++    feed_polling_enabled: "Whether to import a RSS/ATOM feed as posts"
++    feed_polling_url: "URL of RSS/ATOM feed to import"
++    embed_by_username: "Discourse username of the user who creates the topics"
++
+   notification_types:
+     mentioned: "%{display_username} mentioned you in %{link}"
+     liked: "%{display_username} liked your post in %{link}"
+diff --git a/config/routes.rb b/config/routes.rb
+index 87573e59078..066dd988819 100644
+--- a/config/routes.rb
++++ b/config/routes.rb
+@@ -242,6 +242,8 @@
+   get "topics/private-messages-sent/:username" => "list#private_messages_sent", as: "topics_private_messages_sent", constraints: {username: USERNAME_ROUTE_FORMAT}
+   get "topics/private-messages-unread/:username" => "list#private_messages_unread", as: "topics_private_messages_unread", constraints: {username: USERNAME_ROUTE_FORMAT}
+ 
++  get 'embed/best' => 'embed#best'
++
+   # Topic routes
+   get "t/:slug/:topic_id/wordpress" => "topics#wordpress", constraints: {topic_id: /\d+/}
+   get "t/:slug/:topic_id/moderator-liked" => "topics#moderator_liked", constraints: {topic_id: /\d+/}
+diff --git a/config/site_settings.yml b/config/site_settings.yml
+index 1e89a2d8012..f3cf61009a3 100644
+--- a/config/site_settings.yml
++++ b/config/site_settings.yml
+@@ -350,6 +350,12 @@ developer:
+       test: false
+       default: true
+ 
++embedding:
++  embeddable_host: ''
++  feed_polling_enabled: false
++  feed_polling_url: ''
++  embed_by_username: ''
++
+ uncategorized:
+   tos_url:
+     client: true
+diff --git a/db/migrate/20131210181901_migrate_word_counts.rb b/db/migrate/20131210181901_migrate_word_counts.rb
+index c0c2299c613..b922ae401bc 100644
+--- a/db/migrate/20131210181901_migrate_word_counts.rb
++++ b/db/migrate/20131210181901_migrate_word_counts.rb
+@@ -1,6 +1,6 @@
+ class MigrateWordCounts < ActiveRecord::Migration
+   disable_ddl_transaction!
+-  
++
+   def up
+     post_ids = execute("SELECT id FROM posts WHERE word_count IS NULL LIMIT 500").map {|r| r['id'].to_i }
+     while post_ids.length > 0
+@@ -30,4 +30,4 @@ def up
+ 
+   end
+ 
+-end
++end
+\ No newline at end of file
+diff --git a/db/migrate/20131217174004_create_topic_embeds.rb b/db/migrate/20131217174004_create_topic_embeds.rb
+new file mode 100644
+index 00000000000..d887ff890b4
+--- /dev/null
++++ b/db/migrate/20131217174004_create_topic_embeds.rb
+@@ -0,0 +1,13 @@
++class CreateTopicEmbeds < ActiveRecord::Migration
++  def change
++    create_table :topic_embeds, force: true do |t|
++      t.integer :topic_id, null: false
++      t.integer :post_id, null: false
++      t.string :embed_url, null: false
++      t.string :content_sha1, null: false, limit: 40
++      t.timestamps
++    end
++
++    add_index :topic_embeds, :embed_url, unique: true
++  end
++end
+diff --git a/db/migrate/20131219203905_add_cook_method_to_posts.rb b/db/migrate/20131219203905_add_cook_method_to_posts.rb
+new file mode 100644
+index 00000000000..5549082059c
+--- /dev/null
++++ b/db/migrate/20131219203905_add_cook_method_to_posts.rb
+@@ -0,0 +1,5 @@
++class AddCookMethodToPosts < ActiveRecord::Migration
++  def change
++    add_column :posts, :cook_method, :integer, default: 1, null: false
++  end
++end
+diff --git a/db/migrate/20131223171005_create_top_topics.rb b/db/migrate/20131223171005_create_top_topics.rb
+index 1717b59bfc2..25bda921d18 100644
+--- a/db/migrate/20131223171005_create_top_topics.rb
++++ b/db/migrate/20131223171005_create_top_topics.rb
+@@ -1,6 +1,6 @@
+ class CreateTopTopics < ActiveRecord::Migration
+   def change
+-    create_table :top_topics do |t|
++    create_table :top_topics, force: true do |t|
+       t.belongs_to :topic
+ 
+       TopTopic.periods.each do |period|
+diff --git a/lib/post_creator.rb b/lib/post_creator.rb
+index aa555d5ddbc..fd57cd80c82 100644
+--- a/lib/post_creator.rb
++++ b/lib/post_creator.rb
+@@ -213,6 +213,7 @@ def setup_post
+       post.send("#{a}=", @opts[a]) if @opts[a].present?
+     end
+ 
++    post.cook_method = @opts[:cook_method] if @opts[:cook_method].present?
+     post.extract_quoted_post_numbers
+     post.created_at = Time.zone.parse(@opts[:created_at].to_s) if @opts[:created_at].present?
+     @post = post
+diff --git a/lib/post_revisor.rb b/lib/post_revisor.rb
+index e118d5af522..c2a3155ecd5 100644
+--- a/lib/post_revisor.rb
++++ b/lib/post_revisor.rb
+@@ -11,7 +11,6 @@ def initialize(post)
+   def revise!(user, new_raw, opts = {})
+     @user, @new_raw, @opts = user, new_raw, opts
+     return false if not should_revise?
+-
+     @post.acting_user = @user
+     revise_post
+     update_category_description
+@@ -83,7 +82,8 @@ def update_post
+     end
+ 
+     @post.extract_quoted_post_numbers
+-    @post.save
++    @post.save(validate: !@opts[:skip_validations])
++
+     @post.save_reply_relationships
+   end
+ 
+diff --git a/lib/tasks/disqus.thor b/lib/tasks/disqus.thor
+index 0c39750e19b..95a519a4b5f 100644
+--- a/lib/tasks/disqus.thor
++++ b/lib/tasks/disqus.thor
+@@ -114,7 +114,6 @@ class Disqus < Thor
+   method_option :dry_run, required: false, desc: "Just output what will be imported rather than doing it"
+   method_option :post_as, aliases: '-p', required: true, desc: "The Discourse username to post as"
+   method_option :strip, aliases: '-s', required: false, desc: "Text to strip from titles"
+-  method_option :category, aliases: '-c', desc: "The category to post in"
+ 
+   def import
+     require './config/environment'
+@@ -141,18 +140,12 @@ class Disqus < Thor
+ 
+     SiteSetting.email_domains_blacklist = ""
+ 
+-    category_id = nil
+-    if options[:category]
+-      category_id = Category.where(name: options[:category]).first.try(:id)
+-    end
+-
+     parser.threads.each do |id, t|
+       puts "Creating #{t[:title]}... (#{t[:posts].size} posts)"
+ 
+       if options[:dry_run].blank?
+-        creator = PostCreator.new(user, title: t[:title], raw: "\[[Permalink](#{t[:link]})\]", created_at: Date.parse(t[:created_at]), category: category_id)
+-        post = creator.create
+ 
++        post = TopicEmbed.import_remote(user, t[:link], title: t[:title])
+         if post.present?
+           t[:posts].each do |p|
+             post_user = user
+diff --git a/lib/topic_retriever.rb b/lib/topic_retriever.rb
+new file mode 100644
+index 00000000000..dc63d310fc3
+--- /dev/null
++++ b/lib/topic_retriever.rb
+@@ -0,0 +1,55 @@
++class TopicRetriever
++
++  def initialize(embed_url, opts=nil)
++    @embed_url = embed_url
++    @opts = opts || {}
++  end
++
++  def retrieve
++    perform_retrieve unless (invalid_host? || retrieved_recently?)
++  end
++
++  private
++
++    def invalid_host?
++      SiteSetting.embeddable_host != URI(@embed_url).host
++    rescue URI::InvalidURIError
++      # An invalid URI is an invalid host
++      true
++    end
++
++    def retrieved_recently?
++      # We can disable the throttle for some users, such as staff
++      return false if @opts[:no_throttle]
++
++      # Throttle other users to once every 60 seconds
++      retrieved_key = "retrieved:#{@embed_url}"
++      if $redis.setnx(retrieved_key, "1")
++        $redis.expire(retrieved_key, 60)
++        return false
++      end
++
++      true
++    end
++
++    def perform_retrieve
++      # It's possible another process or job found the embed already. So if that happened bail out.
++      return if TopicEmbed.where(embed_url: @embed_url).exists?
++
++      # First check RSS if that is enabled
++      if SiteSetting.feed_polling_enabled?
++        Jobs::PollFeed.new.execute({})
++        return if TopicEmbed.where(embed_url: @embed_url).exists?
++      end
++
++      fetch_http
++    end
++
++    def fetch_http
++      user = User.where(username_lower: SiteSetting.embed_by_username.downcase).first
++      return if user.blank?
++
++      TopicEmbed.import_remote(user, @embed_url)
++    end
++
++end
+\ No newline at end of file
+diff --git a/spec/components/topic_retriever_spec.rb b/spec/components/topic_retriever_spec.rb
+new file mode 100644
+index 00000000000..2e7810be98f
+--- /dev/null
++++ b/spec/components/topic_retriever_spec.rb
+@@ -0,0 +1,46 @@
++require 'spec_helper'
++require_dependency 'topic_retriever'
++
++describe TopicRetriever do
++
++  let(:embed_url) { "http://eviltrout.com/2013/02/10/why-discourse-uses-emberjs.html" }
++  let(:topic_retriever) { TopicRetriever.new(embed_url) }
++
++  it "does not call perform_retrieve when embeddable_host is not set" do
++    SiteSetting.expects(:embeddable_host).returns(nil)
++    topic_retriever.expects(:perform_retrieve).never
++    topic_retriever.retrieve
++  end
++
++  it "does not call perform_retrieve when embeddable_host is different than the host of the URL" do
++    SiteSetting.expects(:embeddable_host).returns("eviltuna.com")
++    topic_retriever.expects(:perform_retrieve).never
++    topic_retriever.retrieve
++  end
++
++  it "does not call perform_retrieve when the embed url is not a url" do
++    r = TopicRetriever.new("not a url")
++    r.expects(:perform_retrieve).never
++    r.retrieve
++  end
++
++  context "with a valid host" do
++    before do
++      SiteSetting.expects(:embeddable_host).returns("eviltrout.com")
++    end
++
++    it "calls perform_retrieve if it hasn't been retrieved recently" do
++      topic_retriever.expects(:perform_retrieve).once
++      topic_retriever.expects(:retrieved_recently?).returns(false)
++      topic_retriever.retrieve
++    end
++
++    it "doesn't call perform_retrieve if it's been retrieved recently" do
++      topic_retriever.expects(:perform_retrieve).never
++      topic_retriever.expects(:retrieved_recently?).returns(true)
++      topic_retriever.retrieve
++    end
++
++  end
++
++end
+diff --git a/spec/controllers/embed_controller_spec.rb b/spec/controllers/embed_controller_spec.rb
+new file mode 100644
+index 00000000000..52661962167
+--- /dev/null
++++ b/spec/controllers/embed_controller_spec.rb
+@@ -0,0 +1,58 @@
++require 'spec_helper'
++
++describe EmbedController do
++
++  let(:host) { "eviltrout.com" }
++  let(:embed_url) { "http://eviltrout.com/2013/02/10/why-discourse-uses-emberjs.html" }
++
++  it "is 404 without an embed_url" do
++    get :best
++    response.should_not be_success
++  end
++
++  it "raises an error with a missing host" do
++    SiteSetting.stubs(:embeddable_host).returns(nil)
++    get :best, embed_url: embed_url
++    response.should_not be_success
++  end
++
++  context "with a host" do
++    before do
++      SiteSetting.stubs(:embeddable_host).returns(host)
++    end
++
++    it "raises an error with no referer" do
++      get :best, embed_url: embed_url
++      response.should_not be_success
++    end
++
++    context "success" do
++
++      before do
++        controller.request.stubs(:referer).returns(embed_url)
++      end
++
++      after do
++        response.should be_success
++        response.headers['X-Frame-Options'].should == "ALLOWALL"
++      end
++
++      it "tells the topic retriever to work when no previous embed is found" do
++        TopicEmbed.expects(:topic_id_for_embed).returns(nil)
++        retriever = mock
++        TopicRetriever.expects(:new).returns(retriever)
++        retriever.expects(:retrieve)
++        get :best, embed_url: embed_url
++      end
++
++      it "creates a topic view when a topic_id is found" do
++        TopicEmbed.expects(:topic_id_for_embed).returns(123)
++        TopicView.expects(:new).with(123, nil, {best: 5})
++        get :best, embed_url: embed_url
++      end
++    end
++
++  end
++
++
++end
+diff --git a/spec/jobs/poll_feed_spec.rb b/spec/jobs/poll_feed_spec.rb
+new file mode 100644
+index 00000000000..e2648338b73
+--- /dev/null
++++ b/spec/jobs/poll_feed_spec.rb
+@@ -0,0 +1,40 @@
++require 'spec_helper'
++require_dependency 'jobs/regular/process_post'
++
++describe Jobs::PollFeed do
++
++  let(:poller) { Jobs::PollFeed.new }
++
++  context "execute" do
++    let(:url) { "http://eviltrout.com" }
++    let(:embed_by_username) { "eviltrout" }
++
++    it "requires feed_polling_enabled?" do
++      SiteSetting.stubs(:feed_polling_enabled?).returns(false)
++      poller.expects(:poll_feed).never
++      poller.execute({})
++    end
++
++    it "requires feed_polling_url" do
++      SiteSetting.stubs(:feed_polling_url).returns(nil)
++      poller.expects(:poll_feed).never
++      poller.execute({})
++    end
++
++    it "requires embed_by_username" do
++      SiteSetting.stubs(:embed_by_username).returns(nil)
++      poller.expects(:poll_feed).never
++      poller.execute({})
++    end
++
++
++    it "delegates to poll_feed" do
++      SiteSetting.stubs(:feed_polling_enabled?).returns(true)
++      SiteSetting.stubs(:feed_polling_url).returns(url)
++      SiteSetting.stubs(:embed_by_username).returns(embed_by_username)
++      poller.expects(:poll_feed).once
++      poller.execute({})
++    end
++  end
++
++end
+diff --git a/spec/models/topic_embed_spec.rb b/spec/models/topic_embed_spec.rb
+new file mode 100644
+index 00000000000..3db8aaf0738
+--- /dev/null
++++ b/spec/models/topic_embed_spec.rb
+@@ -0,0 +1,48 @@
++require 'spec_helper'
++
++describe TopicEmbed do
++
++  it { should belong_to :topic }
++  it { should belong_to :post }
++  it { should validate_presence_of :embed_url }
++  it { should validate_presence_of :content_sha1 }
++
++
++  context '.import' do
++
++    let(:user) { Fabricate(:user) }
++    let(:title) { "How to turn a fish from good to evil in 30 seconds" }
++    let(:url) { 'http://eviltrout.com/123' }
++    let(:contents) { "hello world new post <a href='/hello'>hello</a> <img src='/images/wat.jpg'>" }
++
++    it "returns nil when the URL is malformed" do
++      TopicEmbed.import(user, "invalid url", title, contents).should be_nil
++      TopicEmbed.count.should == 0
++    end
++
++    context 'creation of a post' do
++      let!(:post) { TopicEmbed.import(user, url, title, contents) }
++
++      it "works as expected with a new URL" do
++        post.should be_present
++
++        # It uses raw_html rendering
++        post.cook_method.should == Post.cook_methods[:raw_html]
++        post.cooked.should == post.raw
++
++        # It converts relative URLs to absolute
++        post.cooked.start_with?("hello world new post <a href=\"http://eviltrout.com/hello\">hello</a> <img src=\"http://eviltrout.com/images/wat.jpg\">").should be_true
++
++        TopicEmbed.where(topic_id: post.topic_id).should be_present
++      end
++
++      it "Supports updating the post" do
++        post = TopicEmbed.import(user, url, title, "muhahaha new contents!")
++        post.cooked.should =~ /new contents/
++      end
++
++    end
++
++  end
++
++end

@@ -54,6 +54,10 @@ const (
 		"tautological, or satisfied by something other than the property it names.\n" +
 		"- A comment, doc line, test name or specification row that asserts a property the code does not have is a " +
 		"real finding, even when the code behaves correctly, because the next reader will rely on it.\n" +
+		"- A finding that claims tests, specs or coverage are ABSENT is real only when the absence is real. When the " +
+		"evidence includes test files whose added lines reference the claimed subject, read them: a test that covers the " +
+		"claimed behavior makes the claim false, however thin the rest of the coverage is. A test that exists yet does " +
+		"not cover the claimed behavior leaves the claim real - cite the gap, not the file count.\n" +
 		"Still answer false for a finding the code contradicts, one that restates intended behaviour, or one whose " +
 		"premise about a tool or language is wrong. If what you were given is not enough to decide, say exactly what " +
 		"was missing in your reasoning rather than guessing."

@@ -1,0 +1,15 @@
+{
+ "run_id": "r2",
+ "url": "https://github.com/org/repo/pull/2",
+ "framework": "test-fw",
+ "records": [
+  {
+   "issue_text": "nothing tests the timer",
+   "source_lens": "test-fw-lens/testing-quality",
+   "old_verdict": "hallucination",
+   "new_verdict": "unresolved",
+   "confidence": 0.4,
+   "rationale": "cannot verify"
+  }
+ ]
+}

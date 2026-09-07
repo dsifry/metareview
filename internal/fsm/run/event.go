@@ -118,8 +118,14 @@ type LLMCallData struct {
 	// not a read boundary (see judge.WithCodexWorkDir), so this records the input that was
 	// prepared, not a proof that nothing else was consulted.
 	TreeHash string `json:"tree_hash,omitempty"`
-	BaseSHA  string `json:"base_sha,omitempty"`
-	HeadSHA  string `json:"head_sha,omitempty"`
+	// ClaimClass and ClaimEvidence record, when the adjudicated finding asserts an absence
+	// (issue #140's testing-gap claims), the detected claim class and the test files whose
+	// added lines reference the claimed subject. The per-call rows are the raw material for
+	// the per-run "claims made vs verified absent" metric; empty on every other call.
+	ClaimClass    string   `json:"claim_class,omitempty"`
+	ClaimEvidence []string `json:"claim_evidence,omitempty"`
+	BaseSHA       string   `json:"base_sha,omitempty"`
+	HeadSHA       string   `json:"head_sha,omitempty"`
 }
 
 // How a judge saw the code, recorded on every llm_call.

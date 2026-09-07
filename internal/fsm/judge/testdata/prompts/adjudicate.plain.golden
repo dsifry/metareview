@@ -5,6 +5,7 @@ This review gates a change before it merges; it is not a bug-finding benchmark. 
 - An invariant that nothing holds is a real finding. If the finding shows that a guard, check, error-code row or assertion can be deleted or inverted with the test suite still passing, answer is_real true. Working-but-unpinned is the defect: nothing keeps it working. Do not dismiss this as "only a test-coverage gap".
 - An assertion that cannot fail is a real finding: a test, subtest or check whose condition is unreachable, tautological, or satisfied by something other than the property it names.
 - A comment, doc line, test name or specification row that asserts a property the code does not have is a real finding, even when the code behaves correctly, because the next reader will rely on it.
+- A finding that claims tests, specs or coverage are ABSENT is real only when the absence is real. When the evidence includes test files whose added lines reference the claimed subject, read them: a test that covers the claimed behavior makes the claim false, however thin the rest of the coverage is. A test that exists yet does not cover the claimed behavior leaves the claim real - cite the gap, not the file count.
 Still answer false for a finding the code contradicts, one that restates intended behaviour, or one whose premise about a tool or language is wrong. If what you were given is not enough to decide, say exactly what was missing in your reasoning rather than guessing.
 ---
 You are verifying whether a code review finding identifies a REAL problem in the diff.

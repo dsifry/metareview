@@ -1,0 +1,971 @@
+diff --git a/app/assets/javascripts/admin/controllers/admin-group.js.es6 b/app/assets/javascripts/admin/controllers/admin-group.js.es6
+index 10cee82d99a..6bd8eda6bf3 100644
+--- a/app/assets/javascripts/admin/controllers/admin-group.js.es6
++++ b/app/assets/javascripts/admin/controllers/admin-group.js.es6
+@@ -1,34 +1,69 @@
+ export default Em.ObjectController.extend({
+   needs: ['adminGroups'],
+-  members: null,
+   disableSave: false,
++  usernames: null,
++
++  currentPage: function() {
++    if (this.get("user_count") == 0) { return 0; }
++    return Math.floor(this.get("offset") / this.get("limit")) + 1;
++  }.property("limit", "offset", "user_count"),
++
++  totalPages: function() {
++    if (this.get("user_count") == 0) { return 0; }
++    return Math.floor(this.get("user_count") / this.get("limit")) + 1;
++  }.property("limit", "user_count"),
++
++  showingFirst: Em.computed.lte("currentPage", 1),
++  showingLast: Discourse.computed.propertyEqual("currentPage", "totalPages"),
+ 
+   aliasLevelOptions: function() {
+     return [
+-      { name: I18n.t("groups.alias_levels.nobody"), value: 0},
+-      { name: I18n.t("groups.alias_levels.mods_and_admins"), value: 2},
+-      { name: I18n.t("groups.alias_levels.members_mods_and_admins"), value: 3},
+-      { name: I18n.t("groups.alias_levels.everyone"), value: 99}
++      { name: I18n.t("groups.alias_levels.nobody"), value: 0 },
++      { name: I18n.t("groups.alias_levels.mods_and_admins"), value: 2 },
++      { name: I18n.t("groups.alias_levels.members_mods_and_admins"), value: 3 },
++      { name: I18n.t("groups.alias_levels.everyone"), value: 99 }
+     ];
+   }.property(),
+ 
+-  usernames: function(key, value) {
+-    var members = this.get('members');
+-    if (arguments.length > 1) {
+-      this.set('_usernames', value);
+-    } else {
+-      var usernames;
+-      if(members) {
+-        usernames = members.map(function(user) {
+-          return user.get('username');
+-        }).join(',');
+-      }
+-      this.set('_usernames', usernames);
+-    }
+-    return this.get('_usernames');
+-  }.property('members.@each.username'),
+-
+   actions: {
++    next: function() {
++      if (this.get("showingLast")) { return; }
++
++      var group = this.get("model"),
++          offset = Math.min(group.get("offset") + group.get("limit"), group.get("user_count"));
++
++      group.set("offset", offset);
++
++      return group.findMembers();
++    },
++
++    previous: function() {
++      if (this.get("showingFirst")) { return; }
++
++      var group = this.get("model"),
++          offset = Math.max(group.get("offset") - group.get("limit"), 0);
++
++      group.set("offset", offset);
++
++      return group.findMembers();
++    },
++
++    removeMember: function(member) {
++      var self = this,
++          message = I18n.t("admin.groups.delete_member_confirm", { username: member.get("username"), group: this.get("name") });
++      return bootbox.confirm(message, I18n.t("no_value"), I18n.t("yes_value"), function(confirm) {
++        if (confirm) {
++          self.get("model").removeMember(member);
++        }
++      });
++    },
++
++    addMembers: function() {
++      // TODO: should clear the input
++      if (Em.isEmpty(this.get("usernames"))) { return; }
++      this.get("model").addMembers(this.get("usernames"));
++    },
++
+     save: function() {
+       var self = this,
+           group = this.get('model');
+@@ -37,9 +72,9 @@ export default Em.ObjectController.extend({
+ 
+       var promise;
+       if (group.get('id')) {
+-        promise = group.saveWithUsernames(this.get('usernames'));
++        promise = group.save();
+       } else {
+-        promise = group.createWithUsernames(this.get('usernames')).then(function() {
++        promise = group.create().then(function() {
+           var groupsController = self.get('controllers.adminGroups');
+           groupsController.addObject(group);
+         });
+diff --git a/app/assets/javascripts/admin/routes/admin_group_route.js b/app/assets/javascripts/admin/routes/admin_group_route.js
+index 3de37b38e48..89388e1c323 100644
+--- a/app/assets/javascripts/admin/routes/admin_group_route.js
++++ b/app/assets/javascripts/admin/routes/admin_group_route.js
+@@ -8,16 +8,10 @@ Discourse.AdminGroupRoute = Discourse.Route.extend({
+     return group;
+   },
+ 
+-  afterModel: function(model) {
+-    var self = this;
+-    return model.findMembers().then(function(members) {
+-      self.set('_members', members);
+-    });
+-  },
+-
+   setupController: function(controller, model) {
+-    controller.set('model', model);
+-    controller.set('members', this.get('_members'));
++    controller.set("model", model);
++    model.findMembers();
+   }
++
+ });
+ 
+diff --git a/app/assets/javascripts/admin/templates/group.hbs b/app/assets/javascripts/admin/templates/group.hbs
+index e37eb39a7d0..03d9d697e67 100644
+--- a/app/assets/javascripts/admin/templates/group.hbs
++++ b/app/assets/javascripts/admin/templates/group.hbs
+@@ -1,29 +1,53 @@
+-{{#if automatic}}
+-  <h3>{{name}}</h3>
+-{{else}}
+-  {{text-field value=name placeholderKey="admin.groups.name_placeholder"}}
+-{{/if}}
++<form class="form-horizontal">
+ 
+-<div class="control-group">
+-  <label class="control-label">{{i18n 'admin.groups.group_members'}}</label>
+-  <div class="controls">
+-    {{user-selector usernames=usernames id="group-users" placeholderKey="admin.groups.selector_placeholder" tabindex="1" disabled=automatic}}
++  <div>
++    {{#if automatic}}
++      <h3>{{name}}</h3>
++    {{else}}
++      <label for="name">{{i18n 'admin.groups.name'}}</label>
++      {{text-field name="name" value=name placeholderKey="admin.groups.name_placeholder"}}
++    {{/if}}
+   </div>
+-</div>
+-<div class="control-group">
+-  <div class="controls">
+-    {{input type="checkbox" checked=visible}} {{i18n 'groups.visible'}}
++
++  {{#if id}}
++    <div>
++      <label>{{i18n 'admin.groups.group_members'}} ({{user_count}})</label>
++      <div>
++        <a {{bind-attr class=":previous showingFirst:disabled"}} {{action "previous"}}>{{fa-icon "fast-backward"}}</a>
++        {{currentPage}}/{{totalPages}}
++        <a {{bind-attr class=":next showingLast:disabled"}} {{action "next"}}>{{fa-icon "fast-forward"}}</a>
++      </div>
++      <div class="ac-wrap clearfix">
++        {{each member in members itemView="group-member"}}
++      </div>
++    </div>
++
++    {{#unless automatic}}
++      <div>
++        <label for="user-selector">{{i18n 'admin.groups.add_members'}}</label>
++        {{user-selector usernames=usernames placeholderKey="admin.groups.selector_placeholder" id="user-selector"}}
++        <button {{action "addMembers"}} class='btn add'>{{fa-icon "plus"}} {{i18n 'admin.groups.add'}}</button>
++      </div>
++    {{/unless}}
++  {{/if}}
++
++  <div>
++    <label>
++      {{input type="checkbox" checked=visible}}
++      {{i18n 'groups.visible'}}
++    </label>
+   </div>
+-</div>
+-<div class="control-group">
+-  <label class="control-label">{{i18n 'groups.alias_levels.title'}}</label>
+-  <div class="controls">
+-    {{combo-box valueAttribute="value" value=alias_level content=aliasLevelOptions}}
++
++  <div>
++    <label for="alias">{{i18n 'groups.alias_levels.title'}}</label>
++    {{combo-box name="alias" valueAttribute="value" value=alias_level content=aliasLevelOptions}}
+   </div>
+-</div>
+-<div class='controls'>
+-  <button {{action "save"}} {{bind-attr disabled="disableSave"}} class='btn'>{{i18n 'admin.customize.save'}}</button>
+-  {{#unless automatic}}
+-    <button {{action "destroy"}} class='btn btn-danger'><i class="fa fa-trash-o"></i>{{i18n 'admin.customize.delete'}}</button>
+-  {{/unless}}
+-</div>
++
++  <div class='buttons'>
++    <button {{action "save"}} {{bind-attr disabled="disableSave"}} class='btn btn-primary'>{{i18n 'admin.customize.save'}}</button>
++    {{#unless automatic}}
++      <button {{action "destroy"}} class='btn btn-danger'>{{fa-icon "trash-o"}}{{i18n 'admin.customize.delete'}}</button>
++    {{/unless}}
++  </div>
++
++</form>
+diff --git a/app/assets/javascripts/admin/templates/group_member.hbs b/app/assets/javascripts/admin/templates/group_member.hbs
+new file mode 100644
+index 00000000000..d94f2ebe850
+--- /dev/null
++++ b/app/assets/javascripts/admin/templates/group_member.hbs
+@@ -0,0 +1 @@
++{{avatar member imageSize="small"}} {{member.username}} {{#unless automatic}}<a class='remove' {{action "removeMember" member}}>{{fa-icon "times"}}</a>{{/unless}}
+diff --git a/app/assets/javascripts/admin/views/group-member.js.es6 b/app/assets/javascripts/admin/views/group-member.js.es6
+new file mode 100644
+index 00000000000..7889fd59cf7
+--- /dev/null
++++ b/app/assets/javascripts/admin/views/group-member.js.es6
+@@ -0,0 +1,4 @@
++export default Discourse.View.extend({
++  classNames: ["item"],
++  templateName: "admin/templates/group_member"
++});
+diff --git a/app/assets/javascripts/discourse/models/group.js b/app/assets/javascripts/discourse/models/group.js
+index 669c8f698f8..94930b291e3 100644
+--- a/app/assets/javascripts/discourse/models/group.js
++++ b/app/assets/javascripts/discourse/models/group.js
+@@ -7,53 +7,80 @@
+   @module Discourse
+ **/
+ Discourse.Group = Discourse.Model.extend({
++  limit: 50,
++  offset: 0,
++  user_count: 0,
+ 
+   userCountDisplay: function(){
+     var c = this.get('user_count');
+     // don't display zero its ugly
+-    if(c > 0) {
+-      return c;
+-    }
++    if (c > 0) { return c; }
+   }.property('user_count'),
+ 
+   findMembers: function() {
+-    if (Em.isEmpty(this.get('name'))) { return Ember.RSVP.resolve([]); }
++    if (Em.isEmpty(this.get('name'))) { return ; }
+ 
+-    return Discourse.ajax('/groups/' + this.get('name') + '/members').then(function(result) {
+-      return result.map(function(u) { return Discourse.User.create(u) });
++    var self = this, offset = Math.min(this.get("user_count"), Math.max(this.get("offset"), 0));
++
++    return Discourse.ajax('/groups/' + this.get('name') + '/members.json', {
++      data: {
++        limit: this.get("limit"),
++        offset: offset
++      }
++    }).then(function(result) {
++      self.setProperties({
++        user_count: result.meta.total,
++        limit: result.meta.limit,
++        offset: result.meta.offset,
++        members: result.members.map(function(member) { return Discourse.User.create(member); })
++      });
+     });
+   },
+ 
+-  destroy: function(){
+-    if(!this.get('id')) return;
+-    return Discourse.ajax("/admin/groups/" + this.get('id'), {type: "DELETE"});
++  removeMember: function(member) {
++    var self = this;
++    return Discourse.ajax('/admin/groups/' + this.get('id') + '/members.json', {
++      type: "DELETE",
++      data: { user_id: member.get("id") }
++    }).then(function() {
++      // reload member list
++      self.findMembers();
++    });
+   },
+ 
+-  asJSON: function() {
+-    return { group: {
+-             name: this.get('name'),
+-             alias_level: this.get('alias_level'),
+-             visible: !!this.get('visible'),
+-             usernames: this.get('usernames') } };
++  addMembers: function(usernames) {
++    var self = this;
++    return Discourse.ajax('/admin/groups/' + this.get('id') + '/members.json', {
++      type: "PUT",
++      data: { usernames: usernames }
++    }).then(function() {
++      // reload member list
++      self.findMembers();
++    })
+   },
+ 
+-  createWithUsernames: function(usernames){
+-    var self = this,
+-        json = this.asJSON();
+-    json.group.usernames = usernames;
++  asJSON: function() {
++    return {
++      name: this.get('name'),
++      alias_level: this.get('alias_level'),
++      visible: !!this.get('visible')
++    };
++  },
+ 
+-    return Discourse.ajax("/admin/groups", {type: "POST", data: json}).then(function(resp) {
++  create: function(){
++    var self = this;
++    return Discourse.ajax("/admin/groups", { type: "POST", data: this.asJSON() }).then(function(resp) {
+       self.set('id', resp.basic_group.id);
+     });
+   },
+ 
+-  saveWithUsernames: function(usernames){
+-    var json = this.asJSON();
+-    json.group.usernames = usernames;
+-    return Discourse.ajax("/admin/groups/" + this.get('id'), {
+-      type: "PUT",
+-      data: json
+-    });
++  save: function(){
++    return Discourse.ajax("/admin/groups/" + this.get('id'), { type: "PUT", data: this.asJSON() });
++  },
++
++  destroy: function(){
++    if (!this.get('id')) { return };
++    return Discourse.ajax("/admin/groups/" + this.get('id'), {type: "DELETE"});
+   },
+ 
+   findPosts: function(opts) {
+diff --git a/app/assets/javascripts/discourse/routes/group-members.js.es6 b/app/assets/javascripts/discourse/routes/group-members.js.es6
+index b95fdfd88be..e6b207fc436 100644
+--- a/app/assets/javascripts/discourse/routes/group-members.js.es6
++++ b/app/assets/javascripts/discourse/routes/group-members.js.es6
+@@ -5,17 +5,10 @@ export default Discourse.Route.extend(ShowFooter, {
+     return this.modelFor('group');
+   },
+ 
+-  afterModel: function(model) {
+-    var self = this;
+-    return model.findMembers().then(function(result) {
+-      self.set('_members', result);
+-    });
+-  },
+-
+-  setupController: function(controller) {
+-    controller.set('model', this.get('_members'));
++  setupController: function(controller, model) {
+     this.controllerFor('group').set('showing', 'members');
++    controller.set("model", model);
++    model.findMembers();
+   }
+ 
+ });
+-
+diff --git a/app/assets/javascripts/discourse/templates/components/admin-group-selector.hbs b/app/assets/javascripts/discourse/templates/components/admin-group-selector.hbs
+index f897810ab9e..4856de5179a 100644
+--- a/app/assets/javascripts/discourse/templates/components/admin-group-selector.hbs
++++ b/app/assets/javascripts/discourse/templates/components/admin-group-selector.hbs
+@@ -1,3 +1 @@
+-
+ <input type="text">
+-
+diff --git a/app/assets/javascripts/discourse/templates/group/members.hbs b/app/assets/javascripts/discourse/templates/group/members.hbs
+index 6ac492ea398..16728d740e0 100644
+--- a/app/assets/javascripts/discourse/templates/group/members.hbs
++++ b/app/assets/javascripts/discourse/templates/group/members.hbs
+@@ -3,7 +3,7 @@
+     <tr>
+       <th colspan="3" class="seen">{{i18n 'last_seen'}}</th>
+     </tr>
+-  {{#each m in model}}
++  {{#each m in members}}
+   <tr>
+       <td class='avatar'>
+         {{avatar m imageSize="large"}}
+diff --git a/app/assets/javascripts/discourse/templates/user-selector-autocomplete.raw.hbs b/app/assets/javascripts/discourse/templates/user-selector-autocomplete.raw.hbs
+index cf424163380..eea69be0b82 100644
+--- a/app/assets/javascripts/discourse/templates/user-selector-autocomplete.raw.hbs
++++ b/app/assets/javascripts/discourse/templates/user-selector-autocomplete.raw.hbs
+@@ -2,19 +2,21 @@
+   <ul>
+     {{#each options.users}}
+       <li>
+-      <a href='#'>{{avatar this imageSize="tiny"}}
+-        <span class='username'>{{this.username}}</span>
+-        <span class='name'>{{this.name}}</span></a>
++        <a href='#'>{{avatar this imageSize="tiny"}}
++          <span class='username'>{{this.username}}</span>
++          <span class='name'>{{this.name}}</span>
++        </a>
+       </li>
+     {{/each}}
+     {{#if options.groups}}
+       {{#if options.users}}<hr>{{/if}}
+       {{#each options.groups}}
+         <li>
+-        <a href=''><i class='icon-group'></i>
+-          <span class='username'>{{this.name}}</span>
+-          <span class='name'>{{max-usernames usernames max="3"}}</span>
+-        </a>
++          <a href=''>
++            <i class='icon-group'></i>
++            <span class='username'>{{this.name}}</span>
++            <span class='name'>{{max-usernames usernames max="3"}}</span>
++          </a>
+         </li>
+       {{/each}}
+     {{/if}}
+diff --git a/app/assets/stylesheets/common/admin/admin_base.scss b/app/assets/stylesheets/common/admin/admin_base.scss
+index 86b1d81238d..3e71449fe17 100644
+--- a/app/assets/stylesheets/common/admin/admin_base.scss
++++ b/app/assets/stylesheets/common/admin/admin_base.scss
+@@ -161,6 +161,26 @@ td.flaggers td {
+   }
+ }
+ 
++.groups, .badges {
++  .form-horizontal {
++    label {
++      font-weight: bold;
++    }
++
++    & > div {
++      margin-top: 10px;
++    }
++
++    input, textarea, select {
++      width: 350px;
++    }
++
++    input[type="checkbox"] {
++      width: 20px;
++    }
++  }
++}
++
+ .site-settings-nav {
+   width: 18.018%;
+   margin-top: 30px;
+@@ -378,25 +398,10 @@ section.details {
+   }
+ 
+   .form-horizontal {
+-    label {
+-      font-weight: bold;
+-    }
+-    & > div {
+-      margin-top: 10px;
+-    }
+     .delete-link {
+       margin-left: 15px;
+       margin-top: 5px;
+     }
+-
+-    input, textarea, select {
+-      width: 350px;
+-    }
+-
+-    input[type="checkbox"] {
+-      width: 20px;
+-    }
+-
+     textarea {
+       height: 200px;
+     }
+@@ -454,6 +459,26 @@ section.details {
+   }
+ }
+ 
++// Groups area
++.groups {
++  .ac-wrap {
++    width: 100% !important;
++    .item {
++      width: 190px;
++      margin-right: 0 !important;
++    }
++  }
++  .next, .previous {
++    color: #333 !important;
++    &.disabled {
++      color: #aaa !important;
++    }
++  }
++  .btn.add {
++    margin-top: 7px;
++  }
++}
++
+ // Customise area
+ .customize {
+   .admin-footer {
+diff --git a/app/controllers/admin/groups_controller.rb b/app/controllers/admin/groups_controller.rb
+index 0dd4dc8afa4..dd9e5f720dd 100644
+--- a/app/controllers/admin/groups_controller.rb
++++ b/app/controllers/admin/groups_controller.rb
+@@ -1,13 +1,17 @@
+ class Admin::GroupsController < Admin::AdminController
++
+   def index
+     groups = Group.order(:name)
++
+     if search = params[:search]
+       search = search.to_s
+-      groups = groups.where("name ilike ?", "%#{search}%")
++      groups = groups.where("name ILIKE ?", "%#{search}%")
+     end
++
+     if params[:ignore_automatic].to_s == "true"
+       groups = groups.where(automatic: false)
+     end
++
+     render_serialized(groups, BasicGroupSerializer)
+   end
+ 
+@@ -15,42 +19,25 @@ def show
+     render nothing: true
+   end
+ 
+-  def refresh_automatic_groups
+-    Group.refresh_automatic_groups!
+-    render json: success_json
+-  end
+-
+-  def update_patch(group)
+-    raise Discourse::InvalidAccess.new("automatic groups do not permit membership changes") if group.automatic
++  def create
++    group = Group.new
++    group.name = (params[:name] || '').strip
++    group.visible = params[:visible] == "true"
+ 
+-    if actions = params[:changes]
+-      Array(actions[:add]).each do |username|
+-        if user = User.find_by_username(username)
+-          group.add(user)
+-        end
+-      end
+-      Array(actions[:delete]).each do |username|
+-        if user = User.find_by_username(username)
+-          group.remove(user)
+-        end
+-      end
++    if group.save
++      render_serialized(group, BasicGroupSerializer)
++    else
++      render_json_error group
+     end
+-
+-    render json: success_json
+   end
+ 
+-  def update_put(group)
+-    payload = params[:group]
++  def update
++    group = Group.find(params[:id].to_i)
+ 
+-    group.alias_level = payload[:alias_level].to_i if payload[:alias_level].present?
+-    group.visible = payload[:visible] == "true"
+-
+-    if group.automatic
+-      # group rename & membership changes are ignored/prohibited for automatic groups
+-    else
+-      group.usernames = payload[:usernames] if payload[:usernames]
+-      group.name = payload[:name] if payload[:name]
+-    end
++    group.alias_level = params[:alias_level].to_i if params[:alias_level].present?
++    group.visible = params[:visible] == "true"
++    # group rename is ignored for automatic groups
++    group.name = params[:name] if params[:name] && !group.automatic
+ 
+     if group.save
+       render json: success_json
+@@ -59,41 +46,59 @@ def update_put(group)
+     end
+   end
+ 
+-  def update
++  def destroy
+     group = Group.find(params[:id].to_i)
+ 
+-    if request.patch?
+-      update_patch(group)
++    if group.automatic
++      can_not_modify_automatic
+     else
+-      update_put(group)
++      group.destroy
++      render json: success_json
+     end
+   end
+ 
+-  def create
+-    group = Group.new
+-    group.name = (params[:group][:name] || '').strip
+-    group.usernames = params[:group][:usernames] if params[:group][:usernames]
+-    group.visible = params[:group][:visible] == "true"
++  def refresh_automatic_groups
++    Group.refresh_automatic_groups!
++    render json: success_json
++  end
++
++  def add_members
++    group = Group.find(params.require(:group_id).to_i)
++    usernames = params.require(:usernames)
++
++    return can_not_modify_automatic if group.automatic
++
++    usernames.split(",").each do |username|
++      if user = User.find_by_username(username)
++        group.add(user)
++      end
++    end
++
+     if group.save
+-      render_serialized(group, BasicGroupSerializer)
++      render json: success_json
+     else
+-      render_json_error group
++      render_json_error(group)
+     end
+   end
+ 
+-  def destroy
+-    group = Group.find(params[:id].to_i)
+-    if group.automatic
+-      can_not_modify_automatic
+-    else
+-      group.destroy
++  def remove_member
++    group = Group.find(params.require(:group_id).to_i)
++    user_id = params.require(:user_id).to_i
++
++    return can_not_modify_automatic if group.automatic
++
++    group.users.delete(user_id)
++
++    if group.save
+       render json: success_json
++    else
++      render_json_error(group)
+     end
+   end
+ 
+   protected
+ 
+-  def can_not_modify_automatic
+-    render json: {errors: I18n.t('groups.errors.can_not_modify_automatic')}, status: 422
+-  end
++    def can_not_modify_automatic
++      render json: {errors: I18n.t('groups.errors.can_not_modify_automatic')}, status: 422
++    end
+ end
+diff --git a/app/controllers/groups_controller.rb b/app/controllers/groups_controller.rb
+index bcc6fbd6d57..f6d7af0b5c3 100644
+--- a/app/controllers/groups_controller.rb
++++ b/app/controllers/groups_controller.rb
+@@ -19,26 +19,29 @@ def posts
+   def members
+     group = find_group(:group_id)
+ 
+-    members = group.users.order('username_lower asc')
+-
+-    # TODO: We should fix the root cause of the bug where if there
+-    # are more than 200 groups it will truncate
+-    if group.automatic?
+-      limit = (params[:limit] || 200).to_i
+-      offset = (params[:offset] || 0).to_i
+-      members = members.limit(limit).offset(offset)
+-    end
+-
+-    render_serialized(members.to_a, GroupUserSerializer)
++    limit = (params[:limit] || 50).to_i
++    offset = params[:offset].to_i
++
++    total = group.users.count
++    members = group.users.order(:username_lower).limit(limit).offset(offset)
++
++    render json: {
++      members: serialize_data(members, GroupUserSerializer),
++      meta: {
++        total: total,
++        limit: limit,
++        offset: offset
++      }
++    }
+   end
+ 
+   private
+ 
+-  def find_group(param_name)
+-    name = params.require(param_name)
+-    group = Group.find_by("lower(name) = ?", name.downcase)
+-    guardian.ensure_can_see!(group)
+-    group
+-  end
++    def find_group(param_name)
++      name = params.require(param_name)
++      group = Group.find_by("lower(name) = ?", name.downcase)
++      guardian.ensure_can_see!(group)
++      group
++    end
+ 
+ end
+diff --git a/config/locales/client.en.yml b/config/locales/client.en.yml
+index 0cd56c491de..04c39989765 100644
+--- a/config/locales/client.en.yml
++++ b/config/locales/client.en.yml
+@@ -1620,13 +1620,17 @@ en:
+         edit: "Edit Groups"
+         refresh: "Refresh"
+         new: "New"
+-        selector_placeholder: "add users"
++        selector_placeholder: "enter username"
+         name_placeholder: "Group name, no spaces, same as username rule"
+         about: "Edit your group membership and names here"
+         group_members: "Group members"
+         delete: "Delete"
+         delete_confirm: "Delete this group?"
+         delete_failed: "Unable to delete group. If this is an automatic group, it cannot be destroyed."
++        delete_member_confirm: "Remove '%{username}' from the '%{group}' group?"
++        name: "Name"
++        add: "Add"
++        add_members: "Add members"
+ 
+       api:
+         generate_master: "Generate Master API Key"
+diff --git a/config/routes.rb b/config/routes.rb
+index 0c883317bdd..e1981e327e4 100644
+--- a/config/routes.rb
++++ b/config/routes.rb
+@@ -46,7 +46,8 @@
+       collection do
+         post "refresh_automatic_groups" => "groups#refresh_automatic_groups"
+       end
+-      get "users"
++      delete "members" => "groups#remove_member"
++      put "members" => "groups#add_members"
+     end
+ 
+     resources :users, id: USERNAME_ROUTE_FORMAT do
+diff --git a/spec/controllers/admin/groups_controller_spec.rb b/spec/controllers/admin/groups_controller_spec.rb
+index 5979523a1ea..5983c985dad 100644
+--- a/spec/controllers/admin/groups_controller_spec.rb
++++ b/spec/controllers/admin/groups_controller_spec.rb
+@@ -10,31 +10,57 @@
+     (Admin::GroupsController < Admin::AdminController).should == true
+   end
+ 
+-  it "produces valid json for groups" do
+-    group = Fabricate.build(:group, name: "test")
+-    group.add(@admin)
+-    group.save
+-
+-    xhr :get, :index
+-    response.status.should == 200
+-    ::JSON.parse(response.body).keep_if{|r| r["id"] == group.id}.should == [{
+-      "id"=>group.id,
+-      "name"=>group.name,
+-      "user_count"=>1,
+-      "automatic"=>false,
+-      "alias_level"=>0,
+-      "visible"=>true
+-    }]
++  context ".index" do
++
++    it "produces valid json for groups" do
++      group = Fabricate.build(:group, name: "test")
++      group.add(@admin)
++      group.save
++
++      xhr :get, :index
++      response.status.should == 200
++      ::JSON.parse(response.body).keep_if {|r| r["id"] == group.id }.should == [{
++        "id"=>group.id,
++        "name"=>group.name,
++        "user_count"=>1,
++        "automatic"=>false,
++        "alias_level"=>0,
++        "visible"=>true
++      }]
++    end
++
++  end
++
++  context ".create" do
++
++    it "strip spaces on the group name" do
++      xhr :post, :create, name: " bob "
++
++      response.status.should == 200
++
++      groups = Group.where(name: "bob").to_a
++
++      groups.count.should == 1
++      groups[0].name.should == "bob"
++    end
++
+   end
+ 
+-  it "is able to refresh automatic groups" do
+-    Group.expects(:refresh_automatic_groups!).returns(true)
++  context ".update" do
++
++    it "ignore name change on automatic group" do
++      xhr :put, :update, id: 1, name: "WAT", visible: "true"
++      response.should be_success
++
++      group = Group.find(1)
++      group.name.should_not == "WAT"
++      group.visible.should == true
++    end
+ 
+-    xhr :post, :refresh_automatic_groups
+-    response.status.should == 200
+   end
+ 
+-  context '.destroy' do
++  context ".destroy" do
++
+     it "returns a 422 if the group is automatic" do
+       group = Fabricate(:group, automatic: true)
+       xhr :delete, :destroy, id: group.id
+@@ -48,97 +74,61 @@
+       response.status.should == 200
+       Group.where(id: group.id).count.should == 0
+     end
++
+   end
+ 
+-  context '.create' do
+-    let(:usernames) { @admin.username }
++  context ".refresh_automatic_groups" do
+ 
+-    it "is able to create a group" do
+-      xhr :post, :create, group: {
+-        usernames: usernames,
+-        name: "bob"
+-      }
++    it "is able to refresh automatic groups" do
++      Group.expects(:refresh_automatic_groups!).returns(true)
+ 
++      xhr :post, :refresh_automatic_groups
+       response.status.should == 200
+-
+-      groups = Group.where(name: "bob").to_a
+-
+-      groups.count.should == 1
+-      groups[0].usernames.should == usernames
+-      groups[0].name.should == "bob"
+     end
+ 
+-    it "strips spaces from group name" do
+-      lambda {
+-        xhr :post, :create, group: {
+-          usernames: usernames,
+-          name: " bob "
+-        }
+-      }.should_not raise_error()
+-      Group.where(name: "bob").count.should == 1
+-    end
+   end
+ 
+-  context '.update' do
+-    let (:group) { Fabricate(:group) }
++  context ".add_members" do
+ 
+-    it "is able to update group members" do
++    it "cannot add members to automatic groups" do
++      xhr :put, :add_members, group_id: 1, usernames: "l77t"
++      response.status.should == 422
++    end
++
++    it "is able to add several members to a group" do
+       user1 = Fabricate(:user)
+       user2 = Fabricate(:user)
++      group = Fabricate(:group)
+ 
+-      xhr :put, :update, id: group.id, name: 'fred', group: {
+-            name: 'fred',
+-            usernames: "#{user1.username},#{user2.username}"
+-          }
++      xhr :put, :add_members, group_id: group.id, usernames: [user1.username, user2.username].join(",")
+ 
++      response.should be_success
+       group.reload
+       group.users.count.should == 2
+-      group.name.should == 'fred'
+     end
+ 
+-    context 'incremental' do
+-      before do
+-        @user1 = Fabricate(:user)
+-        group.add(@user1)
+-        group.reload
+-      end
+-
+-      it "can make incremental adds" do
+-        user2 = Fabricate(:user)
+-        xhr :patch, :update, id: group.id, changes: {add: user2.username}
+-        response.status.should == 200
+-        group.reload
+-        group.users.count.should eq(2)
+-      end
+-
+-      it "succeeds silently when adding non-existent users" do
+-        xhr :patch, :update, id: group.id, changes: {add: "nosuchperson"}
+-        response.status.should == 200
+-        group.reload
+-        group.users.count.should eq(1)
+-      end
+-
+-      it "can make incremental deletes" do
+-        xhr :patch, :update, id: group.id, changes: {delete: @user1.username}
+-        response.status.should == 200
+-        group.reload
+-        group.users.count.should eq(0)
+-      end
+-
+-      it "succeeds silently when removing non-members" do
+-        user2 = Fabricate(:user)
+-        xhr :patch, :update, id: group.id, changes: {delete: user2.username}
+-        response.status.should == 200
+-        group.reload
+-        group.users.count.should eq(1)
+-      end
+-
+-      it "cannot patch automatic groups" do
+-        auto_group = Fabricate(:group, name: "auto_group", automatic: true)
+-
+-        xhr :patch, :update, id: auto_group.id, changes: {add: "bob"}
+-        response.status.should == 403
+-      end
++  end
++
++  context ".remove_member" do
++
++    it "cannot remove members from automatic groups" do
++      xhr :put, :remove_member, group_id: 1, user_id: 42
++      response.status.should == 422
++    end
++
++    it "is able to remove a member" do
++      group = Fabricate(:group)
++      user = Fabricate(:user)
++      group.add(user)
++      group.save
++
++      xhr :delete, :remove_member, group_id: group.id, user_id: user.id
++
++      response.should be_success
++      group.reload
++      group.users.count.should == 0
+     end
++
+   end
++
+ end

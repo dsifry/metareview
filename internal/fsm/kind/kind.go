@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/dsifry/metareview/internal/claimcheck"
 	"github.com/dsifry/metareview/internal/fsm/converge"
 	"github.com/dsifry/metareview/internal/fsm/errs"
 	"github.com/dsifry/metareview/internal/fsm/judge"
@@ -461,6 +462,9 @@ func callAs(ctx context.Context, j judge.Judge, in machine.ExecInput, req judge.
 	if esc != nil {
 		data.Evidence, data.TreeHash, data.BaseSHA, data.HeadSHA = esc.Evidence, esc.TreeHash, esc.BaseSHA, esc.HeadSHA
 	}
+	if req.Claim != nil {
+		data.ClaimClass, data.ClaimEvidence = string(req.Claim.Class), req.Claim.Evidence
+	}
 	if v.Parsed != nil {
 		data.Verdict = v.Parsed
 	}
@@ -557,6 +561,11 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		}
 	}
 	var rejected []run.Bug
+	// #140's per-run metric: testing-gap claims made, how many had covering-test evidence
+	// in the diff, and how each was ruled. Claims-made is the denominator the issue asks
+	// for ("claims made vs claims verified absent"); verified-absent is the confirmed count
+	// below with zero evidence found.
+	gapClaims, gapEvidence, gapConfirmed, gapConfirmedNoEvidence, gapRejected, gapRejectedEvidence, gapUnverified := 0, 0, 0, 0, 0, 0, 0
 	for c, cand := range cands {
 		if seen[c] {
 			continue
@@ -573,8 +582,29 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 			confirmed = append(confirmed, run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictUnverifiedNoEvidence})
 			continue
 		}
-		diff, truncated, diffHash := judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, cand.IssueText, judge.MaxDiffBytes)
-		v, err := call(ctx, e.judge, in, judge.Request{Kind: judge.KindAdjudicate, Index: index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand}})
+		// #140: a finding that asserts absent tests is adjudicated against the test files
+		// the diff actually changes (ContextForGapClaim), so the judge verifies the claimed
+		// absence the same way it verifies claimed defects - the cal.com miss was a claim
+		// whose contradicting spec sat in the same diff and was never shown.
+		var claim *judge.ClaimInfo
+		var diff string
+		var truncated bool
+		var diffHash string
+		if class, ok := claimcheck.Detect(cand.IssueText); ok {
+			var ev []claimcheck.Evidence
+			diff, truncated, diffHash, ev = judge.ContextForGapClaim(in.Diff.Text, in.Diff.Truncated, cand, judge.MaxDiffBytes)
+			claim = &judge.ClaimInfo{Class: class}
+			for _, e := range ev {
+				claim.Evidence = append(claim.Evidence, e.Path)
+			}
+			gapClaims++
+			if len(ev) > 0 {
+				gapEvidence++
+			}
+		} else {
+			diff, truncated, diffHash = judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, cand.IssueText, judge.MaxDiffBytes)
+		}
+		v, err := call(ctx, e.judge, in, judge.Request{Kind: judge.KindAdjudicate, Index: index, Input: judge.AdjudicateInput{Diff: diff, DiffTruncated: truncated, DiffContextHash: diffHash, Candidate: cand}, Claim: claim})
 		index++
 		if err != nil {
 			return nil, err
@@ -584,9 +614,26 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		if v.ParseError != "" {
 			desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
 			confirmed = append(confirmed, run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictCheckedButUnverified})
+			if claim != nil {
+				gapUnverified++
+			}
 			continue
 		}
 		real := v.Decision && v.Confidence >= AdjudicateThreshold
+		if claim != nil {
+			switch {
+			case real && len(claim.Evidence) == 0:
+				gapConfirmed++
+				gapConfirmedNoEvidence++
+			case real:
+				gapConfirmed++
+			case len(claim.Evidence) > 0:
+				gapRejected++
+				gapRejectedEvidence++
+			default:
+				gapRejected++
+			}
+		}
 		if real {
 			desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
 			confirmed = append(confirmed, run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictRealButUngold, Confidence: v.Confidence})
@@ -595,6 +642,27 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		} else {
 			desc, _ := run.CapText(cand.IssueText, run.MaxShort)
 			rejected = append(rejected, run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictHallucination, Confidence: v.Confidence})
+		}
+	}
+	// The per-run #140 metric, one record event per adjudicate execution: claims made,
+	// evidence found, and the rulings split by whether covering tests were in view. A
+	// regression shows up as claims-made rising or confirmed-without-evidence shrinking.
+	if gapClaims > 0 {
+		data := run.MarshalCanonical(run.RecordData{
+			Name: "claimcheck",
+			Data: run.MarshalCanonical(map[string]any{
+				"class":                      string(claimcheck.ClassTestingGap),
+				"claims":                     gapClaims,
+				"with_evidence":              gapEvidence,
+				"confirmed":                  gapConfirmed,
+				"confirmed_without_evidence": gapConfirmedNoEvidence,
+				"rejected":                   gapRejected,
+				"rejected_with_evidence":     gapRejectedEvidence,
+				"unverified":                 gapUnverified,
+			}),
+		})
+		if aerr := in.Audit(run.Event{Type: run.TypeRecord, Data: data}); aerr != nil {
+			return nil, aerr
 		}
 	}
 	// validity by construction: the pre-flight bounds the size and count, every

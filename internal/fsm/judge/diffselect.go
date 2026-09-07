@@ -7,6 +7,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/dsifry/metareview/internal/claimcheck"
+	"github.com/dsifry/metareview/internal/fsm/run"
 )
 
 // Selecting the diff a judge sees is deliberately language-agnostic. A unified diff's
@@ -495,4 +498,88 @@ func ContextForClaim(diff string, alreadyTruncated bool, file string, line int, 
 	out = b.String()
 	sum := sha1.Sum([]byte(out))
 	return out, alreadyTruncated || len(out) < len(diff), hex.EncodeToString(sum[:])
+}
+
+// ChangedBlocks returns one claimcheck.Block per changed file: its post-image path and
+// the lines the diff added to it. It is the bridge from this package's unified-diff
+// parser to claimcheck's evidence search, so the parser stays single and cmd tooling can
+// reach the same view (AddedLinesInFile is the one-file form of the same idea).
+func ChangedBlocks(diff string) []claimcheck.Block {
+	all := parseUnifiedDiff(diff)
+	out := make([]claimcheck.Block, 0, len(all))
+	for _, b := range all {
+		blk := claimcheck.Block{Path: b.path}
+		for _, h := range b.hunks {
+			for _, line := range h.lines {
+				if strings.HasPrefix(line, "+") {
+					blk.Added = append(blk.Added, line[1:])
+				}
+			}
+		}
+		out = append(out, blk)
+	}
+	return out
+}
+
+// maxGapEvidenceFiles bounds how many covering-test files one testing-gap claim can pull
+// into the judge's context. Like maxReferencedFiles it bounds prompt size, not judgment:
+// the evidence is ranked by how strongly its added lines reference the claim's subject.
+const maxGapEvidenceFiles = 3
+
+// GapClaimEvidence returns the covering-test evidence for a testing-gap finding: the
+// diff's test files whose added lines reference the claim's subject, strongest first.
+// It is the "verify the claimed absence" half of issue #140 - the same search the lens
+// rubrics now require before the finding is emitted at all.
+func GapClaimEvidence(diff string, f run.Finding, max int) []claimcheck.Evidence {
+	return claimcheck.EvidenceFor(ChangedBlocks(diff), claimcheck.Finding{File: f.File, Line: f.Line, Text: f.IssueText}, max)
+}
+
+// gapClaimDisclosure is prefixed to a gap-claim context so the judge knows what the extra
+// test-file hunks are and why they are there. It lives in the diff VALUE, not the prompt
+// template, like every other metareview disclosure: the templates are byte-pinned to
+// harnesseval, the evidence is ours to shape.
+const gapClaimDisclosure = "[metareview: the finding claims tests, specs or coverage are ABSENT for a subject this diff changes. " +
+	"This diff also changes the following test-shaped files, whose added lines reference the claimed subject; their hunks are appended below. " +
+	"Before accepting the claim, verify the claimed absence against them - a test that exists yet does not cover the claimed behavior still makes the claim true, but a test that does cover it makes the claim false.]\n"
+
+// ContextForGapClaim is ContextForClaim for a finding whose claim class is testing-gap
+// (claimcheck.Detect): the primary file, the files the text names, AND the test files
+// whose added lines reference the claim's subject, with a disclosure naming them. The
+// cal.com failure (#140) was exactly a claim whose contradicting spec sat in the same
+// diff, eight lines below the change, and the judge was never shown it.
+func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budget int) (out string, truncated bool, hash string, evidence []claimcheck.Evidence) {
+	evidence = GapClaimEvidence(diff, f, maxGapEvidenceFiles)
+	var paths []string
+	inPaths := map[string]bool{}
+	for _, p := range ReferencedPaths(diff, f.File, f.IssueText) {
+		inPaths[p] = true
+		paths = append(paths, p)
+	}
+	for _, e := range evidence {
+		if !inPaths[e.Path] {
+			inPaths[e.Path] = true
+			paths = append(paths, e.Path)
+		}
+	}
+	if len(paths) == 0 {
+		out, truncated, hash := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget)
+		return out, truncated, hash, evidence
+	}
+	// same split as ContextForClaim: the declared file keeps two shares of the budget,
+	// every corroborating file one.
+	share := budget / (len(paths) + 2)
+	primary, _, _ := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget-share*len(paths))
+	var b strings.Builder
+	if len(evidence) > 0 {
+		b.WriteString(gapClaimDisclosure)
+	}
+	b.WriteString(primary)
+	for _, p := range paths {
+		if sel, ok, _ := SelectDiff(diff, p, 0, share); ok {
+			b.WriteString("\n" + sel)
+		}
+	}
+	out = b.String()
+	sum := sha1.Sum([]byte(out))
+	return out, alreadyTruncated || len(out) < len(diff), hex.EncodeToString(sum[:]), evidence
 }

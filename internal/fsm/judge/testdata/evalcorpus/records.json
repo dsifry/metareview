@@ -1,0 +1,1159 @@
+{
+ "source": "harnesseval readjudication3 (metareview-realistic runs), stratified sample for issue #140",
+ "records": [
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/features/bookings/lib/handleNewBooking.ts:1078 — the PR's headline feature silently drops co-host calendars with no test and no error [85,P0]",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "spec/controllers/admin/embeddable_hosts_controller_spec.rb + embedding_controller_spec.rb — both files contain only a subclass-hierarchy assertion; no test exercises create/update/destroy persistence, validation errors, or the nil-id 500 path, and no spec/models/embeddable_host_spec.rb exists at all (confidence=85, severity=P2)",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/models/topic_embed.rb:36-43 — per-host category assignment (`eh.try(:category_id)`) replacing the old global SiteSetting.embed_category has no test verifying an embedded topic lands in the matched host's category (confidence=55, severity=P2)",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/models/topic_spec.rb",
+    "test/javascripts/helpers/create-pretender.js.es6",
+    "spec/models/topic_embed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/models/embeddable_host.rb — no spec/models/embeddable_host_spec.rb exists; validation, normalization, and record_for_host/host_allowed? matching (including the case-sensitivity bug against referer hosts) are untested at the unit level (confidence=75, severity=P2)",
+   "lens": "metareview-lens/testing",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/models/embeddable_host_spec.rb",
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb",
+    "spec/controllers/embed_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/models/embeddable_host.rb / TopicEmbed's use of EmbeddableHost.record_for_host — the core new business logic driving the category/host relationship (the feature's namesake) has zero spec coverage anywhere in the diff. [high, block]",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb",
+    "spec/models/embeddable_host_spec.rb",
+    "spec/models/topic_embed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "NONE — diff contains no test files; missing-test ownership falls to the deterministic gate and Completeness",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "no test files changed in this diff; no existing test surface for addGuests/AddGuestsDialog found in repo, so no stale/sentinel-mock risk to flag beyond the baseline gap already owned by Completeness (confidence=100, severity=P3).",
+   "lens": "metareview-lens/testing",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/controllers/embed_controller.rb:60 — removing the explicit embeddable_hosts.blank? guard makes fail-closed behavior incidental to host_allowed?'s falsy return, with no test for the empty-table case (P2, conf 60)",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb",
+    "spec/models/embeddable_host_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/models/topic_embed.rb:36-43 — the category argument type changed from name-string to integer id with zero tests; nothing asserts the created topic's category (P1, conf 80)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/models/topic_spec.rb",
+    "spec/models/topic_embed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/models/topic_embed.rb:36 — [conf=100,P1] the \"embedded topics are created in the category configured for the matching host\" criterion has no spec at all, so the central behavior change is unverified.",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/models/topic_spec.rb",
+    "test/javascripts/models/store-test.js.es6"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/models/topic_embed.rb:36 — [conf=100,P0] the PostCreator `:category` argument changed from a name string to an integer id and the \"embedded topics created in the configured category\" criterion has NO test, so a total behavioral break ships green.",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/models/topic_spec.rb",
+    "test/javascripts/models/store-test.js.es6"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/models/embeddable_host.rb:6 — [conf=100,P1] no spec/models/embeddable_host_spec.rb exists anywhere, so the callback, format validation, record_for_host, and host_allowed? have zero direct tests.",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/models/embeddable_host_spec.rb",
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb",
+    "spec/controllers/embed_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/models/topic.rb:868 — [conf=100,P2] expandable_first_post? dropped a guard and no spec in this diff exercises the new truth table.",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/models/topic_spec.rb",
+    "spec/models/topic_embed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/models/topic_embed.rb:36-40 — `category: eh.try(:category_id)` relies on record_for_host's inconsistent `false`/nil/record return type; untested by any added spec. [55/P3]",
+   "lens": "metareview-lens/scope",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/models/topic_spec.rb",
+    "test/javascripts/helpers/create-pretender.js.es6"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/models/embeddable_host.rb — brand-new model has no spec/models/embeddable_host_spec.rb; validation regex, normalization, record_for_host, host_allowed? all untested directly. [90/P1]",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/models/embeddable_host_spec.rb",
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb",
+    "spec/controllers/embed_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/models/topic_embed.rb:36 — the new `category: eh.try(:category_id)` lookup is only reachable through `TopicRetriever`, which spec/controllers/embed_controller_spec.rb:52-54 replaces with a bare `mock`, so no test in the diff verifies an embedded topic actually lands in the host's category (or falls back sensibly when `record_for_host` returns false) (confidence 75, P2)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/models/topic_spec.rb",
+    "test/javascripts/helpers/create-pretender.js.es6",
+    "spec/models/topic_embed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/assets/javascripts/discourse/models/store.js.es6:192 — the new `_id(s?)` hydration branch (`obj[k].map(...)`, `obj[self.pluralize(subType)]`) and the `type.replace('_', '-')` change in adapters/rest.js.es6:22 (replaces only the first underscore) ship with no JS test in the diff; the `embeddable_host_ids` payload is the only consumer and nothing asserts it hydrates into `embedding.embeddable_hosts` (confidence 75, P3)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "packages/app-store/_utils/oauth/createOAuthAppCredential.ts:32-57 — untested authorization branch where the admin check is bypassed (conf=75, P1)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "packages/app-store/_utils/oauth/decodeOAuthState.ts:9 / encodeOAuthState.ts:9 — throw path on malformed state untested; encodeOAuthState's only observable behavior is unverified (conf=70, P2)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "packages/app-store/_utils/oauth/createOAuthAppCredential.ts:30 — [100/P1] `if (state?.teamId) {` — no tests cover the new shared OAuth credential team-member, non-member, and user-credential branches, so callbacks can write to the wrong owner or reject valid installs undetected.",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "lib/post_revisor.rb:85 — `@post.save(validate: !@opts[:skip_validations])` changes save semantics for every PostRevisor caller with zero test modification anywhere in the diff [conf=90, P1]",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "hallucination",
+   "detect": true,
+   "evidence": [
+    "spec/jobs/poll_feed_spec.rb",
+    "spec/models/topic_embed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "Only test for Admin::EmbeddableHostsController is an inheritance assertion, providing no coverage of create/update/destroy, category_id fallback, validation error path, or nil destroy crash",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb",
+    "test/javascripts/helpers/create-pretender.js.es6"
+   ]
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/trpc/server/routers/viewer/organizations/create.handler.ts:151 — inverted billing condition ships with no test and no traceability to the destinationCalendar requirement [80,P1]",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/core/EventManager.ts:119 — the branch the diff rewrote has zero test coverage despite throwing on the common no-calendar-connected case [92,P0]",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/core/EventManager.ts:170 — silent credentialId regression on every video booking with no test asserting reference rows [80,P1]",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/core/EventManager.ts:541 — new DB-fallback path can pass undefined credential and can reuse the prior iteration's credential; both untested [75,P1]",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/features/bookings/lib/handleCancelBooking.ts:418 — find→filter rewrite multiplies recurring deleteEvent calls per reference with zero coverage [72,P2]",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/controllers/admin/embeddable_hosts_controller.rb:14-17 — `destroy` raises NoMethodError on a nil host lookup with no spec exercising a bad id, so this defect is currently undetectable by the suite (confidence=75, severity=P1)",
+   "lens": "metareview-lens/testing",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "spec/controllers/admin/embeddable_hosts_controller_spec.rb:3 and spec/controllers/admin/embedding_controller_spec.rb:3 — the only tests for the new admin endpoints merely assert controller inheritance and verify no behavior, leaving untested failure modes including EmbeddableHostsController#destroy crashing with NoMethodError on a bad id and Admin::EmbeddingController#update silently not saving",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb",
+    "spec/controllers/admin/embedding_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/assets/javascripts/discourse/models/store.js.es6:192-204 — the new plural-hydration error path is untested; hydrated is a .map() result so || [] is dead code, unresolvable ids silently produce undefined entries with the original *_ids key deleted (unlike the singular branch which keeps obj[k]), and no test covers an unresolvable color_ids entry",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": [
+    "test/javascripts/helpers/create-pretender.js.es6"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "Migration data transfer of embeddable_hosts/embed_category settings into rows has zero test coverage; the name-based category join silently falls to uncategorized when a category was renamed, untested",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/features/bookings/lib/handleNewBooking.ts:1078 — the new COLLECTIVE multi-host branch (the whole point of the PR) has no test, and a test would immediately expose that when neither eventType nor organizer has a destination calendar `evt.destinationCalendar` is `null` so the team members' calendars are silently dropped (`evt.destinationCalendar?.push(...teamDestinationCalendars);`; confidence 100; severity P1)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/core/EventManager.ts:119 — no test covers the new empty-array sentinel that most callers (confirm/cancel/webhook/reminder) now emit, and with `[]` + a Google Meet location this line throws TypeError on undefined instead of falling back to Cal Video (`if (evt.location === MeetLocationType \u0026\u0026 mainHostDestinationCalendar.integration !== \"google_calendar\") {`; confidence 100; severity P1)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "apps/web/playwright/webhook.e2e.ts:119 — BOOKING_CREATED and BOOKING_REQUESTED snapshots still assert `null` while BOOKING_REJECTED now asserts `[]`, so the suite now pins an inconsistent webhook contract (handleNewBooking emits `null`, every other producer emits `[]`) and nobody noticed because no test compares the two paths (`destinationCalendar: null,`; confidence 100; severity P2)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/app-store/googlecalendar/lib/CalendarService.ts:148 — the new credentialId-based calendar selection is untested and silently falls back to \"primary\" when no destination matches, meaning a mismatched credential writes to the wrong calendar with no failure signal that a test could catch (`(cal) =\u003e cal.credentialId === credentialId`; confidence 100; severity P2)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/core/CalendarManager.ts:267 — `createEvent` now returns `externalId`/`credentialId` that EventManager persists into BookingReference (`externalCalendarId: isCalendarType ? result.externalId : undefined`), replacing the old `evt.destinationCalendar?.externalId`; for the `else` fan-out branch `externalId` is never passed so references get `externalCalendarId: undefined` where they previously had a value, and no test asserts the persisted reference shape (`externalId,`; confidence 75; severity P2)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "lib/post_revisor.rb:85 — `@post.save(validate: !@opts[:skip_validations])` has no test that actually verifies validations are bypassed (e.g. saving otherwise-invalid content with skip_validations: true); spec/models/topic_embed_spec.rb's \"Supports updating the post\" test only checks cooked content changed, not that validation-skipping behavior works or is needed.",
+   "lens": "metareview-lens/testing",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/models/topic_embed_spec.rb",
+    "spec/jobs/poll_feed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "lib/tasks/disqus.thor — no spec file covers this task before or after the diff, so removal of the `--category` option and the switch to `TopicEmbed.import_remote` is entirely untested (no existing coverage to regress, but also no new coverage added despite the behavioral change).",
+   "lens": "metareview-lens/testing",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/embed_controller_spec.rb",
+    "spec/models/topic_embed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "No test coverage for new controller behavior (create/update/destroy, validation, migration backfill), including untested raw SQL interpolation of legacy setting values in the migration",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "apps/web/playwright/webhook.e2e.ts:249 — the only test artifact is a fixture literal edit; no test exercises a COLLECTIVE booking with two hosts having distinct destination calendars or a create/reschedule/cancel round-trip [95,P1]",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/features/bookings/lib/handleNewBooking.ts:728,761 — two new untested error paths, and the specific `dynamicUserList` message is swallowed into a generic 500 [82,P2]",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/features/bookings/lib/handleNewBooking.ts:721 — behavioral change to dynamic bookings with zero test modification and no compile-time catch [70,P2]",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "No spec covers the migration in any of its paths, including the acceptance criterion that settings survive the migration",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "No spec covers a host-with-port; fabricators and specs only use bare hostnames",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "Admin embeddable hosts controller spec only asserts controller inheritance; nothing tests create/update/destroy round-trip or the uncategorized fallback in save_host",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "Admin::EmbeddingController#update just re-renders the fetch and mutates nothing, while the client wires saveChanges() to embedding.update({}), so the 'save changes' requirement is not actually implemented and untested",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/embedding_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "spec/models/topic_spec.rb:1403 — the 'is false if embeddable_host is blank' test has no setup (no embeddable host fabricate, no embed_truncate setting), so it passes vacuously because embed_truncate? defaults to false, leaving the removed host-gating behavior change with zero test coverage",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/models/topic_spec.rb",
+    "spec/models/embeddable_host_spec.rb",
+    "spec/controllers/embed_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "Controller specs (embedding_controller_spec.rb, embeddable_hosts_controller_spec.rb) only assert class inheritance, verifying nothing about behavior; EmbeddingController#update never mutates @embedding yet the client calls saveChanges, and no test catches this",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/embedding_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "No test for EmbeddableHost validation failure path (invalid host strings) or the controller's host.save failure branch; the host format regex has no coverage",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb",
+    "spec/models/embeddable_host_spec.rb",
+    "spec/controllers/embed_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "EmbeddableHost.record_for_host untested for malformed/non-URI input and its false return; TopicEmbed.import path where eh is nil (topic posts to nil category) is untested",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/models/embeddable_host_spec.rb",
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb",
+    "spec/models/topic_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "Embed controller's referer-check reject branch with a populated EmbeddableHost table and a foreign referer is untested",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/embeddable_hosts_controller_spec.rb",
+    "spec/models/embeddable_host_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "Store _hydrateEmbedded plural path only tested with well-formed ids; dangling plural ids (missing sidecar object) yield undefined entries in the hydrated array, untested, and the || [] fallback is dead code",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "test/javascripts/models/store-test.js.es6"
+   ]
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts:1 — zero tests added for a new authed mutation that mutates attendees, pushes to external calendars, and sends emails: no unit test for the handler, no e2e for the dialog, no email-snapshot test (`export const addGuestsHandler = async ({ ctx, input }: AddGuestsOptions) =\u003e {`; confidence 100; severity P1)",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "packages/ui/form/MultiEmail.tsx:55 — `data-testid=\"add-another-email\"` and `data-testid=\"add-emails\"` (line 78) are added as test hooks with zero tests using them, so the add/remove-row behavior of the new MultiEmail component (including the `onClickAddon` remove path) is unverified (`data-testid=\"add-another-email\"`; confidence 75; severity P3)",
+   "lens": "metareview-lens/testing",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/core/EventManager.ts:337 — no unit tests were added for createAllCalendarEvents / updateAllCalendarEvents multi-destination logic, the DB credential fallback, handleNewBooking co-host aggregation, or handleCancelBooking multi-reference deletion; the only test change is a snapshot tweak in apps/web/playwright/webhook.e2e.ts:249 (`destinationCalendar: [],`; confidence 100; severity P2)",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/core/EventManager.ts:339 — the per-destination loop, the `destination.credentialId` DB-fallback (`prisma.credential.findUnique`) and the `else` integration-type fan-out are all new control flow with zero unit coverage; there is no EventManager test file anywhere in the repo, so a wrong credential/calendar pairing (event created on host A's calendar with host B's credential) would ship unnoticed (`for (const destination of event.destinationCalendar) {`; confidence 100; severity P1)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/features/bookings/lib/handleCancelBooking.ts:423 — cancel path now iterates every `_calendar` reference and adds a cross-user `prisma.credential.findUnique` fallback for other hosts' credentials, but no test exercises a booking with more than one calendar reference, so a second host's calendar event left undeleted on cancel would not be detected (`for (const reference of bookingCalendarReference) {`; confidence 100; severity P1)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "spec/jobs/poll_feed_spec.rb:31 — only `execute` gating is tested; `poll_feed` itself (RSS parsing, link/id fallback, nil content, import call) has zero coverage, and import_remote/absolutize_urls-with-port have no specs (confidence 100, P2)",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/jobs/poll_feed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "spec/controllers/embed_controller_spec.rb:25 — only the nil-referer case is tested; the mismatched-referer-host branch and the `rescue URI::InvalidURIError` branch in `ensure_embeddable` (app/controllers/embed_controller.rb:25-30) have zero coverage, so a referer from another host being accepted would not be caught (confidence 85, P2)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/embed_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "spec/components/topic_retriever_spec.rb:31 — every test stubs `perform_retrieve` and/or `retrieved_recently?`, so the redis setnx/expire 60s throttle, the `no_throttle` opt, the \"already exists\" early return, the PollFeed-first branch, and `fetch_http`/user lookup (lib/topic_retriever.rb:22-54) are executed by no test; the file only proves the boolean guard in `retrieve` (confidence 90, P2)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/components/topic_retriever_spec.rb",
+    "spec/controllers/embed_controller_spec.rb",
+    "spec/jobs/poll_feed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "spec/jobs/poll_feed_spec.rb:31 — \"delegates to poll_feed\" stubs `poll_feed` itself, leaving `poll_feed` (SimpleRSS parse, `url = i.id` fallback when link is blank/non-http, CGI.unescapeHTML/scrub, user-blank return, app/jobs/scheduled/poll_feed.rb:24-38) with zero coverage; a broken feed loop passes green (confidence 90, P2)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/jobs/poll_feed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "lib/post_revisor.rb:85 — the new `@post.save(validate: !@opts[:skip_validations])` and `bypass_rate_limiter` opts are exercised only incidentally through topic_embed_spec's update test; no test asserts that a regular (non-skip) revise still validates, so a regression that always skips validation would be invisible (confidence 70, P2)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/jobs/poll_feed_spec.rb",
+    "spec/models/topic_embed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "app/models/post.rb:133 — `return raw if cook_method == Post.cook_methods[:raw_html]` is covered only via `post.cooked.should == post.raw` in topic_embed_spec; no test asserts a regular post still goes through `post_analyzer.cook` / `Plugin::Filter` (e.g. that `cook_method` nil or `:regular` does NOT return raw HTML), so an inverted comparison would pass (confidence 65, P2)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": [
+    "spec/models/topic_embed_spec.rb",
+    "spec/jobs/poll_feed_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "Missing test coverage for the new addGuests mutation, including authz branching, guest dedup/blacklist filtering, and email routing in sendAddGuestsEmails",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "Missing E2E test coverage despite the diff adding data-testid attributes (add_members, add-another-email, add-emails) that imply E2E tests were intended",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/features/bookings/lib/handleNewBooking.ts:987-1078 — zero test coverage for the central new behavior: multiple COLLECTIVE hosts producing multiple destinationCalendar array entries. (P1, confidence 100)",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts:165 — handler calls an EventManager method that is not defined anywhere in the diff (no packages/core/EventManager.ts change), so the mutation fails at runtime/typecheck with no test to catch it (`await eventManager.updateCalendarAttendees(evt, booking);`; confidence 75; severity P0)",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "unresolved",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "Gemfile.lock not updated after adding ruby-readability and simple-rss; only Gemfile_rails4.lock was updated, which can break bundle install --deployment/CI or resolve untested versions",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "unresolved",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-8.diff",
+   "issue_text": "app/controllers/admin/groups_controller.rb:90 — `group.users.delete(user_id)` may bypass GroupUser callbacks maintaining the denormalized groups.user_count, leaving permanent drift with no backfill and no test (P1, conf 50)",
+   "lens": "metareview-lens/data-migration",
+   "v2_verdict": "unresolved",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/groups_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-8.diff",
+   "issue_text": "app/controllers/admin/groups_controller.rb:90 — bypassing `Group#remove` skips its bookkeeping (user_count, primary_group/trust-level cleanup) and nothing verifies user_count stays correct after removal [conf=50, P2]",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "unresolved",
+   "detect": true,
+   "evidence": [
+    "spec/controllers/admin/groups_controller_spec.rb"
+   ]
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "packages/app-store/salesforce/lib/CalendarService.ts:96 — [conf=90,P0] the missing-`prisma`-import compile break survives only because no test or test-time import ever loads this module.",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "unresolved",
+   "detect": true,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts — no handling for recurring bookings; only the single booking row by bookingId is updated, sibling occurrences not updated (P2, conf 50)",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "unresolved",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-8.diff",
+   "issue_text": "Whitespace-only reformatting in admin-group-selector.hbs and user-selector-autocomplete.raw.hbs not traceable to membership-handling intent",
+   "lens": "metareview-lens/scope",
+   "v2_verdict": "hallucination",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/lib/CalendarService.ts:156 — CalDAV/Apple/Exchange-style providers filter the host's own calendars by the organizer's externalId, so for any non-organizer host the filter matches nothing and no event is silently created (`const [mainHostDestinationCalendar] = event.destinationCalendar ?? []; ... calendars.filter((c) =\u003e mainHostDestinationCalendar?.externalId ? c.externalId === mainHostDestinationCalendar.externalId : true)`; confidence 100; severity P1)",
+   "lens": "metareview-lens/intent-preservation",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/core/EventManager.ts:376 — sentinel-meaning change: legacy destination rows lose their external id on every new booking, feeding the update/delete failures above [85,P1]",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "In parseRefreshTokenResponse.ts, the dynamic schema keys use z.string().toString() which evaluates to '[object Object]', so both computed keys collapse to one literal key and the 'any numeric property is the expiry' intent is not implemented; zod's strip behavior also drops expiry_date, refresh_token, and scope from parsed data",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "TopicEmbed fetches eh inside the transaction but it can be nil; category: eh.try(:category_id) silently drops category selection and falls back to uncategorized with no surfacing when the article URL has no matching embeddable_host row",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "important_non_bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "Guests array in addGuests.schema.ts has no .max() limit and the handler has no rate limiting, allowing any authenticated attendee to mass-send emails with full meeting details (including video call URL and password) to arbitrary third-party addresses",
+   "lens": "metareview-lens/security",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "Disqus import in lib/tasks/disqus.thor silently changed behavior: --category option and original timestamps dropped; new behavior scrapes remote article body, uses current timestamps, and cannot target a category",
+   "lens": "metareview-lens/intent",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "The admin embedding update endpoint is a no-op: update action renders serialized data without persisting anything, yet it's wired to the route and client saveChanges() call, so callers get a 200 and believe the save succeeded when nothing was written",
+   "lens": "metareview-lens/intent",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "feed_key is defined but never called; the conditional-poll caching optimization was never wired up so the feed is fully re-fetched every hour",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "important_non_bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "spec/jobs/poll_feed_spec.rb only verifies poll_feed is called, never that it survives a bad feed — the job's failure surface is unverified",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "important_non_bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "P2 confidence 75 — packages/core/EventManager.ts:554 — `const oldCalendarEvent = booking.references.find((reference) =\u003e reference.type.includes(\"_calendar\"));` — The booking-merge path deletes only one old calendar event, so merged collective bookings leave stale events in the remaining hosts' calendars.",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "topic.rb expandable_first_post? silently drops the SiteSetting.embeddable_hosts.present? host gate, loosening the invariant without stated intent, and the updated spec hides rather than tests the change",
+   "lens": "metareview-lens/scope",
+   "v2_verdict": "important_non_bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "packages/app-store/_utils/oauth/createOAuthAppCredential.ts:47 — [P1, confidence 100] `await prisma.credential.create({` runs for any accepted team member and returns before `await throwIfNotHaveAdminAccessToTeam({ teamId: state?.teamId ?? null, userId });`, allowing a non-admin to install team credentials, including their own Stripe payment account, through a crafted OAuth teamId.",
+   "lens": "metareview-lens/security",
+   "v2_verdict": "hallucination",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "spec/controllers/embed_controller_spec.rb:24 — \"with a host\" context relies on fabricator default host \"eviltrout.com\" implicitly matching a separately-defined `host` variable in the spec; no explicit assertion ties them, so drift in either literal silently degrades what the test verifies. [medium, medium]",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "important_non_bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "app/models/topic_embed.rb:20 — TOCTOU check-then-insert (`where(embed_url:).first` then `create!`) races between PollFeed and RetrieveTopic, raising RecordNotUnique that aborts the retry:false job (P1)",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-8.diff",
+   "issue_text": "New meta.limit is echoed back unvalidated, and the client (group.js findMembers) trusts and adopts it as its page size",
+   "lens": "metareview-lens/security",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "packages/app-store/zoho-bigin/api/add.ts:17 — `appConfig.slug` was replaced with the literal `zoho-bigin`, and every refreshOAuthTokens call site hardcodes slugs (\"google-calendar\", \"msteams\", \"office365-calendar\", \"lark-calendar\") that must match `appStoreMetadata` keys used by the webhook; magic strings duplicated across 8 files instead of sourced from each app's config are a type-clarity trap that will silently break sync for any renamed app (P2, confidence 75)",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "important_non_bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "No booking-status check in the booking query (filters only on id), so guests can be added to cancelled or rejected bookings, and ICS emails with method REQUEST and status CONFIRMED actively resurrect cancelled events in attendees' calendars",
+   "lens": "metareview-lens/intent",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-8.diff",
+   "issue_text": "app/assets/javascripts/discourse/models/group.js:23 — offset is clamped against the stale pre-request user_count, so deleting the last member on the final page refetches at offset == total and renders an empty page labelled \"N/N\" [conf=75, P2]",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "packages/app-store/zoho-bigin/api/add.ts:17 — `const redirectUri = WEBAPP_URL + \\`/api/integrations/zoho-bigin/callback\\`;` hardcodes the slug instead of reusing `appConfig.slug` (used elsewhere in the same file), an unrelated, unexplained edit (P2, conf90).",
+   "lens": "metareview-lens/scope",
+   "v2_verdict": "unresolved",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/serializers/embedding_serializer.rb:3 uses embed: :ids but the admin UI (embeddable-host.js.es6 and embedding.hbs) expects full host objects with host name, category, and isNew/save methods; hydrating embeddable_host_ids yields records with only an id and no client model for embeddable-host exists, so the table renders empty rows or errors",
+   "lens": "metareview-lens/scope",
+   "v2_verdict": "hallucination",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "db/migrate/20131217174004_create_topic_embeds.rb:4 — `topic_id` duplicates `posts.topic_id` with no FK and no consistency constraint, so moving the post to another topic leaves `topic_id_for_embed` returning a stale topic [conf=75, P2]",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "handleNewBooking.ts (~1063-1073): uses null instead of [] for missing destinationCalendar, making the subsequent ?.push(...teamDestinationCalendars) a silent no-op, so COLLECTIVE events whose event type and organizer have no destinationCalendar silently drop all team members' destination calendars",
+   "lens": "metareview-lens/data-migration",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "P1 confidence 75 — packages/core/EventManager.ts:526 — `id: reference.credentialId,` — Calendar updates resolve booking-reference credential IDs globally rather than against authorized users or teams, so a forged or corrupted reference can use another tenant's OAuth credential to alter external events.",
+   "lens": "metareview-lens/security",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-8.diff",
+   "issue_text": "The update action request payload shape changed from nested group[name]/group[usernames] to flat name/alias_level/visible, and old nested format requests return 200 success while the membership change is silently dropped",
+   "lens": "metareview-lens/intent",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "app/models/topic_embed.rb:48 — confidence 100, P1: `open(url).read` does not require open-uri, so HTTP URLs are treated as filesystem paths and retrieval fails when feed polling has not loaded that dependency.",
+   "lens": "metareview-lens/feasibility",
+   "v2_verdict": "hallucination",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "apps/web/pages/api/webhook/app-credential.ts:56 — decrypted `keys` is stored verbatim with no validation against the app's credential schema (e.g. googleCredentialSchema), so a syntactically valid but wrong-shaped payload is persisted and only fails later at CalendarService construction (P2, confidence 75)",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "addGuests.handler.ts:36-41 — isTeamAdminOrOwner combining admin AND owner with logical AND is a new, narrower bespoke authorization rule invented for this feature, not reused from existing helpers, effectively authorization-model drift bundled into a feature PR (confidence=75, severity=P1).",
+   "lens": "metareview-lens/scope",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/models/embeddable_host.rb:10 — `record_for_host` / `host_allowed?` and the `before_validation` normalization have no model spec; the removed `SiteSetting.allows_embeddable_host?` presumably had coverage that was not ported (confidence 75, P1)",
+   "lens": "metareview-lens/completeness",
+   "v2_verdict": "hallucination",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "parseRefreshTokenResponse returns the SafeParseReturnType wrapper in the non-shared path, which is persisted as the credential key, corrupting stored credentials so credential.key.access_token resolves to undefined after the first refresh",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "zoho-bigin CalendarService.ts passes credentialId where userId is expected, so the sync endpoint will be called with the wrong identifier and POSTed as calcomUserId",
+   "lens": "metareview-lens/testing-quality",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "embed_category backfill assumes the setting stored the category name; if it stored a category ID (or the category was renamed), category_id resolves to 0 and all hosts silently fall back to Uncategorized",
+   "lens": "metareview-lens/data-migration",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "EventManager.ts:600-615 — error-path sentinel change: update failures can now return [] instead of a failure EventResult, making 'update attempted and failed' indistinguishable from 'nothing to update' and silently swallowing failures (P2)",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "app/controllers/admin/embedding_controller.rb:9 — [conf=100,P2] the route + no-op update action + client saveChanges triple is dead on arrival (no template invokes it) and satisfies no acceptance criterion.",
+   "lens": "metareview-lens/scope",
+   "v2_verdict": "important_non_bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "`create_table :embeddable_hosts, force: true` silently drops the table if it already exists, destroying backfilled/admin-created host rows without warning if the migration is re-run against a populated table",
+   "lens": "metareview-lens/data-migration",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-8.diff",
+   "issue_text": "app/assets/javascripts/admin/controllers/admin-group.js.es6:13 — page count over-counts whenever user_count is an exact multiple of limit, so showingLast stays false and next navigates to a phantom empty page [conf=75, P3]",
+   "lens": "metareview-lens/intent",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "force: true on create_topic_embeds silently drops existing embed mapping rows in partial/rerun scenarios with no export",
+   "lens": "metareview-lens/data-migration",
+   "v2_verdict": "important_non_bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/features/bookings/lib/handleNewBooking.ts:370,383 — renaming `orginalBookingDuration` to `originalBookingDuration` is an unrelated typo fix bundled into the destinationCalendar diff; harmless but not traceable to the stated fix. [confidence 100, severity P3]",
+   "lens": "metareview-lens/scope",
+   "v2_verdict": "hallucination",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "spec/models/topic_spec.rb:1401-1404 'is false if embeddable_host is blank' test passes for the wrong reason because production code no longer checks the host and embed_truncate defaults to false, so the named invariant is never exercised",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "important_non_bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "db/migrate/20131217174004_create_topic_embeds.rb:4 — topic_id/post_id are null: false with no FK and no index, so orphan rows crash the next import with PostRevisor.new(nil) (P2)",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "The refreshOAuthTokens/parseRefreshTokenResponse abstraction cannot represent the incompatible response shapes of seven providers; the design should be replaced with a single normalized {access_token, expires_at} return type with sync fetch, status check, and sentinel handling centralized",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-8.diff",
+   "issue_text": "[confidence 100][P1] app/controllers/admin/groups_controller.rb:90 — `group.users.delete(user_id)` passes an integer instead of a User record, causing DELETE member requests to raise and preventing administrators from removing members.",
+   "lens": "metareview-lens/feasibility",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "db/migrate/20150818190757_create_embeddable_hosts.rb:9 — [conf=100,P0] `[0]['id']` on a zero-tuple result raises IndexError on every install that never set embed_category, including every CI/test DB, aborting migration and the entire deploy.",
+   "lens": "metareview-lens/data-migration",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "Fabricator file contents are swapped: category_fabricator.rb contains only the EmbeddableHost fabricator while embeddable_host_fabricator.rb contains the Category fabricators, misleading future contributors editing the wrong file",
+   "lens": "metareview-lens/intent",
+   "v2_verdict": "important_non_bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "packages/features/bookings/lib/handleNewBooking.ts:370/383 — unrelated typo fix `orginalBookingDuration` → `originalBookingDuration` riding along. (P3, confidence 100)",
+   "lens": "metareview-lens/scope",
+   "v2_verdict": "hallucination",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "Emails sent with replyTo set to the organizer's email can target attacker-chosen addresses, creating an email-sending/spam/phishing vector with no rate limit",
+   "lens": "metareview-lens/security",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "In EventManager.ts, the credential variable is declared outside the new reference loop and retains stale values across iterations, so a reference whose credentialId can't be resolved silently reuses the previous reference's credential, running updateEvent against the wrong host's calendar or crashing in getCalendar.",
+   "lens": "metareview-lens/intent",
+   "v2_verdict": "hallucination",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-8.diff",
+   "issue_text": "[100][P1] app/assets/javascripts/discourse/routes/group-members.js.es6:10; app/assets/javascripts/discourse/templates/group/members.hbs:6 — `controller.set(\"model\", model);` / `{{#each m in members}}` — the default controller receives only `model`, so `members` is never exposed to the template and the public group-members page renders no members.",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "packages/app-store/hubspot/lib/CalendarService.ts:177 — `const hubspotRefreshToken: HubspotToken = await refreshOAuthTokens(` — P1 confidence 100: credential sync returns a Fetch `Response` but this consumer treats it as a `HubspotToken`, producing undefined token fields when sync is enabled.",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "apps/web/components/dialog/AddGuestsDialog.tsx:44 — `showToast(message || t(\"unable_to_add_guests\"), \"error\")` can never reach the fallback because `message` is an always-truthy template literal, so the newly added `unable_to_add_guests` key (common.json:1137) is dead and zod errors surface as raw JSON issue arrays [conf=100 sev=P3]",
+   "lens": "metareview-lens/feasibility",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-8.diff",
+   "issue_text": "app/controllers/admin/groups_controller.rb#remove_member — `group.users.delete(user_id)` mutates the join table immediately outside of `group.save`'s outcome; save failure reports error after mutation already happened, giving false success/failure semantics with no transaction. Confidence 100, P2.",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "CalendarService.ts:253,315 — broken fallback predicate: cal.externalId === undefined never matches, causing undefined calendarId and Google API 404 on reschedule/delete",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "app/models/post.rb:133 — `return raw if cook_method == Post.cook_methods[:raw_html]` short-circuits before `Plugin::Filter.apply(:after_post_cook, ...)`, so plugins that rely on the after_post_cook hook running for every post silently never see raw_html posts, and `cook(*args)` ignores its args (topic_id, cooking_options) for this path — a behavior fork keyed on a bare integer column with no DB CHECK constraint (confidence 75, P3)",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "important_non_bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-4.diff",
+   "issue_text": "[100][P1] db/migrate/20131217174004_create_topic_embeds.rb:4 — `t.integer :topic_id, null: false` / `t.integer :post_id, null: false` — independent non-FK IDs permit an embed topic to differ from its updated post, representing a broken relationship.",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "hallucination",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-10967.diff",
+   "issue_text": "googlecalendar CalendarService.ts:253-256, 312-315 — self-comparison `find` (cal.externalId === externalCalendarId) always fails when externalCalendarId is null/undefined, breaking update/delete event resolution for affected bookings (P1)",
+   "lens": "metareview-lens/architecture",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-14740.diff",
+   "issue_text": "No cap on guest array length allows a single mutation to mass-email arbitrarily many addresses",
+   "lens": "metareview-lens/security",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "[confidence 100][severity P1] apps/web/pages/api/webhook/app-credential.ts:24 — `req.headers[process.env.CALCOM_WEBHOOK_HEADER_NAME || \"calcom-webhook-secret\"] !== process.env.CALCOM_WEBHOOK_SECRET` — When the secret is unset, an absent header compares `undefined` to `undefined` and bypasses authentication on a credential-writing endpoint.",
+   "lens": "metareview-lens/security",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "ai-code-review-evaluation-discourse-graphite-10.diff",
+   "issue_text": "`app/controllers/admin/embedding_controller.rb:17-20` / migration lines 9-13 — legacy `embed_category` setting is matched by category *name* via `s.value = c.name`; if the setting held a slug or the category was renamed, the join yields nothing, every migrated host silently retargets to Uncategorized, and the original setting row is DELETEd making the drift irreversible",
+   "lens": "metareview-lens/intent",
+   "v2_verdict": "bug",
+   "detect": false,
+   "evidence": null
+  },
+  {
+   "diff_file": "calcom-cal.com-11059.diff",
+   "issue_text": "parseRefreshTokenResponse fabricates placeholder 'refresh_token' string which gets persisted, overwriting the user's real Google refresh token and breaking token refresh",
+   "lens": "metareview-lens/security",
+   "v2_verdict": "hallucination",
+   "detect": false,
+   "evidence": null
+  }
+ ]
+}

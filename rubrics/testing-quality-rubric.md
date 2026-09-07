@@ -41,6 +41,21 @@ diff, not generic "add more tests" advice.
 - A function signature changed (new param, changed return type) but no test caller updated.
 - Block on a behavioral change in the diff with no test modifications.
 
+### Evidence of Absence (required before any missing-tests finding)
+Before reporting ANY finding whose claim is that tests, specs or coverage are absent —
+"no tests", "nothing asserts", "untested", "no spec exists" — you MUST first search for the
+tests you are claiming do not exist, and the search must be shown in the finding:
+- Scan the diff itself for test-shaped files (`spec/**`, `test/**`, `tests/**`, `__tests__/**`,
+  `*.test.*`, `*.spec.*`, `*_test.go`, `test_*.py`) whose changes reference the subject you
+  are claiming is untested — the same file stem, the same symbols. Read surrounding files with
+  your tools when the diff alone does not settle it.
+- If a candidate test exists, the finding must cite the SPECIFIC assertion gap — what the
+  existing test fails to assert about the claimed behavior (quote it) — or be dropped. A
+  claim of absence contradicted by a test in the same diff is a fabricated finding, the
+  single largest confirmed-hallucination mode in evaluation to date.
+- State in the finding which test files you checked (paths), so the absence is verifiable:
+  "no test in spec/foo_spec.rb, spec/bar_spec.rb asserts X" — never a bare "no tests".
+
 ### Tests Verifying Mocks, Not Real Logic
 - A test that asserts the mock was called with certain args but never checks the real return
   value or side effect.
@@ -89,4 +104,6 @@ Every blocking finding must cite the test code (file:line + the verbatim asserti
 block that makes the finding true — the "quote-the-line" gate) and state the failure mode (what
 the test claims to verify vs. what it actually verifies), not just "this test is weak." If the
 diff's stated intent is to change test behavior, judge whether the test change actually verifies
-the behavior change or merely silences a failing test.
+the behavior change or merely silences a failing test. A finding that claims tests are ABSENT
+additionally carries its Evidence-of-Absence search result: the paths checked and the specific
+assertion gap, per the section above.

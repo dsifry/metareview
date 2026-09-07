@@ -1,0 +1,1126 @@
+diff --git a/apps/web/pages/api/cron/bookingReminder.ts b/apps/web/pages/api/cron/bookingReminder.ts
+index ab511b5a427c59..571b4850dd2f01 100644
+--- a/apps/web/pages/api/cron/bookingReminder.ts
++++ b/apps/web/pages/api/cron/bookingReminder.ts
+@@ -104,7 +104,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+       });
+ 
+       const attendeesList = await Promise.all(attendeesListPromises);
+-
++      const selectedDestinationCalendar = booking.destinationCalendar || user.destinationCalendar;
+       const evt: CalendarEvent = {
+         type: booking.title,
+         title: booking.title,
+@@ -127,7 +127,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+         attendees: attendeesList,
+         uid: booking.uid,
+         recurringEvent: parseRecurringEvent(booking.eventType?.recurringEvent),
+-        destinationCalendar: booking.destinationCalendar || user.destinationCalendar,
++        destinationCalendar: selectedDestinationCalendar ? [selectedDestinationCalendar] : [],
+       };
+ 
+       await sendOrganizerRequestReminderEmail(evt);
+diff --git a/apps/web/playwright/webhook.e2e.ts b/apps/web/playwright/webhook.e2e.ts
+index a157578d5ea0c8..a56f5a425bc1d3 100644
+--- a/apps/web/playwright/webhook.e2e.ts
++++ b/apps/web/playwright/webhook.e2e.ts
+@@ -246,7 +246,7 @@ test.describe("BOOKING_REJECTED", async () => {
+           },
+         ],
+         location: "[redacted/dynamic]",
+-        destinationCalendar: null,
++        destinationCalendar: [],
+         // hideCalendarNotes: false,
+         requiresConfirmation: "[redacted/dynamic]",
+         eventTypeId: "[redacted/dynamic]",
+diff --git a/packages/app-store/googlecalendar/lib/CalendarService.ts b/packages/app-store/googlecalendar/lib/CalendarService.ts
+index b746233a437b98..755c7bcc401ead 100644
+--- a/packages/app-store/googlecalendar/lib/CalendarService.ts
++++ b/packages/app-store/googlecalendar/lib/CalendarService.ts
+@@ -84,7 +84,7 @@ export default class GoogleCalendarService implements Calendar {
+     };
+   };
+ 
+-  async createEvent(calEventRaw: CalendarEvent): Promise<NewCalendarEventType> {
++  async createEvent(calEventRaw: CalendarEvent, credentialId: number): Promise<NewCalendarEventType> {
+     const eventAttendees = calEventRaw.attendees.map(({ id: _id, ...rest }) => ({
+       ...rest,
+       responseStatus: "accepted",
+@@ -97,6 +97,10 @@ export default class GoogleCalendarService implements Calendar {
+         responseStatus: "accepted",
+       })) || [];
+     return new Promise(async (resolve, reject) => {
++      const [mainHostDestinationCalendar] =
++        calEventRaw?.destinationCalendar && calEventRaw?.destinationCalendar.length > 0
++          ? calEventRaw.destinationCalendar
++          : [];
+       const myGoogleAuth = await this.auth.getToken();
+       const payload: calendar_v3.Schema$Event = {
+         summary: calEventRaw.title,
+@@ -115,8 +119,8 @@ export default class GoogleCalendarService implements Calendar {
+             id: String(calEventRaw.organizer.id),
+             responseStatus: "accepted",
+             organizer: true,
+-            email: calEventRaw.destinationCalendar?.externalId
+-              ? calEventRaw.destinationCalendar.externalId
++            email: mainHostDestinationCalendar?.externalId
++              ? mainHostDestinationCalendar.externalId
+               : calEventRaw.organizer.email,
+           },
+           ...eventAttendees,
+@@ -138,13 +142,16 @@ export default class GoogleCalendarService implements Calendar {
+       const calendar = google.calendar({
+         version: "v3",
+       });
+-      const selectedCalendar = calEventRaw.destinationCalendar?.externalId
+-        ? calEventRaw.destinationCalendar.externalId
+-        : "primary";
++      // Find in calEventRaw.destinationCalendar the one with the same credentialId
++
++      const selectedCalendar = calEventRaw.destinationCalendar?.find(
++        (cal) => cal.credentialId === credentialId
++      )?.externalId;
++
+       calendar.events.insert(
+         {
+           auth: myGoogleAuth,
+-          calendarId: selectedCalendar,
++          calendarId: selectedCalendar || "primary",
+           requestBody: payload,
+           conferenceDataVersion: 1,
+           sendUpdates: "none",
+@@ -188,6 +195,8 @@ export default class GoogleCalendarService implements Calendar {
+ 
+   async updateEvent(uid: string, event: CalendarEvent, externalCalendarId: string): Promise<any> {
+     return new Promise(async (resolve, reject) => {
++      const [mainHostDestinationCalendar] =
++        event?.destinationCalendar && event?.destinationCalendar.length > 0 ? event.destinationCalendar : [];
+       const myGoogleAuth = await this.auth.getToken();
+       const eventAttendees = event.attendees.map(({ ...rest }) => ({
+         ...rest,
+@@ -216,8 +225,8 @@ export default class GoogleCalendarService implements Calendar {
+             id: String(event.organizer.id),
+             organizer: true,
+             responseStatus: "accepted",
+-            email: event.destinationCalendar?.externalId
+-              ? event.destinationCalendar.externalId
++            email: mainHostDestinationCalendar?.externalId
++              ? mainHostDestinationCalendar.externalId
+               : event.organizer.email,
+           },
+           ...(eventAttendees as any),
+@@ -244,7 +253,7 @@ export default class GoogleCalendarService implements Calendar {
+ 
+       const selectedCalendar = externalCalendarId
+         ? externalCalendarId
+-        : event.destinationCalendar?.externalId;
++        : event.destinationCalendar?.find((cal) => cal.externalId === externalCalendarId)?.externalId;
+ 
+       calendar.events.update(
+         {
+@@ -303,7 +312,9 @@ export default class GoogleCalendarService implements Calendar {
+       });
+ 
+       const defaultCalendarId = "primary";
+-      const calendarId = externalCalendarId ? externalCalendarId : event.destinationCalendar?.externalId;
++      const calendarId = externalCalendarId
++        ? externalCalendarId
++        : event.destinationCalendar?.find((cal) => cal.externalId === externalCalendarId)?.externalId;
+ 
+       calendar.events.delete(
+         {
+diff --git a/packages/app-store/larkcalendar/lib/CalendarService.ts b/packages/app-store/larkcalendar/lib/CalendarService.ts
+index 61774563e178b8..f2979b5952616a 100644
+--- a/packages/app-store/larkcalendar/lib/CalendarService.ts
++++ b/packages/app-store/larkcalendar/lib/CalendarService.ts
+@@ -125,7 +125,8 @@ export default class LarkCalendarService implements Calendar {
+   async createEvent(event: CalendarEvent): Promise<NewCalendarEventType> {
+     let eventId = "";
+     let eventRespData;
+-    const calendarId = event.destinationCalendar?.externalId;
++    const [mainHostDestinationCalendar] = event.destinationCalendar ?? [];
++    const calendarId = mainHostDestinationCalendar?.externalId;
+     if (!calendarId) {
+       throw new Error("no calendar id");
+     }
+@@ -160,7 +161,8 @@ export default class LarkCalendarService implements Calendar {
+   }
+ 
+   private createAttendees = async (event: CalendarEvent, eventId: string) => {
+-    const calendarId = event.destinationCalendar?.externalId;
++    const [mainHostDestinationCalendar] = event.destinationCalendar ?? [];
++    const calendarId = mainHostDestinationCalendar?.externalId;
+     if (!calendarId) {
+       this.log.error("no calendar id provided in createAttendees");
+       throw new Error("no calendar id provided in createAttendees");
+@@ -187,7 +189,8 @@ export default class LarkCalendarService implements Calendar {
+   async updateEvent(uid: string, event: CalendarEvent, externalCalendarId?: string) {
+     const eventId = uid;
+     let eventRespData;
+-    const calendarId = externalCalendarId || event.destinationCalendar?.externalId;
++    const [mainHostDestinationCalendar] = event.destinationCalendar ?? [];
++    const calendarId = externalCalendarId || mainHostDestinationCalendar?.externalId;
+     if (!calendarId) {
+       this.log.error("no calendar id provided in updateEvent");
+       throw new Error("no calendar id provided in updateEvent");
+@@ -231,7 +234,8 @@ export default class LarkCalendarService implements Calendar {
+    * @returns
+    */
+   async deleteEvent(uid: string, event: CalendarEvent, externalCalendarId?: string) {
+-    const calendarId = externalCalendarId || event.destinationCalendar?.externalId;
++    const [mainHostDestinationCalendar] = event.destinationCalendar ?? [];
++    const calendarId = externalCalendarId || mainHostDestinationCalendar?.externalId;
+     if (!calendarId) {
+       this.log.error("no calendar id provided in deleteEvent");
+       throw new Error("no calendar id provided in deleteEvent");
+diff --git a/packages/app-store/office365calendar/lib/CalendarService.ts b/packages/app-store/office365calendar/lib/CalendarService.ts
+index c4faa5f8ec5f4c..5283eed71910ce 100644
+--- a/packages/app-store/office365calendar/lib/CalendarService.ts
++++ b/packages/app-store/office365calendar/lib/CalendarService.ts
+@@ -70,9 +70,10 @@ export default class Office365CalendarService implements Calendar {
+   }
+ 
+   async createEvent(event: CalendarEvent): Promise<NewCalendarEventType> {
++    const [mainHostDestinationCalendar] = event.destinationCalendar ?? [];
+     try {
+-      const eventsUrl = event.destinationCalendar?.externalId
+-        ? `/me/calendars/${event.destinationCalendar?.externalId}/events`
++      const eventsUrl = mainHostDestinationCalendar?.externalId
++        ? `/me/calendars/${mainHostDestinationCalendar?.externalId}/events`
+         : "/me/calendar/events";
+ 
+       const response = await this.fetcher(eventsUrl, {
+diff --git a/packages/core/CalendarManager.ts b/packages/core/CalendarManager.ts
+index b256eb1cfc2583..e3a995dbe6feee 100644
+--- a/packages/core/CalendarManager.ts
++++ b/packages/core/CalendarManager.ts
+@@ -217,7 +217,8 @@ export const getBusyCalendarTimes = async (
+ 
+ export const createEvent = async (
+   credential: CredentialWithAppName,
+-  calEvent: CalendarEvent
++  calEvent: CalendarEvent,
++  externalId?: string
+ ): Promise<EventResult<NewCalendarEventType>> => {
+   const uid: string = getUid(calEvent);
+   const calendar = await getCalendar(credential);
+@@ -226,29 +227,31 @@ export const createEvent = async (
+ 
+   // Check if the disabledNotes flag is set to true
+   if (calEvent.hideCalendarNotes) {
+-    calEvent.additionalNotes = "Notes have been hidden by the organiser"; // TODO: i18n this string?
++    calEvent.additionalNotes = "Notes have been hidden by the organizer"; // TODO: i18n this string?
+   }
+ 
+   // TODO: Surface success/error messages coming from apps to improve end user visibility
+   const creationResult = calendar
+-    ? await calendar.createEvent(calEvent).catch(async (error: { code: number; calError: string }) => {
+-        success = false;
+-        /**
+-         * There is a time when selectedCalendar externalId doesn't match witch certain credential
+-         * so google returns 404.
+-         * */
+-        if (error?.code === 404) {
++    ? await calendar
++        .createEvent(calEvent, credential.id)
++        .catch(async (error: { code: number; calError: string }) => {
++          success = false;
++          /**
++           * There is a time when selectedCalendar externalId doesn't match witch certain credential
++           * so google returns 404.
++           * */
++          if (error?.code === 404) {
++            return undefined;
++          }
++          if (error?.calError) {
++            calError = error.calError;
++          }
++          log.error("createEvent failed", JSON.stringify(error), calEvent);
++          // @TODO: This code will be off till we can investigate an error with it
++          //https://github.com/calcom/cal.com/issues/3949
++          // await sendBrokenIntegrationEmail(calEvent, "calendar");
+           return undefined;
+-        }
+-        if (error?.calError) {
+-          calError = error.calError;
+-        }
+-        log.error("createEvent failed", JSON.stringify(error), calEvent);
+-        // @TODO: This code will be off till we can investigate an error with it
+-        //https://github.com/calcom/cal.com/issues/3949
+-        // await sendBrokenIntegrationEmail(calEvent, "calendar");
+-        return undefined;
+-      })
++        })
+     : undefined;
+ 
+   return {
+@@ -261,6 +264,8 @@ export const createEvent = async (
+     originalEvent: calEvent,
+     calError,
+     calWarnings: creationResult?.additionalInfo?.calWarnings || [],
++    externalId,
++    credentialId: credential.id,
+   };
+ };
+ 
+diff --git a/packages/core/EventManager.ts b/packages/core/EventManager.ts
+index 72aa75eb68a510..cc8d5c55b9696a 100644
+--- a/packages/core/EventManager.ts
++++ b/packages/core/EventManager.ts
+@@ -114,7 +114,9 @@ export default class EventManager {
+     }
+ 
+     // Fallback to Cal Video if Google Meet is selected w/o a Google Cal
+-    if (evt.location === MeetLocationType && evt.destinationCalendar?.integration !== "google_calendar") {
++    // @NOTE: destinationCalendar it's an array now so as a fallback we will only check the first one
++    const [mainHostDestinationCalendar] = evt.destinationCalendar ?? [];
++    if (evt.location === MeetLocationType && mainHostDestinationCalendar.integration !== "google_calendar") {
+       evt["location"] = "integrations:daily";
+     }
+     const isDedicated = evt.location ? isDedicatedIntegration(evt.location) : null;
+@@ -164,8 +166,8 @@ export default class EventManager {
+         meetingId: createdEventObj ? createdEventObj.id : result.createdEvent?.id?.toString(),
+         meetingPassword: createdEventObj ? createdEventObj.password : result.createdEvent?.password,
+         meetingUrl: createdEventObj ? createdEventObj.onlineMeetingUrl : result.createdEvent?.url,
+-        externalCalendarId: isCalendarType ? evt.destinationCalendar?.externalId : undefined,
+-        credentialId: isCalendarType ? evt.destinationCalendar?.credentialId : result.credentialId,
++        externalCalendarId: isCalendarType ? result.externalId : undefined,
++        credentialId: isCalendarType ? result.credentialId : undefined,
+       };
+     });
+ 
+@@ -203,8 +205,8 @@ export default class EventManager {
+         meetingId: result.createdEvent?.id?.toString(),
+         meetingPassword: result.createdEvent?.password,
+         meetingUrl: result.createdEvent?.url,
+-        externalCalendarId: evt.destinationCalendar?.externalId,
+-        credentialId: result.credentialId ?? evt.destinationCalendar?.credentialId,
++        externalCalendarId: result.externalId,
++        credentialId: result.credentialId ?? undefined,
+       };
+     });
+ 
+@@ -332,29 +334,52 @@ export default class EventManager {
+    * @private
+    */
+   private async createAllCalendarEvents(event: CalendarEvent) {
+-    /** Can I use destinationCalendar here? */
+-    /* How can I link a DC to a cred? */
+-
+     let createdEvents: EventResult<NewCalendarEventType>[] = [];
+-    if (event.destinationCalendar) {
+-      if (event.destinationCalendar.credentialId) {
+-        const credential = this.calendarCredentials.find(
+-          (c) => c.id === event.destinationCalendar?.credentialId
+-        );
+-
+-        if (credential) {
+-          const createdEvent = await createEvent(credential, event);
+-          if (createdEvent) {
+-            createdEvents.push(createdEvent);
++    if (event.destinationCalendar && event.destinationCalendar.length > 0) {
++      for (const destination of event.destinationCalendar) {
++        if (destination.credentialId) {
++          let credential = this.calendarCredentials.find((c) => c.id === destination.credentialId);
++          if (!credential) {
++            // Fetch credential from DB
++            const credentialFromDB = await prisma.credential.findUnique({
++              include: {
++                app: {
++                  select: {
++                    slug: true,
++                  },
++                },
++              },
++              where: {
++                id: destination.credentialId,
++              },
++            });
++            if (credentialFromDB && credentialFromDB.app?.slug) {
++              credential = {
++                appName: credentialFromDB?.app.slug ?? "",
++                id: credentialFromDB.id,
++                type: credentialFromDB.type,
++                key: credentialFromDB.key,
++                userId: credentialFromDB.userId,
++                teamId: credentialFromDB.teamId,
++                invalid: credentialFromDB.invalid,
++                appId: credentialFromDB.appId,
++              };
++            }
++          }
++          if (credential) {
++            const createdEvent = await createEvent(credential, event, destination.externalId);
++            if (createdEvent) {
++              createdEvents.push(createdEvent);
++            }
+           }
++        } else {
++          const destinationCalendarCredentials = this.calendarCredentials.filter(
++            (c) => c.type === destination.integration
++          );
++          createdEvents = createdEvents.concat(
++            await Promise.all(destinationCalendarCredentials.map(async (c) => await createEvent(c, event)))
++          );
+         }
+-      } else {
+-        const destinationCalendarCredentials = this.calendarCredentials.filter(
+-          (c) => c.type === event.destinationCalendar?.integration
+-        );
+-        createdEvents = createdEvents.concat(
+-          await Promise.all(destinationCalendarCredentials.map(async (c) => await createEvent(c, event)))
+-        );
+       }
+     } else {
+       /**
+@@ -451,7 +476,7 @@ export default class EventManager {
+     booking: PartialBooking,
+     newBookingId?: number
+   ): Promise<Array<EventResult<NewCalendarEventType>>> {
+-    let calendarReference: PartialReference | undefined = undefined,
++    let calendarReference: PartialReference[] | undefined = undefined,
+       credential;
+     try {
+       // If a newBookingId is given, update that calendar event
+@@ -468,33 +493,62 @@ export default class EventManager {
+       }
+ 
+       calendarReference = newBooking?.references.length
+-        ? newBooking.references.find((reference) => reference.type.includes("_calendar"))
+-        : booking.references.find((reference) => reference.type.includes("_calendar"));
++        ? newBooking.references.filter((reference) => reference.type.includes("_calendar"))
++        : booking.references.filter((reference) => reference.type.includes("_calendar"));
+ 
+-      if (!calendarReference) {
++      if (calendarReference.length === 0) {
+         return [];
+       }
+-      const { uid: bookingRefUid, externalCalendarId: bookingExternalCalendarId } = calendarReference;
+-      let calenderExternalId: string | null = null;
+-      if (bookingExternalCalendarId) {
+-        calenderExternalId = bookingExternalCalendarId;
+-      }
+-
++      // process all calendar references
+       let result = [];
+-      if (calendarReference.credentialId) {
+-        credential = this.calendarCredentials.filter(
+-          (credential) => credential.id === calendarReference?.credentialId
+-        )[0];
+-        result.push(updateEvent(credential, event, bookingRefUid, calenderExternalId));
+-      } else {
+-        const credentials = this.calendarCredentials.filter(
+-          (credential) => credential.type === calendarReference?.type
+-        );
+-        for (const credential of credentials) {
++      for (const reference of calendarReference) {
++        const { uid: bookingRefUid, externalCalendarId: bookingExternalCalendarId } = reference;
++        let calenderExternalId: string | null = null;
++        if (bookingExternalCalendarId) {
++          calenderExternalId = bookingExternalCalendarId;
++        }
++
++        if (reference.credentialId) {
++          credential = this.calendarCredentials.filter(
++            (credential) => credential.id === reference?.credentialId
++          )[0];
++          if (!credential) {
++            // Fetch credential from DB
++            const credentialFromDB = await prisma.credential.findUnique({
++              include: {
++                app: {
++                  select: {
++                    slug: true,
++                  },
++                },
++              },
++              where: {
++                id: reference.credentialId,
++              },
++            });
++            if (credentialFromDB && credentialFromDB.app?.slug) {
++              credential = {
++                appName: credentialFromDB?.app.slug ?? "",
++                id: credentialFromDB.id,
++                type: credentialFromDB.type,
++                key: credentialFromDB.key,
++                userId: credentialFromDB.userId,
++                teamId: credentialFromDB.teamId,
++                invalid: credentialFromDB.invalid,
++                appId: credentialFromDB.appId,
++              };
++            }
++          }
+           result.push(updateEvent(credential, event, bookingRefUid, calenderExternalId));
++        } else {
++          const credentials = this.calendarCredentials.filter(
++            (credential) => credential.type === reference?.type
++          );
++          for (const credential of credentials) {
++            result.push(updateEvent(credential, event, bookingRefUid, calenderExternalId));
++          }
+         }
+       }
+-
+       // If we are merging two calendar events we should delete the old calendar event
+       if (newBookingId) {
+         const oldCalendarEvent = booking.references.find((reference) => reference.type.includes("_calendar"));
+@@ -516,17 +570,17 @@ export default class EventManager {
+           .filter((cred) => cred.type.includes("other_calendar"))
+           .map(async (cred) => {
+             const calendarReference = booking.references.find((ref) => ref.type === cred.type);
+-            if (!calendarReference)
+-              if (!calendarReference) {
+-                return {
+-                  appName: cred.appName,
+-                  type: cred.type,
+-                  success: false,
+-                  uid: "",
+-                  originalEvent: event,
+-                  credentialId: cred.id,
+-                };
+-              }
++
++            if (!calendarReference) {
++              return {
++                appName: cred.appName,
++                type: cred.type,
++                success: false,
++                uid: "",
++                originalEvent: event,
++                credentialId: cred.id,
++              };
++            }
+             const { externalCalendarId: bookingExternalCalendarId, meetingId: bookingRefUid } =
+               calendarReference;
+             return await updateEvent(cred, event, bookingRefUid ?? null, bookingExternalCalendarId ?? null);
+@@ -539,17 +593,19 @@ export default class EventManager {
+       if (error instanceof Error) {
+         message = message.replace("{thing}", error.message);
+       }
+-      console.error(message);
+-      return Promise.resolve([
+-        {
+-          appName: "none",
+-          type: calendarReference?.type || "calendar",
+-          success: false,
+-          uid: "",
+-          originalEvent: event,
+-          credentialId: 0,
+-        },
+-      ]);
++
++      return Promise.resolve(
++        calendarReference?.map((reference) => {
++          return {
++            appName: "none",
++            type: reference?.type || "calendar",
++            success: false,
++            uid: "",
++            originalEvent: event,
++            credentialId: 0,
++          };
++        }) ?? ([] as Array<EventResult<NewCalendarEventType>>)
++      );
+     }
+   }
+ 
+diff --git a/packages/core/builders/CalendarEvent/builder.ts b/packages/core/builders/CalendarEvent/builder.ts
+index 8aa4b3cb7c8502..80a75ba2b14f05 100644
+--- a/packages/core/builders/CalendarEvent/builder.ts
++++ b/packages/core/builders/CalendarEvent/builder.ts
+@@ -1,4 +1,5 @@
+-import { Prisma, Booking } from "@prisma/client";
++import type { Booking } from "@prisma/client";
++import { Prisma } from "@prisma/client";
+ import short from "short-uuid";
+ import { v5 as uuidv5 } from "uuid";
+ 
+diff --git a/packages/core/builders/CalendarEvent/class.ts b/packages/core/builders/CalendarEvent/class.ts
+index 880fde52872233..2f069c3425a06f 100644
+--- a/packages/core/builders/CalendarEvent/class.ts
++++ b/packages/core/builders/CalendarEvent/class.ts
+@@ -23,7 +23,7 @@ class CalendarEventClass implements CalendarEvent {
+   uid?: string | null;
+   videoCallData?: VideoCallData;
+   paymentInfo?: any;
+-  destinationCalendar?: DestinationCalendar | null;
++  destinationCalendar?: DestinationCalendar[] | null;
+   cancellationReason?: string | null;
+   rejectionReason?: string | null;
+   hideCalendarNotes?: boolean;
+diff --git a/packages/emails/src/templates/BrokenIntegrationEmail.tsx b/packages/emails/src/templates/BrokenIntegrationEmail.tsx
+index 99f7fe72ce2a64..afb7edd31d6139 100644
+--- a/packages/emails/src/templates/BrokenIntegrationEmail.tsx
++++ b/packages/emails/src/templates/BrokenIntegrationEmail.tsx
+@@ -85,8 +85,9 @@ export const BrokenIntegrationEmail = (
+ 
+   if (type === "calendar") {
+     // The calendar name is stored as name_calendar
+-    let calendar = calEvent.destinationCalendar
+-      ? calEvent.destinationCalendar?.integration.split("_")
++    const [mainHostDestinationCalendar] = calEvent.destinationCalendar ?? [];
++    let calendar = mainHostDestinationCalendar
++      ? mainHostDestinationCalendar?.integration.split("_")
+       : "calendar";
+ 
+     if (Array.isArray(calendar)) {
+diff --git a/packages/features/bookings/lib/handleCancelBooking.ts b/packages/features/bookings/lib/handleCancelBooking.ts
+index 277aaae159c4dd..dcfee8a4a76437 100644
+--- a/packages/features/bookings/lib/handleCancelBooking.ts
++++ b/packages/features/bookings/lib/handleCancelBooking.ts
+@@ -248,7 +248,11 @@ async function handler(req: CustomRequest) {
+       ? parseRecurringEvent(bookingToDelete.eventType?.recurringEvent)
+       : undefined,
+     location: bookingToDelete?.location,
+-    destinationCalendar: bookingToDelete?.destinationCalendar || bookingToDelete?.user.destinationCalendar,
++    destinationCalendar: bookingToDelete?.destinationCalendar
++      ? [bookingToDelete?.destinationCalendar]
++      : bookingToDelete?.user.destinationCalendar
++      ? [bookingToDelete?.user.destinationCalendar]
++      : [],
+     cancellationReason: cancellationReason,
+     ...(teamMembers && { team: { name: "", members: teamMembers } }),
+     seatsPerTimeSlot: bookingToDelete.eventType?.seatsPerTimeSlot,
+@@ -411,58 +415,71 @@ async function handler(req: CustomRequest) {
+ 
+   const apiDeletes = [];
+ 
+-  const bookingCalendarReference = bookingToDelete.references.find((reference) =>
++  const bookingCalendarReference = bookingToDelete.references.filter((reference) =>
+     reference.type.includes("_calendar")
+   );
+ 
+-  if (bookingCalendarReference) {
+-    const { credentialId, uid, externalCalendarId } = bookingCalendarReference;
+-    // If the booking calendar reference contains a credentialId
+-    if (credentialId) {
+-      // Find the correct calendar credential under user credentials
+-      const calendarCredential = bookingToDelete.user.credentials.find(
+-        (credential) => credential.id === credentialId
+-      );
+-      if (calendarCredential) {
+-        const calendar = await getCalendar(calendarCredential);
+-        if (
+-          bookingToDelete.eventType?.recurringEvent &&
+-          bookingToDelete.recurringEventId &&
+-          allRemainingBookings
+-        ) {
+-          const promises = bookingToDelete.user.credentials
+-            .filter((credential) => credential.type.endsWith("_calendar"))
+-            .map(async (credential) => {
+-              const calendar = await getCalendar(credential);
+-              for (const updBooking of updatedBookings) {
+-                const bookingRef = updBooking.references.find((ref) => ref.type.includes("_calendar"));
+-                if (bookingRef) {
+-                  const { uid, externalCalendarId } = bookingRef;
+-                  const deletedEvent = await calendar?.deleteEvent(uid, evt, externalCalendarId);
+-                  apiDeletes.push(deletedEvent);
++  if (bookingCalendarReference.length > 0) {
++    for (const reference of bookingCalendarReference) {
++      const { credentialId, uid, externalCalendarId } = reference;
++      // If the booking calendar reference contains a credentialId
++      if (credentialId) {
++        // Find the correct calendar credential under user credentials
++        let calendarCredential = bookingToDelete.user.credentials.find(
++          (credential) => credential.id === credentialId
++        );
++        if (!calendarCredential) {
++          // get credential from DB
++          const foundCalendarCredential = await prisma.credential.findUnique({
++            where: {
++              id: credentialId,
++            },
++          });
++          if (foundCalendarCredential) {
++            calendarCredential = foundCalendarCredential;
++          }
++        }
++        if (calendarCredential) {
++          const calendar = await getCalendar(calendarCredential);
++          if (
++            bookingToDelete.eventType?.recurringEvent &&
++            bookingToDelete.recurringEventId &&
++            allRemainingBookings
++          ) {
++            const promises = bookingToDelete.user.credentials
++              .filter((credential) => credential.type.endsWith("_calendar"))
++              .map(async (credential) => {
++                const calendar = await getCalendar(credential);
++                for (const updBooking of updatedBookings) {
++                  const bookingRef = updBooking.references.find((ref) => ref.type.includes("_calendar"));
++                  if (bookingRef) {
++                    const { uid, externalCalendarId } = bookingRef;
++                    const deletedEvent = await calendar?.deleteEvent(uid, evt, externalCalendarId);
++                    apiDeletes.push(deletedEvent);
++                  }
+                 }
++              });
++            try {
++              await Promise.all(promises);
++            } catch (error) {
++              if (error instanceof Error) {
++                logger.error(error.message);
+               }
+-            });
+-          try {
+-            await Promise.all(promises);
+-          } catch (error) {
+-            if (error instanceof Error) {
+-              logger.error(error.message);
+             }
++          } else {
++            apiDeletes.push(calendar?.deleteEvent(uid, evt, externalCalendarId) as Promise<unknown>);
+           }
+-        } else {
++        }
++      } else {
++        // For bookings made before the refactor we go through the old behavior of running through each calendar credential
++        const calendarCredentials = bookingToDelete.user.credentials.filter((credential) =>
++          credential.type.endsWith("_calendar")
++        );
++        for (const credential of calendarCredentials) {
++          const calendar = await getCalendar(credential);
+           apiDeletes.push(calendar?.deleteEvent(uid, evt, externalCalendarId) as Promise<unknown>);
+         }
+       }
+-    } else {
+-      // For bookings made before the refactor we go through the old behaviour of running through each calendar credential
+-      const calendarCredentials = bookingToDelete.user.credentials.filter((credential) =>
+-        credential.type.endsWith("_calendar")
+-      );
+-      for (const credential of calendarCredentials) {
+-        const calendar = await getCalendar(credential);
+-        apiDeletes.push(calendar?.deleteEvent(uid, evt, externalCalendarId) as Promise<unknown>);
+-      }
+     }
+   }
+ 
+@@ -508,7 +525,11 @@ async function handler(req: CustomRequest) {
+       attendees: attendeesList,
+       location: bookingToDelete.location ?? "",
+       uid: bookingToDelete.uid ?? "",
+-      destinationCalendar: bookingToDelete?.destinationCalendar || bookingToDelete?.user.destinationCalendar,
++      destinationCalendar: bookingToDelete?.destinationCalendar
++        ? [bookingToDelete?.destinationCalendar]
++        : bookingToDelete?.user.destinationCalendar
++        ? [bookingToDelete?.user.destinationCalendar]
++        : [],
+     };
+ 
+     const successPayment = bookingToDelete.payment.find((payment) => payment.success);
+diff --git a/packages/features/bookings/lib/handleNewBooking.ts b/packages/features/bookings/lib/handleNewBooking.ts
+index 03702f100dc287..a7b1fdd3c2475c 100644
+--- a/packages/features/bookings/lib/handleNewBooking.ts
++++ b/packages/features/bookings/lib/handleNewBooking.ts
+@@ -1,4 +1,4 @@
+-import type { App, Attendee, Credential, EventTypeCustomInput } from "@prisma/client";
++import type { App, Attendee, Credential, EventTypeCustomInput, DestinationCalendar } from "@prisma/client";
+ import { Prisma } from "@prisma/client";
+ import async from "async";
+ import { isValidPhoneNumber } from "libphonenumber-js";
+@@ -367,7 +367,7 @@ async function ensureAvailableUsers(
+ ) {
+   const availableUsers: IsFixedAwareUser[] = [];
+ 
+-  const orginalBookingDuration = input.originalRescheduledBooking
++  const originalBookingDuration = input.originalRescheduledBooking
+     ? dayjs(input.originalRescheduledBooking.endTime).diff(
+         dayjs(input.originalRescheduledBooking.startTime),
+         "minutes"
+@@ -380,7 +380,7 @@ async function ensureAvailableUsers(
+       {
+         userId: user.id,
+         eventTypeId: eventType.id,
+-        duration: orginalBookingDuration,
++        duration: originalBookingDuration,
+         ...input,
+       },
+       {
+@@ -686,8 +686,7 @@ async function handler(
+   if (!eventType) throw new HttpError({ statusCode: 404, message: "eventType.notFound" });
+ 
+   const isTeamEventType =
+-    eventType.schedulingType === SchedulingType.COLLECTIVE ||
+-    eventType.schedulingType === SchedulingType.ROUND_ROBIN;
++    !!eventType.schedulingType && ["COLLECTIVE", "ROUND_ROBIN"].includes(eventType.schedulingType);
+ 
+   const paymentAppData = getPaymentAppData(eventType);
+ 
+@@ -722,31 +721,46 @@ async function handler(
+     throw new HttpError({ statusCode: 400, message: error.message });
+   }
+ 
+-  const loadUsers = async () =>
+-    !eventTypeId
+-      ? await prisma.user.findMany({
++  const loadUsers = async () => {
++    try {
++      if (!eventTypeId) {
++        if (!Array.isArray(dynamicUserList) || dynamicUserList.length === 0) {
++          throw new Error("dynamicUserList is not properly defined or empty.");
++        }
++
++        const users = await prisma.user.findMany({
+           where: {
+-            username: {
+-              in: dynamicUserList,
+-            },
++            username: { in: dynamicUserList },
+           },
+           select: {
+             ...userSelect.select,
+-            credentials: true, // Don't leak to client
++            credentials: true,
+             metadata: true,
+-            organization: {
+-              select: {
+-                slug: true,
+-              },
+-            },
+           },
+-        })
+-      : eventType.hosts?.length
+-      ? eventType.hosts.map(({ user, isFixed }) => ({
++        });
++
++        return users;
++      } else {
++        const hosts = eventType.hosts || [];
++
++        if (!Array.isArray(hosts)) {
++          throw new Error("eventType.hosts is not properly defined.");
++        }
++
++        const users = hosts.map(({ user, isFixed }) => ({
+           ...user,
+           isFixed,
+-        }))
+-      : eventType.users || [];
++        }));
++
++        return users.length ? users : eventType.users;
++      }
++    } catch (error) {
++      if (error instanceof HttpError || error instanceof Prisma.PrismaClientKnownRequestError) {
++        throw new HttpError({ statusCode: 400, message: error.message });
++      }
++      throw new HttpError({ statusCode: 500, message: "Unable to load users" });
++    }
++  };
+   // loadUsers allows type inferring
+   let users: (Awaited<ReturnType<typeof loadUsers>>[number] & {
+     isFixed?: boolean;
+@@ -970,20 +984,26 @@ async function handler(
+     : getLocationValueForDB(locationBodyString, eventType.locations);
+ 
+   const customInputs = getCustomInputsResponses(reqBody, eventType.customInputs);
+-  const teamMemberPromises =
+-    users.length > 1
+-      ? users.slice(1).map(async function (user) {
+-          return {
+-            email: user.email || "",
+-            name: user.name || "",
+-            timeZone: user.timeZone,
+-            language: {
+-              translate: await getTranslation(user.locale ?? "en", "common"),
+-              locale: user.locale ?? "en",
+-            },
+-          };
+-        })
+-      : [];
++  const teamDestinationCalendars: DestinationCalendar[] = [];
++
++  // Organizer or user owner of this event type it's not listed as a team member.
++  const teamMemberPromises = users.slice(1).map(async (user) => {
++    // push to teamDestinationCalendars if it's a team event but collective only
++    if (isTeamEventType && eventType.schedulingType === "COLLECTIVE" && user.destinationCalendar) {
++      teamDestinationCalendars.push(user.destinationCalendar);
++    }
++    return {
++      email: user.email ?? "",
++      name: user.name ?? "",
++      firstName: "",
++      lastName: "",
++      timeZone: user.timeZone,
++      language: {
++        translate: await getTranslation(user.locale ?? "en", "common"),
++        locale: user.locale ?? "en",
++      },
++    };
++  });
+ 
+   const teamMembers = await Promise.all(teamMemberPromises);
+ 
+@@ -1040,16 +1060,24 @@ async function handler(
+     attendees: attendeesList,
+     location: bookingLocation, // Will be processed by the EventManager later.
+     conferenceCredentialId,
+-    /** For team events & dynamic collective events, we will need to handle each member destinationCalendar eventually */
+-    destinationCalendar: eventType.destinationCalendar || organizerUser.destinationCalendar,
++    destinationCalendar: eventType.destinationCalendar
++      ? [eventType.destinationCalendar]
++      : organizerUser.destinationCalendar
++      ? [organizerUser.destinationCalendar]
++      : null,
+     hideCalendarNotes: eventType.hideCalendarNotes,
+     requiresConfirmation: requiresConfirmation ?? false,
+     eventTypeId: eventType.id,
+     // if seats are not enabled we should default true
+     seatsShowAttendees: eventType.seatsPerTimeSlot ? eventType.seatsShowAttendees : true,
+     seatsPerTimeSlot: eventType.seatsPerTimeSlot,
++    schedulingType: eventType.schedulingType,
+   };
+ 
++  if (isTeamEventType && eventType.schedulingType === "COLLECTIVE") {
++    evt.destinationCalendar?.push(...teamDestinationCalendars);
++  }
++
+   /* Used for seats bookings to update evt object with video data */
+   const addVideoCallDataToEvt = (bookingReferences: BookingReference[]) => {
+     const videoCallReference = bookingReferences.find((reference) => reference.type.includes("_video"));
+@@ -1843,11 +1871,12 @@ async function handler(
+           id: organizerUser.id,
+         },
+       },
+-      destinationCalendar: evt.destinationCalendar
+-        ? {
+-            connect: { id: evt.destinationCalendar.id },
+-          }
+-        : undefined,
++      destinationCalendar:
++        evt.destinationCalendar && evt.destinationCalendar.length > 0
++          ? {
++              connect: { id: evt.destinationCalendar[0].id },
++            }
++          : undefined,
+     };
+ 
+     if (reqBody.recurringEventId) {
+diff --git a/packages/features/ee/payments/api/paypal-webhook.ts b/packages/features/ee/payments/api/paypal-webhook.ts
+index 493626200b63fc..06708fe0fdf8b5 100644
+--- a/packages/features/ee/payments/api/paypal-webhook.ts
++++ b/packages/features/ee/payments/api/paypal-webhook.ts
+@@ -149,7 +149,11 @@ export async function handlePaymentSuccess(
+     },
+     attendees: attendeesList,
+     uid: booking.uid,
+-    destinationCalendar: booking.destinationCalendar || user.destinationCalendar,
++    destinationCalendar: booking.destinationCalendar
++      ? [booking.destinationCalendar]
++      : user.destinationCalendar
++      ? [user.destinationCalendar]
++      : [],
+     recurringEvent: parseRecurringEvent(eventTypeRaw?.recurringEvent),
+   };
+ 
+diff --git a/packages/features/ee/payments/api/webhook.ts b/packages/features/ee/payments/api/webhook.ts
+index deb8f6e993178b..c6b563a0711e72 100644
+--- a/packages/features/ee/payments/api/webhook.ts
++++ b/packages/features/ee/payments/api/webhook.ts
+@@ -98,7 +98,7 @@ async function getBooking(bookingId: number) {
+   });
+ 
+   const attendeesList = await Promise.all(attendeesListPromises);
+-
++  const selectedDestinationCalendar = booking.destinationCalendar || user.destinationCalendar;
+   const evt: CalendarEvent = {
+     type: booking.title,
+     title: booking.title,
+@@ -116,7 +116,7 @@ async function getBooking(bookingId: number) {
+     },
+     attendees: attendeesList,
+     uid: booking.uid,
+-    destinationCalendar: booking.destinationCalendar || user.destinationCalendar,
++    destinationCalendar: selectedDestinationCalendar ? [selectedDestinationCalendar] : [],
+     recurringEvent: parseRecurringEvent(eventType?.recurringEvent),
+   };
+ 
+@@ -204,7 +204,7 @@ async function handlePaymentSuccess(event: Stripe.Event) {
+   });
+ 
+   const attendeesList = await Promise.all(attendeesListPromises);
+-
++  const selectedDestinationCalendar = booking.destinationCalendar || user.destinationCalendar;
+   const evt: CalendarEvent = {
+     type: booking.title,
+     title: booking.title,
+@@ -226,7 +226,7 @@ async function handlePaymentSuccess(event: Stripe.Event) {
+     attendees: attendeesList,
+     location: booking.location,
+     uid: booking.uid,
+-    destinationCalendar: booking.destinationCalendar || user.destinationCalendar,
++    destinationCalendar: selectedDestinationCalendar ? [selectedDestinationCalendar] : [],
+     recurringEvent: parseRecurringEvent(eventTypeRaw?.recurringEvent),
+   };
+ 
+diff --git a/packages/lib/CalendarService.ts b/packages/lib/CalendarService.ts
+index c18dec7332ad8b..da4a32f7fd8879 100644
+--- a/packages/lib/CalendarService.ts
++++ b/packages/lib/CalendarService.ts
+@@ -153,12 +153,14 @@ export default abstract class BaseCalendarService implements Calendar {
+       if (error || !iCalString)
+         throw new Error(`Error creating iCalString:=> ${error?.message} : ${error?.name} `);
+ 
++      const [mainHostDestinationCalendar] = event.destinationCalendar ?? [];
++
+       // We create the event directly on iCal
+       const responses = await Promise.all(
+         calendars
+           .filter((c) =>
+-            event.destinationCalendar?.externalId
+-              ? c.externalId === event.destinationCalendar.externalId
++            mainHostDestinationCalendar?.externalId
++              ? c.externalId === mainHostDestinationCalendar.externalId
+               : true
+           )
+           .map((calendar) =>
+@@ -504,13 +506,13 @@ export default abstract class BaseCalendarService implements Calendar {
+ 
+       return calendars.reduce<IntegrationCalendar[]>((newCalendars, calendar) => {
+         if (!calendar.components?.includes("VEVENT")) return newCalendars;
+-
++        const [mainHostDestinationCalendar] = event?.destinationCalendar ?? [];
+         newCalendars.push({
+           externalId: calendar.url,
+           /** @url https://github.com/calcom/cal.com/issues/7186 */
+           name: typeof calendar.displayName === "string" ? calendar.displayName : "",
+-          primary: event?.destinationCalendar?.externalId
+-            ? event.destinationCalendar.externalId === calendar.url
++          primary: mainHostDestinationCalendar?.externalId
++            ? mainHostDestinationCalendar.externalId === calendar.url
+             : false,
+           integration: this.integrationName,
+           email: this.credentials.username ?? "",
+diff --git a/packages/trpc/server/routers/loggedInViewer/deleteCredential.handler.ts b/packages/trpc/server/routers/loggedInViewer/deleteCredential.handler.ts
+index 4d676f9bfb59a4..fe7032b1412bb6 100644
+--- a/packages/trpc/server/routers/loggedInViewer/deleteCredential.handler.ts
++++ b/packages/trpc/server/routers/loggedInViewer/deleteCredential.handler.ts
+@@ -287,7 +287,11 @@ export const deleteCredentialHandler = async ({ ctx, input }: DeleteCredentialOp
+                 uid: booking.uid,
+                 recurringEvent: parseRecurringEvent(booking.eventType?.recurringEvent),
+                 location: booking.location,
+-                destinationCalendar: booking.destinationCalendar || booking.user?.destinationCalendar,
++                destinationCalendar: booking.destinationCalendar
++                  ? [booking.destinationCalendar]
++                  : booking.user?.destinationCalendar
++                  ? [booking.user?.destinationCalendar]
++                  : [],
+                 cancellationReason: "Payment method removed by organizer",
+                 seatsPerTimeSlot: booking.eventType?.seatsPerTimeSlot,
+                 seatsShowAttendees: booking.eventType?.seatsShowAttendees,
+diff --git a/packages/trpc/server/routers/viewer/bookings/confirm.handler.ts b/packages/trpc/server/routers/viewer/bookings/confirm.handler.ts
+index 8d32d64c15c4dd..d3182bdfc022c7 100644
+--- a/packages/trpc/server/routers/viewer/bookings/confirm.handler.ts
++++ b/packages/trpc/server/routers/viewer/bookings/confirm.handler.ts
+@@ -172,7 +172,11 @@ export const confirmHandler = async ({ ctx, input }: ConfirmOptions) => {
+     attendees: attendeesList,
+     location: booking.location ?? "",
+     uid: booking.uid,
+-    destinationCalendar: booking?.destinationCalendar || user.destinationCalendar,
++    destinationCalendar: booking?.destinationCalendar
++      ? [booking.destinationCalendar]
++      : user.destinationCalendar
++      ? [user.destinationCalendar]
++      : [],
+     requiresConfirmation: booking?.eventType?.requiresConfirmation ?? false,
+     eventTypeId: booking.eventType?.id,
+   };
+diff --git a/packages/trpc/server/routers/viewer/bookings/editLocation.handler.ts b/packages/trpc/server/routers/viewer/bookings/editLocation.handler.ts
+index 19695fd44529b3..e4110f2405b452 100644
+--- a/packages/trpc/server/routers/viewer/bookings/editLocation.handler.ts
++++ b/packages/trpc/server/routers/viewer/bookings/editLocation.handler.ts
+@@ -82,7 +82,11 @@ export const editLocationHandler = async ({ ctx, input }: EditLocationOptions) =
+       recurringEvent: parseRecurringEvent(booking.eventType?.recurringEvent),
+       location,
+       conferenceCredentialId: details?.credentialId,
+-      destinationCalendar: booking?.destinationCalendar || booking?.user?.destinationCalendar,
++      destinationCalendar: booking?.destinationCalendar
++        ? [booking?.destinationCalendar]
++        : booking?.user?.destinationCalendar
++        ? [booking?.user?.destinationCalendar]
++        : [],
+       seatsPerTimeSlot: booking.eventType?.seatsPerTimeSlot,
+       seatsShowAttendees: booking.eventType?.seatsShowAttendees,
+     };
+diff --git a/packages/trpc/server/routers/viewer/bookings/requestReschedule.handler.ts b/packages/trpc/server/routers/viewer/bookings/requestReschedule.handler.ts
+index 324ed230575627..8d1adb8e16dc2e 100644
+--- a/packages/trpc/server/routers/viewer/bookings/requestReschedule.handler.ts
++++ b/packages/trpc/server/routers/viewer/bookings/requestReschedule.handler.ts
+@@ -237,7 +237,9 @@ export const requestRescheduleHandler = async ({ ctx, input }: RequestReschedule
+     ),
+     uid: bookingToReschedule?.uid,
+     location: bookingToReschedule?.location,
+-    destinationCalendar: bookingToReschedule?.destinationCalendar || bookingToReschedule?.destinationCalendar,
++    destinationCalendar: bookingToReschedule?.destinationCalendar
++      ? [bookingToReschedule?.destinationCalendar]
++      : [],
+     cancellationReason: `Please reschedule. ${cancellationReason}`, // TODO::Add i18-next for this
+   };
+ 
+diff --git a/packages/trpc/server/routers/viewer/organizations/create.handler.ts b/packages/trpc/server/routers/viewer/organizations/create.handler.ts
+index 2cfabcf5fe6799..c80deb47741728 100644
+--- a/packages/trpc/server/routers/viewer/organizations/create.handler.ts
++++ b/packages/trpc/server/routers/viewer/organizations/create.handler.ts
+@@ -148,9 +148,9 @@ export const createHandler = async ({ input, ctx }: CreateOptions) => {
+         organization: {
+           create: {
+             name,
+-            ...(!IS_TEAM_BILLING_ENABLED && { slug }),
++            ...(IS_TEAM_BILLING_ENABLED ? { slug } : {}),
+             metadata: {
+-              ...(IS_TEAM_BILLING_ENABLED && { requestedSlug: slug }),
++              ...(IS_TEAM_BILLING_ENABLED ? { requestedSlug: slug } : {}),
+               isOrganization: true,
+               isOrganizationVerified: false,
+               isOrganizationConfigured,
+diff --git a/packages/types/Calendar.d.ts b/packages/types/Calendar.d.ts
+index a7e3ba70a9d706..c5714c2c0dffaf 100644
+--- a/packages/types/Calendar.d.ts
++++ b/packages/types/Calendar.d.ts
+@@ -8,6 +8,7 @@ import type z from "zod";
+ import type { bookingResponse } from "@calcom/features/bookings/lib/getBookingResponsesSchema";
+ import type { Calendar } from "@calcom/features/calendars/weeklyview";
+ import type { TimeFormat } from "@calcom/lib/timeFormat";
++import type { SchedulingType } from "@calcom/prisma/enums";
+ import type { Frequency } from "@calcom/prisma/zod-utils";
+ import type { CredentialPayload } from "@calcom/types/Credential";
+ 
+@@ -167,7 +168,7 @@ export interface CalendarEvent {
+   videoCallData?: VideoCallData;
+   paymentInfo?: PaymentInfo | null;
+   requiresConfirmation?: boolean | null;
+-  destinationCalendar?: DestinationCalendar | null;
++  destinationCalendar?: DestinationCalendar[] | null;
+   cancellationReason?: string | null;
+   rejectionReason?: string | null;
+   hideCalendarNotes?: boolean;
+@@ -178,6 +179,7 @@ export interface CalendarEvent {
+   seatsShowAttendees?: boolean | null;
+   attendeeSeatId?: string;
+   seatsPerTimeSlot?: number | null;
++  schedulingType?: SchedulingType | null;
+   iCalUID?: string | null;
+ 
+   // It has responses to all the fields(system + user)
+@@ -216,7 +218,7 @@ export interface IntegrationCalendar extends Ensure<Partial<SelectedCalendar>, "
+ }
+ 
+ export interface Calendar {
+-  createEvent(event: CalendarEvent): Promise<NewCalendarEventType>;
++  createEvent(event: CalendarEvent, credentialId: number): Promise<NewCalendarEventType>;
+ 
+   updateEvent(
+     uid: string,
+diff --git a/packages/types/EventManager.d.ts b/packages/types/EventManager.d.ts
+index d93069f63e880d..14209e0b412d45 100644
+--- a/packages/types/EventManager.d.ts
++++ b/packages/types/EventManager.d.ts
+@@ -23,6 +23,7 @@ export interface EventResult<T> {
+   calError?: string;
+   calWarnings?: string[];
+   credentialId?: number;
++  externalId?: string | null;
+ }
+ 
+ export interface CreateUpdateResult {
