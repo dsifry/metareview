@@ -311,7 +311,7 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 	rows := []string{"evidence", "no-evidence"}
 	if pass != nil {
 		rows = []string{"both", "diff-only", "repo-only", "no-evidence", "no-clone", "repo-error"}
-		out.printf("claims without a repo clone (measured on the diff only): %d\n", noClone)
+		out.printf("claims without a repo clone (excluded from the repo dimension and the rollup): %d\n", noClone)
 		out.printf("repo search errors: %d\n", repoErrs)
 	}
 	verdicts := []string{"bug", "important_non_bug", "hallucination", "unresolved"}
@@ -337,7 +337,11 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 		halWo = matrix[[2]string{"repo-only", "hallucination"}] + matrix[[2]string{"no-evidence", "hallucination"}]
 	}
 	if halWith+halWo > 0 {
-		out.printf("\nhallucinated gap-claims with covering evidence in the diff: %d/%d\n", halWith, halWith+halWo)
+		if pass == nil {
+			out.printf("\nhallucinated gap-claims with covering evidence in the diff: %d/%d\n", halWith, halWith+halWo)
+		} else {
+			out.printf("\nhallucinated gap-claims with covering evidence (measured rows only): %d/%d\n", halWith, halWith+halWo)
+		}
 	}
 	out.println("\nclaims by lens:")
 	var lenses []string

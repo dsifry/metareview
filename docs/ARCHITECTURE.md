@@ -212,6 +212,10 @@ list below is illustrative, omitting e.g. `judge`, `gate`, `converge`, `export`)
   the bar.)
 - **The command-seam DI pattern:** git access goes through an injectable `RunGit`/`GitRunner` func so logic is
   hermetically testable without a real repo; `nil` uses the real binary. Mirror it for any external command.
+  For the pinned-rev evidence seams (grep at a rev, blob reads — the covering-test search and the escalation
+  sandbox), use the shared constructors in `internal/fsm/judge` (`GrepSeam`/`ShowSeam`) rather than re-implementing
+  the contract per call site; the rules (exit 1 is no-matches, `-z` NUL parsing, ls-tree absence vs failure,
+  byte-exact blob reads) live and are tested there once.
 - **Embed + materialize:** ship scripts/templates via `go:embed`, write them into the target on demand,
   verify before claiming success (see the hook install). Don't assume files exist on disk in a consumer repo.
 - **Fail closed:** when the gate can't tell (unresolvable scope, unreadable state, a git error listing what a

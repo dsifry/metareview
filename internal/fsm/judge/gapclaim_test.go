@@ -369,9 +369,7 @@ func TestContextForGapClaimKeepsRepoBodyWhenHunksLackTheMatch(t *testing.T) {
 	if !strings.Contains(out, gapClaimRepoDisclosure) {
 		t.Errorf("injected repo content must carry its disclosure:\n%s", out)
 	}
-	if n := 0; n != len(ev) {
-		_ = ev
-	}
+	_ = ev // the evidence list is asserted by the audit-trail test; here only the context matters
 	// when the hunks DO carry the matched tokens, the body stays deduped away
 	diff2 := "diff --git a/app/models/widget.rb b/app/models/widget.rb\n--- a/app/models/widget.rb\n+++ b/app/models/widget.rb\n@@ -3,2 +3,4 @@\n" +
 		"+  def polish(g)\n+    g.try(:shine)\n" +
@@ -385,7 +383,9 @@ func TestContextForGapClaimKeepsRepoBodyWhenHunksLackTheMatch(t *testing.T) {
 
 // A repo-evidence path that normalizes onto a diff path SelectDiff cannot render (spelling
 // the parser misses) is not "covered" — the body is the only view and must be injected.
-func TestContextForGapClaimUnrenderableDiffPathKeepsRepoBody(t *testing.T) {
+// (named for the case it no longer exercises: the hunks-carry-the-match dedup; the
+// genuine unrenderable-referenced-path case is the test above)
+func TestContextForGapClaimDedupsWhenHunksCarryTheMatch(t *testing.T) {
 	f := run.Finding{File: "app/models/widget.rb", Line: 3,
 		IssueText: "spec/models/widget_spec.rb has no test for polish"}
 	diff := "diff --git a/spec/models/widget_spec.rb b/spec/models/widget_spec.rb\n--- a/spec/models/widget_spec.rb\n+++ b/spec/models/widget_spec.rb\n@@ -1,2 +1,3 @@\n" +
@@ -484,5 +484,31 @@ func TestContextForGapClaimInDiffBodiesStayInBudget(t *testing.T) {
 	}
 	if !truncated {
 		t.Error("an over-share aggregate must mark the context truncated")
+	}
+}
+
+// The coveredByHunks check must render at the same share the assembly ships: a token
+// visible in a full-budget render but elided from the share-sized shipped hunks must NOT
+// count as covered — the body is then the only view of the covering lines.
+
+// coveredByHunks renders at the same share the assembly ships, not the full budget: a
+// token visible in the full render but elided from the share-sized shipped hunks means
+// the repo body is the only view of the covering lines and must be injected.
+func TestContextForGapClaimCoveredCheckUsesTheShippedRender(t *testing.T) {
+	f := run.Finding{File: "app/models/widget.rb", Line: 3,
+		IssueText: "spec/models/widget_spec.rb has no test for polish"}
+	// a large spec hunk whose matched token sits past the elision point of a share-sized
+	// render; the diff has enough paths that share is a fraction of the hunk
+	hunk := strings.Repeat("+spec filler line so the hunk exceeds the share window\n", 400) +
+		"+expect(widget.polish).to eq(true)\n"
+	diff := "diff --git a/app/models/widget.rb b/app/models/widget.rb\n--- a/app/models/widget.rb\n+++ b/app/models/widget.rb\n@@ -3,2 +3,4 @@\n" +
+		"+  def polish(g)\n" +
+		"diff --git a/spec/models/widget_spec.rb b/spec/models/widget_spec.rb\n--- a/spec/models/widget_spec.rb\n+++ b/spec/models/widget_spec.rb\n@@ -1,2 +1,3 @@\n" + hunk
+	repo := &RepoEvidence{Ran: true, Evidence: []claimcheck.Evidence{
+		{Path: "spec/models/widget_spec.rb", Tokens: []string{"polish"}, Score: 3},
+	}, Content: map[string]string{"spec/models/widget_spec.rb": "FULL BODY expect(widget.polish)\n"}}
+	out, _, _, _ := ContextForGapClaim(diff, false, f, MaxDiffBytes, repo)
+	if !strings.Contains(out, "FULL BODY") {
+		t.Errorf("the token is elided from the share-sized shipped render; the body must be injected:\n%s", out)
 	}
 }

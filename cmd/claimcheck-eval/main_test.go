@@ -662,12 +662,10 @@ func TestRepoPassFetchAndRevFailuresAreDisclosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	records := []record{{URL: "https://github.com/org/repo/pull/7"}}
-	calls := 0
 	fakeRaw := func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
 		return []byte("abc"), 0, nil
 	}
 	fake := func(ctx context.Context, dir string, args ...string) (string, int, error) {
-		calls++
 		if args[0] == "fetch" {
 			return "", 128, nil
 		}
@@ -677,7 +675,6 @@ func TestRepoPassFetchAndRevFailuresAreDisclosed(t *testing.T) {
 		t.Errorf("missing = %v; want the fetch failure disclosed", missing)
 	}
 	fake = func(ctx context.Context, dir string, args ...string) (string, int, error) {
-		calls++
 		if args[0] == "rev-parse" {
 			return "", 0, nil // rev-parse succeeded but printed nothing
 		}
@@ -858,14 +855,14 @@ func TestReportReposPassSeparateGapRows(t *testing.T) {
 	}
 	diff := "diff --git a/spec/models/widget_spec.rb b/spec/models/widget_spec.rb\n--- a/spec/models/widget_spec.rb\n+++ b/spec/models/widget_spec.rb\n@@ -5,2 +5,4 @@\n" +
 		"+    expect(widget.shine).to eq(true)\n"
-	prev := reportGit
-	reportGit = func(ctx context.Context, dir string, args ...string) (string, int, error) {
+	prev := reportGitRaw
+	reportGitRaw = func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
 		if args[0] == "grep" {
-			return "", 128, nil
+			return nil, 128, nil
 		}
 		return prev(ctx, dir, args...)
 	}
-	defer func() { reportGit = prev }()
+	defer func() { reportGitRaw = prev }()
 	var buf bytes.Buffer
 	if err := report(&buf, records, map[string]string{
 		"https://github.com/org/repo/pull/7": diff, "https://github.com/org/absent/pull/1": diff,
@@ -873,10 +870,9 @@ func TestReportReposPassSeparateGapRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{"no-clone", "repo-error"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("report missing the %q row:\n%s", want, out)
-		}
+	got := matrixCells(out, []string{"no-clone", "repo-error"})
+	if got["no-clone"] != 1 || got["repo-error"] != 1 {
+		t.Errorf("the gap rows must carry their claims:\n%s", out)
 	}
 }
 
@@ -948,7 +944,7 @@ func TestReportReposPassRollupExcludesInfraRows(t *testing.T) {
 	}
 	out := buf.String()
 	// one hallucinated claim with evidence (both), one unmeasured on the repo dimension
-	if !strings.Contains(out, "hallucinated gap-claims with covering evidence in the diff: 1/1") {
+	if !strings.Contains(out, "hallucinated gap-claims with covering evidence (measured rows only): 1/1") {
 		t.Errorf("the rollup must exclude no-clone and repo-error rows:\n%s", out)
 	}
 }

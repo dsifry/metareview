@@ -2,7 +2,6 @@ package judge
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
@@ -84,5 +83,4 @@ func TestShowSeamContract(t *testing.T) {
 			t.Errorf("%s must surface as an error", name)
 		}
 	}
-	_ = strings.TrimSpace
 }

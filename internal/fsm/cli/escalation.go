@@ -153,34 +153,11 @@ func (c *ctxDeps) changedPaths(ctx context.Context, root, base, head string) ([]
 // showFile reads one path at one revision. A path absent at a revision is not an error: a file
 // added on the branch has no base side, and the judge is told so by its absence from base/.
 func (c *ctxDeps) showFile(ctx context.Context, root string) sandbox.ShowFunc {
+	raw := func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+		out, code, err := c.gitRawCtx(ctx, dir, args...)
+		return out, code, err
+	}
 	return func(rev, path string) ([]byte, bool, error) {
-		// Absence and failure must be distinguishable. Mapping every nonzero exit to "absent"
-		// means an unreadable object produces a partial or empty tree that still carries a
-		// well-formed TreeHash, and the judge is asked to settle a claim inside a directory that
-		// was never materialized while the audit records evidence=sandbox.
-		//
-		// `cat-file -e` cannot answer this: it exits 128 both for a path missing from the tree and
-		// for a revision that does not resolve. `ls-tree` separates them - it exits 0 whether or
-		// not the path is there and says which by printing it, so a nonzero exit is a real failure.
-		listed, code, err := c.gitCtx(ctx, root, "ls-tree", "--name-only", "-z", rev, "--", path)
-		if err != nil {
-			return nil, false, err
-		}
-		if code != 0 {
-			return nil, false, fmt.Errorf("git ls-tree %s -- %s failed with exit code %d", rev, path, code)
-		}
-		if strings.Trim(listed, "\x00") == "" {
-			return nil, false, nil
-		}
-		// Read the blob raw. c.git trims, and a file body must reach the tree byte for byte or
-		// its line numbers no longer match the finding that points into it.
-		out, code, err := c.gitRawCtx(ctx, root, "cat-file", "blob", rev+":"+path)
-		if err != nil {
-			return nil, false, err
-		}
-		if code != 0 {
-			return nil, false, fmt.Errorf("git cat-file blob %s:%s failed with exit code %d", rev, path, code)
-		}
-		return out, true, nil
+		return judge.ShowSeam(ctx, raw, root, rev)(path)
 	}
 }
