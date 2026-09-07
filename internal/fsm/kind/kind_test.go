@@ -1453,3 +1453,125 @@ func (a *errAudits) fn(ev run.Event) error {
 	}
 	return nil
 }
+
+// escalationGapJudge records what the escalated second opinion was shown and confirms
+// everything, so a test can assert the escalation arm carried the gap-claim evidence.
+type escalationGapJudge struct{ diffs []string }
+
+func (e *escalationGapJudge) Call(_ context.Context, req judge.Request) (judge.Verdict, error) {
+	if in, ok := req.Input.(judge.AdjudicateInput); ok {
+		e.diffs = append(e.diffs, in.Diff)
+	}
+	if req.Claim != nil {
+		e.diffs[len(e.diffs)-1] += "\n[claim:" + string(req.Claim.Class) + "]"
+	}
+	return judge.Verdict{Decision: true, Confidence: 0.9}, nil
+}
+
+// The confirmed P1s from the dogfooded review run: the escalation arm must carry the SAME
+// gap-claim evidence as the first arm (a second opinion that never saw the covering spec
+// can flip a correct rejection — the cal.com failure mode through the back door), the
+// rollup must classify the FINAL outcome (a rescued claim is confirmed, not rejected), and
+// a gap claim whose file is absent from the diff still counts as a claim made.
+func TestEscalatedGapClaimKeepsItsEvidenceAndCountsAsConfirmed(t *testing.T) {
+	esc := &escalationGapJudge{}
+	var e EscalateFunc = func(context.Context, run.Snapshot, *workflow.Node) (*Escalation, error) {
+		return &Escalation{Judge: esc, Model: "codex/x", Effort: "medium", Evidence: run.EvidenceSandbox}, nil
+	}
+	r, err := New(Deps{Judge: &scriptedJudge{real: false}, Escalate: e})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	snap := run.Snapshot{RunID: "mrv-gapesc", Iteration: 1, Findings: []run.Finding{
+		// names the spec path (cross-file: the escalation trigger) and claims absence with
+		// subjects the spec's added lines actually reference, so evidence is found
+		{IssueText: "spec/models/topic_embed_spec.rb has no test verifying the per-host category assignment for an embedded topic's category", File: "app/models/topic_embed.rb", Line: 37},
+	}}
+	a := &allAudits{}
+	raw, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: snap, Node: adjNode, Diff: machine.Diff{Text: gapDiff}, StartIndex: 0, Audit: a.fn})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(esc.diffs) != 1 {
+		t.Fatalf("escalation calls = %d, want 1 (the claim names the spec path)", len(esc.diffs))
+	}
+	escDiff := esc.diffs[0]
+	if !strings.Contains(escDiff, "expect(post.topic.category)") {
+		t.Errorf("the escalated call did not see the covering spec's assertion:\n%s", escDiff)
+	}
+	if !strings.Contains(escDiff, "claims tests, specs or coverage are ABSENT") {
+		t.Errorf("the escalated call is missing the gap-claim disclosure:\n%s", escDiff)
+	}
+	if !strings.Contains(escDiff, "[claim:testing-gap]") {
+		t.Errorf("the escalated Request carried no Claim, so its audit row loses the claim class:\n%s", escDiff)
+	}
+	var out adjudicateOut
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Confirmed) != 1 || len(out.Rejected) != 0 {
+		t.Fatalf("escalation rescued the claim: confirmed=%d rejected=%d, want 1/0", len(out.Confirmed), len(out.Rejected))
+	}
+	// the rollup must classify the FINAL outcome: rescued = confirmed, never rejected
+	for _, ev := range a.events {
+		if ev.Type != run.TypeRecord {
+			continue
+		}
+		var d run.RecordData
+		if err := json.Unmarshal(ev.Data, &d); err != nil {
+			t.Fatal(err)
+		}
+		if d.Name != "claimcheck" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal(d.Data, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m["confirmed"].(float64) != 1 || m["rejected"].(float64) != 0 {
+			t.Errorf("the rollup miscounted a rescued gap claim: %v", m)
+		}
+		if m["claims"].(float64) != 1 {
+			t.Errorf("claims-made must count the escalated gap claim: %v", m)
+		}
+		return
+	}
+	t.Fatal("no claimcheck record was audited")
+}
+
+// A gap claim whose file the diff does not carry is kept for a human (unverified_no_evidence)
+// — but it is still a claim MADE, the #140 metric's denominator.
+func TestGapClaimWithAbsentFileStillCountsAsClaimMade(t *testing.T) {
+	r := mustNew(t, &scriptedJudge{real: true}, false)
+	ex, _ := r.Executor(MatchThenAdjudicate)
+	snap := run.Snapshot{RunID: "mrv-gapabs", Iteration: 1, Findings: []run.Finding{
+		{IssueText: "the widget polish path is untested", File: "absent/widget.rb", Line: 1},
+	}}
+	a := &allAudits{}
+	if _, err := ex.Execute(context.Background(), machine.ExecInput{
+		Snap: snap, Node: adjNode, Diff: machine.Diff{Text: gapDiff}, StartIndex: 0, Audit: a.fn}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for _, ev := range a.events {
+		if ev.Type != run.TypeRecord {
+			continue
+		}
+		var d run.RecordData
+		if err := json.Unmarshal(ev.Data, &d); err != nil {
+			t.Fatal(err)
+		}
+		if d.Name == "claimcheck" {
+			var m map[string]any
+			if err := json.Unmarshal(d.Data, &m); err != nil {
+				t.Fatal(err)
+			}
+			if m["claims"].(float64) != 1 || m["unverified"].(float64) != 1 {
+				t.Errorf("an absent-file gap claim must count as made+unverified: %v", m)
+			}
+			return
+		}
+	}
+	t.Fatal("no claimcheck record was audited for an absent-file gap claim")
+}

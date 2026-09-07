@@ -18,7 +18,7 @@
 //
 // Design rule: this package never DECIDES a claim. A test file whose added lines mention
 // the claim's subject is evidence a judge weighs, not a contradiction — measured on the
-// eval corpus, 15/21 hallucinated gap-claims had such a file, but so did 149 real gap
+// eval corpus, 14/21 hallucinated gap-claims had such a file, but so did 149 real gap
 // findings (tests that exist yet do not cover the claimed behavior). Evidence is
 // injected; the verdict stays the judge's.
 //

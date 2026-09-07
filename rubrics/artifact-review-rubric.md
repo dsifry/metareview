@@ -85,6 +85,12 @@ persona-anti-overlap pattern.
   artifact silently drops — the missing acceptance criterion, the missing verification, the
   obvious edge case no section addresses.
 - Block on missing acceptance criteria, missing verification, or unhandled obvious edge cases.
+- Any finding that claims tests, specs or verification are ABSENT must first search for what it
+  claims is missing — the diff's test-shaped files (`spec/**`, `test/**`, `tests/**`,
+  `__tests__/**`, `*.test.*`, `*.spec.*`, `*_test.go`, `test_*.py`) and the repo, with your
+  tools — and cite the specific gap when a candidate exists. A claim of absence contradicted
+  by a test in the same diff is a fabricated finding, the largest single hallucination mode
+  in evaluation to date.
 - Does NOT flag: whether a path is feasible (defer to Feasibility); scope drift (defer to Scope
   and alignment); architecture soundness (defer to Architecture).
 

@@ -22,7 +22,10 @@ func TestReportAgainstMiniCorpus(t *testing.T) {
 	if len(records) != 4 {
 		t.Fatalf("records = %d, want 4", len(records))
 	}
-	diffs, missing := loadDiffs("testdata/mini", records)
+	diffs, missing, fatal := loadDiffs("testdata/mini", records)
+	if fatal != nil {
+		t.Fatal(fatal)
+	}
 	if missing == nil {
 		t.Fatal("the uncached PR must surface as a missing-diff error")
 	}
@@ -60,7 +63,10 @@ func TestReportVerboseAndLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	diffs, _ := loadDiffs("testdata/mini", records)
+	diffs, _, fatal := loadDiffs("testdata/mini", records)
+	if fatal != nil {
+		t.Fatal(fatal)
+	}
 	var buf bytes.Buffer
 	if err := report(&buf, records, diffs, options{dir: "testdata/mini", framework: "test-fw", verbose: true, limit: 1}); err != nil {
 		t.Fatal(err)
@@ -152,8 +158,8 @@ func TestLoadDiffsRejectsUnparsableCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cache, hex.EncodeToString(sum[:])[:16]+".json"), []byte("{bad"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadDiffs(dir, []record{{URL: url}}); err == nil {
-		t.Fatal("an unparsable cached diff must be an error, not ignored")
+	if _, _, fatal := loadDiffs(dir, []record{{URL: url}}); fatal == nil {
+		t.Fatal("an unparsable cached diff must be a hard error, not ignored")
 	}
 }
 
@@ -178,7 +184,10 @@ func TestReportSurfacesADeadStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	diffs, _ := loadDiffs("testdata/mini", records)
+	diffs, _, fatal := loadDiffs("testdata/mini", records)
+	if fatal != nil {
+		t.Fatal(fatal)
+	}
 	if err := report(&failAfter{n: 8}, records, diffs, options{dir: "testdata/mini", framework: "test-fw"}); err == nil {
 		t.Fatal("a writer that died mid-report must surface its error")
 	}
@@ -204,5 +213,50 @@ func TestLoadRecordsGlobAndReadFailures(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(p, 0o644) })
 	if _, err := loadRecords(dir, ""); err == nil {
 		t.Error("an unreadable readjudication3.json must be an error")
+	}
+}
+
+// The confirmed P2s: an empty corpus must not print NaN%, and a corrupt (unparsable)
+// cached diff must fail the run loudly — only a MISSING cache file may be skipped.
+func TestReportEmptyCorpusHasNoNaN(t *testing.T) {
+	var buf bytes.Buffer
+	if err := report(&buf, nil, map[string]string{}, options{dir: "testdata/mini", framework: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "NaN") {
+		t.Errorf("empty corpus printed NaN:\n%s", buf.String())
+	}
+}
+
+func TestEvaluateFailsOnUnparsableCacheButSkipsMissing(t *testing.T) {
+	// missing: reported to stderr, report continues, exit clean
+	var out, errb bytes.Buffer
+	if err := evaluate(options{dir: "testdata/mini", framework: "test-fw"}, &out, &errb); err != nil {
+		t.Fatalf("a merely missing diff must not fail the run: %v", err)
+	}
+	if !strings.Contains(errb.String(), "diff for") {
+		t.Errorf("the missing diff must be named on stderr:\n%s", errb.String())
+	}
+
+	// unparsable: the tool's data is corrupt; fail loudly instead of reporting an
+	// all-no-evidence matrix with a success exit code
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "runs", "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".cache", "pr_diffs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	url := "https://github.com/org/repo/pull/1"
+	sum := sha1.Sum([]byte(url))
+	if err := os.WriteFile(filepath.Join(dir, ".cache", "pr_diffs", hex.EncodeToString(sum[:])[:16]+".json"), []byte("{bad"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "runs", "x", "readjudication3.json"),
+		[]byte(`{"run_id":"x","url":"`+url+`","framework":"f","records":[{"issue_text":"no tests","source_lens":"l","old_verdict":"h","new_verdict":"h"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := evaluate(options{dir: dir, framework: "f"}, &out, &errb); err == nil {
+		t.Fatal("an unparsable cached diff must fail the run, not silently report no-evidence")
 	}
 }

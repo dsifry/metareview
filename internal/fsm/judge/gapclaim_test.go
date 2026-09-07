@@ -55,7 +55,7 @@ func TestContextForGapClaimInjectsTheCoveringSpec(t *testing.T) {
 	for _, want := range []string{
 		"claims tests, specs or coverage are ABSENT", // the disclosure
 		"eh.try(:category_id)",                       // the primary file's change
-		"expect(post.topic.category)",                 // the covering spec's assertion
+		"expect(post.topic.category)",                // the covering spec's assertion
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("gap-claim context missing %q:\n%s", want, out)

@@ -83,11 +83,14 @@ func evaluate(o options, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	diffs, err := loadDiffs(o.dir, records)
-	if err != nil {
+	diffs, missing, fatal := loadDiffs(o.dir, records)
+	if fatal != nil {
+		return fatal
+	}
+	if missing != nil {
 		// A missing cached diff must not sink the whole report: the claims it would have
 		// measured are named and skipped, so the operator knows what to re-fetch.
-		_, _ = fmt.Fprintln(stderr, "claimcheck-eval:", err)
+		_, _ = fmt.Fprintln(stderr, "claimcheck-eval:", missing)
 	}
 	return report(stdout, records, diffs, o)
 }
@@ -125,15 +128,17 @@ func loadRecords(dir, framework string) ([]record, error) {
 	return out, nil
 }
 
-// loadDiffs reads the cached diff for every URL in records; the FIRST missing one is the
-// error (the caller reports it and continues with the URLs it did find).
-func loadDiffs(dir string, records []record) (map[string]string, error) {
+// loadDiffs reads the cached diff for every URL in records. A MISSING cache file is
+// reported as the returned error and skipped (the report continues; the operator re-fetches
+// later). An UNPARSABLE cache file is a hard error by construction: reporting an
+// all-no-evidence confusion matrix from corrupt data with a success exit code is the exact
+// silent-failure mode a measurement tool must not have.
+func loadDiffs(dir string, records []record) (diffs map[string]string, missing, fatal error) {
 	urls := map[string]bool{}
 	for _, r := range records {
 		urls[r.URL] = true
 	}
-	out := map[string]string{}
-	var missing error
+	diffs = map[string]string{}
 	for u := range urls {
 		sum := sha1.Sum([]byte(u))
 		p := filepath.Join(dir, ".cache", "pr_diffs", hex.EncodeToString(sum[:])[:16]+".json")
@@ -148,11 +153,11 @@ func loadDiffs(dir string, records []record) (map[string]string, error) {
 			Diff string `json:"diff"`
 		}
 		if err := json.Unmarshal(raw, &c); err != nil {
-			return nil, err
+			return nil, nil, fmt.Errorf("corrupt cached diff %s: %w", p, err)
 		}
-		out[u] = c.Diff
+		diffs[u] = c.Diff
 	}
-	return out, missing
+	return diffs, missing, nil
 }
 
 // errWriter remembers the first write error so the report body stays linear; report
@@ -210,7 +215,11 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 		}
 	}
 
-	out.printf("records: %d  claims detected: %d (%.1f%%)\n", total, claims, 100*float64(claims)/float64(total))
+	pct := 0.0
+	if total > 0 {
+		pct = 100 * float64(claims) / float64(total)
+	}
+	out.printf("records: %d  claims detected: %d (%.1f%%)\n", total, claims, pct)
 	verdicts := []string{"bug", "important_non_bug", "hallucination", "unresolved"}
 	out.printf("\n%-14s", "evidence\\v2")
 	for _, v := range verdicts {

@@ -38,6 +38,7 @@ func TestGapClaimEvalCorpus(t *testing.T) {
 	}
 	var corpus struct {
 		Source  string         `json:"source"`
+		Note    string         `json:"note"`
 		Records []corpusRecord `json:"records"`
 	}
 	if err := json.Unmarshal(raw, &corpus); err != nil {
@@ -121,4 +122,48 @@ func clipCorpus(s string) string {
 		return s
 	}
 	return s[:110] + "…"
+}
+
+// The vendored file carries a note stating the regeneration contract; CLAIMCORPUS_UPDATE
+// re-marshals the decoded struct, so the note must survive a round trip or the first
+// regen silently strips it.
+func TestGapClaimEvalCorpusPreservesVendorNote(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "evalcorpus", "records.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var withNote struct {
+		Source  string     `json:"source"`
+		Note    string     `json:"note"`
+		Records []struct{} `json:"records"`
+	}
+	if err := json.Unmarshal(raw, &withNote); err != nil {
+		t.Fatal(err)
+	}
+	if withNote.Note == "" {
+		t.Fatal("the vendored corpus must carry its regeneration-contract note")
+	}
+	// the update path re-marshals the corpus struct — the note must round-trip through it
+	var corpus struct {
+		Source  string         `json:"source"`
+		Note    string         `json:"note"`
+		Records []corpusRecord `json:"records"`
+	}
+	if err := json.Unmarshal(raw, &corpus); err != nil {
+		t.Fatal(err)
+	}
+	corpus.Records = corpus.Records[:0]
+	out, err := json.MarshalIndent(corpus, "", " ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back struct {
+		Note string `json:"note"`
+	}
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Note != withNote.Note {
+		t.Fatalf("note did not round-trip: %q != %q", back.Note, withNote.Note)
+	}
 }
