@@ -12,6 +12,13 @@
 //
 //	go run ./cmd/claimcheck-eval -harnesseval ../harnesseval
 //	go run ./cmd/claimcheck-eval -harnesseval ../harnesseval -framework metareview-realistic -verbose -limit 20
+//	go run ./cmd/claimcheck-eval -harnesseval ../harnesseval -repos ../harnesseval-repos
+//
+// -repos enables the issue #146 repo-side structural pass: a directory of corpus clones
+// (<repos>/<org>/<repo> or <repos>/<org>-<repo>, one per PR repo), each pinned to its
+// PR's head via the pull ref. The matrix then separates diff-only from repo-only
+// evidence — the structural half of the #146 measure; the A/B re-judge (old vs new
+// prompt against the v2 ground truth) needs model spend and stays open in the issue.
 package main
 
 import (
@@ -53,6 +60,10 @@ type options struct {
 	framework string
 	verbose   bool
 	limit     int
+	// repos, when set, is a directory of corpus clones (one per PR repo: <repos>/<org>/<repo>
+	// or <repos>/<org>-<repo>) and enables the issue #146 repo-side structural pass: the
+	// matrix gains the combined diff×repo rows. Empty keeps the diff-only report.
+	repos string
 }
 
 // osExit is swapped in tests so main() itself is coverable (the cmd/metareview pattern).
@@ -69,6 +80,7 @@ func realMain() int {
 	fs.StringVar(&o.framework, "framework", "metareview-realistic", "framework filter (empty = all)")
 	fs.BoolVar(&o.verbose, "verbose", false, "print every claim with its evidence")
 	fs.IntVar(&o.limit, "limit", 0, "with -verbose, stop after N claims (0 = all)")
+	fs.StringVar(&o.repos, "repos", "", "directory of corpus clones (<repos>/<org>/<repo> or <repos>/<org>-<repo>); enables the repo-side structural pass (issue #146)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return 2
 	}
@@ -202,7 +214,20 @@ func (e *errWriter) println(s string) {
 
 func report(w io.Writer, records []record, diffs map[string]string, o options) error {
 	out := &errWriter{w: w}
-	var total, claims, skipped, detailed int
+	// -repos enables the issue #146 repo-side pass: the matrix rows become the combined
+	// diff×repo classification instead of the diff-only one. Claims whose PR has no
+	// clone are disclosed and measured on the diff dimension alone, so the repo
+	// dimension never silently shrinks the matrix.
+	var pass *repoPass
+	var missingRepos error
+	var noClone int
+	if o.repos != "" {
+		pass, missingRepos = resolveRepos(o, records, reportGit)
+		if missingRepos != nil {
+			_, _ = fmt.Fprintln(out.w, "claimcheck-eval:", missingRepos)
+		}
+	}
+	var total, claims, skipped, detailed, repoErrs int
 	matrix := map[[2]string]int{}
 	lensClaims := map[string]int{}
 	byLens := map[string]int{}
@@ -224,10 +249,35 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 		// The finding's own file, when its text names one, keeps EvidenceFor from using
 		// that file as covering evidence for itself (CodeRabbit #145): a gap claim
 		// anchored in a test file is not contradicted by that same file.
-		ev := judge.GapClaimEvidence(diff, run.Finding{File: findingFileFromText(r.IssueText), IssueText: r.IssueText}, judge.MaxGapEvidenceFiles)
-		found := "no-evidence"
-		if len(ev) > 0 {
-			found = "evidence"
+		f := run.Finding{File: findingFileFromText(r.IssueText), IssueText: r.IssueText}
+		ev := judge.GapClaimEvidence(diff, f, judge.MaxGapEvidenceFiles)
+		// #146: the repo-side search at the PR's pinned head, when the pass is on.
+		var repoEv judge.RepoEvidence
+		if pass != nil && pass.rev(r.URL) != "" {
+			var err error
+			if repoEv, err = pass.search(r.URL, f); err != nil {
+				repoErrs++
+				repoEv = judge.RepoEvidence{Ran: false}
+			}
+		} else if pass != nil {
+			noClone++
+		}
+		var found string
+		switch {
+		case pass == nil:
+			if len(ev) > 0 {
+				found = "evidence"
+			} else {
+				found = "no-evidence"
+			}
+		case len(ev) > 0 && len(repoEv.Evidence) > 0:
+			found = "both"
+		case len(ev) > 0:
+			found = "diff-only"
+		case len(repoEv.Evidence) > 0:
+			found = "repo-only"
+		default:
+			found = "no-evidence"
 		}
 		matrix[[2]string{found, r.NewVerdict}]++
 		// the limit counts PRINTED detail records, not claims made: a leading uncached
@@ -251,13 +301,19 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 	if skipped > 0 {
 		out.printf("claims skipped (no cached diff): %d\n", skipped)
 	}
+	rows := []string{"evidence", "no-evidence"}
+	if pass != nil {
+		rows = []string{"both", "diff-only", "repo-only", "no-evidence"}
+		out.printf("claims without a repo clone (measured on the diff only): %d\n", noClone)
+		out.printf("repo search errors: %d\n", repoErrs)
+	}
 	verdicts := []string{"bug", "important_non_bug", "hallucination", "unresolved"}
 	out.printf("\n%-14s", "evidence\\v2")
 	for _, v := range verdicts {
 		out.printf("%8s", clip(v, 8))
 	}
 	out.println("")
-	for _, found := range []string{"evidence", "no-evidence"} {
+	for _, found := range rows {
 		out.printf("%-14s", found)
 		for _, v := range verdicts {
 			out.printf("%8d", matrix[[2]string{found, v}])
@@ -265,6 +321,10 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 		out.println("")
 	}
 	halWith, halWo := matrix[[2]string{"evidence", "hallucination"}], matrix[[2]string{"no-evidence", "hallucination"}]
+	if pass != nil {
+		halWith = matrix[[2]string{"both", "hallucination"}] + matrix[[2]string{"diff-only", "hallucination"}]
+		halWo = matrix[[2]string{"repo-only", "hallucination"}] + matrix[[2]string{"no-evidence", "hallucination"}]
+	}
 	if halWith+halWo > 0 {
 		out.printf("\nhallucinated gap-claims with covering evidence in the diff: %d/%d\n", halWith, halWith+halWo)
 	}
