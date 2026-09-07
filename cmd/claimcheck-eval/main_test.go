@@ -68,8 +68,20 @@ func TestReportVerboseAndLimit(t *testing.T) {
 	if fatal != nil {
 		t.Fatal(fatal)
 	}
+	// put the UNCACHED claim first: it is counted as made but skipped, and must not
+	// consume the printed-detail limit
+	var lead record
+	rest := records[:0:0]
+	for i, r := range records {
+		if r.URL == "https://github.com/org/repo/pull/2" {
+			lead = records[i]
+		} else {
+			rest = append(rest, r)
+		}
+	}
+	ordered := append([]record{lead}, rest...)
 	var buf bytes.Buffer
-	if err := report(&buf, records, diffs, options{dir: "testdata/mini", framework: "test-fw", verbose: true, limit: 1}); err != nil {
+	if err := report(&buf, ordered, diffs, options{dir: "testdata/mini", framework: "test-fw", verbose: true, limit: 1}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -391,5 +403,68 @@ func TestFindingFileDerivedFromLeadingPath(t *testing.T) {
 		if got := findingFileFromText(tc.text); got != tc.want {
 			t.Errorf("findingFileFromText(%q) = %q, want %q", tc.text, got, tc.want)
 		}
+	}
+}
+
+// Bugbot #145: an empty cached diff must fail with a message that says WHY (empty),
+// not a nil-wrapping %!w(<nil>).
+func TestEmptyCachedDiffErrorNamesTheProblem(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "runs", "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".cache", "pr_diffs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	url := "https://github.com/org/repo/pull/1"
+	sum := sha1.Sum([]byte(url))
+	if err := os.WriteFile(filepath.Join(dir, ".cache", "pr_diffs", hex.EncodeToString(sum[:])[:16]+".json"), []byte(`{"diff":""}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "runs", "x", "readjudication3.json"),
+		[]byte(`{"run_id":"x","url":"`+url+`","framework":"f","records":[{"issue_text":"no tests","source_lens":"l","old_verdict":"h","new_verdict":"h"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	err := evaluate(options{dir: dir, framework: "f"}, &out, &errb)
+	if err == nil {
+		t.Fatal("an empty cached diff must fail the run")
+	}
+	if strings.Contains(err.Error(), "%!w") || !strings.Contains(err.Error(), "empty") {
+		t.Errorf("the error must name the emptiness, not wrap nil: %v", err)
+	}
+}
+
+// Bugbot #145: a leading uncached claim must not consume the -verbose limit — the limit
+// counts printed detail records, not claims made.
+func TestVerboseLimitCountsPrintedDetailsOnly(t *testing.T) {
+	// mini corpus: r2's URL is uncached and its record IS a claim (counted, skipped);
+	// r1's claim has the covering spec (printed). limit 1 must still print r1's detail.
+	records, err := loadRecords("testdata/mini", "test-fw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffs, _, fatal := loadDiffs("testdata/mini", records)
+	if fatal != nil {
+		t.Fatal(fatal)
+	}
+	// put the UNCACHED claim first: it is counted as made but skipped, and must not
+	// consume the printed-detail limit
+	var lead record
+	rest := records[:0:0]
+	for i, r := range records {
+		if r.URL == "https://github.com/org/repo/pull/2" {
+			lead = records[i]
+		} else {
+			rest = append(rest, r)
+		}
+	}
+	ordered := append([]record{lead}, rest...)
+	var buf bytes.Buffer
+	if err := report(&buf, ordered, diffs, options{dir: "testdata/mini", framework: "test-fw", verbose: true, limit: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "evidence: spec/models/widget_spec.rb") {
+		t.Errorf("a skipped uncached claim consumed the limit; the measurable claim's detail is missing:\n%s", buf.String())
 	}
 }

@@ -160,9 +160,13 @@ func loadDiffs(dir string, records []record) (diffs map[string]string, missing, 
 		}
 		// An empty diff is corrupt data wearing a valid shape: it would produce an
 		// all-no-evidence matrix with a success exit — the exact silent failure this
-		// tool must not have.
-		if err := json.Unmarshal(raw, &c); err != nil || c.Diff == "" {
+		// tool must not have. The error names which failure it was; the empty case has
+		// no err to wrap (Bugbot #145: %!w(<nil>) told the operator nothing).
+		if err := json.Unmarshal(raw, &c); err != nil {
 			return nil, nil, fmt.Errorf("corrupt cached diff %s: %w", p, err)
+		}
+		if c.Diff == "" {
+			return nil, nil, fmt.Errorf("cached diff %s is empty", p)
 		}
 		diffs[u] = c.Diff
 	}
@@ -198,7 +202,7 @@ func (e *errWriter) println(s string) {
 
 func report(w io.Writer, records []record, diffs map[string]string, o options) error {
 	out := &errWriter{w: w}
-	var total, claims, skipped int
+	var total, claims, skipped, detailed int
 	matrix := map[[2]string]int{}
 	lensClaims := map[string]int{}
 	byLens := map[string]int{}
@@ -226,7 +230,10 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 			found = "evidence"
 		}
 		matrix[[2]string{found, r.NewVerdict}]++
-		if o.verbose && (o.limit <= 0 || claims <= o.limit) {
+		// the limit counts PRINTED detail records, not claims made: a leading uncached
+		// claim is skipped before this point and must not consume the limit (Bugbot #145)
+		if o.verbose && (o.limit <= 0 || detailed < o.limit) {
+			detailed++
 			var paths []string
 			for _, e := range ev {
 				paths = append(paths, e.Path)
