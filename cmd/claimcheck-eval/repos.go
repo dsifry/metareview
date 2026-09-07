@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dsifry/metareview/internal/fsm/judge"
 	"github.com/dsifry/metareview/internal/fsm/run"
@@ -38,6 +39,13 @@ func realGit(ctx context.Context, dir string, args ...string) (string, int, erro
 // realGitRaw returns stdout byte for byte — a trimmed blob shifts every line below its
 // leading blank lines (the showFile lesson).
 func realGitRaw(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+	// A hung fetch against an unreachable origin must not block the whole report: the
+	// eval's git calls get a per-command ceiling the caller's context can only narrow.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	var out, errOut bytes.Buffer

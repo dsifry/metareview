@@ -722,12 +722,12 @@ func TestRepoPassSeamErrors(t *testing.T) {
 		t.Error("a grep failure exit must surface")
 	}
 	calls := 0
-	p.runGit = func(ctx context.Context, dir string, args ...string) (string, int, error) {
+	p.runRaw = func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
 		calls++
 		if args[0] == "ls-tree" {
-			return "", 128, nil
+			return nil, 128, nil
 		}
-		return "", 0, nil
+		return []byte(revZ), 0, nil
 	}
 	if _, _, err := p.showHead(context.Background(), "d", "rev")("p"); err == nil {
 		t.Error("an ls-tree failure exit must surface")
