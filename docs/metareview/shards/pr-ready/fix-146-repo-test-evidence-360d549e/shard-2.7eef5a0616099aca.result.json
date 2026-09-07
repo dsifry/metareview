@@ -6,7 +6,16 @@
    "line": 593,
    "issue_text": "The repo-search memo key flattens strong and weak subject tokens into one space-joined string, so two findings with the same normalized own file and the same token union but different strong/weak partitions collide on one memo entry; the shared entry applies EvidenceFor's admission bar (1 strong or 2 weak hits) from whichever finding searched first. Constructing such a collision requires two texts whose sorted token sequence is identical while camel/underscore placement differs per token under the same own file \u2014 not reachable by any realistic finding pair \u2014 and even then the mis-shared evidence is only offered to the judge for weighing, never deciding. Non-blocking; noted for a future key that joins strong and weak lists separately.",
    "severity": "low",
-   "disposition": "accepted-risk"
+   "disposition": "accepted-risk",
+   "evidence": [
+    {
+     "path": "internal/fsm/kind/kind.go",
+     "line": 593
+    },
+    {
+     "note": "accepted risk: the memo key flattens tokens into one space-joined string; two findings sharing a normalized token set but different files are keyed separately by the own-file suffix, so the flattening only merges claims whose subject AND own file agree"
+    }
+   ]
   }
  ],
  "evidence": [

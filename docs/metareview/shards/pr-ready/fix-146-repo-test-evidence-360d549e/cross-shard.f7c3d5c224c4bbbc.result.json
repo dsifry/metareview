@@ -6,14 +6,32 @@
    "line": 264,
    "issue_text": "Boundary drift between shards 1 and 2: repos.go's resolveRepos classifies an existing clone whose fetch or rev-parse failed as 'missing' (pinned to nothing), but main.go's report can only see pass.rev(URL)==\"\" and files such claims under the 'no-clone' matrix row. The per-claim disclosure does name '(fetch failed)', and the rollup excludes the row either way, so the conflation only slightly mislabels the row for operators; severity low, documented trade-off, non-blocking.",
    "severity": "low",
-   "disposition": "accepted-risk"
+   "disposition": "accepted-risk",
+   "evidence": [
+    {
+     "path": "cmd/claimcheck-eval/repos.go",
+     "line": 80
+    },
+    {
+     "note": "accepted risk: pin-failed clones are named in the missing disclosure with a (fetch failed) suffix, distinguishable from absent clones; the no-clone row aggregates them, disclosed per URL"
+    }
+   ]
   },
   {
    "file": "internal/fsm/cli/repoevidence.go",
    "line": 60,
    "issue_text": "Escalation seam re-runs RepoTestEvidence instead of reusing the executor's memoized search (explicitly documented in the file as deliberate: escalation resolves lazily before the executor may have searched). Transient seam failure between the primary arm and the escalation materialization could give the second-opinion tree fewer repo evidence paths than the primary prompt displayed; both arms fail open identically and the pinned rev is the same, so divergence is bounded and rare; severity low, non-blocking.",
    "severity": "low",
-   "disposition": "accepted-risk"
+   "disposition": "accepted-risk",
+   "evidence": [
+    {
+     "path": "internal/fsm/cli/repoevidence.go",
+     "line": 60
+    },
+    {
+     "note": "accepted risk: the escalation seam re-runs the search rather than reusing the executor memo, documented as deliberate at this site because escalation resolves before the executor may have searched"
+    }
+   ]
   }
  ],
  "evidence": [
