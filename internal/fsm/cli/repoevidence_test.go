@@ -90,8 +90,10 @@ func TestEscalationForCarriesRepoEvidencePaths(t *testing.T) {
 	}
 	// The tree hash changes when the spec joins, so verify content, not just a hash:
 	// read the materialized file back from the recorded root.
-	esc.Judge.Call(c.ctx, judge.Request{Kind: judge.KindAdjudicate, Model: esc.Model, Effort: esc.Effort,
-		Input: judge.AdjudicateInput{Diff: "d", Candidate: gapFinding(), Sandbox: true}}) //nolint:errcheck — the call is exercised for the tree, the verdict is a fixture
+	// the call is exercised for the tree; the verdict is a fixture, so the return is
+	// deliberately discarded — assigned to _ to keep the linter honest about it.
+	_, _ = esc.Judge.Call(c.ctx, judge.Request{Kind: judge.KindAdjudicate, Model: esc.Model, Effort: esc.Effort,
+		Input: judge.AdjudicateInput{Diff: "d", Candidate: gapFinding(), Sandbox: true}})
 	spec := filepath.Join(esc.Root, sandbox.Head, "spec", "models", "topic_embed_spec.rb")
 	body, err := os.ReadFile(spec)
 	if err != nil {

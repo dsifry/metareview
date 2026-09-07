@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dsifry/metareview/internal/claimcheck"
 	"github.com/dsifry/metareview/internal/fsm/run"
 )
 
@@ -203,12 +202,14 @@ func TestRepoTestEvidenceDeterministic(t *testing.T) {
 // The Evidence shape stays the claimcheck type so the audit trail and the eval share it.
 func TestRepoTestEvidenceShape(t *testing.T) {
 	repo := &fakeRepo{grepPaths: []string{"spec/models/topic_embed_spec.rb"},
-		files: map[string]string{"spec/models/topic_embed_spec.rb": "let!(:embeddable_host) { Fabricate(:embeddable_host) }\n"}}
+		files: map[string]string{"spec/models/topic_embed_spec.rb": "RSpec.describe TopicEmbed do\n  expect(post.topic.category).to eq(host.category)\nend\n"}}
 	ev, err := RepoTestEvidence(repo.grep, repo.show, finding(), 3)
 	if err != nil {
 		t.Fatalf("RepoTestEvidence: %v", err)
 	}
-	var _ []claimcheck.Evidence = ev.Evidence
+	if len(ev.Evidence) != 1 || ev.Evidence[0].Path != "spec/models/topic_embed_spec.rb" {
+		t.Fatalf("evidence = %+v; want the spec as claimcheck.Evidence", ev.Evidence)
+	}
 }
 
 // Nil seams disable the search (mock and judge-less runs keep today's behavior).
