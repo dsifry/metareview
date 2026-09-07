@@ -629,33 +629,44 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 			continue
 		}
 		real := v.Decision && v.Confidence >= AdjudicateThreshold
-		rescued := false
+		// outcome is what the claim metric classifies: confirmed, rejected, or unverified.
+		// An escalation that CONFIRMED the claim rescues it; one that merely kept it for a
+		// human (transport failure, unparseable verdict — VerdictCheckedButUnverified) is
+		// unverified, never confirmed: "confirmed_without_evidence" is the metric's
+		// verified-absent, and an infrastructure failure is not a verification.
+		outcome := "rejected"
 		if real {
 			desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
 			confirmed = append(confirmed, run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictRealButUngold, Confidence: v.Confidence})
+			outcome = "confirmed"
 		} else if second, ok := e.secondOpinion(ctx, in, cand, &index, claim); ok {
-			// The escalation rescued the claim; it is confirmed, and the rollup below must
-			// say so — classifying from the first arm alone would count a rescued gap claim
-			// as rejected while it lands in out.Confirmed.
-			rescued = true
+			if second.Verdict == run.VerdictRealButUngold {
+				outcome = "confirmed"
+			} else {
+				outcome = "unverified"
+			}
 			confirmed = append(confirmed, second)
 		} else {
 			desc, _ := run.CapText(cand.IssueText, run.MaxShort)
 			rejected = append(rejected, run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictHallucination, Confidence: v.Confidence})
 		}
-		// Classify AFTER the escalation resolves: the metric reports the FINAL outcome.
+		// Classify AFTER the escalation resolves: the metric reports the FINAL outcome —
+		// classifying from the first arm alone would count a rescued gap claim as rejected
+		// while it lands in out.Confirmed.
 		if claim != nil {
 			switch {
-			case (real || rescued) && len(claim.Evidence) == 0:
+			case outcome == "confirmed" && len(claim.Evidence) == 0:
 				gapConfirmed++
 				gapConfirmedNoEvidence++
-			case real || rescued:
+			case outcome == "confirmed":
 				gapConfirmed++
-			case len(claim.Evidence) > 0:
+			case outcome == "rejected" && len(claim.Evidence) > 0:
 				gapRejected++
 				gapRejectedEvidence++
-			default:
+			case outcome == "rejected":
 				gapRejected++
+			default: // unverified
+				gapUnverified++
 			}
 		}
 	}
