@@ -272,7 +272,7 @@ func (c *ctxDeps) machineDeps(root string, scenario *mockai.Scenario, mode judge
 	d := c.deps
 	// Symptom is the run's judge (real or mock): the §9.2 reviewer that vetoes a proven reproduction
 	// whose pre-fix failure is not the finding's own symptom.
-	kinds, _ := kind.New(kind.Deps{Judge: j, Mock: scenario != nil, Escalate: c.escalation(root, scenario, mode), Prove: kind.Provers{Mutation: kind.MutationProver{}, Reproduction: kind.ReproductionProver{Exec: d.Exec}}, Symptom: j}) // consistent by construction: a mock judge iff a scenario
+	kinds, _ := kind.New(kind.Deps{Judge: j, Mock: scenario != nil, Escalate: c.escalation(root, scenario, mode), RepoSearch: c.repoSearch(root, scenario, mode), Prove: kind.Provers{Mutation: kind.MutationProver{}, Reproduction: kind.ReproductionProver{Exec: d.Exec}}, Symptom: j}) // consistent by construction: a mock judge iff a scenario
 	md := machine.Deps{
 		Store: d.Store(root), Sidecar: d.Sidecar(root), Kinds: kinds,
 		Git:      func(dir string) gate.Git { return gate.NewExec(dir, d.Exec) },

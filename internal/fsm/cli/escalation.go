@@ -37,6 +37,11 @@ func (c *ctxDeps) escalationFor(root string) kind.EscalateFunc {
 		// changed files cannot settle those, so every path any finding names is carried too -
 		// at head, since an unchanged file has no separate base side.
 		paths = append(paths, c.referencedByFindings(snap, paths)...)
+		// #146: the repository-side covering-test evidence a gap claim was adjudicated
+		// with joins the tree, or the second opinion would judge the same claim with LESS
+		// evidence than the primary arm had. A search failure skips the paths rather than
+		// disabling escalation: the primary arm already failed open the same way.
+		paths = append(paths, c.repoEvidencePaths(ctx, root, snap)...)
 		dir, err := c.deps.TempDir("mrv-evidence-")
 		if err != nil {
 			return nil, err

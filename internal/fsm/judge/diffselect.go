@@ -544,25 +544,42 @@ const gapClaimDisclosure = "[metareview: the finding claims tests, specs or cove
 	"This diff also changes the following test-shaped files, whose added lines reference the claimed subject; their hunks are appended below. " +
 	"Before accepting the claim, verify the claimed absence against them - a test that exists yet does not cover the claimed behavior still makes the claim true, but a test that does cover it makes the claim false.]\n"
 
+// gapClaimRepoDisclosure follows the diff-side one when the repository-head search found
+// covering-test candidates (issue #146): those files are NOT in the diff, so without the
+// disclosure the judge cannot tell what the appended full files are or where they came from.
+const gapClaimRepoDisclosure = "[metareview: the repository head was also searched for test-shaped files whose content references the claimed subject; " +
+	"the full (line-capped) content of each match is appended below and was NOT changed by this diff. " +
+	"Weigh it the same way: a repository test that covers the claimed behavior makes the claim false, one that does not leaves the claim real.]\n"
+
+// gapClaimRepoNone is appended when the repository search COMPLETED but found no
+// candidate. Only a completed search may say this - an error or a skipped search stays
+// silent, because silence is what the pre-#146 context looked like and a failed search
+// must never read as evidence of absence.
+const gapClaimRepoNone = "[metareview: the repository head was also searched for test-shaped files whose content references the claimed subject; none matched. " +
+	"Treat this as the search record the claim's confirmation rests on.]\n"
+
 // ContextForGapClaim is ContextForClaim for a finding whose claim class is testing-gap
-// (claimcheck.Detect): the primary file, the files the text names, AND the test files
-// whose added lines reference the claim's subject, with a disclosure naming them. The
+// (claimcheck.Detect): the primary file, the files the text names, the test files whose
+// added lines reference the claim's subject, AND - when repo is non-nil - the repository-
+// head candidates from the issue #146 search, with disclosures naming every source. The
 // cal.com failure (#140) was exactly a claim whose contradicting spec sat in the same
-// diff, eight lines below the change, and the judge was never shown it.
-func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budget int) (out string, truncated bool, hash string, evidence []claimcheck.Evidence) {
+// diff, eight lines below the change, and the judge was never shown it; the #146 blind
+// spot was the covering test that lives OUTSIDE the diff entirely.
+func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budget int, repo *RepoEvidence) (out string, truncated bool, hash string, evidence []claimcheck.Evidence) {
 	evidence = GapClaimEvidence(diff, f, MaxGapEvidenceFiles)
 	// Referenced paths and evidence paths are deduped by NORMALIZED value: a finding
 	// that names "b/spec/x.rb" while the evidence returns "spec/x.rb" names the same
 	// file, and the raw-key lookup would append its hunks twice (CodeRabbit #145).
 	var paths []string
 	inPaths := map[string]bool{}
-	addPath := func(p string) {
+	addPath := func(p string) bool {
 		key := NormalizePath(p)
 		if inPaths[key] {
-			return
+			return false
 		}
 		inPaths[key] = true
 		paths = append(paths, p)
+		return true
 	}
 	for _, p := range ReferencedPaths(diff, f.File, f.IssueText) {
 		addPath(p)
@@ -570,20 +587,43 @@ func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budge
 	for _, e := range evidence {
 		addPath(e.Path)
 	}
+	// Repository candidates join the same normalized dedup: a path the diff's hunks
+	// already carry is NOT appended again from its full head content - the hunks win,
+	// the full body behind them is redundant context spend. A path only the repo search
+	// found carries its bounded content below.
+	var repoFiles []repoFile
+	if repo != nil {
+		for _, e := range repo.Evidence {
+			if body, ok := repo.Content[e.Path]; ok && addPath(e.Path) {
+				repoFiles = append(repoFiles, repoFile{path: e.Path, body: body})
+			}
+		}
+		// every repo path is evidence for the audit trail, even one whose full content
+		// was skipped because the diff already shows its hunks
+		for _, e := range repo.Evidence {
+			addEvidencePath(&evidence, e.Path)
+		}
+	}
 	if len(paths) == 0 {
 		out, truncated, hash := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget)
+		if repo != nil && repo.Ran {
+			out = gapClaimRepoNone + out
+		}
 		return out, truncated, hash, evidence
 	}
 	// same split as ContextForClaim: the declared file keeps two shares of the budget,
 	// every corroborating file one.
-	share := budget / (len(paths) + 2)
+	share := budget / (len(paths) + len(repoFiles) + 2)
 	// The primary's truncation flag is preserved, not inferred from byte length: a small
 	// elided block is easily outweighed by the disclosure and repeated file headers, which
 	// would send partial context to the adjudicator marked complete (CodeRabbit #145).
-	primary, primaryTruncated, _ := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget-share*len(paths))
+	primary, primaryTruncated, _ := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget-share*(len(paths)+len(repoFiles)))
 	var b strings.Builder
 	if len(evidence) > 0 {
 		b.WriteString(gapClaimDisclosure)
+	}
+	if len(repoFiles) > 0 {
+		b.WriteString(gapClaimRepoDisclosure)
 	}
 	b.WriteString(primary)
 	for _, p := range paths {
@@ -591,7 +631,32 @@ func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budge
 			b.WriteString("\n" + sel)
 		}
 	}
+	for _, rf := range repoFiles {
+		b.WriteString("\n" + rf.header() + rf.body)
+	}
 	out = b.String()
 	sum := sha1.Sum([]byte(out))
 	return out, alreadyTruncated || primaryTruncated, hex.EncodeToString(sum[:]), evidence
+}
+
+// repoFile is one repository-head candidate the diff does not already cover: its bounded
+// full content, under a header naming where it came from.
+type repoFile struct {
+	path string
+	body string
+}
+
+func (rf repoFile) header() string {
+	return "--- " + rf.path + " (repository head, unchanged by this diff) ---\n"
+}
+
+// addEvidencePath appends a path to the evidence list unless it is already there
+// (normalized), keeping the audit list one-entry-per-file.
+func addEvidencePath(evidence *[]claimcheck.Evidence, path string) {
+	for _, e := range *evidence {
+		if NormalizePath(e.Path) == NormalizePath(path) {
+			return
+		}
+	}
+	*evidence = append(*evidence, claimcheck.Evidence{Path: path})
 }

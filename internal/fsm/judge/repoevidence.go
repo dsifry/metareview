@@ -51,7 +51,12 @@ const MaxRepoCandidates = 64
 // RepoEvidence is one finding's repository-side search result: the admitted covering-test
 // evidence (the claimcheck type, so the audit trail and the eval share one shape) and the
 // bounded content of exactly the admitted paths, for the context builder to inject.
+// Ran reports that a search over the repository head COMPLETED — including one that found
+// no candidates — so the context builder can distinguish "searched, none matched" from
+// "no search happened" (nil seams, no subject tokens, seam error). Only a completed empty
+// search is evidence of absence; anything else is silence.
 type RepoEvidence struct {
+	Ran      bool
 	Evidence []claimcheck.Evidence
 	Content  map[string]string
 }
@@ -80,6 +85,8 @@ func RepoTestEvidence(grep GrepPaths, show ShowHead, f run.Finding, max int) (Re
 	if err != nil {
 		return RepoEvidence{}, err
 	}
+	// From here on a search has completed, whatever it found.
+	ran := RepoEvidence{Ran: true}
 	own := strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(f.File, "./"), "a/"), "b/"))
 	cands := make([]string, 0, len(paths))
 	for _, p := range paths {
@@ -93,7 +100,7 @@ func RepoTestEvidence(grep GrepPaths, show ShowHead, f run.Finding, max int) (Re
 		cands = append(cands, p)
 	}
 	if len(cands) == 0 {
-		return RepoEvidence{}, nil
+		return ran, nil
 	}
 	sort.Strings(cands)
 	if len(cands) > MaxRepoCandidates {
@@ -116,7 +123,9 @@ func RepoTestEvidence(grep GrepPaths, show ShowHead, f run.Finding, max int) (Re
 		content[i] = boundedContent(body, MaxRepoEvidenceLines)
 	}
 	ev := claimcheck.EvidenceFor(blocks, claimcheck.Finding{File: f.File, Line: f.Line, Text: f.IssueText}, max)
-	out := RepoEvidence{Evidence: ev, Content: map[string]string{}}
+	out := ran
+	out.Evidence = ev
+	out.Content = map[string]string{}
 	for _, e := range ev {
 		for i, p := range cands {
 			if p == e.Path && content[i] != "" {

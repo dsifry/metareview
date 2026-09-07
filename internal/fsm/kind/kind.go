@@ -79,7 +79,18 @@ type Deps struct {
 	// the diff carries. A false reject silently drops a real bug while a false confirm only
 	// costs a human a look, and measurement showed excerpts are weakest on cross-file claims.
 	Escalate EscalateFunc
+	// RepoSearch, when set, performs the repository-side covering-test search for a
+	// testing-gap claim (issue #146): the diff-only evidence misses a covering test that
+	// lives outside every changed hunk. Production wires the git seams in internal/fsm/cli;
+	// nil disables the search (mock and judge-less runs keep today's behavior byte for
+	// byte). Errors fail open at the executor: the claim is adjudicated on diff-only
+	// evidence, never on a failed search.
+	RepoSearch RepoSearchFunc
 }
+
+// RepoSearchFunc resolves one finding's repository-head search. It receives the snapshot
+// so production can pin the search to snap.Head — the same revision the diff describes.
+type RepoSearchFunc func(ctx context.Context, snap run.Snapshot, f run.Finding) (judge.RepoEvidence, error)
 
 // EscalateFunc resolves the second opinion for a run. It is called lazily - at most once per
 // REGISTRY, on the first cross-file rejection - because materializing an evidence tree costs real
@@ -134,7 +145,7 @@ func New(d Deps) (*Registry, error) {
 	r.kinds[StillPresent] = stillPresentKind{}
 	r.kinds[Cmd] = cmdKind{}
 	r.kinds[Prove] = proveKind{}
-	r.execs[MatchThenAdjudicate] = &adjudicateExec{judge: d.Judge, escalate: d.Escalate}
+	r.execs[MatchThenAdjudicate] = &adjudicateExec{judge: d.Judge, escalate: d.Escalate, repoSearch: d.RepoSearch}
 	r.execs[StillPresent] = &stillPresentExec{judge: d.Judge}
 	r.execs[Cmd] = cmdExec{}
 	r.execs[Prove] = &proveExec{prover: d.Prove, symptom: d.Symptom}
@@ -437,6 +448,7 @@ func (adjudicateKind) Reduce(s run.Snapshot, out any) (run.Delta, error) {
 type adjudicateExec struct {
 	judge      judge.Judge
 	escalate   EscalateFunc
+	repoSearch RepoSearchFunc
 	once       sync.Once
 	resolved   *Escalation
 	resolveErr error
@@ -561,6 +573,33 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		}
 	}
 	var rejected []run.Bug
+	// #146: repository-side covering-test evidence, memoized by subject-token string so
+	// two gap claims about the same subject share one search. A seam error is memoized
+	// too and fails open (diff-only evidence) the way resolveErr memoizes an unavailable
+	// sandbox: the claim is adjudicated, never dropped, and a failed search never reads
+	// as evidence of absence.
+	repoMemo := map[string]judge.RepoEvidence{}
+	repoErrMemo := map[string]bool{}
+	searchRepo := func(cand run.Finding) *judge.RepoEvidence {
+		if e.repoSearch == nil {
+			return nil
+		}
+		strong, weak := claimcheck.SubjectTokens(claimcheck.Finding{File: cand.File, Line: cand.Line, Text: cand.IssueText})
+		key := strings.Join(append(append([]string{}, strong...), weak...), " ")
+		if ev, ok := repoMemo[key]; ok {
+			return &ev
+		}
+		if repoErrMemo[key] {
+			return nil
+		}
+		ev, err := e.repoSearch(ctx, snap, cand)
+		if err != nil {
+			repoErrMemo[key] = true
+			return nil
+		}
+		repoMemo[key] = ev
+		return &ev
+	}
 	// #140's per-run metric: testing-gap claims made, how many had covering-test evidence
 	// in the diff, and how each was ruled. Claims-made is the denominator the issue asks
 	// for ("claims made vs claims verified absent"); verified-absent is the confirmed count
@@ -572,6 +611,7 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		// it is resolved (matched, adjudicated, or kept for a human), and the metric's
 		// denominator counts claims, not adjudicated claims.
 		var claim *judge.ClaimInfo
+		var repo *judge.RepoEvidence
 		if class, ok := claimcheck.Detect(cand.IssueText); ok {
 			claim = &judge.ClaimInfo{Class: class}
 			gapClaims++
@@ -581,6 +621,24 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 			// paths found here.
 			for _, e := range judge.GapClaimEvidence(in.Diff.Text, cand, judge.MaxGapEvidenceFiles) {
 				claim.Evidence = append(claim.Evidence, e.Path)
+			}
+			// #146: the repository-head search joins the same evidence list. Dedup by
+			// normalized path — a file both sources offer is one entry, and the audit
+			// list stays one-entry-per-file.
+			repo = searchRepo(cand)
+			if repo != nil {
+				for _, e := range repo.Evidence {
+					dup := false
+					for _, p := range claim.Evidence {
+						if judge.NormalizePath(p) == judge.NormalizePath(e.Path) {
+							dup = true
+							break
+						}
+					}
+					if !dup {
+						claim.Evidence = append(claim.Evidence, e.Path)
+					}
+				}
 			}
 			if len(claim.Evidence) > 0 {
 				gapEvidence++
@@ -621,7 +679,7 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		if claim != nil {
 			// claim.Evidence was computed before the golden-match skip; the selection
 			// here only builds the judge's prompt.
-			diff, truncated, diffHash, _ = judge.ContextForGapClaim(in.Diff.Text, in.Diff.Truncated, cand, judge.MaxDiffBytes)
+			diff, truncated, diffHash, _ = judge.ContextForGapClaim(in.Diff.Text, in.Diff.Truncated, cand, judge.MaxDiffBytes, repo)
 		} else {
 			diff, truncated, diffHash = judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, cand.IssueText, judge.MaxDiffBytes)
 		}
@@ -651,7 +709,7 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 			desc, _ := run.CapText(cand.IssueText, run.MaxDesc)
 			confirmed = append(confirmed, run.Bug{ID: run.FindingKey(cand.File, cand.IssueText), Desc: desc, File: cand.File, Line: cand.Line, Verdict: run.VerdictRealButUngold, Confidence: v.Confidence})
 			outcome = "confirmed"
-		} else if second, ok := e.secondOpinion(ctx, in, cand, &index, claim); ok {
+		} else if second, ok := e.secondOpinion(ctx, in, cand, &index, claim, repo); ok {
 			if second.Verdict == run.VerdictRealButUngold {
 				outcome = "confirmed"
 			} else {
@@ -726,7 +784,7 @@ func (e *adjudicateExec) resolve(ctx context.Context, snap run.Snapshot, node *w
 // audit row carries the claim class. Without that, a claim correctly rejected because the
 // injected tests contradicted it could be flipped back by a judge who never saw them - the
 // cal.com failure mode arriving through the escalation door.
-func (e *adjudicateExec) secondOpinion(ctx context.Context, in machine.ExecInput, cand run.Finding, index *int, claim *judge.ClaimInfo) (run.Bug, bool) {
+func (e *adjudicateExec) secondOpinion(ctx context.Context, in machine.ExecInput, cand run.Finding, index *int, claim *judge.ClaimInfo, repo *judge.RepoEvidence) (run.Bug, bool) {
 	// The trigger deliberately does NOT filter on the diff. A finding that contradicts an
 	// UNCHANGED file - "the code requires eight lenses, these documents still say five" - is
 	// exactly the cross-file case a second opinion settles, and filtering on the diff would
@@ -748,7 +806,7 @@ func (e *adjudicateExec) secondOpinion(ctx context.Context, in machine.ExecInput
 	var truncated bool
 	var diffHash string
 	if claim != nil {
-		diff, truncated, diffHash, _ = judge.ContextForGapClaim(in.Diff.Text, in.Diff.Truncated, cand, judge.MaxDiffBytes)
+		diff, truncated, diffHash, _ = judge.ContextForGapClaim(in.Diff.Text, in.Diff.Truncated, cand, judge.MaxDiffBytes, repo)
 	} else {
 		diff, truncated, diffHash = judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, cand.IssueText, judge.MaxDiffBytes)
 	}
