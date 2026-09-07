@@ -86,7 +86,11 @@ func IsSupportPath(p string) bool {
 // unified-diff parser (the single parser; claimcheck does not re-parse diffs) and tests
 // can construct them directly.
 type Block struct {
-	Path  string
+	Path string
+	// Added carries the lines EvidenceFor matches on: the diff's added lines when the
+	// block comes from a diff (judge.ChangedBlocks), or a repository file's FULL content
+	// when it comes from the repo-side search (issue #146). EvidenceFor is agnostic — the
+	// token matching and the admission bar are identical for both shapes.
 	Added []string
 }
 
@@ -252,6 +256,15 @@ func lineTokens(line string) (words, joins map[string]bool, concat string) {
 		}
 	}
 	return words, joins, sb.String()
+}
+
+// SubjectTokens is the exported form of subjectTokens: the lowercase strong and weak
+// subject tokens of a finding, each sorted. The repo-side search (issue #146) builds its
+// candidate-selection pattern from these — the leaf stays import-free, so the git layer
+// reaches the same token logic the diff-side search matches with.
+func SubjectTokens(f Finding) (strong, weak []string) {
+	s, w := subjectTokens(f)
+	return sortedKeys(s), sortedKeys(w)
 }
 
 // EvidenceFor returns the test-shaped blocks whose ADDED lines reference the claim's

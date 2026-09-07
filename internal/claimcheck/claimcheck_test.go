@@ -326,3 +326,66 @@ func TestIsSupportPathIsCaseInsensitive(t *testing.T) {
 		}
 	}
 }
+
+// Issue #146, phase 1: EvidenceFor over FULL-FILE blocks. A pre-existing covering test
+// outside every changed hunk reaches this package as a Block whose Added carries the
+// file's whole content at HEAD; the same admission bar must find it.
+func TestEvidenceForOverFullFileBlocks(t *testing.T) {
+	// The #146 shape: the diff touches only app code; the covering spec exists in the repo.
+	blocks := []Block{
+		{Path: "spec/models/topic_embed_spec.rb", Added: []string{
+			"# frozen_string_literal: true",
+			"require 'rails_helper'",
+			"",
+			"RSpec.describe TopicEmbed do",
+			"  let!(:embeddable_host) { Fabricate(:embeddable_host) }",
+			"  it 'assigns the embedded topic's category from the host' do",
+			"    expect(post.topic.category).to eq(embeddable_host.category)",
+			"  end",
+			"end",
+		}},
+	}
+	f := Finding{File: "app/models/topic_embed.rb", Text: "per-host category assignment has no test verifying an embedded topic's category"}
+	ev := EvidenceFor(blocks, f, 4)
+	if len(ev) != 1 || ev[0].Path != "spec/models/topic_embed_spec.rb" {
+		t.Fatalf("EvidenceFor over full-file blocks = %+v; want the covering spec admitted", ev)
+	}
+	// A full-file support-path file still never admits.
+	fixtures := []Block{{Path: "spec/fabricators/embeddable_host_fabricator.rb", Added: []string{
+		"Fabricator(:embeddable_host) do",
+		"  category_id { 1 }",
+		"end",
+	}}}
+	if ev := EvidenceFor(fixtures, f, 4); len(ev) != 0 {
+		t.Errorf("support path admitted from full-file content: %+v", ev)
+	}
+	// The own-file skip holds for full-file content too.
+	own := []Block{{Path: "spec/models/topic_embed_spec.rb", Added: []string{"describe TopicEmbed do"}}}
+	if ev := EvidenceFor(own, Finding{File: "spec/models/topic_embed_spec.rb", Text: "topic_embed spec contains no real assertion for embeddable_host"}, 4); len(ev) != 0 {
+		t.Errorf("own file admitted from full-file content: %+v", ev)
+	}
+}
+
+// Issue #146, phase 1: SubjectTokens is the exported wrapper the git layer builds its
+// candidate-selection pattern from. Sorted, lowercase, strong-then-weak, no duplicates.
+func TestSubjectTokensExported(t *testing.T) {
+	strong, weak := SubjectTokens(Finding{File: "app/models/topic_embed.rb",
+		Text: "no test verifies eh.try(:category_id) or SiteSetting.embed_category"})
+	if !reflect.DeepEqual(strong, []string{"category_id", "embed_category", "sitesetting", "topic_embed"}) {
+		t.Errorf("strong = %v", strong)
+	}
+	if len(weak) != 0 {
+		t.Errorf("weak = %v; want empty", weak)
+	}
+	// A finding whose only subject is a plain identifier yields weak tokens; the own-file
+	// stem is still strong, and claim vocabulary in the text is an ordinary identifier.
+	strong, weak = SubjectTokens(Finding{File: "app/models/rating.rb", Text: "rating average is untested"})
+	if !reflect.DeepEqual(strong, []string{"rating"}) || !reflect.DeepEqual(weak, []string{"average", "rating", "untested"}) {
+		t.Errorf("strong = %v, weak = %v", strong, weak)
+	}
+	// No subject at all.
+	strong, weak = SubjectTokens(Finding{Text: "no tests"})
+	if len(strong) != 0 || len(weak) != 0 {
+		t.Errorf("strong = %v, weak = %v; want both empty", strong, weak)
+	}
+}
