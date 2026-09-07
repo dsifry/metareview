@@ -53,14 +53,28 @@ func TestGapClaimEvalCorpus(t *testing.T) {
 	var hallucinated, hallucinatedWithEvidence int
 	for i := range corpus.Records {
 		rec := corpus.Records[i]
-		diff, err := os.ReadFile(filepath.Join("testdata", "evalcorpus", rec.DiffFile))
-		if err != nil {
-			t.Fatal(err)
-		}
 		_, detected := claimcheck.Detect(rec.IssueText)
 		if detected != rec.Detect {
 			t.Errorf("Detect drifted on %q: got %v, want %v (lens %s, verdict %s)",
 				clipCorpus(rec.IssueText), detected, rec.Detect, rec.Lens, rec.V2Verdict)
+		}
+		// The aggregate pins count every hallucinated gap-claim, diff or no diff: the
+		// population is the point (#140), not just the measurable half of it.
+		if rec.V2Verdict == "hallucination" && rec.Detect {
+			hallucinated++
+		}
+		// A record with no diff_file comes from a PR whose diff carries no test-shaped
+		// files (the minimized corpus keeps only test sections): there is nothing to
+		// search, so its expectation is empty by construction and Detect is the pin.
+		if rec.DiffFile == "" {
+			if len(rec.Evidence) != 0 {
+				t.Errorf("a record with no diff must expect no evidence: %q", clipCorpus(rec.IssueText))
+			}
+			continue
+		}
+		diff, err := os.ReadFile(filepath.Join("testdata", "evalcorpus", rec.DiffFile))
+		if err != nil {
+			t.Fatal(err)
 		}
 		var got []string
 		if detected {
@@ -77,11 +91,8 @@ func TestGapClaimEvalCorpus(t *testing.T) {
 			t.Errorf("evidence drifted on %q: got %v, want %v (lens %s, verdict %s)",
 				clipCorpus(rec.IssueText), got, rec.Evidence, rec.Lens, rec.V2Verdict)
 		}
-		if rec.V2Verdict == "hallucination" && rec.Detect {
-			hallucinated++
-			if len(got) > 0 {
-				hallucinatedWithEvidence++
-			}
+		if rec.V2Verdict == "hallucination" && rec.Detect && len(got) > 0 {
+			hallucinatedWithEvidence++
 		}
 	}
 	if update {
