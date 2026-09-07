@@ -575,6 +575,16 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		if class, ok := claimcheck.Detect(cand.IssueText); ok {
 			claim = &judge.ClaimInfo{Class: class}
 			gapClaims++
+			// Evidence is computed for EVERY gap claim, before any branch that can
+			// resolve the candidate without it (CodeRabbit #145): a golden-matched
+			// claim's with_evidence must count too, and the context branch reuses the
+			// paths found here.
+			for _, e := range judge.GapClaimEvidence(in.Diff.Text, cand, judge.MaxGapEvidenceFiles) {
+				claim.Evidence = append(claim.Evidence, e.Path)
+			}
+			if len(claim.Evidence) > 0 {
+				gapEvidence++
+			}
 		}
 		if seen[c] {
 			// A golden-matched gap claim is a true positive by the eval's own standard
@@ -609,14 +619,9 @@ func (e *adjudicateExec) Execute(ctx context.Context, in machine.ExecInput) (jso
 		var truncated bool
 		var diffHash string
 		if claim != nil {
-			var ev []claimcheck.Evidence
-			diff, truncated, diffHash, ev = judge.ContextForGapClaim(in.Diff.Text, in.Diff.Truncated, cand, judge.MaxDiffBytes)
-			for _, e := range ev {
-				claim.Evidence = append(claim.Evidence, e.Path)
-			}
-			if len(ev) > 0 {
-				gapEvidence++
-			}
+			// claim.Evidence was computed before the golden-match skip; the selection
+			// here only builds the judge's prompt.
+			diff, truncated, diffHash, _ = judge.ContextForGapClaim(in.Diff.Text, in.Diff.Truncated, cand, judge.MaxDiffBytes)
 		} else {
 			diff, truncated, diffHash = judge.ContextForClaim(in.Diff.Text, in.Diff.Truncated, cand.File, cand.Line, cand.IssueText, judge.MaxDiffBytes)
 		}

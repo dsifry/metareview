@@ -1700,8 +1700,8 @@ func TestGoldenMatchedGapClaimCountsInRollup(t *testing.T) {
 		if err := json.Unmarshal(d.Data, &m); err != nil {
 			t.Fatal(err)
 		}
-		if m["claims"].(float64) != 1 || m["confirmed"].(float64) != 1 {
-			t.Errorf("a golden-matched gap claim must count as made+confirmed: %v", m)
+		if m["claims"].(float64) != 1 || m["confirmed"].(float64) != 1 || m["with_evidence"].(float64) != 1 {
+			t.Errorf("a golden-matched gap claim must count as made+confirmed, with its covering evidence: %v", m)
 		}
 		// the match verified the FINDING, not the absence the claim asserts
 		if m["confirmed_without_evidence"].(float64) != 0 {

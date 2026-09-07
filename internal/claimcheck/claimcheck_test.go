@@ -186,14 +186,22 @@ func TestEvidenceForNoSubjectTokens(t *testing.T) {
 	}
 }
 
-// max <= 0 means the default cap, and the cap truncates ranked evidence.
+// max <= 0 means the default cap; blocks of one path coalesce to one candidate first.
 func TestEvidenceForDefaultCap(t *testing.T) {
 	var blocks []Block
 	for i := 0; i < 6; i++ {
-		blocks = append(blocks, Block{Path: "test/x_test.go", Added: []string{"func TestParseFoo" + string(rune('a'+i)) + "(t *testing.T) {"}})
+		blocks = append(blocks, Block{Path: "test/x" + string(rune('a'+i)) + "_test.go", Added: []string{"func TestParseFoo(t *testing.T) {"}})
 	}
 	if ev := EvidenceFor(blocks, Finding{File: "pkg/parse.go", Text: "parseFoo is untested"}, 0); len(ev) != 4 {
 		t.Errorf("default cap = %d evidence files, want 4: %+v", len(ev), ev)
+	}
+	// same-path blocks are one candidate regardless of the cap
+	blocks = nil
+	for i := 0; i < 6; i++ {
+		blocks = append(blocks, Block{Path: "test/x_test.go", Added: []string{"func TestParseFoo" + string(rune('a'+i)) + "(t *testing.T) {"}})
+	}
+	if ev := EvidenceFor(blocks, Finding{File: "pkg/parse.go", Text: "parseFoo is untested"}, 0); len(ev) != 1 {
+		t.Errorf("same-path blocks coalesce to %d files, want 1: %+v", len(ev), ev)
 	}
 }
 
@@ -282,5 +290,39 @@ func TestEvidenceForOwnFileSymmetricOnBothSides(t *testing.T) {
 	f := Finding{File: "spec/foo_spec.rb", Text: "spec/foo_spec.rb contains no real assertion for foo_spec"}
 	if ev := EvidenceFor(blocks, f, 4); len(ev) != 0 {
 		t.Errorf("prefixed own-file blocks were admitted: %+v", ev)
+	}
+}
+
+// CodeRabbit #145: blocks are coalesced by path before the cap — one multi-hunk test
+// file must not consume every evidence slot.
+func TestEvidenceForCoalescesBlocksByPath(t *testing.T) {
+	var blocks []Block
+	for i := 0; i < 5; i++ {
+		blocks = append(blocks, Block{Path: "test/same_test.go", Added: []string{"func TestParseFoo" + string(rune('A'+i)) + "(t *testing.T) {"}})
+	}
+	blocks = append(blocks, Block{Path: "test/other_test.go", Added: []string{"func TestParseFooZ(t *testing.T) {"}})
+	ev := EvidenceFor(blocks, Finding{File: "pkg/parse.go", Text: "parseFoo has no test coverage"}, 4)
+	if len(ev) != 2 {
+		t.Fatalf("evidence = %d files, want 2 (coalesced by path): %+v", len(ev), ev)
+	}
+	var paths []string
+	for _, e := range ev {
+		paths = append(paths, e.Path)
+	}
+	if paths[0] != "test/other_test.go" && paths[1] != "test/same_test.go" {
+		t.Errorf("unexpected paths: %v", paths)
+	}
+	// both files admitted; the multi-block file's hits merged into ONE entry
+	if len(ev) != 2 || paths[0] == paths[1] {
+		t.Errorf("expected two distinct coalesced paths: %+v", ev)
+	}
+}
+
+// CodeRabbit #145: support directories are matched case-insensitively, matching IsTestPath.
+func TestIsSupportPathIsCaseInsensitive(t *testing.T) {
+	for _, p := range []string{"tests/Fixtures/topic_spec.rb", "Spec/Fabricators/x.rb", "test/TestData/y.json"} {
+		if !IsSupportPath(p) {
+			t.Errorf("IsSupportPath(%q) = false; want true (case-insensitive)", p)
+		}
 	}
 }

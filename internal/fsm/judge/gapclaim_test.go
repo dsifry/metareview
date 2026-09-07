@@ -140,3 +140,38 @@ func TestGapClaimEvidenceFindsCoveringSpec(t *testing.T) {
 		t.Error("the cal.com claim text must be detected as a testing-gap claim")
 	}
 }
+
+// CodeRabbit #145: the primary selection's truncation flag must be preserved, not
+// inferred from serialized byte length — a small elided block can be outweighed by
+// disclosure text and headers, sending partial context marked complete.
+func TestContextForGapClaimPreservesPrimaryTruncation(t *testing.T) {
+	f := run.Finding{File: "app/models/topic_embed.rb", Line: 37,
+		IssueText: "spec/models/topic_embed_spec.rb has no test verifying the per-host category assignment for an embedded topic's category"}
+	_, primaryTruncated, _ := ContextFor(gapDiff, false, f.File, f.Line, 8192)
+	_, truncated, _, _ := ContextForGapClaim(gapDiff, false, f, MaxDiffBytes)
+	if truncated != primaryTruncated {
+		t.Errorf("gap-claim truncation = %v, want the primary's %v (an elided primary block must not be reported complete)", truncated, primaryTruncated)
+	}
+	// a diff with extra unrelated files makes the primary selection partial
+	big := gapDiff + "diff --git a/other.rb b/other.rb\n--- a/other.rb\n+++ b/other.rb\n@@ -1,2 +1,3 @@\n+unrelated\n"
+	_, truncated, _, _ = ContextForGapClaim(big, false, f, MaxDiffBytes)
+	if !truncated {
+		t.Error("a context built from a multi-file diff must report truncation")
+	}
+}
+
+// CodeRabbit #145: a finding that names a path in a different spelling than the evidence
+// returns must not get the same test file's hunks twice.
+func TestContextForGapClaimDedupesPathSpellings(t *testing.T) {
+	f := run.Finding{File: "app/models/topic_embed.rb", Line: 37,
+		IssueText: "the spec at b/spec/models/topic_embed_spec.rb has no test verifying the per-host category assignment for an embedded topic's category"}
+	out, _, _, ev := ContextForGapClaim(gapDiff, false, f, MaxDiffBytes)
+	if n := strings.Count(out, "expect(post.topic.category)"); n != 1 {
+		t.Errorf("the spec's hunk appeared %d times, want 1 (spellings must dedupe)", n)
+	}
+	for _, e := range ev {
+		if e.Path != "spec/models/topic_embed_spec.rb" {
+			t.Errorf("evidence path must be the normalized form: %+v", e)
+		}
+	}
+}

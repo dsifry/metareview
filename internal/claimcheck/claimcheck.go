@@ -74,7 +74,7 @@ func IsTestPath(p string) bool {
 // asserting any behavior (fixtures, fabricators, factories). Their content is weak
 // contradiction evidence at best, so EvidenceFor skips them to keep the injected hunks
 // on files a judge can actually weigh.
-var supportPath = regexp.MustCompile(`(^|/)(fixtures|fabricators|factories|mocks|mockdata|testdata)/`)
+var supportPath = regexp.MustCompile(`(?i)(^|/)(fixtures|fabricators|factories|mocks|mockdata|testdata)/`)
 
 // IsSupportPath reports whether a path is test-support rather than a test itself.
 func IsSupportPath(p string) bool {
@@ -272,16 +272,31 @@ func EvidenceFor(blocks []Block, f Finding, max int) []Evidence {
 	// "b/" joins "./" and "a/" — reviewers quoting diff headers emit all three spellings
 	// (judge.NormalizePath documents them), and each must recognize the finding's own file.
 	own := strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(f.File, "./"), "a/"), "b/"))
-	var out []Evidence
+	// Blocks are coalesced by normalized path BEFORE the cap: one multi-hunk test file is
+	// one candidate, and must not consume every evidence slot to the exclusion of other
+	// files (CodeRabbit #145). Hits, tokens and score merge across the blocks of a path.
+	type acc struct {
+		path   string
+		tokens map[string]bool
+		score  int
+		strong bool
+	}
+	byPath := map[string]*acc{}
+	var order []string
 	for _, b := range blocks {
 		if !IsTestPath(b.Path) || IsSupportPath(b.Path) {
 			continue
 		}
-		if own != "" && strings.EqualFold(normalizePath(b.Path), own) {
+		key := normalizePath(b.Path)
+		if own != "" && strings.EqualFold(key, own) {
 			continue
 		}
-		hits := map[string]bool{}
-		strongHit, score := false, 0
+		a := byPath[key]
+		if a == nil {
+			a = &acc{path: b.Path, tokens: map[string]bool{}}
+			byPath[key] = a
+			order = append(order, key)
+		}
 		for _, line := range b.Added {
 			words, joins, concat := lineTokens(line)
 			for t := range strong {
@@ -289,22 +304,26 @@ func EvidenceFor(blocks []Block, f Finding, max int) []Evidence {
 				// topic_embed); concat matches the same with underscores stripped, for
 				// prose like "embeddable host" a single token cannot see.
 				if words[t] || joins[t] || strings.Contains(concat, strings.ReplaceAll(t, "_", "")) {
-					if !hits[t] {
-						hits[t] = true
-						score += 3
-						strongHit = true
+					if !a.tokens[t] {
+						a.tokens[t] = true
+						a.score += 3
+						a.strong = true
 					}
 				}
 			}
 			for t := range weak {
-				if words[t] && !hits[t] {
-					hits[t] = true
-					score++
+				if words[t] && !a.tokens[t] {
+					a.tokens[t] = true
+					a.score++
 				}
 			}
 		}
-		if strongHit || len(hits) >= 2 {
-			out = append(out, Evidence{Path: b.Path, Tokens: sortedKeys(hits), Score: score})
+	}
+	var out []Evidence
+	for _, key := range order {
+		a := byPath[key]
+		if a.strong || len(a.tokens) >= 2 {
+			out = append(out, Evidence{Path: a.path, Tokens: sortedKeys(a.tokens), Score: a.score})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

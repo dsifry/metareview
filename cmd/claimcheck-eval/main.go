@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -144,9 +145,15 @@ func loadDiffs(dir string, records []record) (diffs map[string]string, missing, 
 		sum := sha1.Sum([]byte(u))
 		p := filepath.Join(dir, ".cache", "pr_diffs", hex.EncodeToString(sum[:])[:16]+".json")
 		raw, err := os.ReadFile(p)
-		if err != nil {
+		if os.IsNotExist(err) {
 			missingURLs = append(missingURLs, u)
 			continue
+		}
+		if err != nil {
+			// unreadable is not missing: a permission failure or a directory at the
+			// cache path is corrupt data, and skipping it silently reports an
+			// incomplete measurement as success (CodeRabbit #145)
+			return nil, nil, fmt.Errorf("read cached diff %s: %w", p, err)
 		}
 		var c struct {
 			Diff string `json:"diff"`
@@ -210,7 +217,10 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 			skipped++
 			continue
 		}
-		ev := judge.GapClaimEvidence(diff, run.Finding{IssueText: r.IssueText}, judge.MaxGapEvidenceFiles)
+		// The finding's own file, when its text names one, keeps EvidenceFor from using
+		// that file as covering evidence for itself (CodeRabbit #145): a gap claim
+		// anchored in a test file is not contradicted by that same file.
+		ev := judge.GapClaimEvidence(diff, run.Finding{File: findingFileFromText(r.IssueText), IssueText: r.IssueText}, judge.MaxGapEvidenceFiles)
 		found := "no-evidence"
 		if len(ev) > 0 {
 			found = "evidence"
@@ -264,6 +274,19 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 	}
 	return out.err
 }
+
+// findingFileFromText extracts the leading repo path a review finding names
+// ("app/models/x.rb:36-43 — ..."), the shape every harnesseval record carries. Empty
+// when the text names no path.
+func findingFileFromText(text string) string {
+	m := leadingPath.FindString(strings.TrimSpace(text))
+	if m == "" {
+		return ""
+	}
+	return strings.TrimSuffix(m, ":")
+}
+
+var leadingPath = regexp.MustCompile(`^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]{1,8}:?`)
 
 func clip(s string, n int) string {
 	if len(s) <= n {

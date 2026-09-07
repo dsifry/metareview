@@ -76,8 +76,8 @@ func TestReportVerboseAndLimit(t *testing.T) {
 	if !strings.Contains(out, "evidence: spec/models/widget_spec.rb") {
 		t.Errorf("verbose output must name the covering spec:\n%s", out)
 	}
-	if strings.Contains(out, "evidence: \n") && strings.Count(out, "evidence: ") > 1 {
-		t.Errorf("limit 1 must print one claim detail:\n%s", out)
+	if strings.Count(out, "evidence: ") != 1 {
+		t.Errorf("limit 1 must print exactly one claim detail record:\n%s", out)
 	}
 }
 
@@ -347,5 +347,49 @@ func TestRealMainNamesFlagErrors(t *testing.T) {
 	}
 	if buf.String() == "" {
 		t.Error("a flag error must be named on stderr, not a bare exit code")
+	}
+}
+
+// CodeRabbit #145: a cache path that exists but cannot be read (a directory, a
+// permission failure) is NOT "missing" — it is corrupt data and must be fatal.
+func TestUnreadableCachedDiffIsFatal(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "runs", "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".cache", "pr_diffs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	url := "https://github.com/org/repo/pull/1"
+	sum := sha1.Sum([]byte(url))
+	// a directory where the cache file belongs: ReadFile fails with EISDIR, not ENOENT
+	if err := os.Mkdir(filepath.Join(dir, ".cache", "pr_diffs", hex.EncodeToString(sum[:])[:16]+".json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "runs", "x", "readjudication3.json"),
+		[]byte(`{"run_id":"x","url":"`+url+`","framework":"f","records":[{"issue_text":"no tests","source_lens":"l","old_verdict":"h","new_verdict":"h"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if err := evaluate(options{dir: dir, framework: "f"}, &out, &errb); err == nil {
+		t.Fatal("an unreadable (non-missing) cached diff must fail the run")
+	}
+}
+
+// CodeRabbit #145: a gap claim whose own file is a changed test file must not use that
+// file as covering evidence — the finding's file is derived from the leading path in
+// issue_text and passed through to run.Finding.
+func TestFindingFileDerivedFromLeadingPath(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want string
+	}{
+		{"app/models/topic_embed.rb:36-43 — no test verifies the category", "app/models/topic_embed.rb"},
+		{"spec/models/topic_embed_spec.rb has no test verifying anything", "spec/models/topic_embed_spec.rb"},
+		{"no tests at all for anything", ""},
+	} {
+		if got := findingFileFromText(tc.text); got != tc.want {
+			t.Errorf("findingFileFromText(%q) = %q, want %q", tc.text, got, tc.want)
+		}
 	}
 }

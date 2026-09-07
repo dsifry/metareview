@@ -551,17 +551,24 @@ const gapClaimDisclosure = "[metareview: the finding claims tests, specs or cove
 // diff, eight lines below the change, and the judge was never shown it.
 func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budget int) (out string, truncated bool, hash string, evidence []claimcheck.Evidence) {
 	evidence = GapClaimEvidence(diff, f, MaxGapEvidenceFiles)
+	// Referenced paths and evidence paths are deduped by NORMALIZED value: a finding
+	// that names "b/spec/x.rb" while the evidence returns "spec/x.rb" names the same
+	// file, and the raw-key lookup would append its hunks twice (CodeRabbit #145).
 	var paths []string
 	inPaths := map[string]bool{}
-	for _, p := range ReferencedPaths(diff, f.File, f.IssueText) {
-		inPaths[p] = true
+	addPath := func(p string) {
+		key := NormalizePath(p)
+		if inPaths[key] {
+			return
+		}
+		inPaths[key] = true
 		paths = append(paths, p)
 	}
+	for _, p := range ReferencedPaths(diff, f.File, f.IssueText) {
+		addPath(p)
+	}
 	for _, e := range evidence {
-		if !inPaths[e.Path] {
-			inPaths[e.Path] = true
-			paths = append(paths, e.Path)
-		}
+		addPath(e.Path)
 	}
 	if len(paths) == 0 {
 		out, truncated, hash := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget)
@@ -570,7 +577,10 @@ func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budge
 	// same split as ContextForClaim: the declared file keeps two shares of the budget,
 	// every corroborating file one.
 	share := budget / (len(paths) + 2)
-	primary, _, _ := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget-share*len(paths))
+	// The primary's truncation flag is preserved, not inferred from byte length: a small
+	// elided block is easily outweighed by the disclosure and repeated file headers, which
+	// would send partial context to the adjudicator marked complete (CodeRabbit #145).
+	primary, primaryTruncated, _ := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget-share*len(paths))
 	var b strings.Builder
 	if len(evidence) > 0 {
 		b.WriteString(gapClaimDisclosure)
@@ -583,5 +593,5 @@ func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budge
 	}
 	out = b.String()
 	sum := sha1.Sum([]byte(out))
-	return out, alreadyTruncated || len(out) < len(diff), hex.EncodeToString(sum[:]), evidence
+	return out, alreadyTruncated || primaryTruncated, hex.EncodeToString(sum[:]), evidence
 }
