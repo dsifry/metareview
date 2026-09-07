@@ -1411,20 +1411,34 @@ func TestAdjudicateGapClaimRollupOutcomes(t *testing.T) {
 	if num(t, rollup, "rejected") != 1 || num(t, rollup, "rejected_with_evidence") != 1 {
 		t.Errorf("a rejected claim with evidence in view must count both: %v", rollup)
 	}
+	assertRollupSums(t, rollup)
 
 	rollup = runGapClaim(t, plainDiff, scriptedJudge{real: false})
 	if num(t, rollup, "with_evidence") != 0 || num(t, rollup, "rejected_with_evidence") != 0 || num(t, rollup, "rejected") != 1 {
 		t.Errorf("a rejected claim without evidence must count rejected only: %v", rollup)
 	}
+	assertRollupSums(t, rollup)
 
 	rollup = runGapClaim(t, gapDiff, scriptedJudge{real: true})
 	if num(t, rollup, "confirmed") != 1 || num(t, rollup, "confirmed_without_evidence") != 0 {
 		t.Errorf("a confirmed claim with evidence must not count as verified-absent: %v", rollup)
 	}
+	assertRollupSums(t, rollup)
 
 	rollup = runGapClaim(t, gapDiff, scriptedJudge{parseErr: "bad json"})
 	if num(t, rollup, "unverified") != 1 || num(t, rollup, "rejected") != 0 {
 		t.Errorf("an unparseable verdict must count unverified, not rejected: %v", rollup)
+	}
+	assertRollupSums(t, rollup)
+}
+
+// Every scripted arm above must also sum: the identity (claims == confirmed + rejected +
+// unverified) is the metric's honesty, and a double count hides most easily in the arm a
+// single outcome assertion does not reach.
+func assertRollupSums(t *testing.T, m map[string]any) {
+	t.Helper()
+	if got := num(t, m, "claims"); got != num(t, m, "confirmed")+num(t, m, "rejected")+num(t, m, "unverified") {
+		t.Errorf("rollup does not sum: %v", m)
 	}
 }
 
@@ -1628,8 +1642,8 @@ func TestEscalationFailureOnGapClaimCountsUnverified(t *testing.T) {
 				if err := json.Unmarshal(d.Data, &m); err != nil {
 					t.Fatal(err)
 				}
-				if m["confirmed"].(float64) != 0 || m["unverified"].(float64) != 1 {
-					t.Errorf("an unresolved escalation must count unverified, not confirmed: %v", m)
+				if m["confirmed"].(float64) != 0 || m["unverified"].(float64) != 1 || m["rejected"].(float64) != 0 {
+					t.Errorf("an unresolved escalation must count unverified, not confirmed or rejected: %v", m)
 				}
 				return
 			}
@@ -1689,7 +1703,23 @@ func TestGoldenMatchedGapClaimCountsInRollup(t *testing.T) {
 		if m["claims"].(float64) != 1 || m["confirmed"].(float64) != 1 {
 			t.Errorf("a golden-matched gap claim must count as made+confirmed: %v", m)
 		}
+		// the match verified the FINDING, not the absence the claim asserts
+		if m["confirmed_without_evidence"].(float64) != 0 {
+			t.Errorf("a golden match is not a verified absence: %v", m)
+		}
 		return
 	}
 	t.Fatal("no claimcheck record was audited for a golden-matched gap claim")
+}
+
+// The rollup must sum: claims == confirmed + rejected + unverified, whatever the mix of
+// outcomes. A double count (e.g. an escalation failure counted both unverified and
+// rejected) or a dropped arm breaks the identity the metric's honesty rests on.
+func TestGapClaimRollupSums(t *testing.T) {
+	for _, diff := range []string{gapDiff, plainDiff} {
+		rollup := runGapClaim(t, diff, scriptedJudge{real: false})
+		if got := num(t, rollup, "claims"); got != num(t, rollup, "confirmed")+num(t, rollup, "rejected")+num(t, rollup, "unverified") {
+			t.Errorf("rollup does not sum: %v", rollup)
+		}
+	}
 }

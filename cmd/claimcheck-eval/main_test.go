@@ -298,3 +298,54 @@ func TestClipIsRuneSafe(t *testing.T) {
 		t.Errorf("clip produced invalid UTF-8: %q", c)
 	}
 }
+
+// An entry that is valid JSON but carries an empty diff is corrupt data wearing a valid
+// shape: it must be the hard error, not a silent all-no-evidence matrix.
+func TestEmptyCachedDiffIsAFatalError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "runs", "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".cache", "pr_diffs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	url := "https://github.com/org/repo/pull/1"
+	sum := sha1.Sum([]byte(url))
+	if err := os.WriteFile(filepath.Join(dir, ".cache", "pr_diffs", hex.EncodeToString(sum[:])[:16]+".json"), []byte(`{"diff":""}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "runs", "x", "readjudication3.json"),
+		[]byte(`{"run_id":"x","url":"`+url+`","framework":"f","records":[{"issue_text":"no tests","source_lens":"l","old_verdict":"h","new_verdict":"h"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if err := evaluate(options{dir: dir, framework: "f"}, &out, &errb); err == nil {
+		t.Fatal("an empty cached diff must fail the run, not report no-evidence")
+	}
+}
+
+// A flag misuse must say WHY it failed, not exit 2 into silence.
+func TestRealMainNamesFlagErrors(t *testing.T) {
+	origExit, origArgs, origStderr := osExit, os.Args, os.Stderr
+	t.Cleanup(func() { osExit, os.Args, os.Stderr = origExit, origArgs, origStderr })
+	captured := -1
+	osExit = func(c int) { captured = c }
+	os.Args = []string{"claimcheck-eval", "-limit", "notanumber"}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	main()
+	_ = w.Close()
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
+	if captured != 2 {
+		t.Fatalf("exit = %d, want 2", captured)
+	}
+	if buf.String() == "" {
+		t.Error("a flag error must be named on stderr, not a bare exit code")
+	}
+}

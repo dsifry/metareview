@@ -13,7 +13,9 @@ import (
 // The vendored eval corpus is a stratified sample of the harnesseval readjudication3
 // ground truth (issue #140): every hallucinated testing-gap claim the v2 re-adjudication
 // found on metareview runs, plus bug/important/unresolved claims and non-claim findings
-// for detector precision, with the six PR diffs they were judged against. The detect and
+// for detector precision, with the (minimized) vendored diffs they were judged against —
+// three Discourse test-section diffs; the cal.com records carry diff_file "" because those
+// PRs change no test-shaped files at all. The detect and
 // evidence expectations are generated (CLAIMCORPUS_UPDATE=1) so a matcher change that
 // moves evidence on REAL review data fails here instead of silently drifting — the same
 // discipline the prompt goldens enforce for prompts.
@@ -85,7 +87,7 @@ func TestGapClaimEvalCorpus(t *testing.T) {
 		}
 		var got []string
 		if detected {
-			for _, e := range GapClaimEvidence(string(diff), run.Finding{IssueText: rec.IssueText}, 3) {
+			for _, e := range GapClaimEvidence(string(diff), run.Finding{IssueText: rec.IssueText}, MaxGapEvidenceFiles) {
 				got = append(got, e.Path)
 			}
 		}

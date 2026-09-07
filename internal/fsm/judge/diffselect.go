@@ -521,10 +521,12 @@ func ChangedBlocks(diff string) []claimcheck.Block {
 	return out
 }
 
-// maxGapEvidenceFiles bounds how many covering-test files one testing-gap claim can pull
+// MaxGapEvidenceFiles bounds how many covering-test files one testing-gap claim can pull
 // into the judge's context. Like maxReferencedFiles it bounds prompt size, not judgment:
 // the evidence is ranked by how strongly its added lines reference the claim's subject.
-const maxGapEvidenceFiles = 3
+// Exported because every measurement call site (the corpus golden, the eval tool) must cap
+// identically or its numbers describe a different search than the product runs.
+const MaxGapEvidenceFiles = 3
 
 // GapClaimEvidence returns the covering-test evidence for a testing-gap finding: the
 // diff's test files whose added lines reference the claim's subject, strongest first.
@@ -548,7 +550,7 @@ const gapClaimDisclosure = "[metareview: the finding claims tests, specs or cove
 // cal.com failure (#140) was exactly a claim whose contradicting spec sat in the same
 // diff, eight lines below the change, and the judge was never shown it.
 func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budget int) (out string, truncated bool, hash string, evidence []claimcheck.Evidence) {
-	evidence = GapClaimEvidence(diff, f, maxGapEvidenceFiles)
+	evidence = GapClaimEvidence(diff, f, MaxGapEvidenceFiles)
 	var paths []string
 	inPaths := map[string]bool{}
 	for _, p := range ReferencedPaths(diff, f.File, f.IssueText) {

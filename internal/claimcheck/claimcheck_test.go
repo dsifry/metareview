@@ -264,3 +264,23 @@ func TestEvidenceForSkipsOwnFileInAllSpellings(t *testing.T) {
 		}
 	}
 }
+
+// camelJoin must see the hump in non-ASCII initials too: ÜberDriver is a compound.
+func TestCamelJoinNonASCIIUpper(t *testing.T) {
+	if j, split := camelJoin("ÜberDriver"); !split || j != "über_driver" {
+		t.Errorf("camelJoin(ÜberDriver) = %q, %v; want über_driver, true", j, split)
+	}
+}
+
+// The own-file skip is symmetric: a Block.Path spelled with a diff-header prefix must be
+// recognized as the finding's own file too, not admitted as evidence against itself.
+func TestEvidenceForOwnFileSymmetricOnBothSides(t *testing.T) {
+	blocks := []Block{
+		{Path: "b/spec/foo_spec.rb", Added: []string{"it \"foo_spec does x\" do"}},
+		{Path: "a/spec/foo_spec.rb", Added: []string{"it \"foo_spec does y\" do"}},
+	}
+	f := Finding{File: "spec/foo_spec.rb", Text: "spec/foo_spec.rb contains no real assertion for foo_spec"}
+	if ev := EvidenceFor(blocks, f, 4); len(ev) != 0 {
+		t.Errorf("prefixed own-file blocks were admitted: %+v", ev)
+	}
+}

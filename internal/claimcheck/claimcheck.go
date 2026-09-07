@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // Class is a claim class whose verification requires evidence of absence.
@@ -105,8 +106,9 @@ type Evidence struct {
 	Score  int      `json:"score"`
 }
 
-// ident matches an identifier-shaped token: ≥2 chars, letters/digits/underscore, starting
-// with a letter or underscore. Subject tokens must survive the stoplists below.
+// ident matches an identifier-shaped token: at least 4 characters total (one lead letter
+// or underscore plus at least three of [A-Za-z0-9_]), so every match is already long
+// enough for the word sets below. Subject tokens must survive the stoplists.
 var ident = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]{3,}`)
 
 // bareFile matches a filename-shaped token (README.md, topic_embed.rb) so a claim that
@@ -201,8 +203,8 @@ func camelJoin(s string) (string, bool) {
 	var parts []string
 	var cur []rune
 	lastUpper := false // the case of the ORIGINAL rune cur grew from, not its stored form
-	isUpper := func(r rune) bool { return r >= 'A' && r <= 'Z' }
-	isLower := func(r rune) bool { return (r >= 'a' && r <= 'z') || r >= 0x80 }
+	isUpper := unicode.IsUpper
+	isLower := unicode.IsLower
 	flush := func() {
 		if len(cur) > 0 {
 			parts = append(parts, string(cur))
@@ -222,7 +224,7 @@ func camelJoin(s string) (string, bool) {
 			if len(cur) > 0 && (!lastUpper || (i+1 < len(rs) && isLower(rs[i+1]))) {
 				flush()
 			}
-			cur = append(cur, r+('a'-'A'))
+			cur = append(cur, unicode.ToLower(r))
 			lastUpper = true
 		default:
 			cur = append(cur, r)
@@ -243,9 +245,7 @@ func lineTokens(line string) (words, joins map[string]bool, concat string) {
 	for _, m := range ident.FindAllString(line, -1) {
 		t := strings.Trim(m, "_")
 		tl := strings.ToLower(t)
-		if len(tl) >= 2 {
-			words[tl] = true
-		}
+		words[tl] = true // ident matches are ≥4 chars by construction
 		sb.WriteString(tl)
 		if j, split := camelJoin(t); split {
 			joins[j] = true
@@ -277,7 +277,7 @@ func EvidenceFor(blocks []Block, f Finding, max int) []Evidence {
 		if !IsTestPath(b.Path) || IsSupportPath(b.Path) {
 			continue
 		}
-		if strings.EqualFold(strings.TrimPrefix(b.Path, "./"), own) && own != "" {
+		if own != "" && strings.EqualFold(normalizePath(b.Path), own) {
 			continue
 		}
 		hits := map[string]bool{}
@@ -320,6 +320,19 @@ func EvidenceFor(blocks []Block, f Finding, max int) []Evidence {
 		out = out[:max]
 	}
 	return out
+}
+
+// normalizePath strips the path spellings a reviewer or a diff header produces ("./x",
+// "a/x", "b/x") so the own-file comparison in EvidenceFor is symmetric on both sides —
+// Finding.File and Block.Path alike. The fold judge.NormalizePath performs lives here as
+// a private twin because this package is a leaf and must not import it.
+func normalizePath(p string) string {
+	p = strings.TrimSpace(p)
+	p = strings.TrimPrefix(p, "./")
+	for _, prefix := range []string{"a/", "b/"} {
+		p = strings.TrimPrefix(p, prefix)
+	}
+	return p
 }
 
 func sortedKeys(m map[string]bool) []string {

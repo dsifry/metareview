@@ -11,7 +11,7 @@ Block when:
 - The diff introduces unsafe execution such as `eval`.
 - Source changes lack relevant tests or explicit validation evidence. A claim that tests are
   absent must be verified, not assumed: search the diff (and the repo, with your tools) for
-  the test files the claim says do not exist — `spec/**`, `test/**`, `tests/**`,
+  the test files the claim says do not exist — `spec/**`, `specs/**`, `test/**`, `tests/**`,
   `__tests__/**`, `*.test.*`, `*.spec.*`, `*_test.go`, `test_*.py` — and cite the specific
   assertion gap when a candidate test is found. A "no tests" claim contradicted by a test in
   the same diff is a fabricated finding, not a blocker.

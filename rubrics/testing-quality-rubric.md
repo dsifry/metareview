@@ -45,7 +45,7 @@ diff, not generic "add more tests" advice.
 Before reporting ANY finding whose claim is that tests, specs or coverage are absent —
 "no tests", "nothing asserts", "untested", "no spec exists" — you MUST first search for the
 tests you are claiming do not exist, and the search must be shown in the finding:
-- Scan the diff itself for test-shaped files (`spec/**`, `test/**`, `tests/**`, `__tests__/**`,
+- Scan the diff itself for test-shaped files (`spec/**`, `specs/**`, `test/**`, `tests/**`, `__tests__/**`,
   `*.test.*`, `*.spec.*`, `*_test.go`, `test_*.py`) whose changes reference the subject you
   are claiming is untested — the same file stem, the same symbols. Read surrounding files with
   your tools when the diff alone does not settle it.

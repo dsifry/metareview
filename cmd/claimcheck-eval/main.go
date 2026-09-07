@@ -63,7 +63,7 @@ func main() { osExit(realMain()) }
 func realMain() int {
 	var o options
 	fs := flag.NewFlagSet("claimcheck-eval", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(os.Stderr) // a flag misuse must say why, not exit 2 into silence
 	fs.StringVar(&o.dir, "harnesseval", "../harnesseval", "harnesseval checkout (read-only)")
 	fs.StringVar(&o.framework, "framework", "metareview-realistic", "framework filter (empty = all)")
 	fs.BoolVar(&o.verbose, "verbose", false, "print every claim with its evidence")
@@ -151,7 +151,10 @@ func loadDiffs(dir string, records []record) (diffs map[string]string, missing, 
 		var c struct {
 			Diff string `json:"diff"`
 		}
-		if err := json.Unmarshal(raw, &c); err != nil {
+		// An empty diff is corrupt data wearing a valid shape: it would produce an
+		// all-no-evidence matrix with a success exit — the exact silent failure this
+		// tool must not have.
+		if err := json.Unmarshal(raw, &c); err != nil || c.Diff == "" {
 			return nil, nil, fmt.Errorf("corrupt cached diff %s: %w", p, err)
 		}
 		diffs[u] = c.Diff
@@ -207,7 +210,7 @@ func report(w io.Writer, records []record, diffs map[string]string, o options) e
 			skipped++
 			continue
 		}
-		ev := judge.GapClaimEvidence(diff, run.Finding{IssueText: r.IssueText}, 3)
+		ev := judge.GapClaimEvidence(diff, run.Finding{IssueText: r.IssueText}, judge.MaxGapEvidenceFiles)
 		found := "no-evidence"
 		if len(ev) > 0 {
 			found = "evidence"

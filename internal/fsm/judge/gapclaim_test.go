@@ -129,7 +129,7 @@ func TestChangedBlocksCarriesOnlyAddedLines(t *testing.T) {
 // GapClaimEvidence is the raw evidence search; the cal.com claim must find the spec.
 func TestGapClaimEvidenceFindsCoveringSpec(t *testing.T) {
 	f := run.Finding{IssueText: "the category argument type changed from name-string to integer id with zero tests; nothing asserts the created topic's category"}
-	ev := GapClaimEvidence(gapDiff, f, 3)
+	ev := GapClaimEvidence(gapDiff, f, MaxGapEvidenceFiles)
 	if len(ev) == 0 {
 		t.Fatal("no evidence for the cal.com claim")
 	}
