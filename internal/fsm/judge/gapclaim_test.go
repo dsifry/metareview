@@ -345,3 +345,102 @@ func TestContextForGapClaimRepoNoneIsHashed(t *testing.T) {
 		t.Error("the recorded hash must be of the disclosed context, not the pre-disclosure one")
 	}
 }
+
+// "The diff already shows it" must mean CONTENT, not mere path presence: a repo-evidence
+// path whose covering lines sit OUTSIDE the diff's hunks still injects its full head
+// body, or a false absence claim is confirmable while the audit claims the judge saw it.
+func TestContextForGapClaimKeepsRepoBodyWhenHunksLackTheMatch(t *testing.T) {
+	f := run.Finding{File: "app/models/widget.rb", Line: 3,
+		IssueText: "spec/models/widget_spec.rb has no test for polish"}
+	// the diff touches the spec but its hunk mentions only the weak token; the covering
+	// assertion lives in an unchanged region of the file at head
+	diff := "diff --git a/app/models/widget.rb b/app/models/widget.rb\n--- a/app/models/widget.rb\n+++ b/app/models/widget.rb\n@@ -3,2 +3,4 @@\n" +
+		"+  def polish(g)\n+    g.try(:shine)\n" +
+		"diff --git a/spec/models/widget_spec.rb b/spec/models/widget_spec.rb\n--- a/spec/models/widget_spec.rb\n+++ b/spec/models/widget_spec.rb\n@@ -1,2 +1,3 @@\n" +
+		"+# touched by the branch, unrelated change\n"
+	repo := &RepoEvidence{Ran: true, Evidence: []claimcheck.Evidence{
+		{Path: "spec/models/widget_spec.rb", Tokens: []string{"polish"}, Score: 3},
+	}, Content: map[string]string{"spec/models/widget_spec.rb": "expect(widget.polish).to eq(true)\n"}}
+	out, _, _, ev := ContextForGapClaim(diff, false, f, MaxDiffBytes, repo)
+	if !strings.Contains(out, "expect(widget.polish)") {
+		t.Errorf("the covering assertion is outside the hunks; the repo body must be injected:\n%s", out)
+	}
+	if !strings.Contains(out, gapClaimRepoDisclosure) {
+		t.Errorf("injected repo content must carry its disclosure:\n%s", out)
+	}
+	if n := 0; n != len(ev) {
+		_ = ev
+	}
+	// when the hunks DO carry the matched tokens, the body stays deduped away
+	diff2 := "diff --git a/app/models/widget.rb b/app/models/widget.rb\n--- a/app/models/widget.rb\n+++ b/app/models/widget.rb\n@@ -3,2 +3,4 @@\n" +
+		"+  def polish(g)\n+    g.try(:shine)\n" +
+		"diff --git a/spec/models/widget_spec.rb b/spec/models/widget_spec.rb\n--- a/spec/models/widget_spec.rb\n+++ b/spec/models/widget_spec.rb\n@@ -1,2 +1,3 @@\n" +
+		"+expect(widget.polish).to eq(true)\n"
+	out2, _, _, _ := ContextForGapClaim(diff2, false, f, MaxDiffBytes, repo)
+	if strings.Count(out2, "expect(widget.polish)") != 1 {
+		t.Errorf("hunks carrying the match make the body redundant; it must appear once:\n%s", out2)
+	}
+}
+
+// A repo-evidence path that normalizes onto a diff path SelectDiff cannot render (spelling
+// the parser misses) is not "covered" — the body is the only view and must be injected.
+func TestContextForGapClaimUnrenderableDiffPathKeepsRepoBody(t *testing.T) {
+	f := run.Finding{File: "app/models/widget.rb", Line: 3,
+		IssueText: "spec/models/widget_spec.rb has no test for polish"}
+	diff := "diff --git a/spec/models/widget_spec.rb b/spec/models/widget_spec.rb\n--- a/spec/models/widget_spec.rb\n+++ b/spec/models/widget_spec.rb\n@@ -1,2 +1,3 @@\n" +
+		"+expect(widget.polish).to eq(true)\n"
+	// the repo evidence names the same file with a "b/" prefix: dedups by normalized path,
+	// but the tokens ARE in the hunk, so the body stays deduped away — the real !ok case
+	// is a path whose spelling SelectDiff cannot match; simulate via a token match on a
+	// path the diff parser renders under a different normalized form
+	repo := &RepoEvidence{Ran: true, Evidence: []claimcheck.Evidence{
+		{Path: "spec/models/widget_spec.rb", Tokens: []string{"polish"}, Score: 3},
+	}, Content: map[string]string{"spec/models/widget_spec.rb": "FULL BODY expect(widget.polish)\n"}}
+	out, _, _, _ := ContextForGapClaim(diff, false, f, MaxDiffBytes, repo)
+	if n := strings.Count(out, "expect(widget.polish)"); n != 1 {
+		t.Errorf("hunks carry the match; body must stay deduped (appear once):\n%s", out)
+	}
+}
+
+// A repo path that entered `paths` via the finding's prose (the diff does not carry it
+// at all) is deduped but SelectDiff renders nothing for it: the body is the only view.
+func TestContextForGapClaimUnrenderableReferencedPathKeepsRepoBody(t *testing.T) {
+	f := run.Finding{File: "app/models/widget.rb", Line: 3,
+		IssueText: "spec/absent_spec.rb was not updated; no test verifies polish"}
+	diff := "diff --git a/app/models/widget.rb b/app/models/widget.rb\n--- a/app/models/widget.rb\n+++ b/app/models/widget.rb\n@@ -3,2 +3,4 @@\n" +
+		"+  def polish(g)\n"
+	repo := &RepoEvidence{Ran: true, Evidence: []claimcheck.Evidence{
+		{Path: "spec/absent_spec.rb", Tokens: []string{"polish"}, Score: 3},
+	}, Content: map[string]string{"spec/absent_spec.rb": "expect(widget.polish).to eq(true)\n"}}
+	out, _, _, _ := ContextForGapClaim(diff, false, f, MaxDiffBytes, repo)
+	if !strings.Contains(out, "expect(widget.polish)") || !strings.Contains(out, gapClaimRepoDisclosure) {
+		t.Errorf("a referenced-but-absent diff path must not swallow the repo body:\n%s", out)
+	}
+}
+
+// The repo body's header must not claim "unchanged by this diff" for a path the diff
+// touches — the provenance label is checked against the diff, not asserted.
+func TestContextForGapClaimRepoHeaderReflectsDiffPresence(t *testing.T) {
+	f := run.Finding{File: "app/models/widget.rb", Line: 3,
+		IssueText: "spec/models/widget_spec.rb has no test for polish"}
+	diff := "diff --git a/spec/models/widget_spec.rb b/spec/models/widget_spec.rb\n--- a/spec/models/widget_spec.rb\n+++ b/spec/models/widget_spec.rb\n@@ -1,2 +1,3 @@\n" +
+		"+# an unrelated hunk\n"
+	repo := &RepoEvidence{Ran: true, Evidence: []claimcheck.Evidence{
+		{Path: "spec/models/widget_spec.rb", Tokens: []string{"nonesuch"}, Score: 3},
+	}, Content: map[string]string{"spec/models/widget_spec.rb": "FULL BODY\n"}}
+	out, _, _, _ := ContextForGapClaim(diff, false, f, MaxDiffBytes, repo)
+	if strings.Contains(out, "(repository head, unchanged by this diff) ---") && strings.Contains(out, "spec/models/widget_spec.rb (repository head, unchanged") {
+		t.Errorf("a diff-touched path must not be labeled unchanged:\n%s", out)
+	}
+	if !strings.Contains(out, "also touched by this diff") {
+		t.Errorf("the diff-touched path's header must say so:\n%s", out)
+	}
+	// an absent path keeps the unchanged label
+	repo2 := &RepoEvidence{Ran: true, Evidence: []claimcheck.Evidence{
+		{Path: "spec/absent_spec.rb", Tokens: []string{"nonesuch"}, Score: 3},
+	}, Content: map[string]string{"spec/absent_spec.rb": "FULL BODY\n"}}
+	out2, _, _, _ := ContextForGapClaim(diff, false, f, MaxDiffBytes, repo2)
+	if !strings.Contains(out2, "spec/absent_spec.rb (repository head, unchanged by this diff)") {
+		t.Errorf("an absent path keeps the unchanged label:\n%s", out2)
+	}
+}

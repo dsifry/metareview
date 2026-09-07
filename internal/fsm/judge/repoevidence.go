@@ -37,10 +37,16 @@ type GrepPaths func(pattern string) ([]string, error)
 // judge never sees.
 type ShowHead func(path string) ([]byte, bool, error)
 
-// MaxRepoEvidenceLines bounds how much of one repository test file enters the search
-// (and later the judge's context). A file capped here is still a scored candidate; the
-// cap bounds prompt size, not judgment, like MaxGapEvidenceFiles.
+// MaxRepoEvidenceLines bounds how much of one repository test file is INJECTED into the
+// judge's context (the prompt-size cap). Admission matching runs over a larger bound
+// (MaxRepoMatchLines) so the injection cap never decides whether a long file's covering
+// test is admitted at all — grep recalls over the file's full content, and a 200-line
+// read window would silently re-shrink it before scoring.
 const MaxRepoEvidenceLines = 200
+
+// MaxRepoMatchLines bounds the matching window per candidate. Larger than the injection
+// cap; still bounded so a pathological giant file cannot dominate the search.
+const MaxRepoMatchLines = 2000
 
 // MaxRepoCandidates bounds how many candidate files are read after the grep. Ranking
 // needs content, so the cap sits on reads; candidates beyond it are the alphabetically
@@ -154,7 +160,7 @@ func RepoTestEvidence(grep GrepPaths, show ShowHead, f run.Finding, max int) (Re
 		if !ok {
 			continue // grep matched, the tree does not carry it: a genuine absence
 		}
-		blocks = append(blocks, claimcheck.Block{Path: p, Added: boundedLines(body, MaxRepoEvidenceLines)})
+		blocks = append(blocks, claimcheck.Block{Path: p, Added: boundedLines(body, MaxRepoMatchLines)})
 		content[i] = boundedContent(body, MaxRepoEvidenceLines)
 	}
 	ev := claimcheck.EvidenceFor(blocks, claimcheck.Finding{File: f.File, Line: f.Line, Text: f.IssueText}, max)

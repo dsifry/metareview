@@ -115,13 +115,14 @@ func TestGrepHeadSeparatesNoMatchesFromFailure(t *testing.T) {
 	if paths, err := grep("topic"); err != nil || len(paths) != 1 || paths[0] != "spec/models/topic_embed_spec.rb" {
 		t.Errorf("matches = %v, %v; want the spec path", paths, err)
 	}
-	// blank lines in the output are skipped, not returned as paths
+	// NUL-separated output: empty entries are skipped and the rev: prefix stripped per
+	// entry — the path itself must survive intact
 	realExec := c.deps.Exec
 	c.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
-		return []byte("\n" + snap.Head + ":spec/models/topic_embed_spec.rb\n\n"), nil, 0, nil
+		return []byte("\x00" + snap.Head + ":spec/models/topic_embed_spec.rb\x00"), nil, 0, nil
 	}
-	if paths, err := grep("topic"); err != nil || len(paths) != 1 {
-		t.Errorf("blank-line handling = %v, %v; want one path", paths, err)
+	if paths, err := grep("topic"); err != nil || len(paths) != 1 || paths[0] != "spec/models/topic_embed_spec.rb" {
+		t.Errorf("NUL-separated handling = %v, %v; want the exact path", paths, err)
 	}
 	// any other nonzero exit is a failure the caller must fail open on
 	c.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {

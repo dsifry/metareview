@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -481,7 +482,7 @@ func TestVerboseLimitCountsPrintedDetailsOnly(t *testing.T) {
 func gitFixture(t *testing.T, reposDir string, files map[string]string) (cloneDir, rev string) {
 	t.Helper()
 	origin := t.TempDir()
-	run := func(dir string, args ...string) string {
+	gitRun := func(dir string, args ...string) string {
 		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -497,15 +498,15 @@ func gitFixture(t *testing.T, reposDir string, files map[string]string) (cloneDi
 			t.Fatal(err)
 		}
 	}
-	run(origin, "init", "-q")
+	gitRun(origin, "init", "-q")
 	// hermetic identity: the repo's test helpers never depend on the operator's global
 	// git config, and neither does this fixture
-	run(origin, "config", "user.email", "fixture@example.invalid")
-	run(origin, "config", "user.name", "fixture")
-	run(origin, "add", "-A")
-	run(origin, "commit", "-q", "-m", "spec")
-	run(origin, "update-ref", "refs/pull/7/head", "HEAD")
-	rev = run(origin, "rev-parse", "refs/pull/7/head")
+	gitRun(origin, "config", "user.email", "fixture@example.invalid")
+	gitRun(origin, "config", "user.name", "fixture")
+	gitRun(origin, "add", "-A")
+	gitRun(origin, "commit", "-q", "-m", "spec")
+	gitRun(origin, "update-ref", "refs/pull/7/head", "HEAD")
+	rev = gitRun(origin, "rev-parse", "refs/pull/7/head")
 	cloneDir = filepath.Join(reposDir, "org", "repo")
 	if out, err := exec.Command("git", "clone", "-q", origin, cloneDir).CombinedOutput(); err != nil {
 		t.Fatalf("clone: %v\n%s", err, out)
@@ -545,45 +546,64 @@ func TestRepoPassResolvesAndSearchesThePinnedHead(t *testing.T) {
 	}
 }
 
-// With -repos the matrix gains the combined rows: a hallucinated claim the repo-side
-// search catches is "both", one only the repo catches is "repo-only".
+// With -repos the matrix gains the combined rows. The fixture must truly produce each
+// classification (the row labels are printed unconditionally, so asserting the label
+// alone is vacuous) — this parses the matrix cells and asserts the hallucination column.
 func TestReportReposPassRows(t *testing.T) {
 	reposDir := t.TempDir()
 	gitFixture(t, reposDir, map[string]string{
-		// the hallucinated claim's covering spec is in the diff AND at head — but its
-		// head body says nothing about polish/shine, so the third claim stays diff-only
-		"spec/models/widget_spec.rb": "let!(:widget) { Fabricate(:widget) }\nexpect(widget).to be_valid\n",
-		// the helper claim's covering spec exists ONLY at head (never in the diff)
+		// claim 1's covering spec is in the diff AND at head → "both"
+		"spec/models/widget_spec.rb": "let!(:widget) { Fabricate(:widget) }\nexpect(widget.shine).to be_present\n",
+		// claim 2's covering spec exists ONLY at head → "repo-only"
 		"spec/models/helper_spec.rb": "describe 'the helper module' do\n  it 'asserts something' do\n  end\nend\n",
 	})
 	records := []record{
 		{URL: "https://github.com/org/repo/pull/7", IssueText: "the widget polish path has no test asserting the shine", NewVerdict: "hallucination", SourceLens: "lens-a"},
 		{URL: "https://github.com/org/repo/pull/7", IssueText: "zero tests exist for the helper module", NewVerdict: "hallucination", SourceLens: "lens-a"},
-		// subject only in the DIFF's spec hunks, absent from the head tree: diff-only
-		{URL: "https://github.com/org/repo/pull/7", IssueText: "the polish and shine behavior is untested", NewVerdict: "hallucination", SourceLens: "lens-b"},
+		// subject only in the DIFF's spec hunks, absent from the head tree → "diff-only"
+		{URL: "https://github.com/org/repo/pull/7", IssueText: "the polish and shimmer behavior is untested", NewVerdict: "hallucination", SourceLens: "lens-b"},
+		// subject no source carries → "no-evidence"
+		{URL: "https://github.com/org/repo/pull/7", IssueText: "the frobnicate quux behavior is untested", NewVerdict: "hallucination", SourceLens: "lens-b"},
 	}
-	// the diff carries the widget spec but never a helper spec
+	// the diff carries the widget spec hunks (widget+shine) and a polish spec the head
+	// tree does not have; the head tree carries no polish/shimmer content
 	diff := "diff --git a/app/models/widget.rb b/app/models/widget.rb\n--- a/app/models/widget.rb\n+++ b/app/models/widget.rb\n@@ -3,2 +3,4 @@\n" +
-		"+  def polish(g)\n+    g.try(:shine)\n" +
+		"+  def polish(g)\n+    g.try(:shimmer)\n" +
 		"diff --git a/spec/models/widget_spec.rb b/spec/models/widget_spec.rb\n--- a/spec/models/widget_spec.rb\n+++ b/spec/models/widget_spec.rb\n@@ -5,2 +5,4 @@\n" +
-		"+  it 'polishes the widget' do\n+    expect(widget.shine).to eq(true)\n"
+		"+    let!(:widget) { Fabricate(:widget) }\n+    expect(widget.shine).to be_present\n" +
+		"diff --git a/spec/models/polish_spec.rb b/spec/models/polish_spec.rb\n--- /dev/null\n+++ b/spec/models/polish_spec.rb\n@@ -0,0 +1,2 @@\n" +
+		"+  it 'has shimmer' do\n+    expect(widget.polish).to be_present\n"
 	var buf bytes.Buffer
 	if err := report(&buf, records, map[string]string{"https://github.com/org/repo/pull/7": diff},
 		options{repos: reposDir, dir: "testdata/mini", framework: "test-fw"}); err != nil {
 		t.Fatal(err)
 	}
-	out := buf.String()
-	for _, want := range []string{
-		"both",      // diff + repo caught the hallucinated claim's spec
-		"repo-only", // the helper spec exists only at head
-		"diff-only", // the third claim's diff evidence stands alone
-		"no-evidence",
-		"repo search errors: 0",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("repos-pass report missing %q:\n%s", want, out)
+	got := matrixCells(buf.String(), []string{"both", "diff-only", "repo-only", "no-evidence"})
+	want := map[string]int{"both": 1, "diff-only": 1, "repo-only": 1, "no-evidence": 1}
+	for _, row := range []string{"both", "diff-only", "repo-only", "no-evidence"} {
+		if got[row] != want[row] {
+			t.Errorf("matrix row %q hallucination cell = %d, want %d\n%s", row, got[row], want[row], buf.String())
 		}
 	}
+}
+
+// matrixCells parses the report's matrix rows into the hallucination column's count.
+func matrixCells(out string, rows []string) map[string]int {
+	cells := map[string]int{}
+	for _, line := range strings.Split(out, "\n") {
+		for _, row := range rows {
+			if !strings.HasPrefix(line, row) || strings.Contains(line, "evidence\\v2") {
+				continue
+			}
+			fields := strings.Fields(strings.TrimPrefix(line, row))
+			if len(fields) >= 3 { // bug, important_non_bug, hallucination, unresolved
+				if n, err := strconv.Atoi(fields[2]); err == nil {
+					cells[row] = n
+				}
+			}
+		}
+	}
+	return cells
 }
 
 // A claim whose PR has no clone is disclosed and measured on the diff dimension alone;
@@ -923,5 +943,47 @@ func TestReportReposPassRollupExcludesInfraRows(t *testing.T) {
 	// one hallucinated claim with evidence (both), one unmeasured on the repo dimension
 	if !strings.Contains(out, "hallucinated gap-claims with covering evidence in the diff: 1/1") {
 		t.Errorf("the rollup must exclude no-clone and repo-error rows:\n%s", out)
+	}
+}
+
+// The operator-facing flat clone layout (<repos>/org-repo) resolves when the nested form
+// is absent — a documented contract, so a regression to it must fail a test.
+func TestRepoPassResolvesFlatLayout(t *testing.T) {
+	reposDir := t.TempDir()
+	origin := t.TempDir()
+	gitRun := func(dir string, args ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	spec := "spec/models/widget_spec.rb"
+	if err := os.MkdirAll(filepath.Join(origin, "spec/models"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(origin, spec), []byte("let!(:widget) { Fabricate(:widget) }\nexpect(widget.shine).to eq(true)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(origin, "init", "-q")
+	gitRun(origin, "config", "user.email", "fixture@example.invalid")
+	gitRun(origin, "config", "user.name", "fixture")
+	gitRun(origin, "add", "-A")
+	gitRun(origin, "commit", "-q", "-m", "spec")
+	gitRun(origin, "update-ref", "refs/pull/7/head", "HEAD")
+	cloneDir := filepath.Join(reposDir, "org-repo") // FLAT: no org/ directory level
+	if out, err := exec.Command("git", "clone", "-q", origin, cloneDir).CombinedOutput(); err != nil {
+		t.Fatalf("clone: %v\n%s", err, out)
+	}
+	pass, missing := resolveRepos(options{repos: reposDir}, []record{
+		{URL: "https://github.com/org/repo/pull/7"},
+	}, realGit, realGitRaw)
+	if missing != nil {
+		t.Fatalf("missing = %v; want the flat layout resolved", missing)
+	}
+	ev, err := pass.search("https://github.com/org/repo/pull/7", run.Finding{
+		File: "app/models/widget.rb", IssueText: "the widget polish path has no test asserting the shine"})
+	if err != nil || len(ev.Evidence) != 1 {
+		t.Errorf("evidence = %+v, %v; want the flat-layout clone searched", ev.Evidence, err)
 	}
 }

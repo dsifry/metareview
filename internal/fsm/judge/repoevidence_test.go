@@ -335,3 +335,26 @@ func TestRepoTestEvidenceCapRanksWeakPathMatches(t *testing.T) {
 		t.Errorf("evidence = %+v; want the weak-path-named candidate", ev.Evidence)
 	}
 }
+
+// The admission match must run over the file's real content, not a 200-line prefix: a
+// covering assertion at line 250 of a long spec is recalled by grep in full, and the
+// 200-line injection cap must not decide whether the file is admitted at all.
+func TestRepoTestEvidenceMatchesBeyondTheInjectionCap(t *testing.T) {
+	long := ""
+	for i := 0; i < MaxRepoEvidenceLines+50; i++ {
+		long += "filler line that mentions nothing\n"
+	}
+	long += "expect(widget.polish).to eq(true)\n" // the covering line, past the cap
+	repo := &fakeRepo{grepPaths: []string{"spec/long_spec.rb"}, files: map[string]string{"spec/long_spec.rb": long}}
+	ev, err := RepoTestEvidence(repo.grep, repo.show, run.Finding{File: "app/models/widget.rb", IssueText: "the widget polish path is untested"}, 3)
+	if err != nil {
+		t.Fatalf("RepoTestEvidence: %v", err)
+	}
+	if len(ev.Evidence) != 1 {
+		t.Fatalf("evidence = %+v; want the long spec admitted on its full content", ev.Evidence)
+	}
+	// the injected content stays line-capped
+	if lines := strings.Count(ev.Content["spec/long_spec.rb"], "\n"); lines > MaxRepoEvidenceLines {
+		t.Errorf("injected content = %d lines; want <= %d", lines, MaxRepoEvidenceLines)
+	}
+}

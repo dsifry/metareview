@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/dsifry/metareview/internal/fsm/judge"
@@ -121,6 +122,9 @@ func resolveRepos(o options, records []record, runGit gitRunner, runRaw gitRawRu
 		p.revs[u], p.dirs[u] = rev, dir
 	}
 	if len(missing) > 0 {
+		// sorted: a map-iteration-random disclosure order differs between runs of the
+		// same corpus, which reads as churn rather than fact
+		sort.Strings(missing)
 		return p, fmt.Errorf("no corpus clone for %d PR(s): %s", len(missing), strings.Join(missing, ", "))
 	}
 	return p, nil

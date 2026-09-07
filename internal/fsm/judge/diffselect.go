@@ -588,14 +588,38 @@ func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budge
 		addPath(e.Path)
 	}
 	// Repository candidates join the same normalized dedup: a path the diff's hunks
-	// already carry is NOT appended again from its full head content - the hunks win,
-	// the full body behind them is redundant context spend. A path only the repo search
-	// found carries its bounded content below.
+	// already carry is NOT appended again from its full head content — the hunks win,
+	// the full body behind them is redundant context spend. "Already carries" means
+	// CONTENT: the evidence's tokens must be visible in the path's rendered hunks. A
+	// repo match on unchanged lines of a touched file renders no hunk line, and dropping
+	// its body would leave the judge with neither the covering assertion nor a search
+	// record while the audit claims the evidence was offered.
 	var repoFiles []repoFile
+	coveredByHunks := func(p string, tokens []string) bool {
+		// SelectDiff cannot render only when the path is not in the diff at all — both dedup
+		// sources guarantee it is (ReferencedPaths filters on DiffHasFile; diff evidence is
+		// built from the diff's own blocks). An empty sel then matches no token, which is
+		// the desired "not covered" answer, so no separate !ok branch exists to dead-spot.
+		sel, _, _ := SelectDiff(diff, p, 0, budget)
+		low := strings.ToLower(sel)
+		concat := strings.ReplaceAll(low, "_", "")
+		for _, t := range tokens {
+			if strings.Contains(low, t) || strings.Contains(concat, strings.ReplaceAll(t, "_", "")) {
+				return true
+			}
+		}
+		return false
+	}
 	if repo != nil {
 		for _, e := range repo.Evidence {
-			if body, ok := repo.Content[e.Path]; ok && addPath(e.Path) {
-				repoFiles = append(repoFiles, repoFile{path: e.Path, body: body})
+			if body, ok := repo.Content[e.Path]; ok {
+				if addPath(e.Path) {
+					repoFiles = append(repoFiles, repoFile{path: e.Path, body: body, inDiff: DiffHasFile(diff, e.Path)})
+				} else if !coveredByHunks(e.Path, e.Tokens) {
+					// the diff touches the path but its hunks do not render the matched
+					// content: the body carries the only view of the covering lines
+					repoFiles = append(repoFiles, repoFile{path: e.Path, body: body, inDiff: DiffHasFile(diff, e.Path)})
+				}
 			}
 		}
 		// every repo path is evidence for the audit trail, even one whose full content
@@ -673,14 +697,20 @@ func clipBody(body string, n int) string {
 	return cut + "[metareview: repository file truncated at the context budget]\n"
 }
 
-// repoFile is one repository-head candidate the diff does not already cover: its bounded
-// full content, under a header naming where it came from.
+// repoFile is one repository-head candidate the judge needs beyond the diff hunks: its
+// bounded full content, under a header whose provenance is CHECKED against the diff, not
+// asserted — a diff-touched file's hunks show only the changed lines, and the label must
+// say the full head content is what carries the rest.
 type repoFile struct {
-	path string
-	body string
+	path   string
+	body   string
+	inDiff bool
 }
 
 func (rf repoFile) header() string {
+	if rf.inDiff {
+		return "--- " + rf.path + " (repository head; also touched by this diff — the hunks above show only the changed lines, this body is the full head content) ---\n"
+	}
 	return "--- " + rf.path + " (repository head, unchanged by this diff) ---\n"
 }
 
