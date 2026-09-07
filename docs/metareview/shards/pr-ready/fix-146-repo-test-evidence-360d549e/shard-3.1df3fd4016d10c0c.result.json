@@ -1,0 +1,58 @@
+{
+ "verdict": "PASS",
+ "findings": [],
+ "evidence": [
+  {
+   "path": "internal/fsm/cli/repoevidence.go",
+   "line": 22
+  },
+  {
+   "path": "internal/fsm/cli/repoevidence.go",
+   "line": 62
+  },
+  {
+   "path": "internal/fsm/cli/escalation.go",
+   "line": 44
+  },
+  {
+   "path": "internal/fsm/cli/escalation.go",
+   "line": 156
+  },
+  {
+   "path": "internal/fsm/cli/wiring.go",
+   "line": 270
+  },
+  {
+   "path": "internal/claimcheck/claimcheck.go",
+   "line": 264
+  },
+  {
+   "path": "internal/fsm/judge/gitseam.go",
+   "line": 53
+  },
+  {
+   "path": "internal/fsm/judge/repoevidence.go",
+   "line": 102
+  },
+  {
+   "path": "internal/fsm/cli/repoevidence_test.go",
+   "line": 52
+  },
+  {
+   "path": "internal/fsm/judge/rubric_test.go",
+   "line": 76
+  },
+  {
+   "note": "kind/kind.go:148 and :600 consume kind.Deps.RepoSearch; wiring confirmed live in cli/wiring.go:270, not dead code"
+  }
+ ],
+ "schemaVersion": 1,
+ "id": "shard-3",
+ "kind": "shard",
+ "shardId": "shard-3",
+ "shardHash": "1df3fd4016d10c0c",
+ "planHash": "f7c3d5c224c4bbbc",
+ "reviewer": "shard reviewer (reviewer subagent)",
+ "reviewedAt": "2026-09-07T23:00:00Z",
+ "blockingCount": 0
+}

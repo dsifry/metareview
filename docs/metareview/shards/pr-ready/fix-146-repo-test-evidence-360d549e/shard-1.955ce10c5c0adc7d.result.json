@@ -1,0 +1,42 @@
+{
+ "verdict": "PASS",
+ "findings": [],
+ "evidence": [
+  {
+   "path": "cmd/claimcheck-eval/repos.go",
+   "line": 96
+  },
+  {
+   "path": "cmd/claimcheck-eval/main.go",
+   "line": 313
+  },
+  {
+   "path": "internal/fsm/judge/gitseam.go",
+   "line": 28
+  },
+  {
+   "path": "internal/fsm/judge/repoevidence.go",
+   "line": 102
+  },
+  {
+   "path": "internal/claimcheck/claimcheck.go",
+   "line": 265
+  },
+  {
+   "path": "cmd/claimcheck-eval/main_test.go",
+   "line": 553
+  },
+  {
+   "note": "Traced all six matrix/rollup tests claim-by-claim through SubjectTokens, GrepSeam exit-1-vs-failure semantics, and EvidenceFor admission bars; each asserted classification and count is reproducible from the fixtures."
+  }
+ ],
+ "schemaVersion": 1,
+ "id": "shard-1",
+ "kind": "shard",
+ "shardId": "shard-1",
+ "shardHash": "955ce10c5c0adc7d",
+ "planHash": "f7c3d5c224c4bbbc",
+ "reviewer": "shard reviewer (reviewer subagent)",
+ "reviewedAt": "2026-09-07T23:00:00Z",
+ "blockingCount": 0
+}

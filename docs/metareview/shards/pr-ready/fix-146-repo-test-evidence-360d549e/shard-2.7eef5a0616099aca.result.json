@@ -1,0 +1,73 @@
+{
+ "verdict": "PASS_ADVISORY",
+ "findings": [
+  {
+   "file": "internal/fsm/kind/kind.go",
+   "line": 593,
+   "issue_text": "The repo-search memo key flattens strong and weak subject tokens into one space-joined string, so two findings with the same normalized own file and the same token union but different strong/weak partitions collide on one memo entry; the shared entry applies EvidenceFor's admission bar (1 strong or 2 weak hits) from whichever finding searched first. Constructing such a collision requires two texts whose sorted token sequence is identical while camel/underscore placement differs per token under the same own file \u2014 not reachable by any realistic finding pair \u2014 and even then the mis-shared evidence is only offered to the judge for weighing, never deciding. Non-blocking; noted for a future key that joins strong and weak lists separately.",
+   "severity": "low",
+   "disposition": "accepted-risk"
+  }
+ ],
+ "evidence": [
+  {
+   "path": "internal/fsm/kind/kind.go",
+   "line": 593
+  },
+  {
+   "path": "internal/fsm/kind/kind.go",
+   "line": 688
+  },
+  {
+   "path": "internal/fsm/judge/diffselect.go",
+   "line": 569
+  },
+  {
+   "path": "internal/fsm/judge/repoevidence.go",
+   "line": 110
+  },
+  {
+   "path": "internal/fsm/judge/gitseam.go",
+   "line": 28
+  },
+  {
+   "path": "cmd/claimcheck-eval/repos.go",
+   "line": 86
+  },
+  {
+   "path": "internal/claimcheck/claimcheck.go",
+   "line": 116
+  },
+  {
+   "path": "internal/fsm/kind/repoevidence_test.go",
+   "line": 1
+  },
+  {
+   "note": "All callers of the changed ContextForGapClaim signature (kind.go:688, kind.go:819, gapclaim_test.go) pass the new repo parameter; no stale call sites remain."
+  },
+  {
+   "note": "Grep pattern tokens derive from ident/bareFile regexes (word chars, dot, dash only) - no ERE metacharacters can corrupt the git grep -E alternation."
+  },
+  {
+   "note": "Budget arithmetic: primary share + path shares + body shares sum exactly to the caller budget; reserved-but-unused shares only under-spend, never overflow."
+  },
+  {
+   "note": "Failure semantics verified end to end: seam errors are memoized, counted (repo_search_errors rollup, repo-error matrix row), and never rendered as evidence of absence; gapClaimRepoNone is emitted only for a completed empty search."
+  },
+  {
+   "note": "ShowSeam distinguishes ls-tree absence from command failure, preserving the bias-toward-confirmation guard the new ShowHead contract documents."
+  },
+  {
+   "note": "No .beads or metaswarm directory in the repository root; rubric advisory-mode condition for PASS_ADVISORY is met with in-diff test evidence present."
+  }
+ ],
+ "schemaVersion": 1,
+ "id": "shard-2",
+ "kind": "shard",
+ "shardId": "shard-2",
+ "shardHash": "7eef5a0616099aca",
+ "planHash": "f7c3d5c224c4bbbc",
+ "reviewer": "shard reviewer (reviewer subagent)",
+ "reviewedAt": "2026-09-07T23:00:00Z",
+ "blockingCount": 0
+}

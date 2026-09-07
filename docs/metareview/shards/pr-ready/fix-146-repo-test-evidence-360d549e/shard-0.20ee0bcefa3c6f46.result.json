@@ -1,0 +1,42 @@
+{
+ "verdict": "PASS",
+ "findings": [],
+ "evidence": [
+  {
+   "path": "internal/fsm/judge/gitseam.go",
+   "line": 28
+  },
+  {
+   "path": "internal/fsm/cli/repoevidence.go",
+   "line": 39
+  },
+  {
+   "path": "internal/fsm/cli/escalation.go",
+   "line": 161
+  },
+  {
+   "path": "cmd/claimcheck-eval/repos.go",
+   "line": 147
+  },
+  {
+   "path": "internal/fsm/cli/wiring.go",
+   "line": 270
+  },
+  {
+   "path": "internal/fsm/judge/prompts.go",
+   "line": 61
+  },
+  {
+   "note": "grep across repo confirms removed ctxDeps.gitCtx has no remaining live callers; only stale mentions in historical docs/metareview/context logs"
+  }
+ ],
+ "schemaVersion": 1,
+ "id": "shard-0",
+ "kind": "shard",
+ "shardId": "shard-0",
+ "shardHash": "20ee0bcefa3c6f46",
+ "planHash": "f7c3d5c224c4bbbc",
+ "reviewer": "shard reviewer (reviewer subagent)",
+ "reviewedAt": "2026-09-07T23:00:00Z",
+ "blockingCount": 0
+}

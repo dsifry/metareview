@@ -1,0 +1,54 @@
+{
+ "verdict": "PASS",
+ "findings": [],
+ "evidence": [
+  {
+   "path": "internal/fsm/judge/gapclaim_test.go",
+   "line": 344
+  },
+  {
+   "path": "internal/fsm/judge/gapclaim_test.go",
+   "line": 331
+  },
+  {
+   "path": "internal/fsm/judge/repoevidence_test.go",
+   "line": 264
+  },
+  {
+   "path": "internal/fsm/judge/diffselect.go",
+   "line": 569
+  },
+  {
+   "path": "internal/fsm/judge/diffselect.go",
+   "line": 637
+  },
+  {
+   "path": "internal/fsm/judge/repoevidence.go",
+   "line": 133
+  },
+  {
+   "path": "internal/fsm/judge/repoevidence.go",
+   "line": 45
+  },
+  {
+   "path": "internal/fsm/kind/kind.go",
+   "line": 688
+  },
+  {
+   "path": "internal/fsm/prompts.go",
+   "line": 167
+  },
+  {
+   "note": "All ContextForGapClaim call sites updated to the 5-arg signature; production callers in kind.go pass the wired repo seam; no stale 4-arg calls in source."
+  }
+ ],
+ "schemaVersion": 1,
+ "id": "shard-1-2",
+ "kind": "shard",
+ "shardId": "shard-1-2",
+ "shardHash": "c4c17c2a879b7de7",
+ "planHash": "f7c3d5c224c4bbbc",
+ "reviewer": "shard reviewer (reviewer subagent)",
+ "reviewedAt": "2026-09-07T23:00:00Z",
+ "blockingCount": 0
+}
