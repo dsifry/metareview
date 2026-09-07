@@ -2,12 +2,12 @@ package judge
 
 import (
 	"crypto/sha1"
-	"unicode/utf8"
 	"encoding/hex"
 	"path"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/dsifry/metareview/internal/claimcheck"
 	"github.com/dsifry/metareview/internal/fsm/run"
@@ -588,20 +588,25 @@ func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budge
 	for _, e := range evidence {
 		addPath(e.Path)
 	}
-	// Repository candidates join the same normalized dedup: a path the diff's hunks
-	// already carry is NOT appended again from its full head content — the hunks win,
-	// the full body behind them is redundant context spend. "Already carries" means
-	// CONTENT: the evidence's tokens must be visible in the path's rendered hunks. A
-	// repo match on unchanged lines of a touched file renders no hunk line, and dropping
+	// Repository candidates join the same normalized dedup. "The diff already carries this
+	// path" means CONTENT: the evidence's tokens must be visible in the hunks AS SHIPPED —
+	// a repo match on unchanged lines of a touched file renders no hunk line, and dropping
 	// its body would leave the judge with neither the covering assertion nor a search
-	// record while the audit claims the evidence was offered.
-	var repoFiles []repoFile
-	coveredByHunks := func(p string, tokens []string) bool {
+	// record while the audit claims the evidence was offered. The decision needs the share
+	// (the shipped render is share-sized), so it is deferred until the share is computed:
+	// candidates are collected first, decided after.
+	type repoCandidate struct {
+		path, body string
+		tokens     []string
+		addedNew   bool
+		inDiff     bool
+	}
+	coveredByHunks := func(p string, tokens []string, render int) bool {
 		// SelectDiff cannot render only when the path is not in the diff at all — both dedup
 		// sources guarantee it is (ReferencedPaths filters on DiffHasFile; diff evidence is
 		// built from the diff's own blocks). An empty sel then matches no token, which is
 		// the desired "not covered" answer, so no separate !ok branch exists to dead-spot.
-		sel, _, _ := SelectDiff(diff, p, 0, budget)
+		sel, _, _ := SelectDiff(diff, p, 0, render)
 		low := strings.ToLower(sel)
 		concat := strings.ReplaceAll(low, "_", "")
 		for _, t := range tokens {
@@ -611,16 +616,12 @@ func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budge
 		}
 		return false
 	}
+	var candidates []repoCandidate
 	if repo != nil {
 		for _, e := range repo.Evidence {
 			if body, ok := repo.Content[e.Path]; ok {
-				if addPath(e.Path) {
-					repoFiles = append(repoFiles, repoFile{path: e.Path, body: body, inDiff: DiffHasFile(diff, e.Path)})
-				} else if !coveredByHunks(e.Path, e.Tokens) {
-					// the diff touches the path but its hunks do not render the matched
-					// content: the body carries the only view of the covering lines
-					repoFiles = append(repoFiles, repoFile{path: e.Path, body: body, inDiff: DiffHasFile(diff, e.Path)})
-				}
+				c := repoCandidate{path: e.Path, body: body, tokens: e.Tokens, addedNew: addPath(e.Path), inDiff: DiffHasFile(diff, e.Path)}
+				candidates = append(candidates, c)
 			}
 		}
 		// every repo path is evidence for the audit trail, even one whose full content
@@ -640,17 +641,27 @@ func ContextForGapClaim(diff string, alreadyTruncated bool, f run.Finding, budge
 		_, _, hash := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget)
 		return out, truncated, hash, evidence
 	}
-	// Same split as ContextForClaim: the declared file keeps two shares of the budget,
-	// every corroborating path one. Repository candidates' paths are already IN paths
-	// (they joined the normalized dedup above), so they are not counted again here —
-	// and each repo body is CLIPPED to its share: a full head file is not bounded by the
-	// diff the way SelectDiff hunks are, and an unclipped body could push the context
-	// far past the caller's budget while the truncated flag said complete.
-	share := budget / (len(paths) + 2)
+	// Same split as ContextForClaim, tightened for repo bodies: the declared file keeps
+	// two shares of the budget; every corroborating path one share of hunks; and EVERY
+	// repository candidate reserves one further share for a potential body — including
+	// deduped ones, because an in-diff path whose hunks do not render the match spends
+	// its hunk share AND a body share. With that reservation the aggregate can never
+	// exceed the caller's budget, and each body is CLIPPED to its share: a full head file
+	// is not bounded by the diff the way SelectDiff hunks are, and an unclipped body
+	// could push the context far past the budget while the truncated flag said complete.
+	share := budget / (len(paths) + len(candidates) + 2)
+	var repoFiles []repoFile
+	for _, c := range candidates {
+		if c.addedNew || !coveredByHunks(c.path, c.tokens, share) {
+			// newly added (the diff renders nothing for it) or the hunks do not render the
+			// matched content: the body carries the only view of the covering lines
+			repoFiles = append(repoFiles, repoFile{path: c.path, body: c.body, inDiff: c.inDiff})
+		}
+	}
 	// The primary's truncation flag is preserved, not inferred from byte length: a small
 	// elided block is easily outweighed by the disclosure and repeated file headers, which
 	// would send partial context to the adjudicator marked complete (CodeRabbit #145).
-	primary, primaryTruncated, _ := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget-share*len(paths))
+	primary, primaryTruncated, _ := ContextFor(diff, alreadyTruncated, f.File, f.Line, budget-share*(len(paths)+len(repoFiles)))
 	bodyClipped := false
 	for i := range repoFiles {
 		clipped := clipBody(repoFiles[i].body, share)

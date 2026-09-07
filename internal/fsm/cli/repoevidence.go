@@ -8,8 +8,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/dsifry/metareview/internal/claimcheck"
 	"github.com/dsifry/metareview/internal/fsm/judge"
@@ -30,38 +28,26 @@ func (c *ctxDeps) repoSearch(root string, scenario *mockai.Scenario, mode judgeM
 	}
 }
 
-// grepHead returns the paths at rev whose content matches the RE2 pattern. Output is
-// read raw and NUL-separated (-z) — a filename with spaces or a trailing newline must
-// survive — with the "rev:" prefix stripped per entry; git's exit 1 is "no matches",
-// not a failure, while any other nonzero exit is.
+// grepHead returns the paths at rev whose content matches the RE2 pattern. It delegates
+// to the shared judge.GrepSeam — the one implementation of the git-grep contract
+// (exit 1 is no-matches, -z NUL parsing, rev: prefix strip); this wrapper only binds the
+// invocation's git runner and directory.
 func (c *ctxDeps) grepHead(ctx context.Context, root, rev string) judge.GrepPaths {
-	return func(pattern string) ([]string, error) {
-		out, code, err := c.gitRawCtx(ctx, root, "grep", "-l", "-i", "-E", "-z", pattern, rev)
-		if err != nil {
-			return nil, err
-		}
-		if code != 0 && code != 1 {
-			return nil, fmt.Errorf("git grep -l -i -E at %s failed with exit code %d", rev, code)
-		}
-		prefix := rev + ":"
-		var paths []string
-		for _, entry := range strings.Split(string(out), "\x00") {
-			if entry == "" {
-				continue
-			}
-			paths = append(paths, strings.TrimPrefix(entry, prefix))
-		}
-		return paths, nil
+	raw := func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+		return c.gitRawCtx(ctx, dir, args...)
 	}
+	return judge.GrepSeam(ctx, raw, root, rev)
 }
 
-// showHead returns one path's content at rev, with absence (not in the tree) distinct
-// from failure — the same separation showFile makes for the escalation tree.
+// showHead returns one path's content at rev through the shared judge.ShowSeam, with
+// absence (not in the tree) distinct from failure — the same separation showFile makes
+// for the escalation tree.
 func (c *ctxDeps) showHead(ctx context.Context, root, rev string) judge.ShowHead {
-	show := c.showFile(ctx, root)
-	return func(path string) ([]byte, bool, error) {
-		return show(rev, path)
+	raw := func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+		out, code, err := c.gitRawCtx(ctx, dir, args...)
+		return out, code, err
 	}
+	return judge.ShowSeam(ctx, raw, root, rev)
 }
 
 // repoEvidencePaths runs the repository search for every gap-claim finding and returns

@@ -49,9 +49,10 @@ const MaxRepoEvidenceLines = 200
 const MaxRepoMatchLines = 2000
 
 // MaxRepoCandidates bounds how many candidate files are read after the grep. Ranking
-// needs content, so the cap sits on reads; candidates beyond it are the alphabetically
-// last ones (grep output is sorted, and the search re-sorts to be order-independent).
-// The diff-side search needs no such cap because a diff is already bounded.
+// needs content, so the cap sits on reads; the survivors are ranked by subject tokens in
+// the PATH (strong tokens weigh triple, ties by path — see the truncation site below),
+// NOT alphabetically. The diff-side search needs no such cap because a diff is already
+// bounded.
 const MaxRepoCandidates = 64
 
 // RepoEvidence is one finding's repository-side search result: the admitted covering-test

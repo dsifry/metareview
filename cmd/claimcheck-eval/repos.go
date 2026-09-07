@@ -27,7 +27,8 @@ import (
 type gitRunner func(ctx context.Context, dir string, args ...string) (string, int, error)
 
 // gitRawRunner returns stdout byte for byte (file content, NUL-separated listings).
-type gitRawRunner func(ctx context.Context, dir string, args ...string) ([]byte, int, error)
+// gitRawRunner aliases the shared judge seam type so fakes stay drop-in.
+type gitRawRunner = judge.RawGitRunner
 
 func realGit(ctx context.Context, dir string, args ...string) (string, int, error) {
 	out, code, err := realGitRaw(ctx, dir, args...)
@@ -143,53 +144,15 @@ func (p *repoPass) search(url string, f run.Finding) (judge.RepoEvidence, error)
 	return judge.RepoTestEvidence(p.grepHead(ctx, dir, rev), p.showHead(ctx, dir, rev), f, judge.MaxGapEvidenceFiles)
 }
 
-// grepHead mirrors the adjudicator's seam: git grep at the pinned rev, NUL-separated (-z)
-// and read raw — a filename with spaces or a trailing newline must survive — and exit 1
-// stays distinct from failure.
+// grepHead and showHead delegate to the shared judge seams — the ONE implementation of
+// the git-grep and blob-read contracts this tool shares with the production adjudicator
+// (issue #146 review: the contract lived in three copies and drifted once already).
 func (p *repoPass) grepHead(ctx context.Context, dir, rev string) judge.GrepPaths {
-	return func(pattern string) ([]string, error) {
-		out, code, err := p.runRaw(ctx, dir, "grep", "-l", "-i", "-E", "-z", pattern, rev)
-		if err != nil {
-			return nil, err
-		}
-		if code != 0 && code != 1 {
-			return nil, fmt.Errorf("git grep -l -i -E at %s failed with exit code %d", rev, code)
-		}
-		prefix := rev + ":"
-		var paths []string
-		for _, entry := range strings.Split(string(out), "\x00") {
-			if entry == "" {
-				continue
-			}
-			paths = append(paths, strings.TrimPrefix(entry, prefix))
-		}
-		return paths, nil
-	}
+	return judge.GrepSeam(ctx, p.runRaw, dir, rev)
 }
 
-// showHead mirrors showFile: absence (not in the tree) stays distinct from failure, so a
-// missing blob never reads as a read blob.
 func (p *repoPass) showHead(ctx context.Context, dir, rev string) judge.ShowHead {
-	return func(path string) ([]byte, bool, error) {
-		listed, code, err := p.runGit(ctx, dir, "ls-tree", "--name-only", "-z", rev, "--", path)
-		if err != nil {
-			return nil, false, err
-		}
-		if code != 0 {
-			return nil, false, fmt.Errorf("git ls-tree %s -- %s failed with exit code %d", rev, path, code)
-		}
-		if strings.Trim(listed, "\x00") == "" {
-			return nil, false, nil
-		}
-		body, code, err := p.runRaw(ctx, dir, "cat-file", "blob", rev+":"+path)
-		if err != nil {
-			return nil, false, err
-		}
-		if code != 0 {
-			return nil, false, fmt.Errorf("git cat-file blob %s:%s failed with exit code %d", rev, path, code)
-		}
-		return body, true, nil
-	}
+	return judge.ShowSeam(ctx, p.runRaw, dir, rev)
 }
 
 func joinDir(parts ...string) string { return strings.Join(parts, "/") }

@@ -458,3 +458,31 @@ func TestClipBodyIsRuneSafe(t *testing.T) {
 		t.Errorf("clipBody grew the body: %d bytes", len(out))
 	}
 }
+
+// an unreserved extra body share genuinely overflows the aggregate.
+// An in-diff repo body spends its hunk share AND a body share: the primary's budget is
+// sized for both, and the aggregate context can never exceed the caller's budget —
+// including when the body fits its share while the aggregate would overflow.
+func TestContextForGapClaimInDiffBodiesStayInBudget(t *testing.T) {
+	f := run.Finding{File: "app/models/widget.rb", Line: 3,
+		IssueText: "spec/models/widget_spec.rb has no test for polish"}
+	// the spec's hunk is a large added block that does NOT carry the match, and the
+	// primary's own hunk is large too — both fill their shares, so only the reservation
+	// accounting keeps the aggregate inside the budget
+	bigHunk := strings.Repeat("+filler for the hunk body so it dominates a small share\n", 400)
+	bigPrimary := strings.Repeat("+primary filler line that mentions nothing distinctive\n", 300)
+	diff := "diff --git a/app/models/widget.rb b/app/models/widget.rb\n--- a/app/models/widget.rb\n+++ b/app/models/widget.rb\n@@ -3,2 +3,4 @@\n" +
+		"+  def polish(g)\n" + bigPrimary +
+		"diff --git a/spec/models/widget_spec.rb b/spec/models/widget_spec.rb\n--- a/spec/models/widget_spec.rb\n+++ b/spec/models/widget_spec.rb\n@@ -1,2 +1,3 @@\n" +
+		"+" + bigHunk
+	repo := &RepoEvidence{Ran: true, Evidence: []claimcheck.Evidence{
+		{Path: "spec/models/widget_spec.rb", Tokens: []string{"nonesuch"}, Score: 3},
+	}, Content: map[string]string{"spec/models/widget_spec.rb": strings.Repeat("y", 5000)}}
+	out, truncated, _, _ := ContextForGapClaim(diff, false, f, MaxDiffBytes, repo)
+	if len(out) > MaxDiffBytes+shareSlack {
+		t.Errorf("in-diff body double-spend: context = %d bytes, budget %d (+%d slack)", len(out), MaxDiffBytes, shareSlack)
+	}
+	if !truncated {
+		t.Error("an over-share aggregate must mark the context truncated")
+	}
+}

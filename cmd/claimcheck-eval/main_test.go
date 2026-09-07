@@ -628,6 +628,10 @@ func TestReportReposPassDisclosesMissingClones(t *testing.T) {
 	if out := buf.String(); !strings.Contains(out, "without a repo clone") {
 		t.Errorf("missing clones must be disclosed:\n%s", out)
 	}
+	// the no-clone claim lands in its own row, not folded into no-evidence
+	if got := matrixCells(buf.String(), []string{"no-clone"}); got["no-clone"] != 1 {
+		t.Errorf("the uncloned claim must land in the no-clone row:\n%s", buf.String())
+	}
 }
 
 // realGit surfaces git's exit code as code (not error) and a failed process start as
@@ -750,9 +754,9 @@ func TestRepoPassSeamErrors(t *testing.T) {
 	if _, _, err := p.showHead(context.Background(), "d", "rev")("p"); err == nil {
 		t.Error("a cat-file transport error must surface")
 	}
-	// absence: ls-tree lists nothing
-	p.runGit = func(ctx context.Context, dir string, args ...string) (string, int, error) {
-		return "", 0, nil
+	// absence: ls-tree lists nothing (the shared seam reads ls-tree via the raw runner)
+	p.runRaw = func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
+		return nil, 0, nil
 	}
 	if body, ok, err := p.showHead(context.Background(), "d", "rev")("p"); err != nil || ok || body != nil {
 		t.Errorf("absent path = %v, %v, %v; want nil, false, nil", body, ok, err)
@@ -790,8 +794,10 @@ func TestReportReposPassSearchErrorsAreCounted(t *testing.T) {
 	if !strings.Contains(out, "repo search errors: 1") {
 		t.Errorf("search errors must be counted and disclosed:\n%s", out)
 	}
-	if !strings.Contains(out, "diff-only") {
-		t.Errorf("the failed-search claim stays measured on the diff:\n%s", out)
+	// the errored claim classifies as "repo-error" (its own row), NOT diff-only — parse
+	// the cells rather than a substring of the unconditionally-printed row labels
+	if got := matrixCells(out, []string{"repo-error"}); got["repo-error"] != 1 {
+		t.Errorf("the errored claim must land in the repo-error row:\n%s", out)
 	}
 }
 
@@ -908,11 +914,12 @@ func TestRepoPassShowHeadTransportError(t *testing.T) {
 	if _, _, err := p.showHead(context.Background(), "d", "rev")("p"); err == nil {
 		t.Error("a cat-file failure exit must surface")
 	}
+	// absence: ls-tree lists nothing (the shared seam reads ls-tree raw)
 	p.runRaw = func(ctx context.Context, dir string, args ...string) ([]byte, int, error) {
 		return nil, 0, nil
 	}
 	p.runGit = func(ctx context.Context, dir string, args ...string) (string, int, error) {
-		return "", 0, nil // ls-tree lists nothing: the path is absent
+		return "", 0, nil
 	}
 	if body, ok, err := p.showHead(context.Background(), "d", "rev")("p"); err != nil || ok || body != nil {
 		t.Errorf("absent path = %v, %v, %v; want nil, false, nil", body, ok, err)
