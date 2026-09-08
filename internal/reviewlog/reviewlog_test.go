@@ -600,7 +600,6 @@ func TestNewestFrozenEraMatchesLiveLensSet(t *testing.T) {
 // A declaration that repeats a lens is malformed, and malformed is not "the legacy rubric".
 // Comparing only the count of UNIQUE names let "the five legacy lenses, one of them twice" match
 // legacyLenses, so a pre-cutoff log could satisfy the gate with five rows on an invalid marker.
-
 func TestDuplicateLensDeclarationIsNotAShippedRubric(t *testing.T) {
 	dup := append(append([]string{}, legacyLenses...), legacyLenses[0])
 	if known := knownRubric(dup); known != nil {
