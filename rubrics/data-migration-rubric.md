@@ -106,7 +106,9 @@ defects in THIS diff, not generic "migrations are risky" advice.
 - Do NOT flag runtime error-path handling outside the migration itself — unhandled async
   failure, optimistic-state desync, silent partial success, outbound-call hardening,
   error-shape leakage, credential lifecycle (defer to Runtime-reliability). A migration's
-  own re-run/deploy/backfill safety stays here.
+  own re-run/deploy/backfill safety stays here, and so do runtime error paths INSIDE the
+  migration code (a timeout-less fetch a migration performs, a swallowed migration error,
+  a fire-and-forget write in the migration script).
 - Do NOT flag architecture soundness beyond migration safety — data-model correctness,
   semantic validity, concurrency, and coupling are Architecture's job. This lens judges only
   whether the *migration itself* is safe and reversible.
