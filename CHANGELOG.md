@@ -28,9 +28,11 @@
   the exact retroactive-blocker failure the era table exists to prevent; from the moment this
   merges the scaffold itself requires ten reviewer rows, so no compliant review can
   under-declare in the sub-day window. The user-facing lens enumeration was synced nine→ten in
-  `skills/review-artifact/SKILL.md`, `commands/review-artifact.md`, `README.md`,
+  `skills/review-artifact/SKILL.md`, `commands/review-artifact.md`, `README.md`, `USAGE.md`,
   `docs/quickstart.md`, `docs/README.claude.md`, `docs/README.codex.md`, and the
-  `docs/fsm/sdlc-loop-example.md` payload, pinned by `tests/manifest/test-skills.sh`. Anti-overlap: Architecture keeps design-level failure
+  `docs/fsm/sdlc-loop-example.md` payload, pinned by `tests/manifest/test-skills.sh` (which now
+  also covers `USAGE.md`'s "adversarial lenses" count form and the example's prose, not just
+  its numeric payload). Anti-overlap: Architecture keeps design-level failure
   *propagation shape* (its cascading-failure/sentinel hunts); Runtime-reliability owns concrete
   error-path handling in this diff's code. Security, Testing-quality, Data-migration, and
   Completeness's "does NOT flag" lines now defer runtime error-path findings here. Deliberately

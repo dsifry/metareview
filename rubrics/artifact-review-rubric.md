@@ -405,7 +405,8 @@ persona-anti-overlap pattern.
   while dropping work, an unbounded or timeout-less outbound call on a request path, or a
   raw 500 where a 4xx belongs.
 - Does NOT flag: security vulnerabilities (defer to Security); test quality (defer to
-  Testing-quality); migration safety (defer to Data-migration); design-level failure
+  Testing-quality); migration safety, including runtime error paths inside the migration
+  itself (defer to Data-migration); design-level failure
   propagation shape or schema invariants (defer to Architecture); whether error handling
   is *tested* (defer to Testing-quality).
 

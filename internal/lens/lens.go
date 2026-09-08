@@ -14,8 +14,11 @@
 // It is NOT a one-line change overall: reviewlog's lens-era table must also be advanced, because
 // every era points at a FROZEN snapshot of the set required on its date, never at this live list.
 // After editing All you must cut a new frozen vNLenses literal in internal/reviewlog and append an
-// era for the new lens's ship date; otherwise older completed logs would be judged against a lens
-// that did not exist when they were written. reviewlog's TestLensErasAreKeyedByDate fails if you
+// era keyed from the first FULL day the new lens is required (the day after it merges) — not the
+// merge date itself: eras are day-granular with no merge-time ordering, so a merge-date era
+// retroactively judges every review written earlier that same day against the new set, the exact
+// failure the era table exists to prevent. TestLensErasAreKeyedByDate and
+// TestNewestFrozenEraMatchesLiveLensSet fail if you skip that step. reviewlog's TestLensErasAreKeyedByDate fails if you
 // skip that step. See also the rubric/skill/doc/workflow sync points noted there.
 //
 // This package is a leaf: it imports nothing from the rest of the tree, so any package can depend

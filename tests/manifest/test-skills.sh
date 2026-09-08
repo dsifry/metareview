@@ -116,7 +116,7 @@ done
 
 # and no user-facing document may claim a different count than the gate enforces
 for doc in README.md USAGE.md docs/quickstart.md docs/README.claude.md docs/README.codex.md commands/review-artifact.md; do
-  # Any claim of a lens count other than nine, not just the exact phrase "five required": none
+  # Any claim of a lens count other than ten, not just one exact phrase: none
   # of these documents contains the word "five" at all today, so matching one phrase asserted
   # nothing. "Run the five lenses." could be appended to any of them and this stayed at exit 0.
   # Read the count and compare it, rather than trying to enumerate every wrong spelling: the
