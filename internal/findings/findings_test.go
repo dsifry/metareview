@@ -1128,11 +1128,16 @@ func TestCarryOverMatchesWhatTheRenderEmits(t *testing.T) {
 	records := []Record{
 		{ID: "mrvf-rt-001", Status: "open", Severity: "high", Classification: "blocking",
 			Title: "an open blocker", Reviewer: "security-reviewer"},
-		{ID: "mrvf-rt-002", Status: StatusOverridden, Title: "an overridden finding",
-			OverrideGrantedBy: "human", OverrideGrantedAt: "2026-09-08T00:00:00Z", OverrideGrantReason: "accepted risk"},
+		// every free-text field below carries an embedded newline: the emitter must flatten
+		// ALL of them (title, actors, reasons, escalation), or the entry spans physical
+		// lines and carry-over re-reads only its first
+		{ID: "mrvf-rt-002", Status: StatusOverridden, Title: "an overridden\nfinding",
+			OverrideGrantedBy: "a human\nwith a newline", OverrideGrantedAt: "2026-09-08T00:00:00Z",
+			OverrideGrantReason: "accepted\nrisk"},
 		{ID: "mrvf-rt-003", Status: StatusOverridePending, Title: "a pending override",
-			OverrideRequestedBy: "agent", OverrideRequestedAt: "2026-09-08T00:00:00Z", OverrideRequestReason: "needs a human",
-			OverrideEscalation: "an escalation that spans\ntwo physical lines"},
+			OverrideRequestedBy: "an\nagent", OverrideRequestedAt: "2026-09-08T00:00:00Z",
+			OverrideRequestReason: "needs\na human",
+			OverrideEscalation:    "an escalation that spans\ntwo physical lines"},
 		// a free-text field with an embedded newline: the emitter must flatten it to one
 		// physical line, or carry-over re-reads only the first line of a two-line entry
 		{ID: "mrvf-rt-004", Status: "open", Severity: "critical", Classification: "blocking",
@@ -1160,8 +1165,14 @@ func TestCarryOverMatchesWhatTheRenderEmits(t *testing.T) {
 	if !strings.Contains(strings.Join(blockers, "\n"), "a title that spans two physical lines") {
 		t.Errorf("the multi-line title was not flattened to the canonical single line: %v", blockers)
 	}
-	if !strings.Contains(strings.Join(overrides, "\n"), "an escalation that spans two physical lines") {
-		t.Errorf("the multi-line escalation was not flattened to the canonical single line: %v", overrides)
+	for _, flat := range []string{
+		"an overridden finding", "a human with a newline", "accepted risk",
+		"an agent", "needs a human",
+		"an escalation that spans two physical lines",
+	} {
+		if !strings.Contains(strings.Join(overrides, "\n"), flat) {
+			t.Errorf("a multi-line free-text field was not flattened (%q): %v", flat, overrides)
+		}
 	}
 	// every emitted line must be exactly one physical line
 	for _, l := range append(append([]string{}, blockers...), overrides...) {
@@ -1321,5 +1332,26 @@ func TestNearMissOverrideHeaderIsItsOwnSection(t *testing.T) {
 	}
 	if !strings.Contains(g, "mrvf-nm-003") {
 		t.Errorf("the history bullet must survive:\n%s", g)
+	}
+}
+
+// The seed is create-if-absent, exclusively: a racing writer that creates the index between
+// the scaffold's Stat and its seed must not have its content clobbered by the empty
+// document (the stat-then-seed TOCTOU the eighth review round caught).
+func TestWriteIndexSeedNeverClobbersExistingContent(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "FINDINGS.md")
+	if err := os.WriteFile(path, []byte("# metareview Findings\n\n- mrvf-t-001 [high] precious committed content (r)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteIndexSeed(path); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	if strings.Contains(string(got), "No unresolved findings recorded yet") {
+		t.Errorf("the seed replaced existing content:\n%s", string(got))
+	}
+	if !strings.Contains(string(got), "precious committed content") {
+		t.Errorf("existing content lost:\n%s", string(got))
 	}
 }

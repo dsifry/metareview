@@ -299,12 +299,30 @@ const (
 	emptyIndexDocument = "# metareview Findings\n\n" + emptyIndexBody + "\n"
 )
 
-// WriteIndexSeed writes the first-render content of the findings index through
-// writeIndexAtomic, so every writer of the durable audit file — the reconciler and the
-// artifact scaffold's first-creation path — carries the same fsync/mode/unique-temp
-// guarantees instead of a truncating in-place write.
+// WriteIndexSeed creates the findings index IF IT DOES NOT EXIST, exclusively: O_EXCL,
+// never a replacement. The seed carries no information, so there is nothing to fsync-replace
+// — but the exclusive create is what closes the stat-then-seed TOCTOU (a racing render that
+// creates the index between the scaffold's Stat and its seed must not have its content
+// clobbered by an empty document: the issue-#151 destruction, reopened through the scaffold
+// path). EEXIST is success — someone else seeded it. writeIndexAtomic stays the only
+// REPLACING writer; this is the only creating one.
 func WriteIndexSeed(path string) error {
-	return writeIndexAtomic(path, emptyIndexDocument)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
+		return err
+	}
+	if _, err := f.WriteString(emptyIndexDocument); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func RenderIndex(root string) error {
@@ -403,6 +421,13 @@ func RenderIndexWithRecords(root string, records []Record) error {
 	// mix two snapshots, silently dropping every preserved section. Not-exist is "first
 	// render" — nothing to carry and nothing to preserve; any other read error fails the
 	// render closed rather than overwriting the durable audit trail with a partial view.
+	//
+	// KNOWN BOUNDARY: concurrent renders in one checkout are still last-writer-wins for
+	// LOCAL records — a render whose read predates another render's write re-emits its stale
+	// snapshot and drops the earlier writer's locally-rendered lines (committed lines
+	// survive: both writers carry them from their own reads). Closing that needs file
+	// locking or compare-and-swap; the unique-temp design made the temp collision impossible,
+	// not the read-modify-write against a stale base.
 	var committed []byte
 	if raw, err := os.ReadFile(path); err == nil {
 		committed = raw
@@ -444,7 +469,11 @@ func singleLine(s string) string {
 	return markdown.PlainText(strings.Join(strings.Fields(s), " "))
 }
 
-// preservedSections extracts every committed ## section the renderer does not itself emit
+// preservedSections extracts every committed ## section the renderer does not emit. Note the
+// boundary of the whole preservation contract: BULLETS in the two owned sections carry, ##
+// sections survive verbatim, but non-bullet PROSE inside the owned sections (a hand-written
+// paragraph in the top section or under Process Overrides) is neither carried nor preserved —
+// those two sections are generated, and their prose does not survive a rewrite.
 // (anything other than Process Overrides), verbatim, so hand-maintained content — a history
 // note, the shelved #93 "Stale" partition — survives the rewrite instead of being silently
 // deleted: the render regenerates only its own two sections and must not destroy the rest of
@@ -531,6 +560,9 @@ func writeIndexAtomic(path, document string) error {
 		return err
 	}
 	if err := seamClose(tmp); err != nil {
+		// Best-effort remove: on Windows removing a file whose Close failed can hit a
+		// sharing violation and leave the temp behind — the gitignored pattern and the next
+		// render's unique names contain the residue.
 		_ = os.Remove(name)
 		return err
 	}
