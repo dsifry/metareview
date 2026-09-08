@@ -316,13 +316,19 @@ func WriteIndexSeed(path string) error {
 	}
 	if err := seamWriteString(f, emptyIndexDocument); err != nil {
 		_ = f.Close()
+		_ = os.Remove(path) // a failed seed must not leave a partial file at the final path
 		return err
 	}
 	if err := seamSync(f); err != nil {
 		_ = f.Close()
+		_ = os.Remove(path)
 		return err
 	}
-	return seamClose(f)
+	if err := seamClose(f); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	return nil
 }
 
 func RenderIndex(root string) error {
@@ -331,6 +337,32 @@ func RenderIndex(root string) error {
 		return err
 	}
 	return RenderIndexWithRecords(root, records)
+}
+
+// readCommittedIndex is the render's ONE read of the committed index, with the single
+// failure policy both parsers share: not-exist is "first render" (no bytes — nothing to
+// carry, nothing to preserve), a symlink is refused rather than followed (following one
+// would echo a planted target's mrvf-prefixed bullets into the committed index; the rename
+// that follows would replace the symlink itself, but the read happens first), any other
+// error fails the render closed — an unreadable committed index must never be overwritten
+// with a partial view — and CRLF is normalized once (a Windows autocrlf checkout must not
+// defeat the exact header match or drag \r into the canonical LF document).
+func readCommittedIndex(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("committed findings index %s is a symlink — refusing to read it", path)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(strings.ReplaceAll(string(raw), "\r\n", "\n")), nil
 }
 
 // carryOverLine matches both shapes the index renders — unresolved-blocker bullets
@@ -428,10 +460,8 @@ func RenderIndexWithRecords(root string, records []Record) error {
 	// survive: both writers carry them from their own reads). Closing that needs file
 	// locking or compare-and-swap; the unique-temp design made the temp collision impossible,
 	// not the read-modify-write against a stale base.
-	var committed []byte
-	if raw, err := os.ReadFile(path); err == nil {
-		committed = raw
-	} else if !os.IsNotExist(err) {
+	committed, err := readCommittedIndex(path)
+	if err != nil {
 		return err
 	}
 	coBlockers, coOverrides := carryOverLines(committed, known)
@@ -469,11 +499,18 @@ func singleLine(s string) string {
 	return markdown.PlainText(strings.Join(strings.Fields(s), " "))
 }
 
-// preservedSections extracts every committed ## section the renderer does not emit. Note the
-// boundary of the whole preservation contract: BULLETS in the two owned sections carry, ##
-// sections survive verbatim, but non-bullet PROSE inside the owned sections (a hand-written
-// paragraph in the top section or under Process Overrides) is neither carried nor preserved —
-// those two sections are generated, and their prose does not survive a rewrite.
+// preservedSections extracts every committed ## section the renderer does not emit
+// (anything other than Process Overrides), verbatim, so hand-maintained content — a history
+// note, the shelved #93 "Stale" partition — survives the rewrite instead of being silently
+// deleted: the render regenerates only its own two sections and must not destroy the rest of
+// the committed file. Same trade-off as carried lines: a preserved section has no retirement
+// path, and removing one means editing the committed file by hand. Preserved sections are
+// re-emitted AFTER Process Overrides regardless of their committed position (content is
+// preserved, position is not). Note the boundary of the whole preservation contract: BULLETS
+// in the two owned sections carry, ## sections survive verbatim, but non-bullet PROSE inside
+// the owned sections (a hand-written paragraph in the top section or under Process
+// Overrides) is neither carried nor preserved — those two sections are generated, and their
+// prose does not survive a rewrite.
 // (anything other than Process Overrides), verbatim, so hand-maintained content — a history
 // note, the shelved #93 "Stale" partition — survives the rewrite instead of being silently
 // deleted: the render regenerates only its own two sections and must not destroy the rest of

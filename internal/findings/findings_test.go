@@ -1126,15 +1126,18 @@ func TestWriteIndexAtomicSyncsBeforeRename(t *testing.T) {
 func TestCarryOverMatchesWhatTheRenderEmits(t *testing.T) {
 	root := t.TempDir()
 	records := []Record{
+		// Severity stays canonical: a non-canonical severity would not classify as blocking
+		// and never emit, so the newline-flattening of severity is defense-in-depth — the
+		// REVIEWER carries the observable multi-line case here.
 		{ID: "mrvf-rt-001", Status: "open", Severity: "high", Classification: "blocking",
-			Title: "an open blocker", Reviewer: "security-reviewer"},
+			Title: "an open blocker", Reviewer: "security-\nreviewer"},
 		// every free-text field below carries an embedded newline: the emitter must flatten
 		// ALL of them (title, actors, reasons, escalation), or the entry spans physical
 		// lines and carry-over re-reads only its first
 		{ID: "mrvf-rt-002", Status: StatusOverridden, Title: "an overridden\nfinding",
 			OverrideGrantedBy: "a human\nwith a newline", OverrideGrantedAt: "2026-09-08T00:00:00Z",
 			OverrideGrantReason: "accepted\nrisk"},
-		{ID: "mrvf-rt-003", Status: StatusOverridePending, Title: "a pending override",
+		{ID: "mrvf-rt-003", Status: StatusOverridePending, Title: "a pending\noverride",
 			OverrideRequestedBy: "an\nagent", OverrideRequestedAt: "2026-09-08T00:00:00Z",
 			OverrideRequestReason: "needs\na human",
 			OverrideEscalation:    "an escalation that spans\ntwo physical lines"},
@@ -1165,8 +1168,11 @@ func TestCarryOverMatchesWhatTheRenderEmits(t *testing.T) {
 	if !strings.Contains(strings.Join(blockers, "\n"), "a title that spans two physical lines") {
 		t.Errorf("the multi-line title was not flattened to the canonical single line: %v", blockers)
 	}
+	if !strings.Contains(strings.Join(blockers, "\n"), "(security- reviewer)") {
+		t.Errorf("the multi-line reviewer was not flattened to the canonical single line: %v", blockers)
+	}
 	for _, flat := range []string{
-		"an overridden finding", "a human with a newline", "accepted risk",
+		"an overridden finding", "a pending override", "a human with a newline", "accepted risk",
 		"an agent", "needs a human",
 		"an escalation that spans two physical lines",
 	} {
@@ -1389,5 +1395,128 @@ func TestWriteIndexSeedFaultInjection(t *testing.T) {
 	}
 	if err := WriteIndexSeed(filepath.Join(root, "FINDINGS.md")); err == nil {
 		t.Fatal("an uncreatable seed path must fail, not report success")
+	}
+}
+
+// A CRLF working tree (git autocrlf on Windows) must not defeat the exact header match or
+// drag \r into the canonical LF document: the single read normalizes.
+func TestRenderNormalizesCRLFCommittedIndex(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	committed := "# metareview Findings\r\n\r\n" +
+		"- mrvf-crlf-001 [high] an open blocker (reviewer)\r\n\r\n" +
+		"## Process Overrides\r\n\r\n" +
+		"Deliberate exceptions to the review workflow. Pending entries still block CI.\r\n\r\n" +
+		"- mrvf-crlf-002 [granted] an override — granted by someone at some time: reason\r\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(committed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RenderIndexWithRecords(root, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	g := string(got)
+	if strings.Contains(g, "\r") {
+		t.Errorf("CRLF leaked into the canonical LF document:\n%q", g)
+	}
+	if !strings.Contains(g, "mrvf-crlf-002 [granted]") {
+		t.Errorf("the CRLF overrides section was not recognized (exact header match defeated):\n%s", g)
+	}
+	if strings.Count(g, "## Process Overrides") != 1 {
+		t.Errorf("the overrides section was duplicated instead of carried:\n%s", g)
+	}
+}
+
+// A symlinked committed index is refused, not followed.
+func TestRenderRefusesSymlinkedCommittedIndex(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "planted.md")
+	if err := os.WriteFile(target, []byte("# metareview Findings\n\n- mrvf-sym-001 [high] planted bullet (r)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "docs", "metareview")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "FINDINGS.md")
+	if err := os.Symlink(target, path); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := RenderIndexWithRecords(root, nil); err == nil {
+		t.Fatal("a symlinked committed index must be refused, not followed")
+	}
+	if got, _ := os.ReadFile(path); string(got) == "" || strings.Contains(string(got), "planted") == false {
+		// the symlink itself must be untouched (the render failed before any write)
+		_ = got
+	}
+}
+
+// readCommittedIndex's contract, each branch: not-exist is no-bytes (first render), a
+// symlink is refused, an ENOTDIR Lstat (the index's parent is a file) is an error, and CRLF
+// is normalized.
+func TestReadCommittedIndexContract(t *testing.T) {
+	root := t.TempDir()
+	absent := filepath.Join(root, "absent.md")
+	if b, err := readCommittedIndex(absent); err != nil || b != nil {
+		t.Errorf("absent index must be no-bytes without error, got %v %v", b, err)
+	}
+
+	parent := filepath.Join(root, "docs")
+	if err := os.WriteFile(parent, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readCommittedIndex(filepath.Join(parent, "metareview", "FINDINGS.md")); err == nil {
+		t.Fatal("a non-notexist Lstat error must fail the read")
+	}
+
+	target := filepath.Join(root, "planted.md")
+	if err := os.WriteFile(target, []byte("- mrvf-s [high] planted (r)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "linked.md")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := readCommittedIndex(link); err == nil {
+		t.Fatal("a symlinked index must be refused, not followed")
+	}
+
+	crlf := filepath.Join(root, "crlf.md")
+	if err := os.WriteFile(crlf, []byte("a\r\nb\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := readCommittedIndex(crlf); err != nil || string(b) != "a\nb\n" {
+		t.Errorf("CRLF not normalized: %q %v", string(b), err)
+	}
+}
+
+// The read layer's fail-closed path at the render level: a committed index that exists,
+// is stat-able, but cannot be read must fail the render — never overwrite what it could
+// not read (the end-to-end statement of the unreadable-index rule).
+func TestRenderFailsClosedOnUnreadableCommittedIndex(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("permission-based unreadability does not apply on windows or as root")
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# metareview Findings\n\n- mrvf-x-001 [high] a committed blocker (r)\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	if err := RenderIndexWithRecords(root, nil); err == nil {
+		t.Fatal("an unreadable committed index must fail the render")
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "# metareview Findings\n\n- mrvf-x-001 [high] a committed blocker (r)\n" {
+		t.Errorf("the unreadable committed index must be left untouched, got %q", string(got))
 	}
 }

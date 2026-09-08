@@ -196,16 +196,17 @@ func overrideLines(records []Record) []string {
 		// its first line carry back (see the findings.go blocker-bullet comment).
 		title, reqReason := singleLine(record.Title), singleLine(record.OverrideRequestReason)
 		reqBy, grantedBy := singleLine(record.OverrideRequestedBy), singleLine(record.OverrideGrantedBy)
+		reqAt, grantedAt := singleLine(record.OverrideRequestedAt), singleLine(record.OverrideGrantedAt)
 		switch record.Status {
 		case StatusOverridePending:
 			lines = append(lines, withEscalation(fmt.Sprintf("- %s [pending] %s — requested by %s at %s: %s",
-				record.ID, title, reqBy, record.OverrideRequestedAt, reqReason), record))
+				record.ID, title, reqBy, reqAt, reqReason), record))
 		case StatusOverridden:
 			detail := fmt.Sprintf("- %s [granted] %s — granted by %s at %s: %s",
-				record.ID, title, grantedBy, record.OverrideGrantedAt, singleLine(record.OverrideGrantReason))
+				record.ID, title, grantedBy, grantedAt, singleLine(record.OverrideGrantReason))
 			if record.OverrideRequestedBy != "" {
 				detail += fmt.Sprintf(" (requested by %s at %s: %s)",
-					reqBy, record.OverrideRequestedAt, reqReason)
+					reqBy, reqAt, reqReason)
 			}
 			lines = append(lines, withEscalation(detail, record))
 		}

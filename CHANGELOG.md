@@ -134,9 +134,12 @@
   emitted entry is one canonical physical line (free-text titles, override reasons, actors
   and escalations are flattened, so an embedded newline can no longer split an entry whose
   continuation would be lost on re-read); the committed index is read once per render (one
-  snapshot, one fail-closed policy, no mixed-snapshot race); and the artifact scaffold's
-  seed path writes through the same atomic writer as the reconciler — there is exactly one
-  writer implementation of the durable audit file.
+  snapshot, one fail-closed policy, no mixed-snapshot race, CRLF normalized, a symlinked
+  index refused); and the durable audit file has exactly two writers with deliberately
+  different contracts — findings.writeIndexAtomic is the only replacing writer (the
+  render), and findings.WriteIndexSeed is the only creating one (exclusive
+  create-if-absent, so a racing render's freshly created index cannot be clobbered by the
+  empty seed document).
 
 - **PR-ready now selects findings for the target under review.** Findings linked to the current
   branch, live pull request, or a task review whose covered paths overlap the current diff retain
