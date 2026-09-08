@@ -44,6 +44,7 @@ var All = []Lens{
 	{"Security", "security"},
 	{"Testing-quality", "testing-quality"},
 	{"Data-migration", "data-migration"},
+	{"Runtime-reliability", "runtime-reliability"},
 	{"Mechanical-precision", "mechanical-precision"},
 }
 

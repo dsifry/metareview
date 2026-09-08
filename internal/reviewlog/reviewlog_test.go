@@ -78,9 +78,10 @@ func TestArtifactNotReviewedIsUnresolved(t *testing.T) {
 	}
 }
 
-// allArtifactReviewerRows is the complete set of 9 required reviewer rows for a current
-// (0.9.0) artifact review (the baseline a completed review must have). The fixtures below use
-// the dateless run ID "mrv-artifact", which is judged against the newest lens set.
+// allArtifactReviewerRows is the complete set of 10 required reviewer rows for a current
+// (runtime-reliability era) artifact review (the baseline a completed review must have). The
+// fixtures below use the dateless run ID "mrv-artifact", which is judged against the newest
+// lens set.
 var allArtifactReviewerRows = []string{
 	"| Feasibility | PASS | 0 | 0 | ok |",
 	"| Completeness | PASS | 0 | 0 | ok |",
@@ -90,19 +91,20 @@ var allArtifactReviewerRows = []string{
 	"| Security | PASS | 0 | 0 | ok |",
 	"| Testing-quality | PASS | 0 | 0 | ok |",
 	"| Data-migration | PASS | 0 | 0 | ok |",
+	"| Runtime-reliability | PASS | 0 | 0 | ok |",
 	"| Mechanical-precision | PASS | 0 | 0 | ok |",
 }
 
 func TestArtifactMissingRequiredReviewerRowsIsUnresolved(t *testing.T) {
 	// Each required lens must be enforced: remove exactly one from the complete set and
 	// assert the review is unresolved. Covers the original 5 + the 3 new 0.8.0 lenses
-	// (Security, Testing-quality, Data-migration) + the 0.9.0 Mechanical-precision lens —
-	// the prior 2-row fixture only omitted Feasibility/Completeness and so did not exercise
-	// the new enforcement.
+	// (Security, Testing-quality, Data-migration) + the 0.9.0 Mechanical-precision lens + the
+	// runtime-reliability lens — the prior 2-row fixture only omitted Feasibility/Completeness
+	// and so did not exercise the new enforcement.
 	for _, omit := range []string{
 		"Feasibility", "Completeness", "Scope and alignment", "Architecture",
 		"Intent preservation", "Security", "Testing-quality", "Data-migration",
-		"Mechanical-precision",
+		"Runtime-reliability", "Mechanical-precision",
 	} {
 		omit := omit
 		t.Run("missing_"+strings.ReplaceAll(strings.ReplaceAll(omit, " ", "_"), "-", "_"), func(t *testing.T) {
@@ -518,14 +520,17 @@ func TestLensErasAreKeyedByDate(t *testing.T) {
 		{"mrv-20260824-1-artifact-a-1", v08Lenses},
 		{"mrv-20260829-1-artifact-a-1", v08Lenses},
 		{"mrv-20260830-1-artifact-a-1", v08Lenses},
-		// The newest era is pinned against the FROZEN v09Lenses, not the live currentLenses. That is
-		// what makes the era table's promise hold: growing lens.All (and with it currentLenses)
-		// without cutting a new frozen snapshot and era would make eraLenses("mrv-20260831-…")
-		// return more than nine and fail here, instead of silently expanding what every 2026-08-31+
-		// log must cover. A dateless id maps to the newest era, so it too is v09Lenses.
+		// v09Lenses, not the live currentLenses: growing lens.All without cutting a new frozen
+		// snapshot and era would make eraLenses("mrv-20260831-…") return more than nine and fail
+		// here, instead of silently expanding what every 2026-08-31+ log must cover.
 		{"mrv-20260831-1-artifact-a-1", v09Lenses},
-		{"mrv-20260901-1-artifact-a-1", v09Lenses},
-		{"mrv-notadate-1-artifact-a-1", v09Lenses},
+		{"mrv-20260907-1-artifact-a-1", v09Lenses},
+		// The newest era is pinned against the FROZEN v10Lenses (the ten required from
+		// 2026-09-08, when runtime-reliability shipped), not the live currentLenses — same
+		// promise, one era later. A dateless id maps to the newest era, so it too is v10Lenses.
+		{"mrv-20260908-1-artifact-a-1", v10Lenses},
+		{"mrv-20260909-1-artifact-a-1", v10Lenses},
+		{"mrv-notadate-1-artifact-a-1", v10Lenses},
 	} {
 		got := eraLenses(tc.runID)
 		if !sameLensSet(got, tc.want) {
@@ -590,6 +595,9 @@ func TestDuplicateLensDeclarationIsNotAShippedRubric(t *testing.T) {
 	}
 	if known := knownRubric(v09Lenses); known == nil {
 		t.Error("the frozen 0.9.0 nine-lens rubric must still be recognised")
+	}
+	if known := knownRubric(v10Lenses); known == nil {
+		t.Error("the frozen ten-lens runtime-reliability-era rubric must be recognised")
 	}
 	if known := knownRubric(currentLenses); known == nil {
 		t.Error("the current rubric must still be recognised")

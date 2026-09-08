@@ -4,6 +4,30 @@
 
 ### Added
 
+- **Runtime-reliability lens (10th required artifact-review lens, benchmark-driven).** Artifact
+  review now runs a tenth lens that attacks the assumption that every runtime failure path in the
+  diff is handled, observable, and honest. It owns the finding classes the harnesseval
+  head-to-head vs. Compound Engineering showed metareview's lens taxonomy structurally missing
+  (~90 of 241 CE-only confirmed findings across three clusters): **unhandled async failure**
+  (`.then` without `.catch`, unreturned inner promises, fire-and-forget refreshes — the
+  model-independent `destroyRecord` blind spot was CE-only across 6 different models),
+  **optimistic-state desync** (state mutated before the request resolves, no in-flight guard,
+  out-of-order responses, offset bookkeeping committed early), **silent partial success** (work
+  skipped while the API returns success — unknown IDs dropped, throttle keys committed before the
+  operation succeeds), **outbound-call hardening** (no timeout on `open(url)`/`fetch`, unbounded
+  payloads, missing rate limits), **error-shape leakage** (a raw 500 where the contract promises a
+  4xx), and **cross-boundary credential/token lifecycle** (a sync-mode response that can never
+  satisfy the provider's refresh schema; a client rebuilt from the pre-refresh token). The lens
+  set is still enumerated once in `internal/lens`; the lens-era table freezes the prior nine-lens
+  rubric at its 2026-08-31 date so reviews written before this addition stay judged against the
+  nine they were required to cover. Anti-overlap: Architecture keeps design-level failure
+  *propagation shape* (its cascading-failure/sentinel hunts); Runtime-reliability owns concrete
+  error-path handling in this diff's code. Security, Testing-quality, Data-migration, and
+  Completeness's "does NOT flag" lines now defer runtime error-path findings here. Deliberately
+  NOT added (handoff §4): style/deprecation/dedup hunting — 5 of 10 external-reviewer misses live
+  there and suppressing them is precision working as designed — and no separate api-contract
+  lens (Architecture's hunt was broadened instead).
+
 - **Testing-gap claims are now verified against the repository head, not just the diff (issue #146).**
   The #140 mechanism (PR #145) only searched covering-test evidence among added diff lines, so a
   covering test outside every changed hunk was invisible and a false absence claim could be confirmed.
