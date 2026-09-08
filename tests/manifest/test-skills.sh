@@ -129,6 +129,10 @@ for doc in README.md docs/quickstart.md docs/README.claude.md docs/README.codex.
     esac
   done < <(grep -Eoi '\b(one|two|three|four|five|six|seven|eight|nine|ten|[0-9]+) (required )?lenses\b' "$doc" | awk '{print $1}')
 done
+# The FSM example payload carries the same count the discover node emits; it drifted once
+# already (nine stayed behind when the set grew), so pin it like the prose docs above.
+grep -q '"lenses":10' docs/fsm/sdlc-loop-example.md
+
 grep -q 'return the actual artifact-review verdict' skills/review-artifact/SKILL.md
 grep -q 'parallel subagents by default' docs/quickstart.md
 grep -q 'in-session-emulated' docs/quickstart.md

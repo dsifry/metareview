@@ -20,7 +20,17 @@
   satisfy the provider's refresh schema; a client rebuilt from the pre-refresh token). The lens
   set is still enumerated once in `internal/lens`; the lens-era table freezes the prior nine-lens
   rubric at its 2026-08-31 date so reviews written before this addition stay judged against the
-  nine they were required to cover. Anti-overlap: Architecture keeps design-level failure
+  nine they were required to cover. Because eras are day-granular with no merge-time ordering,
+  the ten-lens era is keyed from 2026-09-09 — the first full day the lens is required — not the
+  2026-09-08 merge date: keying from the merge date would retroactively judge every nine-lens
+  review written earlier that same day (this repository's own 2026-09-08-dated artifact review
+  of `CHANGELOG.md`, and any downstream user's) against the ten-lens set and mark it incomplete,
+  the exact retroactive-blocker failure the era table exists to prevent; from the moment this
+  merges the scaffold itself requires ten reviewer rows, so no compliant review can
+  under-declare in the sub-day window. The user-facing lens enumeration was synced nine→ten in
+  `skills/review-artifact/SKILL.md`, `commands/review-artifact.md`, `README.md`,
+  `docs/quickstart.md`, `docs/README.claude.md`, `docs/README.codex.md`, and the
+  `docs/fsm/sdlc-loop-example.md` payload, pinned by `tests/manifest/test-skills.sh`. Anti-overlap: Architecture keeps design-level failure
   *propagation shape* (its cascading-failure/sentinel hunts); Runtime-reliability owns concrete
   error-path handling in this diff's code. Security, Testing-quality, Data-migration, and
   Completeness's "does NOT flag" lines now defer runtime error-path findings here. Deliberately
@@ -125,7 +135,8 @@
   freezes the prior eight-lens rubric at its 2026-08-24 date, so reviews written before this
   addition stay judged against the eight they were required to cover. The FSM `sdlc-loop` and
   `review-loop` discover node no longer hard-codes a lens count: it defaults to the full
-  `kind.Lenses` set (now nine) and auto-tracks any lens added later, guarded by a test that
+  `kind.Lenses` set (nine at the time; the Runtime-reliability entry above makes it ten) and
+  auto-tracks any lens added later, guarded by a test that
   refuses a re-introduced `lenses:` cap.
 
 - **Mutation reports as review input (`--mutation-report`).** `review task-done`, `review

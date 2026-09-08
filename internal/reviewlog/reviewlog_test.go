@@ -525,11 +525,14 @@ func TestLensErasAreKeyedByDate(t *testing.T) {
 		// here, instead of silently expanding what every 2026-08-31+ log must cover.
 		{"mrv-20260831-1-artifact-a-1", v09Lenses},
 		{"mrv-20260907-1-artifact-a-1", v09Lenses},
-		// The newest era is pinned against the FROZEN v10Lenses (the ten required from
-		// 2026-09-08, when runtime-reliability shipped), not the live currentLenses — same
-		// promise, one era later. A dateless id maps to the newest era, so it too is v10Lenses.
-		{"mrv-20260908-1-artifact-a-1", v10Lenses},
+		// A review dated on the merge day itself but written BEFORE runtime-reliability merged
+		// (a real one exists: mrv-20260908-053049…-artifact-changelog) must stay judged against
+		// the nine — that is the era table's whole promise — so the v10 era is keyed from the
+		// first full day the lens is required, not the merge date. Keying from the merge date
+		// would fail exactly here.
+		{"mrv-20260908-1-artifact-a-1", v09Lenses},
 		{"mrv-20260909-1-artifact-a-1", v10Lenses},
+		{"mrv-20260910-1-artifact-a-1", v10Lenses},
 		{"mrv-notadate-1-artifact-a-1", v10Lenses},
 	} {
 		got := eraLenses(tc.runID)

@@ -344,7 +344,14 @@ func currentLensKeys() []string {
 // Eras are ordered oldest first and compared as YYYYMMDD strings. Security (0.7.0) and
 // testing-quality / data-migration (0.8.0) both shipped on 2026-08-24; mechanical-precision
 // (0.9.0) shipped on 2026-08-31; runtime-reliability (the benchmark-driven lens upgrade,
-// handoff 2026-09-08) ships on 2026-09-08.
+// handoff 2026-09-08) merged on 2026-09-08 but its era is keyed from 2026-09-09 — the first
+// FULL day it is required — because eras are day-granular with no merge-time ordering: keying
+// from the merge date itself would retroactively judge every nine-lens review written earlier
+// that same day (this repository's own mrv-20260908-053049…-artifact-changelog log, and any
+// downstream user's) against the ten-lens set and mark it incomplete — the exact failure the
+// era table exists to prevent. The cost is a sub-day window where the era floor still reads
+// nine, which cannot under-clear a real review: from the moment this merges, the scaffold
+// itself requires ten reviewer rows, so no compliant review can under-declare in it.
 type lensEra struct {
 	from   string
 	lenses []string
@@ -354,7 +361,7 @@ var lensEras = []lensEra{
 	{from: "", lenses: legacyLenses},
 	{from: "20260824", lenses: v08Lenses},
 	{from: "20260831", lenses: v09Lenses},
-	{from: "20260908", lenses: v10Lenses},
+	{from: "20260909", lenses: v10Lenses},
 }
 
 // eraLenses is the rubric in force when this run happened. A run ID with no parseable date is
