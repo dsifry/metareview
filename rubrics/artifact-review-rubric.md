@@ -244,6 +244,12 @@ persona-anti-overlap pattern.
 - Hunt for **SSRF protocol-bypass**: server-side fetch of unvalidated user URLs where a naive
   localhost string check (`url.includes('localhost')`) is defeated by `file://`, `gopher://`,
   `127.0.0.1` in decimal/IPv6 notation, or DNS rebinding.
+- Hunt for **normalization-mismatch bypasses of security controls**: a control
+  (allowlist/blacklist, deny rule, host check) compared in one canonical form against input
+  arriving in another — a lowercased blacklist checked against non-lowercased input, an
+  allowlist normalized on a different scheme or case, a deny rule defeated by a
+  double-decode. The correctness half of the same drift (a lookup that fails to match what
+  was stored) is Architecture's format-drift hunt, not this one.
 - Hunt for **secrets in logs** (distinct from secrets in code): PII, tokens, or credentials
   written to log output, error messages, or telemetry — not hardcoded in source, but leaked at
   runtime through logging paths the diff adds or changes.

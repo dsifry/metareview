@@ -34,8 +34,14 @@ vulnerabilities in THIS diff, not generic hardening advice.
 ### A01 — Broken Access Control
 - DB queries/lookups using a user-supplied id without an ownership/org/tenant scope check (IDOR).
 - Routes without auth middleware; role checks missing or bypassable.
+- A security control (allowlist/blacklist, deny rule, host check) compared in one canonical
+  form against input arriving in another: a lowercased blacklist checked against
+  non-lowercased input, an allowlist normalized on a different scheme or case, a deny rule
+  defeated by a double-decode. (The correctness half of the same mismatch — a lookup that
+  fails to find what was stored — is Architecture's format-drift hunt.)
 - CORS overly permissive.
-- Block on unscoped user-supplied-id lookups; bypassable role checks.
+- Block on unscoped user-supplied-id lookups; bypassable role checks; normalization-mismatch
+  bypasses of a security control.
 
 ### A02 — Cryptographic Failures / Secrets
 - Hardcoded keys/tokens/passwords/API credentials in the diff.
