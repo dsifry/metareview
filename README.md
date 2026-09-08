@@ -8,9 +8,11 @@ standalone or as a deeper review engine inside metaswarm, Superpowers, and Beads
 
 ## What metareview does
 
-- **🔍 Reviews before you commit.** Named gates for specs, plans, code, epics, and PRs — nine adversarial
+- **🔍 Reviews before you commit.** Named gates for specs, plans, code, epics, and PRs — ten adversarial
   reviewer lenses, deterministic blockers, and durable Markdown evidence. Not another "please review this"
-  prompt: real gates with explicit verdicts.
+  prompt: real gates with explicit verdicts. Lenses also report **advisory findings** — the real,
+  important, not-defects class (latent defects, design risks, simplification opportunities, code smells)
+  that a staff-level reviewer would actually raise, quality-gated so the channel informs instead of flooding.
 - **🐛 Finds and fixes bugs — *with proof*.** `metareview fsm` drives an audited `discover → adjudicate →
   fix → prove → verify` loop where a fix is trusted only when it carries a **differential proof**
   (a reproduction / pin / deletion) that metareview runs *deterministically* against your real tests. A
@@ -77,6 +79,25 @@ metareview is built around review patterns that work well when humans and coding
 - **Repository-knowledge priming:** load service inventories, Beads knowledge, session history, and GitHub history so reviewers catch duplicated services, stale assumptions, and prior mistakes.
 - **Review artifact accountability:** write durable Markdown context and review logs so future humans and agents can inspect what was reviewed, what blocked, and why it passed.
 - **Post-merge reflection:** after a PR lands, extract accepted learnings, discarded candidates, and reviewer calibration so the next review starts smarter.
+
+## Highlights in 0.11.x
+
+0.11.x is the benchmark-driven review-quality line (each change measured against a Compound
+Engineering baseline under the same adjudicator):
+
+- **0.11.0 — the tenth lens.** `Runtime-reliability` owns the ~90 confirmed findings no prior lens covered:
+  unhandled async failure, optimistic-state desync, silent partial success, outbound-call hardening,
+  error-shape leakage, and cross-boundary credential lifecycle. Five rubric briefs sharpened against the
+  same evidence (FORMAT-DRIFT, api-contract broadening, cascading-failure async, RE-RUN-SAFETY,
+  sibling-flag propagation).
+- **0.11.1 — advisory findings, phrasing discipline, six new hunts.** Lenses additionally report
+  **advisory findings** — the staff-reviewer class (CE produces 21.8/PR of them where 0.11.0 produced 1.2)
+  through three quality gates (stated consequence, steel-man rebuttal, convergence weighting) plus a
+  one-call staff-surrogate filter on advisories only; validated bugs pass through untouched. Findings are
+  phrased as definite claims about concrete failure modes (hedged phrasing measurably loses real findings
+  to mis-adjudication). Six new hunt clauses from the measured residue: client/server schema-copy drift,
+  partial-field stale updates, missing include/association, unbounded reply-to growth, silently changed
+  defaults, and N×M duplicate remote operations. No new lens, no numeric caps; style nits stay suppressed.
 
 ## Highlights in 0.10.0
 
@@ -265,7 +286,7 @@ flowchart TD
 
 The decomposition loop is intentionally fractal: a parent plan can be decomposed into child epics, each child can be decomposed again, and each level gets reviewed before implementation continues. After the iteration converges, metareview checks back against the original parent intent so accumulated local fixes do not quietly drift away from the user request.
 
-Every review produces Markdown artifacts under `docs/metareview/` and local transient state under `.metareview/`. A blocking finding is current work. A `NOT_REVIEWED` artifact scaffold is also current work, not a pass. Artifact review runs the ten required lenses as parallel subagents by default; `in-session-emulated` fallback is weaker evidence and must say the review is not independently adversarial.
+Every review produces Markdown artifacts under `docs/metareview/` and local transient state under `.metareview/`. A blocking finding is current work. A `NOT_REVIEWED` artifact scaffold is also current work, not a pass. Artifact review runs the ten required lenses as parallel subagents by default; `in-session-emulated` fallback is weaker evidence and must say the review is not independently adversarial. Review logs classify findings into four sections — `## Blocking Findings` (gate-closing defects), `## Advisory Findings` (real, important, not defects), `## Follow-up Findings`, and `## Warnings`. Advisories pass a quality bar, not a count cap: each states its consequence, survives a steel-man of the author's counter-argument, and meets the convergence bar (reached independently by two or more lenses, or anchor 75 / a P1 consequence alone); the orchestrator then runs one staff-bar filter over the consolidated list before the log is written. Blocking and defect findings never pass through that filter, and style/deprecation nits stay suppressed at every gate.
 
 Lifecycle gate results have a small operating contract:
 

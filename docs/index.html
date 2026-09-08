@@ -231,6 +231,7 @@ next: fix, re-run with --previous-run</code></pre>
         <ul class="checklist">
           <li>Adversarial multi-reviewer passes with named perspectives.</li>
           <li>Hard blockers for critical findings, spec-contract failures, and acceptance gaps.</li>
+          <li>Quality-gated advisory findings for the real-but-not-blocking class — gated by consequence, rebuttal, and convergence, then staff-filtered; defects never pass through that filter.</li>
           <li>A git-native enforcement gate: <code>git push</code> is blocked until the branch is review-clean (<code>--no-verify</code> escapes; it gates the checked-out branch), while metareview never blocks a commit — its <code>post-commit</code> hook just nudges you to review what it wrote.</li>
           <li>Fresh re-review with <code>--previous-run</code> instead of self-certification.</li>
           <li>Evidence-backed decisions: diff, tests, acceptance notes, and GitHub context.</li>
