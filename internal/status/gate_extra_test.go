@@ -409,7 +409,7 @@ func TestPushGateEscalatedLogLiftsOnlyByOverrides(t *testing.T) {
 	if blocked, _, err := PushGate(root, "", nil); err != nil || !blocked {
 		t.Fatalf("a grant without a filed request must not lift the ESCALATED log; blocked=%v err=%v", blocked, err)
 	}
-	writeLedger(findings.Record{ID: "mrvf-20260907-esc-001", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideRequestedBy: "agent", OverrideGrantedBy: "dsifry", OverrideGrantReason: "escalation was marker churn; approved"})
+	writeLedger(findings.Record{ID: "mrvf-20260907-esc-001", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideRequestedBy: "agent", OverrideGrantedBy: "dsifry", OverrideGrantReason: "escalation was marker churn; approved", OverrideEscalation: "mrv-esc"})
 	if blocked, _, err := PushGate(root, "", nil); err != nil || blocked {
 		t.Fatalf("an override grant lifting the ESCALATED log; blocked=%v err=%v", blocked, err)
 	}
@@ -449,7 +449,7 @@ func TestPushGateEscalationLiftRequiresTheTwoPhaseFlow(t *testing.T) {
 	}
 	// the agent files the two-phase request (fixed finding + escalation reference)
 	if err := findings.RequestOverride(root, "mrvf-20260907-esc-001", findings.OverrideRequest{
-		By: "agent", Reason: "the escalation was marker churn; requesting the human lift", Now: "2026-09-08T00:00:00Z", Escalation: "mrv-20260907-234001",
+		By: "agent", Reason: "the escalation was marker churn; requesting the human lift", Now: "2026-09-08T00:00:00Z", Escalation: "mrv-esc",
 	}); err != nil {
 		t.Fatal(err)
 	}

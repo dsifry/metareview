@@ -554,10 +554,21 @@ func LogResolvedInLedger(log reviewlog.Summary, byID map[string]findings.Record)
 	if !log.HasUnresolvedBlockers {
 		return false
 	}
+	vouched := 0
 	for _, id := range log.FindingIDs {
-		if _, ok := byID[id]; !ok {
-			return false
+		record, ok := byID[id]
+		if !ok {
+			return false // an ID the ledger does not know is an unvouched blocker
 		}
+		if findings.IsBlockingClass(record) && findings.IsResolvedTerminal(record.Status) {
+			vouched++
+		}
+	}
+	// The same pruned-reference tripwire as the escalation lift: the FindingIDs list is
+	// partly markdown-sourced, so a deleted reference hides a blocker from the check
+	// above; the unforgeable run record counted the blockers this run raised.
+	if log.BlockingFindingCount > 0 && vouched < log.BlockingFindingCount {
+		return false
 	}
 	resolvers, anyBlocking := ClassifyReviewFindings(log.FindingIDs, byID)
 	return !anyBlocking && len(resolvers) > 0
@@ -576,7 +587,13 @@ func EscalationLiftedByOverrides(log reviewlog.Summary, byID map[string]findings
 	if len(log.FindingIDs) == 0 {
 		return false // nothing to vouch for: fail closed
 	}
-	any := false
+	// The run record is the unforgeable source. No HeadSHA means no run record merged —
+	// the forgeable markdown is then the only source for this log's blocker set, and a
+	// gate decision on it would be theater (issue #147 review: the pruned-markdown attack).
+	if log.HeadSHA == "" {
+		return false
+	}
+	vouched := 0
 	for _, id := range log.FindingIDs {
 		record, ok := byID[id]
 		if !ok {
@@ -587,16 +604,24 @@ func EscalationLiftedByOverrides(log reviewlog.Summary, byID map[string]findings
 		}
 		// Two-phase, enforced: only a grant that ACKNOWLEDGES A FILED REQUEST
 		// (OverrideRequestedBy recorded, requester ≠ grantor enforced by
-		// findings.GrantOverride) counts toward lifting the hard stop. A direct
-		// single-actor grant — the path GrantOverride permits on open findings —
-		// does not, or the "hard stop that a later clean re-run must not erase"
-		// would be liftable by one unauthenticated command.
-		if record.Status != findings.StatusOverridden || record.OverrideGrantedBy == "" || record.OverrideRequestedBy == "" {
+		// findings.GrantOverride) counts toward lifting the hard stop — and the request
+		// must have been filed against THIS escalation: the FindingIDs list is partly
+		// markdown-sourced (forgeable), so a legitimate grant for an unrelated finding
+		// must not vouch for a different run's hard stop.
+		if record.Status != findings.StatusOverridden || record.OverrideGrantedBy == "" || record.OverrideRequestedBy == "" || record.OverrideEscalation != log.RunID {
 			return false
 		}
-		any = true
+		vouched++
 	}
-	return any
+	// Tripwire against the PRUNED-reference attack: the FindingIDs list is partly
+	// markdown-sourced, so deleting a reference hides a blocker from the loop above.
+	// The unforgeable run record counted the blockers this run raised; the vouched set
+	// must cover at least that many. (Carried-forward rows from ancestor runs are extra
+	// credit, not part of the count.)
+	if log.BlockingFindingCount > 0 && vouched < log.BlockingFindingCount {
+		return false
+	}
+	return true
 }
 
 // ResolverPhrase describes how a no-longer-blocking finding was cleared. Free text
