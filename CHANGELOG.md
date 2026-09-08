@@ -141,6 +141,12 @@
   creates (exclusive create-if-absent, so a racing render's freshly created index cannot be
   clobbered by the empty seed document; its error paths deliberately leave a partial seed
   in place rather than remove a path a concurrent render may have renamed content into).
+  Scope note: gate-run ROLLBACK restores prior file state through the generic
+  file-snapshot machinery (taskdone/prready/epicready/learning each carry a
+  restoreSnapshots copy), which still truncates in place — the two-writer contract above
+  covers the render and seed paths, not the rollback restorers; consolidating those onto
+  the atomic writer is follow-up work (the snapshot machinery is file-generic, so it is
+  not a one-line migration).
 
 - **PR-ready now selects findings for the target under review.** Findings linked to the current
   branch, live pull request, or a task review whose covered paths overlap the current diff retain

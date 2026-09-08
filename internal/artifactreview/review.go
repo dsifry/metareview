@@ -83,8 +83,11 @@ func ensureFindingsIndex(root string) error {
 		return err
 	}
 	// The durable audit file has exactly two writers, with deliberately different contracts:
-	// findings.writeIndexAtomic is the only REPLACING writer (the reconciler's render —
-	// unique temp, fsync, mode preservation; it creates when no index exists), and
+	// findings.writeIndexAtomic is the only REPLACING writer of the index on the render and
+	// seed paths (unique temp, fsync, mode preservation; it creates when no index exists)
+	// — gate-run ROLLBACK restores prior file state through the generic file-snapshot
+	// machinery instead, which truncates in place; see the findings package's CHANGELOG
+	// scope note — and
 	// findings.WriteIndexSeed only ever CREATES (exclusive O_EXCL create-if-absent — never a
 	// replacement, so a racing render's freshly created index cannot be clobbered by the
 	// empty document). Do NOT route the seed through the replacer: that reopens the
