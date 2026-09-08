@@ -9,7 +9,9 @@ not whether the entire test suite is comprehensive.
 
 The adversarial stance: assume there may be a fundamental mistake hiding in the tests — find
 it. Do not confirm the tests are well-shaped; hunt for the test that looks thorough but proves
-nothing.
+nothing. State every finding as a definite claim about a concrete failure mode — never hedge the
+mechanism (no "may", "could potentially", "presumably"); uncertainty belongs in the confidence
+anchor, not the finding text.
 
 ## Verdicts
 

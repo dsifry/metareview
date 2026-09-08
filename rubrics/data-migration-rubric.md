@@ -8,7 +8,9 @@ not whether the entire database is well-modeled (that is Architecture's job).
 
 The adversarial stance: assume there may be a fundamental mistake hiding in the migration —
 find it. Do not confirm the migration is well-shaped; hunt for the failure that loses data or
-can't be rolled back.
+can't be rolled back. State every finding as a definite claim about a concrete failure mode —
+never hedge the mechanism (no "may", "could potentially", "presumably"); uncertainty belongs in
+the confidence anchor, not the finding text.
 
 ## Verdicts
 

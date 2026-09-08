@@ -14,6 +14,9 @@ operational complexity, irreversible decisions, hidden coupling, unnecessary abs
 cases the happy-path architecture cannot represent, simpler architectures the author prematurely
 ruled out, and reasons the proposed design might be fundamentally wrong. The adversarial reviewer
 is allowed to conclude the best improvement is to throw away part or all of the proposed design.
+State every finding as a definite claim about a concrete failure mode — never hedge the mechanism;
+uncertainty belongs in the confidence anchor, not the finding text (see **Defect-claim phrasing**
+under Anchored Confidence & Suppression).
 
 ## Verdicts
 
@@ -47,6 +50,17 @@ Each finding carries a **confidence anchor** (0/25/50/75/100) and a **severity**
 
 **Suppression threshold:** suppress findings below the lens's threshold (default: suppress <50
 unless P0). A P0 finding is never suppressed regardless of confidence.
+
+### Defect-claim phrasing
+
+**Defect-claim phrasing.** State every finding as a definite claim about a concrete failure mode:
+"X crashes with NoMethodError when Y is nil, returning a 500 instead of the 4xx the contract
+promises." Never hedge the mechanism — no "may", "could potentially", "presumably". Uncertainty
+belongs in the confidence anchor, not the finding text: a finding you believe in is phrased
+assertively at anchor 50; a finding you don't believe in is dropped. Measured basis: hedged
+phrasing is the largest single cause of real findings being mis-adjudicated (same-issue flip
+rate ~9% — near-verbatim texts of the same issue get opposite verdicts across runs when one
+phrases the mechanism assertively and the other hedges it).
 
 ### What you don't flag (anti-overlap suppression)
 
@@ -132,10 +146,16 @@ persona-anti-overlap pattern.
   O(1); nested loops over the same collection → O(n^2); repeated linear scans.
 - Hunt for unbounded materialization: loading all rows into memory with no LIMIT/streaming on a
   hot path.
-- Hunt for N+1 query patterns: a query inside a loop over earlier results.
+- Hunt for N+1 query patterns: a query inside a loop over earlier results; and the same
+  multiplication over outbound work — nested loops over two collections (references ×
+  credentials) issuing N×M external API calls for one logical action. The cost/complexity
+  framing of that multiplication is this hunt's; the duplicate-execution semantics of the
+  same loop are Runtime-reliability's (its silent-partial-success hunt).
 - Hunt for missing schema invariants: missing FK/index/NOT NULL/UNIQUE/CHECK where the business
   rule implies them; lists jammed into one text/JSON column ("Jaywalking") instead of a
-  join/child table; polymorphic `(entity_type, entity_id)` pairs that can't enforce a real FK.
+  join/child table; polymorphic `(entity_type, entity_id)` pairs that can't enforce a real FK;
+  a query fetched without the include/association a downstream consumer needs, so service
+  resolution returns undefined or the wrong instance.
 - Hunt for scalability cliffs: hot paths that don't paginate or assume small N; hardcoded
   limits masking unbounded queries; adding a new type/category requires a migration (ENUM) when
   a lookup/child table would be data-driven.
@@ -186,7 +206,11 @@ persona-anti-overlap pattern.
   doesn't implement.
 - Hunt for **sentinel-meaning-change**: a return value that changed meaning in this diff — a
   `null`/empty/`[]` that previously meant "nothing here" now meaning "not yet loaded" or "error
-  suppressed"; a status sentinel whose semantics shifted so existing callers now misbehave.
+  suppressed"; a status sentinel whose semantics shifted so existing callers now misbehave; an
+  update path that writes only a subset of fields, leaving a pre-existing row's unwritten field
+  stale (an update that never sets `type`, so an old value survives silently); a changed default
+  (page size, limit, fallback value) that silently truncates or alters behavior for existing
+  callers who relied on the old default.
 - Hunt for **format-drift** (the value one path writes and another path compares disagree
   on canonical form): case (`lower(host) = ?` column vs raw user input; a column stored
   lowercased but matched against mixed-case input); scheme (`http://`-prefixed hosts stored,
@@ -215,7 +239,9 @@ persona-anti-overlap pattern.
   version bump; and when a diff changes an interface/abstract-method signature, check EVERY
   implementer, not just the call sites in the diff (an implementer left on the old signature
   compiles against duck-typing and silently misroutes, e.g. always hitting the default
-  calendar path); advertised routes with no controller action; an accepted request envelope
+  calendar path); a client-side and server-side copy of the same schema/validation that duplicate
+  and drift (the two copies already disagree on a refinement in this diff); advertised routes
+  with no controller action; an accepted request envelope
   changed or dropped so existing callers send fields that are silently ignored; strict-equality
   param parsing that silently inverts booleans (`params[:visible] == "true"` vs JSON `true`).
 - Block on parallel service paths, contradictions with existing architecture, O(n^2) over a
@@ -385,11 +411,16 @@ persona-anti-overlap pattern.
   success (unknown IDs silently skipped; an unresolvable dependency silently skipped with
   no log and no error result; a throttle/lock/dedup key committed before the operation
   succeeds so retries no-op "successfully"; a hash/cursor advanced even when the underlying
-  write failed).
+  write failed); a loop over references × credentials that issues N×M duplicate remote
+  operations for the same logical action. The duplicate-execution semantics of that loop are
+  this hunt's; the cost/complexity framing of the same multiplication is Architecture's (its
+  N+1 query-patterns hunt, which carries the cost half).
 - Hunt for **outbound-call hardening**: no timeout on network/file fetches (`open(url)`,
   `fetch`, feed/HTTP clients); unbounded request payloads or downloads (no size/count cap,
   no `max()` on schema fields written to storage); request amplification with no rate
-  limit (an enqueue endpoint throttled per-URL, bypassed by varying the path). The
+  limit (an enqueue endpoint throttled per-URL, bypassed by varying the path); an outbound
+  header or list built by appending per-recipient with no bound, growing with collection size
+  until the recipient rejects it (unbounded reply-to/CC lists). The
   reliability hardening here is timeouts, payload/storage caps, and exhaustion on the
   request path; a missing rate limit that is a vulnerability (unauthenticated
   amplification) is Security's A04, not this hunt.
