@@ -269,24 +269,86 @@ func pushGateFixtureWithBlockingLog(t *testing.T, root, headSHA string, ledger [
 		`{"id":"mrv-x","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"],"findingIds":["mrvf-20260907-x-001"]}`+"\n")
 }
 
+// pushGateAuthenticatedRows returns runs.jsonl rows that AUTHENTICATE the given log
+// files (reviewlog.localRunAuthenticatesSummary: reviewLogPath == the log file, scope/
+// verdict/base/head/target/reviewers/reviewInputDigest all present and agreeing with the
+// log's declared digest) — the state every real local gate run produces.
+type gateLogRow struct{ id, path, verdict string }
+
+func pushGateAuthenticatedRows(t *testing.T, digest string, headSHA string, rows []gateLogRow) string {
+	t.Helper()
+	out := ""
+	for _, r := range rows {
+		b, err := json.Marshal(map[string]any{
+			"id": r.id, "scope": "pr-ready", "verdict": r.verdict,
+			"baseSha": "base0000", "headSha": headSHA,
+			"target":            map[string]string{"type": "branch", "id": "fix/146"},
+			"reviewLogPath":     "docs/metareview/reviews/" + r.path,
+			"reviewers":         []string{"pr-readiness-reviewer", "validation-reviewer"},
+			"reviewInputDigest": digest,
+			"coveredPaths":      []string{"a.go", "b.go"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out += string(b) + "\n"
+	}
+	return out
+}
+
 // A blocking log whose blocker-class findings are ALL resolved in the ledger
-// (override-granted here) no longer blocks: the ledger is the live reconciliation
-// authority, and the push gate must agree with the pr-ready review's own reconciliation.
+// (override-granted here) no longer blocks — provided the run record AUTHENTICATES the
+// log (issue #147 review: the reconciliation anchor is the authenticated run record, not
+// the forgeable markdown). The fixture logs therefore declare the reviewer-input digest
+// their runs.jsonl rows record.
 func TestPushGateClearsWhenTheLedgerResolvesTheLogBlockers(t *testing.T) {
 	root, _, headSHA := gitRepo(t)
+	digest := "sha256:" + strings.Repeat("a", 64)
 	pushGateFixtureWithBlockingLog(t, root, headSHA, []findings.Record{{
 		ID: "mrvf-20260907-x-001", Status: findings.StatusOverridden, Classification: "blocking",
 		Severity: "high", OverrideGrantedBy: "boss", OverrideGrantReason: "accepted for release",
 	}})
 	// a later PASS review covers the files (a NEEDS_REVISION review never credits
-	// covered paths, so without this the files stay unreviewed regardless)
+	// covered paths, so without this the files stay unreviewed regardless). The digest
+	// declaration in each log is what lets its runs.jsonl row authenticate it — without
+	// the declared digest the record cannot vouch for the log and nothing clears.
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "now.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-x`\nTarget: `current branch`\n\nReviewer input digest: `"+digest+"`\n\n## Verdict\n\nNEEDS_REVISION\n\n## Blocking Findings\n\n### mrvf-20260907-x-001: a blocker\n")
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "later.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-later`\nTarget: `current branch`\n\nReviewer input digest: `"+digest+"`\n\n## Verdict\n\nPASS_ADVISORY\n")
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		pushGateAuthenticatedRows(t, digest, headSHA, []gateLogRow{
+			{"mrv-x", "now.md", "NEEDS_REVISION"}, {"mrv-later", "later.md", "PASS_ADVISORY"},
+		}))
+	if blocked, msg, err := PushGate(root, "", nil); err != nil || blocked {
+		t.Fatalf("a log whose blockers are ledger-resolved must not block; blocked=%v msg=%q err=%v", blocked, msg, err)
+	}
+}
+
+// The negative direction of the same contract: a log whose run record does NOT
+// authenticate it (no declared digest — the hand-authored/re-labeled shape) inherits
+// nothing from the ledger, even with every finding resolved. One markdown edit must not
+// erase a real hard stop (issue #147 review).
+func TestPushGateKeepsBlockingWhenTheLogIsUnauthenticated(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	digest := "sha256:" + strings.Repeat("a", 64)
+	pushGateFixtureWithBlockingLog(t, root, headSHA, []findings.Record{{
+		ID: "mrvf-20260907-x-001", Status: findings.StatusOverridden, Classification: "blocking",
+		Severity: "high", OverrideGrantedBy: "boss", OverrideGrantReason: "accepted for release",
+	}})
+	// logs WITHOUT the digest declaration: the runs.jsonl rows authenticate nothing
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "now.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-x`\nTarget: `current branch`\n\n## Verdict\n\nNEEDS_REVISION\n\n## Blocking Findings\n\n### mrvf-20260907-x-001: a blocker\n")
 	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "later.md"),
 		"# metareview: pr-ready review\n\nRun ID: `mrv-later`\nTarget: `current branch`\n\n## Verdict\n\nPASS_ADVISORY\n")
 	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
-		`{"id":"mrv-x","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"],"findingIds":["mrvf-20260907-x-001"]}`+"\n"+
-			`{"id":"mrv-later","scope":"pr-ready","verdict":"PASS_ADVISORY","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"]}`+"\n")
-	if blocked, msg, err := PushGate(root, "", nil); err != nil || blocked {
-		t.Fatalf("a log whose blockers are ledger-resolved must not block; blocked=%v msg=%q err=%v", blocked, msg, err)
+		pushGateAuthenticatedRows(t, digest, headSHA, []gateLogRow{
+			{"mrv-x", "now.md", "NEEDS_REVISION"}, {"mrv-later", "later.md", "PASS_ADVISORY"},
+		}))
+	if blocked, _, err := PushGate(root, "", nil); err != nil {
+		t.Fatal(err)
+	} else if !blocked {
+		t.Fatal("a log whose run record does not authenticate it must keep blocking, ledger resolved or not")
 	}
 }
 
@@ -373,10 +435,11 @@ func TestPushGateWarnsWhenTheLedgerIsUnreadable(t *testing.T) {
 // stop) — only by explicit override grants on every blocker-class finding it references.
 func TestPushGateEscalatedLogLiftsOnlyByOverrides(t *testing.T) {
 	root, _, headSHA := gitRepo(t)
-	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "esc.md"),
-		"# metareview: pr-ready review\n\nRun ID: `mrv-esc`\nTarget: `current branch`\n\n## Verdict\n\nESCALATED\n\n## Blocking Findings\n\n### mrvf-20260907-esc-001: the hard stop\n")
+	digest := "sha256:" + strings.Repeat("b", 64)
+	escLog := "# metareview: pr-ready review\n\nRun ID: `mrv-esc`\nTarget: `current branch`\nReviewer input digest: `" + digest + "`\n\n## Verdict\n\nESCALATED\n\n## Blocking Findings\n\n### mrvf-20260907-esc-001: the hard stop\n"
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "esc.md"), escLog)
 	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "later.md"),
-		"# metareview: pr-ready review\n\nRun ID: `mrv-later`\nTarget: `current branch`\n\n## Verdict\n\nPASS_ADVISORY\n")
+		"# metareview: pr-ready review\n\nRun ID: `mrv-later`\nTarget: `current branch`\nReviewer input digest: `"+digest+"`\n\n## Verdict\n\nPASS_ADVISORY\n")
 	writeLedger := func(rows ...findings.Record) {
 		t.Helper()
 		out := ""
@@ -390,8 +453,9 @@ func TestPushGateEscalatedLogLiftsOnlyByOverrides(t *testing.T) {
 		mustWriteFile(t, filepath.Join(root, ".metareview", "findings.jsonl"), out)
 	}
 	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
-		`{"id":"mrv-esc","scope":"pr-ready","verdict":"ESCALATED","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"],"findingIds":["mrvf-20260907-esc-001"]}`+"\n"+
-			`{"id":"mrv-later","scope":"pr-ready","verdict":"PASS_ADVISORY","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"]}`+"\n")
+		pushGateAuthenticatedRows(t, digest, headSHA, []gateLogRow{
+			{"mrv-esc", "esc.md", "ESCALATED"}, {"mrv-later", "later.md", "PASS_ADVISORY"},
+		}))
 
 	// a FIX on the escalated run's finding never lifts the hard stop
 	writeLedger(findings.Record{ID: "mrvf-20260907-esc-001", Status: "fixed", Classification: "blocking", Severity: "high", FixedInRunID: "mrv-run-9"})
@@ -420,10 +484,11 @@ func TestPushGateEscalatedLogLiftsOnlyByOverrides(t *testing.T) {
 // reference; the human grants). Until the grant lands, every intermediate state blocks.
 func TestPushGateEscalationLiftRequiresTheTwoPhaseFlow(t *testing.T) {
 	root, _, headSHA := gitRepo(t)
+	escDigest := "sha256:" + strings.Repeat("b", 64)
 	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "esc.md"),
-		"# metareview: pr-ready review\n\nRun ID: `mrv-esc`\nTarget: `current branch`\n\n## Verdict\n\nESCALATED\n\n## Blocking Findings\n\n### mrvf-20260907-esc-001: the hard stop\n")
+		"# metareview: pr-ready review\n\nRun ID: `mrv-esc`\nTarget: `current branch`\nReviewer input digest: `"+escDigest+"`\n\n## Verdict\n\nESCALATED\n\n## Blocking Findings\n\n### mrvf-20260907-esc-001: the hard stop\n")
 	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "later.md"),
-		"# metareview: pr-ready review\n\nRun ID: `mrv-later`\nTarget: `current branch`\n\n## Verdict\n\nPASS_ADVISORY\n")
+		"# metareview: pr-ready review\n\nRun ID: `mrv-later`\nTarget: `current branch`\nReviewer input digest: `"+escDigest+"`\n\n## Verdict\n\nPASS_ADVISORY\n")
 	ledger := func() { mustWriteFile(t, filepath.Join(root, ".metareview", "findings.jsonl"), "") }
 	writeOne := func(r findings.Record) {
 		t.Helper()
@@ -434,8 +499,9 @@ func TestPushGateEscalationLiftRequiresTheTwoPhaseFlow(t *testing.T) {
 		mustWriteFile(t, filepath.Join(root, ".metareview", "findings.jsonl"), string(b)+"\n")
 	}
 	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
-		`{"id":"mrv-esc","scope":"pr-ready","verdict":"ESCALATED","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"],"findingIds":["mrvf-20260907-esc-001"]}`+"\n"+
-			`{"id":"mrv-later","scope":"pr-ready","verdict":"PASS_ADVISORY","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"]}`+"\n")
+		pushGateAuthenticatedRows(t, escDigest, headSHA, []gateLogRow{
+			{"mrv-esc", "esc.md", "ESCALATED"}, {"mrv-later", "later.md", "PASS_ADVISORY"},
+		}))
 
 	// empty ledger: blocked
 	ledger()

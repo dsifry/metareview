@@ -109,6 +109,15 @@ func reconcileLogsAgainstLedger(root string, logs []reviewlog.Summary, warnings 
 		if !reviewstate.LogBlocks(s) {
 			continue
 		}
+		// The reconciliation binds to the run record through the log's Run ID — scraped
+		// from the forgeable committed markdown. Only a run record that AUTHENTICATES the
+		// summary (its own recorded reviewLogPath is this file, plus scope/verdict/SHAs/
+		// digest agreement — reviewlog.localRunAuthenticatesSummary) may serve as the
+		// anchor: a re-labeled or hand-authored log inherits nothing and keeps blocking
+		// (issue #147 review: one markdown edit must not erase a real hard stop).
+		if !s.RunRecordAuthenticated {
+			continue
+		}
 		if strings.EqualFold(strings.TrimSpace(s.Verdict), "ESCALATED") {
 			// aligned with LogBlocks' own TrimSpace so the shared predicate and the
 			// dispatch cannot disagree on a padded verdict
