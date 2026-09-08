@@ -657,3 +657,120 @@ func TestIsResolvedTerminalIsAnAllowlist(t *testing.T) {
 		}
 	}
 }
+
+// The committed docs/metareview/FINDINGS.md is the durable, shared audit trail; the local
+// .metareview/findings.jsonl is per-worktree transient state. Before the carry-over fix
+// (issue #151), a gate run in a fresh worktree rendered the index purely from its empty
+// local ledger and rewrote the committed file to "No unresolved findings recorded yet.",
+// destroying granted-override provenance and open blockers recorded elsewhere. These tests
+// pin the three properties the fix exists for.
+func TestRenderPreservesCommittedLinesTheLedgerDoesNotKnow(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	committed := `# metareview Findings
+
+- mrvf-20260908-x-001 [high] No adjudicated lens review recorded (adversarial-review-reviewer)
+
+## Process Overrides
+
+Deliberate exceptions to the review workflow. Pending entries still block CI.
+
+- mrvf-20260903-y-001 [granted] Adversarial review was in-session-emulated — granted by agent-session-140 (shared-ledger residue cleanup per issue #138) at 2026-09-07T17:58:40Z: Historical advisory from a prior session's branch.
+`
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(committed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh worktree's ledger is EMPTY: the render must carry both committed lines
+	// forward verbatim, not collapse to the no-findings sentinel.
+	if err := RenderIndexWithRecords(root, nil); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := string(got)
+	if !strings.Contains(g, "- mrvf-20260908-x-001 [high] No adjudicated lens review recorded") {
+		t.Errorf("committed open blocker destroyed by an empty local ledger:\n%s", g)
+	}
+	if !strings.Contains(g, "- mrvf-20260903-y-001 [granted] Adversarial review was in-session-emulated") {
+		t.Errorf("committed override provenance destroyed by an empty local ledger:\n%s", g)
+	}
+
+	// Once the ledger KNOWS a finding (any status — here a fixed one), it renders from the
+	// ledger and suppresses the committed line: fresh local knowledge wins.
+	fixed := Record{ID: "mrvf-20260908-x-001", Status: "fixed", Severity: "high", Title: "No adjudicated lens review recorded", Reviewer: "adversarial-review-reviewer"}
+	if err := RenderIndexWithRecords(root, []Record{fixed}); err != nil {
+		t.Fatalf("render with known record: %v", err)
+	}
+	got, _ = os.ReadFile(path)
+	g = string(got)
+	if strings.Contains(g, "mrvf-20260908-x-001") {
+		t.Errorf("a finding the ledger knows must render from the ledger, not carry over:\n%s", g)
+	}
+	if !strings.Contains(g, "mrvf-20260903-y-001") {
+		t.Errorf("the override the ledger still does not know must survive:\n%s", g)
+	}
+}
+
+func TestRenderFreshRepositoryUnchanged(t *testing.T) {
+	root := t.TempDir()
+	// no committed index at all — the first render must behave exactly as before
+	if err := RenderIndexWithRecords(root, nil); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "docs", "metareview", "FINDINGS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(got)) != "# metareview Findings\n\nNo unresolved findings recorded yet." {
+		t.Errorf("fresh render changed: %q", string(got))
+	}
+}
+
+func TestCarryOverLinesSplitsSectionsAndSkipsKnown(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	doc := `# metareview Findings
+
+- mrvf-a-001 [high] known blocker (reviewer)
+- mrvf-a-002 [high] unknown blocker (reviewer)
+
+## Process Overrides
+
+Deliberate exceptions to the review workflow. Pending entries still block CI.
+
+- mrvf-a-001 [granted] known override — granted by someone at some time: reason
+- mrvf-a-003 [pending] unknown override — requested by someone at some time: reason
+
+## Stale
+
+- mrvf-a-004 [low] bullet under a later section — carried as a blocker, not an override
+`
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	blockers, overrides := carryOverLines(path, map[string]bool{"mrvf-a-001": true})
+	if len(blockers) != 2 || !strings.Contains(blockers[0], "mrvf-a-002") {
+		t.Errorf("blockers carry-over = %v, want the unknown mrvf-a-002 first (post-section bullet checked below)", blockers)
+	}
+	if len(overrides) != 1 || !strings.Contains(overrides[0], "mrvf-a-003") {
+		t.Errorf("overrides carry-over = %v, want only the unknown mrvf-a-003", overrides)
+	}
+	// a later ## section closes the overrides section: its bullets carry as blockers
+	if len(blockers) != 2 || !strings.Contains(blockers[1], "mrvf-a-004") {
+		t.Errorf("blockers carry-over = %v, want mrvf-a-002 and the post-section mrvf-a-004", blockers)
+	}
+	// an unreadable/absent committed index is no information, not an error
+	b, o := carryOverLines(filepath.Join(root, "does-not-exist.md"), nil)
+	if b != nil || o != nil {
+		t.Errorf("absent committed index must carry nothing, got %v %v", b, o)
+	}
+}

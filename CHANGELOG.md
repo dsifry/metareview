@@ -111,6 +111,18 @@
 
 ### Fixed
 
+- **A fresh git worktree can no longer clobber the committed `FINDINGS.md` (issue #151).** The
+  findings index is rendered from the per-worktree local ledger
+  (`.metareview/findings.jsonl`), so a gate run in a newly created worktree — whose ledger is
+  empty — rewrote the committed `docs/metareview/FINDINGS.md` to "No unresolved findings
+  recorded yet.", destroying the granted-override provenance and open blockers recorded by
+  other worktrees and sessions (observed twice on 2026-09-08; once swept into a PR and caught
+  only by CodeRabbit). The render now carries every committed blocker and override line whose
+  finding ID the local records do not contain, verbatim: a record the ledger knows (any
+  status) renders from the ledger and suppresses its committed line, so fresh local knowledge
+  always wins, and an empty ledger is NO information rather than "no findings" — the same
+  stance CoveredPaths takes for `none`-vs-absent.
+
 - **PR-ready now selects findings for the target under review.** Findings linked to the current
   branch, live pull request, or a task review whose covered paths overlap the current diff retain
   their blocking effect. Unrelated historical blockers remain visible as repository-health

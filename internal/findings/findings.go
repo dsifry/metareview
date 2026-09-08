@@ -3,12 +3,13 @@ package findings
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/dsifry/metareview/internal/jsonl"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/dsifry/metareview/internal/jsonl"
 	"github.com/dsifry/metareview/internal/state"
 )
 
@@ -297,22 +298,76 @@ func RenderIndex(root string) error {
 	return RenderIndexWithRecords(root, records)
 }
 
+// carryOverLine matches both shapes the index renders — unresolved-blocker bullets
+// ("- mrvf-… [high] Title (reviewer)") and Process Overrides entries ("- mrvf-… [granted] …") —
+// keyed by the leading finding ID, which is unique and stable across worktrees and sessions.
+var carryOverLine = regexp.MustCompile(`^- (mrvf-[A-Za-z0-9-]+) \[`)
+
+// carryOverLines returns the committed FINDINGS.md's blocker and override lines whose finding
+// IDs the rendering records do not know (issue #151).
+//
+// The local ledger (.metareview/findings.jsonl) is per-worktree transient state; the
+// committed docs/metareview/FINDINGS.md is the durable, shared audit trail. Rendering purely
+// from the local ledger let a fresh worktree — whose ledger is empty — rewrite the committed
+// file to "No unresolved findings recorded yet.", destroying the granted-override provenance
+// and open blockers recorded by other worktrees and sessions (observed twice on 2026-09-08;
+// once swept into a PR and caught only by CodeRabbit). The render now carries every committed
+// line whose finding ID the local records do not contain, verbatim: a record the ledger knows
+// (open, fixed, overridden — any status) renders from the ledger and suppresses its committed
+// line, so fresh local knowledge always wins; a record the ledger has never seen is preserved
+// rather than destroyed. An empty ledger is thereby NO INFORMATION, not "no findings" — the
+// same stance CoveredPaths takes for none-vs-absent.
+func carryOverLines(path string, known map[string]bool) (blockers, overrides []string) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil // no committed index yet (first render) — nothing to carry
+	}
+	inOverrides := false
+	for _, line := range strings.Split(string(raw), "\n") {
+		switch {
+		case strings.HasPrefix(line, "## Process Overrides"):
+			inOverrides = true
+		case strings.HasPrefix(line, "## "):
+			inOverrides = false
+		}
+		m := carryOverLine.FindStringSubmatch(line)
+		if m == nil || known[m[1]] {
+			continue
+		}
+		if inOverrides {
+			overrides = append(overrides, line)
+		} else {
+			blockers = append(blockers, line)
+		}
+	}
+	return blockers, overrides
+}
+
 func RenderIndexWithRecords(root string, records []Record) error {
 	blockers := unresolvedBlockingFrom(records)
 	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	body := "No unresolved findings recorded yet."
-	if len(blockers) > 0 {
-		lines := make([]string, 0, len(blockers))
-		for _, finding := range blockers {
-			lines = append(lines, fmt.Sprintf("- %s [%s] %s (%s)", finding.ID, finding.Severity, finding.Title, finding.Reviewer))
+	known := make(map[string]bool, len(records))
+	for _, record := range records {
+		if record.ID != "" {
+			known[record.ID] = true
 		}
+	}
+	coBlockers, coOverrides := carryOverLines(path, known)
+	lines := make([]string, 0, len(blockers)+len(coBlockers))
+	for _, finding := range blockers {
+		lines = append(lines, fmt.Sprintf("- %s [%s] %s (%s)", finding.ID, finding.Severity, finding.Title, finding.Reviewer))
+	}
+	lines = append(lines, coBlockers...)
+	body := "No unresolved findings recorded yet."
+	if len(lines) > 0 {
 		body = strings.Join(lines, "\n")
 	}
 	document := "# metareview Findings\n\n" + body + "\n"
-	if overrides := overrideLines(records); len(overrides) > 0 {
+	overrides := append(overrideLines(records), coOverrides...)
+	if len(overrides) > 0 {
 		document += "\n## Process Overrides\n\n" +
 			"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
 			strings.Join(overrides, "\n") + "\n"
