@@ -1,6 +1,7 @@
 # metareview Findings
 
 - mrvf-20260908-183915833236000-pr-ready-branch-10d735e5-001 [high] Working tree changes excluded from PR-ready review (pr-readiness-reviewer)
+- mrvf-20260908-183928779893000-pr-ready-branch-10d735e5-001 [high] Unresolved review blockers (pr-readiness-reviewer)
 
 ## Process Overrides
 
