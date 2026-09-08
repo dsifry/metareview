@@ -38,6 +38,18 @@ keep the orchestrator lean:
   the verdict plus a one-line summary, not a re-emission of the findings. On large diffs a single
   findings-laden message can overflow the model's per-message output limit and truncate the
   review; per-lens writes avoid this.
+- **Consolidate advisory findings before writing the log.** After the lenses return, cluster
+  near-duplicate advisory findings across lenses into one finding carrying its provenance list
+  (the cluster size feeds the convergence gate), apply the three advisory gates (stated
+  consequence, rebuttal, convergence weighting — see the Advisory Findings section of
+  `rubrics/artifact-review-rubric.md`), then dispatch **one** subagent that re-judges the
+  surviving advisory list against the staff bar — "would a staff-level reviewer actually
+  comment on this in review, and would the author consider it substantive?" — and drops the
+  ones that fail, before the review log is written. Write the survivors into the review log's
+  `## Advisory Findings` section. This filter applies to **advisories only**: it must never
+  touch blocking/defect findings — validated bugs pass through untouched. Keep the filter to
+  one call, cheap effort. The consolidation narrative (clusters, gate outcomes, staff-filter
+  disposition) is audit trail for `## Orchestrator Notes (not findings)`, not a finding stream.
 
 ## Gate Rule
 

@@ -138,6 +138,22 @@ grep -q 'with 10 adversarial lens subagents' docs/fsm/sdlc-loop-example.md
 grep -q 'dispatch the ten lens sub-agents' docs/fsm/sdlc-loop-example.md
 
 grep -q 'return the actual artifact-review verdict' skills/review-artifact/SKILL.md
+# The advisory-consolidation step (0.11.1): the orchestrator clusters advisories across lenses,
+# applies the three gates, and runs ONE staff-surrogate subagent filter on the advisory list only
+# (blocking/defect findings never pass through it). The lens-set enumeration above cannot see
+# this step, and drifting it silently disables the advisory pipeline — pin its load-bearing
+# phrases directly, in both the skill and the rubric section that defines the gates.
+grep -q 'Consolidate advisory findings' skills/review-artifact/SKILL.md
+grep -q 'staff bar' skills/review-artifact/SKILL.md
+grep -q 'must never' skills/review-artifact/SKILL.md
+grep -q 'blocking/defect findings' skills/review-artifact/SKILL.md
+grep -q '## Advisory Findings (real, important, not defects)' rubrics/artifact-review-rubric.md
+grep -q 'Stated consequence' rubrics/artifact-review-rubric.md
+grep -q 'Rebuttal gate' rubrics/artifact-review-rubric.md
+grep -q 'Convergence weighting' rubrics/artifact-review-rubric.md
+grep -q 'The deletion test' rubrics/artifact-review-rubric.md
+grep -q 'style nits remain suppressed at every gate' rubrics/artifact-review-rubric.md
+grep -q 'Report \*\*advisory findings\*\*' rubrics/artifact-review-rubric.md
 grep -q 'parallel subagents by default' docs/quickstart.md
 grep -q 'in-session-emulated' docs/quickstart.md
 grep -q 'weaker evidence' docs/quickstart.md
