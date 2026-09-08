@@ -180,7 +180,8 @@ persona-anti-overlap pattern.
   bare `URI#host` compared); port (validation accepts `host:8080`, lookup via `URI#host`
   strips it); trailing-slash concatenation; type coercion (JSON boolean vs string
   `"true"`, array vs CSV string); encoding (double-decode); normalization asymmetry (model
-  callbacks normalize new rows, but a backfill or raw-SQL insert bypasses them).
+  callbacks normalize new rows, but a raw-SQL insert or other non-migration path bypasses
+  them — a migration's own backfill safety is Data-migration's, not this hunt's).
 - Hunt for **cascading-failure paths**: trace the failure propagation — when one dependency
   fails, does the design degrade gracefully or cascade? A sync call chain with no
   timeout/circuit-breaker/fallback; an async chain with no rejection handling (`.then` without
