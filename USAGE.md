@@ -56,6 +56,18 @@ Artifact review runs **ten adversarial lenses as parallel subagents** by default
 completeness, scope/alignment, architecture, intent-preservation, security, testing-quality,
 data-migration, runtime-reliability, mechanical-precision). A `NOT_REVIEWED` scaffold is *not* a pass.
 
+**Reading a review log.** Findings land in four classified sections: `## Blocking Findings`
+(gate-closing defects), `## Advisory Findings` (real, important, not defects — latent defects,
+design risks, simplification opportunities, and code smells a staff-level reviewer would
+actually raise), `## Follow-up Findings`, and `## Warnings`. Advisories are quality-gated, not
+count-capped: each must state its consequence (who gets bitten, when), survive a steel-man of
+the author's strongest counter-argument, and meet the convergence bar (two or more lenses
+reaching it independently, or anchor 75 / a P1 consequence alone); the orchestrator then runs
+one staff-bar filter over the consolidated list before the log is written — an advisory that
+reads like a concrete defect is flagged back as a candidate blocker, never silently dropped.
+Blocking and defect findings never pass through that filter, and style/deprecation nits stay
+suppressed at every gate.
+
 **Big diffs are handled.** When a branch diff exceeds the review context limit, `task-done`/`pr-ready`
 cut it into content-stable **shards** and write one prompt pack per shard; you review each pack and write
 a result back, and the context-risk blocker clears once every shard (plus the cross-shard seam) has a
