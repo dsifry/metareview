@@ -115,7 +115,7 @@ for lens in 'Feasibility' 'Completeness' 'Scope and alignment' 'Architecture' \
 done
 
 # and no user-facing document may claim a different count than the gate enforces
-for doc in README.md docs/quickstart.md docs/README.claude.md docs/README.codex.md commands/review-artifact.md; do
+for doc in README.md USAGE.md docs/quickstart.md docs/README.claude.md docs/README.codex.md commands/review-artifact.md; do
   # Any claim of a lens count other than nine, not just the exact phrase "five required": none
   # of these documents contains the word "five" at all today, so matching one phrase asserted
   # nothing. "Run the five lenses." could be appended to any of them and this stayed at exit 0.
@@ -127,7 +127,7 @@ for doc in README.md docs/quickstart.md docs/README.claude.md docs/README.codex.
       ten|10) ;;
       *) echo "FAIL: $doc claims $count lenses; artifactReviewComplete enforces ten"; exit 1 ;;
     esac
-  done < <(grep -Eoi '\b(one|two|three|four|five|six|seven|eight|nine|ten|[0-9]+) (required )?lenses\b' "$doc" | awk '{print $1}')
+  done < <(grep -Eoi '\b(one|two|three|four|five|six|seven|eight|nine|ten|[0-9]+) (required |adversarial )?lenses\b' "$doc" | awk '{print $1}')
 done
 # The FSM example payload carries the same count the discover node emits; it drifted once
 # already (nine stayed behind when the set grew), so pin it like the prose docs above.

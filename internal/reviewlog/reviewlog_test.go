@@ -585,6 +585,21 @@ func TestOnlyCriticalAndHighSeveritiesBlock(t *testing.T) {
 // A declaration that repeats a lens is malformed, and malformed is not "the legacy rubric".
 // Comparing only the count of UNIQUE names let "the five legacy lenses, one of them twice" match
 // legacyLenses, so a pre-cutoff log could satisfy the gate with five rows on an invalid marker.
+// The newest frozen era must be a faithful snapshot of the live set it freezes. Nothing else
+// pins the hand-typed vNLenses literal to the set it claims to freeze: every era pin compares
+// the literal only against itself, so a typo'd or duplicated normalized key in the literal
+// stays green across the suite while making dateless-run reviews permanently unresolvable (no
+// reviewer row can normalize to the bogus key) — the exact retroactive-blocker class the
+// frozen-era scheme exists to prevent. This test also forces the next lens addition to cut a
+// fresh snapshot: growing lens.All makes currentLenses outgrow the newest era, and this fails
+// until a new frozen literal and era are appended.
+func TestNewestFrozenEraMatchesLiveLensSet(t *testing.T) {
+	newest := lensEras[len(lensEras)-1].lenses
+	if !sameLensSet(newest, currentLenses) {
+		t.Errorf("newest frozen era = %v, live set = %v — cut a fresh frozen snapshot and era for the live set (see the lensEras comment)", newest, currentLenses)
+	}
+}
+
 func TestDuplicateLensDeclarationIsNotAShippedRubric(t *testing.T) {
 	dup := append(append([]string{}, legacyLenses...), legacyLenses[0])
 	if known := knownRubric(dup); known != nil {

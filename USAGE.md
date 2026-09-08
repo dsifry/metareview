@@ -52,9 +52,9 @@ metareview review pr-ready --base main --evidence "$tmp"
 - `NEEDS_REVISION` — fix the cited blockers, then re-run the **same** gate with `--previous-run <run-id>`.
 - `ESCALATED` — stop retrying the same target; a human must narrow, split, or redesign it.
 
-Artifact review runs **nine adversarial lenses as parallel subagents** by default (feasibility,
+Artifact review runs **ten adversarial lenses as parallel subagents** by default (feasibility,
 completeness, scope/alignment, architecture, intent-preservation, security, testing-quality,
-data-migration, mechanical-precision). A `NOT_REVIEWED` scaffold is *not* a pass.
+data-migration, runtime-reliability, mechanical-precision). A `NOT_REVIEWED` scaffold is *not* a pass.
 
 **Big diffs are handled.** When a branch diff exceeds the review context limit, `task-done`/`pr-ready`
 cut it into content-stable **shards** and write one prompt pack per shard; you review each pack and write
