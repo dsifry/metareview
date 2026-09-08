@@ -396,7 +396,9 @@ persona-anti-overlap pattern.
 - Hunt for **error-shape leakage**: a raw exception/500 where the API contract promises a
   4xx (unguarded parse/decrypt, `find`-or-throw on optional relations, missing param
   envelope); error messages that can never render (a template-literal fallback that is
-  always truthy).
+  always truthy). Stack traces or error details exposed to end users are Security's A05,
+  not this hunt — this hunt owns the wrong-shape response and the never-rendering
+  message.
 - Hunt for **cross-boundary credential/token lifecycle**: a response schema that cannot
   structurally satisfy the parser on one path (every refresh fails); a connection/client
   rebuilt from the pre-refresh token after persisting the new one; `response.ok`/status

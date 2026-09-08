@@ -318,7 +318,9 @@ func verdictIsUnresolved(verdict string) bool {
 // era would retroactively become incomplete — the exact failure the era table exists to prevent.
 // Pointing the newest era at the live currentLenses was a latent footgun (flagged in review): a
 // one-line add to lens.All would silently expand what every 2026-08-31+ log had to cover. Adding a
-// lens now requires cutting a new frozen vNLenses snapshot and appending an era for its ship date;
+// lens now requires cutting a new frozen vNLenses snapshot and appending an era keyed from the
+// first FULL day it is required (the day after it merges — see the lensEras comment for why the
+// merge date itself must not be used);
 // TestLensErasAreKeyedByDate pins each era against its frozen literal so skipping that step fails.
 var currentLenses = currentLensKeys()
 var v10Lenses = []string{"feasibility", "completeness", "scopeandalignment", "architecture", "intentpreservation", "security", "testingquality", "datamigration", "runtimereliability", "mechanicalprecision"}

@@ -17,9 +17,9 @@
 // era keyed from the first FULL day the new lens is required (the day after it merges) — not the
 // merge date itself: eras are day-granular with no merge-time ordering, so a merge-date era
 // retroactively judges every review written earlier that same day against the new set, the exact
-// failure the era table exists to prevent. TestLensErasAreKeyedByDate and
-// TestNewestFrozenEraMatchesLiveLensSet fail if you skip that step. reviewlog's TestLensErasAreKeyedByDate fails if you
-// skip that step. See also the rubric/skill/doc/workflow sync points noted there.
+// failure the era table exists to prevent. reviewlog's TestLensErasAreKeyedByDate and
+// TestNewestFrozenEraMatchesLiveLensSet fail if you skip that step. See also the
+// rubric/skill/doc/workflow sync points noted there.
 //
 // This package is a leaf: it imports nothing from the rest of the tree, so any package can depend
 // on it without a cycle.
