@@ -82,7 +82,8 @@ defects in THIS diff, not generic "migrations are risky" advice.
 - A conditional insert paired with an unconditional delete: settings are destroyed even when
   no rows were migrated, so the migration destroys data when it does nothing.
 - Dead guards on query results: `cmd_tuples > 0` is always 0 for SELECTs in PostgreSQL, so a
-  guard like `if cmd_tuples > 0` makes the delete it gates unconditional.
+  guard like `if cmd_tuples > 0` never fires — the guarded insert never runs while the
+  paired delete destroys the existing rows (settings deleted with no replacement created).
 - Backfills that bypass model validations/callbacks: whitespace/junk rows a normal insert
   would reject; values interpolated into backfill SQL without the escaping/parameterization
   the model layer would have applied (the data-integrity failure is Data-migration's; the
@@ -92,8 +93,9 @@ defects in THIS diff, not generic "migrations are risky" advice.
 - Transformation field-fidelity: each output field must derive from the right source at the
   right precision — `raw` vs `cooked`, date vs datetime, precision loss on parse.
 - Block on re-run-unsafe execution semantics: a shipped migration made destructive on re-run,
-  a delete whose guard cannot fire, a backfill that bypasses validations, or a transformation
-  that derives an output field from the wrong source or at the wrong precision.
+  a dead guard that leaves a delete unreplaced (no replacement rows created), a backfill that
+  bypasses validations, or a transformation that derives an output field from the wrong
+  source or at the wrong precision.
 
 ## What NOT To Flag (Anti-Overlap)
 

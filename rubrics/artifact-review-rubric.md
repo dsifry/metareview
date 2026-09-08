@@ -317,8 +317,9 @@ persona-anti-overlap pattern.
 - Hunt for **migration re-run safety**: `force: true` added to an already-shipped migration
   (drops pre-existing tables on re-run); a conditional insert paired with an unconditional
   delete (settings destroyed even when no rows were migrated); dead guards on query results
-  (`cmd_tuples > 0` is always 0 for SELECTs in PostgreSQL — the guard makes the delete
-  unconditional); backfills that bypass model validations/callbacks (whitespace/junk rows;
+  (`cmd_tuples > 0` is always 0 for SELECTs in PostgreSQL — the guarded insert never runs,
+  so the paired delete destroys the old rows with no replacement created); backfills that
+  bypass model validations/callbacks (whitespace/junk rows;
   values interpolated into backfill SQL without the escaping/parameterization the model
   layer would have applied — the data-integrity failure is this lens's, the injection angle
   is Security's); enum/boolean defaults that silently reclassify every
@@ -327,9 +328,10 @@ persona-anti-overlap pattern.
   `cooked`, date vs datetime, precision loss on parse).
 - Block on irreversible migrations without rollback, missing backfills for NOT NULL columns,
   expand+contract violations that break rolling deploys, silent data loss, orphaned refs, a
-  shipped migration made destructive on re-run (`force: true`), a delete whose guard cannot
-  fire, a backfill that bypasses validations, or a transformation that derives an output field
-  from the wrong source or at the wrong precision.
+  shipped migration made destructive on re-run (`force: true`), a dead guard that leaves a
+  delete unreplaced (no replacement rows created), a backfill that bypasses validations, or
+  a transformation that derives an output field from the wrong source or at the wrong
+  precision.
 - Does NOT flag: security vulnerabilities (defer to Security); test quality (defer to
   Testing-quality); architecture soundness beyond migration safety (defer to Architecture).
 
