@@ -325,6 +325,10 @@ func WriteIndexSeed(path string) error {
 		return err
 	}
 	if err := seamClose(f); err != nil {
+		// Best-effort remove, same Windows sharing-violation caveat as writeIndexAtomic's
+		// close-error path: the residue here sits at the FINAL tracked path, not a temp —
+		// the next render heals it (a partial seed is re-readable content, never a loss of
+		// committed content, because the seed only ever creates what did not exist).
 		_ = os.Remove(path)
 		return err
 	}
@@ -339,11 +343,20 @@ func RenderIndex(root string) error {
 	return RenderIndexWithRecords(root, records)
 }
 
+// Note on the first-render file mode: a committed index that does not exist yet is created
+// at exactly 0644 (CreateTemp's 0600 raised by the explicit chmod, which no umask touches).
+// The pre-fix in-place write applied the process umask (0o644 & ~077 = 0600); the
+// deterministic 0644 matches what a git checkout gives the tracked file, which is the
+// honest mode for a committed, world-readable audit document.
+//
 // readCommittedIndex is the render's ONE read of the committed index, with the single
 // failure policy both parsers share: not-exist is "first render" (no bytes — nothing to
 // carry, nothing to preserve), a symlink is refused rather than followed (following one
 // would echo a planted target's mrvf-prefixed bullets into the committed index; the rename
-// that follows would replace the symlink itself, but the read happens first), any other
+// that follows would replace the symlink itself, but the read happens first — the check is
+// check-then-act and therefore ADVISORY, like the write-protect check: a swap inside the
+// Lstat→ReadFile window is still followed, closing it atomically needs O_NOFOLLOW, and it
+// requires local write access to matter), any other
 // error fails the render closed — an unreadable committed index must never be overwritten
 // with a partial view — and CRLF is normalized once (a Windows autocrlf checkout must not
 // defeat the exact header match or drag \r into the canonical LF document).
@@ -408,13 +421,35 @@ func carryOverLines(raw []byte, known map[string]bool) (blockers, overrides []st
 		sectionOverrides
 		sectionOther
 	)
+	// An entry is a matched bullet PLUS its continuation lines (the non-blank lines that
+	// directly follow it, before the next bullet, header or blank). The CURRENT renderer
+	// flattens free text to one physical line, but entries written by the OLD renderer can
+	// span lines — carrying only the first would silently drop the rest, so the whole block
+	// carries as one entry. A blank line ends the entry; a skipped (ledger-known) bullet's
+	// continuations are skipped with it.
 	section := sectionTop
+	var entry []string
+	flush := func() {
+		if len(entry) == 0 {
+			return
+		}
+		switch section {
+		case sectionTop:
+			blockers = append(blockers, strings.Join(entry, "\n"))
+		case sectionOverrides:
+			overrides = append(overrides, strings.Join(entry, "\n"))
+		}
+		entry = nil
+	}
+	skipping := false // inside the continuations of a ledger-known bullet
 	for _, line := range strings.Split(string(raw), "\n") {
 		if strings.HasPrefix(line, "## ") {
 			// EXACT match, not a prefix: a hand-maintained "## Process Overrides History"
 			// section must not have its prose deleted and its bullets promoted into the
 			// real Process Overrides section — the destroy-and-promote class this package
 			// exists to prevent. The renderer emits the header as exactly this string.
+			flush()
+			skipping = false
 			if line == "## Process Overrides" {
 				section = sectionOverrides
 			} else {
@@ -422,17 +457,25 @@ func carryOverLines(raw []byte, known map[string]bool) (blockers, overrides []st
 			}
 			continue
 		}
-		m := carryOverLine.FindStringSubmatch(line)
-		if m == nil || known[m[1]] {
+		if m := carryOverLine.FindStringSubmatch(line); m != nil {
+			flush()
+			skipping = known[m[1]]
+			if !skipping {
+				entry = []string{line}
+			}
 			continue
 		}
-		switch section {
-		case sectionTop:
-			blockers = append(blockers, line)
-		case sectionOverrides:
-			overrides = append(overrides, line)
+		if line == "" {
+			flush()
+			skipping = false
+			continue
 		}
+		if len(entry) > 0 {
+			entry = append(entry, line)
+		}
+		// skipping continuations of a known bullet, or prose nobody owns: not carried
 	}
+	flush()
 	return blockers, overrides
 }
 
@@ -511,11 +554,6 @@ func singleLine(s string) string {
 // the owned sections (a hand-written paragraph in the top section or under Process
 // Overrides) is neither carried nor preserved — those two sections are generated, and their
 // prose does not survive a rewrite.
-// (anything other than Process Overrides), verbatim, so hand-maintained content — a history
-// note, the shelved #93 "Stale" partition — survives the rewrite instead of being silently
-// deleted: the render regenerates only its own two sections and must not destroy the rest of
-// the committed file. Same trade-off as carried lines: a preserved section has no retirement
-// path, and removing one means editing the committed file by hand.
 func preservedSections(raw []byte) []string {
 	var out []string
 	var cur []string

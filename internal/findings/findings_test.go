@@ -1135,10 +1135,10 @@ func TestCarryOverMatchesWhatTheRenderEmits(t *testing.T) {
 		// ALL of them (title, actors, reasons, escalation), or the entry spans physical
 		// lines and carry-over re-reads only its first
 		{ID: "mrvf-rt-002", Status: StatusOverridden, Title: "an overridden\nfinding",
-			OverrideGrantedBy: "a human\nwith a newline", OverrideGrantedAt: "2026-09-08T00:00:00Z",
+			OverrideGrantedBy: "a human\nwith a newline", OverrideGrantedAt: "2026-09-08T00:00:00Z\n",
 			OverrideGrantReason: "accepted\nrisk"},
 		{ID: "mrvf-rt-003", Status: StatusOverridePending, Title: "a pending\noverride",
-			OverrideRequestedBy: "an\nagent", OverrideRequestedAt: "2026-09-08T00:00:00Z",
+			OverrideRequestedBy: "an\nagent", OverrideRequestedAt: "2026-09-08T00:00:00Z\n",
 			OverrideRequestReason: "needs\na human",
 			OverrideEscalation:    "an escalation that spans\ntwo physical lines"},
 		// a free-text field with an embedded newline: the emitter must flatten it to one
@@ -1237,7 +1237,7 @@ func TestRenderPreservesSectionsItDoesNotEmit(t *testing.T) {
 	}
 }
 
-func TestWriteIndexSeedIsAtomic(t *testing.T) {
+func TestWriteIndexSeedContent(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -1250,15 +1250,8 @@ func TestWriteIndexSeedIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "# metareview Findings\n\nNo unresolved findings recorded yet.\n" {
+	if string(got) != emptyIndexDocument {
 		t.Errorf("seed content = %q", string(got))
-	}
-	leftovers, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".FINDINGS.md.tmp-*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(leftovers) != 0 {
-		t.Errorf("seed left temp files behind: %v", leftovers)
 	}
 }
 
@@ -1518,5 +1511,27 @@ func TestRenderFailsClosedOnUnreadableCommittedIndex(t *testing.T) {
 	got, _ := os.ReadFile(path)
 	if string(got) != "# metareview Findings\n\n- mrvf-x-001 [high] a committed blocker (r)\n" {
 		t.Errorf("the unreadable committed index must be left untouched, got %q", string(got))
+	}
+}
+
+// Legacy multi-line entries — written by the OLD renderer, whose free-text fields could
+// span physical lines — must carry WHOLE (bullet plus continuations), and a ledger-known
+// bullet's continuations must be skipped with it.
+func TestCarryOverCarriesLegacyMultiLineEntriesWhole(t *testing.T) {
+	raw := []byte("# metareview Findings\n\n" +
+		"- mrvf-leg-001 [high] a legacy entry whose title spans\n  two physical lines (reviewer)\n" +
+		"- mrvf-leg-002 [high] a known entry whose continuation\n  must be skipped with it (reviewer)\n\n" +
+		"## Process Overrides\n\n" +
+		"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
+		"- mrvf-leg-003 [granted] a legacy override — granted by someone\n  at some time: reason\n")
+	blockers, overrides := carryOverLines(raw, map[string]bool{"mrvf-leg-002": true})
+	if len(blockers) != 1 || !strings.Contains(blockers[0], "a legacy entry whose title spans\n  two physical lines") {
+		t.Errorf("legacy multi-line entry not carried whole: %q", blockers)
+	}
+	if len(overrides) != 1 || !strings.Contains(overrides[0], "granted by someone\n  at some time") {
+		t.Errorf("legacy multi-line override not carried whole: %q", overrides)
+	}
+	if strings.Contains(strings.Join(blockers, "\n")+strings.Join(overrides, "\n"), "mrvf-leg-002") {
+		t.Errorf("a known bullet's continuations must be skipped with it: %v %v", blockers, overrides)
 	}
 }
