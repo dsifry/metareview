@@ -1,6 +1,6 @@
 # metareview Findings
 
-No unresolved findings recorded yet.
+- mrvf-20260908-183915833236000-pr-ready-branch-10d735e5-001 [high] Working tree changes excluded from PR-ready review (pr-readiness-reviewer)
 
 ## Process Overrides
 

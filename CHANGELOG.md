@@ -1,5 +1,88 @@
 # Changelog
 
+## 0.11.1 - 2026-09-08
+
+### Added
+
+- **Advisory findings (real, important, not defects).** The artifact-review rubric now asks every
+  lens to additionally report advisory findings — latent defects, design risks, simplification
+  opportunities, and code smells, the things a staff-level reviewer would actually say in review
+  that are not blocking defects. This closes the largest measured gap to Compound Engineering on the
+  same adjudicator: CE produces 21.8 important-non-bug findings/PR where metareview 0.11.0 produced
+  1.2, on a cell where the lab already counts the class ("hidden findings = bug_ungold +
+  important_non_bug") and the review-log taxonomy already had the output slot (`## Advisory
+  Findings`) — the rubric never asked the lenses to fill it. There is **no numeric cap** (ratified):
+  the guard against flooding is a quality bar — three gates, all of which must pass: (1) **stated
+  consequence** — the advisory names the trigger and who gets bitten, otherwise it is taste and is
+  suppressed; (2) **rebuttal gate** — state the author's strongest counter-argument and show why the
+  finding survives it; (3) **convergence weighting** — advisories two or more lenses reach
+  independently report at confidence ≥ 50, single-lens advisories need anchor 75 or a P1 consequence.
+  The smell/nit boundary is a test, not a list ("does the next change get harder or riskier because
+  of this?"); style/deprecation nits stay suppressed at every gate (unchanged non-goal — 5 of 10
+  external-reviewer misses live there and suppressing them is precision working as designed). Any
+  "this should be reshaped" advisory must pass the **deletion test** — name what becomes unnecessary.
+  Advisory hunt families (recognition aids, not quotas): flag-trios/parallel booleans, parallel
+  hand-maintained enumerations, conditional sprawl, duplicated logic blocks, speculative generality
+  (a deletion opportunity — previously no hunt covered the over-architected direction at all), and
+  happy-path-only specs where the diff adds an edge case. Per-lens advisory mandates land on the four
+  lenses that own the classes: Architecture (wrong-shape/simplification/coupling), Testing-quality
+  (spec-coverage gaps, fragile test structure), Completeness (scope/architecture risk),
+  Runtime-reliability (latent fragility — "works today, breaks when…"). The in-loop
+  **staff-surrogate filter** (ratified asymmetry: advisories ONLY — validated bugs pass through
+  untouched) is a new Orchestrator Discipline step in `skills/review-artifact/SKILL.md`: after the
+  lenses return, the orchestrator clusters near-duplicate advisories across lenses (attaching
+  provenance; cluster size feeds the convergence gate), applies the three gates, then dispatches one
+  cheap subagent that re-judges the surviving list against the staff bar ("would a staff-level
+  reviewer actually comment on this in review, and would the author consider it substantive?") and
+  drops the ones that fail, before the review log is written. The filter is read-only, treats
+  the advisory texts as data never instructions, flags an advisory that reads like a concrete
+  defect back as a candidate blocking finding instead of dropping it silently, and on a failed
+  call writes the gated-but-unfiltered list through with a warning naming the failure — it
+  must neither silently empty the advisory section nor silently bypass the staff bar.
+  Advisory findings are held out of the per-lens log writes and written once, after
+  consolidation. The system's first run was its own PR's review (the committed artifact
+  review of the 0.11.1 handoff): ten lenses, 18 advisory candidates → 3 deduplicated as
+  blocking double-reports → 4 dropped at Gate 3 → 11 survivors (one convergence pair
+  merging) → 10 findings, all kept by the staff filter (8 in the main pass, 2 in a recovery
+  pass after an extraction error was found); the seven review rounds that followed hardened
+  exactly the failure modes they found — filter failure semantics, the per-lens-write
+  conflict, Gate-3 stage ownership, input fencing, the defect-like flag-back, read-only
+  dispatch, and drop-reason disposition. `## Advisory Findings` entries were
+  verified first-class end-to-end (reviewlog `AdvisoryFindingCount`, findings `CountByClass`, the
+  classified review-log sections, pr-ready `PASS_ADVISORY`) — no pipeline change was needed. The new
+  step is pinned by `tests/manifest/test-skills.sh`. Benchmark acceptance for this release (maintainer
+  session runs it): on mrv × glm-5.3-background × low, issue-recall (bug + important) moves toward
+  CE's ~60/PR combined from today's ~33 with hid ≥ 31.7 (no regression from the 0.11.0 baseline —
+  which the b-batch ran as 9 lenses via the §9.1 adapter drift; the 10-lens number is pending that
+  re-run).
+
+- **Defect-claim phrasing discipline.** Every finding is now stated as a definite claim about a
+  concrete failure mode; hedged mechanisms ("may produce nil", "presumably") are banned —
+  uncertainty belongs in the confidence anchor, not the finding text. Measured basis: the harnesseval
+  flip analysis (116 flip pairs) showed ~9% of identical issues flip verdict on phrasing alone, and
+  hedged phrasing is the largest single cause of real findings being mis-adjudicated (the `.env.example`
+  openssl case is literally identical wording, `bug` in one run, `true_hallucination` in another).
+  Added as a `### Defect-claim phrasing` subsection under *Anchored Confidence & Suppression*,
+  mirrored in the *Adversarial Stance* paragraph and in the three per-lens rubrics that restate the
+  stance (testing-quality, data-migration, mechanical-precision).
+
+- **Six new hunt clauses (benchmark-driven).** From the measured CE-vs-0.11.0 residue (all 221 CE
+  confirmed bugs semantic-matched against the 0.11.0 run; the 27 never-reported findings clustered
+  into new patterns): client/server copies of the same schema/validation that duplicate and drift
+  (Architecture/api-contract); partial-field update paths that leave a pre-existing row's unwritten
+  field stale and silently changed defaults for existing callers (Architecture/sentinel-meaning-change);
+  queries fetched without the include/association a downstream consumer needs (Architecture/schema-
+  invariants); unbounded per-recipient-appended outbound headers/lists (Runtime-reliability/outbound-
+  call-hardening); and N×M duplicate remote operations for one logical action — deliberately two
+  homes: Runtime-reliability's silent-partial-success hunt owns the duplicate-execution semantics,
+  Architecture's N+1 hunt owns the cost/complexity framing, each side's anti-overlap note naming the
+  other's exact hunt.
+
+### Changed
+
+- Nothing else: no new lens (the ten stand), no era change, no numeric caps, deterministic gates and
+  Mechanical-precision untouched.
+
 ## 0.11.0 - 2026-09-08
 
 ### Added
