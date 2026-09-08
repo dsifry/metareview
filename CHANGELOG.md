@@ -141,11 +141,13 @@
   creates (exclusive create-if-absent, so a racing render's freshly created index cannot be
   clobbered by the empty seed document; its error paths deliberately leave a partial seed
   in place rather than remove a path a concurrent render may have renamed content into).
-  Concurrency + platform notes: concurrent renders are last-writer-wins for LOCAL
-  records and self-heal at the next render (the append-only records file is the source of
-  truth; committed lines survive every ordering via the carry-over — pinned by
-  TestConcurrentRenderLostUpdateSelfHeals); the rename-atomicity guarantee is Unix
-  rename(2) — Windows replaces via MoveFileEx without a crash-atomicity promise.
+  Concurrency + platform notes: concurrent renders are last-writer-wins for lines the
+  earlier writer rendered (local or committed-in-the-window) and self-heal at the next
+  render (the append-only records file is the source of truth — pinned by
+  TestConcurrentRenderLostUpdateSelfHeals); lines present in a reader's own committed
+  snapshot survive its rename via the carry-over, which is the issue-#151 guarantee; the
+  rename-atomicity guarantee is Unix rename(2) — Windows replaces via MoveFileEx without
+  a crash-atomicity promise.
   Scope note: gate-run ROLLBACK restores prior file state through the generic
   file-snapshot machinery (taskdone/prready/epicready/learning each carry a
   restoreSnapshots copy), which still truncates in place — the two-writer contract above

@@ -593,9 +593,12 @@ func preservedSections(raw []byte) []string {
 // scope (tracked with the other platform caveats, e.g. the sharing-violation note below).
 //
 // Concurrency contract (see the KNOWN BOUNDARY in RenderIndexWithRecords): concurrent
-// renders are last-writer-wins for LOCAL records — the later rename can omit the earlier
-// writer's locally-rendered lines — while COMMITTED lines survive every ordering via the
-// carry-over. This is deliberate: the rendered index is a DERIVED artifact, the
+// renders are last-writer-wins — the later rename can omit lines the earlier writer
+// rendered, whether local or committed-in-the-window (a line committed after this reader's
+// committed-index read is not carried and is dropped until healing). What the carry-over
+// DOES guarantee is the issue-#151 property: lines present in the reader's OWN committed
+// snapshot survive its rename, so an empty- or stale-records render never erases them.
+// This is deliberate: the rendered index is a DERIVED artifact, the
 // append-only .metareview/findings.jsonl is the source of truth, and every render
 // regenerates from the current records, so a lost update self-heals at the next render.
 // Serializing renders with a lock would close the window but adds a stale-lock failure

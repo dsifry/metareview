@@ -1546,13 +1546,14 @@ func TestPreservedSectionsEmitAfterOverrides(t *testing.T) {
 }
 
 // The concurrency contract (writeIndexAtomic's doc + the KNOWN BOUNDARY in
-// RenderIndexWithRecords): concurrent renders are last-writer-wins for LOCAL records —
-// a render whose committed-index read predates another render's rename re-emits its stale
-// snapshot and drops the earlier writer's locally-rendered lines — and a lost update
-// SELF-HEALS at the next render, because the rendered index is derived from the
-// append-only records file. COMMITTED lines survive the same race via the carry-over
-// (each reader carries them from its own read), which is the property issue #151 was
-// about; this test pins the local-lines half of the contract.
+// RenderIndexWithRecords): concurrent renders are last-writer-wins — a render whose
+// committed-index read predates another render's rename re-emits its stale snapshot and
+// drops the earlier writer's lines (here B's locally-rendered line; a line committed in
+// another reader's read-to-rename window fares the same) — and a lost update SELF-HEALS
+// at the next render, because the rendered index is derived from the append-only records
+// file. What the carry-over guarantees, and what issue #151 was about, is that lines
+// present in a reader's OWN committed snapshot survive its rename; this test pins the
+// dropped-line half plus the healing.
 func TestConcurrentRenderLostUpdateSelfHeals(t *testing.T) {
 	root := t.TempDir()
 	findingsDir := filepath.Join(root, ".metareview")
