@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -995,12 +996,18 @@ func TestWriteIndexAtomicConcurrentRendersAreIndependent(t *testing.T) {
 	if err := os.WriteFile(path, []byte("# seed"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// DISTINCT payloads per writer: with identical documents, a fixed shared-temp
+	// implementation (the exact race this test exists to exclude) can still pass — every
+	// interleaving of equal writes over one name is benign. Distinct payloads make the
+	// interleavings observable.
 	const n = 8
+	docs := make([]string, n)
+	for i := range docs {
+		docs[i] = "# metareview Findings\n\nwriter " + strconv.Itoa(i) + "\n"
+	}
 	errs := make(chan error, n)
 	for i := 0; i < n; i++ {
-		go func() {
-			errs <- writeIndexAtomic(path, "# metareview Findings\n\nNo unresolved findings recorded yet.\n")
-		}()
+		go func(doc string) { errs <- writeIndexAtomic(path, doc) }(docs[i])
 	}
 	for i := 0; i < n; i++ {
 		if err := <-errs; err != nil {
@@ -1011,8 +1018,18 @@ func TestWriteIndexAtomicConcurrentRendersAreIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(got), "# metareview Findings") {
-		t.Errorf("final index malformed after concurrent renders: %q", string(got))
+	final := string(got)
+	// every writer succeeded, so the file must be exactly one writer's document —
+	// whole and uncorrupted, never a splice of two
+	whole := false
+	for i := range docs {
+		if final == docs[i] {
+			whole = true
+			break
+		}
+	}
+	if !whole {
+		t.Errorf("final index is not any single writer's document (spliced?): %q", final)
 	}
 	leftovers, err := filepath.Glob(filepath.Join(root, ".FINDINGS.md.tmp-*"))
 	if err != nil {
@@ -1194,7 +1211,11 @@ func TestRenderPreservesSectionsItDoesNotEmit(t *testing.T) {
 		t.Errorf("carried lines lost:\n%s", g)
 	}
 	// and the stale bullet is NOT promoted: it stays inside its own section, not the top
-	if strings.Contains(g[:strings.Index(g, "## Process Overrides")], "mrvf-a-003") {
+	topEnd := strings.Index(g, "## Process Overrides")
+	if topEnd < 0 {
+		t.Fatalf("the overrides header vanished from the render:\n%s", g)
+	}
+	if strings.Contains(g[:topEnd], "mrvf-a-003") {
 		t.Errorf("stale-section bullet promoted to a current blocker:\n%s", g)
 	}
 }
@@ -1257,5 +1278,48 @@ func TestRenderIsIdempotentOverItsOwnOutput(t *testing.T) {
 	}
 	if n := strings.Count(g, "## Stale"); n != 1 {
 		t.Errorf("the Stale section appears %d times after two renders:\n%s", n, g)
+	}
+}
+
+// A hand-maintained section whose header merely STARTS with the overrides header must not
+// be mistaken for it: its prose survives, its bullets are not promoted into the real
+// Process Overrides section (the exact-header-match regression pin).
+func TestNearMissOverrideHeaderIsItsOwnSection(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	committed := "# metareview Findings\n\n" +
+		"- mrvf-nm-001 [high] an open blocker (reviewer)\n\n" +
+		"## Process Overrides\n\n" +
+		"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
+		"- mrvf-nm-002 [granted] a real override — granted by someone at some time: reason\n\n" +
+		"## Process Overrides History\n\n" +
+		"Hand-maintained history of overrides past.\n\n" +
+		"- mrvf-nm-003 [granted] a historical override — granted by someone at some time: reason\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(committed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RenderIndexWithRecords(root, nil); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	g := string(raw)
+	if !strings.Contains(g, "## Process Overrides History") || !strings.Contains(g, "Hand-maintained history") {
+		t.Errorf("the near-miss header section was deleted:\n%s", g)
+	}
+	// the history bullet must survive INSIDE its own section, not be promoted toward the
+	// real overrides section
+	histAt := strings.Index(g, "## Process Overrides History")
+	realAt := strings.Index(g, "## Process Overrides\n")
+	if realAt < 0 || histAt < 0 || histAt < realAt {
+		t.Fatalf("section order unexpected:\n%s", g)
+	}
+	if strings.Contains(g[:histAt], "mrvf-nm-003") {
+		t.Errorf("the history bullet was promoted toward the real overrides section:\n%s", g)
+	}
+	if !strings.Contains(g, "mrvf-nm-003") {
+		t.Errorf("the history bullet must survive:\n%s", g)
 	}
 }

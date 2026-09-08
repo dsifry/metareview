@@ -488,7 +488,11 @@ func writeIndexAtomic(path, document string) error {
 	// is refused instead of being silently replaced by a fresh writable file. The check is
 	// the owner-write bit only: it catches the deliberate lock, not every EACCES the old
 	// in-place write could raise (a file another user owns and group/other cannot write still
-	// renames — rename needs directory permission, not file permission).
+	// renames — rename needs directory permission, not file permission). It is also
+	// check-then-act and therefore ADVISORY: the mode is read before the write/sync/rename
+	// sequence, so a lock applied mid-render by another process can be overtaken by a writer
+	// already past the check — a real lock needs file-level enforcement this render does not
+	// attempt.
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
