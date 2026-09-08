@@ -248,8 +248,10 @@ persona-anti-overlap pattern.
   (allowlist/blacklist, deny rule, host check) compared in one canonical form against input
   arriving in another — a lowercased blacklist checked against non-lowercased input, an
   allowlist normalized on a different scheme or case, a deny rule defeated by a
-  double-decode. The correctness half of the same drift (a lookup that fails to match what
-  was stored) is Architecture's format-drift hunt, not this one.
+  double-decode (a URL host/scheme check bypassed by protocol forms — `file://`, decimal
+  IPs, DNS rebinding — is the SSRF protocol-bypass hunt's, below). The correctness half of
+  the same drift (a lookup that fails to match what was stored) is Architecture's
+  format-drift hunt, not this one.
 - Hunt for **secrets in logs** (distinct from secrets in code): PII, tokens, or credentials
   written to log output, error messages, or telemetry — not hardcoded in source, but leaked at
   runtime through logging paths the diff adds or changes.
