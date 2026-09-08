@@ -128,9 +128,7 @@
   a crash mid-write would leave half-written. Carry-over is display-preserving only — it does
   not feed the local ledger, cross-worktree enforcement (override list, blocking counts)
   still reports local state, and carried lines have no retirement path once the originating
-  ledger is gone (clearing one means editing the committed file by hand). Scope boundary: carry-over is
-  display-preserving only — it does not feed the local ledger, so cross-worktree enforcement
-  (override list, blocking counts) still reports local state.
+  ledger is gone (clearing one means editing the committed file by hand).
 
 - **PR-ready now selects findings for the target under review.** Findings linked to the current
   branch, live pull request, or a task review whose covered paths overlap the current diff retain

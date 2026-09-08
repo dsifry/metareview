@@ -422,8 +422,10 @@ func RenderIndexWithRecords(root string, records []Record) error {
 func writeIndexAtomic(path, document string) error {
 	// The destination's mode is preserved across replacement (rename does not carry it), and
 	// a write-PROTECTED index (owner-write bit clear — an operator's lock on the audit trail)
-	// fails closed exactly as the old in-place write did with EACCES, instead of being
-	// silently replaced by a fresh writable file.
+	// is refused instead of being silently replaced by a fresh writable file. The check is
+	// the owner-write bit only: it catches the deliberate lock, not every EACCES the old
+	// in-place write could raise (a file another user owns and group/other cannot write still
+	// renames — rename needs directory permission, not file permission).
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
