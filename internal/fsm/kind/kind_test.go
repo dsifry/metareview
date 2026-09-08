@@ -136,7 +136,7 @@ func TestK7Registry(t *testing.T) {
 	}
 	// params
 	rl := info[ReviewLenses].ValidateParams
-	for v, ok := range map[any]bool{nil: true, 1: true, 9: true, 10: true, 0: false, 11: false, "8": false, 8.5: false} {
+	for v, ok := range map[any]bool{nil: true, 1: true, 8: true, 9: true, 10: true, 0: false, 11: false, "8": false, 8.5: false} {
 		p := map[string]any{}
 		if v != nil {
 			p["lenses"] = v
