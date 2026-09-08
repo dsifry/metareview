@@ -196,7 +196,7 @@ is the `mrv-20260908-173200346624000-artifact-handoff-2026-09-08-advisory-findin
 file under `docs/metareview/reviews/`) forced edits in two classes. Accuracy fixes to the
 handoff's own record (§2.1's lens-count labels, §3B's B6 hunt pointer, §3D's release-row
 version pins, §5's pin-suite and dogfood-criterion claims, §6's baselines-not-deltas)
-are defect corrections logged as F1-F5 there, not design changes. Separately, seven
+are defect corrections logged as F1-F5 and ADV-1's resolution there, not design changes. Separately, seven
 §3C/landed-text clarifications postdate the ratification above and are recorded here so
 the ratified text and the landed text cannot be confused: (1) Gate 3 is applied at the
 consolidation stage — a lens cannot see its siblings — within §8's pre-approved fallback;
