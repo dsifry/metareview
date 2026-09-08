@@ -88,7 +88,9 @@ persona-anti-overlap pattern.
   notification/rendering/serialization path gated by user-config flags, enumerate ALL
   gating flags (`disable*`, `hide*`, `include*`) and check each one — catching
   `disableStandardEmails` but missing `hideCalendarNotes` on the same path is a miss.
-- Block on missing acceptance criteria, missing verification, or unhandled obvious edge cases.
+- Block on missing acceptance criteria, missing verification, unhandled obvious edge cases,
+  or a gating flag on a touched notification/rendering/serialization path left unchecked
+  (the sibling-flag miss).
 - Any finding that claims tests, specs or verification are ABSENT must first search for what it
   claims is missing — the diff's test-shaped files (`spec/**`, `specs/**`, `test/**`, `tests/**`,
   `__tests__/**`, `*.test.*`, `*.spec.*`, `*_test.go`, `test_*.py`) and the repo, with your
@@ -209,8 +211,8 @@ persona-anti-overlap pattern.
   phantom-maintained derived column, a sentinel-meaning-change with no caller update, a
   cascading-failure path with no degradation, a stand-in guard that can go green while prod is
   red, a format-drift where the path that writes a value and the path that compares it
-  disagree on canonical form, an implementer left on a changed interface's old signature, or
-  an unversioned breaking API-contract change.
+  disagree on canonical form, an implementer left on a changed interface's old signature, an
+  advertised route with no action behind it, or an unversioned breaking API-contract change.
 - Does NOT flag: security vulnerabilities (defer to Security); test quality (defer to
   Testing-quality); migration safety (defer to Data-migration).
 
