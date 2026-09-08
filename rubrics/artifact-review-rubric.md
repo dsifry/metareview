@@ -173,8 +173,8 @@ defect findings never pass through that filter.
   in evaluation to date.
 - Does NOT flag: whether a path is feasible (defer to Feasibility); scope drift (defer to Scope
   and alignment); architecture soundness (defer to Architecture); concrete runtime error-path
-  handling in this diff's code (defer to Runtime-reliability); style nits remain suppressed at
-  every gate (see the smell/nit boundary under Advisory Findings).
+  handling in this diff's code (defer to Runtime-reliability);
+  style nits remain suppressed at every gate (see the smell/nit boundary under Advisory Findings).
 
 ### Scope And Alignment
 
@@ -572,4 +572,7 @@ Write each lens's findings into the review log as that lens returns (per-lens ed
 orchestrator's final reply to the verdict plus a one-line summary — do not re-emit the findings in
 the final message. On large diffs a single findings-laden message can overflow the model's
 per-message output limit and truncate the review; per-lens writes avoid this (see Orchestrator
-Discipline in `skills/review-artifact/SKILL.md`).
+Discipline in `skills/review-artifact/SKILL.md`). Advisory findings are the exception to per-lens
+writes: they are held, clustered, gated, and staff-filtered at the consolidation step, then
+written once — writing them per-lens as lenses return would publish ungated, unclustered
+advisories the consolidation never filtered.

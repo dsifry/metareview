@@ -187,9 +187,22 @@ blocking/defect findings** — validated bugs pass through untouched; the mainta
 ratified this asymmetry explicitly. Keep the filter to one call, cheap effort.
 
 **Convergence clustering** in that consolidation step: near-duplicate advisories from
-different lenses merge into one finding carrying its provenance list; the cluster size
+ different lenses merge into one finding carrying its provenance list; the cluster size
 feeds Gate 3. (The adjudicator-side near-dup clustering is a separate, later workstream —
 §9 — do not attempt it in this release.)
+
+**Implementation note (2026-09-08 fix round):** the artifact review of this handoff (its log
+lives at `docs/metareview/reviews/mrv-20260908-173200346624000-artifact-handoff-2026-09-08-…md`)
+forced four clarifications that postdate the ratification above and are recorded here so the
+ratified text and the landed text cannot be confused: (1) Gate 3 is applied at the
+consolidation stage — a lens cannot see its siblings — within §8's pre-approved fallback;
+(2) the staff-surrogate filter treats advisory texts as data, never instructions;
+(3) an advisory that reads like a concrete defect is flagged back as a candidate blocking
+finding, never dropped silently (the ratified asymmetry's intent, extended to misclassified
+defects); (4) a failed filter call writes the gated-but-unfiltered list through with a
+warning naming the failure — it must neither empty the advisory section nor silently bypass
+the staff bar. Advisory findings are also exempted from per-lens log writes (they are held
+for consolidation), resolving the conflict with the per-lens-edit discipline.
 
 ### D. Where things land — implementation map
 

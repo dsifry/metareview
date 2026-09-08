@@ -152,8 +152,16 @@ grep -q 'Stated consequence' rubrics/artifact-review-rubric.md
 grep -q 'Rebuttal gate' rubrics/artifact-review-rubric.md
 grep -q 'Convergence weighting' rubrics/artifact-review-rubric.md
 grep -q 'The deletion test' rubrics/artifact-review-rubric.md
-grep -q 'style nits remain suppressed at every gate' rubrics/artifact-review-rubric.md
-grep -q 'Report \*\*advisory findings\*\*' rubrics/artifact-review-rubric.md
+# All FOUR suppression lines, not any one: a single grep -q passes while three of the four
+# mandated lenses lose theirs. An exact count also fails loudly when a fifth lens is mandated
+# later and the pin is not revisited.
+[ "$(grep -c 'style nits remain suppressed at every gate' rubrics/artifact-review-rubric.md)" = 4 ]
+# The per-lens advisory mandates, anchored to the lens each belongs to so a mandate cannot
+# silently move between lenses or be counted under the wrong one.
+grep -q 'Report \*\*advisory findings\*\* for scope/architecture risk' rubrics/artifact-review-rubric.md
+grep -q 'Report \*\*advisory findings\*\* for wrong-shape, simplification, and coupling' rubrics/artifact-review-rubric.md
+grep -q 'Report \*\*advisory findings\*\* for spec-coverage gaps and fragile test structure' rubrics/artifact-review-rubric.md
+grep -q 'Report \*\*advisory findings\*\* for latent fragility' rubrics/artifact-review-rubric.md
 grep -q 'parallel subagents by default' docs/quickstart.md
 grep -q 'in-session-emulated' docs/quickstart.md
 grep -q 'weaker evidence' docs/quickstart.md
