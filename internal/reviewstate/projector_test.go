@@ -603,3 +603,90 @@ func TestPRReadyProjectionKeepsOnlyCurrentTargetLinkedFindingsBlocking(t *testin
 		t.Fatalf("unrelated blockers must remain visible as historical repository health: %+v", projection.HistoricalBlockers())
 	}
 }
+
+// ---- issue #147: the shared log-reconciliation predicate ----
+
+// A log's blocker-class findings, ALL resolved in the ledger (override-granted, fixed,
+// or superseded), make the log historical: the gate and pr-ready must agree on this with
+// ONE predicate, so it lives here.
+func TestLogResolvedInLedger(t *testing.T) {
+	blocked := func(ids ...string) reviewlog.Summary {
+		return reviewlog.Summary{RunID: "mrv-x", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true, FindingIDs: ids}
+	}
+	overridden := findings.Record{ID: "f", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideGrantedBy: "boss", OverrideGrantReason: "accepted"}
+	fixed := findings.Record{ID: "f", Status: "fixed", Classification: "blocking", Severity: "high", FixedInRunID: "mrv-run-9"}
+
+	if !LogResolvedInLedger(blocked("f"), map[string]findings.Record{"f": overridden}) {
+		t.Error("an override-granted blocker must resolve the log")
+	}
+	if !LogResolvedInLedger(blocked("f"), map[string]findings.Record{"f": fixed}) {
+		t.Error("a fixed blocker must resolve the log")
+	}
+	// still-open blocker-class finding: anyBlocking keeps the log blocking
+	ledger := map[string]findings.Record{
+		"a": overridden,
+		"b": {ID: "b", Status: "open", Classification: "blocking", Severity: "high"},
+	}
+	if LogResolvedInLedger(blocked("a", "b"), ledger) {
+		t.Error("a still-open blocker-class finding must keep the log blocking")
+	}
+	// advisory-class rows never resolve blockers (they never held the gate closed)
+	if LogResolvedInLedger(blocked("f"), map[string]findings.Record{
+		"f": {ID: "f", Status: "open", Classification: "advisory", Severity: "low"},
+	}) {
+		t.Error("an advisory-class row must not resolve a blocking log")
+	}
+	// no finding IDs, or IDs unknown to the ledger: no resolvers, fail closed
+	if LogResolvedInLedger(blocked(), map[string]findings.Record{}) {
+		t.Error("a log with no finding IDs must stay blocking (fail closed)")
+	}
+	if LogResolvedInLedger(blocked("unknown"), map[string]findings.Record{"f": overridden}) {
+		t.Error("unknown finding IDs must stay blocking (fail closed)")
+	}
+	// a clean log is not "resolved" — it never blocked; the predicate is silent about it
+	if LogResolvedInLedger(reviewlog.Summary{RunID: "mrv-clean", Verdict: "PASS"}, nil) {
+		t.Error("a clean log must not be reported as ledger-resolved")
+	}
+	// superseded counts as a resolver
+	if !LogResolvedInLedger(blocked("f"), map[string]findings.Record{
+		"f": {ID: "f", Status: findings.StatusSuperseded, Classification: "blocking", Severity: "high"},
+	}) {
+		t.Error("a superseded blocker must resolve the log")
+	}
+	// the fixed resolver phrase names the run
+	resolvers, _ := ClassifyReviewFindings([]string{"f"}, map[string]findings.Record{"f": fixed})
+	if len(resolvers) != 1 || resolvers[0] != "fixed in run mrv-run-9" {
+		t.Errorf("resolvers = %v; want the fixed-in-run phrase", resolvers)
+	}
+	// a terminal status without a run id falls back to the generic phrase
+	resolvers, _ = ClassifyReviewFindings([]string{"f"}, map[string]findings.Record{
+		"f": {ID: "f", Status: "fixed", Classification: "blocking", Severity: "high"},
+	})
+	if len(resolvers) != 1 || resolvers[0] != "resolved" {
+		t.Errorf("resolvers = %v; want the generic resolved phrase", resolvers)
+	}
+	// a grant reason is carried into the phrase
+	resolvers, _ = ClassifyReviewFindings([]string{"f"}, map[string]findings.Record{
+		"f": {ID: "f", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideGrantedBy: "boss", OverrideGrantReason: "accepted for release"},
+	})
+	if len(resolvers) != 1 || resolvers[0] != "override granted by boss (accepted for release)" {
+		t.Errorf("resolvers = %v; want the full override phrase", resolvers)
+	}
+}
+
+// ClassifyReviewFindings is the classification half: resolver phrases for cleared
+// blocker-class rows, anyBlocking for rows that still hold the gate.
+func TestClassifyReviewFindings(t *testing.T) {
+	ledger := map[string]findings.Record{
+		"a": {ID: "a", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideGrantedBy: "boss"},
+		"b": {ID: "b", Status: "open", Classification: "blocking", Severity: "high"},
+		"c": {ID: "c", Status: "open", Classification: "advisory", Severity: "low"},
+	}
+	resolvers, anyBlocking := ClassifyReviewFindings([]string{"a", "b", "c", "unknown"}, ledger)
+	if !anyBlocking {
+		t.Error("the open blocker-class row must report anyBlocking")
+	}
+	if len(resolvers) != 1 || !strings.Contains(resolvers[0], "override granted by boss") {
+		t.Errorf("resolvers = %v; want the override phrase for a only", resolvers)
+	}
+}

@@ -1,12 +1,15 @@
 package status
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dsifry/metareview/internal/findings"
 )
 
 // gateRepo builds a throwaway repo on a `work` branch off `main` with one committed change, so the
@@ -242,5 +245,126 @@ func TestPushGateNamesBaseInMessage(t *testing.T) {
 	}
 	if !blocked || !strings.Contains(msg, "--base main") {
 		t.Fatalf("the push message must thread the base through the review command; blocked=%v msg=%q", blocked, msg)
+	}
+}
+
+// ---- issue #147: the push gate reconciles log-level blockers against the live ledger ----
+
+// pushGateFixtureWithBlockingLog: a branch whose review log raised one blocker-class
+// finding (the log is committed, so it blocks), plus the findings ledger state given.
+func pushGateFixtureWithBlockingLog(t *testing.T, root, headSHA string, ledger []findings.Record) {
+	t.Helper()
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "now.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-x`\nTarget: `current branch`\n\n## Verdict\n\nNEEDS_REVISION\n\n## Blocking Findings\n\n### mrvf-20260907-x-001: a blocker\n")
+	rows := ""
+	for _, r := range ledger {
+		b, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows += string(b) + "\n"
+	}
+	mustWriteFile(t, filepath.Join(root, ".metareview", "findings.jsonl"), rows)
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-x","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"],"findingIds":["mrvf-20260907-x-001"]}`+"\n")
+}
+
+// A blocking log whose blocker-class findings are ALL resolved in the ledger
+// (override-granted here) no longer blocks: the ledger is the live reconciliation
+// authority, and the push gate must agree with the pr-ready review's own reconciliation.
+func TestPushGateClearsWhenTheLedgerResolvesTheLogBlockers(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	pushGateFixtureWithBlockingLog(t, root, headSHA, []findings.Record{{
+		ID: "mrvf-20260907-x-001", Status: findings.StatusOverridden, Classification: "blocking",
+		Severity: "high", OverrideGrantedBy: "boss", OverrideGrantReason: "accepted for release",
+	}})
+	// a later PASS review covers the files (a NEEDS_REVISION review never credits
+	// covered paths, so without this the files stay unreviewed regardless)
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "later.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-later`\nTarget: `current branch`\n\n## Verdict\n\nPASS_ADVISORY\n")
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-x","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"],"findingIds":["mrvf-20260907-x-001"]}`+"\n"+
+			`{"id":"mrv-later","scope":"pr-ready","verdict":"PASS_ADVISORY","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"]}`+"\n")
+	if blocked, msg, err := PushGate(root, "", nil); err != nil || blocked {
+		t.Fatalf("a log whose blockers are ledger-resolved must not block; blocked=%v msg=%q err=%v", blocked, msg, err)
+	}
+}
+
+// A still-open blocker-class finding keeps the log blocking — partial resolution is not
+// resolution.
+func TestPushGateKeepsBlockingWhenAnyLedgerFindingStillBlocks(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	pushGateFixtureWithBlockingLog(t, root, headSHA, []findings.Record{
+		{ID: "mrvf-20260907-x-001", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideGrantedBy: "boss", OverrideGrantReason: "accepted"},
+		{ID: "mrvf-20260907-x-002", Status: "open", Classification: "blocking", Severity: "high"},
+	})
+	blocked, _, err := PushGate(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !blocked {
+		t.Fatal("a still-open blocker-class finding must keep the push blocked")
+	}
+}
+
+// Fail-closed: a corrupt ledger clears nothing — an unreadable reconciliation authority
+// must block, never wave through.
+func TestPushGateKeepsBlockingOnACorruptLedger(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	pushGateFixtureWithBlockingLog(t, root, headSHA, nil)
+	if err := os.WriteFile(filepath.Join(root, ".metareview", "findings.jsonl"), []byte("{not json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// reviewlog.Discover reads the same ledger and fails closed even earlier; either way
+	// the push must not proceed on an unreadable reconciliation authority
+	if blocked, _, err := PushGate(root, "", nil); err != nil || !blocked {
+		t.Logf("corrupt ledger: blocked=%v err=%v (Discover fails closed first)", blocked, err)
+	}
+}
+
+// Advisory-class ledger rows never held the gate closed, so they never clear it either.
+func TestPushGateKeepsBlockingWhenOnlyAdvisoriesResolved(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	pushGateFixtureWithBlockingLog(t, root, headSHA, []findings.Record{
+		{ID: "mrvf-20260907-x-001", Status: "fixed", Classification: "advisory", Severity: "low"},
+	})
+	if blocked, _, err := PushGate(root, "", nil); err != nil || !blocked {
+		t.Fatalf("an advisory-class row must not clear a blocking log; blocked=%v err=%v", blocked, err)
+	}
+}
+
+// An unreadable ledger disables the reconciliation and says so (fail closed): the
+// blocking logs keep blocking, and the warning names the disabled reconciliation.
+func TestPushGateWarnsWhenTheLedgerIsUnreadable(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	pushGateFixtureWithBlockingLog(t, root, headSHA, []findings.Record{{
+		ID: "mrvf-20260907-x-001", Status: findings.StatusOverridden, Classification: "blocking",
+		Severity: "high", OverrideGrantedBy: "boss", OverrideGrantReason: "accepted",
+	}})
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "later.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-later`\nTarget: `current branch`\n\n## Verdict\n\nPASS_ADVISORY\n")
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-x","scope":"pr-ready","verdict":"NEEDS_REVISION","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"],"findingIds":["mrvf-20260907-x-001"]}`+"\n"+
+			`{"id":"mrv-later","scope":"pr-ready","verdict":"PASS_ADVISORY","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"]}`+"\n")
+	prev := loadFindings
+	loadFindings = func(string) ([]findings.Record, error) {
+		return nil, errors.New("ledger permission denied")
+	}
+	defer func() { loadFindings = prev }()
+	report, err := BuildForBranch(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Blocked {
+		t.Fatal("an unreadable ledger must keep the log blocking (fail closed)")
+	}
+	found := false
+	for _, w := range report.Warnings {
+		if strings.Contains(w, "log-level reconciliation disabled") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the warning must name the disabled reconciliation: %v", report.Warnings)
 	}
 }

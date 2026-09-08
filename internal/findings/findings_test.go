@@ -615,3 +615,27 @@ func TestReadJSONLAcceptsExactlyMaxLineCRLF(t *testing.T) {
 		t.Fatalf("records = %+v, want the exact-limit row", records)
 	}
 }
+
+// Issue #147: the push gate needs a read-only view of the ledger to reconcile
+// log-level blockers. Load is that view: the records on disk, missing file = empty.
+func TestLoadReturnsRecordsAndTreatsMissingAsEmpty(t *testing.T) {
+	root := t.TempDir()
+	records, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load on a repo with no ledger: %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("Load = %d records; want empty", len(records))
+	}
+	one := Record{ID: "mrvf-1", Scope: "pr-ready", Status: StatusOverridden, Classification: "blocking", Severity: "high"}
+	if err := writeJSONL(filepath.Join(root, ".metareview", "findings.jsonl"), []Record{one}); err != nil {
+		t.Fatal(err)
+	}
+	records, err = Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(records) != 1 || records[0].ID != "mrvf-1" {
+		t.Fatalf("Load = %+v; want the written row", records)
+	}
+}

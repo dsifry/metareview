@@ -7,6 +7,7 @@ import (
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/githubcontext"
 	"github.com/dsifry/metareview/internal/reviewlog"
+	"github.com/dsifry/metareview/internal/reviewstate"
 )
 
 func TestRenderEvidenceIncludesRequiredSections(t *testing.T) {
@@ -266,7 +267,7 @@ func TestReconcileReviewNotResolvedWithoutBlockerClassFinding(t *testing.T) {
 // TestResolverPhraseSanitizesFreeText guards the second reviewer finding: a
 // grant reason carrying newlines must not break out of its bullet.
 func TestResolverPhraseSanitizesFreeText(t *testing.T) {
-	phrase := resolverPhrase(findings.Record{
+	phrase := reviewstate.ResolverPhrase(findings.Record{
 		Status:              findings.StatusOverridden,
 		Classification:      "blocking",
 		Severity:            "high",

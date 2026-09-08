@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/dsifry/metareview/internal/findings"
+	"github.com/dsifry/metareview/internal/markdown"
 	"github.com/dsifry/metareview/internal/reviewlog"
 	"github.com/dsifry/metareview/internal/runchain"
 )
@@ -504,4 +505,69 @@ func normalizePath(path string) string {
 		return ""
 	}
 	return filepath.ToSlash(filepath.Clean(path))
+}
+
+// ---- issue #147: the shared log-reconciliation predicate ----
+//
+// The push gate and the pr-ready review must agree on when a review log's blockers are
+// historical. The predicate: a log with unresolved blockers is historical when EVERY
+// blocker-class finding it raised is resolved in the findings ledger (override-granted,
+// fixed, or superseded — IsBlockingClass only, at least one resolver required). Live
+// advisories never hold the gate closed, so they never resolve it either; unknown or
+// missing finding IDs resolve nothing (fail closed). The frozen log file is never
+// modified — the ledger is the live reconciliation authority.
+
+// ClassifyReviewFindings inspects the ledger rows a review references. anyBlocking
+// reports whether any blocker-class row still holds the gate closed; resolvers
+// describes how the cleared ones were resolved. Advisory-class rows are ignored: they
+// never appear in a blocker-status section, so they must not sway the verdict.
+func ClassifyReviewFindings(findingIDs []string, byID map[string]findings.Record) (resolvers []string, anyBlocking bool) {
+	for _, id := range findingIDs {
+		record, ok := byID[id]
+		if !ok || !findings.IsBlockingClass(record) {
+			continue
+		}
+		if findings.Blocks(record.Status) {
+			anyBlocking = true
+			continue
+		}
+		resolvers = append(resolvers, ResolverPhrase(record))
+	}
+	return resolvers, anyBlocking
+}
+
+// LogResolvedInLedger reports whether a log that blocks (HasUnresolvedBlockers) is
+// historical because every blocker-class finding it raised is resolved in the ledger.
+func LogResolvedInLedger(log reviewlog.Summary, byID map[string]findings.Record) bool {
+	if !log.HasUnresolvedBlockers {
+		return false
+	}
+	resolvers, anyBlocking := ClassifyReviewFindings(log.FindingIDs, byID)
+	return !anyBlocking && len(resolvers) > 0
+}
+
+// ResolverPhrase describes how a no-longer-blocking finding was cleared. Free text
+// (grantor, reason, run id) is run through markdown.PlainText so a value carrying
+// newlines or control characters cannot break out of its bullet and inject headings or
+// list items into a report that may be posted to a PR.
+func ResolverPhrase(record findings.Record) string {
+	switch record.Status {
+	case findings.StatusOverridden:
+		phrase := "override granted"
+		if by := markdown.PlainText(record.OverrideGrantedBy); by != "" {
+			phrase += " by " + by
+		}
+		if reason := markdown.PlainText(record.OverrideGrantReason); reason != "" {
+			phrase += " (" + reason + ")"
+		}
+		return phrase
+	case findings.StatusSuperseded:
+		return "superseded"
+	default:
+		// Fixed, or any other non-blocking terminal status.
+		if runID := markdown.PlainText(record.FixedInRunID); runID != "" {
+			return "fixed in run " + runID
+		}
+		return "resolved"
+	}
 }

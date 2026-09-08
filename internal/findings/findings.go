@@ -556,3 +556,10 @@ func firstTarget(recordTarget, fallback any) any {
 func nowISO() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
 }
+
+// Load returns the findings ledger's records — the read-only view callers like the push
+// gate reconcile against (issue #147). A repo with no ledger yet is empty, not an error,
+// matching Reconcile's own behavior.
+func Load(root string) ([]Record, error) {
+	return readJSONL(filepath.Join(root, ".metareview", "findings.jsonl"))
+}

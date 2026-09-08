@@ -17,6 +17,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewlog"
 	"github.com/dsifry/metareview/internal/reviewstate"
@@ -82,6 +83,11 @@ func BuildFor(root, target string) (Report, error) {
 // result, and — worse than the waste — a test injecting a fake RunGit still shelled out to the
 // real git here, and an explicit --base never reached the currency check at all. Threading it
 // through keeps one answer to "what are this branch's commits" instead of two that can disagree.
+// loadFindings is the findings-ledger seam (the command-seam DI pattern): the push gate
+// reconciles log-level blockers against the ledger (issue #147), and the tests need to
+// reach the unreadable-ledger branch that reviewlog.Discover otherwise fails closed first.
+var loadFindings = findings.Load
+
 func buildFor(root, target string, current map[string]bool) (Report, error) {
 	rep := repo.Detect(root)
 	r := Report{
@@ -133,11 +139,28 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 	for id := range reviewstate.StaleSameHeadRunIDs(logs) {
 		superseded[id] = true
 	}
+	// Issue #147: the ledger is the live reconciliation authority. A blocking log whose
+	// blocker-class findings are ALL resolved in it (fixed, override-granted, superseded)
+	// is historical — the same predicate the pr-ready review applies to its own blocker
+	// list, so the gate and the review agree. Fail-closed: an unreadable ledger disables
+	// the reconciliation (nothing is cleared) and says so; an open blocker-class finding,
+	// an unknown finding ID, or advisory-class rows never clear a log.
+	ledger, ledgerErr := loadFindings(root)
+	if ledgerErr != nil {
+		r.Warnings = append(r.Warnings, "findings ledger unreadable, log-level reconciliation disabled: "+ledgerErr.Error())
+	}
+	byID := map[string]findings.Record{}
+	for _, rec := range ledger {
+		byID[rec.ID] = rec
+	}
 	for _, s := range logs {
 		if !reviewstate.LogBlocks(s) { // unresolved blockers OR an ESCALATED verdict — one shared predicate
 			continue
 		}
 		if superseded[s.RunID] {
+			continue
+		}
+		if ledgerErr == nil && reviewstate.LogResolvedInLedger(s, byID) {
 			continue
 		}
 		if target != "" && !covers(s, target, current) {
@@ -497,8 +520,22 @@ func buildForBranch(root, base string, run RunGit, committedOnly bool) (Report, 
 	for id := range reviewstate.StaleSameHeadRunIDs(all) {
 		superseded[id] = true
 	}
+	// Issue #147: the same ledger reconciliation buildFor applies — this rebuild DISCARDS
+	// buildFor's MustClear, so without it here the branch scope (the one the push gate uses)
+	// would keep blocking on logs whose blockers the ledger has since resolved.
+	ledger, ledgerErr := loadFindings(root)
+	if ledgerErr != nil {
+		r.Warnings = append(r.Warnings, "findings ledger unreadable, log-level reconciliation disabled: "+ledgerErr.Error())
+	}
+	byID := map[string]findings.Record{}
+	for _, rec := range ledger {
+		byID[rec.ID] = rec
+	}
 	for _, s := range scoped {
 		if !reviewstate.LogBlocks(s) || superseded[s.RunID] { // unresolved blockers OR ESCALATED — shared predicate
+			continue
+		}
+		if ledgerErr == nil && reviewstate.LogResolvedInLedger(s, byID) {
 			continue
 		}
 		r.MustClear = append(r.MustClear, Blocker{

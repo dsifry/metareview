@@ -6,8 +6,8 @@ import (
 
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/githubcontext"
-	"github.com/dsifry/metareview/internal/markdown"
 	"github.com/dsifry/metareview/internal/reviewlog"
+	"github.com/dsifry/metareview/internal/reviewstate"
 )
 
 type EvidenceInput struct {
@@ -176,7 +176,7 @@ func reconcileReviews(reviews []ReviewEvidence, byID map[string]findings.Record)
 }
 
 func reconcileReview(review ReviewEvidence, byID map[string]findings.Record) ReviewEvidence {
-	resolvers, anyBlocking := classifyReviewFindings(review.FindingIDs, byID)
+	resolvers, anyBlocking := reviewstate.ClassifyReviewFindings(review.FindingIDs, byID)
 	// A review flagged with unresolved blockers is historical when it raised at
 	// least one blocker-class finding that has since been cleared and NONE of its
 	// blocker-class findings still block. Only blocker-class findings count, and
@@ -197,53 +197,6 @@ func reconcileReview(review ReviewEvidence, byID map[string]findings.Record) Rev
 		review.AttemptNote = fmt.Sprintf("over the recorded limit of %d; %s", review.MaxAttempts, strings.Join(dedupeStrings(resolvers), "; "))
 	}
 	return review
-}
-
-// classifyReviewFindings inspects the blocker-class ledger rows a review
-// references. anyBlocking reports whether any of them still holds the gate
-// closed; resolvers describes how the cleared ones were resolved (override grant
-// or fix). Non-blocker-class findings (advisory, follow-up, warning) are ignored:
-// they never appear in the blocker-status section, so they must not sway whether
-// the review reads as still-blocking.
-func classifyReviewFindings(findingIDs []string, byID map[string]findings.Record) (resolvers []string, anyBlocking bool) {
-	for _, id := range findingIDs {
-		record, ok := byID[id]
-		if !ok || !findings.IsBlockingClass(record) {
-			continue
-		}
-		if findings.Blocks(record.Status) {
-			anyBlocking = true
-			continue
-		}
-		resolvers = append(resolvers, resolverPhrase(record))
-	}
-	return resolvers, anyBlocking
-}
-
-// resolverPhrase describes how a no-longer-blocking finding was cleared. Free
-// text (grantor, reason, run id) is run through markdown.PlainText so a value
-// carrying newlines or control characters cannot break out of its bullet and
-// inject headings or list items into a report that may be posted to a PR.
-func resolverPhrase(record findings.Record) string {
-	switch record.Status {
-	case findings.StatusOverridden:
-		phrase := "override granted"
-		if by := markdown.PlainText(record.OverrideGrantedBy); by != "" {
-			phrase += " by " + by
-		}
-		if reason := markdown.PlainText(record.OverrideGrantReason); reason != "" {
-			phrase += " (" + reason + ")"
-		}
-		return phrase
-	case findings.StatusSuperseded:
-		return "superseded"
-	default:
-		// Fixed, or any other non-blocking terminal status.
-		if runID := markdown.PlainText(record.FixedInRunID); runID != "" {
-			return "fixed in run " + runID
-		}
-		return "resolved"
-	}
 }
 
 func dedupeStrings(values []string) []string {

@@ -99,3 +99,21 @@ ground-truth-verdict, same shape as the diff-only numbers (14/21, 149). The A/B 
 TDD (tests fail first), `make cover` 100% on touched packages, gremlins
 (`--workers 1 --timeout-coefficient 30`) on `internal/claimcheck`, `internal/fsm/judge`,
 `internal/fsm/kind`, evidence receipts, task-done adjudicated review, record-lenses.
+
+## Addendum (issue #147): the push gate honors the findings ledger
+
+Repairing this branch exposed #147: the push gate blocks on review logs' frozen
+HasUnresolvedBlockers/verdict, but its own remedy ("record an override reason") writes to
+the findings ledger, which the push gate never reads — and non-linear --previous-run runs
+leave sibling logs no linear chain can supersede. The reconciliation predicate already
+exists (prready's reconcileReview, applied by gateReviewLogs inside the pr-ready review);
+the push gate just never applies it.
+
+Fix: the predicate moves to reviewstate (the designated gate/pr-ready shared layer, per
+the StaleSameHeadRunIDs precedent), and status.buildFor applies it — a LogBlocks log whose
+blocker-class findings are ALL resolved in the ledger (fixed / override-granted /
+superseded, IsBlockingClass only, ≥1 resolver required) is historical and no longer
+blocks, whatever its verdict. Fail-closed: an unreadable ledger clears nothing; an open
+blocker-class finding, an unknown finding ID, or advisory-class rows keep the log
+blocking. The frozen log file is never modified — the ledger is the live reconciliation
+authority, exactly as the override system's own documentation promises.
