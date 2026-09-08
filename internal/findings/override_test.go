@@ -536,3 +536,33 @@ func TestReconcileClosesAPendingOverrideThatWasActuallyFixed(t *testing.T) {
 		t.Fatalf("override list --pending must be empty once the finding is fixed: %v %+v", err, pending)
 	}
 }
+
+// Issue #147 review: an escalation can persist after its findings are fixed (the run
+// -level hard stop outlives the finding-level fix). Lifting it is a human decision, so
+// GrantOverride accepts a terminal-status (fixed) finding — the grant records the
+// decision; the two-phase requester≠grantor rule still applies where a request exists.
+func TestGrantOverrideAcceptsAFixedFinding(t *testing.T) {
+	root := t.TempDir()
+	one := Record{ID: "mrvf-esc-1", Scope: "pr-ready", Status: "fixed", Classification: "blocking", Severity: "high", FixedInRunID: "mrv-run-9"}
+	if err := writeJSONL(filepath.Join(root, ".metareview", "findings.jsonl"), []Record{one}); err != nil {
+		t.Fatal(err)
+	}
+	if err := GrantOverride(root, "mrvf-esc-1", OverrideGrant{By: "dsifry", Reason: "escalation was marker churn; the human decision is recorded", Now: "2026-09-08T00:00:00Z"}); err != nil {
+		t.Fatalf("GrantOverride on a fixed finding: %v", err)
+	}
+	records, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if records[0].Status != StatusOverridden || records[0].OverrideGrantedBy != "dsifry" {
+		t.Fatalf("status = %s, grantor = %q; want overridden by dsifry", records[0].Status, records[0].OverrideGrantedBy)
+	}
+	// the requester≠grantor rule still holds on a fixed finding that carries a request
+	two := Record{ID: "mrvf-esc-2", Scope: "pr-ready", Status: "fixed", Classification: "blocking", Severity: "high", OverrideRequestedBy: "agent"}
+	if err := writeJSONL(filepath.Join(root, ".metareview", "findings.jsonl"), []Record{two}); err != nil {
+		t.Fatal(err)
+	}
+	if err := GrantOverride(root, "mrvf-esc-2", OverrideGrant{By: "agent", Reason: "self-grant must be refused", Now: "2026-09-08T00:00:00Z"}); err == nil {
+		t.Fatal("a fixed finding's grant must still refuse the requesting actor")
+	}
+}

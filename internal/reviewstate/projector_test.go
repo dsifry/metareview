@@ -665,6 +665,11 @@ func TestLogResolvedInLedger(t *testing.T) {
 	if len(resolvers) != 1 || resolvers[0] != "resolved" {
 		t.Errorf("resolvers = %v; want the generic resolved phrase", resolvers)
 	}
+	// issue #147 review blocker: an ID the ledger does not know is an unvouched blocker,
+	// never a resolved one — the mixed resolved+unknown case must stay blocking
+	if LogResolvedInLedger(blocked("f", "unknown"), map[string]findings.Record{"f": overridden}) {
+		t.Error("a mixed resolved+unknown ID set must stay blocking (unknown = unvouched)")
+	}
 	// a grant reason is carried into the phrase
 	resolvers, _ = ClassifyReviewFindings([]string{"f"}, map[string]findings.Record{
 		"f": {ID: "f", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideGrantedBy: "boss", OverrideGrantReason: "accepted for release"},
@@ -688,5 +693,63 @@ func TestClassifyReviewFindings(t *testing.T) {
 	}
 	if len(resolvers) != 1 || !strings.Contains(resolvers[0], "override granted by boss") {
 		t.Errorf("resolvers = %v; want the override phrase for a only", resolvers)
+	}
+}
+
+// An ESCALATED log's hard stop lifts ONLY by explicit override grants on every
+// blocker-class finding it references. Fixes and superseded rows never lift one
+// (LogBlocks: "a hard stop that a later clean re-run must not erase").
+func TestEscalationLiftedByOverrides(t *testing.T) {
+	escalated := func(ids ...string) reviewlog.Summary {
+		return reviewlog.Summary{RunID: "mrv-esc", Verdict: "ESCALATED", HasUnresolvedBlockers: true, FindingIDs: ids}
+	}
+	override := findings.Record{ID: "f", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideGrantedBy: "boss", OverrideGrantReason: "accepted"}
+	fixed := findings.Record{ID: "f", Status: "fixed", Classification: "blocking", Severity: "high", FixedInRunID: "mrv-run-9"}
+	open := findings.Record{ID: "f", Status: "open", Classification: "blocking", Severity: "high"}
+
+	if !EscalationLiftedByOverrides(escalated("f"), map[string]findings.Record{"f": override}) {
+		t.Error("an explicit override grant on the only blocker-class finding lifts the escalation")
+	}
+	if EscalationLiftedByOverrides(escalated("f"), map[string]findings.Record{"f": fixed}) {
+		t.Error("a fix never lifts an escalation — only the recorded human decision does")
+	}
+	if EscalationLiftedByOverrides(escalated("f"), map[string]findings.Record{"f": open}) {
+		t.Error("an open blocker never lifts an escalation")
+	}
+	// one overridden, one fixed: not every blocker-class finding carries the human decision
+	if EscalationLiftedByOverrides(escalated("f", "g"), map[string]findings.Record{
+		"f": override,
+		"g": fixed,
+	}) {
+		t.Error("a mixed override+fix set must not lift the escalation")
+	}
+	// a grant without a grantor is not a recorded human decision
+	if EscalationLiftedByOverrides(escalated("f"), map[string]findings.Record{
+		"f": {ID: "f", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high"},
+	}) {
+		t.Error("an override without a recorded grantor must not lift the escalation")
+	}
+	// advisory-class rows are ignored; the blocker-class one decides
+	if !EscalationLiftedByOverrides(escalated("f", "adv"), map[string]findings.Record{
+		"f":   override,
+		"adv": {ID: "adv", Status: "open", Classification: "advisory", Severity: "low"},
+	}) {
+		t.Error("an advisory row must not keep the escalation held")
+	}
+	// no finding IDs: fail closed
+	if EscalationLiftedByOverrides(escalated(), nil) {
+		t.Error("an escalated log with no finding IDs must stay blocking (fail closed)")
+	}
+	// unknown IDs are not vouched
+	if EscalationLiftedByOverrides(escalated("unknown"), map[string]findings.Record{"f": override}) {
+		t.Error("an unknown finding ID must not lift the escalation")
+	}
+}
+
+// A non-blocking log (no unresolved blockers) is never "lifted" — the predicate is
+// silent about logs that never blocked.
+func TestEscalationLiftedByOverridesIgnoresCleanLogs(t *testing.T) {
+	if EscalationLiftedByOverrides(reviewlog.Summary{RunID: "mrv-clean", Verdict: "PASS"}, nil) {
+		t.Error("a clean log must not be reported as escalation-lifted")
 	}
 }

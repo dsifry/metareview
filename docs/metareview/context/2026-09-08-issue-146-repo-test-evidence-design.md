@@ -117,3 +117,23 @@ blocks, whatever its verdict. Fail-closed: an unreadable ledger clears nothing; 
 blocker-class finding, an unknown finding ID, or advisory-class rows keep the log
 blocking. The frozen log file is never modified — the ledger is the live reconciliation
 authority, exactly as the override system's own documentation promises.
+
+### Revision (post-review): the lenses' three blockers on the first reconciliation
+
+The nine-lens round on the gate change found three real flaws, all fixed stricter:
+
+1. **Unknown finding IDs failed open.** A log referencing [resolved-id, unknown-id] cleared
+   — the unknown blocker had no ledger vouching. Now LogResolvedInLedger requires the
+   ledger to know EVERY finding ID the log references; an unknown ID is an unvouched
+   blocker, never a resolved one. (prready's report-prose rendering keeps its lenient
+   reading — it renders, it does not gate.)
+2. **ESCALATED logs were clearable by ordinary ledger resolution.** LogBlocks documents an
+   ESCALATED verdict as "a hard stop that a later clean re-run must not erase". Fixes and
+   superseded rows never lift one now: the gate reconciles them only when EVERY
+   blocker-class finding they reference carries an explicit OVERRIDE GRANT (grantor
+   recorded) — the recorded human decision, via the existing two-phase override
+   machinery. To make that reachable, GrantOverride accepts a terminal-status (fixed)
+   finding: an escalation can persist after its findings are fixed, and lifting it is
+   precisely the human decision the grant records.
+3. **The reconciliation block was duplicated in buildFor and buildForBranch** (the drift
+   hazard #147 itself documents). Extracted into one helper.

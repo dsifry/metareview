@@ -81,9 +81,12 @@ func RequestOverride(root, findingID string, request OverrideRequest) error {
 }
 
 // GrantOverride acknowledges the exception. It accepts an open finding directly
-// (a human overriding without a prior agent escalation) or a pending request
-// filed by someone else. It refuses a grant from the actor that requested it:
-// requesting and acknowledging are separate roles by design.
+// (a human overriding without a prior agent escalation), a pending request
+// filed by someone else, or a FIXED finding whose run-level escalation persists —
+// lifting that escalation is a human decision the grant records (issue #147: the
+// run's hard stop outlives the finding-level fix). It refuses a grant from the
+// actor that requested it: requesting and acknowledging are separate roles by
+// design.
 //
 // By is audit metadata, not authentication — a local CLI has no authority to
 // verify an identity — so this enforces the boundary against the accidental
@@ -101,7 +104,7 @@ func GrantOverride(root, findingID string, grant OverrideGrant) error {
 		return fmt.Errorf("override grant needs a timestamp")
 	}
 	return mutateFinding(root, findingID, func(record *Record) error {
-		if record.Status != "open" && record.Status != StatusOverridePending {
+		if record.Status != "open" && record.Status != StatusOverridePending && record.Status != "fixed" {
 			return fmt.Errorf("finding %s is %s and cannot be overridden", findingID, record.Status)
 		}
 		if strings.EqualFold(by, record.OverrideRequestedBy) {

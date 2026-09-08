@@ -368,3 +368,44 @@ func TestPushGateWarnsWhenTheLedgerIsUnreadable(t *testing.T) {
 		t.Errorf("the warning must name the disabled reconciliation: %v", report.Warnings)
 	}
 }
+
+// An ESCALATED log never clears by ordinary ledger resolution (fixes don't lift a hard
+// stop) — only by explicit override grants on every blocker-class finding it references.
+func TestPushGateEscalatedLogLiftsOnlyByOverrides(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "esc.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-esc`\nTarget: `current branch`\n\n## Verdict\n\nESCALATED\n\n## Blocking Findings\n\n### mrvf-20260907-esc-001: the hard stop\n")
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "later.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-later`\nTarget: `current branch`\n\n## Verdict\n\nPASS_ADVISORY\n")
+	writeLedger := func(rows ...findings.Record) {
+		t.Helper()
+		out := ""
+		for _, r := range rows {
+			b, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out += string(b) + "\n"
+		}
+		mustWriteFile(t, filepath.Join(root, ".metareview", "findings.jsonl"), out)
+	}
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-esc","scope":"pr-ready","verdict":"ESCALATED","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"],"findingIds":["mrvf-20260907-esc-001"]}`+"\n"+
+			`{"id":"mrv-later","scope":"pr-ready","verdict":"PASS_ADVISORY","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"]}`+"\n")
+
+	// a FIX on the escalated run's finding never lifts the hard stop
+	writeLedger(findings.Record{ID: "mrvf-20260907-esc-001", Status: "fixed", Classification: "blocking", Severity: "high", FixedInRunID: "mrv-run-9"})
+	if blocked, _, err := PushGate(root, "", nil); err != nil || !blocked {
+		t.Fatalf("a fix must not lift an ESCALATED log; blocked=%v err=%v", blocked, err)
+	}
+	// a superseded row never lifts it either
+	writeLedger(findings.Record{ID: "mrvf-20260907-esc-001", Status: findings.StatusSuperseded, Classification: "blocking", Severity: "high"})
+	if blocked, _, err := PushGate(root, "", nil); err != nil || !blocked {
+		t.Fatalf("a superseded row must not lift an ESCALATED log; blocked=%v err=%v", blocked, err)
+	}
+	// the explicit human decision — an override grant with a recorded grantor — does
+	writeLedger(findings.Record{ID: "mrvf-20260907-esc-001", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideGrantedBy: "dsifry", OverrideGrantReason: "escalation was marker churn; approved"})
+	if blocked, _, err := PushGate(root, "", nil); err != nil || blocked {
+		t.Fatalf("an override grant lifts the ESCALATED log; blocked=%v err=%v", blocked, err)
+	}
+}

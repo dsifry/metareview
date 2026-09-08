@@ -538,12 +538,49 @@ func ClassifyReviewFindings(findingIDs []string, byID map[string]findings.Record
 
 // LogResolvedInLedger reports whether a log that blocks (HasUnresolvedBlockers) is
 // historical because every blocker-class finding it raised is resolved in the ledger.
+// STRICT on the gate's behalf: the ledger must vouch for EVERY finding ID the log
+// references — an ID it does not know is an unvouched blocker, never a resolved one
+// (issue #147 review: the mixed resolved+unknown case must stay blocking). prready's
+// report-prose rendering keeps its lenient reading on purpose: it renders, it does not
+// gate.
 func LogResolvedInLedger(log reviewlog.Summary, byID map[string]findings.Record) bool {
 	if !log.HasUnresolvedBlockers {
 		return false
 	}
+	for _, id := range log.FindingIDs {
+		if _, ok := byID[id]; !ok {
+			return false
+		}
+	}
 	resolvers, anyBlocking := ClassifyReviewFindings(log.FindingIDs, byID)
 	return !anyBlocking && len(resolvers) > 0
+}
+
+// EscalationLiftedByOverrides reports whether an ESCALATED log's hard stop is lifted by
+// an explicit recorded human decision: EVERY blocker-class finding it references carries
+// an override grant (grantor recorded). Fixes and superseded rows never lift an
+// escalation — LogBlocks documents an ESCALATED verdict as "a hard stop that a later
+// clean re-run must not erase", so only the override system's two-phase human decision
+// (requester ≠ grantor, grantor recorded) may end it. Advisory-class rows are ignored.
+func EscalationLiftedByOverrides(log reviewlog.Summary, byID map[string]findings.Record) bool {
+	if !log.HasUnresolvedBlockers {
+		return false
+	}
+	if len(log.FindingIDs) == 0 {
+		return false // nothing to vouch for: fail closed
+	}
+	any := false
+	for _, id := range log.FindingIDs {
+		record, ok := byID[id]
+		if !ok || !findings.IsBlockingClass(record) {
+			continue // advisory-class rows never held the gate; unknown IDs are not vouched either way
+		}
+		if record.Status != findings.StatusOverridden || record.OverrideGrantedBy == "" {
+			return false
+		}
+		any = true
+	}
+	return any
 }
 
 // ResolverPhrase describes how a no-longer-blocking finding was cleared. Free text

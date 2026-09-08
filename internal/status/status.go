@@ -88,6 +88,40 @@ func BuildFor(root, target string) (Report, error) {
 // reach the unreadable-ledger branch that reviewlog.Discover otherwise fails closed first.
 var loadFindings = findings.Load
 
+// reconcileLogsAgainstLedger returns the run IDs of logs whose log-level blockers the
+// findings ledger resolves (issue #147). A NEEDS_REVISION log clears when every
+// blocker-class finding it references is resolved in the ledger (fixed, override-granted,
+// superseded); an ESCALATED log — LogBlocks' documented hard stop — clears ONLY when
+// every blocker-class finding carries an explicit override grant, the recorded human
+// decision. Fail-closed: an unreadable ledger clears nothing and says so via warnings.
+func reconcileLogsAgainstLedger(root string, logs []reviewlog.Summary, warnings *[]string) map[string]bool {
+	ledger, err := loadFindings(root)
+	if err != nil {
+		*warnings = append(*warnings, "findings ledger unreadable, log-level reconciliation disabled: "+err.Error())
+		return map[string]bool{}
+	}
+	byID := map[string]findings.Record{}
+	for _, rec := range ledger {
+		byID[rec.ID] = rec
+	}
+	resolved := map[string]bool{}
+	for _, s := range logs {
+		if !reviewstate.LogBlocks(s) {
+			continue
+		}
+		if strings.EqualFold(s.Verdict, "ESCALATED") {
+			if reviewstate.EscalationLiftedByOverrides(s, byID) {
+				resolved[s.RunID] = true
+			}
+			continue
+		}
+		if reviewstate.LogResolvedInLedger(s, byID) {
+			resolved[s.RunID] = true
+		}
+	}
+	return resolved
+}
+
 func buildFor(root, target string, current map[string]bool) (Report, error) {
 	rep := repo.Detect(root)
 	r := Report{
@@ -139,20 +173,7 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 	for id := range reviewstate.StaleSameHeadRunIDs(logs) {
 		superseded[id] = true
 	}
-	// Issue #147: the ledger is the live reconciliation authority. A blocking log whose
-	// blocker-class findings are ALL resolved in it (fixed, override-granted, superseded)
-	// is historical — the same predicate the pr-ready review applies to its own blocker
-	// list, so the gate and the review agree. Fail-closed: an unreadable ledger disables
-	// the reconciliation (nothing is cleared) and says so; an open blocker-class finding,
-	// an unknown finding ID, or advisory-class rows never clear a log.
-	ledger, ledgerErr := loadFindings(root)
-	if ledgerErr != nil {
-		r.Warnings = append(r.Warnings, "findings ledger unreadable, log-level reconciliation disabled: "+ledgerErr.Error())
-	}
-	byID := map[string]findings.Record{}
-	for _, rec := range ledger {
-		byID[rec.ID] = rec
-	}
+	resolved := reconcileLogsAgainstLedger(root, logs, &r.Warnings)
 	for _, s := range logs {
 		if !reviewstate.LogBlocks(s) { // unresolved blockers OR an ESCALATED verdict — one shared predicate
 			continue
@@ -160,7 +181,7 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 		if superseded[s.RunID] {
 			continue
 		}
-		if ledgerErr == nil && reviewstate.LogResolvedInLedger(s, byID) {
+		if resolved[s.RunID] {
 			continue
 		}
 		if target != "" && !covers(s, target, current) {
@@ -520,22 +541,12 @@ func buildForBranch(root, base string, run RunGit, committedOnly bool) (Report, 
 	for id := range reviewstate.StaleSameHeadRunIDs(all) {
 		superseded[id] = true
 	}
-	// Issue #147: the same ledger reconciliation buildFor applies — this rebuild DISCARDS
-	// buildFor's MustClear, so without it here the branch scope (the one the push gate uses)
-	// would keep blocking on logs whose blockers the ledger has since resolved.
-	ledger, ledgerErr := loadFindings(root)
-	if ledgerErr != nil {
-		r.Warnings = append(r.Warnings, "findings ledger unreadable, log-level reconciliation disabled: "+ledgerErr.Error())
-	}
-	byID := map[string]findings.Record{}
-	for _, rec := range ledger {
-		byID[rec.ID] = rec
-	}
+	resolved2 := reconcileLogsAgainstLedger(root, all, &r.Warnings)
 	for _, s := range scoped {
 		if !reviewstate.LogBlocks(s) || superseded[s.RunID] { // unresolved blockers OR ESCALATED — shared predicate
 			continue
 		}
-		if ledgerErr == nil && reviewstate.LogResolvedInLedger(s, byID) {
+		if resolved2[s.RunID] {
 			continue
 		}
 		r.MustClear = append(r.MustClear, Blocker{
