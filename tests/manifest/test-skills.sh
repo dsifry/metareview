@@ -153,6 +153,8 @@ grep -q 'blocking/defect findings' skills/review-artifact/SKILL.md
 # surface the dogfood review closed.
 grep -q 'read-only subagent' skills/review-artifact/SKILL.md
 grep -q 'gated-but-unfiltered' skills/review-artifact/SKILL.md
+grep -q 'A flagged item has a write path' skills/review-artifact/SKILL.md
+grep -q 'NEEDS_REVISION exactly as a lens-raised blocking finding' skills/review-artifact/SKILL.md
 grep -q '## Advisory Findings (real, important, not defects)' rubrics/artifact-review-rubric.md
 grep -q 'Stated consequence' rubrics/artifact-review-rubric.md
 grep -q 'Rebuttal gate' rubrics/artifact-review-rubric.md
