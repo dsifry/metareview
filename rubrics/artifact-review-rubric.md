@@ -177,8 +177,8 @@ persona-anti-overlap pattern.
   `null`/empty/`[]` that previously meant "nothing here" now meaning "not yet loaded" or "error
   suppressed"; a status sentinel whose semantics shifted so existing callers now misbehave.
 - Hunt for **format-drift** (the value one path writes and another path compares disagree
-  on canonical form): case (`lower(host) = ?` column vs raw user input; a lowercased
-  blacklist checked against non-lowercased input); scheme (`http://`-prefixed hosts stored,
+  on canonical form): case (`lower(host) = ?` column vs raw user input; a column stored
+  lowercased but matched against mixed-case input); scheme (`http://`-prefixed hosts stored,
   bare `URI#host` compared); port (validation accepts `host:8080`, lookup via `URI#host`
   strips it); trailing-slash concatenation; type coercion (JSON boolean vs string
   `"true"`, array vs CSV string); encoding (double-decode); normalization asymmetry (model
