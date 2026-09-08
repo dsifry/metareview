@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -783,6 +784,13 @@ Deliberate exceptions to the review workflow. Pending entries still block CI.
 // overwrite the committed audit trail with the local-only view — the issue-#151 destruction,
 // re-opened on the error path (caught in adversarial review of this fix).
 func TestCarryOverFailsClosedOnUnreadableCommittedIndex(t *testing.T) {
+	// The 0o000 trick only makes the file unreadable as an unprivileged POSIX process: as
+	// root or on Windows it stays readable, the render legitimately succeeds, and the test
+	// would fail against correct code (the repo's established guard — epicsource/status
+	// use the same one).
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("permission-based unreadability does not apply on windows or as root")
+	}
 	root := t.TempDir()
 	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -879,5 +887,42 @@ func TestRenderOverriddenLedgerRecordSuppressesItsCommittedOverrideLine(t *testi
 	}
 	if !strings.Contains(g, "ledger render of the override") || !strings.Contains(g, "new-session") {
 		t.Errorf("the ledger's own override line must render:\n%s", g)
+	}
+}
+
+// The atomic-replace error paths: the render must fail (and clean up its temp file) when
+// the temp write or the rename cannot complete, never leave a half-written committed index.
+func TestWriteIndexAtomicFailsClosedAndCleansUp(t *testing.T) {
+	// rename failure, portable: the target is a directory, so the temp write succeeds and
+	// the rename onto it cannot.
+	root := t.TempDir()
+	path := filepath.Join(root, "FINDINGS.md")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeIndexAtomic(path, "# index"); err == nil {
+		t.Fatal("a rename that cannot complete must fail the write")
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("the temp file must be cleaned up after a failed rename, got err=%v", err)
+	}
+
+	// temp-write failure: the containing directory is read-only, so creating the temp file
+	// fails (permission-based, unprivileged POSIX only).
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("permission-based unreadability does not apply on windows or as root")
+	}
+	root2 := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root2, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root2, "sub"), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeIndexAtomic(filepath.Join(root2, "sub", "FINDINGS.md"), "# index"); err == nil {
+		t.Fatal("a temp write that cannot complete must fail the write")
+	}
+	if _, err := os.Stat(filepath.Join(root2, "sub", "FINDINGS.md.tmp")); !os.IsNotExist(err) {
+		t.Errorf("no temp file may survive a failed write, got err=%v", err)
 	}
 }

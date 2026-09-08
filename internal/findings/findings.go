@@ -392,7 +392,27 @@ func RenderIndexWithRecords(root string, records []Record) error {
 			"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
 			strings.Join(overrides, "\n") + "\n"
 	}
-	return os.WriteFile(path, []byte(document), 0o644)
+	return writeIndexAtomic(path, document)
+}
+
+// writeIndexAtomic replaces the committed index write-temp-then-rename, never a truncating
+// in-place write: the committed index is the durable audit trail this package exists to
+// preserve, and os.WriteFile truncates before it writes — a crash or I/O failure mid-write
+// (disk full, process kill) would leave it truncated or half-written, the same data loss the
+// carry-over prevents on the read path. The rename replaces the file atomically; the temp
+// file sits beside it so the rename stays on one filesystem, and is removed on every path
+// that does not rename it.
+func writeIndexAtomic(path, document string) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(document), 0o644); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func UnresolvedBlocking(root string) ([]Record, error) {
