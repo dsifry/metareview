@@ -316,8 +316,10 @@ persona-anti-overlap pattern.
   (drops pre-existing tables on re-run); a conditional insert paired with an unconditional
   delete (settings destroyed even when no rows were migrated); dead guards on query results
   (`cmd_tuples > 0` is always 0 for SELECTs in PostgreSQL — the guard makes the delete
-  unconditional); backfills that bypass model validations/callbacks (whitespace/junk rows,
-  unescaped SQL interpolation); enum/boolean defaults that silently reclassify every
+  unconditional); backfills that bypass model validations/callbacks (whitespace/junk rows;
+  values interpolated into backfill SQL without the escaping/parameterization the model
+  layer would have applied — the data-integrity failure is this lens's, the injection angle
+  is Security's); enum/boolean defaults that silently reclassify every
   existing row (`cook_method` default 1 = `raw_html`); transformation field-fidelity (each
   output field must derive from the right source at the right precision — `raw` vs
   `cooked`, date vs datetime, precision loss on parse).

@@ -84,7 +84,9 @@ defects in THIS diff, not generic "migrations are risky" advice.
 - Dead guards on query results: `cmd_tuples > 0` is always 0 for SELECTs in PostgreSQL, so a
   guard like `if cmd_tuples > 0` makes the delete it gates unconditional.
 - Backfills that bypass model validations/callbacks: whitespace/junk rows a normal insert
-  would reject, unescaped SQL interpolation.
+  would reject; values interpolated into backfill SQL without the escaping/parameterization
+  the model layer would have applied (the data-integrity failure is Data-migration's; the
+  injection angle is Security's).
 - Enum/boolean defaults that silently reclassify every existing row (`cook_method` default
   1 = `raw_html`).
 - Transformation field-fidelity: each output field must derive from the right source at the
