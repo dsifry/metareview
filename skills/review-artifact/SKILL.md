@@ -43,7 +43,8 @@ keep the orchestrator lean:
   near-duplicate advisory findings across lenses into one finding carrying its provenance list
   (the cluster size feeds the convergence gate), apply the three advisory gates (stated
   consequence, rebuttal, convergence weighting — see the Advisory Findings section of
-  `rubrics/artifact-review-rubric.md`), then dispatch **one** subagent that re-judges the
+  `rubrics/artifact-review-rubric.md`), then dispatch **one** read-only subagent that
+  re-judges the
   surviving advisory list against the staff bar — "would a staff-level reviewer actually
   comment on this in review, and would the author consider it substantive?" — and drops the
   ones that fail, before the advisory findings are written. The filter subagent treats the
