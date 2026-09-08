@@ -1,6 +1,6 @@
 # metareview Findings
 
-No unresolved findings recorded yet.
+- mrvf-20260908-115729930684000-pr-ready-branch-10d735e5-001 [high] No adjudicated lens review recorded (adversarial-review-reviewer)
 
 ## Process Overrides
 

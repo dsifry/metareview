@@ -360,6 +360,13 @@ func RenderIndex(root string) error {
 // error fails the render closed — an unreadable committed index must never be overwritten
 // with a partial view — and CRLF is normalized once (a Windows autocrlf checkout must not
 // defeat the exact header match or drag \r into the canonical LF document).
+//
+// Size bound asymmetry, deliberate: findings.jsonl (machine-appended, unbounded growth)
+// is read through the line-capped jsonl.Scanner, while the committed index is read whole
+// with no cap — it is a human-reviewed git artifact whose growth is visible in review, and
+// a cap would fail the render closed on an audit trail that legitimately outgrew it,
+// trading a rare allocation for a durability break. If this ever matters, the bound should
+// come with a migration path for over-cap committed docs, not a hard refusal.
 func readCommittedIndex(path string) ([]byte, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
