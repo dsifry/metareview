@@ -207,7 +207,9 @@ persona-anti-overlap pattern.
   an unguarded state transition, a lost-update on a balance/counter, money as float, a
   phantom-maintained derived column, a sentinel-meaning-change with no caller update, a
   cascading-failure path with no degradation, a stand-in guard that can go green while prod is
-  red, or an unversioned breaking API-contract change.
+  red, a format-drift where the path that writes a value and the path that compares it
+  disagree on canonical form, an implementer left on a changed interface's old signature, or
+  an unversioned breaking API-contract change.
 - Does NOT flag: security vulnerabilities (defer to Security); test quality (defer to
   Testing-quality); migration safety (defer to Data-migration).
 
