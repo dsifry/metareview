@@ -14,7 +14,8 @@ can't be rolled back.
 
 - PASS: no blocking data-migration findings.
 - NEEDS_REVISION: one or more blocking data-migration findings (irreversible migrations,
-  missing backfills, expand+contract violations, silent data loss).
+  missing backfills, expand+contract violations, silent data loss, re-run-unsafe execution
+  semantics).
 - ESCALATE: a migration's safety depends on runtime/deploy context the diff can't settle
   (concurrent writer behavior, zero-downtime window constraints).
 - NOT_APPLICABLE: the diff touches no schema, migration, or data-persistence changes. State
@@ -74,6 +75,23 @@ defects in THIS diff, not generic "migrations are risky" advice.
 - A type conversion (`ALTER COLUMN ... TYPE`) that narrows or truncates (varchar→int,
   text→varchar(10)) and silently drops values that don't fit.
 - Block on silent data loss with no backup, rollback, or validation step.
+
+### Migration Re-Run Safety
+- `force: true` added to an already-shipped migration — on re-run (a re-deploy, a restored
+  dump, a re-cloned environment) it drops pre-existing tables that the first run left alone.
+- A conditional insert paired with an unconditional delete: settings are destroyed even when
+  no rows were migrated, so the migration destroys data when it does nothing.
+- Dead guards on query results: `cmd_tuples > 0` is always 0 for SELECTs in PostgreSQL, so a
+  guard like `if cmd_tuples > 0` makes the delete it gates unconditional.
+- Backfills that bypass model validations/callbacks: whitespace/junk rows a normal insert
+  would reject, unescaped SQL interpolation.
+- Enum/boolean defaults that silently reclassify every existing row (`cook_method` default
+  1 = `raw_html`).
+- Transformation field-fidelity: each output field must derive from the right source at the
+  right precision — `raw` vs `cooked`, date vs datetime, precision loss on parse.
+- Block on re-run-unsafe execution semantics: a shipped migration made destructive on re-run,
+  a delete whose guard cannot fire, a backfill that bypasses validations, or a transformation
+  that derives an output field from the wrong source or at the wrong precision.
 
 ## What NOT To Flag (Anti-Overlap)
 

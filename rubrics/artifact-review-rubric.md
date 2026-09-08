@@ -84,6 +84,10 @@ persona-anti-overlap pattern.
 - Attack the assumption that the artifact covers every requirement. Find the requirement this
   artifact silently drops — the missing acceptance criterion, the missing verification, the
   obvious edge case no section addresses.
+- Hunt for **sibling-flag propagation**: when the diff touches a
+  notification/rendering/serialization path gated by user-config flags, enumerate ALL
+  gating flags (`disable*`, `hide*`, `include*`) and check each one — catching
+  `disableStandardEmails` but missing `hideCalendarNotes` on the same path is a miss.
 - Block on missing acceptance criteria, missing verification, or unhandled obvious edge cases.
 - Any finding that claims tests, specs or verification are ABSENT must first search for what it
   claims is missing — the diff's test-shaped files (`spec/**`, `specs/**`, `test/**`, `tests/**`,
@@ -170,9 +174,19 @@ persona-anti-overlap pattern.
 - Hunt for **sentinel-meaning-change**: a return value that changed meaning in this diff — a
   `null`/empty/`[]` that previously meant "nothing here" now meaning "not yet loaded" or "error
   suppressed"; a status sentinel whose semantics shifted so existing callers now misbehave.
+- Hunt for **format-drift** (the value one path writes and another path compares disagree
+  on canonical form): case (`lower(host) = ?` column vs raw user input; a lowercased
+  blacklist checked against non-lowercased input); scheme (`http://`-prefixed hosts stored,
+  bare `URI#host` compared); port (validation accepts `host:8080`, lookup via `URI#host`
+  strips it); trailing-slash concatenation; type coercion (JSON boolean vs string
+  `"true"`, array vs CSV string); encoding (double-decode); normalization asymmetry (model
+  callbacks normalize new rows, but a backfill or raw-SQL insert bypasses them).
 - Hunt for **cascading-failure paths**: trace the failure propagation — when one dependency
   fails, does the design degrade gracefully or cascade? A sync call chain with no
-  timeout/circuit-breaker/fallback; a queue consumer whose failure poisons the batch; a shared
+  timeout/circuit-breaker/fallback; an async chain with no rejection handling (`.then` without
+  `.catch`, an inner promise not returned so the caller sees success before the refresh
+  completes, optimistic state mutated before the request resolves, out-of-order async responses
+  overwriting newer state); a queue consumer whose failure poisons the batch; a shared
   resource (cache, connection pool) whose exhaustion takes down all tenants.
 - Hunt for **stand-in-guard-fidelity**: a CI gate, check, or test that can go green while
   production is red — a guard that tests a proxy/mock instead of the real code path; a check
@@ -181,7 +195,12 @@ persona-anti-overlap pattern.
 - Hunt for **api-contract breaking changes**: renamed or removed fields, narrowed inputs,
   widened returns, missing versioning on breaking changes; a response shape that existing
   callers depend on but the diff silently changes; a field re-typed (int→string) with no
-  version bump.
+  version bump; and when a diff changes an interface/abstract-method signature, check EVERY
+  implementer, not just the call sites in the diff (an implementer left on the old signature
+  compiles against duck-typing and silently misroutes, e.g. always hitting the default
+  calendar path); advertised routes with no controller action; an accepted request envelope
+  changed or dropped so existing callers send fields that are silently ignored; strict-equality
+  param parsing that silently inverts booleans (`params[:visible] == "true"` vs JSON `true`).
 - Block on parallel service paths, contradictions with existing architecture, O(n^2) over a
   growing collection, unbounded materialization on a hot path, N+1 query loops, derivable data
   stored without invalidation, an illegal state the schema permits (no `CHECK` forbidding it),
@@ -290,8 +309,20 @@ persona-anti-overlap pattern.
 - Hunt for **silent data loss**: a migration that drops, overwrites, or truncates data without a
   backup/export step; a `DELETE` with a broader `WHERE` than intended; a column repurposed
   (same name, new meaning) so old data is silently misinterpreted.
+- Hunt for **migration re-run safety**: `force: true` added to an already-shipped migration
+  (drops pre-existing tables on re-run); a conditional insert paired with an unconditional
+  delete (settings destroyed even when no rows were migrated); dead guards on query results
+  (`cmd_tuples > 0` is always 0 for SELECTs in PostgreSQL — the guard makes the delete
+  unconditional); backfills that bypass model validations/callbacks (whitespace/junk rows,
+  unescaped SQL interpolation); enum/boolean defaults that silently reclassify every
+  existing row (`cook_method` default 1 = `raw_html`); transformation field-fidelity (each
+  output field must derive from the right source at the right precision — `raw` vs
+  `cooked`, date vs datetime, precision loss on parse).
 - Block on irreversible migrations without rollback, missing backfills for NOT NULL columns,
-  expand+contract violations that break rolling deploys, silent data loss, or orphaned refs.
+  expand+contract violations that break rolling deploys, silent data loss, orphaned refs, an
+  already-shipped migration made destructive on re-run (`force: true`, a dead guard that
+  makes a delete unconditional), a backfill that bypasses validations, or a transformation
+  that derives an output field from the wrong source or at the wrong precision.
 - Does NOT flag: security vulnerabilities (defer to Security); test quality (defer to
   Testing-quality); architecture soundness beyond migration safety (defer to Architecture).
 
