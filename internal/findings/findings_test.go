@@ -1,6 +1,7 @@
 package findings
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -1541,5 +1542,84 @@ func TestPreservedSectionsEmitAfterOverrides(t *testing.T) {
 	}
 	if staleAt < overridesAt {
 		t.Errorf("preserved section must re-emit AFTER Process Overrides regardless of committed position:\n%s", g)
+	}
+}
+
+// The concurrency contract (writeIndexAtomic's doc + the KNOWN BOUNDARY in
+// RenderIndexWithRecords): concurrent renders are last-writer-wins for LOCAL records —
+// a render whose committed-index read predates another render's rename re-emits its stale
+// snapshot and drops the earlier writer's locally-rendered lines — and a lost update
+// SELF-HEALS at the next render, because the rendered index is derived from the
+// append-only records file. COMMITTED lines survive the same race via the carry-over
+// (each reader carries them from its own read), which is the property issue #151 was
+// about; this test pins the local-lines half of the contract.
+func TestConcurrentRenderLostUpdateSelfHeals(t *testing.T) {
+	root := t.TempDir()
+	findingsDir := filepath.Join(root, ".metareview")
+	if err := os.MkdirAll(findingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mkRecord := func(id, title string) Record {
+		return Record{
+			SchemaVersion:  1,
+			ID:             id,
+			RunID:          "mrv-heal-run",
+			Reviewer:       "heal-test",
+			Severity:       "high",
+			Classification: "blocking",
+			Status:         "open",
+			Target:         map[string]any{"type": "pr", "id": "1"},
+			Title:          title,
+			Finding:        title,
+			Expected:       "expected",
+			Found:          "found",
+			Recommendation: "recommendation",
+			Fingerprint:    "fp:" + id,
+		}
+	}
+	recordsA := []Record{mkRecord("mrvf-heal-001", "from render A")}
+	recordsB := []Record{mkRecord("mrvf-heal-002", "from render B")}
+	union := append(append([]Record{}, recordsA...), recordsB...)
+	// The append-only source of truth ends up holding BOTH record sets (in the real flow
+	// each render appends to this file before rendering; the race only affects the derived
+	// document's construction from a stale snapshot).
+	var buf bytes.Buffer
+	for _, r := range union {
+		if err := json.NewEncoder(&buf).Encode(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(findingsDir, "findings.jsonl"), buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The race, serialized: both renders read a committed index that does not exist yet, so
+	// neither carries the other's lines. B renders and renames first...
+	if err := RenderIndexWithRecords(root, recordsB); err != nil {
+		t.Fatal(err)
+	}
+	// ...then A's stale pre-built document renames over it (what A would have written from
+	// its own snapshot): the derived document now omits B's line — the documented lost
+	// update for LOCAL records.
+	docA := "# metareview Findings\n\n- mrvf-heal-001 [high] from render A (heal-test)\n"
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	if err := writeIndexAtomic(path, docA); err != nil {
+		t.Fatal(err)
+	}
+	doc, _ := os.ReadFile(path)
+	if strings.Contains(string(doc), "mrvf-heal-002") {
+		t.Fatalf("precondition: the stale overwrite should omit B's line:\n%s", doc)
+	}
+	if !strings.Contains(string(doc), "mrvf-heal-001") {
+		t.Fatalf("precondition: A's own line must be present:\n%s", doc)
+	}
+	// The next render regenerates from the CURRENT records (the union) and heals.
+	if err := RenderIndex(root); err != nil {
+		t.Fatal(err)
+	}
+	doc, _ = os.ReadFile(path)
+	for _, id := range []string{"mrvf-heal-001", "mrvf-heal-002"} {
+		if !strings.Contains(string(doc), id) {
+			t.Errorf("post-heal document must carry %s (self-healing contract):\n%s", id, doc)
+		}
 	}
 }

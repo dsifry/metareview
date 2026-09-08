@@ -585,6 +585,22 @@ func preservedSections(raw []byte) []string {
 // carry-over prevents on the read path. The rename replaces the file atomically; the temp
 // file sits beside it so the rename stays on one filesystem, and is removed on every path
 // that does not rename it.
+//
+// Platform scope: the replace-is-atomic guarantee is Unix rename(2). On Windows, Go's
+// os.Rename uses MoveFileEx with MOVEFILE_REPLACE_EXISTING — it replaces, but the
+// platform does not promise crash atomicity. The crash-atomicity contract holds on the
+// Unix runtimes this repo's gates run on; a Windows-specific replacement path is out of
+// scope (tracked with the other platform caveats, e.g. the sharing-violation note below).
+//
+// Concurrency contract (see the KNOWN BOUNDARY in RenderIndexWithRecords): concurrent
+// renders are last-writer-wins for LOCAL records — the later rename can omit the earlier
+// writer's locally-rendered lines — while COMMITTED lines survive every ordering via the
+// carry-over. This is deliberate: the rendered index is a DERIVED artifact, the
+// append-only .metareview/findings.jsonl is the source of truth, and every render
+// regenerates from the current records, so a lost update self-heals at the next render.
+// Serializing renders with a lock would close the window but adds a stale-lock failure
+// mode to a path that must fail safe; healing is the chosen trade-off (pinned by
+// TestConcurrentRenderLostUpdateSelfHeals).
 func writeIndexAtomic(path, document string) error {
 	// The destination's mode is preserved across replacement (rename does not carry it), and
 	// a write-PROTECTED index (owner-write bit clear — an operator's lock on the audit trail)
