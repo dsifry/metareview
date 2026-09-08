@@ -147,6 +147,12 @@ grep -q 'Consolidate advisory findings' skills/review-artifact/SKILL.md
 grep -q 'staff bar' skills/review-artifact/SKILL.md
 grep -q 'must never' skills/review-artifact/SKILL.md
 grep -q 'blocking/defect findings' skills/review-artifact/SKILL.md
+# The two dogfood-hardened filter behaviors (0.11.1 fix rounds): the failure semantics
+# (a failed filter call writes the gated-but-unfiltered list through with a warning) and
+# the read-only dispatch. Drift here silently reopens the silent-drop and injection
+# surface the dogfood review closed.
+grep -q 'read-only subagent' skills/review-artifact/SKILL.md
+grep -q 'gated-but-unfiltered' skills/review-artifact/SKILL.md
 grep -q '## Advisory Findings (real, important, not defects)' rubrics/artifact-review-rubric.md
 grep -q 'Stated consequence' rubrics/artifact-review-rubric.md
 grep -q 'Rebuttal gate' rubrics/artifact-review-rubric.md
