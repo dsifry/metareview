@@ -132,6 +132,10 @@ done
 # The FSM example payload carries the same count the discover node emits; it drifted once
 # already (nine stayed behind when the set grew), so pin it like the prose docs above.
 grep -q '"lenses":10' docs/fsm/sdlc-loop-example.md
+# and the prose in the same example must not lag the payload (it did: "9 adversarial lens
+# subagents" survived next to "lenses":10, and the numeric pin above could not see it).
+grep -q 'with 10 adversarial lens subagents' docs/fsm/sdlc-loop-example.md
+grep -q 'dispatch the ten lens sub-agents' docs/fsm/sdlc-loop-example.md
 
 grep -q 'return the actual artifact-review verdict' skills/review-artifact/SKILL.md
 grep -q 'parallel subagents by default' docs/quickstart.md

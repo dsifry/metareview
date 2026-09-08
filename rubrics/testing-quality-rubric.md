@@ -92,6 +92,10 @@ tests you are claiming do not exist, and the search must be shown in the finding
 - Do NOT flag architecture soundness, data-model correctness, or concurrency (defer to
   Architecture).
 - Do NOT flag migration safety, schema drift, or data loss (defer to Data-migration).
+- Do NOT flag runtime error-path defects in production code — unhandled async failure,
+  optimistic-state desync, silent partial success, outbound-call hardening, error-shape
+  leakage, credential lifecycle (defer to Runtime-reliability); whether the error paths
+  are TESTED stays here.
 - Do NOT flag whether tests exist at all when no test code is in the diff (defer to
   Completeness for "missing verification"; the deterministic `missing-test` gate owns absence
   of a test file for changed code). Testing-quality owns tests that EXIST but lie; it does not

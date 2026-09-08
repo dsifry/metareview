@@ -103,6 +103,10 @@ defects in THIS diff, not generic "migrations are risky" advice.
 
 - Do NOT flag security vulnerabilities (defer to Security).
 - Do NOT flag test quality (defer to Testing-quality).
+- Do NOT flag runtime error-path handling outside the migration itself — unhandled async
+  failure, optimistic-state desync, silent partial success, outbound-call hardening,
+  error-shape leakage, credential lifecycle (defer to Runtime-reliability). A migration's
+  own re-run/deploy/backfill safety stays here.
 - Do NOT flag architecture soundness beyond migration safety — data-model correctness,
   semantic validity, concurrency, and coupling are Architecture's job. This lens judges only
   whether the *migration itself* is safe and reversible.

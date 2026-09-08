@@ -311,7 +311,8 @@ func verdictIsUnresolved(verdict string) bool {
 // frozen era snapshot is cut from — it is NOT what any era points at.
 //
 // EVERY era points at a FROZEN literal, never at currentLenses: v10Lenses (the ten required from
-// 2026-09-08), v09Lenses (the nine from 2026-08-31), v08Lenses (the eight from 2026-08-24),
+// 2026-09-09 — the first full day after the 2026-09-08 merge; see the lensEras comment for why the
+// era is keyed to the day after the merge), v09Lenses (the nine from 2026-08-31), v08Lenses (the eight from 2026-08-24),
 // legacyLenses (the five before security). A
 // historical era's required set must never change when lens.All grows, or completed logs of that
 // era would retroactively become incomplete — the exact failure the era table exists to prevent.

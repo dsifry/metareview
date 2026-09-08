@@ -199,11 +199,12 @@ persona-anti-overlap pattern.
   format drift that defeats a security control (a bypassable blacklist) is Security's.
 - Hunt for **cascading-failure paths**: trace the failure propagation — when one dependency
   fails, does the design degrade gracefully or cascade? A sync call chain with no
-  timeout/circuit-breaker/fallback; an async chain with no rejection handling (`.then` without
-  `.catch`, an inner promise not returned so the caller sees success before the refresh
-  completes, optimistic state mutated before the request resolves, out-of-order async responses
-  overwriting newer state); a queue consumer whose failure poisons the batch; a shared
-  resource (cache, connection pool) whose exhaustion takes down all tenants.
+  timeout/circuit-breaker/fallback; an async chain with no rejection handling at the design
+  level (the concrete error-path handling in this diff's code — `.then` without `.catch`,
+  unreturned inner promises, optimistic state mutated before resolution, out-of-order
+  responses overwriting newer state — is Runtime-reliability's); a queue consumer whose
+  failure poisons the batch; a shared resource (cache, connection pool) whose exhaustion
+  takes down all tenants.
 - Hunt for **stand-in-guard-fidelity**: a CI gate, check, or test that can go green while
   production is red — a guard that tests a proxy/mock instead of the real code path; a check
   that passes because the production-only branch is `#ifdef`-ed out or feature-flagged away; a
@@ -388,7 +389,10 @@ persona-anti-overlap pattern.
 - Hunt for **outbound-call hardening**: no timeout on network/file fetches (`open(url)`,
   `fetch`, feed/HTTP clients); unbounded request payloads or downloads (no size/count cap,
   no `max()` on schema fields written to storage); request amplification with no rate
-  limit (an enqueue endpoint throttled per-URL, bypassed by varying the path).
+  limit (an enqueue endpoint throttled per-URL, bypassed by varying the path). The
+  reliability hardening here is timeouts, payload/storage caps, and exhaustion on the
+  request path; a missing rate limit that is a vulnerability (unauthenticated
+  amplification) is Security's A04, not this hunt.
 - Hunt for **error-shape leakage**: a raw exception/500 where the API contract promises a
   4xx (unguarded parse/decrypt, `find`-or-throw on optional relations, missing param
   envelope); error messages that can never render (a template-literal fallback that is
