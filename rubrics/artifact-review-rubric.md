@@ -92,6 +92,56 @@ persona-anti-overlap pattern.
   (defer to Testing-quality), migration safety (defer to Data-migration), or design-level
   failure propagation shape and schema invariants (defer to Architecture).
 
+## Advisory Findings (real, important, not defects)
+
+Every lens may additionally report **advisory findings**: latent defects, design risks,
+simplification opportunities, and code smells — the things a staff-level reviewer would say in
+review that are not blocking defects. There is **no numeric cap**: if the diff has fifteen
+must-say advisories, report fifteen. The guard against flooding is a quality bar, not a count —
+three gates, all of which must pass:
+
+1. **Stated consequence.** The advisory must name the trigger and who gets bitten: "when a
+   second provider is added, this flag-trio requires a migration instead of a row"; "the
+   next contributor updates three places or breaks one." No consequence stated → it is
+   taste → suppress it.
+2. **Rebuttal gate (steel-man).** State the author's strongest counter-argument and show why
+   the finding survives it: "yes, extraction adds a file — but this exact duplication already
+   drifted once within this PR, which is the failure mode extraction prevents." If the
+   rebuttal wins, drop the finding.
+3. **Convergence weighting (bar modulator).** Advisories that two or more lenses reach
+   independently (different hunts, same underlying issue) report at confidence ≥ 50.
+   Single-lens advisories need anchor 75 or a P1 consequence. Convergence is salience:
+   multiple angles noticing the same wrongness means it is probably wrong-shaped, not taste.
+   A lens cannot see its siblings — report your advisories at your honest anchor; this gate
+   is applied at the consolidation stage, where the cross-lens cluster size is actually known.
+
+**The smell/nit boundary:** a smell is structure that degrades change-safety or comprehension;
+a style nit is formatting or convention. The test: *does the next change get harder or riskier
+because of this?* Deprecated-but-equivalent syntax, layout, naming conventions → style → still
+suppressed (unchanged non-goal).
+
+**The deletion test (simplification claims):** any "this should be reshaped" advisory must name
+what becomes unnecessary — how many branches, places-to-update, or lines disappear.
+"Replacing the three booleans with a state enum deletes the guard-trio and makes the illegal
+state unrepresentable." If you cannot name what gets deleted, it is not a simplification
+finding.
+
+**Hunt families for advisories** (recognition aids, not quotas):
+
+- flag-trios / parallel booleans → state enum or lookup table;
+- parallel hand-maintained enumerations (client+server schemas, config writer+reader,
+  fixture producer+scorer) → single source of truth;
+- conditional sprawl → data-driven dispatch;
+- duplicated logic blocks → extraction (note the drift already observed, if any);
+- speculative generality / over-abstraction → **deletion opportunity** (the over-architected
+  direction — no current hunt covers it at all);
+- specs that exercise the happy path only where the diff adds an edge case.
+
+Advisories are consolidated and staff-filtered at the orchestrator stage before the advisory
+findings are written into the review log (they are held out of the per-lens writes — see
+Orchestrator Discipline in `skills/review-artifact/SKILL.md`); blocking and
+defect findings never pass through that filter.
+
 ## Required Lenses
 
 ### Feasibility
@@ -115,6 +165,7 @@ persona-anti-overlap pattern.
 - Block on missing acceptance criteria, missing verification, unhandled obvious edge cases,
   or a gating flag on a touched notification/rendering/serialization path left unchecked
   (the sibling-flag miss).
+- Report **advisory findings** for scope/architecture risk that does not block.
 - Any finding that claims tests, specs or verification are ABSENT must first search for what it
   claims is missing — the diff's test-shaped files (`spec/**`, `specs/**`, `test/**`, `tests/**`,
   `__tests__/**`, `*.test.*`, `*.spec.*`, `*_test.go`, `test_*.py`) and the repo, with your
@@ -123,7 +174,8 @@ persona-anti-overlap pattern.
   in evaluation to date.
 - Does NOT flag: whether a path is feasible (defer to Feasibility); scope drift (defer to Scope
   and alignment); architecture soundness (defer to Architecture); concrete runtime error-path
-  handling in this diff's code (defer to Runtime-reliability).
+  handling in this diff's code (defer to Runtime-reliability);
+  style nits remain suppressed at every gate (see the smell/nit boundary under Advisory Findings).
 
 ### Scope And Alignment
 
@@ -253,10 +305,14 @@ persona-anti-overlap pattern.
   red, a format-drift where the path that writes a value and the path that compares it
   disagree on canonical form, an implementer left on a changed interface's old signature, an
   advertised route with no action behind it, or an unversioned breaking API-contract change.
+- Report **advisory findings** for wrong-shape, simplification, and coupling concerns that do
+  not block (the advisory hunt families — flag-trios, parallel enumerations, conditional
+  sprawl, duplicated blocks, speculative generality — are recognition aids for this mandate).
 - Does NOT flag: security vulnerabilities (defer to Security); test quality (defer to
   Testing-quality); migration safety (defer to Data-migration); concrete runtime error-path
   handling in this diff's code (defer to Runtime-reliability — design-level failure
-  *propagation shape* stays here).
+  *propagation shape* stays here); style nits remain suppressed at every gate (see the
+  smell/nit boundary under Advisory Findings).
 
 ### Intent Preservation
 
@@ -331,6 +387,9 @@ persona-anti-overlap pattern.
 - Block on a behavioral change in the diff with no test modifications, a test that asserts
   nothing (false-confidence), or a test that exercises only a mock. Do not double-report
   `eval(` or `missing-test` issues the deterministic gates already catch.
+- Report **advisory findings** for spec-coverage gaps and fragile test structure that do not
+  block (specs that exercise the happy path only where the diff adds an edge case are an
+  advisory hunt family).
 - **Missing-test ownership (precedence):** the deterministic `missing-test` gate owns the
   *boolean* "source changed, test file unchanged" (free, exact) — it fires on the absence of
   test-file changes, not on test quality. Testing-quality owns the *qualitative* "tests exist
@@ -344,7 +403,8 @@ persona-anti-overlap pattern.
   Architecture); migration safety (defer to Data-migration); runtime error-path defects in
   production code (defer to Runtime-reliability — whether the error paths are *tested* stays
   here); whether tests exist at all when no test code is in the diff (defer to Completeness
-  for "missing verification").
+  for "missing verification"); style nits remain suppressed at every gate (see the smell/nit
+  boundary under Advisory Findings).
 
 ### Data-Migration
 
@@ -437,11 +497,14 @@ persona-anti-overlap pattern.
 - Block on a user-facing operation whose failure is invisible, an API that reports success
   while dropping work, an unbounded or timeout-less outbound call on a request path, or a
   raw 500 where a 4xx belongs.
+- Report **advisory findings** for latent fragility ("works today, breaks when…") that does
+  not block.
 - Does NOT flag: security vulnerabilities (defer to Security); test quality (defer to
   Testing-quality); migration safety, including runtime error paths inside the migration
   itself (defer to Data-migration); design-level failure
   propagation shape or schema invariants (defer to Architecture); whether error handling
-  is *tested* (defer to Testing-quality).
+  is *tested* (defer to Testing-quality); style nits remain suppressed at every gate (see
+  the smell/nit boundary under Advisory Findings).
 
 ### Mechanical-Precision
 
@@ -491,7 +554,9 @@ Session-derived facts are hints unless the finding is about intent or process hi
 The review markdown has two distinct prose sections; keep them separate:
 
 - **`## Orchestrator Notes (not findings)`** — orchestrator context and synthesis (checkout
-  sparse, filtered file-not-found artifacts, consolidation narrative, "all N lenses returned").
+  sparse, filtered file-not-found artifacts, consolidation narrative, advisory-consolidation
+  narrative (clusters, gate outcomes, staff-filter disposition with each drop's reason),
+  "all N lenses returned").
   This is **audit trail only**. It is NOT a finding stream. Downstream consumers (and the
   harnesseval extractor) MUST NOT extract sentences from here as review findings.
 - **`## Findings`** (and the classified `## Blocking Findings` / `## Advisory Findings` /
@@ -509,4 +574,7 @@ Write each lens's findings into the review log as that lens returns (per-lens ed
 orchestrator's final reply to the verdict plus a one-line summary — do not re-emit the findings in
 the final message. On large diffs a single findings-laden message can overflow the model's
 per-message output limit and truncate the review; per-lens writes avoid this (see Orchestrator
-Discipline in `skills/review-artifact/SKILL.md`).
+Discipline in `skills/review-artifact/SKILL.md`). Advisory findings are the exception to per-lens
+writes: they are held, clustered, gated, and staff-filtered at the consolidation step, then
+written once — writing them per-lens as lenses return would publish ungated, unclustered
+advisories the consolidation never filtered.
