@@ -1355,3 +1355,39 @@ func TestWriteIndexSeedNeverClobbersExistingContent(t *testing.T) {
 		t.Errorf("existing content lost:\n%s", string(got))
 	}
 }
+
+// The seed's fault-injection half: every seam failure fails the seed, and a
+// non-EEXIST open failure (a read-only directory) fails it too — an empty seed must never
+// be mistaken for a successful render's absence of findings.
+func TestWriteIndexSeedFaultInjection(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		inject func()
+	}{
+		{"write", func() { seamWriteString = func(*os.File, string) error { return fmt.Errorf("disk full") } }},
+		{"sync", func() { seamSync = func(*os.File) error { return fmt.Errorf("sync failed") } }},
+		{"close", func() { seamClose = func(*os.File) error { return fmt.Errorf("close failed") } }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			savedWrite, savedSync, savedClose := seamWriteString, seamSync, seamClose
+			defer func() { seamWriteString, seamSync, seamClose = savedWrite, savedSync, savedClose }()
+			tc.inject()
+			root := t.TempDir()
+			path := filepath.Join(root, "FINDINGS.md")
+			if err := WriteIndexSeed(path); err == nil {
+				t.Fatalf("%s fault must fail the seed", tc.name)
+			}
+		})
+	}
+
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("permission-based unreadability does not apply on windows or as root")
+	}
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteIndexSeed(filepath.Join(root, "FINDINGS.md")); err == nil {
+		t.Fatal("an uncreatable seed path must fail, not report success")
+	}
+}

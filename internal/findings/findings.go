@@ -314,15 +314,15 @@ func WriteIndexSeed(path string) error {
 		}
 		return err
 	}
-	if _, err := f.WriteString(emptyIndexDocument); err != nil {
+	if err := seamWriteString(f, emptyIndexDocument); err != nil {
 		_ = f.Close()
 		return err
 	}
-	if err := f.Sync(); err != nil {
+	if err := seamSync(f); err != nil {
 		_ = f.Close()
 		return err
 	}
-	return f.Close()
+	return seamClose(f)
 }
 
 func RenderIndex(root string) error {
