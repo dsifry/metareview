@@ -93,7 +93,9 @@ defects in THIS diff, not generic "migrations are risky" advice.
 - Transformation field-fidelity: each output field must derive from the right source at the
   right precision — `raw` vs `cooked`, date vs datetime, precision loss on parse.
 - Block on re-run-unsafe execution semantics: a shipped migration made destructive on re-run,
-  a dead guard that leaves a delete unreplaced (no replacement rows created), a backfill that
+  a conditional insert paired with an unconditional delete (data destroyed even when nothing
+  was migrated), a dead guard that leaves a delete unreplaced (no replacement rows created),
+  an enum/boolean default that silently reclassifies existing rows, a backfill that
   bypasses validations, or a transformation that derives an output field from the wrong
   source or at the wrong precision.
 

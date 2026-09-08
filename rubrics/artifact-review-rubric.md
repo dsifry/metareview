@@ -340,9 +340,11 @@ persona-anti-overlap pattern.
   `cooked`, date vs datetime, precision loss on parse).
 - Block on irreversible migrations without rollback, missing backfills for NOT NULL columns,
   expand+contract violations that break rolling deploys, silent data loss, orphaned refs, a
-  shipped migration made destructive on re-run (`force: true`), a dead guard that leaves a
-  delete unreplaced (no replacement rows created), a backfill that bypasses validations, or
-  a transformation that derives an output field from the wrong source or at the wrong
+  shipped migration made destructive on re-run (`force: true`), a conditional insert paired
+  with an unconditional delete (data destroyed even when nothing was migrated), a dead guard
+  that leaves a delete unreplaced (no replacement rows created), an enum/boolean default that
+  silently reclassifies existing rows, a backfill that bypasses validations, or a
+  transformation that derives an output field from the wrong source or at the wrong
   precision.
 - Does NOT flag: security vulnerabilities (defer to Security); test quality (defer to
   Testing-quality); architecture soundness beyond migration safety (defer to Architecture).
