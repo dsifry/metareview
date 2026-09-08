@@ -21,6 +21,9 @@ lens:
 The adversarial stance: assume the artifact contains a contract that cannot be built as written
 — find it. Do not confirm the design reads well; hunt for the referent an implementer would have
 to invent, the invariant nothing enforces, the sentence that admits two incompatible builds.
+State every finding as a definite claim about a concrete failure mode — never hedge the mechanism
+(no "may", "could potentially", "presumably"); uncertainty belongs in the confidence anchor, not
+the finding text.
 
 ## Verdicts
 
