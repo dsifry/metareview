@@ -1,6 +1,6 @@
 # metareview Findings
 
-- mrvf-20260908-115729930684000-pr-ready-branch-10d735e5-001 [high] No adjudicated lens review recorded (adversarial-review-reviewer)
+No unresolved findings recorded yet.
 
 ## Process Overrides
 
@@ -60,3 +60,4 @@ Deliberate exceptions to the review workflow. Pending entries still block CI.
 - mrvf-20260907-234236573116000-pr-ready-branch-10d735e5-001 [granted] Unresolved review blockers — granted by dsifry (repo owner, approved in session 2026-09-07) at 2026-09-07T23:42:57Z: Maintainer approved: self-referential stale meta-finding — it pointed at the escalated log whose only blocker was the marker that head-churn kept invalidating; the marker now exists at this exact head from a clean nine-lens run. (requested by david@sifry.com at 2026-09-07T23:42:53Z: Self-referential stale meta-finding: this gate run's 'unresolved review blockers' pointed at the escalated 234001 log, whose only blocker was the review-evidence marker that the head-churn of committing gate artifacts kept invalidating. The marker now exists at this exact head (recorded from FSM run mrv-20260907-234133, DONE clean, nine lenses, zero findings); every substantive dimension passes. The fingerprint can never re-raise in a passing state once the chain is escalated, so an override is the only exit.)
 - mrvf-20260908-111935207236000-pr-ready-branch-10d735e5-001 [granted] Missing validation evidence — granted by david@sifry.com at 2026-09-08T11:21:52Z: Factually resolved: the 11:21 gate run supplies freeform validation evidence that parses (go test/make cover/run-all all exited 0); the 11:19 blocker was caused by the word 'fail-closed' in the evidence text tripping the freeform failure heuristic, not by missing validation.
 - mrvf-20260908-112144546568000-pr-ready-branch-10d735e5-001 [granted] Unresolved review blockers — granted by david@sifry.com at 2026-09-08T11:22:00Z: Self-referential residue: the 11:21 run flagged the branch blocked because the 11:19 run's 'missing validation evidence' blocker was then still open; that blocker is overridden (factually resolved by the 11:21 evidence), so this finding's cause is gone.
+- mrvf-20260908-115729930684000-pr-ready-branch-10d735e5-001 [granted] No adjudicated lens review recorded — granted by david@sifry.com at 2026-09-08T12:00:13Z: Superseded: an adjudicated 10-lens review IS recorded for the current head 72373b4 (FSM run mrv-20260908-120008600825000, DONE clean); the blocker was raised against the previous head before that review was recorded.
