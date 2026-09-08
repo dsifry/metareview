@@ -757,7 +757,10 @@ Deliberate exceptions to the review workflow. Pending entries still block CI.
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	blockers, overrides := carryOverLines(path, map[string]bool{"mrvf-a-001": true})
+	blockers, overrides, err := carryOverLines(path, map[string]bool{"mrvf-a-001": true})
+	if err != nil {
+		t.Fatalf("carryOverLines: %v", err)
+	}
 	if len(blockers) != 2 || !strings.Contains(blockers[0], "mrvf-a-002") {
 		t.Errorf("blockers carry-over = %v, want the unknown mrvf-a-002 first (post-section bullet checked below)", blockers)
 	}
@@ -768,9 +771,113 @@ Deliberate exceptions to the review workflow. Pending entries still block CI.
 	if len(blockers) != 2 || !strings.Contains(blockers[1], "mrvf-a-004") {
 		t.Errorf("blockers carry-over = %v, want mrvf-a-002 and the post-section mrvf-a-004", blockers)
 	}
-	// an unreadable/absent committed index is no information, not an error
-	b, o := carryOverLines(filepath.Join(root, "does-not-exist.md"), nil)
-	if b != nil || o != nil {
-		t.Errorf("absent committed index must carry nothing, got %v %v", b, o)
+	// an ABSENT committed index is no information, not an error
+	b, o, err := carryOverLines(filepath.Join(root, "does-not-exist.md"), nil)
+	if err != nil || b != nil || o != nil {
+		t.Errorf("absent committed index must carry nothing without error, got %v %v %v", b, o, err)
+	}
+}
+
+// The read-error half of the fail-closed rule: a committed index that EXISTS but cannot be
+// read (permissions, transient I/O) must abort the render, because proceeding would
+// overwrite the committed audit trail with the local-only view — the issue-#151 destruction,
+// re-opened on the error path (caught in adversarial review of this fix).
+func TestCarryOverFailsClosedOnUnreadableCommittedIndex(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# metareview Findings\n\n- mrvf-x-001 [high] a committed blocker (r)\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	if err := RenderIndexWithRecords(root, nil); err == nil {
+		t.Fatal("an unreadable committed index must fail the render, not overwrite the file")
+	}
+	if err := os.Chmod(path, 0o644); err != nil { // restore so the untouched-content check can read it
+		t.Fatal(err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != "# metareview Findings\n\n- mrvf-x-001 [high] a committed blocker (r)\n" {
+		t.Errorf("the unreadable committed index must be left untouched, got %q", string(got))
+	}
+}
+
+// The end-to-end regression for issue #151: Reconcile — the caller every gate actually
+// drives — run in a fresh worktree (empty local ledger) against a pre-seeded committed
+// FINDINGS.md must not destroy the committed provenance. Every other Reconcile test runs in
+// a bare TempDir with no committed index, so this is the only test that exercises the
+// caller-level path the clobber actually rode.
+func TestReconcileInFreshWorktreePreservesCommittedIndex(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	committed := "# metareview Findings\n\n" +
+		"- mrvf-20260908-060804291514000-task-done-kind-b7bb121c-001 [high] No adjudicated lens review recorded (adversarial-review-reviewer)\n\n" +
+		"## Process Overrides\n\n" +
+		"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
+		"- mrvf-20260903-233630855862000-pr-ready-branch-10d735e5-001 [granted] Adversarial review was in-session-emulated — granted by agent-session-140 at 2026-09-07T17:58:40Z: Historical advisory from a prior session's branch.\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(committed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run := Run{ID: "mrv-fresh", Scope: "pr-ready", Target: map[string]string{"type": "branch", "id": "feature-x"}, RepoRoot: root, GitHead: "fff"}
+	local := unsafeEval("eval introduced by this run.")
+	local.Fingerprint = "security:eval:lib/fresh.js"
+	if _, err := Reconcile(root, run, []Input{local}, Options{}); err != nil {
+		t.Fatalf("reconcile in fresh worktree: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := string(got)
+	if !strings.Contains(g, "mrvf-20260908-060804291514000-task-done-kind-b7bb121c-001") {
+		t.Errorf("committed open blocker destroyed by a fresh-worktree gate run:\n%s", g)
+	}
+	if !strings.Contains(g, "mrvf-20260903-233630855862000-pr-ready-branch-10d735e5-001 [granted]") {
+		t.Errorf("committed override provenance destroyed by a fresh-worktree gate run:\n%s", g)
+	}
+	if !strings.Contains(g, "mrvf-fresh") {
+		t.Errorf("the fresh run's own finding must also render:\n%s", g)
+	}
+}
+
+// Suppression must hold for the overridden status too, not just fixed: a record the ledger
+// holds as StatusOverridden renders its override line from the ledger, and the committed
+// line with the same ID must not ALSO carry — a failure here duplicates the Process
+// Overrides entry (caught in adversarial review of this fix).
+func TestRenderOverriddenLedgerRecordSuppressesItsCommittedOverrideLine(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	committed := "# metareview Findings\n\n" +
+		"## Process Overrides\n\n" +
+		"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
+		"- mrvf-o-001 [granted] committed render of the override — granted by old-session at 2026-09-01: reason\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(committed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ledger := Record{ID: "mrvf-o-001", Status: StatusOverridden, Title: "ledger render of the override",
+		OverrideGrantedBy: "new-session", OverrideGrantedAt: "2026-09-08", OverrideGrantReason: "fresh local knowledge"}
+	if err := RenderIndexWithRecords(root, []Record{ledger}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	g := string(got)
+	if strings.Contains(g, "committed render of the override") {
+		t.Errorf("a ledger-known overridden record must suppress its committed line:\n%s", g)
+	}
+	if !strings.Contains(g, "ledger render of the override") || !strings.Contains(g, "new-session") {
+		t.Errorf("the ledger's own override line must render:\n%s", g)
 	}
 }

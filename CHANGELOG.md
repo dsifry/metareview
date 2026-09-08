@@ -121,7 +121,10 @@
   finding ID the local records do not contain, verbatim: a record the ledger knows (any
   status) renders from the ledger and suppresses its committed line, so fresh local knowledge
   always wins, and an empty ledger is NO information rather than "no findings" — the same
-  stance CoveredPaths takes for `none`-vs-absent.
+  stance CoveredPaths takes for `none`-vs-absent. A committed index that exists but cannot be
+  read fails the render closed rather than overwriting it. Scope boundary: carry-over is
+  display-preserving only — it does not feed the local ledger, so cross-worktree enforcement
+  (override list, blocking counts) still reports local state.
 
 - **PR-ready now selects findings for the target under review.** Findings linked to the current
   branch, live pull request, or a task review whose covered paths overlap the current diff retain

@@ -314,13 +314,30 @@ var carryOverLine = regexp.MustCompile(`^- (mrvf-[A-Za-z0-9-]+) \[`)
 // once swept into a PR and caught only by CodeRabbit). The render now carries every committed
 // line whose finding ID the local records do not contain, verbatim: a record the ledger knows
 // (open, fixed, overridden — any status) renders from the ledger and suppresses its committed
-// line, so fresh local knowledge always wins; a record the ledger has never seen is preserved
+// line, so fresh local knowledge always wins — for a non-blocking status the record renders
+// as ABSENCE — and a record the ledger has never seen is preserved
 // rather than destroyed. An empty ledger is thereby NO INFORMATION, not "no findings" — the
 // same stance CoveredPaths takes for none-vs-absent.
-func carryOverLines(path string, known map[string]bool) (blockers, overrides []string) {
+//
+// Scope boundary, stated so it is not read as more than it is: carry-over is
+// display-preserving ONLY. It does not feed carried records back into the local ledger, so
+// cross-worktree enforcement (override list, blocking counts) still reports local state, and
+// because finding IDs are run-scoped, the same underlying finding re-recorded in a second
+// worktree can render twice (its old committed line carried beside the new local one) — a
+// duplication that is strictly better than the destruction it replaced, and the price of
+// keying carry-over on the only stable identifier the lossy render carries.
+func carryOverLines(path string, known map[string]bool) (blockers, overrides []string, err error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil // no committed index yet (first render) — nothing to carry
+		if os.IsNotExist(err) {
+			// No committed index yet (first render) — nothing to carry. ONLY this case is
+			// "no information": a file that exists but cannot be read (permissions, transient
+			// I/O) must FAIL the render, because proceeding would overwrite the committed
+			// audit trail with the local-only view — recreating, on the error path, the exact
+			// silent destruction this carry-over exists to prevent.
+			return nil, nil, nil
+		}
+		return nil, nil, err
 	}
 	inOverrides := false
 	for _, line := range strings.Split(string(raw), "\n") {
@@ -340,7 +357,7 @@ func carryOverLines(path string, known map[string]bool) (blockers, overrides []s
 			blockers = append(blockers, line)
 		}
 	}
-	return blockers, overrides
+	return blockers, overrides, nil
 }
 
 func RenderIndexWithRecords(root string, records []Record) error {
@@ -355,7 +372,10 @@ func RenderIndexWithRecords(root string, records []Record) error {
 			known[record.ID] = true
 		}
 	}
-	coBlockers, coOverrides := carryOverLines(path, known)
+	coBlockers, coOverrides, err := carryOverLines(path, known)
+	if err != nil {
+		return err // fail closed: an unreadable committed index must not be overwritten
+	}
 	lines := make([]string, 0, len(blockers)+len(coBlockers))
 	for _, finding := range blockers {
 		lines = append(lines, fmt.Sprintf("- %s [%s] %s (%s)", finding.ID, finding.Severity, finding.Title, finding.Reviewer))
