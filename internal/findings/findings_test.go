@@ -759,10 +759,11 @@ Deliberate exceptions to the review workflow. Pending entries still block CI.
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	blockers, overrides, err := carryOverLines(path, map[string]bool{"mrvf-a-001": true})
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("carryOverLines: %v", err)
+		t.Fatal(err)
 	}
+	blockers, overrides := carryOverLines(raw, map[string]bool{"mrvf-a-001": true})
 	if len(blockers) != 1 || !strings.Contains(blockers[0], "mrvf-a-002") {
 		t.Errorf("blockers carry-over = %v, want only the unknown mrvf-a-002", blockers)
 	}
@@ -775,10 +776,11 @@ Deliberate exceptions to the review workflow. Pending entries still block CI.
 	if len(blockers) != 1 || strings.Contains(strings.Join(blockers, "\n"), "mrvf-a-004") {
 		t.Errorf("blockers carry-over = %v, want only mrvf-a-002; post-section bullets must not carry", blockers)
 	}
-	// an ABSENT committed index is no information, not an error
-	b, o, err := carryOverLines(filepath.Join(root, "does-not-exist.md"), nil)
-	if err != nil || b != nil || o != nil {
-		t.Errorf("absent committed index must carry nothing without error, got %v %v %v", b, o, err)
+	// an ABSENT committed index is no information, not an error — the READ layer's job now;
+	// the parser just sees no bytes
+	b, o := carryOverLines(nil, nil)
+	if b != nil || o != nil {
+		t.Errorf("no committed bytes must carry nothing, got %v %v", b, o)
 	}
 }
 
@@ -1112,7 +1114,8 @@ func TestCarryOverMatchesWhatTheRenderEmits(t *testing.T) {
 		{ID: "mrvf-rt-002", Status: StatusOverridden, Title: "an overridden finding",
 			OverrideGrantedBy: "human", OverrideGrantedAt: "2026-09-08T00:00:00Z", OverrideGrantReason: "accepted risk"},
 		{ID: "mrvf-rt-003", Status: StatusOverridePending, Title: "a pending override",
-			OverrideRequestedBy: "agent", OverrideRequestedAt: "2026-09-08T00:00:00Z", OverrideRequestReason: "needs a human"},
+			OverrideRequestedBy: "agent", OverrideRequestedAt: "2026-09-08T00:00:00Z", OverrideRequestReason: "needs a human",
+			OverrideEscalation: "an escalation that spans\ntwo physical lines"},
 		// a free-text field with an embedded newline: the emitter must flatten it to one
 		// physical line, or carry-over re-reads only the first line of a two-line entry
 		{ID: "mrvf-rt-004", Status: "open", Severity: "critical", Classification: "blocking",
@@ -1124,10 +1127,11 @@ func TestCarryOverMatchesWhatTheRenderEmits(t *testing.T) {
 	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
 
 	// fresh worktree: nothing known — EVERY emitted line must carry back through the parser
-	blockers, overrides, err := carryOverLines(path, map[string]bool{})
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	blockers, overrides := carryOverLines(raw, map[string]bool{})
 	if len(blockers) != 2 {
 		t.Errorf("emitted blockers did not carry back: %v", blockers)
 	}
@@ -1138,6 +1142,15 @@ func TestCarryOverMatchesWhatTheRenderEmits(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(blockers, "\n"), "a title that spans two physical lines") {
 		t.Errorf("the multi-line title was not flattened to the canonical single line: %v", blockers)
+	}
+	if !strings.Contains(strings.Join(overrides, "\n"), "an escalation that spans two physical lines") {
+		t.Errorf("the multi-line escalation was not flattened to the canonical single line: %v", overrides)
+	}
+	// every emitted line must be exactly one physical line
+	for _, l := range append(append([]string{}, blockers...), overrides...) {
+		if strings.ContainsAny(l, "\n\r") {
+			t.Errorf("emitted entry spans physical lines: %q", l)
+		}
 	}
 	if len(overrides) != 2 {
 		t.Errorf("emitted overrides did not carry back: %v", overrides)
@@ -1208,5 +1221,41 @@ func TestWriteIndexSeedIsAtomic(t *testing.T) {
 	}
 	if len(leftovers) != 0 {
 		t.Errorf("seed left temp files behind: %v", leftovers)
+	}
+}
+
+// Rewrite stability (the property issue #151 is about): rendering twice over the file the
+// first render wrote — carried lines, preserved sections and local records re-read from the
+// new layout — must not duplicate a carried line or a preserved section.
+func TestRenderIsIdempotentOverItsOwnOutput(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	committed := "# metareview Findings\n\n" +
+		"- mrvf-idem-001 [high] an open blocker (reviewer)\n\n" +
+		"## Process Overrides\n\n" +
+		"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
+		"- mrvf-idem-002 [granted] an override — granted by someone at some time: reason\n\n" +
+		"## Stale\n\n" +
+		"- mrvf-idem-003 [medium] a stale-head finding (reviewer)\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(committed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := RenderIndexWithRecords(root, nil); err != nil {
+			t.Fatalf("render %d: %v", i, err)
+		}
+	}
+	got, _ := os.ReadFile(path)
+	g := string(got)
+	for _, id := range []string{"mrvf-idem-001", "mrvf-idem-002", "mrvf-idem-003"} {
+		if n := strings.Count(g, id); n != 1 {
+			t.Errorf("%s appears %d times after two renders:\n%s", id, n, g)
+		}
+	}
+	if n := strings.Count(g, "## Stale"); n != 1 {
+		t.Errorf("the Stale section appears %d times after two renders:\n%s", n, g)
 	}
 }

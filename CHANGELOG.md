@@ -128,7 +128,15 @@
   a crash mid-write would leave half-written. Carry-over is display-preserving only — it does
   not feed the local ledger, cross-worktree enforcement (override list, blocking counts)
   still reports local state, and carried lines have no retirement path once the originating
-  ledger is gone (clearing one means editing the committed file by hand).
+  ledger is gone (clearing one means editing the committed file by hand). The renderer's
+  write path matches its promises: hand-maintained committed sections it does not emit (a
+  history note, a "Stale" partition) survive the rewrite instead of being deleted; every
+  emitted entry is one canonical physical line (free-text titles, override reasons, actors
+  and escalations are flattened, so an embedded newline can no longer split an entry whose
+  continuation would be lost on re-read); the committed index is read once per render (one
+  snapshot, one fail-closed policy, no mixed-snapshot race); and the artifact scaffold's
+  seed path writes through the same atomic writer as the reconciler — there is exactly one
+  writer implementation of the durable audit file.
 
 - **PR-ready now selects findings for the target under review.** Findings linked to the current
   branch, live pull request, or a task review whose covered paths overlap the current diff retain

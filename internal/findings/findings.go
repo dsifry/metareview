@@ -291,12 +291,20 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// emptyIndexBody is the shared "no unresolved findings" text; emptyIndexDocument is the
+// complete seed document. ONE literal, two users (the render default and the seed), so the
+// seed path and the render path cannot drift apart.
+const (
+	emptyIndexBody     = "No unresolved findings recorded yet."
+	emptyIndexDocument = "# metareview Findings\n\n" + emptyIndexBody + "\n"
+)
+
 // WriteIndexSeed writes the first-render content of the findings index through
 // writeIndexAtomic, so every writer of the durable audit file — the reconciler and the
 // artifact scaffold's first-creation path — carries the same fsync/mode/unique-temp
 // guarantees instead of a truncating in-place write.
 func WriteIndexSeed(path string) error {
-	return writeIndexAtomic(path, "# metareview Findings\n\nNo unresolved findings recorded yet.\n")
+	return writeIndexAtomic(path, emptyIndexDocument)
 }
 
 func RenderIndex(root string) error {
@@ -339,19 +347,7 @@ var carryOverLine = regexp.MustCompile(`^- (mrvf-[A-Za-z0-9-]+) \[`)
 // and the ledger is transient, so after a clone or ledger cleanup a carried line renders
 // indefinitely — clearing it means editing the committed file by hand (or the durable
 // ledger reconcile #93-style work would give it).
-func carryOverLines(path string, known map[string]bool) (blockers, overrides []string, err error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// No committed index yet (first render) — nothing to carry. ONLY this case is
-			// "no information": a file that exists but cannot be read (permissions, transient
-			// I/O) must FAIL the render, because proceeding would overwrite the committed
-			// audit trail with the local-only view — recreating, on the error path, the exact
-			// silent destruction this carry-over exists to prevent.
-			return nil, nil, nil
-		}
-		return nil, nil, err
-	}
+func carryOverLines(raw []byte, known map[string]bool) (blockers, overrides []string) {
 	// Carry-over is bounded to the two sections the renderer itself emits — the top
 	// unresolved-blockers section and Process Overrides. A bullet under ANY other section
 	// (a hand-maintained history, or the "Stale" partition the shelved #93 design adds) is
@@ -365,7 +361,11 @@ func carryOverLines(path string, known map[string]bool) (blockers, overrides []s
 	section := sectionTop
 	for _, line := range strings.Split(string(raw), "\n") {
 		if strings.HasPrefix(line, "## ") {
-			if strings.HasPrefix(line, "## Process Overrides") {
+			// EXACT match, not a prefix: a hand-maintained "## Process Overrides History"
+			// section must not have its prose deleted and its bullets promoted into the
+			// real Process Overrides section — the destroy-and-promote class this package
+			// exists to prevent. The renderer emits the header as exactly this string.
+			if line == "## Process Overrides" {
 				section = sectionOverrides
 			} else {
 				section = sectionOther
@@ -383,7 +383,7 @@ func carryOverLines(path string, known map[string]bool) (blockers, overrides []s
 			overrides = append(overrides, line)
 		}
 	}
-	return blockers, overrides, nil
+	return blockers, overrides
 }
 
 func RenderIndexWithRecords(root string, records []Record) error {
@@ -398,10 +398,18 @@ func RenderIndexWithRecords(root string, records []Record) error {
 			known[record.ID] = true
 		}
 	}
-	coBlockers, coOverrides, err := carryOverLines(path, known)
-	if err != nil {
-		return err // fail closed: an unreadable committed index must not be overwritten
+	// ONE read of the committed index, one failure policy, handed to both parsers: reading
+	// it twice (carry-over, then preservation) could straddle a concurrent atomic rename and
+	// mix two snapshots, silently dropping every preserved section. Not-exist is "first
+	// render" — nothing to carry and nothing to preserve; any other read error fails the
+	// render closed rather than overwriting the durable audit trail with a partial view.
+	var committed []byte
+	if raw, err := os.ReadFile(path); err == nil {
+		committed = raw
+	} else if !os.IsNotExist(err) {
+		return err
 	}
+	coBlockers, coOverrides := carryOverLines(committed, known)
 	lines := make([]string, 0, len(blockers)+len(coBlockers))
 	for _, finding := range blockers {
 		// Emission is canonicalized to one physical line per entry: the committed index is
@@ -409,11 +417,11 @@ func RenderIndexWithRecords(root string, records []Record) error {
 		// newline would make one entry span lines and only its first line carry back. Titles
 		// and reviewer names are flattened (whitespace runs to a single space, control
 		// characters dropped) so the writer and the reader agree on one form.
-		lines = append(lines, fmt.Sprintf("- %s [%s] %s (%s)", finding.ID, finding.Severity,
+		lines = append(lines, fmt.Sprintf("- %s [%s] %s (%s)", finding.ID, singleLine(finding.Severity),
 			singleLine(finding.Title), singleLine(finding.Reviewer)))
 	}
 	lines = append(lines, coBlockers...)
-	body := "No unresolved findings recorded yet."
+	body := emptyIndexBody
 	if len(lines) > 0 {
 		body = strings.Join(lines, "\n")
 	}
@@ -424,7 +432,7 @@ func RenderIndexWithRecords(root string, records []Record) error {
 			"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
 			strings.Join(overrides, "\n") + "\n"
 	}
-	for _, section := range preservedSections(path) {
+	for _, section := range preservedSections(committed) {
 		document += "\n" + section + "\n"
 	}
 	return writeIndexAtomic(path, document)
@@ -442,15 +450,12 @@ func singleLine(s string) string {
 // deleted: the render regenerates only its own two sections and must not destroy the rest of
 // the committed file. Same trade-off as carried lines: a preserved section has no retirement
 // path, and removing one means editing the committed file by hand.
-func preservedSections(path string) []string {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
+func preservedSections(raw []byte) []string {
 	var out []string
 	var cur []string
 	flush := func() {
-		if len(cur) > 0 && !strings.HasPrefix(cur[0], "## Process Overrides") {
+		// EXACT match for the same reason as carryOverLines's section split (see there).
+		if len(cur) > 0 && cur[0] != "## Process Overrides" {
 			out = append(out, strings.TrimRight(strings.Join(cur, "\n"), "\n"))
 		}
 		cur = nil

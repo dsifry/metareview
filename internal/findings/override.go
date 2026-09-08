@@ -195,16 +195,17 @@ func overrideLines(records []Record) []string {
 		// an embedded newline in a title or reason would make one entry span lines and only
 		// its first line carry back (see the findings.go blocker-bullet comment).
 		title, reqReason := singleLine(record.Title), singleLine(record.OverrideRequestReason)
+		reqBy, grantedBy := singleLine(record.OverrideRequestedBy), singleLine(record.OverrideGrantedBy)
 		switch record.Status {
 		case StatusOverridePending:
 			lines = append(lines, withEscalation(fmt.Sprintf("- %s [pending] %s — requested by %s at %s: %s",
-				record.ID, title, record.OverrideRequestedBy, record.OverrideRequestedAt, reqReason), record))
+				record.ID, title, reqBy, record.OverrideRequestedAt, reqReason), record))
 		case StatusOverridden:
 			detail := fmt.Sprintf("- %s [granted] %s — granted by %s at %s: %s",
-				record.ID, title, record.OverrideGrantedBy, record.OverrideGrantedAt, singleLine(record.OverrideGrantReason))
+				record.ID, title, grantedBy, record.OverrideGrantedAt, singleLine(record.OverrideGrantReason))
 			if record.OverrideRequestedBy != "" {
 				detail += fmt.Sprintf(" (requested by %s at %s: %s)",
-					record.OverrideRequestedBy, record.OverrideRequestedAt, reqReason)
+					reqBy, record.OverrideRequestedAt, reqReason)
 			}
 			lines = append(lines, withEscalation(detail, record))
 		}
@@ -213,10 +214,12 @@ func overrideLines(records []Record) []string {
 }
 
 // withEscalation appends the escalation context when the record carries one, so
-// the index shows why the workflow was stepped outside of and not just that it was.
+// the index shows why the workflow was stepped outside of and not just that it was. The
+// escalation is free text (a CLI --escalation value) and is flattened to the canonical
+// single physical line every emitted entry uses — see the findings.go blocker-bullet comment.
 func withEscalation(detail string, record Record) string {
 	if record.OverrideEscalation == "" {
 		return detail
 	}
-	return detail + fmt.Sprintf(" [escalation: %s]", record.OverrideEscalation)
+	return detail + fmt.Sprintf(" [escalation: %s]", singleLine(record.OverrideEscalation))
 }
