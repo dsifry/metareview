@@ -196,7 +196,7 @@ is the `mrv-20260908-173200346624000-artifact-handoff-2026-09-08-advisory-findin
 file under `docs/metareview/reviews/`) forced edits in two classes. Accuracy fixes to the
 handoff's own record (§2.1's lens-count labels, §3B's B6 hunt pointer, §3D's release-row
 version pins, §5's pin-suite and dogfood-criterion claims, §6's baselines-not-deltas)
-are defect corrections logged as F1-F5 there, not design changes. Separately, five
+are defect corrections logged as F1-F5 there, not design changes. Separately, seven
 §3C/landed-text clarifications postdate the ratification above and are recorded here so
 the ratified text and the landed text cannot be confused: (1) Gate 3 is applied at the
 consolidation stage — a lens cannot see its siblings — within §8's pre-approved fallback;
@@ -207,7 +207,9 @@ defects); (4) a failed filter call writes the gated-but-unfiltered list through 
 warning naming the failure — it must neither empty the advisory section nor silently bypass
 the staff bar; (5) advisory findings are exempted from per-lens log writes (they are held
 for consolidation), resolving the conflict with the per-lens-edit discipline; (6) the
-filter dispatch is a read-only subagent, matching the repo's lens-subagent convention.
+filter dispatch is a read-only subagent, matching the repo's lens-subagent convention;
+(7) the consolidation narrative must record the staff-filter disposition with each drop's
+reason (or the failure state), so the advisory-precision audit has a disposition trail.
 
 ### D. Where things land — implementation map
 
