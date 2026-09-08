@@ -112,6 +112,8 @@ three gates, all of which must pass:
    independently (different hunts, same underlying issue) report at confidence ≥ 50.
    Single-lens advisories need anchor 75 or a P1 consequence. Convergence is salience:
    multiple angles noticing the same wrongness means it is probably wrong-shaped, not taste.
+   A lens cannot see its siblings — report your advisories at your honest anchor; this gate
+   is applied at the consolidation stage, where the cross-lens cluster size is actually known.
 
 **The smell/nit boundary:** a smell is structure that degrades change-safety or comprehension;
 a style nit is formatting or convention. The test: *does the next change get harder or riskier
