@@ -318,25 +318,21 @@ func WriteIndexSeed(path string) error {
 		}
 		return err
 	}
+	// On a mid-seed failure the partial file is deliberately LEFT in place: removing the
+	// final path from an error path could delete a concurrent render's atomic rename that
+	// landed in the window — reopening the issue-#151 destruction through a cross-writer
+	// error-path race — while a partial seed is re-readable content that never costs
+	// committed content (the seed only ever creates what did not exist) and that the next
+	// render replaces.
 	if err := seamWriteString(f, emptyIndexDocument); err != nil {
 		_ = f.Close()
-		_ = os.Remove(path) // a failed seed must not leave a partial file at the final path
 		return err
 	}
 	if err := seamSync(f); err != nil {
 		_ = f.Close()
-		_ = os.Remove(path)
 		return err
 	}
-	if err := seamClose(f); err != nil {
-		// Best-effort remove, same Windows sharing-violation caveat as writeIndexAtomic's
-		// close-error path: the residue here sits at the FINAL tracked path, not a temp —
-		// the next render heals it (a partial seed is re-readable content, never a loss of
-		// committed content, because the seed only ever creates what did not exist).
-		_ = os.Remove(path)
-		return err
-	}
-	return nil
+	return seamClose(f)
 }
 
 func RenderIndex(root string) error {
@@ -431,7 +427,10 @@ func carryOverLines(raw []byte, known map[string]bool) (blockers, overrides []st
 	// span lines — carrying only the first would silently drop the rest, so the whole block
 	// carries as one entry. A ledger-known bullet's continuations are skipped with it: the
 	// accumulator stays empty for a known ID, so nothing absorbs them. A blank line ends the
-	// entry; non-bullet prose no accumulator owns is not carried.
+	// entry; non-bullet prose no accumulator owns is not carried. Edge: a continuation line
+	// that itself matches the bullet pattern (legacy free text quoting a "- mrvf-… [" line)
+	// is treated as a new entry — the old renderer's format is ambiguous there, and
+	// splitting it is the documented behavior.
 	section := sectionTop
 	var entry []string
 	flush := func() {

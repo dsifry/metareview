@@ -1340,6 +1340,12 @@ func TestWriteIndexSeedFaultInjection(t *testing.T) {
 			if err := WriteIndexSeed(path); err == nil {
 				t.Fatalf("%s fault must fail the seed", tc.name)
 			}
+			// LEAVE-IN-PLACE contract: the error path must NOT remove the final path — a
+			// remove there could delete a concurrent render's atomic rename that landed in
+			// the window, and a partial seed is re-readable content the next render replaces.
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("%s fault removed the partial seed (the error path must leave it): %v", tc.name, err)
+			}
 		})
 	}
 
@@ -1503,5 +1509,37 @@ func TestCarryOverCarriesLegacyMultiLineEntriesWhole(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(blockers, "\n")+strings.Join(overrides, "\n"), "mrvf-leg-002") {
 		t.Errorf("a known bullet's continuations must be skipped with it: %v %v", blockers, overrides)
+	}
+}
+
+// The preserved-section position contract: preserved sections re-emit AFTER Process
+// Overrides regardless of their committed position (content is preserved, position is not).
+func TestPreservedSectionsEmitAfterOverrides(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	committed := "# metareview Findings\n\n" +
+		"## Stale\n\n" +
+		"- mrvf-pos-001 [low] a stale finding that lived ABOVE the overrides (r)\n\n" +
+		"## Process Overrides\n\n" +
+		"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
+		"- mrvf-pos-002 [granted] an override — granted by someone at some time: reason\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(committed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RenderIndexWithRecords(root, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	g := string(got)
+	staleAt := strings.Index(g, "## Stale")
+	overridesAt := strings.Index(g, "## Process Overrides\n")
+	if staleAt < 0 || overridesAt < 0 {
+		t.Fatalf("both sections must survive:\n%s", g)
+	}
+	if staleAt < overridesAt {
+		t.Errorf("preserved section must re-emit AFTER Process Overrides regardless of committed position:\n%s", g)
 	}
 }
