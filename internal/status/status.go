@@ -109,7 +109,9 @@ func reconcileLogsAgainstLedger(root string, logs []reviewlog.Summary, warnings 
 		if !reviewstate.LogBlocks(s) {
 			continue
 		}
-		if strings.EqualFold(s.Verdict, "ESCALATED") {
+		if strings.EqualFold(strings.TrimSpace(s.Verdict), "ESCALATED") {
+			// aligned with LogBlocks' own TrimSpace so the shared predicate and the
+			// dispatch cannot disagree on a padded verdict
 			if reviewstate.EscalationLiftedByOverrides(s, byID) {
 				resolved[s.RunID] = true
 			}

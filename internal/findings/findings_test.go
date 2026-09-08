@@ -639,3 +639,21 @@ func TestLoadReturnsRecordsAndTreatsMissingAsEmpty(t *testing.T) {
 		t.Fatalf("Load = %+v; want the written row", records)
 	}
 }
+
+// IsResolvedTerminal is the allowlist the reconciliation consumers gate on: only the
+// three recognized terminal values resolve; everything else — typos, empty, unknown
+// future values — is unvouched and must keep a log blocking (issue #147 review).
+func TestIsResolvedTerminalIsAnAllowlist(t *testing.T) {
+	yes := []string{"fixed", StatusOverridden, StatusSuperseded}
+	no := []string{"", "open", StatusOverridePending, "overridn", "resolved-ish", "FIXED"}
+	for _, s := range yes {
+		if !IsResolvedTerminal(s) {
+			t.Errorf("IsResolvedTerminal(%q) = false; want true", s)
+		}
+	}
+	for _, s := range no {
+		if IsResolvedTerminal(s) {
+			t.Errorf("IsResolvedTerminal(%q) = true; want false", s)
+		}
+	}
+}

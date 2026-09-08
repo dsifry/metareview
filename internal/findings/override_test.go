@@ -547,8 +547,15 @@ func TestGrantOverrideAcceptsAFixedFinding(t *testing.T) {
 	if err := writeJSONL(filepath.Join(root, ".metareview", "findings.jsonl"), []Record{one}); err != nil {
 		t.Fatal(err)
 	}
-	if err := GrantOverride(root, "mrvf-esc-1", OverrideGrant{By: "dsifry", Reason: "escalation was marker churn; the human decision is recorded", Now: "2026-09-08T00:00:00Z"}); err != nil {
-		t.Fatalf("GrantOverride on a fixed finding: %v", err)
+	// two-phase: the agent files the request (with the escalation reference), the human
+	// grants — requester ≠ grantor enforced by GrantOverride itself
+	if err := RequestOverride(root, "mrvf-esc-1", OverrideRequest{
+		By: "agent", Reason: "the escalation was marker churn; requesting the human lift", Now: "2026-09-08T00:00:00Z", Escalation: "mrv-20260907-234001",
+	}); err != nil {
+		t.Fatalf("RequestOverride: %v", err)
+	}
+	if err := GrantOverride(root, "mrvf-esc-1", OverrideGrant{By: "dsifry", Reason: "escalation was marker churn; the human decision is recorded", Now: "2026-09-08T00:00:01Z"}); err != nil {
+		t.Fatalf("GrantOverride on a requested fixed finding: %v", err)
 	}
 	records, err := Load(root)
 	if err != nil {
@@ -557,12 +564,45 @@ func TestGrantOverrideAcceptsAFixedFinding(t *testing.T) {
 	if records[0].Status != StatusOverridden || records[0].OverrideGrantedBy != "dsifry" {
 		t.Fatalf("status = %s, grantor = %q; want overridden by dsifry", records[0].Status, records[0].OverrideGrantedBy)
 	}
-	// the requester≠grantor rule still holds on a fixed finding that carries a request
-	two := Record{ID: "mrvf-esc-2", Scope: "pr-ready", Status: "fixed", Classification: "blocking", Severity: "high", OverrideRequestedBy: "agent"}
-	if err := writeJSONL(filepath.Join(root, ".metareview", "findings.jsonl"), []Record{two}); err != nil {
+	// a DIRECT grant on a fixed finding with no filed request is refused — the two-phase
+	// record is what makes the escalation lift accountable
+	two := Record{ID: "mrvf-esc-2", Scope: "pr-ready", Status: "fixed", Classification: "blocking", Severity: "high"}
+	if err := writeJSONL(filepath.Join(root, ".metareview", "findings.jsonl"), []Record{one, two}); err != nil {
 		t.Fatal(err)
 	}
-	if err := GrantOverride(root, "mrvf-esc-2", OverrideGrant{By: "agent", Reason: "self-grant must be refused", Now: "2026-09-08T00:00:00Z"}); err == nil {
-		t.Fatal("a fixed finding's grant must still refuse the requesting actor")
+	if err := GrantOverride(root, "mrvf-esc-2", OverrideGrant{By: "dsifry", Reason: "direct grant without a filed request", Now: "2026-09-08T00:00:02Z"}); err == nil {
+		t.Fatal("a direct grant on a fixed finding without a filed request must be refused")
+	}
+}
+
+// Issue #147 review: the two-phase path must EXIST for a fixed finding attached to an
+// escalated run — without it, only the single-actor direct grant could lift an
+// escalation. RequestOverride accepts a fixed finding when the request references the
+// escalation; the grant then enforces requester ≠ grantor.
+func TestRequestOverrideAcceptsAFixedFindingWithAnEscalationReference(t *testing.T) {
+	root := t.TempDir()
+	one := Record{ID: "mrvf-esc-9", Scope: "pr-ready", Status: "fixed", Classification: "blocking", Severity: "high", FixedInRunID: "mrv-run-9"}
+	if err := writeJSONL(filepath.Join(root, ".metareview", "findings.jsonl"), []Record{one}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequestOverride(root, "mrvf-esc-9", OverrideRequest{
+		By: "agent", Reason: "the escalation was marker churn; requesting the human lift", Now: "2026-09-08T00:00:00Z", Escalation: "mrv-20260907-234001",
+	}); err != nil {
+		t.Fatalf("RequestOverride on a fixed finding with an escalation reference: %v", err)
+	}
+	records, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if records[0].Status != StatusOverridePending || records[0].OverrideEscalation != "mrv-20260907-234001" {
+		t.Fatalf("status = %s, escalation = %q; want pending with the escalation recorded", records[0].Status, records[0].OverrideEscalation)
+	}
+	// without the escalation reference, a fixed finding is still refused
+	two := Record{ID: "mrvf-esc-10", Scope: "pr-ready", Status: "fixed", Classification: "blocking", Severity: "high"}
+	if err := writeJSONL(filepath.Join(root, ".metareview", "findings.jsonl"), []Record{one, two}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequestOverride(root, "mrvf-esc-10", OverrideRequest{By: "agent", Reason: "no escalation reference", Now: "2026-09-08T00:00:01Z"}); err == nil {
+		t.Fatal("a fixed finding without an escalation reference must stay refused")
 	}
 }

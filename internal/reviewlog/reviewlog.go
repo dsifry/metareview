@@ -587,6 +587,13 @@ func mergeRunMetadata(summary *Summary, runs []runchain.Record, metadata []local
 	}
 	if current.Verdict == "ESCALATED" {
 		summary.HasUnresolvedBlockers = true
+		// Issue #147 review: the push gate's escalation dispatch keys on the summary's
+		// verdict, and the committed markdown is the forgeable copy — runs.jsonl is "the
+		// only copy an attacker cannot supply" (the comment above). When the two disagree,
+		// the disagreement resolves toward the hard stop: a run recorded ESCALATED is
+		// escalation-blocked whatever the markdown says, so editing the log's verdict line
+		// cannot downgrade the stop to a fixable NEEDS_REVISION.
+		summary.Verdict = "ESCALATED"
 	}
 	for _, local := range metadata {
 		if local.ID != summary.RunID {

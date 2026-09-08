@@ -531,6 +531,13 @@ func ClassifyReviewFindings(findingIDs []string, byID map[string]findings.Record
 			anyBlocking = true
 			continue
 		}
+		// Allowlist, not denylist: a row whose status is not a RECOGNIZED terminal
+		// value (typo, empty, a future value an older reader receives) is unvouched —
+		// it must keep the log blocking, never resolve it (issue #147 review).
+		if !findings.IsResolvedTerminal(record.Status) {
+			anyBlocking = true
+			continue
+		}
 		resolvers = append(resolvers, ResolverPhrase(record))
 	}
 	return resolvers, anyBlocking
@@ -572,10 +579,19 @@ func EscalationLiftedByOverrides(log reviewlog.Summary, byID map[string]findings
 	any := false
 	for _, id := range log.FindingIDs {
 		record, ok := byID[id]
-		if !ok || !findings.IsBlockingClass(record) {
-			continue // advisory-class rows never held the gate; unknown IDs are not vouched either way
+		if !ok {
+			return false // an ID the ledger does not know is an unvouched blocker (strict, like LogResolvedInLedger)
 		}
-		if record.Status != findings.StatusOverridden || record.OverrideGrantedBy == "" {
+		if !findings.IsBlockingClass(record) {
+			continue // advisory-class rows never held the gate
+		}
+		// Two-phase, enforced: only a grant that ACKNOWLEDGES A FILED REQUEST
+		// (OverrideRequestedBy recorded, requester ≠ grantor enforced by
+		// findings.GrantOverride) counts toward lifting the hard stop. A direct
+		// single-actor grant — the path GrantOverride permits on open findings —
+		// does not, or the "hard stop that a later clean re-run must not erase"
+		// would be liftable by one unauthenticated command.
+		if record.Status != findings.StatusOverridden || record.OverrideGrantedBy == "" || record.OverrideRequestedBy == "" {
 			return false
 		}
 		any = true

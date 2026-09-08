@@ -403,9 +403,67 @@ func TestPushGateEscalatedLogLiftsOnlyByOverrides(t *testing.T) {
 	if blocked, _, err := PushGate(root, "", nil); err != nil || !blocked {
 		t.Fatalf("a superseded row must not lift an ESCALATED log; blocked=%v err=%v", blocked, err)
 	}
-	// the explicit human decision — an override grant with a recorded grantor — does
-	writeLedger(findings.Record{ID: "mrvf-20260907-esc-001", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideGrantedBy: "dsifry", OverrideGrantReason: "escalation was marker churn; approved"})
+	// the explicit human decision — an override grant acknowledging a FILED request
+	// (requester ≠ grantor) — does; a bare grant with no filed request does not
+	writeLedger(findings.Record{ID: "mrvf-20260907-esc-001", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideGrantedBy: "dsifry"})
+	if blocked, _, err := PushGate(root, "", nil); err != nil || !blocked {
+		t.Fatalf("a grant without a filed request must not lift the ESCALATED log; blocked=%v err=%v", blocked, err)
+	}
+	writeLedger(findings.Record{ID: "mrvf-20260907-esc-001", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideRequestedBy: "agent", OverrideGrantedBy: "dsifry", OverrideGrantReason: "escalation was marker churn; approved"})
 	if blocked, _, err := PushGate(root, "", nil); err != nil || blocked {
-		t.Fatalf("an override grant lifts the ESCALATED log; blocked=%v err=%v", blocked, err)
+		t.Fatalf("an override grant lifting the ESCALATED log; blocked=%v err=%v", blocked, err)
+	}
+}
+
+// The full #147 flow end-to-end at the gate: an ESCALATED log lifts only after the
+// two-phase override (agent files the request on the fixed finding with the escalation
+// reference; the human grants). Until the grant lands, every intermediate state blocks.
+func TestPushGateEscalationLiftRequiresTheTwoPhaseFlow(t *testing.T) {
+	root, _, headSHA := gitRepo(t)
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "esc.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-esc`\nTarget: `current branch`\n\n## Verdict\n\nESCALATED\n\n## Blocking Findings\n\n### mrvf-20260907-esc-001: the hard stop\n")
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "later.md"),
+		"# metareview: pr-ready review\n\nRun ID: `mrv-later`\nTarget: `current branch`\n\n## Verdict\n\nPASS_ADVISORY\n")
+	ledger := func() { mustWriteFile(t, filepath.Join(root, ".metareview", "findings.jsonl"), "") }
+	writeOne := func(r findings.Record) {
+		t.Helper()
+		b, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustWriteFile(t, filepath.Join(root, ".metareview", "findings.jsonl"), string(b)+"\n")
+	}
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-esc","scope":"pr-ready","verdict":"ESCALATED","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"],"findingIds":["mrvf-20260907-esc-001"]}`+"\n"+
+			`{"id":"mrv-later","scope":"pr-ready","verdict":"PASS_ADVISORY","headSha":"`+headSHA+`","coveredPaths":["a.go","b.go"]}`+"\n")
+
+	// empty ledger: blocked
+	ledger()
+	if blocked, _, err := PushGate(root, "", nil); err != nil || !blocked {
+		t.Fatalf("empty ledger: blocked=%v err=%v", blocked, err)
+	}
+	// fixed with no override: blocked (fixes never lift a hard stop)
+	writeOne(findings.Record{ID: "mrvf-20260907-esc-001", Status: "fixed", Classification: "blocking", Severity: "high", FixedInRunID: "mrv-run-9"})
+	if blocked, _, err := PushGate(root, "", nil); err != nil || !blocked {
+		t.Fatalf("fixed-only: blocked=%v err=%v", blocked, err)
+	}
+	// the agent files the two-phase request (fixed finding + escalation reference)
+	if err := findings.RequestOverride(root, "mrvf-20260907-esc-001", findings.OverrideRequest{
+		By: "agent", Reason: "the escalation was marker churn; requesting the human lift", Now: "2026-09-08T00:00:00Z", Escalation: "mrv-20260907-234001",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// pending: still blocked (the human has not decided)
+	if blocked, _, err := PushGate(root, "", nil); err != nil || !blocked {
+		t.Fatalf("override-pending: blocked=%v err=%v", blocked, err)
+	}
+	// the human grants (requester ≠ grantor)
+	if err := findings.GrantOverride(root, "mrvf-20260907-esc-001", findings.OverrideGrant{
+		By: "dsifry", Reason: "escalation was marker churn; approved", Now: "2026-09-08T00:00:01Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if blocked, _, err := PushGate(root, "", nil); err != nil || blocked {
+		t.Fatalf("after the two-phase grant the escalation lifts: blocked=%v err=%v", blocked, err)
 	}
 }

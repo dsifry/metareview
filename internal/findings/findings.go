@@ -563,3 +563,16 @@ func nowISO() string {
 func Load(root string) ([]Record, error) {
 	return readJSONL(filepath.Join(root, ".metareview", "findings.jsonl"))
 }
+
+// IsResolvedTerminal reports whether a finding status is a RECOGNIZED terminal value:
+// fixed, override-granted, or superseded. It is an allowlist, not a denylist — a ledger
+// row with an unrecognized status (typo, empty, a future value an older reader receives)
+// is unvouched: reconciliation consumers must treat it as still blocking, never as
+// resolved (issue #147 review: a malformed row must not clear a gate).
+func IsResolvedTerminal(status string) bool {
+	switch status {
+	case "fixed", StatusOverridden, StatusSuperseded:
+		return true
+	}
+	return false
+}

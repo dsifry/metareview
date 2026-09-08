@@ -703,7 +703,9 @@ func TestEscalationLiftedByOverrides(t *testing.T) {
 	escalated := func(ids ...string) reviewlog.Summary {
 		return reviewlog.Summary{RunID: "mrv-esc", Verdict: "ESCALATED", HasUnresolvedBlockers: true, FindingIDs: ids}
 	}
-	override := findings.Record{ID: "f", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideGrantedBy: "boss", OverrideGrantReason: "accepted"}
+	// every lifting fixture carries a FILED request (OverrideRequestedBy): the two-phase
+	// invariant under test — the agent files, the human grants, requester ≠ grantor
+	override := findings.Record{ID: "f", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideRequestedBy: "agent", OverrideGrantedBy: "boss", OverrideGrantReason: "accepted"}
 	fixed := findings.Record{ID: "f", Status: "fixed", Classification: "blocking", Severity: "high", FixedInRunID: "mrv-run-9"}
 	open := findings.Record{ID: "f", Status: "open", Classification: "blocking", Severity: "high"}
 
@@ -743,6 +745,38 @@ func TestEscalationLiftedByOverrides(t *testing.T) {
 	// unknown IDs are not vouched
 	if EscalationLiftedByOverrides(escalated("unknown"), map[string]findings.Record{"f": override}) {
 		t.Error("an unknown finding ID must not lift the escalation")
+	}
+	// the MIXED known-overridden + unknown shape must stay blocking — the exact hole the
+	// #147 review found: one vouched grant must not vouch for an unvouched sibling
+	if EscalationLiftedByOverrides(escalated("f", "unknown"), map[string]findings.Record{"f": override}) {
+		t.Error("a mixed overridden+unknown ID set must not lift the escalation (unknown = unvouched)")
+	}
+	// the two-phase invariant is enforced: only grants that acknowledge a FILED request
+	// (OverrideRequestedBy recorded) count toward lifting an escalation
+	if EscalationLiftedByOverrides(escalated("f"), map[string]findings.Record{
+		"f": {ID: "f", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideGrantedBy: "boss"},
+	}) {
+		t.Error("an override grant with no filed request (no OverrideRequestedBy) must not lift the escalation")
+	}
+	// ...but a grant acknowledging a filed request does
+	if !EscalationLiftedByOverrides(escalated("f"), map[string]findings.Record{
+		"f": {ID: "f", Status: findings.StatusOverridden, Classification: "blocking", Severity: "high", OverrideRequestedBy: "agent", OverrideGrantedBy: "boss", OverrideGrantReason: "approved"},
+	}) {
+		t.Error("a grant acknowledging a filed request lifts the escalation")
+	}
+}
+
+// The resolution classification is an ALLOWLIST: a ledger row whose status is not a
+// recognized terminal value (typo'd, empty, future) is unvouched and keeps the log
+// blocking — a denylist would let a malformed row clear a gate.
+func TestClassifyReviewFindingsRejectsUnrecognizedStatus(t *testing.T) {
+	for _, status := range []string{"", "overridn", "resolved-ish", "OPEN"} {
+		resolvers, anyBlocking := ClassifyReviewFindings([]string{"f"}, map[string]findings.Record{
+			"f": {ID: "f", Status: status, Classification: "blocking", Severity: "high"},
+		})
+		if len(resolvers) != 0 || !anyBlocking {
+			t.Errorf("status %q: resolvers=%v anyBlocking=%v; want fail-closed (no resolver, blocking)", status, resolvers, anyBlocking)
+		}
 	}
 }
 

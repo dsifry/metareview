@@ -959,3 +959,45 @@ func TestAnUndeclaredLensSetFallsBackToTheStrictestDefault(t *testing.T) {
 		t.Errorf("a declaration may only strengthen: declared %d, default %d", len(narrowed), len(full))
 	}
 }
+
+// Issue #147 review: the push gate's escalation dispatch keys on the summary's verdict,
+// and the committed markdown is the forgeable copy — runs.jsonl is "the only copy an
+// attacker cannot supply" (mergeRunMetadata's own words). When the two disagree, the
+// disagreement must resolve toward the hard stop: a run recorded ESCALATED forces the
+// summary verdict to ESCALATED whatever the markdown says.
+func TestRunRecordEscalatedVerdictOverridesTheMarkdown(t *testing.T) {
+	root := t.TempDir()
+	// the markdown says NEEDS_REVISION; the run record says ESCALATED
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "esc.md"), reviewMarkdown("mrv-esc", "t-1", "NEEDS_REVISION", ""))
+	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-esc","scope":"pr-ready","verdict":"ESCALATED","headSha":"abc1234def"}`+"\n")
+	logs, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range logs {
+		if l.RunID != "mrv-esc" {
+			continue
+		}
+		if l.Verdict != "ESCALATED" {
+			t.Errorf("Verdict = %q; the run record's ESCALATED must win over the markdown", l.Verdict)
+		}
+		if !l.HasUnresolvedBlockers {
+			t.Error("an escalated run must carry HasUnresolvedBlockers")
+		}
+	}
+	// and the agreement case is unchanged: a matching PASS record leaves the markdown verdict
+	mustWrite(t, filepath.Join(root, "docs", "metareview", "reviews", "pass.md"), reviewMarkdown("mrv-pass", "t-1", "PASS", ""))
+	mustWrite(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-esc","scope":"pr-ready","verdict":"ESCALATED","headSha":"abc1234def"}`+"\n"+
+			`{"id":"mrv-pass","scope":"pr-ready","verdict":"PASS","headSha":"def5678abc"}`+"\n")
+	logs, err = Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range logs {
+		if l.RunID == "mrv-pass" && l.Verdict != "PASS" {
+			t.Errorf("Verdict = %q; a matching record must not disturb the markdown verdict", l.Verdict)
+		}
+	}
+}
