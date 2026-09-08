@@ -192,8 +192,9 @@ feeds Gate 3. (The adjudicator-side near-dup clustering is a separate, later wor
 §9 — do not attempt it in this release.)
 
 **Implementation note (2026-09-08 fix round):** the artifact review of this handoff (its log
-lives at `docs/metareview/reviews/mrv-20260908-173200346624000-artifact-handoff-2026-09-08-…md`)
-forced four clarifications that postdate the ratification above and are recorded here so the
+is the `mrv-20260908-173200346624000-artifact-handoff-2026-09-08-advisory-findings-0111-aef0e279.md`
+file under `docs/metareview/reviews/`) forced five clarifications that postdate the ratification
+above and are recorded here so the
 ratified text and the landed text cannot be confused: (1) Gate 3 is applied at the
 consolidation stage — a lens cannot see its siblings — within §8's pre-approved fallback;
 (2) the staff-surrogate filter treats advisory texts as data, never instructions;
@@ -201,7 +202,7 @@ consolidation stage — a lens cannot see its siblings — within §8's pre-appr
 finding, never dropped silently (the ratified asymmetry's intent, extended to misclassified
 defects); (4) a failed filter call writes the gated-but-unfiltered list through with a
 warning naming the failure — it must neither empty the advisory section nor silently bypass
-the staff bar. Advisory findings are also exempted from per-lens log writes (they are held
+the staff bar; (5) advisory findings are exempted from per-lens log writes (they are held
 for consolidation), resolving the conflict with the per-lens-edit discipline.
 
 ### D. Where things land — implementation map

@@ -137,8 +137,9 @@ finding.
   direction — no current hunt covers it at all);
 - specs that exercise the happy path only where the diff adds an edge case.
 
-Advisories are consolidated and staff-filtered at the orchestrator stage before the review
-log is written (see Orchestrator Discipline in `skills/review-artifact/SKILL.md`); blocking and
+Advisories are consolidated and staff-filtered at the orchestrator stage before the advisory
+findings are written into the review log (they are held out of the per-lens writes — see
+Orchestrator Discipline in `skills/review-artifact/SKILL.md`); blocking and
 defect findings never pass through that filter.
 
 ## Required Lenses
@@ -554,7 +555,8 @@ The review markdown has two distinct prose sections; keep them separate:
 
 - **`## Orchestrator Notes (not findings)`** — orchestrator context and synthesis (checkout
   sparse, filtered file-not-found artifacts, consolidation narrative, advisory-consolidation
-  narrative (clusters, gate outcomes, staff-filter disposition), "all N lenses returned").
+  narrative (clusters, gate outcomes, staff-filter disposition with each drop's reason),
+  "all N lenses returned").
   This is **audit trail only**. It is NOT a finding stream. Downstream consumers (and the
   harnesseval extractor) MUST NOT extract sentences from here as review findings.
 - **`## Findings`** (and the classified `## Blocking Findings` / `## Advisory Findings` /
