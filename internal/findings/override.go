@@ -190,16 +190,21 @@ func mutateFinding(root, findingID string, apply func(*Record) error) error {
 func overrideLines(records []Record) []string {
 	var lines []string
 	for _, record := range records {
+		// Free-text fields are flattened to the canonical single physical line every emitted
+		// index entry uses: the committed index is re-read line-by-line by carryOverLines, so
+		// an embedded newline in a title or reason would make one entry span lines and only
+		// its first line carry back (see the findings.go blocker-bullet comment).
+		title, reqReason := singleLine(record.Title), singleLine(record.OverrideRequestReason)
 		switch record.Status {
 		case StatusOverridePending:
 			lines = append(lines, withEscalation(fmt.Sprintf("- %s [pending] %s — requested by %s at %s: %s",
-				record.ID, record.Title, record.OverrideRequestedBy, record.OverrideRequestedAt, record.OverrideRequestReason), record))
+				record.ID, title, record.OverrideRequestedBy, record.OverrideRequestedAt, reqReason), record))
 		case StatusOverridden:
 			detail := fmt.Sprintf("- %s [granted] %s — granted by %s at %s: %s",
-				record.ID, record.Title, record.OverrideGrantedBy, record.OverrideGrantedAt, record.OverrideGrantReason)
+				record.ID, title, record.OverrideGrantedBy, record.OverrideGrantedAt, singleLine(record.OverrideGrantReason))
 			if record.OverrideRequestedBy != "" {
 				detail += fmt.Sprintf(" (requested by %s at %s: %s)",
-					record.OverrideRequestedBy, record.OverrideRequestedAt, record.OverrideRequestReason)
+					record.OverrideRequestedBy, record.OverrideRequestedAt, reqReason)
 			}
 			lines = append(lines, withEscalation(detail, record))
 		}

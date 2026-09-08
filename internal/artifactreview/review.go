@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dsifry/metareview/internal/contextpack"
+	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/lens"
 	"github.com/dsifry/metareview/internal/markdown"
 	"github.com/dsifry/metareview/internal/state"
@@ -81,7 +82,10 @@ func ensureFindingsIndex(root string) error {
 	if err := mkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return writeFile(path, []byte("# metareview Findings\n\nNo unresolved findings recorded yet.\n"), 0o644)
+	// The index's ONLY sanctioned writer is findings.writeIndexAtomic — the seed goes
+	// through it too, so every writer of the durable audit file carries the same
+	// fsync/mode/unique-temp guarantees instead of a truncating in-place write.
+	return findings.WriteIndexSeed(path)
 }
 
 // rubricLinks maps a lens Slug to its dedicated rubric, for the lenses that have one. The rest

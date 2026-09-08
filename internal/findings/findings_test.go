@@ -751,7 +751,7 @@ Deliberate exceptions to the review workflow. Pending entries still block CI.
 
 ## Stale
 
-- mrvf-a-004 [low] bullet under a later section — carried as a blocker, not an override
+- mrvf-a-004 [low] bullet under a later section — must NOT be carried at all
 `
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -947,7 +947,15 @@ func TestWriteIndexAtomicPreservesModeAndRespectsWriteProtection(t *testing.T) {
 	}
 	root := t.TempDir()
 	path := filepath.Join(root, "FINDINGS.md")
-	if err := os.WriteFile(path, []byte("# old"), 0o600); err != nil {
+	// 0o664, not 0o600: os.CreateTemp already creates the temp at 0600, so seeding 0600
+	// passes even with the mode-preservation chmod deleted — the assertion must see a mode
+	// the temp file never has on its own.
+	if err := os.WriteFile(path, []byte("# old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// chmod after creation: WriteFile's perm is masked by the process umask (0664 & ~022 =
+	// 0644), which would quietly turn this back into a mode CreateTemp also produces.
+	if err := os.Chmod(path, 0o664); err != nil {
 		t.Fatal(err)
 	}
 	if err := writeIndexAtomic(path, "# new"); err != nil {
@@ -957,8 +965,8 @@ func TestWriteIndexAtomicPreservesModeAndRespectsWriteProtection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("replacement mode = %v, want the destination's 0600 preserved", info.Mode().Perm())
+	if info.Mode().Perm() != 0o664 {
+		t.Errorf("replacement mode = %v, want the destination's 0664 preserved", info.Mode().Perm())
 	}
 
 	if os.Geteuid() == 0 {
@@ -1066,5 +1074,139 @@ func TestWriteIndexAtomicFailsOnStrangeStatError(t *testing.T) {
 	}
 	if err := writeIndexAtomic(filepath.Join(parent, "metareview", "FINDINGS.md"), "# x"); err == nil {
 		t.Fatal("a non-notexist Stat error must fail the write")
+	}
+}
+
+// fsync-before-rename is the durability guarantee the atomic replacement claims; only its
+// failure branch is fault-injected, so deleting the sync call would leave the suite green.
+// A spy around the real seamSync pins that a happy-path render actually syncs.
+func TestWriteIndexAtomicSyncsBeforeRename(t *testing.T) {
+	saved := seamSync
+	defer func() { seamSync = saved }()
+	synced := 0
+	seamSync = func(f *os.File) error { synced++; return saved(f) }
+	root := t.TempDir()
+	path := filepath.Join(root, "FINDINGS.md")
+	if err := os.WriteFile(path, []byte("# old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeIndexAtomic(path, "# new"); err != nil {
+		t.Fatal(err)
+	}
+	if synced != 1 {
+		t.Errorf("happy-path render synced %d times, want exactly 1", synced)
+	}
+}
+
+// The carry-over parser and the render's own emitters are two hand-maintained descriptions
+// of one committed-index format; if they drift apart (severity rendering, ID format, the
+// "- ID [" prefix, the single-line canonical form), every carried line silently stops
+// matching and the next render drops it — the issue-#151 destruction reopened on a
+// format-drift path. This round-trip pins their agreement the way reviewlog's schema does:
+// one owner, one round-trip test.
+func TestCarryOverMatchesWhatTheRenderEmits(t *testing.T) {
+	root := t.TempDir()
+	records := []Record{
+		{ID: "mrvf-rt-001", Status: "open", Severity: "high", Classification: "blocking",
+			Title: "an open blocker", Reviewer: "security-reviewer"},
+		{ID: "mrvf-rt-002", Status: StatusOverridden, Title: "an overridden finding",
+			OverrideGrantedBy: "human", OverrideGrantedAt: "2026-09-08T00:00:00Z", OverrideGrantReason: "accepted risk"},
+		{ID: "mrvf-rt-003", Status: StatusOverridePending, Title: "a pending override",
+			OverrideRequestedBy: "agent", OverrideRequestedAt: "2026-09-08T00:00:00Z", OverrideRequestReason: "needs a human"},
+		// a free-text field with an embedded newline: the emitter must flatten it to one
+		// physical line, or carry-over re-reads only the first line of a two-line entry
+		{ID: "mrvf-rt-004", Status: "open", Severity: "critical", Classification: "blocking",
+			Title: "a title that spans\ntwo physical lines", Reviewer: "reviewer"},
+	}
+	if err := RenderIndexWithRecords(root, records); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+
+	// fresh worktree: nothing known — EVERY emitted line must carry back through the parser
+	blockers, overrides, err := carryOverLines(path, map[string]bool{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blockers) != 2 {
+		t.Errorf("emitted blockers did not carry back: %v", blockers)
+	}
+	for _, id := range []string{"mrvf-rt-001", "mrvf-rt-004"} {
+		if !strings.Contains(strings.Join(blockers, "\n"), id) {
+			t.Errorf("blocker %s missing from carry-back: %v", id, blockers)
+		}
+	}
+	if !strings.Contains(strings.Join(blockers, "\n"), "a title that spans two physical lines") {
+		t.Errorf("the multi-line title was not flattened to the canonical single line: %v", blockers)
+	}
+	if len(overrides) != 2 {
+		t.Errorf("emitted overrides did not carry back: %v", overrides)
+	}
+	for _, id := range []string{"mrvf-rt-002", "mrvf-rt-003"} {
+		if !strings.Contains(strings.Join(overrides, "\n"), id) {
+			t.Errorf("override %s missing from carry-back: %v", id, overrides)
+		}
+	}
+}
+
+// Hand-maintained committed sections the renderer does not emit (a history note, the
+// shelved #93 "Stale" partition) must survive the rewrite — the render regenerates its own
+// two sections and must not delete the rest of the committed file.
+func TestRenderPreservesSectionsItDoesNotEmit(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	committed := "# metareview Findings\n\n" +
+		"- mrvf-a-001 [high] an open blocker (reviewer)\n\n" +
+		"## Process Overrides\n\n" +
+		"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
+		"- mrvf-a-002 [granted] an override — granted by someone at some time: reason\n\n" +
+		"## Stale\n\n" +
+		"Findings from old heads, kept for the audit trail.\n\n" +
+		"- mrvf-a-003 [medium] a stale-head finding (reviewer)\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(committed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RenderIndexWithRecords(root, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	g := string(got)
+	if !strings.Contains(g, "## Stale") || !strings.Contains(g, "mrvf-a-003") {
+		t.Errorf("a committed section the renderer does not emit was deleted:\n%s", g)
+	}
+	if !strings.Contains(g, "mrvf-a-001") || !strings.Contains(g, "mrvf-a-002") {
+		t.Errorf("carried lines lost:\n%s", g)
+	}
+	// and the stale bullet is NOT promoted: it stays inside its own section, not the top
+	if strings.Contains(g[:strings.Index(g, "## Process Overrides")], "mrvf-a-003") {
+		t.Errorf("stale-section bullet promoted to a current blocker:\n%s", g)
+	}
+}
+
+func TestWriteIndexSeedIsAtomic(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteIndexSeed(path); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "# metareview Findings\n\nNo unresolved findings recorded yet.\n" {
+		t.Errorf("seed content = %q", string(got))
+	}
+	leftovers, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".FINDINGS.md.tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftovers) != 0 {
+		t.Errorf("seed left temp files behind: %v", leftovers)
 	}
 }

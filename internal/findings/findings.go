@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dsifry/metareview/internal/jsonl"
+	"github.com/dsifry/metareview/internal/markdown"
 	"github.com/dsifry/metareview/internal/state"
 )
 
@@ -290,6 +291,14 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// WriteIndexSeed writes the first-render content of the findings index through
+// writeIndexAtomic, so every writer of the durable audit file — the reconciler and the
+// artifact scaffold's first-creation path — carries the same fsync/mode/unique-temp
+// guarantees instead of a truncating in-place write.
+func WriteIndexSeed(path string) error {
+	return writeIndexAtomic(path, "# metareview Findings\n\nNo unresolved findings recorded yet.\n")
+}
+
 func RenderIndex(root string) error {
 	records, err := readJSONL(findingsPath(root))
 	if err != nil {
@@ -395,7 +404,13 @@ func RenderIndexWithRecords(root string, records []Record) error {
 	}
 	lines := make([]string, 0, len(blockers)+len(coBlockers))
 	for _, finding := range blockers {
-		lines = append(lines, fmt.Sprintf("- %s [%s] %s (%s)", finding.ID, finding.Severity, finding.Title, finding.Reviewer))
+		// Emission is canonicalized to one physical line per entry: the committed index is
+		// re-read line-by-line by carryOverLines, so a free-text field carrying an embedded
+		// newline would make one entry span lines and only its first line carry back. Titles
+		// and reviewer names are flattened (whitespace runs to a single space, control
+		// characters dropped) so the writer and the reader agree on one form.
+		lines = append(lines, fmt.Sprintf("- %s [%s] %s (%s)", finding.ID, finding.Severity,
+			singleLine(finding.Title), singleLine(finding.Reviewer)))
 	}
 	lines = append(lines, coBlockers...)
 	body := "No unresolved findings recorded yet."
@@ -409,11 +424,54 @@ func RenderIndexWithRecords(root string, records []Record) error {
 			"Deliberate exceptions to the review workflow. Pending entries still block CI.\n\n" +
 			strings.Join(overrides, "\n") + "\n"
 	}
+	for _, section := range preservedSections(path) {
+		document += "\n" + section + "\n"
+	}
 	return writeIndexAtomic(path, document)
 }
 
+// singleLine flattens a free-text field to the canonical single physical line every emitted
+// index entry uses (see the blocker-bullet comment).
+func singleLine(s string) string {
+	return markdown.PlainText(strings.Join(strings.Fields(s), " "))
+}
+
+// preservedSections extracts every committed ## section the renderer does not itself emit
+// (anything other than Process Overrides), verbatim, so hand-maintained content — a history
+// note, the shelved #93 "Stale" partition — survives the rewrite instead of being silently
+// deleted: the render regenerates only its own two sections and must not destroy the rest of
+// the committed file. Same trade-off as carried lines: a preserved section has no retirement
+// path, and removing one means editing the committed file by hand.
+func preservedSections(path string) []string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	var cur []string
+	flush := func() {
+		if len(cur) > 0 && !strings.HasPrefix(cur[0], "## Process Overrides") {
+			out = append(out, strings.TrimRight(strings.Join(cur, "\n"), "\n"))
+		}
+		cur = nil
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "## ") {
+			flush()
+			cur = append(cur, line)
+			continue
+		}
+		if len(cur) > 0 {
+			cur = append(cur, line)
+		}
+	}
+	flush()
+	return out
+}
+
 // writeIndexAtomic replaces the committed index write-temp-then-rename, never a truncating
-// in-place write: the committed index is the durable audit trail this package exists to
+// in-place write (note: rename replaces a SYMLINK at the target with a regular file, where the
+// old in-place write wrote through it): the committed index is the durable audit trail this package exists to
 // preserve, and os.WriteFile truncates before it writes — a crash or I/O failure mid-write
 // (disk full, process kill) would leave it truncated or half-written, the same data loss the
 // carry-over prevents on the read path. The rename replaces the file atomically; the temp
@@ -474,6 +532,13 @@ func writeIndexAtomic(path, document string) error {
 	if err := os.Rename(name, path); err != nil {
 		_ = os.Remove(name)
 		return err
+	}
+	// Best-effort directory sync: the rename is durable only once the directory entry is.
+	// Failure is ignored deliberately — the rename already landed, and a dir-fsync error
+	// (unsupported on some platforms, e.g. Windows) must not fail a completed write.
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
 	}
 	return nil
 }
