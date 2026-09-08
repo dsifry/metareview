@@ -248,7 +248,9 @@ Repo-side DoD per PR: `go test ./...` green; gofmt/go vet/golangci-lint clean; c
 floor maintained; `tests/manifest/test-skills.sh` green (it pins SKILL.md wording; the
 advisory-consolidation step needs NEW pins — the existing pins cannot see it — so add
 them); dogfood a real artifact review that exercises the advisory path (verify the
-review log's `## Advisory Findings` section populates with gated, converged entries) and
+review log's `## Advisory Findings` section populates with entries that pass the advisory
+gates — converged entries where they exist, qualifying single-lens entries (anchor 75 or a
+P1 consequence) otherwise) and
 run `pr-ready` green on the branch (PASS or PASS_ADVISORY with zero blockers — note the
 two mechanisms do not couple: pr-ready's PASS_ADVISORY arises only from gate-written
 findings-ledger records, never from artifact-review markdown); squash-merged green

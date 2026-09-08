@@ -142,34 +142,42 @@ grep -q 'return the actual artifact-review verdict' skills/review-artifact/SKILL
 # applies the three gates, and runs ONE staff-surrogate subagent filter on the advisory list only
 # (blocking/defect findings never pass through it). The lens-set enumeration above cannot see
 # this step, and drifting it silently disables the advisory pipeline — pin its load-bearing
-# phrases directly, in both the skill and the rubric section that defines the gates.
+# clauses directly, in both the skill and the rubric section that defines the gates. The pins
+# match COMPLETE clauses, not isolated words: independent phrase greps pass when the words
+# appear in unrelated prose, which proves nothing about the relationships they exist to guard.
 grep -q 'Consolidate advisory findings' skills/review-artifact/SKILL.md
 grep -q 'staff bar' skills/review-artifact/SKILL.md
-grep -q 'must never' skills/review-artifact/SKILL.md
-grep -q 'blocking/defect findings' skills/review-artifact/SKILL.md
-# The two dogfood-hardened filter behaviors (0.11.1 fix rounds): the failure semantics
-# (a failed filter call writes the gated-but-unfiltered list through with a warning) and
-# the read-only dispatch. Drift here silently reopens the silent-drop and injection
-# surface the dogfood review closed.
-grep -q 'read-only subagent' skills/review-artifact/SKILL.md
-grep -q 'gated-but-unfiltered' skills/review-artifact/SKILL.md
-grep -q 'A flagged item has a write path' skills/review-artifact/SKILL.md
-grep -q 'NEEDS_REVISION exactly as a lens-raised blocking finding' skills/review-artifact/SKILL.md
+grep -Fq 'applies to **advisories only**: it must never touch blocking/defect findings' skills/review-artifact/SKILL.md
+grep -Fq 'dispatch **one** read-only subagent' skills/review-artifact/SKILL.md
+# The dogfood-hardened filter behaviors (0.11.1 fix rounds + the Bugbot write-path fix):
+# failure semantics, the per-lens-write exemption, and the defect flag-back's landing path.
+# Drift here silently reopens the silent-drop, flooding, and injection surfaces the dogfood
+# review closed.
+grep -Fq 'gated-but-unfiltered advisory list through with a warning note naming' skills/review-artifact/SKILL.md
+grep -Fq 'Advisory findings are the exception' skills/review-artifact/SKILL.md
+grep -Fq 'A flagged item has a write path' skills/review-artifact/SKILL.md
+grep -Fq 'NEEDS_REVISION exactly as a lens-raised blocking finding' skills/review-artifact/SKILL.md
 grep -q '## Advisory Findings (real, important, not defects)' rubrics/artifact-review-rubric.md
 grep -q 'Stated consequence' rubrics/artifact-review-rubric.md
 grep -q 'Rebuttal gate' rubrics/artifact-review-rubric.md
 grep -q 'Convergence weighting' rubrics/artifact-review-rubric.md
 grep -q 'The deletion test' rubrics/artifact-review-rubric.md
-# All FOUR suppression lines, not any one: a single grep -q passes while three of the four
-# mandated lenses lose theirs. An exact count also fails loudly when a fifth lens is mandated
-# later and the pin is not revisited.
-[ "$(grep -c 'style nits remain suppressed at every gate' rubrics/artifact-review-rubric.md)" = 4 ]
-# The per-lens advisory mandates, anchored to the lens each belongs to so a mandate cannot
-# silently move between lenses or be counted under the wrong one.
-grep -q 'Report \*\*advisory findings\*\* for scope/architecture risk' rubrics/artifact-review-rubric.md
-grep -q 'Report \*\*advisory findings\*\* for wrong-shape, simplification, and coupling' rubrics/artifact-review-rubric.md
-grep -q 'Report \*\*advisory findings\*\* for spec-coverage gaps and fragile test structure' rubrics/artifact-review-rubric.md
-grep -q 'Report \*\*advisory findings\*\* for latent fragility' rubrics/artifact-review-rubric.md
+# Section-bounded lens checks: each of the four advisory-mandated lenses must carry BOTH its
+# mandate and its style-nit suppression line inside its own section — a whole-file grep or a
+# bare count proves neither the location nor the one-per-lens distribution, so a mandate can
+# move between lenses or lose its suppression line while the pins stay green (CodeRabbit,
+# PR #157: the manifest checks must verify relationships, not isolated words).
+rubric_section() { # rubric_section <section-start-regex> <next-section-regex>
+  awk -v s="$1" -v e="$2" '$0 ~ s {f=1; next} $0 ~ e {f=0} f' rubrics/artifact-review-rubric.md
+}
+rubric_section '^### Completeness' '^### Scope' | grep -q 'Report \*\*advisory findings\*\* for scope/architecture risk'
+rubric_section '^### Completeness' '^### Scope' | grep -q 'style nits remain suppressed at every gate'
+rubric_section '^### Architecture' '^### Intent' | grep -q 'Report \*\*advisory findings\*\* for wrong-shape, simplification, and coupling'
+rubric_section '^### Architecture' '^### Intent' | grep -q 'style nits remain suppressed at every gate'
+rubric_section '^### Testing-Quality' '^### Data-Migration' | grep -q 'Report \*\*advisory findings\*\* for spec-coverage gaps and fragile test structure'
+rubric_section '^### Testing-Quality' '^### Data-Migration' | grep -q 'style nits remain suppressed at every gate'
+rubric_section '^### Runtime-Reliability' '^### Mechanical' | grep -q 'Report \*\*advisory findings\*\* for latent fragility'
+rubric_section '^### Runtime-Reliability' '^### Mechanical' | grep -q 'style nits remain suppressed at every gate'
 grep -q 'parallel subagents by default' docs/quickstart.md
 grep -q 'in-session-emulated' docs/quickstart.md
 grep -q 'weaker evidence' docs/quickstart.md
