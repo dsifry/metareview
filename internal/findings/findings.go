@@ -425,8 +425,9 @@ func carryOverLines(raw []byte, known map[string]bool) (blockers, overrides []st
 	// directly follow it, before the next bullet, header or blank). The CURRENT renderer
 	// flattens free text to one physical line, but entries written by the OLD renderer can
 	// span lines — carrying only the first would silently drop the rest, so the whole block
-	// carries as one entry. A blank line ends the entry; a skipped (ledger-known) bullet's
-	// continuations are skipped with it.
+	// carries as one entry. A ledger-known bullet's continuations are skipped with it: the
+	// accumulator stays empty for a known ID, so nothing absorbs them. A blank line ends the
+	// entry; non-bullet prose no accumulator owns is not carried.
 	section := sectionTop
 	var entry []string
 	flush := func() {
@@ -441,7 +442,6 @@ func carryOverLines(raw []byte, known map[string]bool) (blockers, overrides []st
 		}
 		entry = nil
 	}
-	skipping := false // inside the continuations of a ledger-known bullet
 	for _, line := range strings.Split(string(raw), "\n") {
 		if strings.HasPrefix(line, "## ") {
 			// EXACT match, not a prefix: a hand-maintained "## Process Overrides History"
@@ -449,7 +449,6 @@ func carryOverLines(raw []byte, known map[string]bool) (blockers, overrides []st
 			// real Process Overrides section — the destroy-and-promote class this package
 			// exists to prevent. The renderer emits the header as exactly this string.
 			flush()
-			skipping = false
 			if line == "## Process Overrides" {
 				section = sectionOverrides
 			} else {
@@ -459,21 +458,18 @@ func carryOverLines(raw []byte, known map[string]bool) (blockers, overrides []st
 		}
 		if m := carryOverLine.FindStringSubmatch(line); m != nil {
 			flush()
-			skipping = known[m[1]]
-			if !skipping {
+			if !known[m[1]] {
 				entry = []string{line}
 			}
 			continue
 		}
 		if line == "" {
 			flush()
-			skipping = false
 			continue
 		}
 		if len(entry) > 0 {
 			entry = append(entry, line)
 		}
-		// skipping continuations of a known bullet, or prose nobody owns: not carried
 	}
 	flush()
 	return blockers, overrides
