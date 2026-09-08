@@ -206,7 +206,8 @@ finding, never dropped silently (the ratified asymmetry's intent, extended to mi
 defects); (4) a failed filter call writes the gated-but-unfiltered list through with a
 warning naming the failure — it must neither empty the advisory section nor silently bypass
 the staff bar; (5) advisory findings are exempted from per-lens log writes (they are held
-for consolidation), resolving the conflict with the per-lens-edit discipline.
+for consolidation), resolving the conflict with the per-lens-edit discipline; (6) the
+filter dispatch is a read-only subagent, matching the repo's lens-subagent convention.
 
 ### D. Where things land — implementation map
 
