@@ -37,8 +37,10 @@ vulnerabilities in THIS diff, not generic hardening advice.
 - A security control (allowlist/blacklist, deny rule, host check) compared in one canonical
   form against input arriving in another: a lowercased blacklist checked against
   non-lowercased input, an allowlist normalized on a different scheme or case, a deny rule
-  defeated by a double-decode. (The correctness half of the same mismatch — a lookup that
-  fails to find what was stored — is Architecture's format-drift hunt.)
+  defeated by a double-decode. (A URL host/scheme check bypassed by protocol forms —
+  `file://`, decimal IPs, DNS rebinding — is A10 SSRF's, below. The correctness half of the
+  same mismatch — a lookup that fails to find what was stored — is Architecture's
+  format-drift hunt.)
 - CORS overly permissive.
 - Block on unscoped user-supplied-id lookups; bypassable role checks; normalization-mismatch
   bypasses of a security control.
