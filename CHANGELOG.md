@@ -122,7 +122,13 @@
   status) renders from the ledger and suppresses its committed line, so fresh local knowledge
   always wins, and an empty ledger is NO information rather than "no findings" — the same
   stance CoveredPaths takes for `none`-vs-absent. A committed index that exists but cannot be
-  read fails the render closed rather than overwriting it. Scope boundary: carry-over is
+  read fails the render closed rather than overwriting it, and the replacement itself is
+  atomic: write-temp-then-rename (unique temp name, fsync before rename, the destination's
+  mode preserved, a write-protected index refused) instead of a truncating in-place write that
+  a crash mid-write would leave half-written. Carry-over is display-preserving only — it does
+  not feed the local ledger, cross-worktree enforcement (override list, blocking counts)
+  still reports local state, and carried lines have no retirement path once the originating
+  ledger is gone (clearing one means editing the committed file by hand). Scope boundary: carry-over is
   display-preserving only — it does not feed the local ledger, so cross-worktree enforcement
   (override list, blocking counts) still reports local state.
 

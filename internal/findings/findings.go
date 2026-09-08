@@ -325,7 +325,11 @@ var carryOverLine = regexp.MustCompile(`^- (mrvf-[A-Za-z0-9-]+) \[`)
 // because finding IDs are run-scoped, the same underlying finding re-recorded in a second
 // worktree can render twice (its old committed line carried beside the new local one) — a
 // duplication that is strictly better than the destruction it replaced, and the price of
-// keying carry-over on the only stable identifier the lossy render carries.
+// keying carry-over on the only stable identifier the lossy render carries. It also has no
+// retirement path: a carried line is suppressed only by a ledger that knows its finding ID,
+// and the ledger is transient, so after a clone or ledger cleanup a carried line renders
+// indefinitely — clearing it means editing the committed file by hand (or the durable
+// ledger reconcile #93-style work would give it).
 func carryOverLines(path string, known map[string]bool) (blockers, overrides []string, err error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -339,22 +343,35 @@ func carryOverLines(path string, known map[string]bool) (blockers, overrides []s
 		}
 		return nil, nil, err
 	}
-	inOverrides := false
+	// Carry-over is bounded to the two sections the renderer itself emits — the top
+	// unresolved-blockers section and Process Overrides. A bullet under ANY other section
+	// (a hand-maintained history, or the "Stale" partition the shelved #93 design adds) is
+	// left alone: verbatim preservation of a line is not preservation of its meaning, and
+	// promoting a stale section's entries to current blockers would resurrect dead findings.
+	const (
+		sectionTop = iota
+		sectionOverrides
+		sectionOther
+	)
+	section := sectionTop
 	for _, line := range strings.Split(string(raw), "\n") {
-		switch {
-		case strings.HasPrefix(line, "## Process Overrides"):
-			inOverrides = true
-		case strings.HasPrefix(line, "## "):
-			inOverrides = false
+		if strings.HasPrefix(line, "## ") {
+			if strings.HasPrefix(line, "## Process Overrides") {
+				section = sectionOverrides
+			} else {
+				section = sectionOther
+			}
+			continue
 		}
 		m := carryOverLine.FindStringSubmatch(line)
 		if m == nil || known[m[1]] {
 			continue
 		}
-		if inOverrides {
-			overrides = append(overrides, line)
-		} else {
+		switch section {
+		case sectionTop:
 			blockers = append(blockers, line)
+		case sectionOverrides:
+			overrides = append(overrides, line)
 		}
 	}
 	return blockers, overrides, nil
@@ -403,17 +420,68 @@ func RenderIndexWithRecords(root string, records []Record) error {
 // file sits beside it so the rename stays on one filesystem, and is removed on every path
 // that does not rename it.
 func writeIndexAtomic(path, document string) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(document), 0o644); err != nil {
-		_ = os.Remove(tmp)
+	// The destination's mode is preserved across replacement (rename does not carry it), and
+	// a write-PROTECTED index (owner-write bit clear — an operator's lock on the audit trail)
+	// fails closed exactly as the old in-place write did with EACCES, instead of being
+	// silently replaced by a fresh writable file.
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+		if mode&0o200 == 0 {
+			return fmt.Errorf("committed findings index %s is write-protected (mode %v) — refusing to replace it", path, mode)
+		}
+	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	// A UNIQUE temp name, not path+".tmp": concurrent renders in one checkout (a gate run
+	// overlapping a Stop hook) share a fixed name, where one render's error cleanup can
+	// delete another's in-flight temp and turn its rename into a spurious failure. Unique
+	// names make the writers independent; the pattern is gitignored for the hard-crash
+	// window between write and rename.
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	// Seams over the fallible calls so their error branches — unreachable on a healthy
+	// filesystem in tests — stay covered by fault injection instead of being deleted for
+	// coverage (the repo's absPath precedent). Every failure path must remove the temp:
+	// a leftover would sit untracked in the committed docs/metareview tree until the next
+	// render, exactly the kind of file a careless `git add docs/metareview` sweeps in.
+	if err := seamWriteString(tmp, document); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	// Sync before rename: on delayed-allocation filesystems the rename can otherwise be
+	// journaled ahead of the data blocks, and a power loss leaves a zero-length index —
+	// which the next render would then read as nothing to carry.
+	if err := seamSync(tmp); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	if err := seamClose(tmp); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	if err := seamChmod(name, mode); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		_ = os.Remove(name)
 		return err
 	}
 	return nil
 }
+
+var (
+	seamWriteString = func(f *os.File, s string) error { _, err := f.WriteString(s); return err }
+	seamSync        = func(f *os.File) error { return f.Sync() }
+	seamClose       = func(f *os.File) error { return f.Close() }
+	seamChmod       = func(name string, mode os.FileMode) error { return os.Chmod(name, mode) }
+)
 
 func UnresolvedBlocking(root string) ([]Record, error) {
 	records, err := readJSONL(findingsPath(root))

@@ -19,5 +19,9 @@ node_modules/
 # Local agent worktrees (never commit)
 .claude/worktrees/
 
+# findings-index atomic-replace temp files (unique names; only survive a hard crash
+# in the write→rename window — see writeIndexAtomic)
+docs/metareview/.FINDINGS.md.tmp-*
+
 # stray root build output (bin/metareview is the real target)
 /metareview

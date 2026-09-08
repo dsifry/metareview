@@ -2,6 +2,7 @@ package findings
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -762,15 +763,17 @@ Deliberate exceptions to the review workflow. Pending entries still block CI.
 	if err != nil {
 		t.Fatalf("carryOverLines: %v", err)
 	}
-	if len(blockers) != 2 || !strings.Contains(blockers[0], "mrvf-a-002") {
-		t.Errorf("blockers carry-over = %v, want the unknown mrvf-a-002 first (post-section bullet checked below)", blockers)
+	if len(blockers) != 1 || !strings.Contains(blockers[0], "mrvf-a-002") {
+		t.Errorf("blockers carry-over = %v, want only the unknown mrvf-a-002", blockers)
 	}
 	if len(overrides) != 1 || !strings.Contains(overrides[0], "mrvf-a-003") {
 		t.Errorf("overrides carry-over = %v, want only the unknown mrvf-a-003", overrides)
 	}
-	// a later ## section closes the overrides section: its bullets carry as blockers
-	if len(blockers) != 2 || !strings.Contains(blockers[1], "mrvf-a-004") {
-		t.Errorf("blockers carry-over = %v, want mrvf-a-002 and the post-section mrvf-a-004", blockers)
+	// a later ## section's bullets are NOT carried at all — verbatim preservation of a
+	// line is not preservation of its meaning (a Stale/history section must not be
+	// promoted to current blockers)
+	if len(blockers) != 1 || strings.Contains(strings.Join(blockers, "\n"), "mrvf-a-004") {
+		t.Errorf("blockers carry-over = %v, want only mrvf-a-002; post-section bullets must not carry", blockers)
 	}
 	// an ABSENT committed index is no information, not an error
 	b, o, err := carryOverLines(filepath.Join(root, "does-not-exist.md"), nil)
@@ -903,8 +906,12 @@ func TestWriteIndexAtomicFailsClosedAndCleansUp(t *testing.T) {
 	if err := writeIndexAtomic(path, "# index"); err == nil {
 		t.Fatal("a rename that cannot complete must fail the write")
 	}
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf("the temp file must be cleaned up after a failed rename, got err=%v", err)
+	leftovers, err := filepath.Glob(filepath.Join(root, ".FINDINGS.md.tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftovers) != 0 {
+		t.Errorf("the temp file must be cleaned up after a failed rename, got %v", leftovers)
 	}
 
 	// temp-write failure: the containing directory is read-only, so creating the temp file
@@ -922,7 +929,142 @@ func TestWriteIndexAtomicFailsClosedAndCleansUp(t *testing.T) {
 	if err := writeIndexAtomic(filepath.Join(root2, "sub", "FINDINGS.md"), "# index"); err == nil {
 		t.Fatal("a temp write that cannot complete must fail the write")
 	}
-	if _, err := os.Stat(filepath.Join(root2, "sub", "FINDINGS.md.tmp")); !os.IsNotExist(err) {
-		t.Errorf("no temp file may survive a failed write, got err=%v", err)
+	leftovers, err = filepath.Glob(filepath.Join(root2, "sub", ".FINDINGS.md.tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftovers) != 0 {
+		t.Errorf("no temp file may survive a failed write, got %v", leftovers)
+	}
+}
+
+// The replacement preserves the committed index's mode (rename does not carry it), and a
+// write-PROTECTED index — an operator's lock on the audit trail — fails closed instead of
+// being silently replaced by a fresh writable file (the old in-place write failed EACCES).
+func TestWriteIndexAtomicPreservesModeAndRespectsWriteProtection(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits")
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "FINDINGS.md")
+	if err := os.WriteFile(path, []byte("# old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeIndexAtomic(path, "# new"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("replacement mode = %v, want the destination's 0600 preserved", info.Mode().Perm())
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores write-protection bits")
+	}
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeIndexAtomic(path, "# clobber"); err == nil {
+		t.Fatal("a write-protected committed index must fail the render, not be replaced")
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "# new" {
+		t.Errorf("write-protected index must be untouched, got %q", string(got))
+	}
+}
+
+// Unique temp names make concurrent renders independent: two renders racing in one checkout
+// (a gate run overlapping a Stop hook) must both succeed, and no fixed-name temp exists for
+// one render's cleanup to delete the other's.
+func TestWriteIndexAtomicConcurrentRendersAreIndependent(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "FINDINGS.md")
+	if err := os.WriteFile(path, []byte("# seed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const n = 8
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			errs <- writeIndexAtomic(path, "# metareview Findings\n\nNo unresolved findings recorded yet.\n")
+		}()
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent render failed: %v", err)
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(got), "# metareview Findings") {
+		t.Errorf("final index malformed after concurrent renders: %q", string(got))
+	}
+	leftovers, err := filepath.Glob(filepath.Join(root, ".FINDINGS.md.tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftovers) != 0 {
+		t.Errorf("temp files survived concurrent renders: %v", leftovers)
+	}
+}
+
+// The injected-fault half of writeIndexAtomic's error surface: every seam failure must
+// fail the write closed AND remove the temp file — a leftover would sit untracked in the
+// committed docs/metareview tree until the next render, exactly the kind of file a careless
+// `git add docs/metareview` sweeps into a commit.
+func TestWriteIndexAtomicFaultInjectionCleansUp(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		inject func()
+	}{
+		{"write", func() { seamWriteString = func(*os.File, string) error { return fmt.Errorf("disk full") } }},
+		{"sync", func() { seamSync = func(*os.File) error { return fmt.Errorf("sync failed") } }},
+		{"chmod", func() { seamChmod = func(string, os.FileMode) error { return fmt.Errorf("chmod failed") } }},
+		{"close", func() { seamClose = func(*os.File) error { return fmt.Errorf("close failed") } }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			savedWrite, savedSync, savedChmod, savedClose := seamWriteString, seamSync, seamChmod, seamClose
+			defer func() {
+				seamWriteString, seamSync, seamChmod, seamClose = savedWrite, savedSync, savedChmod, savedClose
+			}()
+			tc.inject()
+			root := t.TempDir()
+			path := filepath.Join(root, "FINDINGS.md")
+			if err := os.WriteFile(path, []byte("# seed"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeIndexAtomic(path, "# new"); err == nil {
+				t.Fatalf("%s fault must fail the write", tc.name)
+			}
+			leftovers, err := filepath.Glob(filepath.Join(root, ".FINDINGS.md.tmp-*"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(leftovers) != 0 {
+				t.Errorf("%s fault left temp files behind: %v", tc.name, leftovers)
+			}
+			got, _ := os.ReadFile(path)
+			if string(got) != "# seed" {
+				t.Errorf("%s fault must leave the committed index untouched, got %q", tc.name, string(got))
+			}
+		})
+	}
+}
+
+// A Stat failure that is NOT not-exist (here: ENOTDIR — the index's parent is a file) is an
+// error, not "no committed index yet".
+func TestWriteIndexAtomicFailsOnStrangeStatError(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "docs")
+	if err := os.WriteFile(parent, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeIndexAtomic(filepath.Join(parent, "metareview", "FINDINGS.md"), "# x"); err == nil {
+		t.Fatal("a non-notexist Stat error must fail the write")
 	}
 }
