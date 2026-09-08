@@ -84,11 +84,11 @@ func ensureFindingsIndex(root string) error {
 	}
 	// The durable audit file has exactly two writers, with deliberately different contracts:
 	// findings.writeIndexAtomic is the only REPLACING writer (the reconciler's render —
-	// unique temp, fsync, mode preservation), and findings.WriteIndexSeed is the only
-	// CREATING one (exclusive O_EXCL create-if-absent — never a replacement, so a racing
-	// render's freshly created index cannot be clobbered by the empty document). Do NOT
-	// route the seed through the replacer: that reopens the stat-then-seed TOCTOU the
-	// exclusive create exists to close.
+	// unique temp, fsync, mode preservation; it creates when no index exists), and
+	// findings.WriteIndexSeed only ever CREATES (exclusive O_EXCL create-if-absent — never a
+	// replacement, so a racing render's freshly created index cannot be clobbered by the
+	// empty document). Do NOT route the seed through the replacer: that reopens the
+	// stat-then-seed TOCTOU the exclusive create exists to close.
 	return findings.WriteIndexSeed(path)
 }
 

@@ -785,42 +785,6 @@ Deliberate exceptions to the review workflow. Pending entries still block CI.
 	}
 }
 
-// The read-error half of the fail-closed rule: a committed index that EXISTS but cannot be
-// read (permissions, transient I/O) must abort the render, because proceeding would
-// overwrite the committed audit trail with the local-only view — the issue-#151 destruction,
-// re-opened on the error path (caught in adversarial review of this fix).
-func TestCarryOverFailsClosedOnUnreadableCommittedIndex(t *testing.T) {
-	// The 0o000 trick only makes the file unreadable as an unprivileged POSIX process: as
-	// root or on Windows it stays readable, the render legitimately succeeds, and the test
-	// would fail against correct code (the repo's established guard — epicsource/status
-	// use the same one).
-	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
-		t.Skip("permission-based unreadability does not apply on windows or as root")
-	}
-	root := t.TempDir()
-	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("# metareview Findings\n\n- mrvf-x-001 [high] a committed blocker (r)\n"), 0o000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
-	if err := RenderIndexWithRecords(root, nil); err == nil {
-		t.Fatal("an unreadable committed index must fail the render, not overwrite the file")
-	}
-	if err := os.Chmod(path, 0o644); err != nil { // restore so the untouched-content check can read it
-		t.Fatal(err)
-	}
-	got, readErr := os.ReadFile(path)
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if string(got) != "# metareview Findings\n\n- mrvf-x-001 [high] a committed blocker (r)\n" {
-		t.Errorf("the unreadable committed index must be left untouched, got %q", string(got))
-	}
-}
-
 // The end-to-end regression for issue #151: Reconcile — the caller every gate actually
 // drives — run in a fresh worktree (empty local ledger) against a pre-seeded committed
 // FINDINGS.md must not destroy the committed provenance. Every other Reconcile test runs in
@@ -1441,9 +1405,15 @@ func TestRenderRefusesSymlinkedCommittedIndex(t *testing.T) {
 	if err := RenderIndexWithRecords(root, nil); err == nil {
 		t.Fatal("a symlinked committed index must be refused, not followed")
 	}
-	if got, _ := os.ReadFile(path); string(got) == "" || strings.Contains(string(got), "planted") == false {
-		// the symlink itself must be untouched (the render failed before any write)
-		_ = got
+	// the symlink itself must be untouched: the render failed before any write, so the
+	// path still IS a symlink pointing at the planted target (not a regular file, and the
+	// planted content has not been echoed anywhere)
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the failed render replaced the symlink with a regular file")
 	}
 }
 

@@ -137,9 +137,10 @@
   snapshot, one fail-closed policy, no mixed-snapshot race, CRLF normalized, a symlinked
   index refused); and the durable audit file has exactly two writers with deliberately
   different contracts — findings.writeIndexAtomic is the only replacing writer (the
-  render), and findings.WriteIndexSeed is the only creating one (exclusive
-  create-if-absent, so a racing render's freshly created index cannot be clobbered by the
-  empty seed document).
+  render — it also creates when no index exists), and findings.WriteIndexSeed only ever
+  creates (exclusive create-if-absent, so a racing render's freshly created index cannot be
+  clobbered by the empty seed document; its error paths deliberately leave a partial seed
+  in place rather than remove a path a concurrent render may have renamed content into).
 
 - **PR-ready now selects findings for the target under review.** Findings linked to the current
   branch, live pull request, or a task review whose covered paths overlap the current diff retain

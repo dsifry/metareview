@@ -304,8 +304,12 @@ const (
 // — but the exclusive create is what closes the stat-then-seed TOCTOU (a racing render that
 // creates the index between the scaffold's Stat and its seed must not have its content
 // clobbered by an empty document: the issue-#151 destruction, reopened through the scaffold
-// path). EEXIST is success — someone else seeded it. writeIndexAtomic stays the only
-// REPLACING writer; this is the only creating one.
+// path). EEXIST is success — someone else seeded it. The precise contract: the seed only
+// ever CREATES, never replaces; writeIndexAtomic creates-or-replaces (it creates the index
+// too when a render finds none — the seed is not the only creator, only the only
+// non-replacer). Note the seed's own mode is umask-subject (OpenFile applies it), where a
+// render-created index is deterministically 0644 — an accepted inconsistency between the
+// creating paths.
 func WriteIndexSeed(path string) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
