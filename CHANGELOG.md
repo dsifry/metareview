@@ -32,21 +32,28 @@
 - **Review-lens briefs sharpened against head-to-head benchmark evidence.** The harnesseval lab
   ran metareview against Compound Engineering on 81 matched pairs (plus a CodeRabbit/BugBot
   cross-check); the 241 CE-only confirmed findings cluster into classes the briefs worded too
-  narrowly to catch. Five hunts were added or broadened, all pattern-list style like the existing
-  Architecture hunts: Architecture gains a **format-drift** hunt (case/scheme/port/trailing-slash/
-  type-coercion/encoding/normalization asymmetry between writer and reader), its **api-contract**
-  hunt now checks EVERY implementer of a changed interface (not just the diff's call sites),
-  advertised routes with no controller action, dropped request envelopes, and strict-equality
-  boolean parsing, and its **cascading-failure** hunt generalizes to async chains (`.then` without
-  `.catch`, unreturned inner promises, optimistic state mutated before resolution, out-of-order
-  responses). Data-migration (both `rubrics/artifact-review-rubric.md` and
-  `rubrics/data-migration-rubric.md`) gains **migration re-run safety**: `force: true` on shipped
-  migrations, conditional-insert/unconditional-delete pairs, dead guards (`cmd_tuples > 0` is
-  always 0 for SELECTs), validation-bypassing backfills, silently reclassifying enum defaults, and
-  transformation field-fidelity (`raw` vs `cooked`, date vs datetime). Completeness gains
-  **sibling-flag propagation**: a path gated by user-config flags must have every gating flag
-  (`disable*`, `hide*`, `include*`) checked, not just the one the diff touched. Style/deprecation
-  hunting stays suppressed by design.
+  narrowly to catch. Six hunts were added or broadened — five benchmark-driven plus the
+  consistency pass those five forced — and every touched lens's Block-on enumeration was extended
+  to match, all pattern-list style like the existing Architecture hunts: Architecture gains a
+  **format-drift** hunt (case/scheme/port/trailing-slash/type-coercion/encoding/normalization
+  asymmetry between writer and reader), its **api-contract** hunt now checks EVERY implementer of a
+  changed interface (not just the diff's call sites), advertised routes with no controller action,
+  dropped request envelopes, and strict-equality boolean parsing, and its **cascading-failure** hunt
+  generalizes to async chains (`.then` without `.catch`, unreturned inner promises, optimistic
+  state mutated before resolution, out-of-order responses). Data-migration (both
+  `rubrics/artifact-review-rubric.md` and `rubrics/data-migration-rubric.md`) gains **migration
+  re-run safety**: `force: true` on shipped migrations, conditional-insert/unconditional-delete
+  pairs, dead guards (`cmd_tuples > 0` is always 0 for SELECTs — the guarded insert never runs
+  while the paired delete destroys the old rows), validation-bypassing backfills, silently
+  reclassifying enum defaults, and transformation field-fidelity (`raw` vs `cooked`, date vs
+  datetime). Completeness gains **sibling-flag propagation**: a path gated by user-config flags
+  must have every gating flag (`disable*`, `hide*`, `include*`) checked, not just the one the diff
+  touched. Security gains a **normalization-mismatch bypass** hunt (A01 in
+  `rubrics/security-review-rubric.md` and the artifact rubric's Security section): a control
+  compared in one canonical form against input in another — the receiving half of
+  format-drift's Architecture/Security boundary, added when the adversarial review of this diff
+  caught the deferral landing on an unnamed owner. Style/deprecation hunting stays suppressed by
+  design.
 
 - **review-lenses instructions now mandate read-only lens subagents (issue #146 follow-up).** While
   driving the #146 A/B artifact review, a lens subagent with write access to the shared tree decided

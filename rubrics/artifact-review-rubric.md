@@ -256,7 +256,9 @@ persona-anti-overlap pattern.
 - Block on user-supplied-id lookups without ownership scope, string-interpolated SQL/commands,
   unvalidated deserialization of untrusted input, hardcoded secrets in committed code, secrets
   written to logs, server-side fetch of unvalidated user URLs (including protocol-bypass),
-  unescaped user input to HTML/JS output, weakened token integrity/entropy. Do not double-report
+  unescaped user input to HTML/JS output, weakened token integrity/entropy, or a
+  normalization-mismatch bypass of a security control (a lowercased blacklist checked
+  against non-lowercased input). Do not double-report
   issues the deterministic gates already catch (the `eval(` gate covers bare `eval(` injection;
   flag injection the gate does not catch, e.g. SQL string interpolation).
 - Does NOT flag: code style; architecture correctness (defer to Architecture); test quality
