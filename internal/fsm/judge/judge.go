@@ -124,6 +124,7 @@ const (
 	provAnthropic
 	provOpenAI
 	provCodex
+	provClaudeCLI
 )
 
 func route(model string) provider {
@@ -133,6 +134,11 @@ func route(model string) provider {
 	// behind it is an OpenAI one that would otherwise route to HTTP.
 	case strings.HasPrefix(m, CodexPrefix):
 		return provCodex
+	// Checked before the claude family for the same reason: "claude-cli/"
+	// starts with "claude", and the id behind it would otherwise route to the
+	// Anthropic HTTP API and demand the very API key the caller is avoiding.
+	case strings.HasPrefix(m, ClaudeCLIPrefix):
+		return provClaudeCLI
 	case strings.HasPrefix(m, "claude"), strings.HasPrefix(m, "anthropic/"):
 		return provAnthropic
 	case strings.HasPrefix(m, "gpt"), strings.HasPrefix(m, "openai/"), strings.HasPrefix(m, "glm"), strings.HasPrefix(m, "kimi"):
@@ -184,7 +190,7 @@ func wireModel(model string) string {
 	// Case-insensitive, to match route: it lowercases before comparing, so a
 	// differently-cased prefix routed to a provider and then travelled to the
 	// wire unstripped.
-	return trimPrefixFold(trimPrefixFold(trimPrefixFold(model, CodexPrefix), "anthropic/"), "openai/")
+	return trimPrefixFold(trimPrefixFold(trimPrefixFold(trimPrefixFold(model, ClaudeCLIPrefix), CodexPrefix), "anthropic/"), "openai/")
 }
 
 // trimPrefixFold is strings.TrimPrefix with an ASCII case-insensitive match.
@@ -195,12 +201,14 @@ func trimPrefixFold(value, prefix string) string {
 	return value
 }
 
-// realJudge is the HTTP implementation, and the router for codex/ models.
+// realJudge is the HTTP implementation, and the router for codex/ and
+// claude-cli/ models.
 type realJudge struct {
 	codex CodexExec
 	// codexWorkDir narrows a codex judge to a materialized evidence tree. Empty inherits the
 	// caller's directory, which is metareview's own repo - read and exec access to all of it.
 	codexWorkDir string
+	claude       ClaudeExec
 	// attemptTimeout overrides the per-attempt timeout; zero means the AttemptTimeout default.
 	// Set via WithTimeout so a slow reasoning model (a large-context glm-5.3 call routinely needs
 	// >180s) can be given more room without editing a compile-time constant.
@@ -281,6 +289,13 @@ func WithCodexWorkDir(j Judge, dir string) Judge {
 // is refused rather than silently falling back to HTTP, which would need an API
 // key the caller deliberately did not supply.
 func NewWithCodex(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock, codex CodexExec) (Judge, error) {
+	return NewWithCodexAndClaude(doer, keys, urls, nonce, clock, codex, nil)
+}
+
+// NewWithCodexAndClaude is New plus both CLI seams. Either may be nil, in which
+// case a model routed to that CLI is refused rather than silently falling back
+// to HTTP, which would need an API key the caller deliberately did not supply.
+func NewWithCodexAndClaude(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock, codex CodexExec, claude ClaudeExec) (Judge, error) {
 	if urls.Anthropic == "" {
 		urls.Anthropic = DefaultURLs.Anthropic
 	}
@@ -294,7 +309,7 @@ func NewWithCodex(doer Doer, keys Keys, urls URLs, nonce func() string, clock Cl
 		}
 		*u = clean
 	}
-	return &realJudge{doer: doer, keys: keys, urls: urls, nonce: nonce, clock: clock, codex: codex}, nil
+	return &realJudge{doer: doer, keys: keys, urls: urls, nonce: nonce, clock: clock, codex: codex, claude: claude}, nil
 }
 
 // checkURL enforces the base-URL policy and strips a trailing slash.
@@ -360,6 +375,11 @@ func validate(model, effort string, calibration bool, keys Keys) (provider, erro
 		// Delegated whole: the CLI holds the credential and accepts a wider
 		// effort set, so neither the key check nor the effort table below applies.
 		return prov, validateCodex(model, effort, calibration)
+	}
+	if prov == provClaudeCLI {
+		// Delegated whole, for the same reasons as codex: the CLI holds the
+		// credential and accepts the max effort level the API does not.
+		return prov, validateClaude(model, effort, calibration)
 	}
 	if !efforts[effort] {
 		return provUnknown, errs.E(CodeJudgeEffortUnsupported, "unknown effort "+effort, "effort", effort)
@@ -598,6 +618,15 @@ func (j *realJudge) Call(ctx context.Context, r Request) (v Verdict, err error) 
 				errs.E(CodeJudgeModel, "no codex runner is wired for "+r.Model, "model", r.Model, "provider", "codex")
 		}
 		return (&codexJudge{exec: j.codex, nonce: j.nonce, clock: j.clock, workDir: j.codexWorkDir, attemptTimeout: j.attemptTimeout}).Call(ctx, r)
+	}
+	if route(r.Model) == provClaudeCLI {
+		if j.claude == nil {
+			return Verdict{Kind: r.Kind, Model: r.Model, Effort: r.Effort, InputHash: InputHash(r.Input)},
+				errs.E(CodeJudgeModel, "no claude runner is wired for "+r.Model, "model", r.Model, "provider", "claude-cli")
+		}
+		// No workDir: the escalated materialized-tree path is codex-gated (cli/escalation.go),
+		// so a claude judge always runs in the caller's directory.
+		return (&claudeJudge{exec: j.claude, nonce: j.nonce, clock: j.clock, attemptTimeout: j.attemptTimeout}).Call(ctx, r)
 	}
 	v = Verdict{Kind: r.Kind, Model: r.Model, Effort: r.Effort, InputHash: InputHash(r.Input)}
 	system, user, err := RenderPrompt(r.Kind, r.Input, r.Fence, r.Calibration, j.nonce())

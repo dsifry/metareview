@@ -42,43 +42,45 @@ type Deps struct {
 	// --sandbox read-only bounds writes and network, not reads. Verified: from a cwd outside
 	// the repository, `codex sandbox -- /bin/ls <repo>/.git` succeeds. Treat the tree as what
 	// the judge was OFFERED, not as the limit of what it could reach.
-	TempDir   func(pattern string) (string, error)
-	Exec      gate.Exec
-	CodexExec judge.CodexExec
-	HTTP      judge.Doer
-	Store     func(root string) run.RunStore
-	Sidecar   func(root string) machine.Sidecar
-	ExportFS  export.FS
-	MockLoad  func(dir string) (*mockai.Scenario, error)
-	Workflows func(name string) ([]byte, error)
-	Terminal  func(root string, clock func() run.Time) func(context.Context, machine.View) error
-	Exists    func(root, runID string) (bool, error)
-	Runner    func(r machine.RunnerDeps, env func() []string, fileHash func(string) (string, error), now func() time.Time, real cmdexec.Runner) converge.Caller
+	TempDir    func(pattern string) (string, error)
+	Exec       gate.Exec
+	CodexExec  judge.CodexExec
+	ClaudeExec judge.ClaudeExec
+	HTTP       judge.Doer
+	Store      func(root string) run.RunStore
+	Sidecar    func(root string) machine.Sidecar
+	ExportFS   export.FS
+	MockLoad   func(dir string) (*mockai.Scenario, error)
+	Workflows  func(name string) ([]byte, error)
+	Terminal   func(root string, clock func() run.Time) func(context.Context, machine.View) error
+	Exists     func(root, runID string) (bool, error)
+	Runner     func(r machine.RunnerDeps, env func() []string, fileHash func(string) (string, error), now func() time.Time, real cmdexec.Runner) converge.Caller
 }
 
 // RealDeps binds every seam to its real implementation and nothing else; it cannot fail.
 func RealDeps() Deps {
 	return Deps{
-		Getenv:    os.Getenv,
-		Environ:   os.Environ,
-		Now:       time.Now,
-		After:     time.After,
-		Rand:      rand.Read,
-		LookPath:  exec.LookPath,
-		FileHash:  workflow.FileSHA256,
-		ReadFile:  os.ReadFile,
-		TempDir:   func(pattern string) (string, error) { return os.MkdirTemp("", pattern) },
-		Exec:      gate.RealExec,
-		CodexExec: realCodexExec,
-		HTTP:      newHTTPClient(),
-		Store:     func(root string) run.RunStore { return run.NewJSONLStore(root, run.Options{}) },
-		Sidecar:   func(root string) machine.Sidecar { return machine.FSSidecar{Root: root} },
-		ExportFS:  export.OSFS{},
-		MockLoad:  mockai.Load,
-		Workflows: workflows.Read,
-		Terminal:  record.Terminal,
-		Exists:    record.Exists,
-		Runner:    guardedRunner,
+		Getenv:     os.Getenv,
+		Environ:    os.Environ,
+		Now:        time.Now,
+		After:      time.After,
+		Rand:       rand.Read,
+		LookPath:   exec.LookPath,
+		FileHash:   workflow.FileSHA256,
+		ReadFile:   os.ReadFile,
+		TempDir:    func(pattern string) (string, error) { return os.MkdirTemp("", pattern) },
+		Exec:       gate.RealExec,
+		CodexExec:  realCodexExec,
+		ClaudeExec: realClaudeExec,
+		HTTP:       newHTTPClient(),
+		Store:      func(root string) run.RunStore { return run.NewJSONLStore(root, run.Options{}) },
+		Sidecar:    func(root string) machine.Sidecar { return machine.FSSidecar{Root: root} },
+		ExportFS:   export.OSFS{},
+		MockLoad:   mockai.Load,
+		Workflows:  workflows.Read,
+		Terminal:   record.Terminal,
+		Exists:     record.Exists,
+		Runner:     guardedRunner,
 	}
 }
 
@@ -100,6 +102,31 @@ func guardedRunner(r machine.RunnerDeps, env func() []string, fileHash func(stri
 // codexBin is the executable realCodexExec runs; a seam so the three exit paths
 // can be tested without the Codex CLI installed.
 var codexBin = judge.CodexBin
+
+// claudeBin is the executable realClaudeExec runs; a seam for the same reason.
+var claudeBin = judge.ClaudeBin
+
+// realClaudeExec runs the Claude Code CLI, mirroring realCodexExec: the user
+// prompt goes in on stdin rather than as an argument so it never appears in the
+// process table, and the environment is inherited: the logged-in session the
+// CLI reads lives under the user's home, and metareview never handles the
+// token itself.
+func realClaudeExec(ctx context.Context, dir string, args []string, stdin string) ([]byte, int, error) {
+	cmd := exec.CommandContext(ctx, claudeBin, args...)
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(stdin)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return out.Bytes(), ee.ExitCode(), nil
+	}
+	if err != nil {
+		return out.Bytes(), 0, err
+	}
+	return out.Bytes(), 0, nil
+}
 
 // realCodexExec runs the Codex CLI. The prompt goes in on stdin rather than as
 // an argument so it never appears in the process table, and the environment is

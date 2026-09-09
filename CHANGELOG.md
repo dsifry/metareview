@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **OAuth judges: Claude Code CLI transport (`claude-cli/…`).** A judge model id with the
+  `claude-cli/` prefix (e.g. `claude-cli/opus`, `claude-cli/sonnet`) is judged through the local
+  Claude Code CLI (`claude -p`) on its logged-in session, so non-eval usage can run on subscription
+  credentials instead of API keys — the same shape as the existing `codex/` transport. Mirrors
+  `codexJudge`: identical prompts and parsing, the same retry ladder, per-attempt deadline and
+  backoff. Usage accounting sums all four token fields (input + cache_creation + cache_read +
+  output, with thinking made disjoint from output) — the ~15k system-prompt/tool scaffolding tax
+  lives in the cache fields and reporting only input+output undercounts ~4000×. The system prompt is
+  always passed via `--append-system-prompt` (without it `claude -p` can silently fall back to
+  Haiku for the work turn even with `--model` set), and the CLI's silent 5xx mode ("API Error: 5…"
+  as the result string with exit 0) is detected and retried as a transient rather than parsed as a
+  verdict. The user prompt travels on stdin, never argv. Effort vocabulary is the CLI's own
+  (`low/medium/high/xhigh/max`); calibration still pins medium; no API key is read. Bare
+  `claude-*`/`anthropic/*` ids keep routing to the Anthropic API. The codex/ judge was live-verified
+  end-to-end against a real ChatGPT OAuth session as part of this work (verdict parsing, retry,
+  timeout guard, cached-input usage accounting). Lab instruments unchanged (the adjudicator stays
+  frozen on gpt-5.2 k=3 medium via API, #159).
+
 ## 0.11.1 - 2026-09-08
 
 ### Added
