@@ -72,6 +72,13 @@ func (j *claudeJudge) Call(ctx context.Context, r Request) (v Verdict, err error
 		"--effort", r.Effort,
 		"--output-format", "json",
 		"--max-turns", "1", // a judge answers; it must never start a tool loop
+		// The judge's tool surface is empty by construction: a tool call would
+		// burn the single turn above (or worse, act on the tree it is judging).
+		// The wildcard deny removes built-in and MCP tools from the agent's
+		// context entirely; dontAsk makes any permission prompt that somehow
+		// remains a denial rather than a hang in a headless run.
+		"--disallowed-tools", "*",
+		"--permission-mode", "dontAsk",
 		// The system prompt must always be passed. Without it `claude -p` can
 		// silently fall back to Haiku for the work turn even with --model set —
 		// the judge would then be a different model than the one recorded in the
@@ -161,9 +168,10 @@ type claudeResult struct {
 }
 
 // parseClaudeResult pulls the result text and the turn's token usage out of the
-// CLI's JSON document. found is false for a body that is not JSON, declares
-// is_error, or carries no result text. transient is true when the result string
-// is a server-side "API Error: 5.." report (see Call).
+// CLI's JSON document. found is false for a body that is not JSON, carries no
+// result text, or declares is_error. transient is true when the result string
+// is a server-side "API Error: 5.." report (see Call) — checked independently
+// of is_error, which the CLI can set on exactly those transient failures.
 //
 // The CLI reports usage in the Anthropic API's convention, live-verified
 // 2026-09-09: input_tokens is the UNCACHED prompt (9 for a two-word prompt) with
@@ -174,7 +182,7 @@ type claudeResult struct {
 // would report the scaffolding tax as zero and undercount ~4000x.
 func parseClaudeResult(stdout []byte) (text string, tokens run.TokenTotals, found, transient bool) {
 	var r claudeResult
-	if json.Unmarshal(stdout, &r) != nil || r.IsError {
+	if json.Unmarshal(stdout, &r) != nil {
 		return "", run.TokenTotals{}, false, false
 	}
 	if r.Usage != nil {
@@ -191,5 +199,11 @@ func parseClaudeResult(stdout []byte) (text string, tokens run.TokenTotals, foun
 		}
 	}
 	text = r.Result
-	return text, tokens, text != "", strings.HasPrefix(strings.TrimSpace(text), "API Error: 5")
+	// is_error is the authoritative failure flag — the CLI can report it with
+	// subtype "success" and the error text in result — so it forces found false.
+	// It must NOT shortcut the usage or transient detection above: a rate-limited
+	// attempt (is_error + "API Error: 5..") still costs tokens and is still a
+	// retryable transport error, and is_error's tokens still count toward the
+	// attempt that spent them.
+	return text, tokens, text != "" && !r.IsError, strings.HasPrefix(strings.TrimSpace(text), "API Error: 5")
 }

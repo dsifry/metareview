@@ -83,7 +83,9 @@ func TestClaudeJudgeBuildsASafeInvocation(t *testing.T) {
 		"--model opus", // the claude-cli/ prefix is stripped for the wire; aliases pass through
 		"--effort medium",
 		"--output-format json",
-		"--max-turns 1", // a judge answers; it must never start a tool loop
+		"--max-turns 1",             // a judge answers; it must never start a tool loop
+		"--disallowed-tools *",      // the judge's tool surface is empty by construction
+		"--permission-mode dontAsk", // headless: a permission prompt must deny, not hang
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args %q missing %q", joined, want)
@@ -168,6 +170,30 @@ func TestClaudeJudgeRetriesTransientResultErrors(t *testing.T) {
 	// the failed attempt's usage still counts: tokens accumulate across attempts
 	if v.Tokens.Input != 18 {
 		t.Fatalf("tokens must accumulate across attempts: Input=%d want 18", v.Tokens.Input)
+	}
+}
+
+// An is_error response still carries usage, and a rate-limited one carries the
+// "API Error: 5.." result: both must survive the parse — the tokens count
+// toward the attempt that spent them, and the transient flag routes the retry
+// ladder rather than failing as a response error (CodeRabbit, PR #160).
+func TestParseClaudeResultIsErrorKeepsUsageAndTransient(t *testing.T) {
+	doc := `{"is_error":true,"subtype":"success","result":"API Error: 529 Overloaded.",` +
+		`"usage":{"input_tokens":4,"cache_creation_input_tokens":10,"cache_read_input_tokens":20,` +
+		`"output_tokens":6,"output_tokens_details":{"thinking_tokens":2}}}` + "\n"
+	text, tok, found, transient := parseClaudeResult([]byte(doc))
+	if found {
+		t.Fatal("is_error must force found false")
+	}
+	if !transient {
+		t.Fatal("an is_error 529 result must classify as transient")
+	}
+	if text != "API Error: 529 Overloaded." {
+		t.Fatalf("text = %q", text)
+	}
+	want := run.TokenTotals{Input: 4, CacheRead: 20, CacheCreate: 10, Output: 4, Reasoning: 2}
+	if tok != want {
+		t.Fatalf("usage must survive is_error: %+v want %+v", tok, want)
 	}
 }
 
