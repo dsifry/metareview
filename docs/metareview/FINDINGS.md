@@ -1,6 +1,7 @@
 # metareview Findings
 
-No unresolved findings recorded yet.
+- mrvf-20260909-230512078633000-pr-ready-branch-10d735e5-001 [high] Missing validation evidence (validation-reviewer)
+- mrvf-20260909-230614900129000-pr-ready-branch-10d735e5-001 [high] Unresolved review blockers (pr-readiness-reviewer)
 
 ## Process Overrides
 
