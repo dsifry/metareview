@@ -17,7 +17,7 @@
     },
     {
       "name": "kept-rename-accumulation",
-      "entry": {"tag": "bug", "file": "internal/store/users.go", "start_line": 14, "end_line": 14, "issue": "LegacyLookupAll returns nil for every caller", "consequence": "compat callers always see an empty result", "confidence": 70, "severity": "P2"},
+      "entry": {"tag": "bug", "file": "internal/store/users.go", "start_line": 40, "end_line": 40, "issue": "AllUsersBatch ignores FindByID errors and appends nil users", "consequence": "callers dereference nil on any missing id", "confidence": 70, "severity": "P2"},
       "want": "kept"
     },
     {

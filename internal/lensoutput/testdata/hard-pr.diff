@@ -62,9 +62,12 @@ index 3f2a1b..9c4d2e 100644
 +	}
 +	w.WriteHeader(200)
 +}
-diff --git a/internal/store/users.go b/internal/store/users.go
-index aa12ff..be34cd 100644
---- a/internal/store/users.go
+diff --git a/internal/store/legacy_users.go b/internal/store/users.go
+similarity index 85%
+rename from internal/store/legacy_users.go
+rename to internal/store/users.go
+index cc0000..dd1111 100644
+--- a/internal/store/legacy_users.go
 +++ b/internal/store/users.go
 @@ -5,6 +5,9 @@ import "context"
  
@@ -77,6 +80,14 @@ index aa12ff..be34cd 100644
 +	rows := db.Query(ctx, "SELECT * FROM users WHERE id = "+id+" AND tenant = "+t.String())
 +	return scanOne(rows)
 +}
+@@ -14,5 +20,9 @@ func LegacyLookup(name string) *User {
+ 	return nil
+ }
++
++// LegacyLookupAll is the compat shim for the old callers.
++func LegacyLookupAll(names []string) []*User {
++	return nil
++}
 @@ -30,4 +37,10 @@ func AllUsers(page string, limit int) []*User {
  	return nil
  }
@@ -88,21 +99,6 @@ index aa12ff..be34cd 100644
 +		out = append(out, u)
 +	}
 +	return out
-+}
-diff --git a/internal/store/legacy_users.go b/internal/store/users.go
-similarity index 90%
-rename from internal/store/legacy_users.go
-rename to internal/store/users.go
-index cc0000..dd1111 100644
---- a/internal/store/legacy_users.go
-+++ b/internal/store/users.go
-@@ -8,5 +8,9 @@ func LegacyLookup(name string) *User {
- 	return nil
- }
-+
-+// LegacyLookupAll is the compat shim for the old callers.
-+func LegacyLookupAll(names []string) []*User {
-+	return nil
 +}
 diff --git a/web/polls.jsx b/web/polls.jsx
 index 7e5d3a..1f2c4b 100644

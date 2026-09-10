@@ -187,20 +187,43 @@ var hunkLine = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
 
 // AnchorMap parses a unified diff into file -> new-side changed ranges, mechanically. A
 // hunk with zero new lines (a pure deletion, "+n,0") contributes no range: there is no
-// new-side line to anchor a finding against. A file may accumulate ranges (a rename shows
-// one file twice); the lookup unions them.
+// new-side line to anchor a finding against. A file's hunks accumulate under its new-side
+// path — a rename carries its hunks under the path the `+++ b/` header names, so anchors
+// cite the post-rename path.
+//
+// Header pairing: a `+++ b/` line only switches the current file when it follows a `--- `
+// from-header — a real header pair. Content lines inside a hunk can forge the to-header
+// shape (an added line whose text is `++ b/fake.go` renders as `+++ b/fake.go`), and the
+// pair check is what stops the single-line forgery: a forged to-header's preceding line
+// is hunk body, not a from-header. The bar is two ADJACENT crafted lines (a deleted line
+// whose text is `-- a/…` renders as `--- a/…`, then an added line rendering as `+++ b/…`) —
+// a residual accepted deliberately and pinned by test: the threat model is accidental
+// corruption and degenerate patch-emitting code, not adversarial construction. Without
+// the pair check, one crafted content line switches the current file to a phantom path
+// and every later hunk of the real file is mis-attributed — two-sided corruption of the
+// gate.
 func AnchorMap(diff string) map[string][]LineRange {
 	files := make(map[string][]LineRange)
 	cur := ""
+	awaitingTo := false // the previous line was a `---` from-header: the next `+++ b/` is genuine
 	for _, line := range strings.Split(diff, "\n") {
 		line = strings.TrimRight(line, "\r")
+		if strings.HasPrefix(line, "--- ") {
+			awaitingTo = true
+			continue
+		}
 		if m := diffFileLine.FindStringSubmatch(line); m != nil {
+			if !awaitingTo {
+				continue // a content line that merely looks like a to-header
+			}
+			awaitingTo = false
 			cur = strings.TrimSpace(m[1])
 			if _, ok := files[cur]; !ok {
 				files[cur] = nil
 			}
 			continue
 		}
+		awaitingTo = false
 		if cur == "" {
 			continue
 		}
@@ -217,12 +240,16 @@ func AnchorMap(diff string) map[string][]LineRange {
 	return files
 }
 
-// atoi is strconv.Atoi for a regexp-verified digit string: the regexp already guarantees
-// digits, so the error branch cannot exist (and a strconv error branch here would be an
-// uncoverable statement in a 100%-gated package).
+// atoi is strconv.Atoi for a regexp-verified digit string, saturating instead of wrapping:
+// an absurd hunk header (a 20-digit start) is nonsense either way, but a wrap to a negative
+// would fabricate an inverted range, and the error branch of real strconv would be an
+// uncoverable statement in a 100%-gated package.
 func atoi(s string) int {
 	n := 0
 	for _, c := range s {
+		if n > (1<<31-11)/10 {
+			return 1<<31 - 1
+		}
 		n = n*10 + int(c-'0')
 	}
 	return n

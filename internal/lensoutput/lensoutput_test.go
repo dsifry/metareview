@@ -163,3 +163,56 @@ func TestCanonicalTextAndAnchorAndToCandidate(t *testing.T) {
 		t.Errorf("advisory candidate: %+v", c)
 	}
 }
+
+// TestAnchorMapHeaderPairing pins the phantom-file fix: a content line inside a hunk can
+// forge the `+++ b/…` to-header shape (an added line whose text is `++ b/fake.go` renders as
+// `+++ b/fake.go`), but it cannot forge the header PAIR — only a `+++ b/` that follows a
+// `--- ` from-header switches the current file. Without the pair check, one crafted content
+// line steals every later hunk of the real file into a phantom path.
+func TestAnchorMapHeaderPairing(t *testing.T) {
+	// forge 1: a bare to-header shape inside hunk body — ignored
+	d := "diff --git a/real.go b/real.go\n--- a/real.go\n+++ b/real.go\n@@ -1,3 +1,4 @@\n ctx\n+++ b/fake.go\n+added\n ctx\n@@ -10,2 +11,2 @@\n-old\n+new\n"
+	m := AnchorMap(d)
+	if _, ok := m["fake.go"]; ok {
+		t.Fatalf("forged to-header must not create a phantom file: %v", m)
+	}
+	if rs := m["real.go"]; len(rs) != 2 {
+		t.Fatalf("both real hunks must attribute to real.go: %v", m)
+	}
+	// forge 2: the crafted pair — a deleted line whose text is `-- from` renders as
+	// `--- from` (matching the from-header prefix), and an added line whose text is
+	// `++ b/evil.go` renders as `+++ b/evil.go` right after it. The pair check raises the
+	// forgery bar from ONE crafted line to TWO ADJACENT crafted lines; this pins that bar
+	// as the documented contract (the residual is accepted deliberately: the threat model
+	// is accidental corruption and degenerate patch-emitting code, not adversarial
+	// construction — see the AnchorMap doc comment).
+	d2 := "diff --git a/real.go b/real.go\n--- a/real.go\n+++ b/real.go\n@@ -1,3 +1,4 @@\n ctx\n--- from\n+++ b/evil.go\n+added\n@@ -10,2 +11,2 @@\n-old\n+new\n"
+	m2 := AnchorMap(d2)
+	if _, ok := m2["evil.go"]; !ok {
+		t.Fatalf("adjacent crafted pair switches files — the documented two-line bar: %v", m2)
+	}
+	// rename: hunks accumulate under the NEW path; the old path never appears
+	d3 := "diff --git a/old.go b/new.go\nsimilarity index 85%\nrename from a/old.go\nrename to b/new.go\n--- a/old.go\n+++ b/new.go\n@@ -1,2 +1,3 @@\n ctx\n+one\n@@ -20,2 +30,3 @@\n ctx\n+two\n"
+	m3 := AnchorMap(d3)
+	if _, ok := m3["old.go"]; ok {
+		t.Fatalf("rename must key the new path only: %v", m3)
+	}
+	if rs := m3["new.go"]; len(rs) != 2 || rs[0] != (LineRange{1, 3}) || rs[1] != (LineRange{30, 32}) {
+		t.Fatalf("rename hunks under new path: %v", m3)
+	}
+	// a path whose to-header appears twice with proper pairs (two `---`/`+++` blocks naming
+	// the same target — not something git emits, but the union is the defensive contract)
+	// accumulates ranges across both blocks.
+	d5 := "diff --git a/r.go b/r.go\n--- a/r.go\n+++ b/r.go\n@@ -1,2 +1,3 @@\n ctx\n+one\n--- a/r.go\n+++ b/r.go\n@@ -50,2 +60,3 @@\n ctx\n+two\n"
+	m5 := AnchorMap(d5)
+	if rs := m5["r.go"]; len(rs) != 2 || rs[0] != (LineRange{1, 3}) || rs[1] != (LineRange{60, 62}) {
+		t.Fatalf("repeated paired headers accumulate: %v", m5)
+	}
+	// atoi saturates instead of wrapping: an absurd hunk start stays a huge positive range,
+	// never a negative/inverted one.
+	d4 := "diff --git a/x.go b/x.go\n--- a/x.go\n+++ b/x.go\n@@ -1 +99999999999999999999,2 @@\n+x\n"
+	m4 := AnchorMap(d4)
+	if rs := m4["x.go"]; len(rs) != 1 || rs[0].Start <= 0 || rs[0].End < rs[0].Start {
+		t.Fatalf("saturation: %v", m4)
+	}
+}
