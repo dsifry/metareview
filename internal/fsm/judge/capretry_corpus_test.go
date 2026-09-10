@@ -280,6 +280,12 @@ func TestCapRaiseSurvivesExhaustedTransientBudget(t *testing.T) {
 	if !v.CapRaised {
 		t.Error("the verdict must record the cap raise")
 	}
+	// Pin the no-backoff-before-the-raised-request guarantee (PR #162 thread): four transient
+	// retries record exactly four backoff sleeps — a fifth (before the deterministic cap-raise)
+	// is the regression this catches. Reverting retryImmediately makes this 5 and fails here.
+	if len(sleeps) != 4 {
+		t.Fatalf("backoff sleeps: got %d want 4 — the raised request must not wait behind a backoff: %v", len(sleeps), sleeps)
+	}
 }
 
 // lateCapDoer: four 500s (the transient budget), then the cap 400, then success. The flag
