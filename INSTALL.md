@@ -202,6 +202,9 @@ name — no code changes needed:
   overrides the endpoint).
 - **Codex/GPT** (`codex/gpt-5.6-sol`, …) → the local **Codex CLI** on its OAuth session under `~/.codex`
   (no API key needed).
+- **Claude via Claude Code** (`claude-cli/opus`, `claude-cli/sonnet`, …) → the local **Claude Code
+  CLI** (`claude -p`) on its logged-in session (no API key needed). The `claude-cli/` prefix names the
+  transport; bare `claude-*` ids keep routing to the Anthropic API.
 - **OpenAI-compatible providers** — GPT (`gpt*`, `openai/*`), **GLM** (`glm*`), **Kimi** (`kimi*`) → a
   `/v1/chat/completions` endpoint. Set `OPENAI_BASE_URL` and `OPENAI_API_KEY`:
 

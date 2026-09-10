@@ -190,13 +190,17 @@ audit, so the model that judged a run stays visible in its snapshot and export.
 metareview fsm init … --judge-model claude-opus-4-8
 metareview fsm init … --judge-model codex/gpt-5.6-sol
 
+# Claude via the Claude Code CLI's own logged-in session (no API key needed):
+metareview fsm init … --judge-model claude-cli/opus
+
 # OpenAI-compatible providers (GPT, GLM, Kimi) via an endpoint you point at:
 OPENAI_BASE_URL="https://your-openai-compatible-host"  OPENAI_API_KEY="your-api-key" \
   metareview fsm init … --judge-model glm-5.3-flash
 ```
 
 `--judge-model` (or `METAREVIEW_JUDGE_MODEL`) retargets the judge without editing the workflow. Models are
-routed by name: `claude*`/`anthropic/*` → the Anthropic API; `codex/*` → the Codex CLI; `gpt*`,
+routed by name: `claude*`/`anthropic/*` → the Anthropic API; `codex/*` → the Codex CLI; `claude-cli/*` →
+the Claude Code CLI (`claude -p`); `gpt*`,
 `openai/*`, `glm*`, `kimi*` → an OpenAI-compatible `/v1/chat/completions` endpoint (`OPENAI_BASE_URL`).
 Reasoning models (e.g. GLM) are given a generous token budget automatically. Compare two runs' verdicts
 with `metareview fsm diff --a <run> --b <run>`.

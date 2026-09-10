@@ -111,8 +111,9 @@ Engineering baseline under the same adjudicator):
 - **Multi-language proofs.** A pluggable test-convention seam reads each runner's own machine-readable
   output — `go test -json`, `jest --json`, `vitest run --reporter=json`, pytest JUnit XML — so the proof
   engine works for Go, TypeScript/Jest, Vitest, and Python/pytest without a bespoke parser.
-- **Model-swappable, auditable judges.** Choose the judge per run with `--judge-model`: Claude,
-  Codex/GPT (via the Codex CLI), or any OpenAI-compatible provider including GLM and Kimi
+- **Model-swappable, auditable judges.** Choose the judge per run with `--judge-model`: Claude
+  (Anthropic API or the Claude Code CLI), Codex/GPT (via the Codex CLI), or any OpenAI-compatible
+  provider including GLM and Kimi
   (`OPENAI_BASE_URL`). Reasoning models get a generous token budget automatically; compare two runs with
   `metareview fsm diff`.
 - **Mutation-aware review + a Go-native coverage gate.** Pass a mutation report to any gate

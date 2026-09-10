@@ -192,9 +192,9 @@ func (c *ctxDeps) keys() judge.Keys {
 }
 
 func (c *ctxDeps) newJudge() (judge.Judge, error) {
-	j, err := judge.NewWithCodex(c.deps.HTTP, c.keys(),
+	j, err := judge.NewWithCodexAndClaude(c.deps.HTTP, c.keys(),
 		judge.URLs{Anthropic: c.deps.Getenv(EnvAnthropicURL), OpenAI: c.deps.Getenv(EnvOpenAIURL)},
-		c.nonce, judge.Clock{Now: c.deps.Now, After: c.deps.After}, c.deps.CodexExec)
+		c.nonce, judge.Clock{Now: c.deps.Now, After: c.deps.After}, c.deps.CodexExec, c.deps.ClaudeExec)
 	if err != nil {
 		return nil, err
 	}

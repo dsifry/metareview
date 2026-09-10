@@ -101,6 +101,44 @@ func TestRealCodexExec(t *testing.T) {
 	})
 }
 
+// TestRealClaudeExec is the claude twin of TestRealCodexExec: the claudeBin seam
+// exercises realClaudeExec's three exit paths without the Claude Code CLI
+// installed (the coverage gate holds this package at 100% of statements).
+func TestRealClaudeExec(t *testing.T) {
+	original := claudeBin
+	defer func() { claudeBin = original }()
+
+	t.Run("stdout and stdin", func(t *testing.T) {
+		claudeBin = "cat"
+		out, code, err := realClaudeExec(context.Background(), "", nil, "the prompt")
+		if err != nil || code != 0 || strings.TrimSpace(string(out)) != "the prompt" {
+			t.Fatalf("out=%q code=%d err=%v", out, code, err)
+		}
+	})
+
+	t.Run("a non-zero exit is an answer, not a failure to run", func(t *testing.T) {
+		claudeBin = "sh"
+		out, code, err := realClaudeExec(context.Background(), "", []string{"-c", "printf partial; exit 3"}, "")
+		if err != nil {
+			t.Fatalf("a process that ran must not report err: %v", err)
+		}
+		if code != 3 || string(out) != "partial" {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+	})
+
+	t.Run("a missing binary is a failure to run", func(t *testing.T) {
+		claudeBin = "metareview-no-such-binary"
+		_, code, err := realClaudeExec(context.Background(), "", nil, "")
+		if err == nil {
+			t.Fatal("expected an error when the CLI is not installed")
+		}
+		if code != 0 {
+			t.Fatalf("code must stay 0 when nothing ran, got %d", code)
+		}
+	})
+}
+
 // --calibration pins JUDGE and JUDGE_EFFORT so calibration runs stay comparable,
 // and resolve refuses a run that also supplies them. An explicit flag is a real
 // conflict and must still be refused; an ambient environment variable is not —
