@@ -43,6 +43,12 @@ const (
 	AttemptTimeout = 180 * time.Second
 	MaxBody        = 4 << 20
 	CalibrationEff = "medium"
+	// CapRetryMultiplier is the single source of truth for the output-cap retry's headroom:
+	// the raised request carries this multiple of BOTH the original output cap and the
+	// per-attempt deadline. One named constant because the two must move together — a
+	// dimensioned magic number split across sites is exactly what the 0.12 rubric blocks
+	// on (second-round review finding).
+	CapRetryMultiplier = 4
 )
 
 // DefaultURLs are the provider bases when no override is set.
@@ -703,11 +709,11 @@ func (j *realJudge) Call(ctx context.Context, r Request) (v Verdict, err error) 
 			// raised request is still sent (the #159 poison scenario is precisely transients
 			// preceding the cap).
 			req = raiseOutputCap(req)
-			// The raised request asks for 4× the output under the same wall clock otherwise —
-			// for the slow reasoning models this ladder targets, that turns the recovery into
-			// a generic timeout that re-burns every remaining attempt. Give it 4× the
-			// per-attempt deadline, mirroring the cap multiplier.
-			req.timeout = 4 * j.timeout()
+			// The raised request asks for CapRetryMultiplier× the output under the same wall
+			// clock otherwise — for the slow reasoning models this ladder targets, that turns
+			// the recovery into a generic timeout that re-burns every remaining attempt. Give
+			// it the same multiple of the per-attempt deadline — one constant, both sites.
+			req.timeout = CapRetryMultiplier * j.timeout()
 			capRaised = true
 			v.CapRaised = true
 			lastErr = err
@@ -753,12 +759,12 @@ func isOutputCapBody(body []byte) bool {
 	return false
 }
 
-// raiseOutputCap rebuilds req at 4× its current output cap. It mutates the bodyMap and
-// re-marshals — never re-parses marshaled JSON — so the bump is exact and total: every other
-// byte of the request is unchanged (transport headroom only; the prompt and the model are
-// untouched, keeping the judge calibration frozen).
+// raiseOutputCap rebuilds req at CapRetryMultiplier× its current output cap. It mutates the
+// bodyMap and re-marshals — never re-parses marshaled JSON — so the bump is exact and total:
+// every other byte of the request is unchanged (transport headroom only; the prompt and the
+// model are untouched, keeping the judge calibration frozen).
 func raiseOutputCap(req request) request {
-	req.maxTokens *= 4
+	req.maxTokens *= CapRetryMultiplier
 	req.bodyMap[req.capKey] = req.maxTokens
 	req.body = run.MarshalCanonical(req.bodyMap)
 	return req
