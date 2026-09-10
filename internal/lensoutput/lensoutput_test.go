@@ -243,3 +243,21 @@ func TestAnchorInDiffPathEquivalence(t *testing.T) {
 		t.Error("different file matched")
 	}
 }
+
+func TestAnchorInDiffFallbackMatchesLaterKey(t *testing.T) {
+	// The fallback loop scans the whole map when the finding's normalized key is not
+	// literally present — keys themselves may carry spellings the normalizer strips
+	// (a hand-recorded diff, or a prefixed key). With several keys the match may come
+	// after non-matches: the loop must keep scanning, break on the hit, and miss cleanly
+	// when nothing matches.
+	m := map[string][]LineRange{
+		"zzz.go":  {{1, 1}},
+		"b/mm.go": {{5, 5}}, // prefixed key: only reachable via the fallback
+	}
+	if !AnchorInDiff(TypedFinding{File: "mm.go", StartLine: 5, EndLine: 5}, m) {
+		t.Fatal("fallback must match a later prefixed key after passing non-matches")
+	}
+	if AnchorInDiff(TypedFinding{File: "absent.go", StartLine: 1, EndLine: 1}, m) {
+		t.Fatal("no key matches — must be rejected")
+	}
+}

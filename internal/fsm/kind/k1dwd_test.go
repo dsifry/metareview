@@ -205,3 +205,24 @@ func TestK1DecodeWithDiffLegacyFailsClosed(t *testing.T) {
 		t.Fatalf("typed payload: %v", err)
 	}
 }
+
+// TestK1DecodeWithDiffLegacyProbeSkipsMalformed: the legacy probe must skip entries it
+// cannot probe as objects (a JSON string in the findings array) and leave them to
+// ValidatePayload's schema bucket — the probe itself never rejects, it only detects.
+func TestK1DecodeWithDiffLegacyProbeSkipsMalformed(t *testing.T) {
+	r := mustNew(t, judge.NewMock(judge.Script{}), true)
+	k, _ := r.Kind(ReviewLenses)
+	dd, _ := k.(machine.DiffDecoder)
+	diff := machine.Diff{Text: "--- a/f.go\n+++ b/f.go\n@@ -1,4 +1,5 @@\n a\n-b\n+c\n d\n+e\n"}
+	// a malformed entry (bare string) plus a typed entry: the probe skips the string,
+	// sees the typed entry, does not fire; ValidatePayload buckets the string as schema.
+	payload := `{"findings":["not an object",{"tag":"bug","file":"f.go","start_line":2,"end_line":2,"issue":"i","consequence":"c","confidence":75,"severity":"P2"}]}`
+	out, err := dd.DecodeWithDiff(json.RawMessage(payload), diff)
+	if err != nil {
+		t.Fatalf("probe must not reject malformed entries: %v", err)
+	}
+	fo := out.(findingsOut)
+	if fo.stats.Schema != 1 || fo.stats.Kept != 1 {
+		t.Fatalf("buckets: %+v", fo.stats)
+	}
+}
