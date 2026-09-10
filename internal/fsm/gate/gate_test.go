@@ -571,6 +571,7 @@ func TestG2DiffPrefixesPinnedUnderNoPrefixConfig(t *testing.T) {
 	if bare := git(t, dir, "diff", "--no-ext-diff", "--no-textconv", c1+".."+c2); strings.Contains(bare, "+++ b/a.txt") {
 		t.Fatalf("sanity: noprefix config did not strip prefixes — test is not exercising the hazard")
 	}
+	write(t, dir, "a.txt", "one\ntwo é\nthree\n") // uncommitted change: the working diff has content
 	g := NewExec(dir, RealExec)
 	d, _, err := g.Diff(ctx, c1, c2, 1<<20)
 	if err != nil {

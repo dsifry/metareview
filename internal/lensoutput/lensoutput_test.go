@@ -134,6 +134,11 @@ func TestAnchorInDiff(t *testing.T) {
 		{"second-hunk", "a.go", 50, 51, true},                 // inside hunk 2 (48..51)
 		{"wrong-file", "nope.go", 2, 2, false},
 		{"empty-file", "", 2, 2, false},
+		// path-spelling equivalence (PR #162 review): ./, b/, and C-quoted variants of the
+		// same file must not be judged fabricated
+		{"dot-slash-spelling", "./a.go", 2, 3, true},
+		{"b-prefix-spelling", "b/a.go", 2, 3, true},
+		{"c-quoted-finding", "\"a.go\"", 2, 3, true},
 	}
 	for _, r := range rows {
 		f := TypedFinding{File: r.file, StartLine: r.start, EndLine: r.end}
@@ -214,5 +219,27 @@ func TestAnchorMapHeaderPairing(t *testing.T) {
 	m4 := AnchorMap(d4)
 	if rs := m4["x.go"]; len(rs) != 1 || rs[0].Start <= 0 || rs[0].End < rs[0].Start {
 		t.Fatalf("saturation: %v", m4)
+	}
+}
+
+func TestAnchorInDiffPathEquivalence(t *testing.T) {
+	// The diff side may itself carry unusual spellings: a C-quoted header key
+	// (core.quotePath default) or prefixed forms. Both sides normalize.
+	m := AnchorMap("diff --git a/p.go b/p.go\n--- a/p.go\n+++ b/p.go\n@@ -1,1 +1,1 @@\n+x\n")
+	if len(m) != 1 {
+		t.Fatalf("plain key parse: %v", m)
+	}
+	quoted := AnchorMap("diff --git a/q.go b/q.go\n--- a/q.go\n+++ \"b/q u.go\"\n@@ -1,1 +1,1 @@\n+x\n")
+	// the quoted header names q u.go; a finding citing the plain spelling must match
+	if got := AnchorInDiff(TypedFinding{File: "q u.go", StartLine: 1, EndLine: 1}, quoted); !got {
+		t.Fatalf("finding did not match its own C-quoted header: %v", quoted)
+	}
+	for _, spelling := range []string{"p.go", "./p.go", "b/p.go", "a/p.go"} {
+		if got := AnchorInDiff(TypedFinding{File: spelling, StartLine: 1, EndLine: 1}, m); !got {
+			t.Errorf("spelling %q judged fabricated against its own hunk", spelling)
+		}
+	}
+	if got := AnchorInDiff(TypedFinding{File: "other.go", StartLine: 1, EndLine: 1}, m); got {
+		t.Error("different file matched")
 	}
 }

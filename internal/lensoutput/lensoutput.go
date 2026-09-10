@@ -180,7 +180,9 @@ type LineRange struct{ Start, End int }
 // diffFileLine matches the new-side file header of a unified diff. The path is trimmed the
 // way the lab's .strip() trims: a CRLF diff leaves a trailing \r that would otherwise become
 // part of the file name and defeat every anchor lookup against it.
-var diffFileLine = regexp.MustCompile(`^\+\+\+ b/(.+)$`)
+// diffFileLine matches a to-header: `+++ b/path` or, when git C-quotes a path with special
+// bytes (core.quotePath default), `+++ "b/pa th.go"` — the quote wraps the prefix too.
+var diffFileLine = regexp.MustCompile(`^\+\+\+ (?:b/|"b/)(.+?)"?$`)
 
 // hunkLine matches a hunk header; the trailing @@ is a prefix (git appends a function-context
 // section after it), so there is deliberately no end anchor.
@@ -265,9 +267,14 @@ func AnchorInDiff(f TypedFinding, files map[string][]LineRange) bool {
 	// Path spellings must not decide fabrication: a lens citing "./pkg/a.go" or "b/pkg/a.go"
 	// names the same changed file as one citing "pkg/a.go". Normalize the same way the
 	// judge's diff-selection does (judge.NormalizePath — mirrored here to keep this package
-	// a leaf importing only run; PR #162 review finding).
+	// a leaf importing only run; PR #162 review finding). Git may also C-quote a path with
+	// special bytes (core.quotePath, the default): "pkg/spa ce.go" — strip the quotes so a
+	// finding citing the plain spelling matches its own header.
 	norm := func(p string) string {
 		p = strings.TrimPrefix(strings.TrimSpace(p), "./")
+		if len(p) >= 2 && strings.HasPrefix(p, "\"") && strings.HasSuffix(p, "\"") {
+			p = p[1 : len(p)-1]
+		}
 		for _, prefix := range []string{"a/", "b/"} {
 			p = strings.TrimPrefix(p, prefix)
 		}
