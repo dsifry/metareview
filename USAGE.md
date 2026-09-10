@@ -202,7 +202,9 @@ OPENAI_BASE_URL="https://your-openai-compatible-host"  OPENAI_API_KEY="your-api-
 routed by name: `claude*`/`anthropic/*` → the Anthropic API; `codex/*` → the Codex CLI; `claude-cli/*` →
 the Claude Code CLI (`claude -p`); `gpt*`,
 `openai/*`, `glm*`, `kimi*` → an OpenAI-compatible `/v1/chat/completions` endpoint (`OPENAI_BASE_URL`).
-Reasoning models (e.g. GLM) are given a generous token budget automatically. Compare two runs' verdicts
+Reasoning models (e.g. GLM) are given a generous token budget automatically, and if a gateway answers
+the budget with a `400` output-limit error instead of a truncation, the judge retries once at 4× the cap
+(transport headroom only — prompts and calibration never change). Compare two runs' verdicts
 with `metareview fsm diff --a <run> --b <run>`.
 
 ---

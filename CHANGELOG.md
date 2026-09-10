@@ -22,6 +22,58 @@
   timeout guard, cached-input usage accounting). Lab instruments unchanged (the adjudicator stays
   frozen on gpt-5.2 k=3 medium via API, #159).
 
+- **Typed lens-output contract (`internal/lensoutput`) — the 0.12 typed schema.** The
+  deterministic parse, validation, and anchor-verification layer for lens findings, ported
+  from the lab's validated 0.12 pipeline (harnesseval `adapters/metareview.py` rc5 typed
+  schema + rc6 anchor gate; benchmark evidence in dsifry/metareview#159). `TypedFinding`
+  carries tag/file/start_line/end_line/issue/consequence/confidence/severity with a
+  `Validate()` contract check; `ValidatePayload` runs the whole-pipeline semantics: malformed
+  entries are rejected and COUNTED, never crash the run (the lab's ~0.5% malformation rate
+  is the operating assumption); rejection buckets (schema/enum/anchor/suppression/kept)
+  mirror the lab's `[lens-validate]` accounting so product and lab telemetry stay comparable;
+  and the canonical emitted text is `[BUG] …`/`[ADVISORY] …` with the anchor as
+  `file:start-end`. A missing field is a schema rejection, a present-but-empty one is an
+  enum rejection — the distinction the lab's KeyError buckets encode, preserved here with
+  pointer fields.
+- **Anchor-in-diff gate (±10 context lines).** A finding is valid only if its file appears
+  in the diff's changed-file set and its cited range intersects a hunk with ±`AnchorContext`
+  (10) lines of slack. Deterministic, pre-LLM validation: findings anchored outside the
+  diff are fabricated findings by contract definition. rc6 A/B: F1-neutral (bootstrap CI
+  [−0.064, +0.074]) while catching real fabrications.
+- **Judge output-cap retry ladder (transport only).** Some gateways answer a too-small
+  max_tokens with a 400 instead of a truncation; before this, that 400 was terminal and one
+  unfinished verdict could poison a whole evaluation cell (#159: the observed
+  "Could not finish the message because max_tokens or model output limit was reached" —
+  a judge verdict needing more than its cap discarded all findings from the cell). Now a
+  400 matching the output-cap phrasing is retried ONCE at 4× the effective cap (the
+  legacy-thinking path's maxTok+budget included, so a raise can never lower it),
+  byte-identical otherwise; a second cap failure is terminal; a plain 400 stays
+  immediate-fatal. Prompts and calibration untouched — completed calls are byte-identical.
+  The `codex/` and `claude-cli/` OAuth transports already retry transients and hold no
+  max-tokens knob of ours, so the ladder applies to the HTTP transports where our caps bind.
+- **Conformance corpus in CI (`tests/go/test-lens-conformance.sh`, wired into
+  `tests/run-all.sh`).** Data-driven cases over a hard-PR fixture (multi-file, multi-hunk,
+  rename, anchors inside hunks / inside slack / outside both) pinning every rejection
+  bucket, plus the judge cap-retry corpus (cap-then-success, cap-twice-terminal,
+  plain-400-stays-fatal, GLM 16384-floor interplay, composition with transport retry).
+  Every bucket is guaranteed at least one case — a bucket with no case could silently change
+  behavior.
+
+### Changed
+
+- **Reclassifications (ratified, benchmark-verified):** dimensioned magic numbers (a bare
+  literal on a time/size/money/rate quantity — e.g. `86400` vs `84600` is a silent
+  30-minute-per-day error) and misleading error-message content (a message naming the
+  wrong action/entity/state) are **minor bugs, not style/doc nits**. These land with the
+  benchmark-driven lens-clause work merged from `lens-upgrade-runtime-reliability` (the
+  Runtime-reliability lens, FORMAT-DRIFT, api-contract all-implementers, async
+  cascading-failure, RE-RUN-SAFETY, sibling-flag propagation, Security
+  normalization-mismatch hunts, plus the eight 0.11.2-rc7 clauses: config-backed sinks,
+  authz-cache asymmetry, nonce-vs-static-secret, security-header regressions,
+  CONFUSABLE-PAIR-BINDING, FALSY-ZERO-ON-NUMERIC-DOMAINS, MISLEADING-ERROR-CONTENT,
+  dimensioned magic numbers).
+- Version 0.12.0.
+
 ## 0.11.1 - 2026-09-08
 
 ### Added
