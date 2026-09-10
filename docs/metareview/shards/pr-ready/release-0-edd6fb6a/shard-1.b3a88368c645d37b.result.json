@@ -1,0 +1,109 @@
+{
+ "schemaVersion": 1,
+ "id": "shard-1-b3a88368c645d37b",
+ "kind": "shard",
+ "shardId": "shard-1",
+ "shardHash": "b3a88368c645d37b",
+ "planHash": "300474d5c5e638be",
+ "verdict": "PASS",
+ "reviewer": "claude-shard-reviewer",
+ "reviewedAt": "2025-05-30T12:00:00Z",
+ "evidence": [
+  {
+   "path": "internal/lensoutput/lensoutput.go",
+   "line": 306,
+   "note": "ValidatePayload: never errors, buckets schema/enum/anchor/suppression/kept; null-findings silent-poison shape handled as schema rejection (contract: rejected-AND-counted)"
+  },
+  {
+   "path": "internal/lensoutput/lensoutput.go",
+   "line": 205,
+   "note": "AnchorMap: header-pair check defeats single-line to-header forgery; CRLF trim; rename keys new path; two-adjacent-crafted-line residual documented and pinned by test"
+  },
+  {
+   "path": "internal/lensoutput/lensoutput_test.go",
+   "line": 1,
+   "note": "218-line test file covers Validate, first-failing-check order, AnchorMap (CRLF, context headers, renames, saturation), AnchorInDiff slack edges, canonical forms, ToCandidate"
+  },
+  {
+   "path": "internal/fsm/machine/machine.go",
+   "line": 653,
+   "note": "nodeDiff factors the fix-scoped selection so DiffDecoder sees exactly the diff Instructions embedded"
+  },
+  {
+   "path": "internal/fsm/machine/machine.go",
+   "line": 731,
+   "note": "apply path uses decodeKind with diff and emits WarningEmitter telemetry (LENS_VALIDATE) before delta apply, once per Applied[k]"
+  },
+  {
+   "path": "internal/fsm/machine/machine_test.go",
+   "line": 2382,
+   "note": "TestApplyUsesDiffDecoderAndEmitsWarnings pins the machine-level wiring"
+  },
+  {
+   "path": "internal/fsm/kind/kind.go",
+   "line": 427,
+   "note": "reviewLenses implements DecodeWithDiff; record-time Decode remains shape-only; Instructions OutputSchema carries the typed schema (start_line/consequence)"
+  },
+  {
+   "path": "internal/fsm/kind/k1dwd_test.go",
+   "line": 16,
+   "note": "TestK1DecodeWithDiff pins every bucket, canonical candidates, kept-count and payload caps, empty-diff anchor rejection"
+  },
+  {
+   "path": "internal/fsm/judge/judge.go",
+   "line": 46,
+   "note": "CapRetryMultiplier single constant; raise is 4x effective cap and 4x deadline; matches USAGE.md claim"
+  },
+  {
+   "path": "internal/fsm/judge/capretry_corpus_test.go",
+   "line": 16,
+   "note": "cap-retry conformance corpus: cap-then-ok both providers, GLM floor, cap-twice-terminal, plain-400 stays fatal, marker precedence, composes with transport retry and exhausted transient budget"
+  },
+  {
+   "path": "USAGE.md",
+   "line": 205,
+   "note": "documented cap-retry behavior matches the implemented ladder (retry once at 4x cap, transport headroom only)"
+  },
+  {
+   "path": "package.json",
+   "line": 3,
+   "note": "version bump 0.11.1 -> 0.12.0 consistent with the release"
+  }
+ ],
+ "findings": [
+  {
+   "severity": "low",
+   "disposition": "accepted-risk",
+   "note": "Apply path calls nodeDiff for every unapplied kind, including kinds that do not implement DiffDecoder: one extra git.Diff per node and a new git-error failure mode at apply time where decode previously needed no diff. Documented tradeoff in the code comment; decodeKind falls back to plain Decode so behavior for non-diff kinds is unchanged on success. No correctness issue; efficiency/resilience residual accepted.",
+   "evidence": [
+    {
+     "path": "internal/fsm/machine/machine.go",
+     "line": 727
+    }
+   ]
+  },
+  {
+   "severity": "low",
+   "disposition": "accepted-risk",
+   "note": "The apply-time diff is recomputed against the current session head rather than persisted with the node output; if head advanced between the instruction build and apply, the anchor gate would judge against a different diff than the lenses reviewed. In this FSM the apply follows in the same advance pass, so the window is not reachable; residual structural risk accepted and noted for the record.",
+   "evidence": [
+    {
+     "path": "internal/fsm/machine/machine.go",
+     "line": 653
+    }
+   ]
+  },
+  {
+   "severity": "low",
+   "disposition": "false-positive",
+   "note": "Hand-rolled atoi initially reads as an integer-wrap risk, but the saturation guard (n > (2^31-11)/10) caps the maximum reachable value at 2147483639 < 2^31-1, no inverted range is possible, and a saturation test pins it. No defect.",
+   "evidence": [
+    {
+     "path": "internal/lensoutput/lensoutput.go",
+     "line": 247
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}

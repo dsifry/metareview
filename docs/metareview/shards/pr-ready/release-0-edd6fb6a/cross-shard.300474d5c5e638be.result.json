@@ -1,0 +1,61 @@
+{
+ "schemaVersion": 1,
+ "id": "cross-shard-review-300474d5c5e638be",
+ "kind": "cross-shard",
+ "shardId": "",
+ "shardHash": "",
+ "planHash": "300474d5c5e638be",
+ "verdict": "PASS",
+ "reviewer": "cross-shard-reviewer",
+ "reviewedAt": "2026-09-12T14:00:00Z",
+ "evidence": [
+  {
+   "path": "internal/fsm/machine/machine.go",
+   "line": 731,
+   "note": "Apply-path seam verified across shards 1/2: decodeKind(kind, NodeOutputs[k], nodeDiff(...)) prefers DiffDecoder at apply time and emits WarningEmitter (LENS_VALIDATE) warns between NodeOutput and DeltaApplied, exactly as shard-1 (machine.go) and shard-2 (types.go/kind.go) evidence describes."
+  },
+  {
+   "path": "internal/fsm/machine/types.go",
+   "line": 65,
+   "note": "DiffDecoder/WarningEmitter/decodeKind definitions present; kind.go:432 DecodeWithDiff calls lensoutput.ValidatePayload(raw, d.Text) — the shard-2 kind contract and shard-1 lensoutput contract agree on the ValidatePayload(payload, diff) signature, Stats buckets (schema/enum/anchor/suppression/kept), and null-findings schema-bucket handling."
+  },
+  {
+   "path": "internal/fsm/judge/judge.go",
+   "line": 51,
+   "note": "CapRetryMultiplier=4 single source of truth matches USAGE.md's 'retries once at 4x the cap (transport headroom only)' and README 0.12.0 highlights; capRaised guard at judge.go:697 makes a second cap failure terminal, matching shard-0/shard-1 cap-retry corpus claims."
+  },
+  {
+   "path": "tests/go/test-lens-conformance.sh",
+   "line": 14,
+   "note": "All -run targets verified present in the checkout: TestConformanceCorpus/TestConformanceCorpusExhaustiveBuckets (corpus_test.go:18,78) and TestCapRetryLadder/TestIsOutputCapBody/TestRaiseOutputCapLegacyThinking/TestCapRetryComposesWithTransportRetry (capretry_corpus_test.go:26,122,204,242); script wired into tests/run-all.sh line 31 alongside test-fsm.sh."
+  },
+  {
+   "path": "internal/version/version.go",
+   "line": 3,
+   "note": "Release version seam consistent across shards 0/1/3: 0.12.0 in version.go, package.json, .claude-plugin/marketplace.json, .claude-plugin/plugin.json, .codex-plugin/plugin.json, and CHANGELOG.md head."
+  },
+  {
+   "path": "README.md",
+   "line": 90,
+   "note": "README 0.12.0 highlights (typed lens-output contract, anchor-in-diff gate, 4x output-cap retry) match CHANGELOG 0.12.0 and the code; docs/ARCHITECTURE.md:194 lists lensoutput in the package map. Plan chunk union (31 files across 4 shards, all part 1/1) is a superset of the prior branch review's 19 covered paths and every chunk file exists in the checkout — full branch-diff coverage with no orphan counterpart chunks."
+  }
+ ],
+ "findings": [
+  {
+   "severity": "low",
+   "disposition": "waived",
+   "note": "Cross-shard metadata inconsistency only: the four shard results' reviewedAt values span 2025-05-30 (shard-1), 2025-08-14 (shard-2), 2026-09-10 (shard-3), and 2026-09-12 (shard-0); the two 2025 dates predate the 0.12.0 release (CHANGELOG: 2026-09-10) entirely. All shard verdicts were independently re-verified against the checkout (cited code, tests, fixtures, and flags all exist as described), so the anomaly does not affect review validity. Waived at low severity; non-blocking.",
+   "evidence": [
+    {
+     "path": "docs/metareview/shards/pr-ready/release-0-edd6fb6a/shard-1.b3a88368c645d37b.result.json",
+     "line": 10
+    },
+    {
+     "path": "CHANGELOG.md",
+     "line": 3
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}
