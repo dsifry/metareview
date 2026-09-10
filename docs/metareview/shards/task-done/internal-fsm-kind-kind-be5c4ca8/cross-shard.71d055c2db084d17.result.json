@@ -1,0 +1,97 @@
+{
+ "schemaVersion": 1,
+ "id": "cross-shard-review-71d055c2db084d17",
+ "kind": "cross-shard",
+ "shardId": "",
+ "shardHash": "",
+ "planHash": "71d055c2db084d17",
+ "verdict": "PASS",
+ "reviewer": "cross-shard-reviewer",
+ "reviewedAt": "2026-09-10T15:45:00Z",
+ "evidence": [
+  {
+   "path": "internal/fsm/kind/kind.go",
+   "line": 427,
+   "note": "reviewLenses.DecodeWithDiff(raw json.RawMessage, d machine.Diff) (any, error) exactly implements machine.DiffDecoder (types.go:65) \u2014 seam 1 verified"
+  },
+  {
+   "path": "internal/fsm/kind/kind.go",
+   "line": 432,
+   "note": "calls lensoutput.ValidatePayload(raw, d.Text); raw is json.RawMessage ([]byte) and d.Text is string, matching ValidatePayload(payload []byte, diff string) at lensoutput.go:306 \u2014 signature seam verified, no adapter or conversion mismatch"
+  },
+  {
+   "path": "internal/fsm/machine/types.go",
+   "line": 80,
+   "note": "decodeKind prefers DiffDecoder via type assertion and falls back to plain Decode \u2014 kinds not implementing it decode as before, so the wiring is additive"
+  },
+  {
+   "path": "internal/fsm/machine/machine.go",
+   "line": 731,
+   "note": "apply path decodes via decodeKind(kind, snap.NodeOutputs[k], diff) with diff recomputed by nodeDiff (line 727), the same fix-scoped vs base..head selection the instruction build used (line 683) \u2014 seam 2 verified"
+  },
+  {
+   "path": "internal/fsm/judge/judge.go",
+   "line": 51,
+   "note": "CapRetryMultiplier = 4 single constant, used at both the cap raise (raiseOutputCap, judge.go:767) and the timeout multiple (judge.go:716) \u2014 seam 3 verified"
+  },
+  {
+   "path": "internal/fsm/judge/judge.go",
+   "line": 685,
+   "note": "cap-retry ladder: capRaised guard makes a second cap failure terminal, capKey==\"\" guard prevents garbage-key injection, raised attempt re-runs the slot \u2014 consistent with shard-0/shard-3 evidence and the capretry corpus"
+  },
+  {
+   "path": "internal/version/version.go",
+   "line": 3,
+   "note": "Version = 0.12.0 consistent across .claude-plugin/plugin.json:3, .claude-plugin/marketplace.json:11, .codex-plugin/plugin.json:3, package.json:3, CHANGELOG.md:3 (## 0.12.0 - 2026-09-10) \u2014 version seam spanning shards 0, 1, 3 verified"
+  },
+  {
+   "path": ".metareview/shards/task-done/internal-fsm-kind-kind-be5c4ca8/71d055c2db084d17/plan.json",
+   "line": 1,
+   "note": "coverage union: 31 unique chunks across 4 shards (8+6+9+8), each path in exactly one shard \u2014 no duplicate or orphan counterpart chunks; all four shard results exist with matching shardHashes (f27fcd6a2caa7781, 92765a81fdcf982d, 092b07187101df67, 25c72c96d7c37fb9), all PASS, blockingCount 0, no result files beyond the four plan shards"
+  }
+ ],
+ "findings": [
+  {
+   "severity": "low",
+   "disposition": "open",
+   "note": "Carried forward from shard-2: cli_test.go harness comment overstates that later test commits 'also touch f.go' when they touch only .gitignore; immaterial to anchor correctness since the f.go change is present in the base..head diff. Blocks only at medium or above, so non-blocking here.",
+   "evidence": [
+    {
+     "path": "internal/fsm/cli/cli_test.go",
+     "line": 98,
+     "note": "comment '(plus any later test commits, all of which also touch f.go)' vs .gitignore-only commits at lines 223-225"
+    }
+   ]
+  },
+  {
+   "severity": "low",
+   "disposition": "open",
+   "note": "Carried forward from shard-3: in the empty-diff case of TestK1DecodeWithDiff the outI.(findingsOut) type assertion at k1dwd_test.go:137 runs before the err check at line 138, so an unexpected error would panic instead of failing the test; test-robustness nit only, the error path is unreachable by contract. Blocks only at medium or above, so non-blocking here.",
+   "evidence": [
+    {
+     "path": "internal/fsm/kind/k1dwd_test.go",
+     "line": 137,
+     "note": "type assertion precedes the err != nil check"
+    }
+   ]
+  },
+  {
+   "severity": "low",
+   "disposition": "false-positive",
+   "note": "Cross-shard check of the record-time vs apply-time decode split: reviewLenses.Decode (kind.go:411) discards payload contents at record time, but the stored raw is re-decoded at apply time via DecodeWithDiff with the full typed contract (machine.go:731) \u2014 the two-layer design is coherent across the shard-1/shard-2 boundary; no data loss.",
+   "evidence": [
+    {
+     "path": "internal/fsm/machine/machine.go",
+     "line": 731,
+     "note": "apply-time decodeKind re-decodes the stored raw against the diff"
+    },
+    {
+     "pathpath": "internal/fsm/kind/kind.go",
+     "line": 411,
+     "note": "record-time Decode is shape-check only by design"
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}

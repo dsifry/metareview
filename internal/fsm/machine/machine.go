@@ -645,6 +645,23 @@ func (s *session) advance() (AdvanceResult, error) {
 	return s.transitions(head)
 }
 
+// nodeDiff computes the diff a node reviews, applying the fix-scoped selection (a
+// FixScopedDiff kind binds against the fix's own diff — see the long comment in runNode),
+// so a DiffDecoder sees exactly the diff the node's Instructions embedded: the anchor-in-diff
+// gate must judge findings against what the lenses actually reviewed, not a recomputation
+// that could disagree.
+func (s *session) nodeDiff(kind NodeKind, snap run.Snapshot, head string) (Diff, error) {
+	diffFrom := snap.BaseSHA
+	if kind.Info().FixScopedDiff && snap.FixEntryHead != "" {
+		diffFrom = snap.FixEntryHead
+	}
+	text, truncated, err := s.git.Diff(s.ctx, diffFrom, head, MaxDiffBytes)
+	if err != nil {
+		return Diff{}, err
+	}
+	return Diff{Text: text, Truncated: truncated}, nil
+}
+
 // runNode executes or requests the current node's work and applies its delta.
 // done reports that advance must return res.
 func (s *session) runNode(node *workflow.Node, head string) (AdvanceResult, bool, error) {
@@ -663,15 +680,10 @@ func (s *session) runNode(node *workflow.Node, head string) (AdvanceResult, bool
 		// back to base..head there. That is consistent: a failed-proof retry is a fork back into the FIX
 		// node (which re-baselines FixEntryHead via FixBaselineData, restoring the fix-scoped diff), not a
 		// re-run of prove on the same commit.
-		diffFrom := snap.BaseSHA
-		if kind.Info().FixScopedDiff && snap.FixEntryHead != "" {
-			diffFrom = snap.FixEntryHead
-		}
-		text, truncated, err := s.git.Diff(s.ctx, diffFrom, head, MaxDiffBytes)
+		diff, err := s.nodeDiff(kind, snap, head)
 		if err != nil {
 			return AdvanceResult{}, true, err
 		}
-		diff := Diff{Text: text, Truncated: truncated}
 		if node.Exec == "fork" {
 			ex, _ := s.m.deps.Kinds.Executor(node.Kind)
 			out, err := ex.Execute(s.ctx, ExecInput{Snap: snap, Node: node, Diff: diff, StartIndex: s.st.NextIndex(k), Audit: s.audit, Runner: s.runner})
@@ -699,7 +711,11 @@ func (s *session) runNode(node *workflow.Node, head string) (AdvanceResult, bool
 				return AdvanceResult{}, true, errs.Wrap(errs.E(CodeInstructionsFailed, err.Error(), "node", node.Name), err)
 			}
 			if !s.hasNeedsInput(node.Name, snap.Iteration) {
-				if err := s.append(run.TypeNeedsInput, run.EmptyData{}, node.Name); err != nil {
+				// The payload binds the instruction-time head: the apply path fails closed if the
+				// head moved between instruction and apply — a DiffDecoder must judge findings
+				// against the diff the lenses reviewed, not a recomputation over a moved head
+				// (PR #162 review finding; empty head = pre-binding event, check skipped).
+				if err := s.append(run.TypeNeedsInput, run.NeedsInputData{Head: head}, node.Name); err != nil {
 					return AdvanceResult{}, true, err
 				}
 			}
@@ -709,9 +725,38 @@ func (s *session) runNode(node *workflow.Node, head string) (AdvanceResult, bool
 		}
 	}
 	if !snap.Applied[k] {
-		out, err := kind.Decode(snap.NodeOutputs[k])
+		// The diff-aware decode needs the diff the node reviewed — the same selection
+		// (fix-scoped or base..head) the instruction build used, recomputed here because the
+		// apply path runs after the instruction build's scope has closed.
+		diff, err := s.nodeDiff(kind, snap, head)
+		if err != nil {
+			return AdvanceResult{}, true, err
+		}
+		// Head binding (PR #162 review): if the kind decodes against the diff, the head must
+		// not have moved since the instructions were built — otherwise the anchor gate would
+		// judge findings against a diff the lenses never saw (a finding added only by the
+		// later diff can be kept; an original in-diff finding can be dropped as fabricated).
+		// Fail closed; re-recording the node output against the current head is the honest path.
+		if _, isDiffDecoder := kind.(DiffDecoder); isDiffDecoder {
+			if bound := needsInputHead(s.log.Events, node.Name, snap.Iteration); bound != "" && bound != head {
+				return AdvanceResult{}, true, errs.E(CodeNodeOutputInvalid,
+					"the head moved between instruction and apply; the recorded output was reviewed against a different diff",
+					"node", node.Name, "instruction_head", bound, "apply_head", head)
+			}
+		}
+		out, err := decodeKind(kind, snap.NodeOutputs[k], diff)
 		var delta run.Delta
 		if err == nil {
+			// Decoded-output telemetry (review-lenses bucket stats) is recorded as warn events
+			// before the delta applies, so the audit log shows what the lenses said and what the
+			// gate kept in one place. Apply is once per output (Applied[k]), so these fire once.
+			if we, ok := out.(WarningEmitter); ok {
+				for _, w := range we.Warnings() {
+					if werr := s.warn(w.Code, w.Detail); werr != nil {
+						return AdvanceResult{}, true, werr
+					}
+				}
+			}
 			delta, err = kind.Reduce(snap, out)
 		}
 		if err == nil {
@@ -734,6 +779,23 @@ func (s *session) runNode(node *workflow.Node, head string) (AdvanceResult, bool
 
 func (s *session) hasNeedsInput(node string, iter int) bool {
 	return hasNeedsInput(s.log.Events, node, iter)
+}
+
+// needsInputHead returns the head recorded on the latest needs_input event for the node —
+// the head the instructions were built against. Events written before the head binding
+// carry an empty head (legacy {} payloads): the apply-time check treats that as unknown.
+func needsInputHead(events []run.Event, node string, iter int) string {
+	head := ""
+	for _, ev := range events {
+		if ev.Type != run.TypeNeedsInput || ev.Node != node || ev.Iter != iter {
+			continue
+		}
+		var d run.NeedsInputData
+		if err := json.Unmarshal(ev.Data, &d); err == nil && d.Head != "" {
+			head = d.Head
+		}
+	}
+	return head
 }
 
 func hasNeedsInput(events []run.Event, node string, iter int) bool {

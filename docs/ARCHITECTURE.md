@@ -58,7 +58,13 @@ There are **two** engines that produce a review, joined by a **review-evidence m
    lenses as **subagents with a real `$REVIEWER` model**, then `match-then-adjudicate` judges them. This is
    the genuine AI adversarial review. Its findings live in the **FSM run store**
    (`.metareview/runs/<id>/audit.jsonl`, carried as `FoldState.Findings`) — **not** in the
-   `.metareview/findings.jsonl` that the deterministic gate reconciles and reads.
+   `.metareview/findings.jsonl` that the deterministic gate reconciles and reads. Lens output emitted in
+   the typed 0.12 contract (`internal/lensoutput`: tag/file/lines/issue/consequence/confidence/severity)
+   is validated deterministically before it can become a candidate: malformed entries are rejected and
+   counted, and the **anchor-in-diff gate** (±10 context lines) rejects findings citing files or lines the
+   diff never touched — fabricated findings by contract definition. The judge transports themselves carry
+   an output-cap retry (a gateway `400` output-limit answer is retried once at 4× the cap — transport
+   headroom; prompts and calibration are frozen).
 
 **The bridge (require-lenses gate).** `pr-ready`/`task-done`/`epic-ready` now **require** an adjudicated lens
 review by default. After a real review the agent records a **review-evidence marker** —
@@ -185,7 +191,10 @@ list below is illustrative, omitting e.g. `judge`, `gate`, `converge`, `export`)
 
 - **Entry / dispatch:** `cmd/metareview` (CLI), `internal/repo` (root detection), `internal/version`.
 - **Review types:** `artifactreview`, `taskdone`, `prready`, `epicready`, `reviewers` (the deterministic
-  reviewer lenses), `lens` (the lens set).
+  reviewer lenses), `lens` (the lens set), `lensoutput` (the typed lens-output contract: `TypedFinding` +
+  `Validate` + the anchor-in-diff gate ±10 — the deterministic, pre-LLM validation layer with lab-mirrored
+  rejection buckets; see `internal/lensoutput`'s package doc and the conformance corpus in
+  `tests/go/test-lens-conformance.sh`).
 - **Review state & logs:** `reviewlog` (parse/discover `.md` logs), `reviewstate`, `reviewmanifest`,
   `findings`, `runchain` (lineage), `state`/`jsonl` (append/scan), `reviewprompt`.
 - **Gate & install:** `setup` (mode/prereqs + hook install), `status` (branch scope, `CommitGate`/`PushGate`,

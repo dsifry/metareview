@@ -2355,3 +2355,180 @@ func TestSdlcLoopCleanEnforcesReReviewOfTheFix(t *testing.T) {
 		t.Fatalf("adjudicator rejects the re-surfaced finding → done (confirmed_empty), NOT dead-end: %+v", r)
 	}
 }
+
+// diffKind is a fakeKind that implements DiffDecoder and returns a WarningEmitter, to pin
+// the apply-path wiring: the machine must decode through DecodeWithDiff (passing the diff
+// the node reviewed) and record the decoded output's warnings as run warn events.
+type diffKind struct {
+	fakeKind
+	gotDiff Diff
+	called  bool
+}
+
+func (k *diffKind) DecodeWithDiff(raw json.RawMessage, d Diff) (any, error) {
+	k.called = true
+	k.gotDiff = d
+	return warnOut{}, nil
+}
+
+func (k *diffKind) Reduce(run.Snapshot, any) (run.Delta, error) { return run.Delta{}, nil }
+
+type warnOut struct{}
+
+func (warnOut) Warnings() []run.WarnData {
+	return []run.WarnData{{Code: "TEST_WARN", Detail: "rejected schema=1 kept=1"}}
+}
+
+func TestApplyUsesDiffDecoderAndEmitsWarnings(t *testing.T) {
+	h := newHarness(t)
+	// swap the registry's resolution for review-lenses to a diff-aware kind
+	dk := &diffKind{fakeKind: *h.reg.kinds["review-lenses"]}
+	h.reg.override = map[string]NodeKind{"review-lenses": dk}
+	m := h.mustInit(InitOptions{Workflow: "review-loop", Vars: sdlcVars})
+	ctx := context.Background()
+	if _, err := m.Record(ctx, RecordOptions{Kind: RecordNodeOutput, Node: "discover", Data: json.RawMessage(`{"findings":[]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.Advance(ctx)
+	if err != nil || res.Status != StatusDone || res.Outcome != "clean" {
+		t.Fatalf("advance: %v %v", res, err)
+	}
+	if !dk.called {
+		t.Fatalf("DecodeWithDiff must be used at apply time")
+	}
+	warns := 0
+	for _, ev := range h.events(m) {
+		if ev.Type == run.TypeWarn {
+			warns++
+			var d run.WarnData
+			_ = json.Unmarshal(ev.Data, &d)
+			if d.Code != "TEST_WARN" || d.Detail != "rejected schema=1 kept=1" {
+				t.Fatalf("warn event: %+v", d)
+			}
+		}
+	}
+	if warns != 1 {
+		t.Fatalf("exactly one warn event from the decoded output, got %d", warns)
+	}
+}
+
+// diffFailGit fails Diff only when armed — installed at init (instructions still build),
+// armed before the apply advance so the apply-path nodeDiff fails.
+type diffFailGit struct {
+	gate.Git
+	armed *bool
+	err   error
+}
+
+func (d *diffFailGit) Diff(ctx context.Context, a, b string, n int) (string, bool, error) {
+	if *d.armed {
+		return "", false, d.err
+	}
+	return d.Git.Diff(ctx, a, b, n)
+}
+
+// TestApplyNodeDiffFailureSurfaces pins the apply-path error branch: the diff-aware decode
+// needs the diff the node reviewed, and a git failure at apply time (after the instruction
+// build already succeeded) must surface as the advance's error, not be swallowed.
+func TestApplyNodeDiffFailureSurfaces(t *testing.T) {
+	h := newHarness(t)
+	dk := &diffKind{fakeKind: *h.reg.kinds["review-lenses"]}
+	h.reg.override = map[string]NodeKind{"review-lenses": dk}
+	armed := false
+	h.git.byDir["/repo"] = &diffFailGit{Git: h.git.def, armed: &armed, err: errs.E(gate.CodeGit, "diff gone", "op", "Diff")}
+	m := h.mustInit(InitOptions{Workflow: "review-loop", Vars: sdlcVars})
+	ctx := context.Background()
+	h.advance(m) // instruction build — Diff still fine, node awaits output
+	if _, err := m.Record(ctx, RecordOptions{Kind: RecordNodeOutput, Node: "discover", Data: json.RawMessage(`{"findings":[]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	armed = true
+	if _, err := m.Advance(ctx); err == nil || !errs.Is(err, gate.CodeGit) {
+		t.Fatalf("apply-time nodeDiff failure must surface: %v", err)
+	}
+	if dk.called {
+		t.Fatal("decode must not run when the diff cannot be recomputed")
+	}
+}
+
+// TestApplyWarnFailureSurfaces pins the decoded-output telemetry branch: when the warn
+// append itself fails (store error), the apply surfaces it instead of dropping the bucket
+// telemetry silently.
+func TestApplyWarnFailureSurfaces(t *testing.T) {
+	h := newHarness(t)
+	dk := &diffKind{fakeKind: *h.reg.kinds["review-lenses"]}
+	h.reg.override = map[string]NodeKind{"review-lenses": dk}
+	m := h.mustInit(InitOptions{Workflow: "review-loop", Vars: sdlcVars})
+	ctx := context.Background()
+	h.advance(m)
+	if _, err := m.Record(ctx, RecordOptions{Kind: RecordNodeOutput, Node: "discover", Data: json.RawMessage(`{"findings":[]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	// the only TypeWarn append in this flow is the decoded-output telemetry
+	boom := errors.New("warn append fail")
+	h.store.failType, h.store.err = run.TypeWarn, boom
+	if _, err := m.Advance(ctx); err == nil {
+		t.Fatal("warn append failure must surface as the advance error")
+	}
+	for _, ev := range h.events(m) {
+		if ev.Type == run.TypeWarn {
+			t.Fatal("the failed warn must not be persisted")
+		}
+	}
+}
+
+// headMoveGit delegates to the default Fake but switches its reported head once armed —
+// simulating a commit landing between the instruction build and the apply.
+type headMoveGit struct {
+	gate.Git
+	newHead string
+	armed   *bool
+}
+
+func (g *headMoveGit) Head(ctx context.Context) (string, error) {
+	if *g.armed {
+		return g.newHead, nil
+	}
+	return g.Git.Head(ctx)
+}
+
+// TestApplyFailsClosedWhenHeadMoved pins the head binding: a DiffDecoder's recorded output
+// was reviewed against the instruction-time diff; if the head moves before apply, the apply
+// must fail closed instead of judging the findings against a diff the lenses never saw
+// (PR #162 review finding).
+func TestApplyFailsClosedWhenHeadMoved(t *testing.T) {
+	h := newHarness(t)
+	dk := &diffKind{fakeKind: *h.reg.kinds["review-lenses"]}
+	h.reg.override = map[string]NodeKind{"review-lenses": dk}
+	armed := false
+	hm := &headMoveGit{Git: h.git.def, newHead: shaFix, armed: &armed}
+	h.git.byDir["/repo"] = hm
+	m := h.mustInit(InitOptions{Workflow: "review-loop", Vars: sdlcVars})
+	ctx := context.Background()
+	h.advance(m) // instruction build at shaHead — node awaits output
+	if _, err := m.Record(ctx, RecordOptions{Kind: RecordNodeOutput, Node: "discover", Data: json.RawMessage(`{"findings":[]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	armed = true // the head moves before the apply
+	_, aerr := m.Advance(ctx)
+	if aerr == nil || !errs.Is(aerr, CodeNodeOutputInvalid) {
+		t.Fatalf("apply must fail closed when the head moved: %v", aerr)
+	}
+	if e := errs.As(aerr); e == nil || e.Field("instruction_head") != shaHead || e.Field("apply_head") != shaFix {
+		t.Fatalf("error must name both heads: %+v", e)
+	}
+	if dk.called {
+		t.Fatal("decode must not run against a diff the lenses never saw")
+	}
+	// disarm: the same head as the instructions lets the apply proceed
+	armed = false
+	for {
+		r, aerr := m.Advance(ctx)
+		if aerr != nil {
+			t.Fatalf("re-apply at the same head: %v", aerr)
+		}
+		if r.Status == StatusDone {
+			break
+		}
+	}
+}

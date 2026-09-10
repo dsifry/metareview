@@ -645,7 +645,7 @@ func TestJ6URLsRoutingRedirect(t *testing.T) {
 		http.Redirect(w, r, other.URL, http.StatusFound)
 	}))
 	defer srv.Close()
-	client := NewHTTPClient(5 * time.Second)
+	client := NewHTTPClient()
 	for _, path := range []string{"/same", "/cross"} {
 		_, err := client.Get(srv.URL + path)
 		if err == nil || !errs.Is(err, CodeJudgeRedirect) {
@@ -656,7 +656,7 @@ func TestJ6URLsRoutingRedirect(t *testing.T) {
 	var sleeps []time.Duration
 	jr, _ := New(client, Keys{OpenAI: "k"}, URLs{OpenAI: strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)}, func() string { return "n" }, testClock(&sleeps))
 	_ = jr
-	jr2, _ := New(NewHTTPClient(5*time.Second), Keys{OpenAI: "k"}, URLs{OpenAI: srv.URL}, func() string { return "n" }, testClock(&sleeps))
+	jr2, _ := New(NewHTTPClient(), Keys{OpenAI: "k"}, URLs{OpenAI: srv.URL}, func() string { return "n" }, testClock(&sleeps))
 	v, err := jr2.Call(context.Background(), Request{Kind: KindAdjudicate, Model: "gpt-5.2", Effort: "low", Input: fixedInputs[KindAdjudicate]})
 	if !errs.Is(err, CodeJudgeRedirect) || v.Attempts != 1 || len(sleeps) != 0 {
 		t.Fatalf("redirect through judge: %v %d %v", err, v.Attempts, sleeps)

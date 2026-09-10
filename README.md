@@ -24,6 +24,13 @@ standalone or as a deeper review engine inside metaswarm, Superpowers, and Beads
   structured output (no bespoke parser).
 - **🔀 Model-swappable, auditable judges.** Pick the judge per run — Claude, Codex/GPT, GLM, Kimi — every
   judge call is recorded and swappable, and runs are forkable and resumable.
+- **📐 Typed lens-output contract (0.12).** Lens findings carry a typed schema
+  (tag/file/lines/issue/consequence/confidence/severity) validated deterministically before they can
+  become candidates: malformed entries are rejected and counted (never crash the run), and an
+  **anchor-in-diff gate** (±10 context lines) rejects findings that cite files or lines the diff never
+  touched. Benchmarked in the lab (dsifry/metareview#159): the typed schema cut output tokens 27%, and
+  the anchor gate is a real fabricated-finding catcher at F1-neutral. Judge transports also retry a
+  gateway's `400` output-limit answer once at 4× the cap — transport headroom only, calibration frozen.
 - **📚 Learns locally.** Post-merge learning extracts durable, git-native, human-readable lessons — no
   proprietary SaaS lock-in.
 
@@ -79,6 +86,26 @@ metareview is built around review patterns that work well when humans and coding
 - **Repository-knowledge priming:** load service inventories, Beads knowledge, session history, and GitHub history so reviewers catch duplicated services, stale assumptions, and prior mistakes.
 - **Review artifact accountability:** write durable Markdown context and review logs so future humans and agents can inspect what was reviewed, what blocked, and why it passed.
 - **Post-merge reflection:** after a PR lands, extract accepted learnings, discarded candidates, and reviewer calibration so the next review starts smarter.
+
+## Highlights in 0.12.0
+
+0.12.0 is the typed-contract release (evidence in [dsifry/metareview#159](https://github.com/dsifry/metareview/issues/159)):
+
+- **Typed lens-output contract + anchor-in-diff gate.** Lens findings carry a typed schema
+  (tag/file/lines/issue/consequence/confidence/severity), validated deterministically before they can
+  become candidates: malformed entries are rejected and counted (never crash the run), and findings
+  citing files or lines the diff never touched are rejected as fabricated (±10 context lines of slack).
+  Lab-measured: output tokens −27%, the anchor gate F1-neutral while catching real fabrications.
+- **Output-cap retry in the judge transports.** A gateway that answers a too-small token budget with a
+  `400` instead of a truncation no longer kills the call: one retry at 4× the cap, prompts and
+  calibration untouched.
+- **Benchmark-driven lens clauses + reclassifications.** The eight 0.11.2-rc7 hunt clauses (config-backed
+  sinks, authz-cache asymmetry, nonce-vs-static-secret, security-header regressions,
+  CONFUSABLE-PAIR-BINDING, FALSY-ZERO-ON-NUMERIC-DOMAINS, MISLEADING-ERROR-CONTENT, dimensioned magic
+  numbers), and two ratified reclassifications: dimensioned magic numbers and misleading error-message
+  content are minor bugs, not style nits. Conformance corpus in CI pins the contract behavior.
+- **OAuth judges (from PR #160).** `claude-cli/…` judge transport on the Claude Code CLI's logged-in
+  session, plus the live-verified `codex/` judge.
 
 ## Highlights in 0.11.x
 

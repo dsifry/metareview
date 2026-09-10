@@ -463,7 +463,7 @@ func decodePayload(t string, canon []byte) (any, error) {
 	case TypeTree:
 		target = &TreeData{}
 	case TypeNeedsInput:
-		target = &EmptyData{}
+		target = &NeedsInputData{}
 	case TypeNodeOutput:
 		target = &NodeOutputData{}
 	case TypeDeltaApplied:

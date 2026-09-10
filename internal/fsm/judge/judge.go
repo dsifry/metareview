@@ -43,6 +43,12 @@ const (
 	AttemptTimeout = 180 * time.Second
 	MaxBody        = 4 << 20
 	CalibrationEff = "medium"
+	// CapRetryMultiplier is the single source of truth for the output-cap retry's headroom:
+	// the raised request carries this multiple of BOTH the original output cap and the
+	// per-attempt deadline. One named constant because the two must move together — a
+	// dimensioned magic number split across sites is exactly what the 0.12 rubric blocks
+	// on (second-round review finding).
+	CapRetryMultiplier = 4
 )
 
 // DefaultURLs are the provider bases when no override is set.
@@ -81,6 +87,7 @@ type Verdict struct {
 	Mock                           bool
 	Duration                       time.Duration
 	Attempts                       int
+	CapRaised                      bool // the output-cap retry ladder fired: a 4×-cap request was sent
 }
 
 // Judge evaluates requests.
@@ -105,9 +112,13 @@ type Clock struct {
 	After func(time.Duration) <-chan time.Time
 }
 
-// NewHTTPClient returns a client that refuses every redirect.
-func NewHTTPClient(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error {
+// NewHTTPClient returns a client that refuses every redirect. It deliberately sets NO
+// blanket Timeout: every judge request is deadline-bounded by its per-attempt context
+// (attempt() applies context.WithTimeout, including the CapRetryMultiplier extension for
+// a raised request), and a client-side Timeout would silently cap that — which is exactly
+// the bug where the 4× raised request died at the original wall clock (PR #162 review).
+func NewHTTPClient() *http.Client {
+	return &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return errs.E(CodeJudgeRedirect, "redirects are refused")
 	}}
 }
@@ -337,13 +348,23 @@ func checkURL(raw string) (string, error) {
 	return strings.TrimSuffix(raw, "/"), nil
 }
 
-// request is a provider-neutral prepared call.
+// request is a provider-neutral prepared call. bodyMap is the pre-marshal body: the
+// output-cap retry (raiseOutputCap) rebuilds the body from it, so a bump never re-parses
+// marshaled JSON. capKey is the provider's output-cap field ("max_tokens" for Anthropic,
+// "max_completion_tokens" for OpenAI); maxTokens is the cap the body currently carries —
+// for the legacy-thinking Anthropic path that is maxTok+budget, not maxTok, so a 4× bump
+// of the effective cap can never lower it. timeout, when > 0, overrides the judge's
+// per-attempt deadline for THIS request only (the cap-raised retry carries 4× the wall
+// clock to match its 4× output budget).
 type request struct {
 	prov      provider
 	url       string
 	headers   map[string]string
 	body      []byte
+	bodyMap   map[string]any
+	capKey    string
 	maxTokens int
+	timeout   time.Duration
 }
 
 func maxTokensFor(kind string, calibration bool) int {
@@ -450,7 +471,9 @@ func (j *realJudge) prepare(r Request, system, user string) (request, error) {
 				body["thinking"] = map[string]any{"type": "disabled"}
 			}
 		}
-		return request{prov: prov, url: j.urls.Anthropic + "/v1/messages", headers: map[string]string{"x-api-key": j.keys.Anthropic, "anthropic-version": "2023-06-01", "content-type": "application/json"}, body: run.MarshalCanonical(body), maxTokens: maxTok}, nil
+		req := withBody(body)
+		req.prov, req.url, req.headers = prov, j.urls.Anthropic+"/v1/messages", map[string]string{"x-api-key": j.keys.Anthropic, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+		return req, nil
 	default:
 		lower := strings.ToLower(model)
 		effort := r.Effort
@@ -473,8 +496,28 @@ func (j *realJudge) prepare(r Request, system, user string) (request, error) {
 			}
 		}
 		body := map[string]any{"model": model, "messages": []map[string]string{{"role": "system", "content": system}, {"role": "user", "content": user}}, "max_completion_tokens": maxTok, "reasoning_effort": effort, "temperature": 1}
-		return request{prov: prov, url: j.urls.OpenAI + "/v1/chat/completions", headers: map[string]string{"Authorization": "Bearer " + j.keys.OpenAI, "content-type": "application/json"}, body: run.MarshalCanonical(body), maxTokens: maxTok}, nil
+		req := withBody(body)
+		req.prov, req.url, req.headers = prov, j.urls.OpenAI+"/v1/chat/completions", map[string]string{"Authorization": "Bearer " + j.keys.OpenAI, "content-type": "application/json"}
+		return req, nil
 	}
+}
+
+// withBody marshals a prepared body and reads back the output cap it carries. MarshalCanonical
+// cannot fail on a map of JSON-safe values (the repo's idiom: impossible errors are absent from
+// the API, not guarded branches), and the cap is an int by construction on both provider paths
+// — the legacy-thinking path writes maxTok+budget into max_tokens precisely so this reads the
+// effective cap. A comma-ok read (not a type switch) keeps the impossible case a zero, not a
+// panic.
+func withBody(body map[string]any) request {
+	req := request{bodyMap: body, body: run.MarshalCanonical(body)}
+	if cap, ok := body["max_tokens"].(int); ok {
+		req.capKey = "max_tokens"
+		req.maxTokens = cap
+	} else if cap, ok := body["max_completion_tokens"].(int); ok {
+		req.capKey = "max_completion_tokens"
+		req.maxTokens = cap
+	}
+	return req
 }
 
 // response is the provider-neutral decoded reply.
@@ -572,9 +615,10 @@ func decodeOpenAI(body []byte) (response, error) {
 type retryClass int
 
 const (
-	classDone    retryClass = iota
-	classRate               // 429 or overloaded_error: 10·3^a
-	classBackoff            // 5xx / transport: 2^a
+	classDone     retryClass = iota
+	classRate                // 429 or overloaded_error: 10·3^a
+	classBackoff             // 5xx / transport: 2^a
+	classCapRetry            // 400 output-limit: deterministic fix (4× cap), retry immediately
 	classFatal
 )
 
@@ -640,17 +684,48 @@ func (j *realJudge) Call(ctx context.Context, r Request) (v Verdict, err error) 
 	start := j.clock.Now()
 	defer func() { v.Duration = j.clock.Now().Sub(start) }()
 	var lastErr error
-	for attempt := 0; attempt < MaxAttempts; attempt++ {
+	capRaised := false // one output-cap bump per Call: a second cap failure is fatal
+	retryImmediately := false // the pending attempt is a deterministic cap-raise: no backoff before it
+	attempt := 0
+	for attempt < MaxAttempts {
 		v.Attempts = attempt + 1
-		if attempt > 0 {
+		if attempt > 0 && !retryImmediately {
 			select {
 			case <-ctx.Done():
 				return v, ctx.Err()
 			case <-j.clock.After(backoff(classOf(lastErr), attempt-1)):
 			}
 		}
+		retryImmediately = false
 		resp, tok, class, err := j.attempt(ctx, req)
 		v.Tokens = v.Tokens.Add(tok)
+		if class == classCapRetry {
+			if capRaised || req.capKey == "" {
+				// Terminal: the verdict genuinely does not fit 4× the calibrated cap (looping
+				// larger would only re-class the same error) — or the request carries no cap
+				// field to raise (a transport shape the ladder does not know), and a raise
+				// would inject a garbage "":0 key into the body. Either way: fail, never
+				// send a corrupt request.
+				return v, err
+			}
+			// The fix is deterministic (the retry is byte-identical except the cap), so the
+			// inter-attempt backoff is the ordinary one and nothing wider. The raised request
+			// re-runs THIS attempt's slot — a deterministic transport fix must not be eaten by
+			// the transient budget: when four 429/5xx retries precede the cap failure, the
+			// raised request is still sent (the #159 poison scenario is precisely transients
+			// preceding the cap).
+			req = raiseOutputCap(req)
+			// The raised request asks for CapRetryMultiplier× the output under the same wall
+			// clock otherwise — for the slow reasoning models this ladder targets, that turns
+			// the recovery into a generic timeout that re-burns every remaining attempt. Give
+			// it the same multiple of the per-attempt deadline — one constant, both sites.
+			req.timeout = CapRetryMultiplier * j.timeout()
+			capRaised = true
+			v.CapRaised = true
+			lastErr = err
+			retryImmediately = true // deterministic fix: send the raised request now, no backoff
+			continue
+		}
 		if class == classDone {
 			v.Raw = resp
 			v.Parsed, v.Decision, v.Confidence, v.ParseError = Parse(r.Kind, resp)
@@ -660,8 +735,46 @@ func (j *realJudge) Call(ctx context.Context, r Request) (v Verdict, err error) 
 		if class == classFatal {
 			return v, err
 		}
+		attempt++
 	}
 	return v, lastErr
+}
+
+// outputCapMarkers are the substrings (lowercased) that identify a 400 as an output-cap
+// failure rather than a rejected request. Phrasings seen in the wild: Lunaroute/GLM's
+// "Could not finish the message because max_tokens or model output limit was reached"
+// (the exact string from the #159 poison hunt) and the generic "output limit" variants.
+// Every marker carries a cap token ("max_tokens" or "output limit"): a marker without
+// one (an earlier "finish the message because") matched content-filter and rejection
+// bodies that merely phrase refusal that way, misrouting them into a doomed 4× retry.
+// Tight on purpose: a loose match ("limit" alone) would misroute an effort-rejection into
+// a cap retry and burn the attempt on a request that can never succeed.
+var outputCapMarkers = []string{
+	"max_tokens or model output limit",
+	"output limit was reached",
+	"output limit reached",
+}
+
+// isOutputCapBody reports whether a 400 body is an output-cap failure.
+func isOutputCapBody(body []byte) bool {
+	lower := strings.ToLower(string(body))
+	for _, marker := range outputCapMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// raiseOutputCap rebuilds req at CapRetryMultiplier× its current output cap. It mutates the
+// bodyMap and re-marshals — never re-parses marshaled JSON — so the bump is exact and total:
+// every other byte of the request is unchanged (transport headroom only; the prompt and the
+// model are untouched, keeping the judge calibration frozen).
+func raiseOutputCap(req request) request {
+	req.maxTokens *= CapRetryMultiplier
+	req.bodyMap[req.capKey] = req.maxTokens
+	req.body = run.MarshalCanonical(req.bodyMap)
+	return req
 }
 
 // classOf recovers the retry class from the last attempt's error.
@@ -674,7 +787,11 @@ func classOf(err error) retryClass {
 
 // attempt performs one HTTP round trip and classifies it.
 func (j *realJudge) attempt(ctx context.Context, req request) (string, run.TokenTotals, retryClass, error) {
-	actx, cancel := context.WithTimeout(ctx, j.timeout())
+	d := j.timeout()
+	if req.timeout > d {
+		d = req.timeout
+	}
+	actx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
 	hreq, _ := http.NewRequestWithContext(actx, http.MethodPost, req.url, bytes.NewReader(req.body))
 	for k, val := range req.headers {
@@ -705,6 +822,14 @@ func (j *realJudge) attempt(ctx context.Context, req request) (string, run.Token
 	case classBackoff:
 		return "", run.TokenTotals{}, classBackoff, errs.E(CodeJudgeHTTP, fmt.Sprintf("status %d", resp.StatusCode), "status", fmt.Sprint(resp.StatusCode))
 	default:
+		// Output-cap 400s first, and the patterns are deliberately tight: some gateways
+		// 400 (instead of truncating) when the reply cannot finish within max_tokens, and
+		// that failure is TRANSPORT, not judgment — retrying once at 4× the cap recovers the
+		// verdict without changing any completed call. Observed live: a judge verdict that
+		// needed more than its cap poisoned a whole evaluation cell (metareview#159).
+		if resp.StatusCode == http.StatusBadRequest && isOutputCapBody(body) {
+			return "", run.TokenTotals{}, classCapRetry, errs.E(CodeJudgeHTTP, "output cap reached", "status", "400", "class", "cap")
+		}
 		if resp.StatusCode == http.StatusBadRequest && (bytes.Contains(body, []byte("output_config")) || bytes.Contains(body, []byte("effort")) || bytes.Contains(body, []byte("thinking"))) {
 			return "", run.TokenTotals{}, classFatal, errs.E(CodeJudgeEffortUnsupported, "provider rejected the effort setting", "status", "400")
 		}

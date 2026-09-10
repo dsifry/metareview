@@ -18,7 +18,7 @@ func TestSmokeProvider(t *testing.T) {
 	if key == "" {
 		t.Skip("OPENAI_API_KEY unset")
 	}
-	j, err := New(NewHTTPClient(60*time.Second), Keys{OpenAI: key}, URLs{}, func() string { return "0123456789abcdef" }, Clock{Now: time.Now, After: time.After})
+	j, err := New(NewHTTPClient(), Keys{OpenAI: key}, URLs{}, func() string { return "0123456789abcdef" }, Clock{Now: time.Now, After: time.After})
 	if err != nil {
 		t.Fatal(err)
 	}

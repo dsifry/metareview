@@ -29,7 +29,10 @@ const sdlcScenario = `calls:
   - {kind: still-present, node: verify, iter: 1, index: 0, raw: '{"reasoning":"r","still_present":false,"confidence":0.9}', tokens: {input: 3, output: 1}}
 `
 
-const findingsData = `{"findings":[{"issue_text":"nil deref in f.go","file":"f.go","line":3,"severity":"high","category":"bug","source":"lens"}]}`
+// findingsData is the typed-contract form (0.12): tag/file/start_line/end_line/issue/consequence/
+// confidence/severity, anchored inside the harness's reviewable f.go change. The applied finding's
+// issue_text becomes "[BUG] nil deref in f.go <consequence>" (CanonicalText).
+const findingsData = `{"findings":[{"tag":"bug","file":"f.go","start_line":2,"end_line":2,"issue":"nil deref in f.go","consequence":"panics when the flag is unset","confidence":75,"severity":"P1"}]}`
 
 type fakeDoer struct {
 	reqs []*http.Request
@@ -50,6 +53,7 @@ func (f *fakeDoer) Do(r *http.Request) (*http.Response, error) {
 }
 
 type harness struct {
+	base string // pre-reviewable-change commit; inits pass --base so the discover diff spans the f.go change
 	t     *testing.T
 	root  string
 	cwd   string
@@ -85,7 +89,16 @@ func newHarness(t *testing.T) *harness {
 	_ = os.WriteFile(filepath.Join(root, ".gitignore"), []byte("mock/\nfixtures/\nexp/\nsmall/\ndocs/\n"), 0o644)
 	git(t, root, "add", ".gitignore")
 	git(t, root, "commit", "-q", "-m", "ignore mock")
-	h := &harness{t: t, root: root, cwd: root, env: map[string]string{}, doer: &fakeDoer{}}
+	// The reviewable change every discover diff spans: the typed contract's anchor-in-diff gate
+	// rejects findings whose file/line the diff never touches, so the harness repo must carry a
+	// real f.go change for review-lenses payloads to survive. h.base is the pre-change commit —
+	// init with --base h.base makes the discover diff exactly this change (plus any later
+	// test commits, all of which also touch f.go).
+	base := git(t, root, "rev-parse", "HEAD")
+	_ = os.WriteFile(filepath.Join(root, "f.go"), []byte("package f\n\n// reviewable change\n"), 0o644)
+	git(t, root, "add", "f.go")
+	git(t, root, "commit", "-q", "-m", "reviewable change")
+	h := &harness{t: t, root: root, cwd: root, env: map[string]string{}, doer: &fakeDoer{}, base: base}
 	d := RealDeps()
 	d.Getenv = func(k string) string { return h.env[k] }
 	d.Environ = func() []string { return []string{"PATH=" + os.Getenv("PATH")} }
@@ -156,7 +169,9 @@ func strs(v any) []string {
 	return out
 }
 
-var mockInit = []string{"init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock"}
+func (h *harness) mockInit(extra ...string) []string {
+	return append([]string{"init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock", "--base", h.base}, extra...)
+}
 
 // ---- rows ----------------------------------------------------------------------------------------
 
@@ -194,7 +209,7 @@ func TestUsageAndPrompt(t *testing.T) {
 
 func TestHappySdlcLoop(t *testing.T) {
 	h := newHarness(t)
-	env := h.must(StatusOK, 0, mockInit...)
+	env := h.must(StatusOK, 0, h.mockInit()...)
 	if env["mock"] != true || env["workflow_source"] != "embedded" || env["state"] != "discover" || env["iteration"] != float64(0) || env["outcome"] != nil || env["schema_version"] != float64(1) {
 		t.Fatalf("init: %v", env)
 	}
@@ -205,8 +220,8 @@ func TestHappySdlcLoop(t *testing.T) {
 	h.file("../.gitignore", "mock/\nfixtures/\nexp/\nsmall/\ndocs/\n.metareview/runs.jsonl\n")
 	git(t, h.root, "add", ".gitignore")
 	git(t, h.root, "commit", "-q", "-m", "ignore runs.jsonl")
-	base := git(t, h.root, "rev-parse", "HEAD")
-	env = h.must(StatusOK, 0, mockInit...)
+	base := h.base // the init's --base: the pre-reviewable-change commit
+	env = h.must(StatusOK, 0, h.mockInit()...)
 	if len(env["warnings"].([]any)) != 0 {
 		t.Fatalf("warnings must be empty with an ignore rule: %v", env["warnings"])
 	}
@@ -324,7 +339,7 @@ const cleanScenario = `calls:
 // findingsB is a SECOND, distinct finding. It stays on f.go (distinct issue text → distinct candidate):
 // a candidate must name a file the diff actually carries, or adjudicate keeps it as unverified_no_evidence
 // WITHOUT calling the judge (kind.go), and the re-review's mock verdict would never be exercised.
-const findingsB = `{"findings":[{"issue_text":"off-by-one in f.go","file":"f.go","line":7,"severity":"high","category":"bug","source":"lens"}]}`
+const findingsB = `{"findings":[{"tag":"bug","file":"f.go","start_line":7,"end_line":7,"issue":"off-by-one in f.go","consequence":"the loop skips the last element","confidence":75,"severity":"P2"}]}`
 
 // TestSdlcLoopCleanReReviewLoopMockAI drives the WHOLE multi-iteration re-review loop of sdlc-loop-clean
 // through the real machine and the real fork/adjudicate path against an injected mock judge — a real temp
@@ -339,7 +354,7 @@ func TestSdlcLoopCleanReReviewLoopMockAI(t *testing.T) {
 	git(t, h.root, "add", ".gitignore")
 	git(t, h.root, "commit", "-q", "-m", "ignore .metareview")
 
-	id := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop-clean", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock")["run_id"].(string)
+	id := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop-clean", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock", "--base", h.base)["run_id"].(string)
 
 	// review discovers `find`, the fork adjudicator confirms it, we commit a fix, and control lands at
 	// recheck (the re-review) — asserting the fix is re-reviewed, not waved through to done.
@@ -396,7 +411,7 @@ func setupClean(t *testing.T, scenario string) (*harness, string) {
 	_ = os.WriteFile(filepath.Join(h.root, ".gitignore"), []byte("mock/\nfixtures/\nexp/\nsmall/\ndocs/\n.metareview/\n"), 0o644)
 	git(t, h.root, "add", ".gitignore")
 	git(t, h.root, "commit", "-q", "-m", "ignore .metareview")
-	return h, h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop-clean", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock")["run_id"].(string)
+	return h, h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop-clean", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock", "--base", h.base)["run_id"].(string)
 }
 
 // review advances into a review node (discover/recheck), which parks for input, and records its findings.
@@ -425,7 +440,7 @@ func (h *harness) adv(id, to string) map[string]any {
 }
 
 func finding(text, file string, line int) string {
-	return fmt.Sprintf(`{"issue_text":%q,"file":%q,"line":%d,"severity":"high","category":"bug","source":"lens"}`, text, file, line)
+	return fmt.Sprintf(`{"tag":"bug","file":%q,"start_line":%d,"end_line":%d,"issue":%q,"consequence":"breaks the contract the diff claims","confidence":75,"severity":"P2"}`, file, line, line, text)
 }
 
 func findingsJSON(items ...string) string { return `{"findings":[` + strings.Join(items, ",") + `]}` }
@@ -551,7 +566,7 @@ func TestSdlcLoopCleanLoopIsBounded(t *testing.T) {
 	raw, _ := h.deps.Workflows("sdlc-loop-clean")
 	renamed := strings.Replace(string(raw), "workflow: sdlc-loop-clean", "workflow: sdlc-clean-bounded", 1)
 	bounded := h.file("bounded.yaml", strings.Replace(renamed, "max_iterations: 8", "max_iterations: 1", 1))
-	id := h.must(StatusOK, 0, "init", "--workflow", bounded, "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock")["run_id"].(string)
+	id := h.must(StatusOK, 0, "init", "--workflow", bounded, "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock", "--base", h.base)["run_id"].(string)
 
 	b1 := finding("nil deref in f.go", "f.go", 3)
 	stillBad := finding("the fix did not take in f.go", "f.go", 7)
@@ -571,7 +586,7 @@ func TestSdlcLoopCleanLoopIsBounded(t *testing.T) {
 func TestRunResolutionAndRecords(t *testing.T) {
 	h := newHarness(t)
 	h.mustErr(CodeNoRuns, 2, "state")
-	env := h.must(StatusOK, 0, mockInit...)
+	env := h.must(StatusOK, 0, h.mockInit()...)
 	id := env["run_id"].(string)
 	// env default warns; flag beats env; malformed and unknown ids
 	h.env[EnvRunID] = id
@@ -722,7 +737,7 @@ func TestProductRunAndJudge(t *testing.T) {
 	}
 	h.env[EnvOpenAIKey] = "sekret"
 	h.mustErr("ERR_JUDGE_MODEL", 2, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=bogus", "--var", "JUDGE_EFFORT=medium")
-	env := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium")
+	env := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--base", h.base)
 	id := env["run_id"].(string)
 	if env["mock"] != false {
 		t.Fatal("product run")
@@ -754,7 +769,7 @@ func TestProductRunAndJudge(t *testing.T) {
 	}
 	// a provider failure surfaces as GATE_FAILED{executor}, exit 1
 	h.file("f2.json", findingsData)
-	env2 := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium")
+	env2 := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--base", h.base)
 	id2 := env2["run_id"].(string)
 	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id2)
 	h.must(StatusOK, 0, "record", "node-output", "--node", "discover", "--data", h.file("f2.json", findingsData), "--run", id2)
@@ -792,7 +807,7 @@ func TestProductRunAndJudge(t *testing.T) {
 	h.mustErr("ERR_JUDGE_TRANSPORT", 2, "judge", "--kind", "match", "--model", "gpt-5.2", "--effort", "low", "--input", h.file("m.json", `{"golden":{"comment":"g"},"candidate":{"issue_text":"x"}}`))
 	// judge --run on a mock run: recorded under the run, index continues; terminal run refused
 	h.env = map[string]string{}
-	env = h.must(StatusOK, 0, mockInit...)
+	env = h.must(StatusOK, 0, h.mockInit()...)
 	mid := env["run_id"].(string)
 	env = h.must(StatusOK, 0, "judge", "--kind", "adjudicate", "--model", "gpt-5.2", "--effort", "medium", "--input", cand, "--context", diff, "--run", mid)
 	if env["index"] != float64(0) || env["seq"] == nil || env["verdict"].(map[string]any)["decision"] != true {
@@ -805,7 +820,7 @@ func TestProductRunAndJudge(t *testing.T) {
 
 func TestTornRepairAndForkErrors(t *testing.T) {
 	h := newHarness(t)
-	env := h.must(StatusOK, 0, mockInit...)
+	env := h.must(StatusOK, 0, h.mockInit()...)
 	id := env["run_id"].(string)
 	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
 	audit := filepath.Join(h.root, ".metareview", "runs", id, "audit.jsonl")
@@ -901,7 +916,7 @@ func TestContextErrorGuardOnJudgeCall(t *testing.T) {
 	// receive an empty LLMCallData, preventing the call from being recorded
 	h := newHarness(t)
 	h.env[EnvOpenAIKey] = "k"
-	env := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium")
+	env := h.must(StatusOK, 0, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--base", h.base)
 	id := env["run_id"].(string)
 	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
 	h.must(StatusOK, 0, "record", "node-output", "--node", "discover", "--data", h.file("f.json", findingsData), "--run", id)
@@ -984,7 +999,7 @@ func TestMockTaintedGuards(t *testing.T) {
 	// described as verifying "the same condition for output formatting". It does not share the
 	// condition unless the mock marker actually reaches the line.
 	h := newHarness(t)
-	h.must(StatusOK, 0, mockInit...)
+	h.must(StatusOK, 0, h.mockInit()...)
 	lines := StatusLines(context.Background(), h.deps, h.root)
 	if len(lines) < 2 || !strings.Contains(lines[0], "fsm runs:") {
 		t.Fatalf("StatusLines: unexpected output: %v", lines)
@@ -1019,7 +1034,7 @@ func TestOverflowHandlerForkConsentAndStatus(t *testing.T) {
 	wf := cmdsWorkflow(h)
 	e := h.mustErr("ERR_CMDS_NOT_ALLOWED", 2, "init", "--workflow", wf, "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock")
 	sha := e["cmds_sha256"].(string)
-	env := h.must(StatusOK, 0, "init", "--workflow", wf, "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock", "--allow-custom-cmds", sha)
+	env := h.must(StatusOK, 0, "init", "--workflow", wf, "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock", "--allow-custom-cmds", sha, "--base", h.base)
 	id := env["run_id"].(string)
 	// converge --check --run sees the run's allowed names
 	pred := h.file("pred.yaml", "any: [{cmd: notify}]")
@@ -1055,7 +1070,7 @@ func TestOverflowHandlerForkConsentAndStatus(t *testing.T) {
 	// diff of a run against itself with an errored llm_call marks both sides
 	h2 := newHarness(t)
 	h2.env[EnvOpenAIKey] = "k"
-	env = h2.must(StatusOK, 0, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium")
+	env = h2.must(StatusOK, 0, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--base", h2.base)
 	pid := env["run_id"].(string)
 	h2.must(machine.StatusNeedsInput, 3, "advance", "--run", pid)
 	h2.must(StatusOK, 0, "record", "node-output", "--node", "discover", "--data", h2.file("f.json", findingsData), "--run", pid)
@@ -1070,7 +1085,7 @@ func TestOverflowHandlerForkConsentAndStatus(t *testing.T) {
 	if l := StatusLines(context.Background(), h3.deps, h3.root); len(l) != 1 || l[0] != "fsm runs: none" {
 		t.Fatalf("none: %v", l)
 	}
-	env = h3.must(StatusOK, 0, mockInit...)
+	env = h3.must(StatusOK, 0, h3.mockInit()...)
 	tid := env["run_id"].(string)
 	f, _ := os.OpenFile(filepath.Join(h3.root, ".metareview", "runs", tid, "audit.jsonl"), os.O_APPEND|os.O_WRONLY, 0o600)
 	_, _ = f.WriteString(`{"torn`)
@@ -1132,7 +1147,7 @@ func TestOpenFailuresAndCraftedRuns(t *testing.T) {
 		}
 	}
 	// a mock run whose init names a scenario outside the root
-	env := h.must(StatusOK, 0, mockInit...)
+	env := h.must(StatusOK, 0, h.mockInit()...)
 	id := env["run_id"].(string)
 	raw, _ := os.ReadFile(filepath.Join(runs, id, "audit.jsonl"))
 	lines := strings.SplitN(string(raw), "\n", 2)
@@ -1191,7 +1206,7 @@ func TestOpenFailuresAndCraftedRuns(t *testing.T) {
 		t.Fatalf("last_error: %v", env)
 	}
 	// helpers on a run without transitions, warnings or handlers, and on an unreadable store
-	fresh := h.must(StatusOK, 0, mockInit...)["run_id"].(string)
+	fresh := h.must(StatusOK, 0, h.mockInit()...)["run_id"].(string)
 	inv := &invocation{}
 	if inv.lastTransitionGate(store, fresh) != nil || inv.handler(store, fresh) != nil || inv.lastWarn(store, fresh, "X") != "" {
 		t.Fatal("helpers on a fresh run")

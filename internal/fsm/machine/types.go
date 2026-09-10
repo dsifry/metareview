@@ -57,6 +57,33 @@ type NodeKind interface {
 	Reduce(snap run.Snapshot, out any) (run.Delta, error)
 }
 
+// DiffDecoder is implemented by kinds whose node output must be decoded against the diff it
+// reviewed — the typed-contract validation and the anchor-in-diff gate run where both the
+// payload and the diff are in hand (review-lenses). The machine prefers it over Decode at
+// apply time, passing the same diff the node's Instructions embedded. Kinds that do not
+// implement it are decoded exactly as before.
+type DiffDecoder interface {
+	DecodeWithDiff(raw json.RawMessage, diff Diff) (any, error)
+}
+
+// WarningEmitter is implemented by decoded node outputs that carry non-fatal telemetry the
+// run log should record (review-lenses: the typed-contract rejection buckets). Emitted once,
+// at apply time, between the NodeOutput and DeltaApplied events, so the audit log shows what
+// the lenses said and what survived the gate side by side.
+type WarningEmitter interface {
+	Warnings() []run.WarnData
+}
+
+// decodeKind prefers a kind's diff-aware decode when the kind implements DiffDecoder, so the
+// anchor-in-diff gate sees the diff the node actually reviewed; otherwise it is the plain
+// Decode the kind defines.
+func decodeKind(kind NodeKind, raw json.RawMessage, diff Diff) (any, error) {
+	if dd, ok := kind.(DiffDecoder); ok {
+		return dd.DecodeWithDiff(raw, diff)
+	}
+	return kind.Decode(raw)
+}
+
 // Executor runs a fork node and returns Decode-valid output.
 type Executor interface {
 	Execute(ctx context.Context, in ExecInput) (json.RawMessage, error)

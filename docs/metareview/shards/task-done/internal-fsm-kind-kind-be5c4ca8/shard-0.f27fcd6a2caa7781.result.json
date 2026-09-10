@@ -1,0 +1,112 @@
+{
+ "schemaVersion": 1,
+ "id": "shard-0-review-f27fcd6a2caa7781",
+ "kind": "shard",
+ "shardId": "shard-0",
+ "shardHash": "f27fcd6a2caa7781",
+ "planHash": "71d055c2db084d17",
+ "verdict": "PASS",
+ "reviewer": "shard-reviewer",
+ "reviewedAt": "2026-09-10T15:30:00Z",
+ "evidence": [
+  {
+   "path": "internal/fsm/judge/judge.go",
+   "line": 685,
+   "note": "Verified cap-retry ladder loop in full checkout: `for attempt < MaxAttempts` with cap retry continuing without attempt++ (slot re-run), capRaised guard making a second cap failure terminal \u2014 matches the corpus test expectations (attempts=1 for cap-then-ok, terminal for cap-twice)."
+  },
+  {
+   "path": "internal/fsm/judge/judge.go",
+   "line": 696,
+   "note": "classCapRetry branch verified: capKey==\"\" guard prevents injecting a garbage cap key; raiseOutputCap + 4x per-attempt deadline (CapRetryMultiplier=4, single constant at judge.go:43-53) exactly as the diff claims."
+  },
+  {
+   "path": "internal/fsm/judge/judge.go",
+   "line": 823,
+   "note": "Cap-400 classification checked BEFORE the effort/thinking fatal branch in attempt() \u2014 precedence pinned by TestBothMarkersPrecedence holds in the actual code."
+  },
+  {
+   "path": "internal/fsm/judge/judge.go",
+   "line": 530,
+   "note": "withBody reads back the effective cap (maxTok+budget on the legacy-thinking Anthropic path, prepare writes maxTok+budget into max_tokens at judge.go:462) \u2014 4x raise can never lower the effective cap; verified against prepare() in the checkout."
+  },
+  {
+   "path": "internal/fsm/judge/capretry_corpus_test.go",
+   "line": 26,
+   "note": "Full corpus test file present at HEAD; helpers (fixedInputs, step, fakeDoer, newJudge, testClock, oaiOK, anthOK, body, readErrDoer) all exist in judge_test.go (lines 96, 266, 286, 299-300, 302, 311, 595); MaxTokensAdjudicate=2048 confirmed in prompts.go:172. Test math for the exhausted-transient-budget case (4 backoff retries consume 4 of 5 slots, cap arrives in slot 5, raised call 6) is consistent with MaxAttempts=5."
+  },
+  {
+   "path": "internal/fsm/judge/judge.go",
+   "line": 754,
+   "note": "outputCapMarkers verified: all three markers carry a cap token ('max_tokens or model output limit', 'output limit was reached', 'output limit reached'); TestIsOutputCapBody's must-not-match rows (plain 'finish the message' phrasings, 'bad request', 'effort level unsupported', '{}') are correctly excluded."
+  },
+  {
+   "path": "internal/lensoutput/lensoutput.go",
+   "line": 52,
+   "note": "AnchorContext = 10 confirmed, matching the documented \u00b110 anchor-in-diff gate; AnchorInDiff (line 263) implements the intersect-with-slack check exactly as documented in ARCHITECTURE.md."
+  },
+  {
+   "path": "internal/fsm/kind/kind.go",
+   "line": 432,
+   "note": "Typed lens-output contract is genuinely wired into the production path: reviewLenses.DecodeWithDiff calls lensoutput.ValidatePayload(raw, d.Text) and only kept findings become candidates via f.ToCandidate(\"lens\") \u2014 the ARCHITECTURE.md claim checks out."
+  },
+  {
+   "path": "internal/lensoutput/discriminate_test.go",
+   "line": 16,
+   "note": "Discrimination test verified against testdata: hard-pr.diff's rename entry internal/store/users.go has hunks 5..13, 20..28, 37..46; the kept-rename-accumulation corpus case (corpus.json:19) cites line 40, reachable only via hunk 3 (37..46) with \u00b110 slack (first-hunk-only reach ends at 23, second at 38) \u2014 the test genuinely discriminates full vs dropped accumulation."
+  },
+  {
+   "path": "internal/version/version.go",
+   "line": 3,
+   "note": "Version = \"0.12.0\"; cross-checked all five version pins in the checkout: .claude-plugin/plugin.json, .claude-plugin/marketplace.json, .codex-plugin/plugin.json, package.json all 0.12.0, CHANGELOG.md has '## 0.12.0 - 2026-09-10'; remaining 0.11.1 strings are historical (CHANGELOG/README history, docs/metareview artifacts)."
+  },
+  {
+   "path": "rubrics/artifact-review-rubric.md",
+   "line": 233,
+   "note": "All rubric additions verified in the checkout: dimensioned magic numbers (line 233, and the smell/nit-boundary exceptions at ~line 121), confusable-pair binding (line 286), authorization-cache asymmetry / nonce-vs-static-secret / security-header / config-backed sinks (lines 386+), falsy-zero and misleading error content (lines 545+), with matching block-list updates at lines 333 and 405."
+  },
+  {
+   "path": "docs/ARCHITECTURE.md",
+   "line": 62,
+   "note": "Both doc claims verified against code: typed-contract validation before candidacy (kind.go:432) and the 4x cap retry (judge.go:696-720); the referenced conformance corpus tests/go/test-lens-conformance.sh exists."
+  }
+ ],
+ "findings": [
+  {
+   "severity": "low",
+   "disposition": "accepted-risk",
+   "note": "lateCapDoerRaised is a package-level mutable bool shared across the test binary. Benign here (single test writes it, no t.Parallel in this file), but it is global test state that would silently break if a parallel test were ever added or the test were run twice in one process via -count.",
+   "evidence": [
+    {
+     "path": "internal/fsm/judge/capretry_corpus_test.go",
+     "line": 287,
+     "note": "var lateCapDoerRaised bool declared at package scope, written at line 299, read at line 277"
+    }
+   ]
+  },
+  {
+   "severity": "low",
+   "disposition": "accepted-risk",
+   "note": "isOutputCapBody's generic markers ('output limit was reached' / 'output limit reached') are substring matches on the lowercased whole body; a future gateway that phrases a content-filter or quota refusal with the literal phrase 'output limit reached' would be misrouted into one doomed 4x retry before failing terminally. Cost is one wasted request, not a wrong verdict; the marker set is pinned by TestIsOutputCapBody and is documented as deliberately tight.",
+   "evidence": [
+    {
+     "path": "internal/fsm/judge/judge.go",
+     "line": 754,
+     "note": "outputCapMarkers list; isOutputCapBody does strings.Contains over the full lowercased body"
+    }
+   ]
+  },
+  {
+   "severity": "low",
+   "disposition": "accepted-risk",
+   "note": "withBody's cap read is a comma-ok type assertion on int. If a future prepare() path writes the cap as a non-int (int64/float), capKey silently stays \"\" and a cap 400 becomes terminal with no retry and no error signal. Guarded today by construction (both provider paths write int) and by the terminal-fail-not-corrupt branch at judge.go:696-704, but it is an implicit invariant rather than a checked one.",
+   "evidence": [
+    {
+     "path": "internal/fsm/judge/judge.go",
+     "line": 530,
+     "note": "if cap, ok := body[\"max_tokens\"].(int); ok \u2014 silent zero on type drift"
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}

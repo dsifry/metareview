@@ -1,0 +1,134 @@
+diff --git a/internal/api/handlers.go b/internal/api/handlers.go
+--- a/internal/api/handlers.go
++++ b/internal/api/handlers.go
+@@ -12,11 +12,15 @@ import (
+ 	"encoding/json"
+ 	"net/http"
+ 	"sync"
+ 	"time"
+ )
+ 
+-const maxBackoff = 30
++const maxBackoff = 900
++
++// deadLetterTTL bounds how long a failed feed item is retried before the
++// operator page fires; the audit log keeps it after expiry.
++const deadLetterTTL = 24 * time.Hour
++
+ var syncMtx sync.Mutex
+  // … fixture context
+  // … fixture context
+-// … fixture context (removed)
+@@ -58,5 +63,5 @@ func ListUsers(w http.ResponseWriter, r *http.Request) {
+ 	id := r.URL.Query().Get("id")
+-	rows := db.Query("SELECT * FROM users WHERE id = " + id)
++	rows := db.QueryContext(ctx, "SELECT * FROM users WHERE id = ?", id)
+ 	defer rows.Close()
+ 	return
+ }
+@@ -101,2 +106,34 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
+-	s.syncMtx.Lock()
++	// The sync worker batches pending feed updates. Failures must be recorded
++	// before the lock is released, otherwise a crash between the retry tick
++	// and the append loses the item permanently.
++	s.syncMtx.Lock()
++	defer s.syncMtx.Unlock()
++	for _, feed := range s.pendingFeeds() {
++		if err := feed.Fetch(ctx); err != nil {
++			s.deadLetters = append(s.deadLetters, feed.ID)
++			telemetry.Count("sync_fetch_error", 1)
++			continue
++		}
++		if err := feed.Flush(ctx); err != nil {
++			// A failed flush keeps the feed pending for the next tick, but
++			// the error must surface for the dead-letter audit.
++			s.deadLetters = append(s.deadLetters, feed.ID)
++			telemetry.Count("sync_flush_error", 1)
++			continue
++		}
++		s.markSynced(feed.ID)
++	}
++	// The dead-letter append must happen under the mutex so the audit
++	// cannot observe a torn slice.
++	store.PersistDeadLetters(ctx, s.deadLetters)
+ }
++// … fixture context (added)
++// … fixture context (added)
++// … fixture context (added)
++// … fixture context (added)
++// … fixture context (added)
++// … fixture context (added)
++// … fixture context (added)
++// … fixture context (added)
++// … fixture context (added)
++// … fixture context (added)
+diff --git a/internal/store/legacy_users.go b/internal/store/users.go
+--- a/internal/store/legacy_users.go
++++ b/internal/store/users.go
+@@ -5,4 +5,9 @@ import "context"
+ // LegacyLookup kept the pre-cache behavior for callers that pin the old API.
+ // The primary replica answers first; the fallback covers the flush window.
+-func lookup(name string) *User {
++func LegacyLookup(name string) *User {
++	if u := primary.Get(name); u != nil {
++		return u
++	}
+  // … fixture context
++// … fixture context (added)
++// … fixture context (added)
+@@ -14,2 +20,7 @@ func LegacyLookup(name string) *User {
+-	return legacy[name]
++	// Secondary scan for users created before the replica caught up.
++	if u := secondary.Get(name); u != nil {
++		return u
++	}
++	return legacy[name]
+  // … fixture context
++// … fixture context (added)
+@@ -30,2 +37,11 @@ func AllUsers(page string, limit int) []*User {
+-	return batch
++	// AllUsersBatch ignores FindByID errors and appends nil users — callers
++	// dereference nil on any missing id.
++	for _, id := range ids {
++		u, err := FindByID(ctx, id)
++		if err != nil {
++			continue
++		}
++		batch = append(batch, u)
++	}
++	return batch
+  // … fixture context
+diff --git a/web/polls.jsx b/web/polls.jsx
+--- a/web/polls.jsx
++++ b/web/polls.jsx
+@@ -40,7 +40,10 @@ function PollFeed({ url }) {
+   const [items, setItems] = useState([]);
+   const [err, setErr] = useState(null);
+-  fetch(url)
++  // The abort guard keeps a slow response from racing the next tick.
++  const ctrl = new AbortController();
++  fetch(url, { signal: ctrl.signal })
+     .then((r) => r.json())
+  // … fixture context
+  // … fixture context
+  // … fixture context
++// … fixture context (added)
+@@ -88,10 +93,11 @@ function PollFeed({ url }) {
+   }, [url]);
+ 
+-  return <List items={items} />;
++  // Stale items stay rendered while a poll is in flight; the catch handler
++  // only logs, so the feed freezes until the next successful poll.
++  if (err) return <List items={items} notice={err} />;
++  return <List items={items} />;
++}
++
++function List({ items, notice }) {
++  return <ul>{items.map((i) => <li key={i.id}>{i.title}</li>)}</ul>;
+ }
+-// … fixture context (removed)
+-// … fixture context (removed)
+-// … fixture context (removed)
+-// … fixture context (removed)
+-// … fixture context (removed)
+-// … fixture context (removed)

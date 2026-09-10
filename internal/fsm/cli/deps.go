@@ -84,11 +84,11 @@ func RealDeps() Deps {
 	}
 }
 
-// newHTTPClient is judge.NewHTTPClient with proxy environment variables switched off (spec 5 §8). The
-// client timeout follows METAREVIEW_JUDGE_TIMEOUT so it never cuts a request short before the
-// (equally overridden) per-attempt deadline does.
+// newHTTPClient is judge.NewHTTPClient with proxy environment variables switched off (spec 5 §8). No
+// blanket client timeout: per-attempt deadlines (and the cap-raise extension) are applied via the
+// per-request context in attempt(), keyed off METAREVIEW_JUDGE_TIMEOUT.
 func newHTTPClient() *http.Client {
-	c := judge.NewHTTPClient(judge.ResolveTimeout(os.Getenv))
+	c := judge.NewHTTPClient()
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.Proxy = nil
 	c.Transport = t

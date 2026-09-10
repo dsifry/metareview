@@ -206,7 +206,11 @@ func (g *execGit) Diff(ctx context.Context, from, to string, max int) (string, b
 	if err := shaArgs(from, to); err != nil {
 		return "", false, err
 	}
-	out, code, err := g.run(ctx, "diff", "--no-ext-diff", "--no-textconv", "--end-of-options", from+".."+to)
+	// --src-prefix/--dst-prefix pin the a//b// shape regardless of the user's diff.noprefix
+	// config: consumers of this diff (lensoutput.AnchorMap's header pairing, the judge's
+	// diff selection) key on the prefixed form, and a noprefix config would starve them
+	// (PR #162 review finding).
+	out, code, err := g.run(ctx, "diff", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "--end-of-options", from+".."+to)
 	if err != nil {
 		return "", false, err
 	}
@@ -218,7 +222,7 @@ func (g *execGit) Diff(ctx context.Context, from, to string, max int) (string, b
 }
 
 func (g *execGit) WorkingDiff(ctx context.Context, max int) (string, bool, error) {
-	out, code, err := g.run(ctx, "diff", "--no-ext-diff", "--no-textconv", "HEAD")
+	out, code, err := g.run(ctx, "diff", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "HEAD")
 	if err != nil {
 		return "", false, err
 	}
