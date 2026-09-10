@@ -1,0 +1,100 @@
+{
+ "schemaVersion": 1,
+ "id": "shard-3-review-25c72c96d7c37fb9",
+ "kind": "shard",
+ "shardId": "shard-3",
+ "shardHash": "25c72c96d7c37fb9",
+ "planHash": "71d055c2db084d17",
+ "verdict": "PASS",
+ "reviewer": "shard-reviewer",
+ "reviewedAt": "2026-09-10T15:30:00Z",
+ "evidence": [
+  {
+   "path": ".codex-plugin/plugin.json",
+   "line": 3,
+   "note": "version bumped to 0.12.0, consistent with internal/version/version.go:3 (const Version = \"0.12.0\") and CHANGELOG.md:3 (## 0.12.0 - 2026-09-10)"
+  },
+  {
+   "path": "internal/fsm/kind/kind.go",
+   "line": 432,
+   "note": "DecodeWithDiff is the production decode: lensoutput.ValidatePayload(raw, d.Text) runs the typed contract against the diff, findings become candidates via ToCandidate(\"lens\") \u2014 the typed contract is wired into the production review-lenses path, not a lab-only copy"
+  },
+  {
+   "path": "internal/fsm/machine/types.go",
+   "line": 65,
+   "note": "DiffDecoder interface declared; machine.decodeKind (types.go:80-85) prefers DecodeWithDiff at apply time so the anchor gate sees the diff the node's Instructions embedded (machine.go:648-653 nodeDiff)"
+  },
+  {
+   "path": "internal/fsm/kind/k1dwd_test.go",
+   "line": 22,
+   "note": "TestK1DecodeWithDiff pins every rejection bucket (schema/enum/anchor/suppression/kept), canonical candidate forms ([BUG] i c, file, line 2, severity p2, category bug, source lens), the LENS_VALIDATE warning format, the kept-count/field/payload caps, and the empty-diff anchor behavior; assertions match kind.go:377-383 Warnings() format 'rejected schema=%d enum=%d anchor=%d suppressed=%d kept=%d'"
+  },
+  {
+   "path": "internal/lensoutput/lensoutput.go",
+   "line": 306,
+   "note": "ValidatePayload never errors/panics; pointer-field wireEntry (missing field \u2192 schema bucket, present-but-empty \u2192 enum bucket) preserves the lab's KeyError distinction exactly as the CHANGELOG claims; AnchorContext=10 (line 52), SuppressionFloor=50 with P0 bypass (line 67, 263)"
+  },
+  {
+   "path": "internal/lensoutput/corpus_test.go",
+   "line": 18,
+   "note": "TestConformanceCorpus is data-driven over testdata/hard-pr.diff + testdata/corpus.json (both present in internal/lensoutput/testdata/); TestConformanceCorpusExhaustiveBuckets (line 78) guarantees every bucket has at least one pinned case"
+  },
+  {
+   "path": "internal/fsm/judge/judge.go",
+   "line": 683,
+   "note": "cap-retry ladder in production: classCapRetry retried ONCE via raiseOutputCap (judge.go:766-772, CapRetryMultiplier\u00d7cap, body re-marshaled so only the cap byte differs), second cap failure terminal (capRaised check), plain 400 stays immediate-fatal via isOutputCapBody marker set (judge.go:746-759), matching CHANGELOG claims"
+  },
+  {
+   "path": "internal/fsm/judge/capretry_corpus_test.go",
+   "line": 26,
+   "note": "TestCapRetryLadder pins cap-then-success, cap-twice-terminal, plain-400-stays-fatal, GLM 16384-floor; TestIsOutputCapBody (122), TestRaiseOutputCapLegacyThinking (204), TestCapRetryComposesWithTransportRetry (242) all exist and match the -run regex in tests/go/test-lens-conformance.sh:17"
+  },
+  {
+   "path": "tests/go/test-lens-conformance.sh",
+   "line": 19,
+   "note": "conformance script exists, executable, and is wired into tests/run-all.sh:35 \u2014 the CI wiring claim is verified"
+  },
+  {
+   "path": "tests/go/test-fsm.sh",
+   "line": 56,
+   "note": "new_repo now commits a real f.go change and every init passes --base HEAD~1 so the discover diff spans the change; --base is a real CLI flag (internal/fsm/cli/run.go:116, 311) and the FINDINGS fixture (line 61) is in the typed schema anchored at f.go:2 (inside the hunk new-side range)"
+  },
+  {
+   "path": "internal/fsm/machine/harness_test.go",
+   "line": 81,
+   "note": "fakeRegistry.override resolves swapped kinds first; used by machine_test.go:2382-2386 TestApplyUsesDiffDecoderAndEmitsWarnings to pin the apply-path DiffDecoder + WarningEmitter wiring"
+  },
+  {
+   "path": "tests/run-all.sh",
+   "line": 35,
+   "note": "test-lens-conformance.sh added to the hand-maintained suite list between test-covergate.sh and test-reviewlog.sh, exactly as the CHANGELOG entry states"
+  }
+ ],
+ "findings": [
+  {
+   "severity": "low",
+   "disposition": "open",
+   "note": "internal/fsm/kind/k1dwd_test.go:137-138: in the empty-diff case the type assertion outI.(findingsOut) runs before the err check, so an unexpected DecodeWithDiff error would panic (nil interface assertion) instead of reaching the t.Fatalf \u2014 a test-robustness nit only; the error path is not expected (empty diff must not error by contract), so no behavioral risk",
+   "evidence": [
+    {
+     "path": "internal/fsm/kind/k1dwd_test.go",
+     "line": 137,
+     "note": "out = outI.(findingsOut) precedes the err != nil check at line 138"
+    }
+   ]
+  },
+  {
+   "severity": "low",
+   "disposition": "false-positive",
+   "note": "internal/lensoutput/testdata/hard-pr.diff contains intentionally broken Go (e.g. 's.dead Letters.Add(item)' around the SyncWorker hunk) and hunk header counts that do not match the body line counts \u2014 verified intentional: it is a planted-bug fixture consumed only by AnchorMap, which reads header numbers, so the mismatch is inert for the corpus",
+   "evidence": [
+    {
+     "path": "internal/lensoutput/testdata/hard-pr.diff",
+     "line": 44,
+     "note": "planted defect in a synthetic fixture, never compiled; AnchorMap (lensoutput.go:199) only parses +++/@@ headers"
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}

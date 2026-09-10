@@ -1,0 +1,122 @@
+{
+ "schemaVersion": 1,
+ "id": "shard-1-review-92765a81fdcf982d",
+ "kind": "shard",
+ "shardId": "shard-1",
+ "shardHash": "92765a81fdcf982d",
+ "planHash": "71d055c2db084d17",
+ "verdict": "PASS",
+ "reviewer": "shard-reviewer",
+ "reviewedAt": "2026-09-10T15:30:00Z",
+ "evidence": [
+  {
+   "path": "internal/lensoutput/lensoutput.go",
+   "line": 306,
+   "note": "ValidatePayload: bucket accounting (schema/enum/anchor/suppression/kept), null-findings silent-poison guard at 317, never errors or panics \u2014 matches lab contract described in package doc"
+  },
+  {
+   "path": "internal/lensoutput/lensoutput.go",
+   "line": 205,
+   "note": "AnchorMap header-pairing guard (awaitingTo) stops single-line to-header forgery; CRLF trim; rename keys new path; pure deletions contribute no range \u2014 all pinned by tests in lensoutput_test.go"
+  },
+  {
+   "path": "internal/fsm/kind/kind.go",
+   "line": 427,
+   "note": "DecodeWithDiff is the production review-lenses decode: strictDecode shape check, lensoutput.ValidatePayload against the reviewed diff, checkFindings/checkPayload caps, stats ride findingsOut"
+  },
+  {
+   "path": "internal/fsm/kind/kind.go",
+   "line": 377,
+   "note": "findingsOut.Warnings implements machine.WarningEmitter; LENS_VALIDATE emitted only when anything was rejected"
+  },
+  {
+   "path": "internal/fsm/machine/machine.go",
+   "line": 731,
+   "note": "apply path decodes via decodeKind(kind, output, nodeDiff(...)) and emits WarningEmitter warns before delta applies; fired once per output under Applied[k]"
+  },
+  {
+   "path": "internal/fsm/machine/types.go",
+   "line": 80,
+   "note": "decodeKind prefers DiffDecoder (types.go:65) and falls back to plain Decode \u2014 kinds without diff-aware decode unchanged"
+  },
+  {
+   "path": "internal/fsm/machine/machine.go",
+   "line": 653,
+   "note": "nodeDiff factors the fix-scoped vs base..head diff selection, used identically by instruction build (line 683) and apply path (line 727) so the anchor gate judges the diff the lenses actually reviewed"
+  },
+  {
+   "path": "USAGE.md",
+   "line": 206,
+   "note": "4x cap-retry claim verified against implementation: internal/fsm/judge/judge.go:51 CapRetryMultiplier=4, classCapRetry at judge.go:696-720 retries once with raiseOutputCap (byte-identical body except the cap), second failure terminal, plain 400 fatal"
+  },
+  {
+   "path": "package.json",
+   "line": 3,
+   "note": "version 0.12.0, consistent with internal/version/version.go:3"
+  },
+  {
+   "path": "internal/fsm/kind/kind_test.go",
+   "line": 284,
+   "note": "rewritten K2 reduce test drives the real production path (DiffDecoder -> DecodeWithDiff -> Reduce) and asserts canonical [BUG] text, p2 severity, bug category, file, line"
+  },
+  {
+   "path": "internal/fsm/kind/k1dwd_test.go",
+   "line": 19,
+   "note": "TestK1DecodeWithDiff exists (referenced by kind_test.go:197-198 comment) covering enum/anchor/suppression buckets, field cap, payload cap"
+  },
+  {
+   "path": "internal/fsm/machine/machine_test.go",
+   "line": 2382,
+   "note": "TestApplyUsesDiffDecoderAndEmitsWarnings pins apply-path wiring; diffFailGit test (line 2447) pins apply-time nodeDiff failure surfacing"
+  }
+ ],
+ "findings": [
+  {
+   "severity": "low",
+   "disposition": "accepted-risk",
+   "note": "AnchorInDiff verifies file membership strictly but line anchoring only via range intersection: a well-formed entry citing a deliberately over-broad range (e.g. start_line=1, end_line=999999) for a file present in the diff passes the anchor gate. This is inherent to the lab-ported range-intersection contract (\u00b110 slack documented at lensoutput.go:29-34); the gate targets fabricated file/line citations from non-adversarial lens output, not adversarial range inflation. Documented contract behavior, non-blocking.",
+   "evidence": [
+    {
+     "path": "internal/lensoutput/lensoutput.go",
+     "line": 263,
+     "note": "AnchorInDiff: f.StartLine-AnchorContext <= r.End && f.EndLine+AnchorContext >= r.Start \u2014 any huge EndLine intersects"
+    },
+    {
+     "path": "internal/lensoutput/lensoutput.go",
+     "line": 104,
+     "note": "enumOK imposes no upper bound on EndLine beyond EndLine >= StartLine"
+    }
+   ]
+  },
+  {
+   "severity": "low",
+   "disposition": "accepted-risk",
+   "note": "The apply path now recomputes the diff (nodeDiff) for every kind before decoding, even kinds whose Decode does not need a diff; a git.Diff failure at apply time fails the advance for plain kinds where it previously could not. Deliberate (the machine_test.go:2415-2452 diffFailGit test pins the failure surfacing) and fail-closed rather than fail-open; non-blocking.",
+   "evidence": [
+    {
+     "path": "internal/fsm/machine/machine.go",
+     "line": 727,
+     "note": "unconditional nodeDiff before decodeKind in the apply path"
+    },
+    {
+     "path": "internal/fsm/machine/machine_test.go",
+     "line": 2447,
+     "note": "test pins that an apply-time nodeDiff failure surfaces and decode does not run"
+    }
+   ]
+  },
+  {
+   "severity": "low",
+   "disposition": "accepted-risk",
+   "note": "AnchorMap header forgery bar is two adjacent crafted content lines (documented residual, lensoutput.go:180-190, pinned by TestAnchorMapHeaderPairing forge-2). Accepted deliberately per the stated threat model (accidental corruption, not adversarial construction); non-blocking.",
+   "evidence": [
+    {
+     "path": "internal/lensoutput/lensoutput.go",
+     "line": 205,
+     "note": "AnchorMap pair-check documentation of the two-line forgery residual"
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}

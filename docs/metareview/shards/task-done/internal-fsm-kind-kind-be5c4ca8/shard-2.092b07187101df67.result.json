@@ -1,0 +1,125 @@
+{
+ "schemaVersion": 1,
+ "id": "shard-2-review-092b07187101df67",
+ "kind": "shard",
+ "shardId": "shard-2",
+ "shardHash": "092b07187101df67",
+ "planHash": "71d055c2db084d17",
+ "verdict": "PASS",
+ "reviewer": "shard-reviewer",
+ "reviewedAt": "2026-09-10T15:30:00Z",
+ "evidence": [
+  {
+   "path": "internal/fsm/kind/kind.go",
+   "line": 427,
+   "note": "DecodeWithDiff is the production decode: strict shape check then lensoutput.ValidatePayload against the reviewed diff; kept findings converted via ToCandidate, stats carried on unexported findingsOut.stats so the marshaled shape stays {\"findings\":[...]}"
+  },
+  {
+   "path": "internal/fsm/machine/machine.go",
+   "line": 731,
+   "note": "apply path routes through decodeKind(kind, raw, diff), preferring DiffDecoder \u2014 verified the typed contract is wired into the production path, not just tests"
+  },
+  {
+   "path": "internal/fsm/machine/machine.go",
+   "line": 737,
+   "note": "WarningEmitter branch records decoded-output warnings as run warn events before the delta applies; warn-append failure returns the error (surfaces, not swallowed) \u2014 matches TestApplyWarnFailureSurfaces"
+  },
+  {
+   "path": "internal/fsm/machine/machine.go",
+   "line": 1029,
+   "note": "Record uses kind.Decode as the record-time shape check only; entries are bucketed later at apply time \u2014 the two-layer design the kind.go comments describe"
+  },
+  {
+   "path": "internal/fsm/machine/types.go",
+   "line": 61,
+   "note": "DiffDecoder and WarningEmitter interfaces plus decodeKind helper exactly as diffed; kinds not implementing them decode as before"
+  },
+  {
+   "path": "internal/lensoutput/lensoutput.go",
+   "line": 306,
+   "note": "ValidatePayload never errors and never panics; schema/enum/anchor/suppression/kept buckets match the lab accounting, including the null-findings silent-poison schema bucket"
+  },
+  {
+   "path": "internal/lensoutput/lensoutput.go",
+   "line": 52,
+   "note": "AnchorContext=10 matches README's '\u00b110 context lines' claim; SuppressionFloor=50 with P0 override matches corpus cases"
+  },
+  {
+   "path": "internal/lensoutput/testdata/hard-pr.diff",
+   "line": 1,
+   "note": "recomputed all hunk ranges (handlers.go 12-25/63-69/106-153, users.go rename 5-13/20-28/37-46, polls.jsx 40-55/93-100) and re-derived every corpus.json bucket expectation (incl. line 90 between hunk-2 slack end 79 and hunk-3 slack start 96, and line 56 inside polls.jsx slack 40-65) \u2014 all 14 cases correct"
+  },
+  {
+   "path": "internal/lensoutput/testdata/corpus.json",
+   "line": 1,
+   "note": "14 cases covering all five buckets; exhaustive-bucket test plus discriminate_test.go pins the rename-accumulation case"
+  },
+  {
+   "path": "internal/fsm/judge/judge.go",
+   "line": 51,
+   "note": "CapRetryMultiplier=4 with classCapRetry single-retry ladder and capretry corpus \u2014 matches README's 'one retry at 4x the cap, calibration frozen'"
+  },
+  {
+   "path": "internal/fsm/cli/cli_test.go",
+   "line": 97,
+   "note": "harness commits a real reviewable f.go change and threads --base h.base into every init, so discover diffs span f.go; all payload anchors (lines 2,3,7,8) sit inside the f.go hunk (1-3) plus \u00b110 slack"
+  },
+  {
+   "path": "internal/fsm/cli/cli_test.go",
+   "line": 35,
+   "note": "findingsData/findingsB/finding() all emit the typed tag/file/start_line/end_line/issue/consequence/confidence/severity form matching the contract"
+  },
+  {
+   "path": "internal/fsm/machine/machine_test.go",
+   "line": 2382,
+   "note": "TestApplyUsesDiffDecoderAndEmitsWarnings, TestApplyNodeDiffFailureSurfaces, TestApplyWarnFailureSurfaces pin the apply-path wiring, diff-failure branch, and warn-failure branch; harness infra (fakeKind, fakeRegistry.override, store.failType) exists and the kinds map holds *fakeKind so the diffKind embedding compiles"
+  },
+  {
+   "path": "tests/go/test-lens-conformance.sh",
+   "line": 14,
+   "note": "script exists and runs the conformance corpus, exhaustive-buckets, and judge cap-retry ladder tests as claimed in corpus_test.go's comment and the README"
+  },
+  {
+   "path": "rubrics/security-review-rubric.md",
+   "line": 45,
+   "note": "authz-cache asymmetry, security-header regressions, nonce-vs-static-secret, and cross-class Config-Backed Sinks clauses present in the committed file exactly as diffed, each with a matching Block line"
+  },
+  {
+   "path": "README.md",
+   "line": 90,
+   "note": "0.12.0 highlights verified against implementation: typed schema, \u00b110 anchor gate, malformed-rejected-and-counted, 4x cap retry once; version 0.12.0 consistent across internal/version/version.go:3, plugin manifests, package.json, CHANGELOG.md"
+  }
+ ],
+ "findings": [
+  {
+   "severity": "low",
+   "disposition": "open",
+   "note": "cli_test.go harness comment claims later test commits 'all of which also touch f.go', but subsequent test commits (ignore runs.jsonl, ignore .metareview) touch only .gitignore. Immaterial to correctness \u2014 anchors only need the f.go change present in the base..head diff, which it is \u2014 but the comment overstates. Non-blocking.",
+   "evidence": [
+    {
+     "path": "internal/fsm/cli/cli_test.go",
+     "line": 98,
+     "note": "comment '(plus any later test commits, all of which also touch f.go)' vs the .gitignore-only commits at lines 223-225"
+    }
+   ]
+  },
+  {
+   "severity": "low",
+   "disposition": "false-positive",
+   "note": "Initially suspected data loss in reviewLenses.Decode returning findingsOut with empty Findings (record-time payload contents discarded), but confirmed intentional two-layer design: the stored raw is re-decoded at apply time via DecodeWithDiff with the full typed contract, and Reduce only ever receives the apply-time decodeKind result. No defect.",
+   "evidence": [
+    {
+     "path": "internal/fsm/kind/kind.go",
+     "line": 411,
+     "note": "record-time Decode is shape-check only by design"
+    },
+    {
+     "path": "internal/fsm/machine/machine.go",
+     "line": 731,
+     "note": "apply-time decodeKind re-decodes the stored raw against the diff"
+    }
+   ]
+  }
+ ],
+ "blockingCount": 0
+}
