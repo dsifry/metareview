@@ -180,3 +180,28 @@ func TestK1DecodeWithDiffPayloadCap(t *testing.T) {
 		t.Fatalf("payload cap: %v", err)
 	}
 }
+
+// TestK1DecodeWithDiffLegacyFailsClosed: a 0.11-format recorded output (issue_text/file/
+// line) must NOT be silently schema-bucketed into an empty-but-clean review — it fails the
+// decode with a distinct lens_legacy reason so a human sees the version skew (PR #162
+// review finding: the run must never conclude clean from pre-upgrade residue).
+func TestK1DecodeWithDiffLegacyFailsClosed(t *testing.T) {
+	r := mustNew(t, judge.NewMock(judge.Script{}), true)
+	k, _ := r.Kind(ReviewLenses)
+	dd, _ := k.(machine.DiffDecoder)
+	diff := machine.Diff{Text: "--- a/f.go\n+++ b/f.go\n@@ -1,4 +1,5 @@\n a\n-b\n+c\n d\n+e\n"}
+	legacy := `{"findings":[{"issue_text":"FindByIDScoped interpolates id","file":"f.go","line":2,"severity":"high"}]}`
+	_, err := dd.DecodeWithDiff(json.RawMessage(legacy), diff)
+	if !errs.Is(err, CodeNodeOutputInvalid) || errs.As(err).Field("reason") != "lens_legacy" {
+		t.Fatalf("legacy payload must fail closed with reason lens_legacy: %v", err)
+	}
+	// an empty findings array stays clean (a genuine no-findings run), and a typed
+	// payload still decodes — the probe must not fire on either.
+	if _, err := dd.DecodeWithDiff(json.RawMessage(`{"findings":[]}`), diff); err != nil {
+		t.Fatalf("empty findings: %v", err)
+	}
+	typed := `{"findings":[{"tag":"bug","file":"f.go","start_line":2,"end_line":2,"issue":"i","consequence":"c","confidence":75,"severity":"P2"}]}`
+	if out, err := dd.DecodeWithDiff(json.RawMessage(typed), diff); err != nil || out == nil {
+		t.Fatalf("typed payload: %v", err)
+	}
+}

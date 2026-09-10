@@ -213,3 +213,13 @@ type ForkData struct {
 
 // EmptyData is the payload of events that carry nothing.
 type EmptyData struct{}
+
+// NeedsInputData is the payload of a needs_input event: the head the node's instructions
+// were built against. The apply path compares it against the head at apply time and fails
+// closed on divergence — a DiffDecoder must judge findings against the diff the lenses
+// actually reviewed, never a recomputation over a moved head (PR #162 review finding).
+// Old logs carry {} here (EmptyData): an empty Head means "pre-binding event" and the
+// check is skipped, so replaying historical runs changes nothing.
+type NeedsInputData struct {
+	Head string `json:"head,omitempty"`
+}

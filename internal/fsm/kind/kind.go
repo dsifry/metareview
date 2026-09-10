@@ -429,6 +429,13 @@ func (reviewLenses) DecodeWithDiff(raw json.RawMessage, d machine.Diff) (any, er
 	if err := strictDecode(raw, &shape); err != nil {
 		return nil, err
 	}
+	if legacy, detail := legacyLensPayload(shape); legacy {
+		// 0.11-format residue: an output recorded by the old prompt (issue_text/file/line)
+		// would otherwise land wholly in the schema bucket — zero kept, zero signal — and the
+		// run could conclude clean from stale data. Fail closed with a distinct reason so a
+		// human sees the version skew instead of a silently empty review (PR #162 review).
+		return nil, invalid("lens_legacy", detail)
+	}
 	kept, stats := lensoutput.ValidatePayload(raw, d.Text)
 	fs := make([]run.Finding, 0, len(kept))
 	for _, f := range kept {
@@ -442,6 +449,27 @@ func (reviewLenses) DecodeWithDiff(raw json.RawMessage, d machine.Diff) (any, er
 		return nil, err
 	}
 	return out, nil
+}
+
+// legacyLensPayload reports whether a findings shape carries the 0.11 untyped entries
+// (issue_text/file/line) instead of the typed contract's fields. Detection is per-entry:
+// any entry with the legacy keys present and the typed keys absent marks the payload — the
+// two schemas never mix legitimately, so one witness is decisive.
+func legacyLensPayload(shape findingsShape) (bool, string) {
+	for i, raw := range shape.Findings {
+		var probe map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &probe); err != nil {
+			continue // malformed is ValidatePayload's bucket, not legacy
+		}
+		_, hasIssueText := probe["issue_text"]
+		_, hasLine := probe["line"]
+		_, hasTag := probe["tag"]
+		_, hasStart := probe["start_line"]
+		if (hasIssueText || hasLine) && !hasTag && !hasStart {
+			return true, fmt.Sprintf("entry %d uses the 0.11 untyped shape (issue_text/file/line) — rerecord the review with the 0.12 typed lens prompts; resuming a pre-0.12 run's recorded output is not supported", i)
+		}
+	}
+	return false, ""
 }
 
 func (reviewLenses) Reduce(_ run.Snapshot, out any) (run.Delta, error) {

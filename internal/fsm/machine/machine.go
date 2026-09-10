@@ -711,7 +711,11 @@ func (s *session) runNode(node *workflow.Node, head string) (AdvanceResult, bool
 				return AdvanceResult{}, true, errs.Wrap(errs.E(CodeInstructionsFailed, err.Error(), "node", node.Name), err)
 			}
 			if !s.hasNeedsInput(node.Name, snap.Iteration) {
-				if err := s.append(run.TypeNeedsInput, run.EmptyData{}, node.Name); err != nil {
+				// The payload binds the instruction-time head: the apply path fails closed if the
+				// head moved between instruction and apply — a DiffDecoder must judge findings
+				// against the diff the lenses reviewed, not a recomputation over a moved head
+				// (PR #162 review finding; empty head = pre-binding event, check skipped).
+				if err := s.append(run.TypeNeedsInput, run.NeedsInputData{Head: head}, node.Name); err != nil {
 					return AdvanceResult{}, true, err
 				}
 			}
@@ -727,6 +731,18 @@ func (s *session) runNode(node *workflow.Node, head string) (AdvanceResult, bool
 		diff, err := s.nodeDiff(kind, snap, head)
 		if err != nil {
 			return AdvanceResult{}, true, err
+		}
+		// Head binding (PR #162 review): if the kind decodes against the diff, the head must
+		// not have moved since the instructions were built — otherwise the anchor gate would
+		// judge findings against a diff the lenses never saw (a finding added only by the
+		// later diff can be kept; an original in-diff finding can be dropped as fabricated).
+		// Fail closed; re-recording the node output against the current head is the honest path.
+		if _, isDiffDecoder := kind.(DiffDecoder); isDiffDecoder {
+			if bound := needsInputHead(s.log.Events, node.Name, snap.Iteration); bound != "" && bound != head {
+				return AdvanceResult{}, true, errs.E(CodeNodeOutputInvalid,
+					"the head moved between instruction and apply; the recorded output was reviewed against a different diff",
+					"node", node.Name, "instruction_head", bound, "apply_head", head)
+			}
 		}
 		out, err := decodeKind(kind, snap.NodeOutputs[k], diff)
 		var delta run.Delta
@@ -763,6 +779,23 @@ func (s *session) runNode(node *workflow.Node, head string) (AdvanceResult, bool
 
 func (s *session) hasNeedsInput(node string, iter int) bool {
 	return hasNeedsInput(s.log.Events, node, iter)
+}
+
+// needsInputHead returns the head recorded on the latest needs_input event for the node —
+// the head the instructions were built against. Events written before the head binding
+// carry an empty head (legacy {} payloads): the apply-time check treats that as unknown.
+func needsInputHead(events []run.Event, node string, iter int) string {
+	head := ""
+	for _, ev := range events {
+		if ev.Type != run.TypeNeedsInput || ev.Node != node || ev.Iter != iter {
+			continue
+		}
+		var d run.NeedsInputData
+		if err := json.Unmarshal(ev.Data, &d); err == nil && d.Head != "" {
+			head = d.Head
+		}
+	}
+	return head
 }
 
 func hasNeedsInput(events []run.Event, node string, iter int) bool {

@@ -2476,3 +2476,59 @@ func TestApplyWarnFailureSurfaces(t *testing.T) {
 		}
 	}
 }
+
+// headMoveGit delegates to the default Fake but switches its reported head once armed —
+// simulating a commit landing between the instruction build and the apply.
+type headMoveGit struct {
+	gate.Git
+	newHead string
+	armed   *bool
+}
+
+func (g *headMoveGit) Head(ctx context.Context) (string, error) {
+	if *g.armed {
+		return g.newHead, nil
+	}
+	return g.Git.Head(ctx)
+}
+
+// TestApplyFailsClosedWhenHeadMoved pins the head binding: a DiffDecoder's recorded output
+// was reviewed against the instruction-time diff; if the head moves before apply, the apply
+// must fail closed instead of judging the findings against a diff the lenses never saw
+// (PR #162 review finding).
+func TestApplyFailsClosedWhenHeadMoved(t *testing.T) {
+	h := newHarness(t)
+	dk := &diffKind{fakeKind: *h.reg.kinds["review-lenses"]}
+	h.reg.override = map[string]NodeKind{"review-lenses": dk}
+	armed := false
+	hm := &headMoveGit{Git: h.git.def, newHead: shaFix, armed: &armed}
+	h.git.byDir["/repo"] = hm
+	m := h.mustInit(InitOptions{Workflow: "review-loop", Vars: sdlcVars})
+	ctx := context.Background()
+	h.advance(m) // instruction build at shaHead — node awaits output
+	if _, err := m.Record(ctx, RecordOptions{Kind: RecordNodeOutput, Node: "discover", Data: json.RawMessage(`{"findings":[]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	armed = true // the head moves before the apply
+	_, aerr := m.Advance(ctx)
+	if aerr == nil || !errs.Is(aerr, CodeNodeOutputInvalid) {
+		t.Fatalf("apply must fail closed when the head moved: %v", aerr)
+	}
+	if e := errs.As(aerr); e == nil || e.Field("instruction_head") != shaHead || e.Field("apply_head") != shaFix {
+		t.Fatalf("error must name both heads: %+v", e)
+	}
+	if dk.called {
+		t.Fatal("decode must not run against a diff the lenses never saw")
+	}
+	// disarm: the same head as the instructions lets the apply proceed
+	armed = false
+	for {
+		r, aerr := m.Advance(ctx)
+		if aerr != nil {
+			t.Fatalf("re-apply at the same head: %v", aerr)
+		}
+		if r.Status == StatusDone {
+			break
+		}
+	}
+}
