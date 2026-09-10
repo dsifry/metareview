@@ -118,7 +118,22 @@ three gates, all of which must pass:
 **The smell/nit boundary:** a smell is structure that degrades change-safety or comprehension;
 a style nit is formatting or convention. The test: *does the next change get harder or riskier
 because of this?* Deprecated-but-equivalent syntax, layout, naming conventions → style → still
-suppressed (unchanged non-goal).
+suppressed (unchanged non-goal). **Two ratified exceptions cross the boundary INTO bug territory
+(0.12, benchmark-driven — a decision, not a suggestion):**
+
+- **Dimensioned magic numbers** — a bare literal on a time/size/money/rate quantity (`86400`,
+  `3600`, a byte size, a retry count) whose unit and provenance the code does not express.
+  `86400` vs `84600` is a silent 30-minute-per-day error no reviewer can catch at the call
+  site; copies silently diverge. This is a **minor bug** (P3, the consequence is which copies
+  can diverge or which unit confusion the next editor makes), not a style choice.
+- **Misleading error-message content** — an error message that misdescribes the operation
+  (wrong action, wrong entity, wrong state: "backup code login" on a disable endpoint, a
+  message naming the wrong field or the wrong endpoint). The response shape is right but the
+  content misdirects debugging and misrepresents the behavior to the user. This is a **minor
+  bug**, not a wording nit.
+
+Everything else about formatting, convention, and deprecated-but-equivalent syntax stays
+suppressed.
 
 **The deletion test (simplification claims):** any "this should be reshaped" advisory must name
 what becomes unnecessary — how many branches, places-to-update, or lines disappear.
@@ -215,8 +230,13 @@ defect findings never pass through that filter.
   "open"`, `kind: 1`) scattered across the diff instead of a named enum/typed constant so
   adding a variant is compile-checked, not a find-and-replace; untyped containers (`dict`,
   `object`) where a named typed struct/record would make the shape explicit; stringly-typed data
-  a typed enum would prevent from drifting. Prefer the typed form unless the diff is
-  intentionally dynamic.
+  a typed enum would prevent from drifting; **dimensioned magic numbers** — a bare literal on
+  a time/size/money/rate quantity like `86400`, `3600`, a byte size, or a retry count whose unit
+  and provenance the code does not express: the unit is unreviewable, the provenance unstated,
+  and copies silently diverge (`86400` vs `84600` is a silent 30-minute-per-day error), so this
+  is a minor bug whose consequence is which copies can diverge or which unit confusion the next
+  editor makes, not a style choice (the ratified smell/nit-boundary exception). Prefer the typed
+  or named form unless the diff is intentionally dynamic.
 - Hunt for redundant derived data: a new column storing derivable data (a cached
   total/count/formatted string) with no invalidation that can drift; a value duplicated across
   two tables with no single-source-of-truth rule; god-tables/fat interfaces mixing concerns.
@@ -263,6 +283,15 @@ defect findings never pass through that filter.
   stale (an update that never sets `type`, so an old value survives silently); a changed default
   (page size, limit, fallback value) that silently truncates or alters behavior for existing
   callers who relied on the old default.
+- Hunt for **confusable-pair binding**: two similar identifiers in scope — same stem, adjacent
+  semantics, near-identical shape — where the one used may not be the one meant: a lookup keyed
+  by `externalId` compared against `externalCalendarId`; a validator reading
+  `validated_data['detector_type']` while writing `instance.type`; a duration metric recorded
+  with the legacy duration function; a recursive call routing through the session instead of
+  the delegate it should use. Each line reads fine alone — the bug only appears when comparing
+  the binding sites. Wherever the diff uses one of two confusable names, verify the choice
+  against the dataflow: does the identifier passed, read, or written match the one the
+  surrounding context intends?
 - Hunt for **format-drift** (the value one path writes and another path compares disagree
   on canonical form): case (`lower(host) = ?` column vs raw user input; a column stored
   lowercased but matched against mixed-case input); scheme (`http://`-prefixed hosts stored,
@@ -301,10 +330,13 @@ defect findings never pass through that filter.
   stored without invalidation, an illegal state the schema permits (no `CHECK` forbidding it),
   an unguarded state transition, a lost-update on a balance/counter, money as float, a
   phantom-maintained derived column, a sentinel-meaning-change with no caller update, a
-  cascading-failure path with no degradation, a stand-in guard that can go green while prod is
-  red, a format-drift where the path that writes a value and the path that compares it
-  disagree on canonical form, an implementer left on a changed interface's old signature, an
-  advertised route with no action behind it, or an unversioned breaking API-contract change.
+  confusable-pair binding where the identifier used is not the one the dataflow intends, a
+  dimensioned magic number on a time/size/money/rate quantity (a minor bug, per the ratified
+  smell/nit-boundary exception — not a suppressed style nit), a cascading-failure path with no
+  degradation, a stand-in guard that can go green while prod is red, a format-drift where the
+  path that writes a value and the path that compares it disagree on canonical form, an
+  implementer left on a changed interface's old signature, an advertised route with no action
+  behind it, or an unversioned breaking API-contract change.
 - Report **advisory findings** for wrong-shape, simplification, and coupling concerns that do
   not block (the advisory hunt families — flag-trios, parallel enumerations, conditional
   sprawl, duplicated blocks, speculative generality — are recognition aids for this mandate).
@@ -351,12 +383,28 @@ defect findings never pass through that filter.
 - Hunt for **secrets in logs** (distinct from secrets in code): PII, tokens, or credentials
   written to log output, error messages, or telemetry — not hardcoded in source, but leaked at
   runtime through logging paths the diff adds or changes.
+- Hunt for **authorization-cache asymmetry**: a permission/authz cache where grants and denials
+  take different verification paths — cached grants served without revalidation while cached
+  denials are rechecked, or the reverse. The asymmetry is the vulnerability: whichever side
+  skips revalidation is the side an attacker wants to be on.
+- Hunt for **nonce-vs-static-secret confusion**: state/CSRF tokens, nonces, or one-time values
+  derived from static material (an app signature, a constant, a long-lived secret) instead of
+  per-request randomness — replayable by design.
+- Hunt for **security-header regressions**: a response header set to a protection-disabling
+  value (`X-Frame-Options: ALLOWALL`, an unscoped `Access-Control-Allow-Origin`, a CSP weakened
+  to `unsafe-inline`) — a misconfiguration with a concrete attack, not a style choice.
+- Hunt for **config-backed sinks**: site settings, environment variables, feature flags, or
+  admin-set configuration values feeding `open()`/`fetch`/HTTP clients/SQL/command execution —
+  treat configuration as attacker-controllable input in the threat model; a setting-controlled
+  URL fetched without validation is SSRF exactly as a user-supplied one is.
 - Block on user-supplied-id lookups without ownership scope, string-interpolated SQL/commands,
   unvalidated deserialization of untrusted input, hardcoded secrets in committed code, secrets
   written to logs, server-side fetch of unvalidated user URLs (including protocol-bypass),
-  unescaped user input to HTML/JS output, weakened token integrity/entropy, or a
+  unescaped user input to HTML/JS output, weakened token integrity/entropy, a
   normalization-mismatch bypass of a security control (a lowercased blacklist checked
-  against non-lowercased input). Do not double-report
+  against non-lowercased input), an authorization-cache asymmetry, a state/CSRF token or nonce
+  derived from static material instead of per-request randomness, or a security header set to a
+  protection-disabling value. Do not double-report
   issues the deterministic gates already catch (the `eval(` gate covers bare `eval(` injection;
   flag injection the gate does not catch, e.g. SQL string interpolation).
 - Does NOT flag: code style; architecture correctness (defer to Architecture); test quality
@@ -494,9 +542,20 @@ defect findings never pass through that filter.
   structurally satisfy the parser on one path (every refresh fails); a connection/client
   rebuilt from the pre-refresh token after persisting the new one; `response.ok`/status
   never checked before parsing.
+- Hunt for **falsy-zero on numeric domains**: a field whose domain includes 0 or
+  empty-string-as-valid — a `sample_rate` of 0.0, a timestamp of 0, a count of zero — checked
+  with truthiness (`if x:` / `.get(k)`) instead of presence (`k in ...`), so zero is silently
+  treated as absent and the default path runs. The zero value is legal data; the truthiness
+  check is the bug.
+- Hunt for **misleading error content**: an error message that misdescribes the operation —
+  wrong action, wrong entity, wrong state: "backup code login" on a disable endpoint, a
+  message naming the wrong field or the wrong endpoint. The response shape is right but the
+  content misdirects debugging and misrepresents the behavior to the user; a minor bug, not a
+  wording nit (the ratified smell/nit-boundary exception).
 - Block on a user-facing operation whose failure is invisible, an API that reports success
-  while dropping work, an unbounded or timeout-less outbound call on a request path, or a
-  raw 500 where a 4xx belongs.
+  while dropping work, an unbounded or timeout-less outbound call on a request path, a raw
+  500 where a 4xx belongs, a falsy-zero check on a numeric domain that treats legal zero data
+  as absent, or an error message that misdescribes the operation it reports on.
 - Report **advisory findings** for latent fragility ("works today, breaks when…") that does
   not block.
 - Does NOT flag: security vulnerabilities (defer to Security); test quality (defer to

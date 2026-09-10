@@ -41,9 +41,15 @@ vulnerabilities in THIS diff, not generic hardening advice.
   `file://`, decimal IPs, DNS rebinding — is A10 SSRF's, below. The correctness half of the
   same mismatch — a lookup that fails to find what was stored — is Architecture's
   format-drift hunt.)
+- **Authorization-cache asymmetry**: a permission/authz cache where grants and denials take
+  different verification paths — cached grants served without revalidation while cached
+  denials are rechecked, or the reverse. The asymmetry itself is the vulnerability: whichever
+  side skips revalidation is the side an attacker wants to be on, and the cache's staleness
+  window becomes the attack window.
 - CORS overly permissive.
 - Block on unscoped user-supplied-id lookups; bypassable role checks; normalization-mismatch
-  bypasses of a security control.
+  bypasses of a security control; an authorization-cache asymmetry (grants and denials on
+  different verification paths).
 
 ### A02 — Cryptographic Failures / Secrets
 - Hardcoded keys/tokens/passwords/API credentials in the diff.
@@ -67,12 +73,24 @@ vulnerabilities in THIS diff, not generic hardening advice.
 ### A05 — Security Misconfiguration
 - Debug mode enabled in prod paths; default credentials; exposed error details/stack traces.
 - Missing security headers where a frame-protection or CSP golden exists.
-- Block on debug/default-credential exposure in shipped code.
+- **Security-header regressions**: a response header set to a protection-disabling value —
+  `X-Frame-Options: ALLOWALL`, an unscoped `Access-Control-Allow-Origin`, a CSP weakened to
+  `unsafe-inline`, a `Strict-Transport-Security` removed on a redirect path. The diff did not
+  merely fail to add a header; it moved one from a protective value to a disabling one — that
+  is a misconfiguration with a concrete attack, not a style choice.
+- Block on debug/default-credential exposure in shipped code; a security header set to a
+  protection-disabling value.
 
 ### A07 — Auth/Session Failures
 - Session fixation; token generation without sufficient entropy; session timeout removed.
 - JWT/cookie handling changes that weaken integrity or expiry.
-- Block on weakened token integrity/entropy; removed session expiry.
+- **Nonce-vs-static-secret confusion**: state/CSRF tokens, nonces, or one-time values derived
+  from static material — an app signature, a constant, a long-lived secret — instead of
+  per-request randomness. The token is present and checked, so the happy-path audit passes;
+  but it is replayable by design: anyone who learns the static material (or just observes one
+  exchange, for a deterministic derivation) forges every future "one-time" value.
+- Block on weakened token integrity/entropy; removed session expiry; a state/CSRF token,
+  nonce, or one-time value derived from static material instead of per-request randomness.
 
 ### A08 — Software/Data Integrity
 - Unvalidated deserialization of untrusted input; unsigned updates/code paths.
@@ -82,6 +100,17 @@ vulnerabilities in THIS diff, not generic hardening advice.
 - User-supplied URLs fetched server-side without validation; internal-network/localhost access;
   protocol bypass (`file://`, `gopher://`).
 - Block on server-side fetch of unvalidated user URLs reaching internal/localhost targets.
+
+### Config-Backed Sinks (cross-class: A03/A04/A10)
+- Site settings, environment variables, feature flags, or admin-set configuration values
+  feeding `open()`/`fetch`/HTTP clients/SQL/command execution. Treat configuration as
+  attacker-controllable input in the threat model: a setting-controlled URL fetched without
+  validation is SSRF exactly as a user-supplied one is (A10); a setting-controlled query or
+  command string is injection exactly as a user-supplied one is (A03); a flag that switches
+  the code onto a less-validated path is insecure design (A04). The unvalidated fetch is the
+  same hunt whether the value arrived from a request or a config store.
+- Block on a config-backed sink — a setting/env/flag value reaching fetch, query, or command
+  execution without the validation a user-supplied value of the same shape would require.
 
 ### XSS / Output Encoding (diff-scoped)
 - Unescaped user input rendered to HTML/JS; missing output encoding; unescaped header values
