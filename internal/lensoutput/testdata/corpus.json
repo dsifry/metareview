@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "name": "kept-bug-in-hunk",
+      "entry": {"tag": "bug", "file": "internal/api/handlers.go", "start_line": 15, "end_line": 19, "issue": "FindByIDScoped string-interpolates id into SQL", "consequence": "SQL injection from the id query param", "confidence": 95, "severity": "P0"},
+      "want": "kept"
+    },
+    {
+      "name": "kept-advisory-in-hunk",
+      "entry": {"tag": "advisory", "file": "web/polls.jsx", "start_line": 45, "end_line": 48, "issue": "the catch handler only logs, leaving stale items rendered", "consequence": "users see a frozen feed until the next successful poll", "confidence": 60, "severity": "P2"},
+      "want": "kept"
+    },
+    {
+      "name": "kept-p0-below-confidence-floor",
+      "entry": {"tag": "bug", "file": "internal/api/handlers.go", "start_line": 110, "end_line": 116, "issue": "SyncWorker writes to s.dead Letters (a typo'd field) so failures vanish", "consequence": "the queue silently drops every failed item", "confidence": 30, "severity": "P0"},
+      "want": "kept"
+    },
+    {
+      "name": "kept-rename-accumulation",
+      "entry": {"tag": "bug", "file": "internal/store/users.go", "start_line": 14, "end_line": 14, "issue": "LegacyLookupAll returns nil for every caller", "consequence": "compat callers always see an empty result", "confidence": 70, "severity": "P2"},
+      "want": "kept"
+    },
+    {
+      "name": "schema-missing-severity",
+      "entry": {"tag": "bug", "file": "internal/api/handlers.go", "start_line": 15, "end_line": 15, "issue": "missing severity field", "consequence": "x", "confidence": 80},
+      "want": "schema"
+    },
+    {
+      "name": "schema-type-error-confidence",
+      "entry": {"tag": "bug", "file": "internal/api/handlers.go", "start_line": 15, "end_line": 15, "issue": "confidence is a string", "consequence": "x", "severity": "P1", "confidence": "high"},
+      "want": "schema"
+    },
+    {
+      "name": "enum-empty-issue",
+      "entry": {"tag": "bug", "file": "internal/api/handlers.go", "start_line": 15, "end_line": 15, "issue": "  ", "consequence": "x", "confidence": 80, "severity": "P1"},
+      "want": "enum"
+    },
+    {
+      "name": "enum-tag-outside-contract",
+      "entry": {"tag": "note", "file": "internal/api/handlers.go", "start_line": 15, "end_line": 15, "issue": "a tag the contract does not know", "consequence": "x", "confidence": 80, "severity": "P1"},
+      "want": "enum"
+    },
+    {
+      "name": "enum-line-range-inverted",
+      "entry": {"tag": "bug", "file": "internal/api/handlers.go", "start_line": 20, "end_line": 10, "issue": "end before start", "consequence": "x", "confidence": 80, "severity": "P1"},
+      "want": "enum"
+    },
+    {
+      "name": "anchor-file-not-in-diff",
+      "entry": {"tag": "bug", "file": "internal/api/middleware.go", "start_line": 5, "end_line": 5, "issue": "file the diff never touches", "consequence": "x", "confidence": 80, "severity": "P1"},
+      "want": "anchor"
+    },
+    {
+      "name": "anchor-beyond-slack-between-hunks",
+      "entry": {"tag": "bug", "file": "internal/api/handlers.go", "start_line": 90, "end_line": 90, "issue": "line 90 is past hunk 2 slack (79) and before hunk 3 slack (96)", "consequence": "x", "confidence": 80, "severity": "P1"},
+      "want": "anchor"
+    },
+    {
+      "name": "anchor-empty-file",
+      "entry": {"tag": "bug", "file": "", "start_line": 5, "end_line": 5, "issue": "no file cited", "consequence": "x", "confidence": 80, "severity": "P1"},
+      "want": "anchor"
+    },
+    {
+      "name": "suppression-below-floor-non-p0",
+      "entry": {"tag": "advisory", "file": "internal/api/handlers.go", "start_line": 65, "end_line": 65, "issue": "limit 0 materializes every row", "consequence": "unbounded memory on large tenants", "confidence": 40, "severity": "P2"},
+      "want": "suppression"
+    },
+    {
+      "name": "anchor-in-slack-edge",
+      "entry": {"tag": "bug", "file": "web/polls.jsx", "start_line": 56, "end_line": 56, "issue": "line 56 is inside hunk 1 slack (40..55 plus 10)", "consequence": "x", "confidence": 80, "severity": "P1"},
+      "want": "kept"
+    }
+  ]
+}
