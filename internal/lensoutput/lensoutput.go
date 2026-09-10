@@ -39,6 +39,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 
@@ -261,7 +262,27 @@ func atoi(s string) int {
 // contract's definition — the file or line it cites as evidence does not exist in the
 // change under review.
 func AnchorInDiff(f TypedFinding, files map[string][]LineRange) bool {
-	ranges, ok := files[f.File]
+	// Path spellings must not decide fabrication: a lens citing "./pkg/a.go" or "b/pkg/a.go"
+	// names the same changed file as one citing "pkg/a.go". Normalize the same way the
+	// judge's diff-selection does (judge.NormalizePath — mirrored here to keep this package
+	// a leaf importing only run; PR #162 review finding).
+	norm := func(p string) string {
+		p = strings.TrimPrefix(strings.TrimSpace(p), "./")
+		for _, prefix := range []string{"a/", "b/"} {
+			p = strings.TrimPrefix(p, prefix)
+		}
+		return path.Clean(p)
+	}
+	ranges, ok := files[norm(f.File)]
+	if !ok {
+		// fall back to a normalized-map lookup in case the diff keys themselves carry prefixes
+		for k, v := range files {
+			if norm(k) == norm(f.File) {
+				ranges, ok = v, true
+				break
+			}
+		}
+	}
 	if !ok {
 		return false
 	}

@@ -350,3 +350,80 @@ func (c *captureDoer) Do(r *http.Request) (*http.Response, error) {
 	c.i++
 	return c.next(c.i - 1), nil
 }
+
+// delayedDoer wraps a fakeDoer and sleeps before the Nth response, simulating a slow
+// raised request that legitimately needs more than the base wall clock to return its
+// 4x-sized verdict.
+type delayedDoer struct {
+	inner   *fakeDoer
+	delayOn map[int]time.Duration
+}
+
+func (d *delayedDoer) Do(r *http.Request) (*http.Response, error) {
+	i := len(d.inner.reqs)
+	if wait, ok := d.delayOn[i]; ok {
+		select {
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		case <-time.After(wait):
+		}
+	}
+	return d.inner.Do(r)
+}
+
+// TestCapRaiseGetsRaisedWallClock pins the transport half of the raised deadline: the
+// HTTP client must not carry a blanket Timeout that caps the per-request context,
+// or the 4x budget would die at the original wall clock — the exact bug where the
+// recovery re-degrades into a timeout (PR #162 review; the fix removed the client-
+// level cap so the per-attempt context is the only deadline).
+func TestCapRaiseGetsRaisedWallClock(t *testing.T) {
+	ctx := context.Background()
+	base := 150 * time.Millisecond
+	inner := &fakeDoer{steps: []step{
+		{400, lunarouteCap, nil},
+		{200, oaiOK, nil},
+	}}
+	d := &delayedDoer{inner: inner, delayOn: map[int]time.Duration{1: 3 * base}} // raised reply takes 3x base — dead at the old cap, fine at 4x
+	var sleeps []time.Duration
+	j, err0 := New(d, Keys{Anthropic: "sk-ant-test", OpenAI: "sk-test"}, URLs{}, func() string { return "0123456789abcdef" }, testClock(&sleeps))
+	if err0 != nil {
+		t.Fatal(err0)
+	}
+	j = WithTimeout(j, base)
+	v, err := j.Call(ctx, Request{Kind: KindAdjudicate, Model: "gpt-5.2", Effort: "medium", Input: fixedInputs[KindAdjudicate]})
+	if err != nil {
+		t.Fatalf("raised request died at the base wall clock: %v", err)
+	}
+	if !v.CapRaised || v.Attempts != 1 {
+		t.Fatalf("expected one raised attempt, got attempts=%d capRaised=%v", v.Attempts, v.CapRaised)
+	}
+	// control: the same slow reply without a raise (plain 200 both times, second slow) still
+	// dies at the base per-attempt deadline — proving the raise is what bought the time.
+	inner2 := &fakeDoer{steps: []step{
+		{200, oaiOK, nil},
+	}}
+	d2 := &delayedDoer{inner: inner2, delayOn: map[int]time.Duration{0: 3 * base}}
+	var sleeps2 []time.Duration
+	j2, err1 := New(d2, Keys{Anthropic: "sk-ant-test", OpenAI: "sk-test"}, URLs{}, func() string { return "0123456789abcdef" }, testClock(&sleeps2))
+	if err1 != nil {
+		t.Fatal(err1)
+	}
+	j2 = WithTimeout(j2, base)
+	_, err2 := j2.Call(ctx, Request{Kind: KindAdjudicate, Model: "gpt-5.2", Effort: "medium", Input: fixedInputs[KindAdjudicate]})
+	if err2 == nil {
+		t.Fatal("control: slow un-raised request should have died at the base deadline")
+	}
+}
+
+// TestNewHTTPClientHasNoBlanketTimeout pins the client half: a client-level Timeout would
+// silently cap the per-request raised context — the exact production bug (deps.go built the
+// client at the base timeout, so every 4x recovery died at the original wall clock).
+func TestNewHTTPClientHasNoBlanketTimeout(t *testing.T) {
+	c := NewHTTPClient()
+	if c.Timeout != 0 {
+		t.Fatalf("client carries a blanket Timeout %s — the raised per-request context would be capped by it", c.Timeout)
+	}
+	if c.CheckRedirect == nil {
+		t.Fatal("redirect refusal lost")
+	}
+}

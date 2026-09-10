@@ -557,3 +557,33 @@ func TestG5RealExecIgnoresGlobalExcludesFile(t *testing.T) {
 		t.Fatalf("RealExec must neutralize the global excludesFile; clean=%v porcelain=%q", clean, porcelain)
 	}
 }
+
+func TestG2DiffPrefixesPinnedUnderNoPrefixConfig(t *testing.T) {
+	// diff.noprefix=true is a common user config; without the pinned --src-prefix=a/
+	// --dst-prefix=b/ flags, git emits `+++ path` and every downstream consumer that keys
+	// on the b/ prefix (lensoutput.AnchorMap, judge diff selection) starves — findings
+	// anchor-rejected wholesale (PR #162 review finding). The flags must hold under the
+	// hostile config, for both Diff and WorkingDiff.
+	ctx := context.Background()
+	dir, c1, c2 := repo(t)
+	git(t, dir, "config", "diff.noprefix", "true")
+	// sanity: the config really does strip prefixes from a bare git diff
+	if bare := git(t, dir, "diff", "--no-ext-diff", "--no-textconv", c1+".."+c2); strings.Contains(bare, "+++ b/a.txt") {
+		t.Fatalf("sanity: noprefix config did not strip prefixes — test is not exercising the hazard")
+	}
+	g := NewExec(dir, RealExec)
+	d, _, err := g.Diff(ctx, c1, c2, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(d, "+++ b/a.txt") || !strings.Contains(d, "--- a/a.txt") {
+		t.Fatalf("Diff lost a//b/ prefixes under diff.noprefix=true: %q", d)
+	}
+	wd, _, err := g.WorkingDiff(ctx, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(wd, "+++ b/a.txt") {
+		t.Fatalf("WorkingDiff lost b/ prefix under diff.noprefix=true: %q", wd)
+	}
+}

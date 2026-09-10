@@ -30,10 +30,12 @@ func TestRenameCaseDiscriminates(t *testing.T) {
 	if err := json.Unmarshal(cb, &corpus); err != nil {
 		t.Fatal(err)
 	}
+	found := false // the case must exist: a renamed/removed corpus case would otherwise pass vacuously (PR #162 review finding)
 	for _, c := range corpus.Cases {
 		if c.Name != "kept-rename-accumulation" {
 			continue
 		}
+		found = true
 		var f TypedFinding
 		if err := json.Unmarshal(c.Entry, &f); err != nil {
 			t.Fatal(err)
@@ -44,5 +46,8 @@ func TestRenameCaseDiscriminates(t *testing.T) {
 		if AnchorInDiff(f, dropped) {
 			t.Fatalf("case must FAIL when later hunks are dropped — it does not discriminate: %v", f)
 		}
+	}
+	if !found {
+		t.Fatal("corpus case 'kept-rename-accumulation' not found — it was renamed or removed; update this test")
 	}
 }

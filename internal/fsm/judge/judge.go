@@ -112,9 +112,13 @@ type Clock struct {
 	After func(time.Duration) <-chan time.Time
 }
 
-// NewHTTPClient returns a client that refuses every redirect.
-func NewHTTPClient(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error {
+// NewHTTPClient returns a client that refuses every redirect. It deliberately sets NO
+// blanket Timeout: every judge request is deadline-bounded by its per-attempt context
+// (attempt() applies context.WithTimeout, including the CapRetryMultiplier extension for
+// a raised request), and a client-side Timeout would silently cap that — which is exactly
+// the bug where the 4× raised request died at the original wall clock (PR #162 review).
+func NewHTTPClient() *http.Client {
+	return &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return errs.E(CodeJudgeRedirect, "redirects are refused")
 	}}
 }
@@ -681,16 +685,18 @@ func (j *realJudge) Call(ctx context.Context, r Request) (v Verdict, err error) 
 	defer func() { v.Duration = j.clock.Now().Sub(start) }()
 	var lastErr error
 	capRaised := false // one output-cap bump per Call: a second cap failure is fatal
+	retryImmediately := false // the pending attempt is a deterministic cap-raise: no backoff before it
 	attempt := 0
 	for attempt < MaxAttempts {
 		v.Attempts = attempt + 1
-		if attempt > 0 {
+		if attempt > 0 && !retryImmediately {
 			select {
 			case <-ctx.Done():
 				return v, ctx.Err()
 			case <-j.clock.After(backoff(classOf(lastErr), attempt-1)):
 			}
 		}
+		retryImmediately = false
 		resp, tok, class, err := j.attempt(ctx, req)
 		v.Tokens = v.Tokens.Add(tok)
 		if class == classCapRetry {
@@ -717,6 +723,7 @@ func (j *realJudge) Call(ctx context.Context, r Request) (v Verdict, err error) 
 			capRaised = true
 			v.CapRaised = true
 			lastErr = err
+			retryImmediately = true // deterministic fix: send the raised request now, no backoff
 			continue
 		}
 		if class == classDone {

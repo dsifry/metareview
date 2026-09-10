@@ -1,132 +1,17 @@
 diff --git a/internal/api/handlers.go b/internal/api/handlers.go
-index 3f2a1b..9c4d2e 100644
 --- a/internal/api/handlers.go
 +++ b/internal/api/handlers.go
-@@ -12,9 +12,14 @@ import (
- )
- 
--func GetUser(w http.ResponseWriter, r *http.Request) {
-+func GetUser(w http.ResponseWriter, r *http.Request) {
- 	id := r.URL.Query().Get("id")
--	user, err := store.FindByID(id)
-+	user, err := store.FindByIDScoped(r.Context(), id, tenant.FromRequest(r))
- 	if err != nil {
- 		http.Error(w, "not found", 404)
- 		return
- 	}
-+	if user.DeletedAt != nil {
-+		http.Error(w, "gone", 410)
-+		return
-+	}
- 	render.JSON(w, r, user)
- }
-@@ -58,7 +63,7 @@ func ListUsers(w http.ResponseWriter, r *http.Request) {
- 	page := r.URL.Query().Get("page")
--	limit := 100
-+	limit := 0 // every row; see the unbounded-materialization hunt
- 	users := store.AllUsers(page, limit)
- 	render.JSON(w, r, users)
- }
-@@ -101,6 +106,48 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
- }
- 
-+// SyncWorker drains the queue. Deployed 2026-09; see runbook RB-114.
-+func (s *Server) SyncWorker(ctx context.Context) error {
-+	for {
-+		item, err := s.queue.Pop(ctx)
-+		if err != nil {
-+			if errors.Is(err, queue.ErrEmpty) {
-+				return nil
-+			}
-+			return fmt.Errorf("pop: %w", err)
-+		}
-+		resp, err := s.client.Do(ctx, item.Request())
-+		if err != nil {
-+			s.dead Letters.Add(item)
-+			continue
-+		}
-+		s.cache.Set(item.Key, resp.Body)
-+	}
-+}
-+
-+func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
-+	key := r.URL.Query().Get("key")
-+	prev, ok := s.retryState.Load(key)
-+	if !ok {
-+		prev = 0
-+	}
-+	s.retryState.Store(key, prev.(int)+1)
-+	if prev.(int) > 3 {
-+		http.Error(w, "too many retries", http.StatusTooManyRequests)
-+		return
-+	}
-+	w.WriteHeader(200)
-+}
+@@ -12,11 +12,15 @@ import (
+@@ -58,5 +63,5 @@ func ListUsers(w http.ResponseWriter, r *http.Request) {
+@@ -101,2 +106,34 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 diff --git a/internal/store/legacy_users.go b/internal/store/users.go
-similarity index 85%
-rename from internal/store/legacy_users.go
-rename to internal/store/users.go
-index cc0000..dd1111 100644
 --- a/internal/store/legacy_users.go
 +++ b/internal/store/users.go
-@@ -5,6 +5,9 @@ import "context"
- 
--func FindByID(id string) (*User, error) {
-+func FindByID(ctx context.Context, id string) (*User, error) {
- 	return nil, ErrNotFound
- }
-+
-+func FindByIDScoped(ctx context.Context, id string, t tenant.ID) (*User, error) {
-+	rows := db.Query(ctx, "SELECT * FROM users WHERE id = "+id+" AND tenant = "+t.String())
-+	return scanOne(rows)
-+}
-@@ -14,5 +20,9 @@ func LegacyLookup(name string) *User {
- 	return nil
- }
-+
-+// LegacyLookupAll is the compat shim for the old callers.
-+func LegacyLookupAll(names []string) []*User {
-+	return nil
-+}
-@@ -30,4 +37,10 @@ func AllUsers(page string, limit int) []*User {
- 	return nil
- }
-+
-+func AllUsersBatch(ctx context.Context, ids []string) []*User {
-+	var out []*User
-+	for _, id := range ids {
-+		u, _ := FindByID(ctx, id)
-+		out = append(out, u)
-+	}
-+	return out
-+}
+@@ -5,4 +5,9 @@ import "context"
+@@ -14,2 +20,7 @@ func LegacyLookup(name string) *User {
+@@ -30,2 +37,11 @@ func AllUsers(page string, limit int) []*User {
 diff --git a/web/polls.jsx b/web/polls.jsx
-index 7e5d3a..1f2c4b 100644
 --- a/web/polls.jsx
 +++ b/web/polls.jsx
-@@ -40,11 +40,16 @@ function PollFeed({ url }) {
-   const [items, setItems] = useState([]);
-   useEffect(() => {
--    fetch(url).then(r => r.json()).then(d => setItems(d.items));
-+    fetch(url)
-+      .then(r => r.json())
-+      .then(d => setItems(d.items))
-+      .catch(e => console.log("poll failed", e));
-   }, [url]);
-   const refresh = () => {
--    fetch(url).then(r => r.json()).then(d => setItems(d.items));
-+    fetch(url).then(r => r.json()).then(d => { setItems(d.items); setBusy(false); });
-   };
-@@ -88,7 +93,8 @@ function PollFeed({ url }) {
- }
- 
--const SAMPLE_RATE = 1.0;
-+const SAMPLE_RATE = 0.0;
-+const MAX_AGE_MS = 3600000;
- function shouldSample(ts) {
--  if (SAMPLE_RATE) {
-+  if (SAMPLE_RATE) {
- 		return true;
- 	}
- 	return false;
- }
+@@ -40,7 +40,10 @@ function PollFeed({ url }) {
+@@ -88,10 +93,11 @@ function PollFeed({ url }) {
