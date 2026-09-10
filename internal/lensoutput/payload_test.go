@@ -158,3 +158,24 @@ func TestValidatePayloadKeptEntryShape(t *testing.T) {
 		t.Errorf("canonical: %q", f.CanonicalText())
 	}
 }
+
+func TestValidatePayloadNullFindingsIsCounted(t *testing.T) {
+	// The silent-poison shapes: a top-level null and {"findings":null} must land in the
+	// schema bucket (rejected AND counted — the LENS_VALIDATE warn must fire), never
+	// read as "lenses found nothing". An empty array stays a valid clean payload.
+	for name, p := range map[string]string{
+		"top-level null":   `null`,
+		"null findings":    `{"findings":null}`,
+		"missing findings": `{}`,
+	} {
+		kept, stats := ValidatePayload([]byte(p), testDiff)
+		total := stats.Schema + stats.Enum + stats.Anchor + stats.Suppression + stats.Kept
+		if len(kept) != 0 || stats.Schema != 1 || total != 1 {
+			t.Errorf("%s: kept=%d stats=%+v — want schema-bucketed", name, len(kept), stats)
+		}
+	}
+	kept, stats := ValidatePayload([]byte(`{"findings":[]}`), testDiff)
+	if len(kept) != 0 || stats.Schema != 0 || (stats.Enum+stats.Anchor+stats.Suppression+stats.Kept) != 0 {
+		t.Errorf("empty findings: kept=%d stats=%+v — want valid clean", len(kept), stats)
+	}
+}

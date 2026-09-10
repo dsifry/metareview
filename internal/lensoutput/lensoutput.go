@@ -314,6 +314,15 @@ func ValidatePayload(payload []byte, diff string) ([]TypedFinding, Stats) {
 		stats.Schema = 1
 		return nil, stats
 	}
+	if top.Findings == nil {
+		// JSON null (a top-level null, or {"findings":null}) unmarshals without error
+		// and leaves Findings nil — the silent-poison shape: zero kept, zero counted, the
+		// run reads as "lenses found nothing" when the output was actually garbage.
+		// Bucket it as a schema rejection so the LENS_VALIDATE warn fires (second-round
+		// review finding; the contract's promise is rejected-AND-counted, never silent).
+		stats.Schema = 1
+		return nil, stats
+	}
 	anchors := AnchorMap(diff)
 	var kept []TypedFinding
 	for _, raw := range top.Findings {
