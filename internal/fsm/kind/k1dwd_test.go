@@ -140,3 +140,43 @@ func TestK1DecodeWithDiff(t *testing.T) {
 		t.Fatalf("empty diff: %+v err=%v", out.stats, err)
 	}
 }
+
+// TestK1DecodeWithDiffFieldCap: a kept entry whose canonical "[BUG] issue consequence" text
+// exceeds run.MaxText is a hard error at checkFindings (the candidate cap — the typed
+// contract validates shape, the FSM caps what it will carry forward).
+func TestK1DecodeWithDiffFieldCap(t *testing.T) {
+	r := mustNew(t, judge.NewMock(judge.Script{}), true)
+	k, _ := r.Kind(ReviewLenses)
+	dd, _ := k.(machine.DiffDecoder)
+	diff := machine.Diff{Text: "--- a/f.go\n+++ b/f.go\n@@ -1,4 +1,5 @@\n a\n-b\n+c\n d\n+e\n"}
+	big := strings.Repeat("x", run.MaxText+16)
+	payload := `{"findings":[{"tag":"bug","file":"f.go","start_line":2,"end_line":2,"issue":"` + big + `","consequence":"c","confidence":75,"severity":"P2"}]}`
+	_, err := dd.DecodeWithDiff(json.RawMessage(payload), diff)
+	if !errs.Is(err, CodeNodeOutputInvalid) || errs.As(err).Field("reason") != "cap" {
+		t.Fatalf("field cap: %v", err)
+	}
+}
+
+// TestK1DecodeWithDiffPayloadCap: individually-valid kept findings whose marshaled output
+// exceeds run.MaxPayload are rejected whole — the out payload cap fires after every finding
+// passed the per-finding caps (250 × ~1.2KB canonical candidates ≈ 300KB > 256KB−128).
+func TestK1DecodeWithDiffPayloadCap(t *testing.T) {
+	r := mustNew(t, judge.NewMock(judge.Script{}), true)
+	k, _ := r.Kind(ReviewLenses)
+	dd, _ := k.(machine.DiffDecoder)
+	diff := machine.Diff{Text: "--- a/f.go\n+++ b/f.go\n@@ -1,4 +1,5 @@\n a\n-b\n+c\n d\n+e\n"}
+	issue := strings.Repeat("y", 1100)
+	var sb strings.Builder
+	sb.WriteString(`{"findings":[`)
+	for i := 0; i < 250; i++ {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		fmt.Fprintf(&sb, `{"tag":"bug","file":"f.go","start_line":2,"end_line":2,"issue":"i%d%s","consequence":"c","confidence":75,"severity":"P2"}`, i, issue)
+	}
+	sb.WriteString(`]}`)
+	_, err := dd.DecodeWithDiff(json.RawMessage(sb.String()), diff)
+	if !errs.Is(err, CodeNodeOutputInvalid) || errs.As(err).Field("reason") != "cap" {
+		t.Fatalf("payload cap: %v", err)
+	}
+}
