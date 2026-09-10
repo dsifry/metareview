@@ -75,12 +75,16 @@ func (e *fakeExecutor) Execute(_ context.Context, in ExecInput) (json.RawMessage
 }
 
 type fakeRegistry struct {
-	kinds map[string]*fakeKind
-	execs map[string]*fakeExecutor
-	mock  bool
+	kinds    map[string]*fakeKind
+	execs    map[string]*fakeExecutor
+	mock     bool
+	override map[string]NodeKind // when set, Kind() resolves these first (the DiffDecoder test swaps review-lenses for a diff-aware kind)
 }
 
 func (r *fakeRegistry) Kind(n string) (NodeKind, bool) {
+	if k, ok := r.override[n]; ok {
+		return k, true
+	}
 	k, ok := r.kinds[n]
 	return k, ok
 }
