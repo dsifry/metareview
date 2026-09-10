@@ -39,13 +39,13 @@ func TestCapRetryLadder(t *testing.T) {
 			name: "openai-cap-then-ok", model: "gpt-5.2",
 			steps:  []step{{400, lunarouteCap, nil}, {200, oaiOK, nil}},
 			capKey: "max_completion_tokens", baseCap: 2048,
-			sleeps: []time.Duration{time.Second}, attempts: 2,
+			sleeps: nil, attempts: 1, // the raise re-runs the slot, immediately
 		},
 		{
 			name: "anthropic-cap-then-ok", model: "claude-opus-4-5",
 			steps:  []step{{400, genericCap, nil}, {200, anthOK, nil}},
 			capKey: "max_tokens", baseCap: 2048,
-			sleeps: []time.Duration{time.Second}, attempts: 2,
+			sleeps: nil, attempts: 1, // the raise re-runs the slot, immediately
 		},
 		{
 			// GLM/Kimi requests are floored at 16384 by prepare; the raise is 4x the
@@ -53,13 +53,15 @@ func TestCapRetryLadder(t *testing.T) {
 			name: "glm-floor-then-ok", model: "glm-5.3-background",
 			steps:  []step{{400, lunarouteCap, nil}, {200, oaiOK, nil}},
 			capKey: "max_completion_tokens", baseCap: 16384,
-			sleeps: []time.Duration{time.Second}, attempts: 2,
+			// the raised retry re-runs the capped attempt's slot, immediately (the fix is
+			// deterministic): one attempt slot, no backoff
+			sleeps: nil, attempts: 1,
 		},
 		{
 			name: "cap-twice-terminal", model: "gpt-5.2",
 			steps:  []step{{400, lunarouteCap, nil}, {400, lunarouteCap, nil}},
 			capKey: "max_completion_tokens", baseCap: 2048,
-			sleeps: []time.Duration{time.Second}, code: CodeJudgeHTTP, attempts: 2,
+			sleeps: nil, code: CodeJudgeHTTP, attempts: 1,
 		},
 		{
 			// A 400 that carries an effort marker but no cap phrasing must NOT enter the
@@ -113,13 +115,15 @@ func TestCapRetryLadder(t *testing.T) {
 	}
 }
 
-// TestIsOutputCapBody pins the marker set: each observed phrasing matches, near-miss
-// effort-rejection text does not.
+// TestIsOutputCapBody pins the marker set: each observed phrasing matches; a body that
+// merely says "finish the message because" with no cap token does NOT (the tightened
+// contract: every marker carries "max_tokens" or "output limit", so content-filter and
+// rejection bodies phrased that way stay immediate-fatal instead of burning a 4x retry).
 func TestIsOutputCapBody(t *testing.T) {
 	for _, body := range []string{
 		lunarouteCap,
 		genericCap,
-		`{"error":{"message":"could not FINISH THE MESSAGE because the model ran out"}}`,
+		`{"error":{"message":"Could not FINISH THE MESSAGE because max_tokens or model output limit WAS REACHED"}}`,
 	} {
 		if !isOutputCapBody([]byte(body)) {
 			t.Errorf("must match: %s", body)
@@ -129,11 +133,69 @@ func TestIsOutputCapBody(t *testing.T) {
 		`{"error":{"message":"bad request"}}`,
 		`{"error":{"message":"effort level unsupported"}}`,
 		`{}`,
+		`{"error":{"message":"could not finish the message because the request was rejected"}}`,
+		`{"error":{"message":"could not FINISH THE MESSAGE because the model ran out"}}`,
 	} {
 		if isOutputCapBody([]byte(body)) {
 			t.Errorf("must not match: %s", body)
 		}
 	}
+}
+
+// TestNonCapFinishPhraseStaysFatal: a 400 whose body contains the loose phrase but no cap
+// token must stay immediate-fatal at the Call level — no 4x retry, no wasted budget.
+func TestNonCapFinishPhraseStaysFatal(t *testing.T) {
+	d := &plain400Doer{body: `{"error":{"message":"could not finish the message because the request was rejected"}}`}
+	j, err := New(d, Keys{Anthropic: "sk-ant-test", OpenAI: "sk-test"}, URLs{}, func() string { return "0123456789abcdef" }, testClock(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = j.Call(context.Background(), Request{Kind: KindAdjudicate, Model: "gpt-5.2", Effort: "medium", Input: fixedInputs[KindAdjudicate]})
+	if err == nil {
+		t.Fatal("a non-cap 400 is fatal")
+	}
+	if d.calls != 1 {
+		t.Errorf("calls %d want 1 (no retry)", d.calls)
+	}
+}
+
+// TestBothMarkersPrecedence: a 400 carrying BOTH a cap marker and effort text classifies
+// as a cap retry (the cap branch is checked first) — pin the ordering, because a swap
+// would reclassify cap failures as terminal effort rejections.
+func TestBothMarkersPrecedence(t *testing.T) {
+	var sleeps []time.Duration
+	j, err := New(&bothMarkersDoer{}, Keys{Anthropic: "sk-ant-test", OpenAI: "sk-test"}, URLs{}, func() string { return "0123456789abcdef" }, testClock(&sleeps))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := j.Call(context.Background(), Request{Kind: KindAdjudicate, Model: "gpt-5.2", Effort: "medium", Input: fixedInputs[KindAdjudicate]})
+	if err != nil {
+		t.Fatalf("cap marker must win: %v", err)
+	}
+	if !v.CapRaised || v.Attempts != 1 {
+		t.Errorf("cap-first precedence: raised=%v attempts=%d", v.CapRaised, v.Attempts)
+	}
+}
+
+type bothMarkersDoer struct{ i int }
+
+func (b *bothMarkersDoer) Do(*http.Request) (*http.Response, error) {
+	b.i++
+	if b.i == 1 {
+		body := `{"error":{"message":"max_tokens or model output limit was reached","type":"invalid_request_error","detail":"effort setting not supported"}}`
+		return &http.Response{StatusCode: 400, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+	}
+	return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(oaiOK)), Header: http.Header{}}, nil
+}
+
+type plain400Doer struct {
+	body  string
+	calls int
+}
+
+func (p *plain400Doer) Do(*http.Request) (*http.Response, error) {
+	p.calls++
+	return &http.Response{StatusCode: 400, Body: io.NopCloser(strings.NewReader(p.body)), Header: http.Header{}}, nil
 }
 
 // TestRaiseOutputCapLegacyThinking: the legacy-thinking Anthropic path carries
@@ -187,7 +249,104 @@ func TestCapRetryComposesWithTransportRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("must recover: %v", err)
 	}
-	if v.Attempts != 3 {
-		t.Errorf("attempts %d want 3 (cap raise, transport retry, success)", v.Attempts)
+	// The cap raise repairs WITHIN its attempt slot (it must not eat the transient budget),
+	// so the ladder's accounting is: slot 0 = capped call + raised call (the 5xx), slot 1 =
+	// the successful retry. Three HTTP calls, two attempt slots.
+	if v.Attempts != 2 {
+		t.Errorf("attempts %d want 2 (slot 0: cap raise + its transport retry; slot 1: success)", v.Attempts)
 	}
+	if !v.CapRaised {
+		t.Error("the verdict must record that a cap raise was in flight")
+	}
+}
+
+// TestCapRaiseSurvivesExhaustedTransientBudget is the #159 poison ordering: four transient
+// failures consume the whole attempt budget, and THEN the cap 400 arrives. The raised
+// request must still be sent — a deterministic transport fix is never eaten by the
+// transient budget.
+func TestCapRaiseSurvivesExhaustedTransientBudget(t *testing.T) {
+	var sleeps []time.Duration
+	j, err := New(&lateCapDoer{}, Keys{Anthropic: "sk-ant-test", OpenAI: "sk-test"}, URLs{}, func() string { return "0123456789abcdef" }, testClock(&sleeps))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := j.Call(context.Background(), Request{Kind: KindAdjudicate, Model: "gpt-5.2", Effort: "medium", Input: fixedInputs[KindAdjudicate]})
+	if err != nil {
+		t.Fatalf("must recover: %v", err)
+	}
+	if !lateCapDoerRaised {
+		t.Fatal("the 4x-raised request must be sent even when transients exhausted the budget")
+	}
+	if !v.CapRaised {
+		t.Error("the verdict must record the cap raise")
+	}
+}
+
+// lateCapDoer: four 500s (the transient budget), then the cap 400, then success. The flag
+// records whether the fifth call — the raised one — ever arrives.
+var lateCapDoerRaised bool
+
+type lateCapDoer struct{ i int }
+
+func (c *lateCapDoer) Do(*http.Request) (*http.Response, error) {
+	c.i++
+	switch c.i {
+	case 1, 2, 3, 4:
+		return &http.Response{StatusCode: 500, Body: io.NopCloser(strings.NewReader("boom")), Header: http.Header{}}, nil
+	case 5:
+		return &http.Response{StatusCode: 400, Body: io.NopCloser(strings.NewReader(lunarouteCap)), Header: http.Header{}}, nil
+	default:
+		lateCapDoerRaised = true
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(oaiOK)), Header: http.Header{}}, nil
+	}
+}
+
+// TestCapRaiseLegacyThinkingEndToEnd drives a legacy-thinking Anthropic model
+// (claude-sonnet-4-5 at high effort — the path that writes maxTok+budget into max_tokens)
+// through prepare → withBody → Call into a cap 400, and asserts the RETRIED request
+// carries 4× the EFFECTIVE cap — not the kind's base cap. A refactor of withBody's cap
+// read (reading maxTok instead of the body value) would make the raised request smaller
+// than 4× the effective cap and this test fails.
+func TestCapRaiseLegacyThinkingEndToEnd(t *testing.T) {
+	var bodies []map[string]any
+	d := &captureDoer{next: func(i int) *http.Response {
+		if i == 0 {
+			return &http.Response{StatusCode: 400, Body: io.NopCloser(strings.NewReader(genericCap)), Header: http.Header{}}
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(anthOK)), Header: http.Header{}}
+	}, bodies: &bodies}
+	j, err := New(d, Keys{Anthropic: "sk-ant-test", OpenAI: "sk-test"}, URLs{}, func() string { return "0123456789abcdef" }, testClock(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := j.Call(context.Background(), Request{Kind: KindAdjudicate, Model: "claude-sonnet-4-5", Effort: "high", Input: fixedInputs[KindAdjudicate]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.CapRaised || len(bodies) != 2 {
+		t.Fatalf("raised=%v bodies=%d", v.CapRaised, len(bodies))
+	}
+	base, ok := bodies[0]["max_tokens"].(float64)
+	if !ok || base != float64(MaxTokensAdjudicate+8192) {
+		t.Fatalf("first request effective cap %v want %d", bodies[0]["max_tokens"], MaxTokensAdjudicate+8192)
+	}
+	raised, ok := bodies[1]["max_tokens"].(float64)
+	if !ok || raised != 4*base {
+		t.Fatalf("raised cap %v want 4x effective (%v)", bodies[1]["max_tokens"], 4*base)
+	}
+}
+
+type captureDoer struct {
+	i      int
+	next   func(int) *http.Response
+	bodies *[]map[string]any
+}
+
+func (c *captureDoer) Do(r *http.Request) (*http.Response, error) {
+	b, _ := io.ReadAll(r.Body)
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	*c.bodies = append(*c.bodies, m)
+	c.i++
+	return c.next(c.i - 1), nil
 }
