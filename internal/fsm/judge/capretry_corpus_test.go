@@ -397,21 +397,31 @@ func TestCapRaiseGetsRaisedWallClock(t *testing.T) {
 	if !v.CapRaised || v.Attempts != 1 {
 		t.Fatalf("expected one raised attempt, got attempts=%d capRaised=%v", v.Attempts, v.CapRaised)
 	}
-	// control: the same slow reply without a raise (plain 200 both times, second slow) still
-	// dies at the base per-attempt deadline — proving the raise is what bought the time.
+	// control: the same slow reply on EVERY attempt (no cap raise — plain 200s) dies at the
+	// base per-attempt deadline and exhausts the retry budget — proving the raise is what
+	// bought the time. Every request index is delayed so exhaustion is deterministic
+	// regardless of how the retry ladder advances (a deadline expiry is classified backoff
+	// and retried; it must never succeed, so the call ends in the transport error).
 	inner2 := &fakeDoer{steps: []step{
 		{200, oaiOK, nil},
 	}}
-	d2 := &delayedDoer{inner: inner2, delayOn: map[int]time.Duration{0: 3 * base}}
+	every := map[int]time.Duration{}
+	for i := 0; i < 16; i++ {
+		every[i] = 3 * base
+	}
+	d2 := &delayedDoer{inner: inner2, delayOn: every}
 	var sleeps2 []time.Duration
 	j2, err1 := New(d2, Keys{Anthropic: "sk-ant-test", OpenAI: "sk-test"}, URLs{}, func() string { return "0123456789abcdef" }, testClock(&sleeps2))
 	if err1 != nil {
 		t.Fatal(err1)
 	}
 	j2 = WithTimeout(j2, base)
-	_, err2 := j2.Call(ctx, Request{Kind: KindAdjudicate, Model: "gpt-5.2", Effort: "medium", Input: fixedInputs[KindAdjudicate]})
+	v2, err2 := j2.Call(ctx, Request{Kind: KindAdjudicate, Model: "gpt-5.2", Effort: "medium", Input: fixedInputs[KindAdjudicate]})
 	if err2 == nil {
 		t.Fatal("control: slow un-raised request should have died at the base deadline")
+	}
+	if v2.Attempts != MaxAttempts {
+		t.Fatalf("control: expected the full retry budget exhausted, attempts=%d", v2.Attempts)
 	}
 }
 
