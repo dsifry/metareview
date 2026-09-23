@@ -1,6 +1,6 @@
 # Change-driven mutation testing + attested evidence freshness — design
 
-Status: r16 — final review pending (§11 amendment from the adoption contract, revised after r15 review `mrv-20260923-204202233770000-…`; blocking only on major or critical findings). r14 was approved by final review `mrv-20260923-201040808900000-…` (10/10 PASS). Review history: full artifact reviews r1
+Status: r17 — verification pending (§11 amendment from the adoption contract, revised after reviews r15 `mrv-20260923-204202233770000-…` and r16 `mrv-20260923-204712580916000-…`; blocking only on major or critical findings). r14 was approved by final review `mrv-20260923-201040808900000-…` (10/10 PASS). Review history: full artifact reviews r1
 `mrv-20260923-182025208234000-…`, r2 `mrv-20260923-183942601569000-…`, r3
 `mrv-20260923-185110177502000-…`; targeted review r4 `mrv-20260923-190310858720000-…`; verification
 of r5; full pragmatic reviews r6 `mrv-20260923-192628041933000-…`, r7
@@ -864,7 +864,7 @@ rewritten to `.`.
     worth its complexity). When main is below the threshold, PRs are red and the step summary
     says main is below it.
 
-## 11. Amendment (r15, revised r16; adoption contract)
+## 11. Amendment (r15, revised r16–r17; adoption contract)
 
 Source: `docs/superpowers/specs/2026-09-23-mutation-incremental-adoption-contract.md` (decisions
 K1–K9, user, 2026-09-23). This section is normative and overrides the sections it names; everything
@@ -878,12 +878,14 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
   configured. Environment: the harness's own environment plus `MUTATION_REPORT=<stateDir>/incremental.json`,
   `MUTATION_ATTESTATION=<stateDir>/attestation.json`, and per view `MUTATION_VIEW=<name>`,
   `MUTATION_VIEW_PATTERNS=<JSON array>` and `MUTATION_VIEW_FILES=<JSON array of the resolved
-  paths>` (all three unset without views).
+  paths>` (all three unset without views), and `MUTATION_RUN_KIND=pr|other` (`pr` with `--pr`).
 - The verifier reads the whole report; view scoping and waiver semantics are the project's (waivers
   are per mutant, so a mutant in several views is judged consistently). Kills covered by a deferral
-  still show their previous status in the report; a verifier enforcing a survivor bar must treat
-  them as unverified (the attestation's `deferrals` and `viewSummaries[view].pending`); the docs say
-  so.
+  still show their previous status in the report. The attestation marks each deferral
+  `"inherited": true|false` (§11.2) and splits `viewSummaries[view]` pending into `pendingCounted`
+  and `pendingInherited`. A verifier enforcing a survivor bar treats **counted** pending kills as
+  unverified on PR runs (`MUTATION_RUN_KIND=pr`) and ignores inherited ones, which main's `full`
+  job owns; on other runs pending never fails the verifier (decision 2). The docs say so.
 - Any verify failure is exit 1, the same class as a threshold break (state stays committed and is
   published): a non-zero exit, a command that cannot be spawned, or exceeding `timeoutMinutes`;
   stderr names each failing view and the reason. `thresholds.break` becomes optional; either check
@@ -907,10 +909,16 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
   forced-set budget is disabled, as in `strict`) and uses `--max-minutes <m>` in place of
   `maxMinutesPerInvocation`.
 - **Counted and inherited deferrals.** A deferral in the run's resulting attestation is
-  **inherited** only when an identical `{reason, paths}` appears in the attestation of one of the
-  run's `--also-state` directories (main's fetched `remote/inc` or `remote/full`; parsed, whether or
-  not usable). Every other deferral is **counted**, including deferrals carried from the PR's own
-  cached state. So a deferral a PR caused never turns into "inherited" on a re-run or a later push.
+  **inherited** only when (i) an identical `{reason, paths}` appears in the attestation of one of
+  the run's `--also-state` directories (main's fetched `remote/inc` or `remote/full`; parsed,
+  whether or not usable), **and** (ii) the run has not changed what the deferral is about: the path
+  or runtime key named in its reason, and every path in `paths` other than `*`, has the same digest
+  in this run's snapshot as in that attestation's `files`/`runtime` (reasons naming nothing, such as
+  `no usable state`, need only (i)). Every other deferral is **counted**, including deferrals
+  carried from the PR's own cached state. So a deferral a PR caused, or a PR that changes the same
+  lockfile main is still re-establishing, is never "inherited". Each run with `--also-state`
+  records the result as `"inherited": true|false` on every deferral in its attestation (`false` on
+  runs without `--also-state`).
   Inherited deferrals belong to main's `full` job; the step summary lists them as "inherited from
   main, cleared by main's full run".
 - **Cause.** On exit 0 or 1 only, `run` appends `pending_cause` to `GITHUB_OUTPUT`: `global` if any
@@ -930,7 +938,9 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
   `none` or `pendingOnPr` is `allow`.
 - **Sizing.** For `full`/`full-on-global` the PR job timeout must be ≥ setup + 2 × `<m>` + one full
   sweep (Keeper: roughly 240–350 min). The docs also warn that under `full` every PR that exceeds
-  `<m>` becomes a full sweep.
+  `<m>` becomes a full sweep; that under `full-on-global` a `time budget exceeded` failure repeats on
+  re-run until `<m>` is raised or the change is split; and that a PR rebased during main's pending
+  window may pay a full sweep (correct, but slower).
 - A local run never turns a PR green; no local state is imported into CI (contract option (b)
   rejected).
 
@@ -949,8 +959,8 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
   it has mutants). A bad map therefore also stops main's jobs; the PR job catches it first. Views
   may overlap; per-view counts are never summed.
 - **Attestation** gains `views` (the resolved map, byte-ordered) and `viewSummaries`
-  (`{name: {<Stryker status>: count, "pending": count}}`, `pending` = kills covered by a
-  deferral). `publish-state` never re-runs the views command.
+  (`{name: {<Stryker status>: count, "pendingCounted": count, "pendingInherited": count}}`, pending =
+  kills covered by a deferral, split by the deferral's `inherited` flag). `publish-state` never re-runs the views command.
 - **Gate `--mutation-view <name>`** (repeatable): the name must appear in the map of every supplied
   attested report that has `views`; otherwise exit 2. An unattested report, or an attested one
   without `views`, is not scoped: it produces its usual findings under the view's fingerprint. Each
@@ -959,10 +969,12 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
   (`mutation:stale:<mode>:<engine>:<view>:<cause>:<cause8>`, likewise for pending and unattested).
 - **Ledger with views (amends §6.5, and `openForRun` for these three prefixes):** a run with views
   counts as open, and may supersede, only rows whose view is in its `--mutation-view` set; a run
-  without views counts and supersedes all rows of these prefixes, viewed or not. On any run that
-  supplies a report of the same engine, an `open` or `override-pending` row whose view is absent
-  from every supplied attested report's current map becomes `superseded` (a renamed or removed view
-  never strands a blocker). `overridden` rows are left as in §6.5. An override on one view's
+  without views counts and supersedes all rows of these prefixes, viewed or not. On a run that
+  supplies at least one attested report of the same engine carrying `views`, an `open` or
+  `override-pending` row **from an earlier run**, whose fingerprint this run did not produce and
+  whose view is absent from the maps of all such reports, becomes `superseded` (a renamed or
+  removed view never strands a blocker). Runs supplying no report with `views` never apply this
+  sweep. `overridden` rows are left as in §6.5. An override on one view's
   fingerprint does not cover the same cause under another view (docs).
 
 ### 11.4 Edited files (K5; amends §5.4 steps 1 and 4, Normalise, §5.6 step 4, decision 12)
@@ -1046,13 +1058,16 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
   `verify` failing for one view (exit 1, view named) and not run on a cold run; PRs under
   `full-on-global` with a lockfile edit (shortcut, full run), with a time-budget deferral (job
   fails, cause named; re-run with no change fails again), with inherited deferrals only (no
-  failure, summary lists them), and on a cold baseline after a `stateVersion` bump (cause
+  failure, summary lists them; a strict survivor-bar verifier still exits 0), with a lockfile edit
+  while main's `inc` carries a lockfile deferral (counted, cause `global`, full run), and on a cold baseline after a `stateVersion` bump (cause
   `global`, full run); a PR under `full` whose follow-up full run succeeds (cache saved, next push
   no full sweep); the gate's `--mutation-view` scoping, per-view fingerprints, cross-view isolation,
-  a renamed view superseding its rows, and an unattested report under a view.
+  a renamed view superseding its rows (and a run with no `views`-carrying report
+  superseding nothing), and an unattested report under a view keeping its blocker.
 - §7.2 Node tests: the line diff (shared vectors), EOL/BOM normalisation, old→new mapping, pure
   insertions and deletions, `T_H`, the scope placement of Y, the 1 MiB fallback; counted vs
-  inherited deferrals and `pending_cause` (only on exit 0/1); the shortcut; `--pr`/`--max-minutes`;
+  inherited deferrals incl. the digest condition and the recorded `inherited` flag, and
+  `pending_cause` (only on exit 0/1); `pendingCounted`/`pendingInherited`; `MUTATION_RUN_KIND`; the shortcut; `--pr`/`--max-minutes`;
   config validation (`allowBail` with `residual`, missing `disableBail`, `residual off` with
   `full-on-global`); views shape, names and completeness; `viewSummaries`; `verify` environment,
   per-view invocation, spawn failure and timeout (exit 1); `stateVersion` and its golden-output
@@ -1070,5 +1085,5 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
 18. No local state is imported into CI.
 19. A demanding consumer's adoption is gated by the adoption spec's viability measurement
     (contract §3; for Keeper, ≤ 20% projected pending PR runs in `residual` mode).
-20. Only deferrals found in main's published state are inherited; everything else a PR run carries
-    counts toward its outcome.
+20. Only deferrals found in main's published state, about inputs the run has not changed, are
+    inherited; everything else a PR run carries counts toward its outcome.
