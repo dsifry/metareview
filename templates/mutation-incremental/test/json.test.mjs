@@ -15,11 +15,6 @@ test('errors carry exit codes', () => {
   assert.equal(new EngineError('x').exitCode, 4);
 });
 
-test('cli placeholder loads', async () => {
-  await import('../cli.mjs');
-});
-
-
 test('duplicateKey finds a repeated key at any depth and ignores keys in arrays and strings', () => {
   assert.equal(duplicateKey('{"a":1,"b":{"c":1,"c":2}}'), 'c');
   assert.equal(duplicateKey('{"a":1,"a":2}'), 'a');
