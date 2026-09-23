@@ -153,8 +153,12 @@ numbers. Fallback levers, in order: `residual`; a larger `maxMinutesPerInvocatio
 
 Decided 2026-09-23: K2 (`allow|full|full-on-global`), K3 (one state + views, five
 requirements), K5 (`editedFiles`, default `residual`, six conditions), §3 (≤ 20%).
-Open: how a `full-on-global` PR that fails on a non-global deferral turns green (K2, option (a)
-recommended).
+K2 gap settled (user, 2026-09-23): option (a), option (b) rejected (no local state imported into CI).
+Under `full`/`full-on-global` the PR run is unbudgeted (scoped to the deferred closure, not whole
+files), bounded by the job timeout and failing with a named reason when it does not fit, and still
+attested; only this run's deferrals count, inherited ones belong to main's full run. K3 additions:
+the attestation records the resolved view map; views are read-time only; `verify` reads the whole
+report per view, with per-mutant waivers. All of this is specified in the design's §11 (r15).
 
 ## 5. Unchanged by this contract
 
