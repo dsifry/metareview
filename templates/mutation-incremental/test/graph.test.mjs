@@ -123,3 +123,18 @@ test('files over 1 MiB, symlinks and non-source files are not parsed', () => {
   const g = buildGraph(snap.files, cfg);
   assert.equal([...(g.reverse.get('src/a.ts') ?? [])].includes('src/big.ts'), false);
 });
+
+test('an alias key that prefixes a scoped package name does not hide the installed package', () => {
+  // A Vite-style "@" alias: "@/a" is the alias, "@testing-library/react" is still a package.
+  const r = graphRepo({ aliases: { '@': 'src' } });
+  mkdirSync(join(r.top, 'node_modules/@testing-library/react'), { recursive: true });
+  r.write('tests/r.test.ts', "import { render } from '@testing-library/react';\nimport { a } from '@/a';\nimport z from '@/nope';");
+  const cfg = loadConfig(r.top);
+  const snap = takeSnapshot(cfg);
+  const g = buildGraph(snap.files, cfg);
+  assert.deepEqual(openImporters(g), [
+    { path: 'tests/c.test.ts', specifiers: ['@app/c'] },
+    { path: 'tests/r.test.ts', specifiers: ['@/nope'] },
+  ]);
+  assert.ok(importerTests(g, snap.files, 'src/a.ts').has('tests/r.test.ts'));
+});

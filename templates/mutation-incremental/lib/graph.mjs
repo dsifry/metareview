@@ -46,7 +46,8 @@ function isInstalledPackage(spec, fromFile, top) {
 
 function classify(spec, fromFile, ctx) {
   let base = null;
-  if (spec.startsWith('./') || spec.startsWith('../')) {
+  const relative = spec.startsWith('./') || spec.startsWith('../');
+  if (relative) {
     base = posix.normalize(posix.join(posix.dirname(fromFile), spec));
   } else {
     const key = Object.keys(ctx.aliases).filter((k) => spec.startsWith(k)).sort((a, b) => b.length - a.length)[0];
@@ -56,7 +57,10 @@ function classify(spec, fromFile, ctx) {
     // Spec §5.4: a relative or alias specifier that reaches no regular file in the snapshot (outside
     // the repo, gitignored or generated, excluded) is unresolved, so its file is an open importer.
     const to = base.startsWith('../') ? null : resolveFile(base, ctx.files);
-    return to ? { edge: to } : { unresolved: true };
+    if (to) return { edge: to };
+    // An alias key can also prefix a package name ("@" and "@testing-library/react"); an alias
+    // specifier that reaches no file is still a package when one is installed under that name.
+    if (relative) return { unresolved: true };
   }
   if (spec.startsWith('node:') || builtinModules.includes(spec.split('/')[0])) return {};
   return isInstalledPackage(spec, fromFile, ctx.top) ? {} : { unresolved: true };

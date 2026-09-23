@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../lib/config.mjs';
 import { takeSnapshot, digestOf, sha256 } from '../lib/snapshot.mjs';
@@ -71,4 +71,16 @@ test('indexReport flattens mutants and test ids', () => {
   assert.deepEqual(idx.testIds, { 'tests/a.test.ts': ['0', '1'], 'tests/b.test.ts': [] });
   assert.deepEqual(indexReport({}), { mutants: [], testIds: {} });
   assert.deepEqual(indexReport({ files: { 'x.ts': {} } }).mutants, []);
+});
+
+test('the config digest ignores the inline views map and tracks every other key', () => {
+  // Spec K3.4, §11.3: assigning a new file to a view invalidates no kill, so it is no global change.
+  const r = makeRepo({ config: { views: { inline: { core: ['src/**'] } } } });
+  const cfg = JSON.parse(readFileSync(join(r.top, 'mutation-incremental.json'), 'utf8'));
+  const digest = () => takeSnapshot(loadConfig(r.top)).files['mutation-incremental.json'].digest;
+  const before = digest();
+  r.write('mutation-incremental.json', JSON.stringify({ ...cfg, views: { inline: { core: ['src/**'], ui: ['src/new.ts'] } } }, null, 2));
+  assert.equal(digest(), before);
+  r.write('mutation-incremental.json', JSON.stringify({ ...cfg, budget: { ...cfg.budget, maxForcedShare: 0.5 } }));
+  assert.notEqual(digest(), before);
 });

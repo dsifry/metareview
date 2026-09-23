@@ -46,6 +46,8 @@
 - **Unresolvable relative or alias specifiers make the file an open importer** (spec §5.4: anything that neither resolves nor is a package is unresolved).
 - **Duplicate JSON keys.** The spec requires exit 2 on a duplicate view name. `JSON.parse` silently keeps the last duplicate, so `json.mjs` adds a small scanner, `duplicateKey(text)`. It runs on the harness config, the Stryker config, the core `package.json` and the views command's output.
 - **Views command timeout** (review advisory). The command runs with a 60 s timeout. A timeout is exit 2, like any other views command failure.
+- **The config digest ignores `views`** (final review). Spec §4 makes the config file always global. K3.4 and §11.3 say a view-map change invalidates no kill. The specific rules win: the snapshot digests the config as canonical JSON with `views` removed. Plan 2's gate must use the same digest whenever it compares config digests.
+- **An alias key that prefixes a package name** (final review), for example `"@": "src"` together with `@testing-library/react`. An alias specifier that reaches no file falls through to the builtin/package check before it counts as unresolved.
 - **Reason → named-key table** (review advisory). The table in `lib/deferrals.mjs` is the single source for §11.2 (ii), and an unknown reason is exit 2.
 
 ---

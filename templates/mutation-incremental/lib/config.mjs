@@ -127,6 +127,7 @@ export function loadConfig(top, configArg) {
   return {
     top,
     configPath,
+    configRel,
     stateDir,
     stateDirRaw: raw.stateDir,
     stateRel,

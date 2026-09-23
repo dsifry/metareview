@@ -4,6 +4,7 @@ import { lstatSync, readFileSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { categorize, matchList } from './glob.mjs';
 import { UsageError } from './errors.mjs';
+import { canonicalJSON } from './json.mjs';
 
 export const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 
@@ -52,6 +53,14 @@ function defaultRunCommand(argv, cwd) {
   }
 }
 
+// Spec K3.4, §11.3: the view map invalidates no kill, so the always-global config file is digested
+// without it (canonical JSON, so formatting-only edits are no change either).
+function configDigest(absPath) {
+  const raw = JSON.parse(readFileSync(absPath, 'utf8'));
+  delete raw.views;
+  return `sha256:${sha256(canonicalJSON(raw))}`;
+}
+
 export function takeSnapshot(config, { runCommand = defaultRunCommand } = {}) {
   const { paths, tracked } = listRepoPaths(config.top);
   const files = {};
@@ -59,7 +68,7 @@ export function takeSnapshot(config, { runCommand = defaultRunCommand } = {}) {
     if (matchList(path, config.exclusions)) continue;
     const category = categorize(path, config.lists);
     if (category === 'ignore') continue;
-    const digest = digestOf(join(config.top, path));
+    const digest = path === config.configRel ? configDigest(config.configPath) : digestOf(join(config.top, path));
     if (digest === null) continue;
     files[path] = { digest, category, tracked: tracked.has(path) };
   }
