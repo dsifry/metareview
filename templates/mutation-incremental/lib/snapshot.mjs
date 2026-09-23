@@ -61,6 +61,10 @@ function configDigest(absPath) {
   return `sha256:${sha256(canonicalJSON(raw))}`;
 }
 
+// The digest a snapshot records for one path: the config file without its views (spec K3.4),
+// anything else by content or link text.
+export const fileDigest = (config, path) => (path === config.configRel ? configDigest(config.configPath) : digestOf(join(config.top, path)));
+
 export function takeSnapshot(config, { runCommand = defaultRunCommand } = {}) {
   const { paths, tracked } = listRepoPaths(config.top);
   const files = {};
@@ -68,7 +72,7 @@ export function takeSnapshot(config, { runCommand = defaultRunCommand } = {}) {
     if (matchList(path, config.exclusions)) continue;
     const category = categorize(path, config.lists);
     if (category === 'ignore') continue;
-    const digest = path === config.configRel ? configDigest(config.configPath) : digestOf(join(config.top, path));
+    const digest = fileDigest(config, path);
     if (digest === null) continue;
     files[path] = { digest, category, tracked: tracked.has(path) };
   }
