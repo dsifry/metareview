@@ -31,3 +31,9 @@ docs/metareview/.FINDINGS.md.tmp-*
 .beads/
 .agents/
 .codex/
+
+# local e2e runs of templates/mutation-incremental (tests/e2e-mutation-incremental.sh)
+.e2e/
+
+# superpowers plan-execution workspaces (ledgers, briefs)
+.superpowers/
