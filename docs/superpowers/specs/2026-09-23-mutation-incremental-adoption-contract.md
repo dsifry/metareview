@@ -46,7 +46,7 @@ unverified mutants merging. *Decided (user, 2026-09-23; spec change):* config
 `pendingOnPr: "allow" | "full" | "full-on-global"` (default `allow`, decision 2 unchanged for
 everyone else):
 - `full`: a PR run that ends pending runs `run --mode full` in the PR job.
-- `full-on-global`: pending caused by a `global` or runtime input (the whole tree must be
+- *(Superseded by §7 and design §11.2: a timeout or budget cause routes to the sweep; only `no reachable tests` fails.)* `full-on-global`: pending caused by a `global` or runtime input (the whole tree must be
   re-established anyway) runs the full sweep; pending from any other cause (budget, time budget,
   support with no importer, no reachable tests) fails the PR (exit 1) with the deferral causes in
   the step summary. This is Keeper's setting: the common hot-file case should not cost 3.5 h.
