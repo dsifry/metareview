@@ -1,6 +1,6 @@
 # Change-driven mutation testing + attested evidence freshness — design
 
-Status: r13 — pending re-review. Review history: full artifact reviews r1
+Status: r14 — final review pending (user, 2026-09-23: converged; one final review, blocking only on major or critical findings). Review history: full artifact reviews r1
 `mrv-20260923-182025208234000-…`, r2 `mrv-20260923-183942601569000-…`, r3
 `mrv-20260923-185110177502000-…`; targeted review r4 `mrv-20260923-190310858720000-…`; verification
 of r5; full pragmatic reviews r6 `mrv-20260923-192628041933000-…`, r7
@@ -11,7 +11,9 @@ baseline, the full job's skip rule and `fetch-state` credentials) and r10
 user then chose the absolute threshold for PRs, decision 15) and r11
 `mrv-20260923-200028555622000-…` (9 PASS, 1 NEEDS_REVISION on the PR summary step's cold-run
 case) and r12 `mrv-20260923-200340521908000-…` (9 PASS, 1 NEEDS_REVISION on testing which exit
-code fails the `full` job; fixed here). The user decisions are in §10. Origin:
+code fails the `full` job) and r13 `mrv-20260923-200638249049000-…` (8 PASS, 2 NEEDS_REVISION
+converging on one ledger blocker: a stale-only escalation could not be lifted once its rows were
+superseded; fixed here). The user decisions are in §10. Origin:
 `docs/0.13.0-candidates.md` §1.
 
 Review stance (user instruction): handle real workflows and real edge cases; do not engineer for
@@ -423,8 +425,9 @@ setup insertion point, then the steps below:
      `pending_full=true` and labelled "previous state (this run committed nothing)" when `exit_code`
      ∉ {0, 1}; and main's score from the first of `<stateDir>/remote/inc`, `remote/full` whose
      report matches its `reportSha256` (none ⇒ "main state unavailable"), so a PR that is red only
-     because main is already below the threshold says so. An empty `exit_code`
-     prints "run step did not execute (see earlier step)"; a missing attestation otherwise (a cold
+     because main is already below the threshold says so (labelled "includes pending kills" when that
+     attestation has deferrals). An empty `exit_code` prints only "run step did not execute or did
+     not finish (see earlier step)"; a missing attestation otherwise (a cold
      first run, which exits 0, or exit 2) prints `no usable state`. A green job is never mistaken for
      fully verified work;
   6. fail the job when `exit_code` is empty or ≠ 0.
@@ -451,7 +454,8 @@ setup insertion point, then the steps below:
   4. when the full run's `exit_code` ∈ {0, 1}: save the cache (key `mutation-main-${{ github.sha
      }}-${{ github.run_id }}-${{ github.run_attempt }}-full`, distinct from `incremental-main`'s
      key in the same workflow run), then `publish-state --kind full`;
-  5. fail the job when `final_exit` is empty or ≠ 0, where `final_exit` is the full run's
+  5. (a shell step, not an expression) fail the job when `final_exit` is empty or ≠ 0, where
+     `final_exit` is the full run's
      `exit_code` when the full-run step ran and the catch-up's otherwise (a threshold break is red,
      but its state is published, so the full run is not repeated on every push). Publish steps are
      never `continue-on-error`.
@@ -559,7 +563,10 @@ mode.
   this requires: the existing fix branch skips these prefixes under both of its conditions
   (`--previous-run` and escalation reset); `activeExisting` excludes `superseded` rows of these
   prefixes, so a recurring fingerprint opens a new `open` row; `overrideLines` renders the override
-  request/grant of superseded rows, tagged `[superseded]`.
+  request/grant of superseded rows, tagged `[superseded]`; `RequestOverride` and `GrantOverride`
+  accept a `superseded` row of these prefixes when the request carries an escalation, exactly as
+  they already accept a `fixed` one (`fixedWithEscalation`, `internal/findings/override.go`), so a
+  stale-only escalation (§6.8) can still be lifted after the evidence is refreshed.
 
 The score summary excludes stale, pending, unbound and unattested kills and counts them; metareview
 applies no score threshold, so this changes no verdict by itself.
@@ -732,7 +739,10 @@ rewritten to `.`.
   `fetch-state` and `publish-state` steps; checkout and setup precede `fetch-state` in every job;
   the step summary is `if: always()`; the full job runs the catch-up before `run --mode full`, saves
   and publishes a green catch-up, and saves the cache before publishing; every saved cache key is
-  distinct; cache saves require the attestation; the `full` job's fail step reads the full-run
+  distinct; cache saves require the attestation; the catch-up's publish step requires `pending_full == 'false'`;
+  no job-level `github.token` env; `N` in cache keys is `github.event.pull_request.number`; the
+  `full` job's fail step (a shell step, with a fake-exit test: catch-up 0 with `pending_full=true`,
+  full run 1 ⇒ red) reads the full-run
   step's `exit_code` when that step ran and the catch-up's otherwise; publish steps are not
   `continue-on-error`; `incremental-main`'s summary omits main's score;
   identical cache path lists; `continue-on-error`; outputs; `!cancelled()`; restore-key order;
@@ -748,7 +758,8 @@ rewritten to `.`.
   gate and severity; gremlins no finding; `Reconcile` supersedes absent `mutation:*` rows of the same
   scope, target and engine only on runs with reports (a gremlins-only run leaves stryker rows), never on a run without reports, never on an `overridden` row (override granted → runs with and
   without reports: the override still holds, and a stale-only escalation lifted by it stays
-  lifted), skips the fix branch under
+  lifted; stale-only escalation → re-run with fresh reports supersedes the rows → override request
+  and grant with `--escalation` → the escalation is lifted), skips the fix branch under
   both conditions, reopens a recurring fingerprint, and renders superseded override lines; log
   section keyed by (file, cause); digest behaviour; escalation bounds (stale + non-stale blocker
   still escalates at `maxAttempts`); learning filter. Classification tests use the committed real
@@ -808,7 +819,14 @@ rewritten to `.`.
   score); add the external-trial follow-up (≤ 2 min p50 and the share of PR runs ending pending) and
   the survivor-severity follow-up (§3).
 - `CHANGELOG.md`; `docs/ARCHITECTURE.md` (mutation freshness in the review model).
-- `docs/mutation-harness.md` also covers: upgrading the harness (re-copy the template; the upgrade
+- `docs/mutation-harness.md` also covers: tests must not print environment or config values
+  (summaries and logs are public); a red `incremental-main` on a global change triggers no full run
+  for that commit (re-run it); repeated red `full` jobs (timeout or exit 4) never clear on their
+  own; a PR whose own budget or time-budget deferral re-runs its delta from main on each push; a
+  local `run --mode full` clears a PR's pending kills; the gate marks every kill stale after a
+  zero-mutant `mutate` edit until the harness re-runs; superseded override requests disappear from
+  `override list --pending`, and old grants on pending/unattested fingerprints accumulate under
+  "Process Overrides"; private repositories without fork Actions run no PR job for forks; upgrading the harness (re-copy the template; the upgrade
   PR runs cold and green-pending; main pays one full run); that `mutation-state/full` means "main's
   latest state without deferrals" and may carry `mode: incremental` with an older `lastFullAt`;
   that a `full` job hitting its timeout will not clear on its own (raise the timeout or narrow
