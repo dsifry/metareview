@@ -1,6 +1,6 @@
 # Change-driven mutation testing + attested evidence freshness — design
 
-Status: r14 — final review pending (user, 2026-09-23: converged; one final review, blocking only on major or critical findings). Review history: full artifact reviews r1
+Status: r14 — APPROVED for planning. Final review `mrv-20260923-201040808900000-…`: 10/10 PASS, blocking only on major or critical findings (user, 2026-09-23). Review history: full artifact reviews r1
 `mrv-20260923-182025208234000-…`, r2 `mrv-20260923-183942601569000-…`, r3
 `mrv-20260923-185110177502000-…`; targeted review r4 `mrv-20260923-190310858720000-…`; verification
 of r5; full pragmatic reviews r6 `mrv-20260923-192628041933000-…`, r7
