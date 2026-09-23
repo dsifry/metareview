@@ -30,14 +30,19 @@
 
 1. **Installed packages are not open importers.** `vitest`, `node:assert` and any installed dependency must never make a file an open importer, or every helper edit defers everything. Task 4, test `installed packages and builtins are not open importers`.
 2. **Deleting or `git mv`-renaming a covered source file with its test must not exit 2.** Deleted paths are dropped from scope and forced. Task 7, tests `delete b.ts and b.test.ts together` and `git mv c.ts to d.ts`.
-3. **Residual mode keeps the edited file whole in the unforced scope.** Only the coverage closure is forced, as ranges mapped to current lines, so mutants spanning the edit are rebuilt by Stryker and unchanged-region kills of the same file that the changed hunk's tests kill are forced. Task 7, tests `residual: a.ts line 3`, `residual: e.ts closure is narrower than the file` and `residual: inserted line shifts mapped ranges`.
+3. **Residual mode never re-attests a stale kill of the edited file.** The file stays whole in the unforced scope; the changed lines and every mutant with a boundary on a changed line are forced (budget-exempt); the coverage closure is forced as mapped ranges. Task 7, tests `residual: a.ts line 3`, `residual: a block mutant opening on an edited line is forced`, `residual: a block mutant closing on an edited line is forced`, `residual: e.ts closure is narrower than the file` and `residual: inserted line shifts mapped ranges`.
 4. **A lockfile edit during main's pending window counts against the PR.** An identical deferral in main's state is inherited only while the named inputs have the same digests. Task 8, test `classify: identical deferral with a changed digest is counted`.
 5. **A new `mutate` file that no view covers exits 2 at plan time** (the Keeper operational rule). Task 8, test `resolveViews: a mutate file in no view is exit 2`.
 
 ## Plan decisions beyond the spec text (flagged for review)
 
 - **Diff cap.** `MAX_EDIT_DISTANCE = 2000`. Above that, `lineDiff` returns `null`, and `computePlan` treats the file exactly like the > 1 MiB fallback: it is forced whole-file and its importer tests are added (K4). This bounds memory, since Myers traces grow with D². Plan 2's Go diff uses the same constant, and a capped diff there is a blanket cause, like a zero-mutant file (gate plan review note).
-- **Changed lines are forced in `residual` mode (plan review finding).** Stryker decides reuse at character level. A mutant on an edited line whose own columns did not change would be reused without re-running. So for a residual-edited file, the new-side line ranges of its changed hunks are forced as well. They are mandatory and budget-exempt, as contract K5.1 requires, and are never dropped by the budget.
+- **Changed lines and boundary mutants are forced in `residual` mode (plan review findings, checked against StrykerJS source).** Stryker decides reuse at character level: a mutant is reused when no text inside its own span changed. A `--mutate file:a-b` range creates only mutants wholly inside it. So a mutant on an edited line whose own columns did not change is not re-run by the unforced scope. The same holds for a multi-line mutant that starts after the edited characters on its first line or ends before them on its last line (a block opening on an edited `if (…) {` line). For a residual-edited file, the harness therefore forces:
+  - the new-side lines of every changed hunk;
+  - every mutant of the file that intersects a changed hunk without strictly spanning it, over its span mapped to current lines. An endpoint on a changed line takes the hunk's new-side start or end.
+
+  Both are mandatory and budget-exempt, as contract K5.1 requires, and are never dropped by the budget. Mutants that strictly enclose a hunk (and mutants containing a pure insertion) are re-run by the scope, because their text changed.
+- **Unexpected internal errors exit 4** (plan review finding). `main` maps any error that is not a `UsageError` to exit 4 with its message. For `run` in Plan 1b, exit 1 means "ok, state committed", so an internal crash must never produce Node's default 1.
 - **Unresolvable relative or alias specifiers make the file an open importer** (spec §5.4: anything that neither resolves nor is a package is unresolved).
 - **Duplicate JSON keys.** The spec requires exit 2 on a duplicate view name. `JSON.parse` silently keeps the last duplicate, so `json.mjs` adds a small scanner, `duplicateKey(text)`. It runs on the harness config, the Stryker config, the core `package.json` and the views command's output.
 - **Views command timeout** (review advisory). The command runs with a 60 s timeout. A timeout is exit 2, like any other views command failure.
@@ -1161,7 +1166,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../lib/config.mjs';
 import { takeSnapshot } from '../lib/snapshot.mjs';
@@ -1216,6 +1222,17 @@ test('installed packages and builtins are not open importers', () => {
   assert.deepEqual([...importerTests(g, snap.files, 'src/c.ts')], ['tests/c.test.ts']);
   assert.deepEqual([...importerTests(g, snap.files, 'tests/data.json')], ['tests/c.test.ts']);
   assert.deepEqual([...reachesFrom(g, 'tests/b.test.ts')].sort(), ['src/a.ts', 'src/b.ts', 'tests/b.test.ts', 'tests/helpers/make.ts']);
+});
+
+test('an npm link to a directory outside node_modules makes an open importer', () => {
+  const r = graphRepo();
+  const linked = mkdtempSync(join(tmpdir(), 'mi-linked-'));
+  mkdirSync(join(r.top, 'node_modules/@org'), { recursive: true });
+  symlinkSync(linked, join(r.top, 'node_modules/@org/linked'));
+  r.write('src/l.ts', "import x from '@org/linked';");
+  const cfg = loadConfig(r.top);
+  const snap = takeSnapshot(cfg);
+  assert.deepEqual(openImporters(buildGraph(snap.files, cfg)), [{ path: 'src/l.ts', specifiers: ['@org/linked'] }]);
 });
 
 test('workspace links into the repo and unknown bare specifiers make open importers', () => {
@@ -1286,7 +1303,7 @@ Expected: FAIL — missing module.
 ```js
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { builtinModules } from 'node:module';
-import { dirname, isAbsolute, join, posix, relative } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 
 export const SOURCE_EXTS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
 const TS_EXTS = ['.ts', '.tsx', '.mts', '.cts'];
@@ -1316,18 +1333,15 @@ function resolveFile(base, files) {
   return candidates.find((c) => files[c]?.digest.startsWith('sha256:')) ?? null;
 }
 
-// A bare specifier is a package when node_modules holds it outside the repo's own sources
-// (npm/pnpm installs live under node_modules; workspace links resolve into the repo).
+// Spec §5.4: a bare specifier is a package when node_modules holds it and its realpath still has a
+// node_modules segment (npm, pnpm, yarn node-modules). Workspace links into the repo's own sources,
+// and `npm link` targets elsewhere, are unresolved, so the importing file is an open importer.
 function isInstalledPackage(spec, fromFile, top) {
   const name = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
   let dir = dirname(join(top, fromFile));
   for (;;) {
     const candidate = join(dir, 'node_modules', name);
-    if (existsSync(candidate)) {
-      const rel = relative(realpathSync(top), realpathSync(candidate));
-      const inRepo = !rel.startsWith('..') && !isAbsolute(rel);
-      return !inRepo || rel.split(/[\\/]/).includes('node_modules');
-    }
+    if (existsSync(candidate)) return realpathSync(candidate).split(/[\\/]/).includes('node_modules');
     if (dir === top) return false;
     dir = dirname(dir);
   }
@@ -1422,7 +1436,7 @@ export function openImporters(graph) {
 - [ ] **Step 4: Run to verify pass**
 
 Run: `MUTATION_ALLOW_TMP_STATE=1 node --test templates/mutation-incremental/test/graph.test.mjs`
-Expected: PASS (7 tests).
+Expected: PASS (8 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -2029,12 +2043,34 @@ test('whole: behaviour-preserving edit on a.ts line 3 forces the file and the re
   const p = plan({ edit: { 'src/a.ts': A3 } });
   assert.deepEqual([p.scope, p.forced, p.deferrals, p.pendingFull], [[], ['src/a.ts', 'src/b.ts:4-4'], [], false]);
   assert.deepEqual([p.invocation1, p.invocation2], [[], ['src/a.ts', 'src/b.ts:4-4']]);
+  assert.equal(p.baseline, '.mutation');
   assert.equal(p.forcedCount, 1);
 });
 
 test('residual: a.ts line 3 keeps the file in scope, forces the changed line and the mapped closure', () => {
   const p = plan({ edit: { 'src/a.ts': A3 }, config: residual });
   // a2 (line 2, closure) and the changed line 3 merge; forcedCount counts closure mutants only.
+  assert.deepEqual([p.scope, p.forced, p.forcedCount], [['src/a.ts'], ['src/a.ts:2-3', 'src/b.ts:4-4'], 2]);
+});
+
+test('residual: a block mutant opening on an edited line is forced', () => {
+  // a1 (lines 1–5) starts on the edited line 1: its own text may be unchanged, so it is forced.
+  const p = plan({ edit: { 'src/a.ts': A.replace('clamp(n, lo, hi)', 'clamp(n, lo, max)') }, config: residual });
+  assert.deepEqual([p.scope, p.forced, p.forcedCount], [['src/a.ts'], ['src/a.ts:1-5', 'src/b.ts:4-4'], 3]);
+});
+
+test('residual: a block mutant closing on an edited line is forced', () => {
+  const p = plan({ edit: { 'src/a.ts': A.replace('  return n;\n}\n', '  return n;\n};\n') }, config: residual });
+  assert.deepEqual([p.scope, p.forced], [['src/a.ts'], ['src/a.ts:1-5', 'src/b.ts:4-4']]);
+});
+
+test('residual: a line inserted inside a block is re-run by the scope, the rest is mapped', () => {
+  const p = plan({ edit: { 'src/a.ts': A.replace('  if (n > hi)', '  n = n;\n  if (n > hi)') }, config: residual });
+  assert.deepEqual([p.scope, p.forced], [['src/a.ts'], ['src/a.ts:2-4', 'src/b.ts:4-4']]);
+});
+
+test('residual: support forcing skips mutants on the changed hunk of a residual-edited file', () => {
+  const p = plan({ edit: { 'src/a.ts': A3, 'tests/helpers/make.ts': 'x' }, config: residual });
   assert.deepEqual([p.scope, p.forced, p.forcedCount], [['src/a.ts'], ['src/a.ts:2-3', 'src/b.ts:4-4'], 2]);
 });
 
@@ -2157,7 +2193,8 @@ test('cold plan', () => {
 });
 
 test('global, support and unclassified deferrals', () => {
-  assert.deepEqual(plan({ edit: { 'package-lock.json': 'x' } }).deferrals, [{ reason: 'global input changed: package-lock.json', paths: ['*'] }]);
+  const lock = plan({ edit: { 'package-lock.json': 'x' } });
+  assert.deepEqual([lock.deferrals, lock.pendingFull], [[{ reason: 'global input changed: package-lock.json', paths: ['*'] }], true]);
   assert.deepEqual(plan({ add: { 'tests/helpers/orphan.ts': { category: 'support' } } }).deferrals, [{ reason: 'support tests/helpers/orphan.ts has no resolvable importer', paths: ['*'] }]);
   assert.deepEqual(plan({ remove: ['tests/helpers/fmt.ts'] }).deferrals, [{ reason: 'support tests/helpers/fmt.ts deleted', paths: ['*'] }]);
   const orphan = plan({ add: { 'scripts/x.sh': { category: 'unclassified' } } });
@@ -2436,9 +2473,19 @@ export function computePlan({ config, snapshot, graph, chosen, disableResidual =
   // of every changed hunk (mandatory and budget-exempt: added after the budget check).
   const spansOf = new Map();
   for (const [f, ms] of forced) if (!whole.has(f)) spansOf.set(f, [...ms.values()]);
+  // A mutant strictly enclosing a changed hunk (or containing a pure insertion) has changed text,
+  // so Stryker re-runs it from the scope. Any other mutant touching a hunk may keep its own text
+  // unchanged (Stryker diffs characters), so its current span is forced.
+  const strictlySpans = (m, h) => h.oldEnd < h.oldStart || (m.startLine < h.oldStart && m.endLine > h.oldEnd);
+  const containing = (d, line) => d.hunks.find((h) => h.oldStart <= line && line <= h.oldEnd);
   for (const [f, d] of residualEdited) {
-    const lines = d.hunks.filter((h) => h.newEnd >= h.newStart).map((h) => [h.newStart, h.newEnd]);
-    if (lines.length > 0) spansOf.set(f, [...(spansOf.get(f) ?? []), ...lines]);
+    const spans = d.hunks.filter((h) => h.newEnd >= h.newStart).map((h) => [h.newStart, h.newEnd]);
+    for (const m of own(f)) {
+      if (!d.hunks.some((h) => hunkIntersects(m.startLine, m.endLine, h) && !strictlySpans(m, h))) continue;
+      const start = d.oldToNew[m.startLine] ?? containing(d, m.startLine).newStart;
+      spans.push([start, Math.max(start, d.oldToNew[m.endLine] ?? containing(d, m.endLine).newEnd)]);
+    }
+    if (spans.length > 0) spansOf.set(f, [...(spansOf.get(f) ?? []), ...spans]);
   }
   const entries = [...edited, ...whole].map((f) => ({ file: f, start: 0, text: f }));
   for (const [f, spans] of spansOf) {
@@ -2482,7 +2529,7 @@ export function computePlan({ config, snapshot, graph, chosen, disableResidual =
 - [ ] **Step 4: Run to verify pass**
 
 Run: `node --test templates/mutation-incremental/test/plan.test.mjs`
-Expected: PASS (30 tests). If an expected value fails, re-derive it by hand from spec §5.4/§11.4 before changing either side. Every expected value above was hand-derived from the rules and the miniature fixture.
+Expected: PASS (34 tests). If an expected value fails, re-derive it by hand from spec §5.4/§11.4 before changing either side. Every expected value above was hand-derived from the rules and the miniature fixture.
 
 - [ ] **Step 5: Commit**
 
@@ -2908,9 +2955,12 @@ test('plan adopts a warm state and reports the change', async () => {
   assert.deepEqual([plan.scope, plan.forced], [['src/a.ts'], ['src/a.ts:1-1']]);
 });
 
-test('unexpected errors propagate instead of becoming exit 2', async () => {
+test('unexpected internal errors are exit 4, never 1', async () => {
   const r = makeRepo();
-  await assert.rejects(main(['plan'], { stdout: { write() { throw new Error('boom'); } }, stderr: capture(), cwd: r.top }), /boom/);
+  const stderr = capture();
+  const code = await main(['plan'], { stdout: { write() { throw new Error('boom'); } }, stderr, cwd: r.top });
+  assert.equal(code, 4);
+  assert.match(stderr.text, /internal error: boom/);
 });
 
 test('usage errors are exit 2 with a message', async () => {
@@ -3078,10 +3128,11 @@ export async function main(args, io = { stdout: process.stdout, stderr: process.
     if (!command) throw new UsageError(options.command === undefined ? USAGE : `unknown command ${options.command}; ${USAGE}`);
     return await command(io, options);
   } catch (e) {
-    if (!(e instanceof UsageError)) throw e;
-    io.stderr.write(`mutation-incremental: error: ${e.message}\n`);
+    // Exit 1 means "ok, state committed" for run (Plan 1b), so an internal crash is exit 4.
+    const usage = e instanceof UsageError;
+    io.stderr.write(`mutation-incremental: ${usage ? 'error' : 'internal error'}: ${e.message}\n`);
     io.stderr.write(summaryLine({ command: args[0] ?? 'none' }));
-    return e.exitCode;
+    return usage ? e.exitCode : 4;
   }
 }
 ```
@@ -3121,6 +3172,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
+
+## Follow-ups (recorded, not in 1a: no credible normal-usage failure)
+
+- `stateDir` placed inside a `mutate` tree (e.g. `stateDir: "src"`) is not rejected by the probe check.
+- `buildGraph`'s 1 MiB limit compares UTF-16 length, not bytes.
+- Dot-files inside a non-gitignored leftover `.stryker-tmp/` enter the snapshot as unclassified (over-defers only).
+- Residual mode may add a second invocation (second dry run) when only the changed lines are forced; measure in the external trial.
+- Docs (1c): a gitignored generated module imported by relative path makes its importers open importers; `MUTATION_ALLOW_TMP_STATE` is test-only (comment it in `config.mjs`).
 
 ## Self-Review (done while writing)
 
