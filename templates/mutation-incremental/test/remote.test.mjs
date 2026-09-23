@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { authEnv } from '../lib/remote.mjs';
 import { readCandidate } from '../lib/state.mjs';
-import { cli, runRepo, warm } from './fake.mjs';
+import { cli, reportFor, runRepo, warm } from './fake.mjs';
 
 function bareRemote(r) {
   const bare = mkdtempSync(join(tmpdir(), 'mi-remote-'));
@@ -51,6 +51,18 @@ test('publish-state pushes a parentless commit that fetch-state reads back in an
   assert.equal(run.code, 0);
   assert.deepEqual(other.calls(), []);
   assert.equal(usable(join(other.top, '.mutation')), true);
+});
+
+test('fetch-state reads a state larger than 1 MiB (reports embed every source file)', async () => {
+  const r = runRepo({ steps: [{ report: { ...reportFor(), padding: 'x'.repeat(1_500_000) } }] });
+  assert.equal((await cli(r, ['run', '--mode', 'full'])).code, 0);
+  const bare = bareRemote(r);
+  assert.equal((await cli(r, ['publish-state', '--kind', 'full'])).code, 0);
+  const other = runRepo();
+  other.git('remote', 'add', 'origin', bare);
+  const got = await cli(other, ['fetch-state']);
+  assert.equal(got.code, 0, got.stderr);
+  assert.equal(readFileSync(join(other.top, '.mutation/remote/full/incremental.json'), 'utf8'), readFileSync(join(r.top, '.mutation/incremental.json'), 'utf8'));
 });
 
 test('fetch-state removes a copy whose branch is gone', async () => {

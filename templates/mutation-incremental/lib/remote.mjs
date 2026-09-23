@@ -54,7 +54,8 @@ export async function fetchStateCommand(io, options) {
     must(spawnSync('git', ['fetch', '--no-tags', remote, branchRef(kind)], { cwd: top, env, encoding: 'utf8' }), `git fetch ${branchRef(kind)}`, 'fetch-state');
     mkdirSync(dir, { recursive: true });
     for (const name of [ATTESTATION_FILE, REPORT_FILE]) {
-      const bytes = must(spawnSync('git', ['show', `FETCH_HEAD:${name}`], { cwd: top, env }), `reading ${name} from ${branchRef(kind)}`, 'fetch-state');
+      // Reports embed every mutated file's source: far beyond spawnSync's 1 MiB default buffer.
+      const bytes = must(spawnSync('git', ['show', `FETCH_HEAD:${name}`], { cwd: top, env, maxBuffer: 1 << 30 }), `reading ${name} from ${branchRef(kind)}`, 'fetch-state');
       writeFileSync(join(dir, `${name}.tmp`), bytes);
       renameSync(join(dir, `${name}.tmp`), join(dir, name));
     }
