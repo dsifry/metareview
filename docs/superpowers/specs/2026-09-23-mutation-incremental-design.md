@@ -1,12 +1,14 @@
 # Change-driven mutation testing + attested evidence freshness — design
 
-Status: r10 — pending re-review. Review history: full artifact reviews r1
+Status: r11 — pending re-review. Review history: full artifact reviews r1
 `mrv-20260923-182025208234000-…`, r2 `mrv-20260923-183942601569000-…`, r3
 `mrv-20260923-185110177502000-…`; targeted review r4 `mrv-20260923-190310858720000-…`; verification
 of r5; full pragmatic reviews r6 `mrv-20260923-192628041933000-…`, r7
 `mrv-20260923-193343742411000-…`, r8 `mrv-20260923-194341093013000-…` and r9
 `mrv-20260923-195021334650000-…` (3 PASS, 7 NEEDS_REVISION converging on the relative-threshold
-baseline, the full job's skip rule and `fetch-state` credentials; fixed here). The user decisions are in §10. Origin:
+baseline, the full job's skip rule and `fetch-state` credentials) and r10
+`mrv-20260923-195626283409000-…` (8 PASS, 2 NEEDS_REVISION on one gate blocker, fixed here; the
+user then chose the absolute threshold for PRs, decision 15). The user decisions are in §10. Origin:
 `docs/0.13.0-candidates.md` §1.
 
 Review stance (user instruction): handle real workflows and real edge cases; do not engineer for
@@ -115,7 +117,7 @@ resolves against the top-level; every command runs with cwd = top-level.
 | Command | Behaviour |
 |---|---|
 | `plan [--also-state <dir>]...` | print the plan (§5.4) as JSON; adoption in memory only; no side effects |
-| `run --mode incremental\|full [--also-state <dir>]... [--threshold absolute\|relative]` | lock, adopt, plan, execute (§5.6), commit |
+| `run --mode incremental\|full [--also-state <dir>]...` | lock, adopt, plan, execute (§5.6), commit |
 | `seed --from <report> [--replace]` | bootstrap from a full Stryker report (§5.8); refusing because usable state exists is exit 2 |
 | `fetch-state [--remote <name>]` | fetch the state branches into `<stateDir>/remote/{inc,full}/` (§5.7) |
 | `publish-state --kind inc\|full [--remote <name>]` | push the canonical state to branch `mutation-state/<kind>` (§5.7) |
@@ -123,25 +125,19 @@ resolves against the top-level; every command runs with cwd = top-level.
 
 Exit codes: 0 ok (deferrals included); 1 ok, but the threshold check fails (computed by the harness
 on every run from the committed report and the current config, so a re-run of a red job stays red
-and lowering the threshold turns it green). `--threshold absolute` (default; main and local): fails
-when the score is below `thresholds.break`. `--threshold relative` (PR jobs, decision 15): fails only
-when the score is below `thresholds.break` **and** either the **reference score** is not below it or
-the score is lower than the reference score — a PR fails only if it made things worse than main. The
-reference is main's, never the PR's own state (so a red PR stays red on re-run and on later pushes):
-among the `--also-state` candidates whose `incremental.json` parses and matches `reportSha256`
-(`toolVersion` is not required, so a harness upgrade does not lose it), the one with the smallest
-`|C|`, then the order given; its score is recomputed from its report (§5.5). With no such candidate,
-or a null reference score, relative behaves as absolute; 2 config/usage/validation; 3 lock held; 4 engine failure (nothing committed); 130
+and lowering the threshold turns it green): the check fails when the score is below
+`thresholds.break`, the same rule on PRs, main and local runs (decision 15); 2 config/usage/validation; 3 lock held; 4 engine failure (nothing committed); 130
 interrupted (SIGINT/SIGTERM/SIGHUP; nothing committed). Precedence: 2 > 3 > 130 > 4 > 1 > 0. When
 `GITHUB_OUTPUT` is set, `run` appends on every exit path `pending_full=<true|false>` (the canonical
 state afterwards is a pending full run; `false` if exit 2 happens before the config is readable) and
 `exit_code=<n>`. Every command prints one stderr line:
 `mutation-incremental: command=<c> invocations=<n> scope=<k> forced=<j> deferrals=<d> pending_full=<bool>`
 (commands other than `run` and `plan` print zeros and the canonical state's `pending_full`). `plan`
-exits 0 with its JSON, or 2. When `.nvmrc` or `.node-version` names a version that the running
-`node --version` does not start with, `plan` and `run` print a warning, not an error (the file is
-already a `global` input, so CI state is protected by digest; a local mismatch is the developer's
-choice).
+exits 0 with its JSON, or 2. When `.nvmrc` or `.node-version` holds a numeric version (after
+stripping a leading `v`) whose dot-separated components are not a prefix of the running
+`node --version`'s components (also without `v`), `plan` and `run` print one warning line before the
+summary line; aliases such as `lts/iron` are skipped. It is not an error (the file is already a
+`global` input, so CI state is protected by digest; a local mismatch is the developer's choice).
 
 ### 5.2 Config `mutation-incremental.json`
 
@@ -272,11 +268,11 @@ imports P through edges transitively. **Importer tests of P** = `test` files tha
 - Forced ranges `<file>:<startLine>-<endLine>` (whole-file: `<file>`), merged when `end + 1 >= start`.
 - A scope or forced path containing `, { } [ ] ( ) ! * ? :` or a newline ⇒ exit 2 naming it.
 
-Plan JSON: `{ "baseline", "reference", "cold", "pendingFull", "scope", "forced", "forcedCount", "deferrals":
+Plan JSON: `{ "baseline", "cold", "pendingFull", "scope", "forced", "forcedCount", "deferrals":
 [{"reason","paths"}], "changes": [{"path","category","kind"}], "openImporters":
 [{"path","specifiers"}], "unclassified": [paths] }`. `baseline` is the adopted
-candidate's directory as given (the primary: `stateDir`), or null when cold; `reference` is
-`{"state", "score"}` per §5.1, or null. `kind` ∈ `changed|new|deleted`; runtime keys
+candidate: the `--also-state` argument as typed, or the config's `stateDir` value as written for
+the primary; null when cold. `kind` ∈ `changed|new|deleted`; runtime keys
 appear in `changes` with category `global` and in reasons by their key (e.g. `env:DATABASE_IMAGE`).
 In `off` mode, an unclassified path with no importer still records its `["*"]` deferral. `pendingFull` = cold, or
 the (adopted) prior attestation has deferrals, or this plan adds any. A cold plan has empty `scope`,
@@ -318,8 +314,7 @@ in byte order; `forced` by file then numeric start line; `deferrals` by `reason`
 - `score` = the committed report's mutation score, (Killed + Timeout) / (Killed + Timeout + Survived
   + NoCoverage) × 100 (Stryker's definition), or `null` when that denominator is 0. `thresholdBreak`
   = `score` is a number below the current Stryker config's `thresholds.break` (`false` when the
-  threshold is null or absent, or `score` is null). Both are recomputed on every run; the relative
-  threshold check (§5.1) compares against the reference score, recomputed the same way.
+  threshold is null or absent, or `score` is null). Both are recomputed on every run.
 - Report keys are repo-relative POSIX paths (Stryker runs at the top-level); a key that is not is
   treated by the gate as absent from `files` (unbound).
 - `lists` include the implicit `global` entries; `exclusions` are the resolved patterns of §4 other
@@ -377,18 +372,20 @@ in byte order; `forced` by file then numeric start line; `deferrals` by `reason`
 incremental state) and `mutation-state/full` (main's latest full-run state). `publish-state --kind
 <k>` builds a parentless commit with git plumbing (`hash-object`, `mktree`, `commit-tree`, author
 and committer `mutation-incremental <noreply@localhost>` set explicitly) and force-pushes it to
-`refs/heads/mutation-state/<k>`; when `MUTATION_STATE_TOKEN` is set it is used only for that push
-(as an HTTP authorization header), so no other step holds a push credential. It pushes only when the
+`refs/heads/mutation-state/<k>`; the workflow gives `contents: write` only to the main-only jobs, so the
+token is a push credential only there. It pushes only when the
 canonical state is usable (otherwise it prints why and exits 0), and each branch has a single writer
 (below), so it is replaced only when main's state changes; nothing expires. The docs mark
-`publish-state` as CI-only. `fetch-state` and `publish-state` read the token from `MUTATION_STATE_TOKEN` and pass it to git as
-`http.extraheader=AUTHORIZATION: basic <base64 of x-access-token:<token>>` through
-`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0` (never argv); unset ⇒ git's own
-credentials (local use). `fetch-state` lists `refs/heads/mutation-state/*` with `git ls-remote`
+`publish-state` as CI-only. `fetch-state` and `publish-state` read the token from `MUTATION_STATE_TOKEN` (empty ⇒ unset) and
+pass it to git as `http.<remote URL>.extraheader=AUTHORIZATION: basic <base64 of
+x-access-token:<token>>` through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_<n>`/`GIT_CONFIG_VALUE_<n>`,
+appended after any entries already in the environment (never argv); under `GITHUB_ACTIONS` they
+first print `::add-mask::` for the base64 value. Unset ⇒ git's own credentials (local use). `fetch-state` lists `refs/heads/mutation-state/*` with `git ls-remote`
 (so a missing branch is skipped, while a network or auth failure exits 2), fetches each present
 branch without `--depth` (the commit has no parents, and a depth fetch would make the clone
 shallow), and writes its two files into `<stateDir>/remote/inc/` and `<stateDir>/remote/full/`.
-Repository rulesets that restrict updates to all branches must allow `mutation-state/*`.
+Repository rulesets that restrict updates or force-pushes on all branches must allow both on
+`mutation-state/*`.
 
 **Fast path.** `actions/cache` keeps the two canonical files (one identical path list, F10:
 `<stateDir>/attestation.json` + `<stateDir>/incremental.json`) for quick restores while entries are
@@ -402,23 +399,27 @@ uses `fetch-depth: 0` and `persist-credentials: false`; no secrets passed to mut
 `MUTATION_STATE_TOKEN: ${{ github.token }}` is set only on `fetch-state` and `publish-state` steps
 (read-only in `incremental-pr`, so private repositories can fetch the state branches); marked insertion points hold
 project setup such as Node from `.nvmrc`, `npm ci`, services). GitHub sets `permissions` per job and
-not per event, so the incremental work is two jobs:
+not per event, so the incremental work is two jobs. Each job starts with checkout and the project
+setup insertion point, then the steps below:
 
 - Job `incremental-pr` (`if: github.event_name == 'pull_request'`; `permissions: contents: read`;
   timeout 60 min; concurrency `mutation-inc-${{ github.ref }}`, cancel in progress):
   1. restore the cache: key `mutation-pr-N-${{ github.sha }}`, restore-keys `mutation-pr-N-` then
      `mutation-main-`;
   2. `fetch-state`;
-  3. `run --mode incremental --threshold relative --also-state <stateDir>/remote/full --also-state
+  3. `run --mode incremental --also-state <stateDir>/remote/full --also-state
      <stateDir>/remote/inc`, `continue-on-error: true`, exposing `exit_code`;
   4. when `exit_code` ∈ {0, 1}: save the cache with key
      `mutation-pr-N-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}`;
-  5. write `pending_full` and the deferral reasons (from the attestation) to `$GITHUB_STEP_SUMMARY`,
-     so a green job is never mistaken for fully verified work;
+  5. (`if: always()`) write `exit_code`, `pending_full`, the score against `thresholds.break`, main's
+     score from `<stateDir>/remote/inc` when present (so a PR that is red only because main is
+     already below the threshold says so), and the deferral reasons to `$GITHUB_STEP_SUMMARY`; a
+     missing attestation (cold first run, exit 2) prints `no usable state` instead of failing the
+     step. A green job is never mistaken for fully verified work;
   6. fail the job when `exit_code` is empty or ≠ 0.
 - Job `incremental-main` (`if: github.event_name == 'push'`; `permissions: contents: write`; timeout
   60 min; concurrency `mutation-inc-${{ github.ref }}`, no cancel in progress): the same steps with
-  cache keys `mutation-main-…`, restore-keys `mutation-main-`, `--threshold absolute`, exposing
+  cache keys `mutation-main-…`, restore-keys `mutation-main-`, exposing
   `pending_full` and `exit_code`; step 4 also runs `publish-state --kind inc`.
 - Job `full` (`needs: incremental-main`;
   `if: ${{ !cancelled() && needs.incremental-main.outputs.pending_full == 'true' }}`; timeout 350 min;
@@ -430,15 +431,18 @@ not per event, so the incremental work is two jobs:
      to this commit by executing, not just planning, so deferrals that arise only while running
      (`time budget exceeded`, `blocked by deferred scope`, `no reachable tests`) are re-derived, and a
      `pending_full` that a push inherited from a state a full run has since cleared is dropped;
-  3. stop (green) when the catch-up exited 0 or 1 with `pending_full=false`; otherwise
+  3. when the catch-up exited 0 or 1 with `pending_full=false`: save the cache (key
+     `mutation-main-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-catchup`, so
+     the next main push can adopt it instead of redoing the delta) and stop green; otherwise
      `run --mode full` with `continue-on-error: true` (full mode starts fresh);
   4. when the full run's `exit_code` ∈ {0, 1}: save the cache (key `mutation-main-${{ github.sha
      }}-${{ github.run_id }}-${{ github.run_attempt }}`), then `publish-state --kind full`; then fail
      the job when `exit_code` is empty or ≠ 0 (a threshold break is red, but its state is published,
      so the full run is not repeated on every push).
 
-  The catch-up's state is never published (each branch keeps a single writer); the next main push
-  adopts the new full state anyway. The full run must fit the job timeout; the docs say so.
+  The catch-up's state is never published (each branch keeps a single writer). Setup, the catch-up
+  (at most 2 × `maxMinutesPerInvocation`) and the full run must fit the job timeout together; the
+  docs say so.
 - Later runs on main and every PR adopt the full-run state when their own state carries deferrals
   (§5.4 Adopt), regardless of the order in which jobs finished.
 - Local use: `fetch-state`, then `run --mode incremental --also-state <stateDir>/remote/full
@@ -489,7 +493,9 @@ Each kill gets one class, first match wins:
 1. **stale** — a cause applies, checked in order: its own file changed; a changed `test` file whose
    ids intersect its `killedBy`; a changed `mutate` file Y whose mutants' `coveredBy` union
    intersects its `killedBy` (the planner's residual rule); any changed `support`, `global` or
-   `unclassified` path. The first cause found (ties by byte order of path) is the kill's recorded
+   `unclassified` path, or changed `mutate` path with no mutants in the report (constants, barrels:
+   the gate has no import graph, so like support it invalidates every kill until the harness
+   re-runs). The first cause found (ties by byte order of path) is the kill's recorded
    cause. Findings and the re-run list are keyed on recorded causes.
 2. **pending** — its file is covered by a deferral.
 3. **unbound** — its file is not in `files`, or its `killedBy` is empty.
@@ -633,11 +639,8 @@ emulation of the job's steps (same commands and exit-code gates as the workflow 
 | edit `tests/b.test.ts` | scope `[src/a.ts, src/b.ts]` |
 | new test file `tests/b2.test.ts` importing `src/b.ts` (base fixture has no survivors) | scope `[]` |
 | survivor variant: `src/a.ts` has a survivor on line 3; add a case to `tests/a.test.ts` that kills it | scope `[src/a.ts]`; that mutant is `Killed` in the new report; equivalence holds |
-| survivor variant on a PR: main's state (published) breaks `thresholds.break`; PR changes only `src/c.ts` without lowering the score | `--threshold relative` exits 0; `--threshold absolute` exits 1; `plan` shows `reference` = the main state |
-| survivor variant on a PR: PR removes the assertion that kills `src/c.ts`'s mutants (score lower than main's) | relative exits 1; re-run with no change: exit 1; then an unrelated edit to `tests/helpers/fmt.ts`: exit 1 (the reference stays main's) |
-| base fixture with `thresholds.break` just below the full score; PR removes that assertion | relative exits 1 (main was not below break) |
-| relative with no `--also-state` (no reference) | behaves as absolute |
-| change `LIMIT` in `src/limits.ts` | forced `[src/c.ts:2-2, src/limits.ts]` (edited, plus residual via its importer test `tests/c.test.ts`); no deferral |
+| base fixture with `thresholds.break` just below the full score; PR job emulation where the PR removes the assertion that kills `src/c.ts`'s mutants | exit 1; re-run with no change: exit 1; the step summary shows the score below the threshold and main's score above it |
+| change `LIMIT` in `src/limits.ts` | forced `[src/c.ts:2-2, src/limits.ts]` (edited, plus residual via its importer test `tests/c.test.ts`); 1 invocation; success; no deferral |
 | edit `tests/helpers/make.ts` | forced `[src/a.ts:1-5, src/b.ts:4-4]`; `vitest`/`node:assert` imports are packages, not open importers |
 | edit `tests/helpers/fmt.ts` | forced `[src/c.ts:2-2]` |
 | remove the alias from the harness config, edit `tests/helpers/fmt.ts` | `c.test` is an open importer; forced includes `src/c.ts:2-2`; `plan` lists `@app/c`; also deferral `global input changed: mutation-incremental.json` |
@@ -647,13 +650,13 @@ emulation of the job's steps (same commands and exit-code gates as the workflow 
 | edit only `src/types.ts` | 1 invocation (forced `[src/types.ts]`); `No tests were executed`; no deferral; exit 0; `pending_full=false`; next `plan` shows no change |
 | edit `src/a.ts` and `src/types.ts` together | 1 invocation, forced `[src/a.ts, src/b.ts:4-4, src/types.ts]`; succeeds |
 | edit `src/types.ts` and `tests/helpers/make.ts` together | 1 invocation, forced `[src/a.ts:1-5, src/b.ts:4-4, src/types.ts]`; succeeds |
-| edit `src/index.ts` | forced `[src/index.ts]` plus the `src/a.ts` mutants killed by `tests/index.test.ts` (residual via its importer tests; exact ranges in `expectations.json`); success; `files` has no `src/index.ts` entry |
+| edit `src/index.ts` | forced `[src/index.ts]` plus the `src/a.ts` mutants killed by `tests/index.test.ts` (residual via its importer tests; exact ranges in `expectations.json`); success; the report's `files` has no `src/index.ts` entry |
 | delete `tests/c.test.ts` alone | scope `[src/c.ts]`; `No tests were executed`; deferral `no reachable tests: src/c.ts`; gate: `src/c.ts` kills pending |
 | add `src/u.ts` alone, run; then add `tests/u.test.ts` importing it, run | first run: no-tests, no deferral; second run: scope includes `src/u.ts`; its mutants appear |
 | add `src/v.ts` alone, run; then import it from existing `tests/a.test.ts`, run | second run: scope includes `src/v.ts`; its mutants appear |
 | delete `src/b.ts` and `tests/b.test.ts` together | scope `[]`; forced `[src/a.ts]` (whole file: scoped via b.test and residual-forced); `src/b.ts` mutants absent afterwards |
 | `git mv src/c.ts src/d.ts` with its test updated | no exit 2; `src/d.ts` forced whole-file |
-| `residual.mode: off` / `strict` with `maxForcedMutants: 1` | deferral `residual off: src/a.ts` on `src/b.ts` / residual forced despite exceeding the budget |
+| `residual.mode: off` / `strict` with `maxForcedMutants: 1` (`expectations.json` states `forcedCount` > 1) | deferral `residual off: src/a.ts` on `src/b.ts` / residual forced despite exceeding the budget |
 | threshold break (fixture variant with a survivor and `thresholds.break: 100`) | exit 1; state committed |
 | threshold break, then re-run with no change | exit 1 again |
 | threshold break, then lower `thresholds.break` in `stryker.config.json` | exit 0; `pending_full=true` |
@@ -671,7 +674,7 @@ emulation of the job's steps (same commands and exit-code gates as the workflow 
 | **equivalence** | after each edit scenario, a fresh non-incremental run on the same tree; mutants matched by `(file, mutatorName, location, replacement)`; every kill the gate classifies `verified` is a fresh kill (a fresh `Timeout` is re-run once); the number of compared kills is recorded so an empty comparison is visible |
 | **equivalence negative control** | scenario `e-flip` (README) with the residual step disabled by a test-only switch: equivalence fails for exactly the listed mutant |
 | **gate** | edit committed, `metareview review pr-ready --mutation-report …` before re-running: one stale finding with cause `src/a.ts`; after re-running: none; enforce: blocking; revert without re-running: a stale finding with cause `src/a.ts` blocks (a new fingerprint, since the
-digest differs; recurrence of the same fingerprint is covered by the Go tests); after a `package-lock.json` edit and re-run: pending finding |
+digest differs; recurrence of the same fingerprint is covered by the Go tests); after a `package-lock.json` edit and re-run: pending finding; commit a `LIMIT` edit in `src/limits.ts`, pr-ready before re-running: stale findings with cause `src/limits.ts`, none after re-running |
 
 The script writes `testdata/mutation-incremental/real/manifest.json` (sha256 of the planner- and
 report-affecting template modules, fixture sources, `expectations.json`, the script, lockfile,
@@ -692,30 +695,29 @@ rewritten to `.`.
   `No tests were executed` with and without kills in the selection, invocation 2 after a no-tests
   invocation 1, full-mode no-tests ⇒ exit 4, timeout, any failure ⇒ nothing committed, interrupt
   incl. SIGHUP); `score`/`thresholdBreak` computed from report and config (incl. a null score) and
-  both threshold modes (relative: pass when main was already below and the PR is not lower; fail
-  when lower; fail when main was not below; reference taken from `--also-state` only, never the
-  primary; a reference with another `toolVersion` still counts; no or null reference ⇒ absolute);
-  plan `baseline`/`reference` fields; the Node-version warning; zero-mutant changed files using
+  the threshold exit (below, equal, above, null score, no threshold); the plan `baseline` field; the
+  Node-version warning (`v` prefix, `20` vs `20.11.0`, `2` vs `20.1.0`, aliases skipped); zero-mutant changed files using
   importer tests for `T_Y`; adoption via repeated `--also-state` (no-deferral candidates first, then
   smallest change set, then primary, then order; `run` copies, `plan` does not);
   `publish-state`/`fetch-state` against a local bare remote (missing branch skipped, no shallow
   clone, explicit committer, unusable state ⇒ no push and exit 0, the token passed through
-  `GIT_CONFIG_*` and never in argv); the `changed-during-run` digest;
+  `GIT_CONFIG_*` appended after existing entries and never in argv, empty token ⇒ unset); the `changed-during-run` digest;
   commit ordering; lock and `break-lock`; seeding; exit precedence and the `GITHUB_OUTPUT` lines;
   config validation; and a static workflow test (triggers; workflow-level `permissions: {}`;
   `incremental-pr` has `contents: read`; only `incremental-main` and `full` have `contents: write`;
   every checkout has `persist-credentials: false`; `MUTATION_STATE_TOKEN` appears only on
-  `fetch-state` and `publish-state` steps; the full job runs the catch-up before `run --mode full`
-  and saves the cache before publishing;
+  `fetch-state` and `publish-state` steps; checkout and setup precede `fetch-state` in every job;
+  the step summary is `if: always()`; the full job runs the catch-up before `run --mode full`, saves
+  a green catch-up to the cache, and saves the cache before publishing;
   identical cache path lists; `continue-on-error`; outputs; `!cancelled()`; restore-key order;
-  `--threshold relative` on PRs; publish only on exit 0/1; empty exit code fails).
+  no `--threshold` flag anywhere; publish only on exit 0/1; empty exit code fails).
 - A CI test recomputes the manifest's hashes (planner- and report-affecting template modules,
   fixture, expectations, script, and each committed `real/<scenario>/` tree) and fails on any
   difference.
 - Go, 100% statement coverage (`make cover`): glob vectors; parser fields; unchanged existing
   fingerprints; attestation validation (each unattested reason); HEAD reader with `.gitattributes
   eol=crlf` and a symlink; `tracked:false` handling; new-path handling per category; each kill class
-  and cause order including the residual cause; one finding per recorded cause and summed counts;
+  and cause order including the residual cause and a changed zero-mutant `mutate` file; one finding per recorded cause and summed counts;
   Timeout never a kill; modes including invalid value and task-done under enforce; findings per mode,
   gate and severity; gremlins no finding; `Reconcile` supersedes absent `mutation:*` rows of the same
   scope, target and engine only on runs with reports (a gremlins-only run leaves stryker rows), never on a run without reports (override granted →
@@ -750,12 +752,17 @@ rewritten to `.`.
 
 - `docs/mutation-harness.md`: setup; config and defaults; which files to add to `ignore` and to
   gitignore (`<stateDir>/`); aliases and open importers; sizing the budget and time ceiling against
-  the ≤ 2 min bar and the CI job timeout (the full run must fit its job timeout); pinning Node with a
+  the ≤ 2 min bar and the CI job timeout (setup, catch-up and the full run must fit together); pinning Node with a
   tracked `.nvmrc`; the state branches, `fetch-state`/`publish-state` (CI-only) and the cache fast
   path, and allowing `mutation-state/*` in branch rulesets; warm-starting a new worktree; that
-  dependency bumps (global inputs) trigger one full run on main; that PRs fail the threshold only
-  when they make the score worse than main's (and behave as absolute until main has published
-  state); that a PR which changes a global input (e.g. a lockfile bump) re-runs its whole delta
+  dependency bumps (global inputs) trigger one full run on main; that a threshold break turns every PR
+  red until main is fixed (the step summary shows main's score); that editing a widely imported
+  barrel or constants file often exceeds the budget and defers to a full run (prefer `import type`
+  or `verbatimModuleSyntax` for type-only imports); that seeding helps local runs only (CI's first
+  run is still a full run); that `incremental-pr` is not a merge-queue check unless `merge_group` is
+  added; that main re-runs each merged PR's delta (PR caches are per PR); that re-running an old main
+  workflow publishes an older, still valid state; to pass `<stateDir>/incremental.json` (not
+  Stryker's `reports/mutation/mutation.json`) and every report on gated runs; that a PR which changes a global input (e.g. a lockfile bump) re-runs its whole delta
   from main's state on each push; the `MUTATION_STATE_TOKEN` wiring; that an enforced stale
   finding clears only on a later run that supplies reports (or by override), and that overrides on
   pending/unattested findings last only for that report and every mutation override is tied to the
@@ -791,5 +798,7 @@ rewritten to `.`.
 13. Mutation state lives on change-based git branches (`mutation-state/inc`, `mutation-state/full`),
     with `actions/cache` as a fast path while its entries are within GitHub's 7-day window.
 14. Validity and storage are change-based, never date-based.
-15. On PRs a threshold break fails the job only if the PR made the score worse than main's;
-    main's own red stays visible on main.
+15. The threshold rule is the same everywhere: a score below `thresholds.break` fails the job,
+    on PRs too (revised after r10; the relative rule's main-reference machinery was removed as not
+    worth its complexity). When main is below the threshold, PRs are red and the step summary
+    says main is below it.
