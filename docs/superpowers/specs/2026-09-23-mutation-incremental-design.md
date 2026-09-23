@@ -1,6 +1,6 @@
 # Change-driven mutation testing + attested evidence freshness — design
 
-Status: r18 — verification pending (§11 amendment from the adoption contract, revised after reviews r15 `mrv-20260923-204202233770000-…` and r16 `mrv-20260923-204712580916000-…` and r17 `mrv-20260923-205053924374000-…`; blocking only on major or critical findings). r14 was approved by final review `mrv-20260923-201040808900000-…` (10/10 PASS). Review history: full artifact reviews r1
+Status: r18 — APPROVED for planning (§11 amendment from the adoption contract, revised after reviews r15 `mrv-20260923-204202233770000-…` and r16 `mrv-20260923-204712580916000-…` and r17 `mrv-20260923-205053924374000-…`; blocking only on major or critical findings). r14 was approved by final review `mrv-20260923-201040808900000-…` (10/10 PASS). Review history: full artifact reviews r1
 `mrv-20260923-182025208234000-…`, r2 `mrv-20260923-183942601569000-…`, r3
 `mrv-20260923-185110177502000-…`; targeted review r4 `mrv-20260923-190310858720000-…`; verification
 of r5; full pragmatic reviews r6 `mrv-20260923-192628041933000-…`, r7
@@ -932,7 +932,10 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
   (each kill lands in exactly one bucket).
   Inherited deferrals belong to main's `full` job; the step summary lists them as "inherited from
   main, cleared by main's full run".
-- **Cause.** On exit 0 or 1 only, `run` appends `pending_cause` to `GITHUB_OUTPUT`: `global` if any
+- **Cause.** On exit 0 or 1 only, `run` appends `pending_cause` to `GITHUB_OUTPUT`, computed from
+  the plan's and the run's deferrals even when nothing is committed (a cold run with no
+  `incremental.json` writes no attestation but still reports its counted `no usable state`, so
+  `global`): `global` if any
   counted deferral has `paths: ["*"]` (global or runtime input, `no usable state`, a deleted or
   importer-less support file, an importer-less unclassified file, seeding); else `other` if any
   counted deferral exists (per-file: `time budget exceeded`, `blocked by deferred scope`,
@@ -950,7 +953,9 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
   remove the module). Step 4's cache save of the incremental state runs only when `pending_cause` is
   `none` or `pendingOnPr` is `allow`.
 - **Sizing.** For `full`/`full-on-global` the PR job timeout must be ≥ setup + 2 × `<m>` + one full
-  sweep (Keeper: roughly 240–350 min). The docs also warn that under `full` every PR that exceeds
+  sweep (Keeper: roughly 240–350 min); the template's `incremental-pr` timeout (60 min in §5.7) is
+  an input set from this rule when `pendingOnPr` ≠ `allow`, and cancel-in-progress on a new push
+  discards an in-flight follow-up sweep (the next push pays it again). The docs also warn that under `full` every PR that exceeds
   `<m>` becomes a full sweep; that under `full-on-global` a `time budget exceeded` failure repeats on
   re-run until `<m>` is raised or the change is split; that a PR rebased during main's pending
   window may pay a full sweep (correct, but slower); and that under `full-on-global` a PR whose
