@@ -1,0 +1,13 @@
+{
+  "maxEditDistance": 2000,
+  "cases": [
+    { "name": "identical", "old": "a\nb\n", "new": "a\nb\n", "hunks": [] },
+    { "name": "replace middle line", "old": "a\nb\nc\n", "new": "a\nB\nc\n", "hunks": [{ "oldStart": 2, "oldEnd": 2, "newStart": 2, "newEnd": 2 }] },
+    { "name": "pure insertion", "old": "a\nc\n", "new": "a\nb\nc\n", "hunks": [{ "oldStart": 2, "oldEnd": 1, "newStart": 2, "newEnd": 2 }] },
+    { "name": "pure deletion", "old": "a\nb\nc\n", "new": "a\nc\n", "hunks": [{ "oldStart": 2, "oldEnd": 2, "newStart": 2, "newEnd": 1 }] },
+    { "name": "swap uses the tie rule", "old": "a\nb\n", "new": "b\na\n", "hunks": [{ "oldStart": 1, "oldEnd": 1, "newStart": 1, "newEnd": 0 }, { "oldStart": 3, "oldEnd": 2, "newStart": 2, "newEnd": 2 }] },
+    { "name": "empty old", "old": "", "new": "a\n", "hunks": [{ "oldStart": 1, "oldEnd": 0, "newStart": 1, "newEnd": 1 }] },
+    { "name": "CRLF and BOM normalised", "old": "\ufeffa\r\nb\r\n", "new": "a\nb\n", "hunks": [] },
+    { "name": "missing final newline is not a change", "old": "a\nb", "new": "a\nb\n", "hunks": [] }
+  ]
+}
