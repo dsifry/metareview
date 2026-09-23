@@ -170,3 +170,31 @@ tracked as its own bead.
 Note (design r16): whole-tree deferrals (`["*"]`: `no usable state`, a deleted or importer-less
 support file, an importer-less unclassified file) are routed to the full sweep rather than failing
 the PR under `full-on-global`, because a PR cannot clear them itself; only per-file causes fail it.
+
+## 7. Keeper agent review of design r18 (2026-09-23)
+
+- **Timeout under `full-on-global` (decided: option (ii) + (iii)).** A timeout routes to the full
+  sweep instead of failing, and `<m>` is sized so it is rare (Keeper: ≥ 60 min). `blocked by
+  deferred scope` is a clock effect (it only follows a timed-out invocation 1), so it routes to the
+  sweep too. Only `no reachable tests` fails a PR. Option (i) (tolerate as pending) is rejected and
+  not to be revisited: in an unbudgeted PR run the time limit is the only thing that can leave the
+  PR's own changes unrun, so tolerating it reopens the hole `full-on-global` closes. Design §11.2,
+  decision 21; `pending_cause` becomes `none | global | unreachable | other | timeout`, plus the
+  list `pending_causes`.
+- **Sweep job.** The sweep runs in its own `pr-full` job that is never cancelled mid-run; a finished
+  sweep's state is reused by the next push. A force-push during a sweep costs at most one more
+  queued sweep (documented).
+- **Binding operational rule (K3.3, stricter than asked, accepted):** every `mutate` file must
+  belong to a view before it has mutants, so a new source file needs a `keeper-test-strategy.json`
+  edit in the same PR. WU18 and WU20 both add files. The Keeper adoption spec repeats this.
+- **Compact multi-view rendering (accepted):** one freshness section with a row per view and one
+  re-run list with a View column; the gate accepts 16 repeated `--mutation-view` flags; findings
+  stay per view with the view in the title.
+- **1 MiB `residual` fallback measured against Keeper (does not bite):** largest scoped file 60 KB
+  (`packages/domain/src/invitations.ts`); hot files 44 KB (`apps/web/src/App.tsx`), 39 KB
+  (`apps/server/src/main.ts`), 23 KB (`apps/worker/src/main.ts`). No re-check needed.
+- **Viability measurement matches the adopted mode (amends §3):** the replay predicts both the
+  budget-pending share under `allow` (the baseline) and, for `full-on-global`, the **timeout share**
+  of unbudgeted PR runs at the chosen `<m>` (forced + scoped mutants × ≈ 0.7 s > `<m>`), plus the
+  global share (sweeps). The ≤ 20% bar applies to the mode actually adopted: under
+  `full-on-global`, to the share of PR runs that pay a sweep (global + timeout).

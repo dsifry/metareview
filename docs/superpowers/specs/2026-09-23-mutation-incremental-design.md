@@ -1,6 +1,6 @@
 # Change-driven mutation testing + attested evidence freshness — design
 
-Status: r18 — APPROVED for planning (§11 amendment from the adoption contract, revised after reviews r15 `mrv-20260923-204202233770000-…` and r16 `mrv-20260923-204712580916000-…` and r17 `mrv-20260923-205053924374000-…`; blocking only on major or critical findings). r14 was approved by final review `mrv-20260923-201040808900000-…` (10/10 PASS). Review history: full artifact reviews r1
+Status: r19 — final review pending (§11 amendment from the adoption contract; r18 was approved by review `mrv-20260923-205431264136000-…`; r19 adds the Keeper agent's review: timeout routes to the sweep, `pr-full` job, compact multi-view rendering). Blocking only on major or critical findings.
 `mrv-20260923-182025208234000-…`, r2 `mrv-20260923-183942601569000-…`, r3
 `mrv-20260923-185110177502000-…`; targeted review r4 `mrv-20260923-190310858720000-…`; verification
 of r5; full pragmatic reviews r6 `mrv-20260923-192628041933000-…`, r7
@@ -864,7 +864,7 @@ rewritten to `.`.
     worth its complexity). When main is below the threshold, PRs are red and the step summary
     says main is below it.
 
-## 11. Amendment (r15, revised r16–r18; adoption contract)
+## 11. Amendment (r15, revised r16–r19; adoption contract)
 
 Source: `docs/superpowers/specs/2026-09-23-mutation-incremental-adoption-contract.md` (decisions
 K1–K9, user, 2026-09-23). This section is normative and overrides the sections it names; everything
@@ -906,11 +906,12 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
   for projects that do not opt in). `residual.mode: "off"` together with `full-on-global` is exit 2
   (every residual edit would fail the PR).
 - `run --pr` marks a PR run; the template passes it only when `pendingOnPr` ≠ `allow` (so under
-  `allow` a verifier sees `MUTATION_RUN_KIND=other` and decision 2 holds). The follow-up
-  `run --mode full` is never `--pr`; full mode leaves no deferrals (a full run that finds no tests
-  is exit 4, §5.6), so its verifier need not consider pending. With `pendingOnPr` ≠ `allow`, a PR run is **unbudgeted** (the
-  forced-set budget is disabled, as in `strict`) and uses `--max-minutes <m>` in place of
-  `maxMinutesPerInvocation`.
+  `allow` a verifier sees `MUTATION_RUN_KIND=other` and decision 2 holds). With `pendingOnPr` ≠
+  `allow`, a PR run is **unbudgeted** (the forced-set budget is disabled, as in `strict`, so budget
+  deferrals never arise for a PR's own changes) and uses `--max-minutes <m>` in place of
+  `maxMinutesPerInvocation`; the time limit is then the only thing that can leave a PR's own work
+  unrun. The sweep (`run --mode full`) is never `--pr`; full mode leaves no deferrals (a full run
+  that finds no tests is exit 4, §5.6), so its verifier need not consider pending.
 - **Counted and inherited deferrals.** A deferral in the run's resulting attestation is
   **inherited** only when (i) an identical `{reason, paths}` appears in the attestation of one of
   the run's `--also-state` directories (main's fetched `remote/inc` or `remote/full`; parsed,
@@ -922,45 +923,59 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
   is always counted (a cold run executes nothing, so it must never pass on main's pending). Every
   other deferral is **counted**, including deferrals carried from the PR's own cached state that
   fail (i) or (ii). Reasons and `paths` are canonical (fixed formats, byte-ordered paths) so the
-  comparison is exact. **Inherited deferrals never suppress execution:** the run's scope, edited
-  and forced work run as planned (the shortcut below applies only to counted deferrals), so a PR's
-  own changes are executed even while main is pending; their kills are then also covered by the
-  inherited deferral and are reported as `pendingInherited`, which main's `full` run clears. So a deferral a PR caused, or a PR that changes the same
-  lockfile main is still re-establishing, is never "inherited". Each run with `--also-state`
-  records the result as `"inherited": true|false` on every deferral in its attestation (`false` on
-  runs without `--also-state`). A kill covered by both a counted and an inherited deferral is counted
-  (each kill lands in exactly one bucket).
-  Inherited deferrals belong to main's `full` job; the step summary lists them as "inherited from
-  main, cleared by main's full run".
-- **Cause.** On exit 0 or 1 only, `run` appends `pending_cause` to `GITHUB_OUTPUT`, computed from
-  the plan's and the run's deferrals even when nothing is committed (a cold run with no
-  `incremental.json` writes no attestation but still reports its counted `no usable state`, so
-  `global`): `global` if any
-  counted deferral has `paths: ["*"]` (global or runtime input, `no usable state`, a deleted or
-  importer-less support file, an importer-less unclassified file, seeding); else `other` if any
-  counted deferral exists (per-file: `time budget exceeded`, `blocked by deferred scope`,
-  `no reachable tests`); else `none`. Follow-up steps are gated on `exit_code` ∈ {0, 1}.
+  comparison is exact. **Inherited deferrals never suppress execution:** the run's scope, edited and
+  forced work run as planned (the shortcut applies only to counted deferrals), so a PR's own changes
+  are executed even while main is pending; their kills are then also covered by the inherited
+  deferral and reported as `pendingInherited` ("executed, awaiting main's full run", not "never
+  ran"). Each run with `--also-state` records `"inherited": true|false` on every deferral in its
+  attestation (`false` on runs without `--also-state`). A kill covered by both a counted and an
+  inherited deferral is counted (each kill lands in exactly one bucket). The step summary lists
+  inherited deferrals as "inherited from main, cleared by main's full run".
+- **Cause.** On exit 0 or 1 only, `run` appends to `GITHUB_OUTPUT` `pending_cause` and
+  `pending_causes` (a JSON array of the counted `{reason, paths}`), computed from the plan's and the
+  run's deferrals even when nothing is committed (a cold run with no `incremental.json` writes no
+  attestation but still reports its counted `no usable state`). `pending_cause` is the first that
+  applies of:
+  1. `global` — a counted deferral with `paths: ["*"]` (global or runtime input, `no usable state`,
+     a deleted or importer-less support file, an importer-less unclassified file, seeding);
+  2. `unreachable` — a counted `no reachable tests: <p>` (the change removed the only test reaching
+     code that has kills);
+  3. `other` — a counted `residual off: <p>` (possible only under `allow`/`full`);
+  4. `timeout` — a counted `time budget exceeded` or `blocked by deferred scope` (the latter only
+     ever follows a timed-out invocation 1, §5.6, so it is a clock effect too);
+  5. `none`.
+  Follow-up steps and jobs are gated on `exit_code` ∈ {0, 1}.
+- **Routing.** Under `full`, any `pending_cause` ≠ `none` routes to the sweep. Under
+  `full-on-global`, `global` and `timeout` route to the sweep and `unreachable` fails the
+  `incremental-pr` job with each counted cause named in the step summary (`no reachable tests:
+  src/x.ts` — add a test or remove the module). **A PR's verdict under `full-on-global` never depends
+  on runner speed:** a timeout only makes the PR slower (it pays the sweep), never red; only
+  `unreachable` needs a person.
 - **Shortcut.** In a PR run with `pendingOnPr` ≠ `allow`, when the plan already contains a counted
   `["*"]` deferral, no invocation runs (the state is re-attested as in §5.6 step 6) and the cause is
-  `global`; the job goes straight to the full sweep.
-- Job `incremental-pr` under `full`: step 3 passes `--pr --max-minutes <m>`; when `pending_cause` ≠
-  `none`, a following step runs `run --mode full`; its exit code is the job's result, and on exit
-  0/1 its state is saved to the cache with key
-  `mutation-pr-N-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-full`, where `N` is
-  `github.event.pull_request.number` (restored by the existing `mutation-pr-N-` restore key). Under `full-on-global`: the same, except
-  that `pending_cause=other` fails the job with each counted cause named in the step summary (for
-  example `time budget exceeded: src/App.tsx`, or `no reachable tests: src/x.ts` — add a test or
-  remove the module). Step 4's cache save of the incremental state runs only when `pending_cause` is
-  `none` or `pendingOnPr` is `allow`.
-- **Sizing.** For `full`/`full-on-global` the PR job timeout must be ≥ setup + 2 × `<m>` + one full
-  sweep (Keeper: roughly 240–350 min); the template's `incremental-pr` timeout (60 min in §5.7) is
-  an input set from this rule when `pendingOnPr` ≠ `allow`, and cancel-in-progress on a new push
-  discards an in-flight follow-up sweep (the next push pays it again). The docs also warn that under `full` every PR that exceeds
-  `<m>` becomes a full sweep; that under `full-on-global` a `time budget exceeded` failure repeats on
-  re-run until `<m>` is raised or the change is split; that a PR rebased during main's pending
-  window may pay a full sweep (correct, but slower); and that under `full-on-global` a PR whose
-  selection mixes main's time-deferred files with its own can fail until main's `full` run lands
-  (it recovers on re-run afterwards).
+  `global`.
+- **Jobs (amends §5.7).** Under `full`/`full-on-global` the sweep runs in its own job:
+  - `incremental-pr` (timeout ≥ setup + 2 × `<m>`; concurrency `mutation-inc-${{ github.ref }}`,
+    cancel in progress as before): step 3 passes `--pr --max-minutes <m>` and exposes `exit_code`,
+    `pending_cause` and `pending_causes`; the job succeeds when the cause routes to the sweep (the
+    sweep job then decides), fails on `unreachable`, and otherwise follows §5.7 step 6. Step 4's
+    cache save of the incremental state runs only when `pending_cause` is `none` or `pendingOnPr`
+    is `allow`.
+  - `pr-full` (`needs: incremental-pr`; runs only when its `pending_cause` routes to the sweep and
+    its `exit_code` ∈ {0, 1}; `permissions: contents: read`; timeout ≥ setup + one full sweep;
+    concurrency `mutation-pr-full-${{ github.event.pull_request.number }}` with
+    `cancel-in-progress: false`, so a running sweep is never cancelled and only the newest waiting
+    one survives): checkout, setup, `run --mode full`; on exit 0/1 save the cache with key
+    `mutation-pr-N-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-full`
+    (`N` = `github.event.pull_request.number`, restored by the existing `mutation-pr-N-` restore
+    key), so a sweep that finishes after a newer push is adopted by the next push, which then
+    re-runs only its own delta; fail when `exit_code` is empty or ≠ 0. Skipped, it satisfies a
+    required check.
+- **Sizing and costs (docs).** `<m>` is sized so a timeout is rare (Keeper: ≥ 60 min); a breach costs
+  a sweep, not a failure. Under `full` every PR exceeding `<m>` pays a sweep. A force-push during a
+  running sweep lets that sweep finish (its state is reused) and queues one more if the new commit
+  also needs a sweep. A PR rebased or not rebased during main's pending window may pay a sweep when
+  its lockfile digest differs from main's (correct, but slower).
 - A local run never turns a PR green; no local state is imported into CI (contract option (b)
   rejected).
 
@@ -984,7 +999,12 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
 - **Gate `--mutation-view <name>`** (repeatable): the name must appear in the map of every supplied
   attested report that has `views`; otherwise exit 2. An unattested report, or an attested one
   without `views`, is not scoped: it produces its usual findings under the view's fingerprint. Each
-  view yields its own classification, findings, score summary and §6.6 section (never a union).
+  view has its own classification, findings and counts (never a union). The gate accepts the flag
+  repeated in one run (Keeper: 16). **Rendering:** one §6.6 "Mutation Evidence Freshness" section
+  with a table row per view (verified, stale, pending counted, pending inherited, unbound,
+  unattested) and one re-run list with a View column; findings stay one per view (ledger
+  isolation) with the view named in the title (`Mutation evidence stale (<view>): <cause>
+  changed`).
   With a view, fingerprints gain `:<view>` after `<engine>`
   (`mutation:stale:<mode>:<engine>:<view>:<cause>:<cause8>`, likewise for pending and unattested).
 - **Ledger with views (amends §6.5, and `openForRun` for these three prefixes):** a run with views
@@ -1078,14 +1098,17 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
   closure disabled by a test-only switch makes equivalence fail for exactly the listed mutant); a
   view pattern outside `mutate`, an unviewed `mutate` file and a failing views command (exit 2);
   `verify` failing for one view (exit 1, view named) and not run on a cold run; PRs under
-  `full-on-global` with a lockfile edit (shortcut, full run), with a time-budget deferral (job
-  fails, cause named; re-run with no change fails again), with inherited deferrals only (no
+  `full-on-global` with a lockfile edit (shortcut, `pr-full` sweep), with a time-budget deferral
+  (`timeout` → `pr-full` sweep, never red for speed), with `blocked by deferred scope` (`timeout` →
+  sweep), with a deleted only-test (`unreachable` → `incremental-pr` fails, cause named), with inherited deferrals only (no
   failure, summary lists them, the PR's own edits executed; a strict survivor-bar verifier still
   exits 0), with a counted pending kill under a strict verifier (exit 1 on a `--pr` run, exit 0
   otherwise), with a lockfile edit
   while main's `inc` carries a lockfile deferral (counted, cause `global`, full run), and on a cold baseline after a `stateVersion` bump (cause
-  `global`, full run); a PR under `full` whose follow-up full run succeeds (cache saved, next push
-  no full sweep); the gate's `--mutation-view` scoping, per-view fingerprints, cross-view isolation,
+  `global`, full run); a PR under `full` whose `pr-full` sweep succeeds (cache saved, next push re-runs
+  only its delta), and a push during a running sweep (the sweep is not cancelled; the next push
+  adopts its state); the gate's `--mutation-view` scoping (repeated flags in one run, one compact
+  section with a row per view), per-view fingerprints, cross-view isolation,
   a renamed view superseding its rows (and a run with no `views`-carrying report
   superseding nothing), and an unattested report under a view keeping its blocker.
 - §7.2 Node tests: the line diff (shared vectors), EOL/BOM normalisation, old→new mapping, pure
@@ -1094,8 +1117,10 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
   absent on both sides, nameless reasons, a cold run's `no usable state` always counted), canonical
   reasons, the precedence of counted over inherited per kill, the recorded `inherited` flag
   (`false` without `--also-state`), and
-  `pending_cause` (only on exit 0/1); `pendingCounted`/`pendingInherited`; `MUTATION_RUN_KIND`; the shortcut; `--pr`/`--max-minutes`;
-  config validation (`allowBail` with `residual`, missing `disableBail`, `residual off` with
+  `pending_cause` (only on exit 0/1); `pendingCounted`/`pendingInherited`; `MUTATION_RUN_KIND`; the shortcut; `--pr`/`--max-minutes`; `pending_cause` precedence and `pending_causes`;
+  the static workflow test for `pr-full`
+  (needs, gating on `pending_cause` per mode and `exit_code`, `cancel-in-progress: false`, cache key,
+  read-only permissions); config validation (`allowBail` with `residual`, missing `disableBail`, `residual off` with
   `full-on-global`); views shape, names and completeness; `viewSummaries`; `verify` environment,
   per-view invocation, spawn failure and timeout (exit 1); `stateVersion` and its golden-output
   guard; seed merge and re-keying. Go tests: `--mutation-view` scoping and exit 2 on an unknown
@@ -1114,3 +1139,5 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
     (contract §3; for Keeper, ≤ 20% projected pending PR runs in `residual` mode).
 20. Only deferrals found in main's published state, about inputs the run has not changed, are
     inherited; everything else a PR run carries counts toward its outcome.
+21. Under `full-on-global` a PR's verdict never depends on runner speed: a timeout routes to the full
+    sweep; only `no reachable tests` fails the PR (user and the Keeper agent, 2026-09-23).
