@@ -170,3 +170,7 @@ kill classes and ledger lifecycle.
 The Keeper adoption spec (migration steps, waiver-ledger bridge script, unit views mapping) is
 written after the template passes its local proof and the §3 viability gate, within 0.13.0, and is
 tracked as its own bead.
+
+Note (design r16): whole-tree deferrals (`["*"]`: `no usable state`, a deleted or importer-less
+support file, an importer-less unclassified file) are routed to the full sweep rather than failing
+the PR under `full-on-global`, because a PR cannot clear them itself; only per-file causes fail it.
