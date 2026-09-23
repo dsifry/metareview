@@ -36,8 +36,10 @@
 
 ## Plan decisions beyond the spec text (flagged for review)
 
-- **Diff cap.** `MAX_EDIT_DISTANCE = 2000`. Above that, `lineDiff` returns one hunk spanning both whole files and maps no line. This behaves exactly like `editedFiles: "whole"` for that file and bounds memory, since Myers traces grow with D². Plan 2's Go diff uses the same constant, and a vector pins it.
-- **Duplicate JSON keys.** The spec requires exit 2 on a duplicate view name. `JSON.parse` silently keeps the last duplicate, so `json.mjs` adds a small scanner, `duplicateKey(text)`. It runs on every JSON file the harness reads and on the views command's output.
+- **Diff cap.** `MAX_EDIT_DISTANCE = 2000`. Above that, `lineDiff` returns `null`, and `computePlan` treats the file exactly like the > 1 MiB fallback: it is forced whole-file and its importer tests are added (K4). This bounds memory, since Myers traces grow with D². Plan 2's Go diff uses the same constant, and a capped diff there is a blanket cause, like a zero-mutant file (gate plan review note).
+- **Changed lines are forced in `residual` mode (plan review finding).** Stryker decides reuse at character level. A mutant on an edited line whose own columns did not change would be reused without re-running. So for a residual-edited file, the new-side line ranges of its changed hunks are forced as well. They are mandatory and budget-exempt, as contract K5.1 requires, and are never dropped by the budget.
+- **Unresolvable relative or alias specifiers make the file an open importer** (spec §5.4: anything that neither resolves nor is a package is unresolved).
+- **Duplicate JSON keys.** The spec requires exit 2 on a duplicate view name. `JSON.parse` silently keeps the last duplicate, so `json.mjs` adds a small scanner, `duplicateKey(text)`. It runs on the harness config, the Stryker config, the core `package.json` and the views command's output.
 - **Views command timeout** (review advisory). The command runs with a 60 s timeout. A timeout is exit 2, like any other views command failure.
 - **Reason → named-key table** (review advisory). The table in `lib/deferrals.mjs` is the single source for §11.2 (ii), and an unknown reason is exit 2.
 
@@ -114,6 +116,7 @@ testdata/mutation-incremental/diff-vectors.json
     { "pattern": "src/{a,b}.ts", "path": "src/c.ts", "match": false },
     { "pattern": "src/?.ts", "path": "src/a.ts", "match": true },
     { "pattern": "src/?.ts", "path": "src/ab.ts", "match": false },
+    { "pattern": "src/a?.ts", "path": "src/ab.ts", "match": true },
     { "pattern": "**", "path": "a/b/c", "match": true },
     { "pattern": "a.b", "path": "axb", "match": false },
     { "pattern": ".mutation/**", "path": ".mutation/attestation.json", "match": true }
@@ -624,6 +627,8 @@ const invalid = [
   ['minutes', (r) => r.write('mutation-incremental.json', cfg({ budget: { ...baseConfig().budget, maxMinutesPerInvocation: 0 } })), /maxMinutesPerInvocation/],
   ['stryker shape', (r) => r.write('mutation-incremental.json', cfg({ stryker: { command: [] } })), /stryker needs/],
   ['runtime shape', (r) => r.write('mutation-incremental.json', cfg({ runtime: {} })), /runtime needs/],
+  ['runtime command shape', (r) => r.write('mutation-incremental.json', cfg({ runtime: { commands: ['node'], env: [] } })), /runtime needs/],
+  ['runtime env shape', (r) => r.write('mutation-incremental.json', cfg({ runtime: { commands: [], env: [1] } })), /runtime needs/],
   ['editedFiles', (r) => r.write('mutation-incremental.json', cfg({ editedFiles: 'x' })), /editedFiles/],
   ['pendingOnPr', (r) => r.write('mutation-incremental.json', cfg({ pendingOnPr: 'x' })), /pendingOnPr/],
   ['allowBail type', (r) => r.write('mutation-incremental.json', cfg({ allowBail: 'yes' })), /allowBail must be a boolean/],
@@ -814,7 +819,9 @@ export function loadConfig(top, configArg) {
     fail('stryker needs command[], configFile and extraArgs[]');
   }
   const runtime = raw.runtime ?? {};
-  if (!Array.isArray(runtime.commands) || !Array.isArray(runtime.env)) fail('runtime needs commands[] and env[]');
+  if (!Array.isArray(runtime.commands) || !runtime.commands.every(isArgv) || !Array.isArray(runtime.env) || !runtime.env.every((n) => typeof n === 'string')) {
+    fail('runtime needs commands[] (argv arrays) and env[] (variable names)');
+  }
   const optional = validateOptional(raw);
   if (mode === 'off' && optional.pendingOnPr === 'full-on-global') fail('residual.mode off cannot be combined with pendingOnPr full-on-global');
 
@@ -930,7 +937,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, symlinkSync } from 'node:fs';
+import { mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../lib/config.mjs';
 import { takeSnapshot, digestOf, sha256 } from '../lib/snapshot.mjs';
@@ -941,6 +948,7 @@ test('snapshot classifies, excludes and records tracked', () => {
   const r = makeRepo({ files: { 'src/a.ts': 'a', 'tests/a.test.ts': 't', 'README.md': 'x', 'scripts/x.sh': 's' } });
   r.write('src/new.ts', 'n');
   r.write('.mutation/attestation.json', '{}');
+  r.write('reports/mutation/mutation.json', '{}'); // not gitignored: excluded by the resolved exclusions
   const snap = takeSnapshot(loadConfig(r.top));
   assert.equal(snap.files['src/a.ts'].category, 'mutate');
   assert.equal(snap.files['src/a.ts'].digest, `sha256:${sha256('a')}`);
@@ -950,6 +958,7 @@ test('snapshot classifies, excludes and records tracked', () => {
   assert.equal(snap.files['scripts/x.sh'].category, 'unclassified');
   assert.equal(snap.files['README.md'], undefined);
   assert.equal(snap.files['.mutation/attestation.json'], undefined);
+  assert.equal(snap.files['reports/mutation/mutation.json'], undefined);
   assert.equal(snap.files['mutation-incremental.json'].category, 'global');
 });
 
@@ -959,10 +968,11 @@ test('snapshot hashes symlinks by link text and skips gitlinks and deleted track
   r.git('update-index', '--add', '--cacheinfo', `160000,${'1'.repeat(40)},vendor/sub`);
   r.write('src/gone.ts', 'g');
   r.git('add', 'src/gone.ts');
-  r.git('rm', '-q', '-f', '--cached', 'src/gone.ts');
+  rmSync(join(r.top, 'src/gone.ts')); // tracked in the index, deleted from the working tree
   const snap = takeSnapshot(loadConfig(r.top));
   assert.equal(snap.files['src/link.ts'].digest, `symlink:${sha256('a.ts')}`);
   assert.equal(snap.files['vendor/sub'], undefined);
+  assert.equal(snap.files['src/gone.ts'], undefined);
 });
 
 test('digestOf returns null for directories and missing files, rethrows other errors', () => {
@@ -1169,8 +1179,10 @@ test('specifiers finds runtime imports and skips type-only and vi.mock', () => {
     "const d = require('./d');",
     "vi.mock('./mocked');",
     "const x = obj.import('./not');",
+    'export type Id = string',
+    "export { h } from './h'",
   ].join('\n');
-  assert.deepEqual(specifiers(src).sort(), ['./a', './b', './c', './d', './side']);
+  assert.deepEqual(specifiers(src).sort(), ['./a', './b', './c', './d', './h', './side']);
 });
 
 function graphRepo(extra = {}) {
@@ -1186,7 +1198,7 @@ function graphRepo(extra = {}) {
       'tests/b.test.ts': "import { b } from '../src/b';\nimport { make } from './helpers/make';\nimport fs from 'fs';",
       'tests/c.test.ts': "import { c } from '@app/c';\nimport data from './data.json';",
       'tests/data.json': '{}',
-      'tests/i.test.ts': "import { a } from '../src/idx';\nimport x from '../../outside';\nimport y from './missing';",
+      'tests/i.test.ts': "import { a } from '../src/idx';",
     },
   });
   mkdirSync(join(r.top, 'node_modules/vitest'), { recursive: true });
@@ -1223,6 +1235,34 @@ test('workspace links into the repo and unknown bare specifiers make open import
   assert.deepEqual([...importerTests(g, snap.files, 'tests/helpers/make.ts')].sort(), ['tests/b.test.ts', 'tests/c.test.ts', 'tests/w.test.ts']);
 });
 
+test('relative and alias specifiers that resolve to no file in the snapshot make open importers', () => {
+  const r = graphRepo();
+  r.write('tests/u.test.ts', "import x from '../../outside';\nimport y from './missing';\nimport z from '@app/nope';");
+  const cfg = loadConfig(r.top);
+  const snap = takeSnapshot(cfg);
+  const g = buildGraph(snap.files, cfg);
+  assert.deepEqual(openImporters(g), [{ path: 'tests/u.test.ts', specifiers: ['../../outside', './missing', '@app/nope'] }]);
+  assert.deepEqual([...importerTests(g, snap.files, 'src/c.ts')].sort(), ['tests/c.test.ts', 'tests/u.test.ts']);
+});
+
+test('the longest alias key wins', () => {
+  const r = graphRepo({ aliases: { '@app/': 'lib/', '@app/c': 'src/c' } });
+  const cfg = loadConfig(r.top);
+  const snap = takeSnapshot(cfg);
+  const g = buildGraph(snap.files, cfg);
+  assert.deepEqual([...importerTests(g, snap.files, 'src/c.ts')], ['tests/c.test.ts']);
+  assert.deepEqual(openImporters(g), []);
+});
+
+test('openImporters sorts by path and de-duplicates specifiers', () => {
+  const open = new Map([['b.ts', ['y']], ['a.ts', ['x', 'x']], ['c.ts', ['z']]]);
+  assert.deepEqual(openImporters({ open }), [
+    { path: 'a.ts', specifiers: ['x'] },
+    { path: 'b.ts', specifiers: ['y'] },
+    { path: 'c.ts', specifiers: ['z'] },
+  ]);
+});
+
 test('files over 1 MiB, symlinks and non-source files are not parsed', () => {
   const r = graphRepo();
   r.write('src/big.ts', `import './a';\n${'x'.repeat((1 << 20) + 1)}`);
@@ -1253,7 +1293,9 @@ const TS_EXTS = ['.ts', '.tsx', '.mts', '.cts'];
 const MAX_BYTES = 1 << 20;
 // String-literal specifiers only. `import type` / `export type` are elided at runtime (spec F4),
 // and `vi.mock('./x')` replaces a module rather than depending on it.
-const FROM = /(?:^|[^\w$.])(?:import|export)\s+(type\s+)?[^'"`;]*?\bfrom\s*(['"])([^'"\n]+)\2/g;
+// `=` is excluded so that, in code without semicolons, `export type X = …` cannot swallow the next
+// statement's `from` (a real import/export clause never contains `=`).
+const FROM = /(?:^|[^\w$.])(?:import|export)\s+(type\s+)?[^'"`;=]*?\bfrom\s*(['"])([^'"\n]+)\2/g;
 const OTHERS = [
   /(?:^|[^\w$.])import\s*(['"])([^'"\n]+)\1/g,
   /(?:^|[^\w$.])import\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g,
@@ -1282,7 +1324,7 @@ function isInstalledPackage(spec, fromFile, top) {
   for (;;) {
     const candidate = join(dir, 'node_modules', name);
     if (existsSync(candidate)) {
-      const rel = relative(top, realpathSync(candidate));
+      const rel = relative(realpathSync(top), realpathSync(candidate));
       const inRepo = !rel.startsWith('..') && !isAbsolute(rel);
       return !inRepo || rel.split(/[\\/]/).includes('node_modules');
     }
@@ -1300,9 +1342,10 @@ function classify(spec, fromFile, ctx) {
     if (key !== undefined) base = posix.normalize(ctx.aliases[key] + spec.slice(key.length));
   }
   if (base !== null) {
-    // Outside the repo, or a missing file: not an edge we can follow (a missing import fails its tests).
+    // Spec §5.4: a relative or alias specifier that reaches no regular file in the snapshot (outside
+    // the repo, gitignored or generated, excluded) is unresolved, so its file is an open importer.
     const to = base.startsWith('../') ? null : resolveFile(base, ctx.files);
-    return to ? { edge: to } : {};
+    return to ? { edge: to } : { unresolved: true };
   }
   if (spec.startsWith('node:') || builtinModules.includes(spec.split('/')[0])) return {};
   return isInstalledPackage(spec, fromFile, ctx.top) ? {} : { unresolved: true };
@@ -1379,7 +1422,7 @@ export function openImporters(graph) {
 - [ ] **Step 4: Run to verify pass**
 
 Run: `MUTATION_ALLOW_TMP_STATE=1 node --test templates/mutation-incremental/test/graph.test.mjs`
-Expected: PASS (4 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -1404,7 +1447,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - `MAX_EDIT_DISTANCE` (2000);
   - `normalizeText(text): string` (strips a leading BOM, converts CRLF/CR to LF);
   - `splitLines(text): string[]`;
-  - `lineDiff(oldText, newText) → { hunks: Hunk[], oldToNew: (number|null)[] }`, where `Hunk = { oldStart, oldEnd, newStart, newEnd }` (1-based; an empty side has `end = start − 1`; a pure insertion goes after old line `oldStart − 1`) and `oldToNew[oldLine]` is the new line of an unchanged old line, otherwise `null`;
+  - `lineDiff(oldText, newText) → { hunks: Hunk[], oldToNew: (number|null)[] } | null` (`null` above `MAX_EDIT_DISTANCE`; the caller treats the file as whole), where `Hunk = { oldStart, oldEnd, newStart, newEnd }` (1-based; an empty side has `end = start − 1`; a pure insertion goes after old line `oldStart − 1`) and `oldToNew[oldLine]` is the new line of an unchanged old line, otherwise `null`;
   - `hunkIntersects(start, end, hunk): boolean` (the §11.4.3 rule).
 
 - [ ] **Step 1: Write the vectors (shared with Plan 2's Go diff)**
@@ -1467,12 +1510,10 @@ test('hunkIntersects: overlap for a changed range, containment for an insertion 
   assert.equal(hunkIntersects(4, 5, insertAfter3), false);
 });
 
-test('above MAX_EDIT_DISTANCE the whole file is one hunk and nothing maps', () => {
+test('above MAX_EDIT_DISTANCE lineDiff returns null (the planner treats the file as whole)', () => {
   const a = Array.from({ length: MAX_EDIT_DISTANCE + 1 }, (_, i) => `a${i}`).join('\n');
   const b = Array.from({ length: MAX_EDIT_DISTANCE + 1 }, (_, i) => `b${i}`).join('\n');
-  const d = lineDiff(a, b);
-  assert.deepEqual(d.hunks, [{ oldStart: 1, oldEnd: MAX_EDIT_DISTANCE + 1, newStart: 1, newEnd: MAX_EDIT_DISTANCE + 1 }]);
-  assert.equal(d.oldToNew.every((x) => x === null), true);
+  assert.equal(lineDiff(a, b), null);
 });
 ```
 
@@ -1488,7 +1529,7 @@ Expected: FAIL — missing module.
 ```js
 // Content-based line diff (spec §11.4.1), shared with the Go gate. Both implementations run
 // testdata/mutation-incremental/diff-vectors.json, so a change here needs the same change there.
-// Above MAX_EDIT_DISTANCE the file is treated as one hunk (same effect as editedFiles "whole").
+// Above MAX_EDIT_DISTANCE lineDiff returns null and the planner forces the file whole.
 export const MAX_EDIT_DISTANCE = 2000;
 
 export function normalizeText(text) {
@@ -1513,8 +1554,7 @@ function editOps(a, b) {
   const off = n + m + 1;
   const v = new Int32Array(2 * (n + m) + 3);
   const trace = [];
-  for (let d = 0; ; d++) {
-    if (d > MAX_EDIT_DISTANCE) return null;
+  for (let d = 0; d <= MAX_EDIT_DISTANCE; d++) {
     trace.push(v.slice(off - d - 1, off + d + 2));
     for (let k = -d; k <= d; k += 2) {
       let x = k === -d || (k !== d && v[off + k - 1] < v[off + k + 1]) ? v[off + k + 1] : v[off + k - 1] + 1;
@@ -1527,6 +1567,7 @@ function editOps(a, b) {
       if (x >= n && y >= m) return backtrack(trace, n, m);
     }
   }
+  return null;
 }
 
 function backtrack(trace, n, m) {
@@ -1556,9 +1597,7 @@ export function lineDiff(oldText, newText) {
   const a = splitLines(oldText);
   const b = splitLines(newText);
   const ops = editOps(a, b);
-  if (ops === null) {
-    return { hunks: [{ oldStart: 1, oldEnd: a.length, newStart: 1, newEnd: b.length }], oldToNew: new Array(a.length + 1).fill(null) };
-  }
+  if (ops === null) return null;
   const hunks = [];
   const oldToNew = [null];
   let i = 0;
@@ -1890,6 +1929,7 @@ import assert from 'node:assert/strict';
 import { computePlan, publicPlan, RESIDUAL_MAX_BYTES } from '../lib/plan.mjs';
 import { changeSet, TOOL, STATE_VERSION } from '../lib/state.mjs';
 import { dedupeDeferrals, sortDeferrals, deferralKey } from '../lib/deferrals.mjs';
+import { MAX_EDIT_DISTANCE } from '../lib/diff.mjs';
 
 // The spec §7.1 fixture in miniature (same line numbers), plus src/e.ts from §11.7.
 const A = 'export function clamp(n, lo, hi) {\n  if (n < lo) return lo;\n  if (n > hi) return hi;\n  return n;\n}\n';
@@ -1992,19 +2032,37 @@ test('whole: behaviour-preserving edit on a.ts line 3 forces the file and the re
   assert.equal(p.forcedCount, 1);
 });
 
-test('residual: a.ts line 3 keeps the file in scope and forces the mapped closure', () => {
+test('residual: a.ts line 3 keeps the file in scope, forces the changed line and the mapped closure', () => {
   const p = plan({ edit: { 'src/a.ts': A3 }, config: residual });
-  assert.deepEqual([p.scope, p.forced, p.forcedCount], [['src/a.ts'], ['src/a.ts:2-2', 'src/b.ts:4-4'], 2]);
+  // a2 (line 2, closure) and the changed line 3 merge; forcedCount counts closure mutants only.
+  assert.deepEqual([p.scope, p.forced, p.forcedCount], [['src/a.ts'], ['src/a.ts:2-3', 'src/b.ts:4-4'], 2]);
 });
 
 test('residual: e.ts closure is narrower than the file', () => {
   const p = plan({ edit: { 'src/e.ts': E.replace('n + 1', 'n + 2') }, config: residual });
-  assert.deepEqual([p.scope, p.forced], [['src/e.ts'], []]);
+  assert.deepEqual([p.scope, p.forced], [['src/e.ts'], ['src/e.ts:2-2']]);
+});
+
+test('residual: a pure deletion forces no new-side lines, only the closure', () => {
+  const p = plan({ edit: { 'src/e.ts': E.replace('  return r;\n}\n\nexport function dec', '}\n\nexport function dec') }, config: residual });
+  assert.deepEqual([p.scope, p.forced], [['src/e.ts'], ['src/e.ts:2-2']]);
 });
 
 test('residual: inserted line shifts mapped ranges; a hunk outside every mutant adds importer tests', () => {
   const p = plan({ edit: { 'src/a.ts': `// note\n${A}` }, config: residual });
-  assert.deepEqual([p.scope, p.forced], [['src/a.ts'], ['src/a.ts:2-6', 'src/b.ts:4-4']]);
+  assert.deepEqual([p.scope, p.forced], [['src/a.ts'], ['src/a.ts:1-6', 'src/b.ts:4-4']]);
+});
+
+test('residual: a capped diff is handled like the whole-file fallback', () => {
+  const many = Array.from({ length: MAX_EDIT_DISTANCE + 1 }, (_, i) => `// ${i}`).join('\n');
+  const p = plan({ edit: { 'src/a.ts': `${A}${many}\n` }, config: residual });
+  assert.deepEqual([p.scope, p.forced], [[], ['src/a.ts', 'src/b.ts:4-4']]);
+});
+
+test('residual with residual.mode off records only the closure it skipped', () => {
+  const p = plan({ edit: { 'src/a.ts': A3 }, config: { ...residual, residualMode: 'off' } });
+  assert.deepEqual([p.scope, p.forced], [['src/a.ts'], ['src/a.ts:3-3']]);
+  assert.deepEqual(p.deferrals, [{ reason: 'residual off: src/a.ts', paths: ['src/a.ts', 'src/b.ts'] }]);
 });
 
 test('whole and residual: a hunk outside every mutant adds the file importer tests (K4)', () => {
@@ -2013,7 +2071,7 @@ test('whole and residual: a hunk outside every mutant adds the file importer tes
   assert.deepEqual(plan({ edit: { 'src/a.ts': A3 }, edges }).forced, ['src/a.ts', 'src/b.ts:4-4']);
   assert.deepEqual(plan({ edit: { 'src/a.ts': appended }, edges }).forced, ['src/a.ts', 'src/b.ts:4-4', 'src/c.ts:2-2']);
   const r = plan({ edit: { 'src/a.ts': appended }, edges, config: residual });
-  assert.deepEqual([r.scope, r.forced], [['src/a.ts'], ['src/a.ts:1-5', 'src/b.ts:4-4', 'src/c.ts:2-2']]);
+  assert.deepEqual([r.scope, r.forced], [['src/a.ts'], ['src/a.ts:1-6', 'src/b.ts:4-4', 'src/c.ts:2-2']]);
 });
 
 test('residual falls back to whole above RESIDUAL_MAX_BYTES', () => {
@@ -2026,6 +2084,21 @@ test('residual falls back to whole above RESIDUAL_MAX_BYTES', () => {
 test('zero-mutant module: importer tests drive the residual (limits.ts, index.ts)', () => {
   assert.deepEqual(plan({ edit: { 'src/limits.ts': 'export const LIMIT = 50;\n' } }).forced, ['src/c.ts:2-2', 'src/limits.ts']);
   assert.deepEqual(plan({ edit: { 'src/index.ts': "export * from './a.js';\n" }, config: residual }).forced, ['src/a.ts:1-5', 'src/index.ts']);
+  // A new test importing the module has no ids in the report yet; it adds nothing to T_Y.
+  const withNewTest = plan({ edit: { 'src/limits.ts': 'export const LIMIT = 50;\n' }, add: { 'tests/l.test.ts': { category: 'test' } }, edges: { 'tests/l.test.ts': ['src/limits.ts'] } });
+  assert.deepEqual(withNewTest.forced, ['src/c.ts:2-2', 'src/limits.ts']);
+});
+
+test('support forcing skips a file that is already edited whole', () => {
+  assert.deepEqual(plan({ edit: { 'src/a.ts': A3, 'tests/helpers/make.ts': 'x' } }).forced, ['src/a.ts', 'src/b.ts:4-4']);
+});
+
+test('forced spans merge per file and sort by start, then end', () => {
+  const p = plan({
+    edit: { 'tests/helpers/make.ts': 'x' },
+    mutate: (r) => { r.files['src/e.ts'].mutants = [mk('x1', 2, 2, 'Killed', ['tb'], ['tb']), mk('x2', 7, 9, 'Killed', ['tb'], ['tb']), mk('x3', 7, 7, 'Killed', ['tb'], ['tb'])]; },
+  });
+  assert.deepEqual(p.forced, ['src/a.ts:1-5', 'src/b.ts:4-4', 'src/e.ts:2-2', 'src/e.ts:7-9']);
 });
 
 test('edit tests/b.test.ts scopes the files its tests cover', () => {
@@ -2113,6 +2186,11 @@ test('a test that reaches an open importer scopes every uncovered or weak file',
   const p = plan({ add: { 'tests/w.test.ts': { category: 'test' } }, open: { 'tests/w.test.ts': ['@x/y'] } });
   assert.deepEqual(p.scope, ['src/index.ts', 'src/limits.ts', 'src/types.ts']);
   assert.deepEqual(p.openImporters, [{ path: 'tests/w.test.ts', specifiers: ['@x/y'] }]);
+});
+
+test('a test reaching an open importer also scopes reported files with survivors', () => {
+  const p = plan({ add: { 'tests/w.test.ts': { category: 'test' } }, open: { 'tests/w.test.ts': ['@x/y'] }, mutate: (r) => { r.files['src/c.ts'].mutants[0].status = 'Survived'; } });
+  assert.deepEqual(p.scope, ['src/c.ts', 'src/index.ts', 'src/limits.ts', 'src/types.ts']);
 });
 
 test('a new case in an existing test scopes a file with a survivor', () => {
@@ -2216,7 +2294,9 @@ export function computePlan({ config, snapshot, graph, chosen, disableResidual =
   }
   const own = (f) => byFile.get(f) ?? [];
   const inR = (f) => Object.hasOwn(reportFiles, f);
-  const present = (f) => snapshot.files[f]?.digest.startsWith('sha256:') === true;
+  // A path Stryker may be given: a regular file still in the mutate category (deleted, symlinked or
+  // re-categorised files drop out, spec §5.4 Normalise).
+  const present = (f) => snapshot.files[f]?.category === 'mutate' && snapshot.files[f].digest.startsWith('sha256:');
   const hits = (ids, set) => ids.some((id) => set.has(id));
   const idsOf = (tests) => new Set([...tests].flatMap((t) => R.testIds[t] ?? []));
   const importerIds = (p) => idsOf(importerTests(graph, snapshot.files, p));
@@ -2235,7 +2315,7 @@ export function computePlan({ config, snapshot, graph, chosen, disableResidual =
     let d = null;
     if (inR(c.path) && present(c.path)) {
       const text = read(c.path);
-      // Stryker embeds every file's source in the report (spec F3).
+      // Stryker embeds every file's source in the report (spec F3). null above the size or edit cap.
       if (Buffer.byteLength(text) <= RESIDUAL_MAX_BYTES) d = lineDiff(reportFiles[c.path].source, text);
     }
     if (d) diffs.set(c.path, d);
@@ -2294,13 +2374,17 @@ export function computePlan({ config, snapshot, graph, chosen, disableResidual =
 
   // Step 4: residual (spec §5.4 step 4, §11.4.3, §11.5).
   const killedBy = (T, skip) => R.mutants.filter((m) => m.status === 'Killed' && m.file !== skip && hits(m.killedBy, T));
+  // Mutants touching a changed hunk of a residual-edited file are re-run by the unforced scope and
+  // the forced changed lines, so they are neither forced by the closure nor recorded under "off".
+  const rerunInScope = (m) => residualEdited.get(m.file)?.hunks.some((h) => hunkIntersects(m.startLine, m.endLine, h)) === true;
   const applyResidual = (origin, targets) => {
-    if (disableResidual || targets.length === 0) return;
+    const live = targets.filter((m) => !rerunInScope(m));
+    if (disableResidual || live.length === 0) return;
     if (config.residualMode === 'off') {
-      added.push({ reason: `residual off: ${origin}`, paths: [...new Set(targets.map((m) => m.file))] });
+      added.push({ reason: `residual off: ${origin}`, paths: [...new Set(live.map((m) => m.file))] });
       return;
     }
-    for (const m of targets) addForced(m);
+    for (const m of live) addForced(m);
   };
   for (const c of changes) {
     if (c.category === 'mutate') {
@@ -2310,7 +2394,8 @@ export function computePlan({ config, snapshot, graph, chosen, disableResidual =
       const touching = residualEdited.has(Y) ? mine.filter((m) => d.hunks.some((h) => hunkIntersects(m.startLine, m.endLine, h))) : mine;
       const T = new Set(touching.flatMap((m) => m.coveredBy));
       const outsideEveryMutant = mine.length === 0 || !d || d.hunks.some((h) => !mine.some((m) => hunkIntersects(m.startLine, m.endLine, h)));
-      if (c.kind !== 'deleted' && outsideEveryMutant) for (const id of importerIds(Y)) T.add(id);
+      // Spec §5.4 step 4 / §11.5: only a *changed* Y falls back to (or adds) its importer tests.
+      if (c.kind === 'changed' && outsideEveryMutant) for (const id of importerIds(Y)) T.add(id);
       applyResidual(Y, killedBy(T, residualEdited.has(Y) ? null : Y));
     } else if (c.category === 'unclassified' && c.kind !== 'deleted') {
       const tests = importerTests(graph, snapshot.files, c.path);
@@ -2347,14 +2432,18 @@ export function computePlan({ config, snapshot, graph, chosen, disableResidual =
     whole.clear();
   }
 
-  const entries = [...edited].map((f) => ({ file: f, start: 0, text: f }));
-  for (const [f, ms] of forced) {
-    if (whole.has(f)) {
-      entries.push({ file: f, start: 0, text: f });
-      continue;
-    }
+  // Forced spans per file: the closure's mutants plus, for residual-edited files, the new-side lines
+  // of every changed hunk (mandatory and budget-exempt: added after the budget check).
+  const spansOf = new Map();
+  for (const [f, ms] of forced) if (!whole.has(f)) spansOf.set(f, [...ms.values()]);
+  for (const [f, d] of residualEdited) {
+    const lines = d.hunks.filter((h) => h.newEnd >= h.newStart).map((h) => [h.newStart, h.newEnd]);
+    if (lines.length > 0) spansOf.set(f, [...(spansOf.get(f) ?? []), ...lines]);
+  }
+  const entries = [...edited, ...whole].map((f) => ({ file: f, start: 0, text: f }));
+  for (const [f, spans] of spansOf) {
     let cur = null;
-    for (const [s, e] of [...ms.values()].sort((x, y) => x[0] - y[0] || x[1] - y[1])) {
+    for (const [s, e] of spans.sort((x, y) => x[0] - y[0] || x[1] - y[1])) {
       if (cur && s <= cur.end + 1) cur.end = Math.max(cur.end, e);
       else {
         cur = { file: f, start: s, end: e };
@@ -2393,7 +2482,7 @@ export function computePlan({ config, snapshot, graph, chosen, disableResidual =
 - [ ] **Step 4: Run to verify pass**
 
 Run: `node --test templates/mutation-incremental/test/plan.test.mjs`
-Expected: PASS (24 tests). If an expected value fails, re-derive it by hand from spec §5.4/§11.4 before changing either side. Every expected value above was hand-derived from the rules and the miniature fixture.
+Expected: PASS (30 tests). If an expected value fails, re-derive it by hand from spec §5.4/§11.4 before changing either side. Every expected value above was hand-derived from the rules and the miniature fixture.
 
 - [ ] **Step 5: Commit**
 
@@ -2523,6 +2612,11 @@ test('resolveViews: absent, inline and command', () => {
   assert.deepEqual(resolveViews(config({ command: ['x'] }), snapshot, { run: ok('{"u.1":["src/*.ts"]}') }), { 'u.1': ['src/*.ts'] });
 });
 
+test('resolveViews runs a real views command', () => {
+  const command = [process.execPath, '-e', 'console.log(JSON.stringify({u:["src/**"]}))'];
+  assert.deepEqual(resolveViews({ top: process.cwd(), views: { command } }, snapshot), { u: ['src/**'] });
+});
+
 test('resolveViews: command failures and bad shapes are exit 2', () => {
   const bad = [
     [() => ({ status: 1, stdout: '' }), /views command .* failed/],
@@ -2648,7 +2742,6 @@ import { duplicateKey } from './json.mjs';
 
 const NAME = /^[A-Za-z0-9._-]+$/;
 const VIEWS_TIMEOUT_MS = 60_000; // review advisory: a hanging views command must not stall the job
-const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const fail = (message) => {
   throw new UsageError(`views: ${message}`);
 };
@@ -2675,7 +2768,7 @@ export function resolveViews(config, snapshot, { run = defaultRun } = {}) {
     if (!NAME.test(name)) fail(`invalid view name ${JSON.stringify(name)} (use [A-Za-z0-9._-]+)`);
     if (!Array.isArray(patterns) || !patterns.every((p) => typeof p === 'string')) fail(`view ${name} must be an array of patterns`);
   }
-  const entries = Object.entries(map).sort(([a], [b]) => cmp(a, b));
+  const entries = Object.keys(map).sort().map((name) => [name, map[name]]);
   for (const [path, info] of Object.entries(snapshot.files)) {
     for (const [name, patterns] of entries) {
       if (info.category !== 'mutate' && matchList(path, patterns)) fail(`view ${name} matches ${path}, which is not a mutate file`);
@@ -2688,7 +2781,7 @@ export function resolveViews(config, snapshot, { run = defaultRun } = {}) {
 }
 
 export function viewFiles(views, snapshot) {
-  const mutate = Object.keys(snapshot.files).filter((p) => snapshot.files[p].category === 'mutate').sort(cmp);
+  const mutate = Object.keys(snapshot.files).filter((p) => snapshot.files[p].category === 'mutate').sort();
   return Object.fromEntries(Object.entries(views).map(([name, patterns]) => [name, mutate.filter((p) => matchList(p, patterns))]));
 }
 
@@ -2718,7 +2811,7 @@ export function viewSummaries(report, views, classified) {
 - [ ] **Step 4: Run to verify pass**
 
 Run: `node --test templates/mutation-incremental/test/deferrals.test.mjs templates/mutation-incremental/test/views.test.mjs`
-Expected: PASS (12 tests).
+Expected: PASS (13 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -2810,8 +2903,9 @@ test('plan adopts a warm state and reports the change', async () => {
   const plan = JSON.parse(res.stdout);
   assert.equal(plan.baseline, '.mutation/remote');
   assert.deepEqual(plan.changes, [{ path: 'src/a.ts', category: 'mutate', kind: 'changed' }]);
-  // Residual mode (the default): the edited file goes whole into the unforced scope.
-  assert.deepEqual([plan.scope, plan.forced], [['src/a.ts'], []]);
+  // Residual mode (the default): the edited file goes whole into the unforced scope and its
+  // changed line is forced.
+  assert.deepEqual([plan.scope, plan.forced], [['src/a.ts'], ['src/a.ts:1-1']]);
 });
 
 test('unexpected errors propagate instead of becoming exit 2', async () => {
