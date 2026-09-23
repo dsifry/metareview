@@ -1,16 +1,16 @@
 # Change-driven mutation testing + attested evidence freshness — design
 
-Status: r6 — verification fixes applied; proceeding to the implementation plan per the user's
-decision (the plan gets its own review gate). Review history: full artifact reviews r1
+Status: r8 — pending re-review. Review history: full artifact reviews r1
 `mrv-20260923-182025208234000-…`, r2 `mrv-20260923-183942601569000-…`, r3
-`mrv-20260923-185110177502000-…`; targeted review r4 `mrv-20260923-190310858720000-…`; a pragmatic
-verification pass on r5 (real workflows, assume trust — user instruction) confirmed the engine and
-CI claims and found two real-workflow bugs, fixed here, plus simplifications applied here. The user
-decisions are in §10. Origin: `docs/0.13.0-candidates.md` §1.
+`mrv-20260923-185110177502000-…`; targeted review r4 `mrv-20260923-190310858720000-…`; verification
+of r5; full pragmatic reviews r6 `mrv-20260923-192628041933000-…` and r7
+`mrv-20260923-193343742411000-…` (6 PASS, 4 NEEDS_REVISION on narrow real-workflow blockers, fixed
+here, plus user decisions 12–14). The user decisions are in §10. Origin:
+`docs/0.13.0-candidates.md` §1.
 
-Review stance for everything that follows (user instruction): handle real workflows and real edge
-cases; do not engineer for rare races or synthetic cases; assume developers, CI and agents act in
-good faith.
+Review stance (user instruction): handle real workflows and real edge cases; do not engineer for
+rare races or synthetic cases; assume developers, CI and agents act in good faith. Validity of
+mutation evidence is decided only by what changed (content digests), never by dates.
 
 ## 1. Problem and engine facts
 
@@ -20,54 +20,62 @@ binds reports to whole-tree manifests and re-runs Stryker from scratch without `
 Scoping each run to the change (rather than running `--incremental` over the whole `mutate` set)
 matters because the dry run executes every test related to the mutated files (F4); on an
 integration-heavy suite that is most of the suite. The harness restores the guarantees that scoping
-gives up (F2).
+gives up (F1, F2).
 
 Facts verified in StrykerJS 10.0.0 (`@stryker-mutator/core/dist/src`), its instrumenter, Vitest
-4.1.11, GitHub Actions and git (the r5 verification re-ran F4, F5, F9, F10 on a real project):
+4.1.11, GitHub Actions and git (reviewers reproduced F4, F5, F9 and the §7.1 rows on a real project):
 
 - F1. `--incremental` reuses per-mutant results: a Killed mutant is reused when its killing test is
-  unchanged; a non-killed one when no covering test changed. `--force` re-runs every in-scope
-  mutant. Mutants of files that no longer exist are dropped.
+  unchanged; a non-killed one when no covering test changed. Without `--force`, kills in unchanged
+  regions of an edited file are reused, not re-run — a behaviour-changing edit elsewhere in the same
+  file can invalidate them. `--force` re-runs every in-scope mutant. Mutants of files that no longer
+  exist are dropped.
 - F2. Out-of-scope mutants of files that still exist are carried forward without re-evaluation,
   regardless of `--force`; a changed test drops out of their `killedBy`; mutants in changed regions
   of out-of-scope files are removed.
 - F3. The report embeds each file's source as Stryker first read it in that run.
 - F4. The dry run always happens. The Vitest runner (`related: true` default) runs only tests whose
   transformed dependency graph reaches a mutated file (type-only imports elided); zero tests ⇒
-  `No tests were executed` on stdout and stderr, exit 1, nothing written. The Vitest runner always
-  uses per-test coverage, so `killedBy`/`coveredBy` are populated.
+  `No tests were executed` on stdout and stderr, exit 1, nothing written (`--allowEmpty` returns
+  before the report is written). The Vitest runner always uses per-test coverage, so
+  `killedBy`/`coveredBy` are populated; it reports no test locations, so any edit to a test file
+  invalidates all of that file's tests in Stryker's own differ. `killedBy` depends on test order
+  unless `disableBail: true`.
 - F5. `--mutate` accepts `<file>` and `<file>:<startLine>-<endLine>` (1-based), comma-separated,
   combinable with `--force`, and replaces the config's `mutate`. Stryker's matcher is minimatch with
   `dot: false`.
 - F6. The incremental file (`--incrementalFile`) is read and written in place. On
   SIGINT/SIGTERM/SIGHUP/SIGABRT Stryker writes partial results and exits 128+n. Thrown errors exit 1
-  without writing. A threshold break exits 1 after writing, computed over the whole report.
+  without writing. A threshold break exits 1 after writing.
 - F7. Mutant ids are unique only within one report. The report has no timestamp.
 - F8. Without a positional config file Stryker searches its own list of names.
 - F9. The report's `files` contains only files that produced at least one mutant; a selected
   zero-mutant file (type-only, barrel, constants) is absent, and a run whose selection has no mutants
   but reachable tests succeeds with `files: {}`.
-- F10. `actions/cache` includes the exact `path` list in each entry's version: a restore only hits
-  entries saved with the identical list.
+- F10. `actions/cache` includes the exact `path` list in each entry's version (a restore only hits
+  entries saved with the identical list), and GitHub evicts entries not accessed for 7 days.
 
 metareview today ingests `--mutation-report` files and accepts a stale report silently.
 
 ## 2. Goals
 
 - G1 — Per-change cost bounded by the change: one related-tests dry run plus the mutants the change
-  can affect. Proven locally by deterministic counts (§7); the external trial's pass bar is a
-  one-line edit ≤ 2 min p50 (decision 9), tracked in `docs/0.13.0-candidates.md`.
+  can affect (edited files are re-run whole, decision 12). Proven locally by deterministic counts
+  (§7); the external trial's pass bar is a one-line edit ≤ 2 min p50 (decision 9), tracked in
+  `docs/0.13.0-candidates.md` together with the share of PR runs that end pending a full run.
 - G2 — Every change is re-verified in the same run or recorded as **deferred**, visibly; kills that
   depend on deferred work are never reported as verified. Planning is clock-free; the only
   time-dependent outcome is the per-invocation time budget, which always defers. Documented
   exceptions are in §8.
 - G3 — The gate states exactly what it verified (accident-level check; not tamper proof).
-- G4 — No scheduled job. A full run happens only when something was deferred.
+- G4 — No scheduled job and no date-based validity. A full run happens only when something was
+  deferred; stored state stays valid until what it describes changes.
 
 ## 3. Non-goals
 
 - Changing any mutation engine or editing Stryker's report format.
-- Test runners other than StrykerJS 10.x with its Vitest runner in the template.
+- Test runners other than StrykerJS 10.x with its Vitest runner in the template; Yarn Plug'n'Play
+  (no `node_modules`) is unsupported.
 - Pin (`prove`) verification speed; the `prove` non-Go pin bug is a separate ticket.
 - Keeper adoption and migration: a separate follow-up (decision 7).
 - Checkpoint/resume of long runs (candidates §7).
@@ -82,14 +90,15 @@ metareview today ingests `--mutation-report` files and accepts a stale report si
   `unresolved` and never a kill.
 - **Categories** (§5.3): `mutate`, `test`, `support`, `global`, `unclassified`. The config file and
   `tools/mutation-incremental/**` are always `global`.
-- **Excluded paths**: gitlinks; `<stateDir>/**`; `.mutation-full/**`; Stryker's `tempDirName`
-  (default `.stryker-tmp`) `/**`; Stryker's `jsonReporter.fileName` and `htmlReporter.fileName`; and
-  paths whose category resolves to ignore (§5.3). The attestation records the resolved exclusions
-  and the category lists so the gate applies the same rules.
+- **Excluded paths**: gitlinks; `<stateDir>/**`; Stryker's `tempDirName` (default `.stryker-tmp`)
+  `/**`; Stryker's `jsonReporter.fileName` and `htmlReporter.fileName`; and paths whose category
+  resolves to ignore (§5.3). The attestation records the resolved exclusions and the category lists
+  so the gate applies the same rules.
 - **Deferral**: `{reason, paths}`, `paths` being files or `["*"]`. A kill is covered by a deferral if
   its file is in `paths`.
 - **Pending full run**: state is not usable, or the attestation has deferrals. Cleared only by a
   successful full run.
+- **Edited files**: `mutate` files changed or new since the attested snapshot.
 
 ## 5. Part 1 — Harness template (`templates/mutation-incremental/`)
 
@@ -104,18 +113,22 @@ resolves against the top-level; every command runs with cwd = top-level.
 
 | Command | Behaviour |
 |---|---|
-| `plan [--also-state <dir>]` | print the plan (§5.4) as JSON; no side effects |
-| `run --mode incremental\|full [--also-state <dir>]` | lock, adopt, plan, execute (§5.6), commit |
+| `plan [--also-state <dir>]...` | print the plan (§5.4) as JSON; adoption in memory only; no side effects |
+| `run --mode incremental\|full [--also-state <dir>]...` | lock, adopt, plan, execute (§5.6), commit |
 | `seed --from <report> [--replace]` | bootstrap from a full Stryker report (§5.8) |
-| `seed --from-state <dir> [--replace]` | adopt a state produced by this harness (§5.8) |
+| `fetch-state [--remote <name>]` | fetch the state branches into `<stateDir>/remote/{inc,full}/` (§5.7) |
+| `publish-state --kind inc\|full [--remote <name>]` | push the canonical state to branch `mutation-state/<kind>` (§5.7) |
 | `break-lock` | print and remove `<stateDir>/lock` |
 
-Exit codes: 0 ok (deferrals included); 1 ok, committed report breaks Stryker's threshold; 2
-config/usage/validation; 3 lock held; 4 engine failure. Precedence: 2 > 3 > 4 > 1 > 0; a run whose
-invocations were all deferred exits 0. When `GITHUB_OUTPUT` is set, `run` appends on every exit path
-`pending_full=<true|false>` (the canonical state afterwards is a pending full run; `false` if exit 2
-happens before the config is readable) and `exit_code=<n>`. Every command prints one stderr line:
-`mutation-incremental: mode=<m> invocations=<n> scope=<k> forced=<j> deferrals=<d> pending_full=<bool>`.
+Exit codes: 0 ok (deferrals included); 1 ok, but the committed report's mutation score is below the
+current Stryker config's `thresholds.break` (computed by the harness on every run from the committed
+report and the current config, so a re-run of a red job stays red and lowering the threshold turns
+it green); 2 config/usage/validation; 3 lock held; 4 engine failure (nothing committed); 130
+interrupted (SIGINT/SIGTERM/SIGHUP; nothing committed). Precedence: 2 > 3 > 130 > 4 > 1 > 0. When
+`GITHUB_OUTPUT` is set, `run` appends on every exit path `pending_full=<true|false>` (the canonical
+state afterwards is a pending full run; `false` if exit 2 happens before the config is readable) and
+`exit_code=<n>`. Every command prints one stderr line:
+`mutation-incremental: command=<c> invocations=<n> scope=<k> forced=<j> deferrals=<d> pending_full=<bool>`.
 
 ### 5.2 Config `mutation-incremental.json`
 
@@ -127,8 +140,8 @@ happens before the config is readable) and `exit_code=<n>`. Every command prints
   "mutate":  ["src/**/*.ts", "!src/**/*.d.ts"],
   "test":    ["tests/**/*.test.ts"],
   "support": ["tests/helpers/**", "tests/factories/**", "tests/fixtures/**"],
-  "global":  ["package.json", "package-lock.json", "stryker.config.json", "vitest.config.ts", "tsconfig*.json", "migrations/**"],
-  "ignore":  ["docs/**", "**/*.md", ".github/**", "**/.*"],
+  "global":  ["package.json", "package-lock.json", "stryker.config.json", "vitest.config.ts", "tsconfig*.json", "migrations/**", ".env*"],
+  "ignore":  ["docs/**", "**/*.md", ".github/**", ".vscode/**", ".gitignore", "LICENSE*", "Dockerfile", "Makefile", ".metareview/**", ".beads/**", ".claude/**"],
   "aliases": {},
   "runtime": { "commands": [["node", "--version"]], "env": [] },
   "budget":  { "maxForcedShare": 0.25, "maxForcedMutants": null, "maxMinutesPerInvocation": 20 },
@@ -139,13 +152,15 @@ happens before the config is readable) and `exit_code=<n>`. Every command prints
 All keys are required; the values above are the shipped defaults (decisions 5, 6). Validation (exit
 2 naming the reason): exactly these keys; `schemaVersion` = 1; `aliases` maps specifier prefixes to
 repo-relative path prefixes; `residual.mode` ∈ `strict|bounded|off`; `maxForcedShare` in (0, 1];
-`maxForcedMutants` positive integer or null; `maxMinutesPerInvocation` positive; `stateDir` inside
-the top-level and not under the OS temp dir; `node_modules/@stryker-mutator/core` major version 10;
-`stryker.configFile` is JSON with `"testRunner": "vitest"`, no `"inPlace": true`, a `mutate` array
-equal to config `mutate`, and `ignorePatterns` containing `<stateDir>`; `runtime.env` names matching
-`/(TOKEN|SECRET|PASS|KEY|CREDENTIAL|DSN|URL|URI|AUTH)/i` are rejected (the state directory is
-readable by every pull request, §5.7). The docs explain sizing `maxMinutesPerInvocation` (a safety
-ceiling, not the target) and the budget against the ≤ 2 min bar.
+`maxForcedMutants` positive integer or null; `maxMinutesPerInvocation` positive; `stateDir` is a
+dedicated directory inside the top-level (not the top-level itself, not matching any `mutate`,
+`test` or `support` pattern) and not under the OS temp dir; `node_modules/@stryker-mutator/core`
+major version 10; `stryker.configFile` is JSON with `"testRunner": "vitest"`, no `"inPlace": true`, a
+`mutate` array equal to config `mutate`, and `ignorePatterns` containing `<stateDir>`. `runtime.env`
+values are stored only as sha256 digests; the docs say never to list secrets there. The docs explain
+sizing `maxMinutesPerInvocation` (a safety ceiling, not the target; two invocations plus setup must
+fit the CI job timeout) and the budget against the ≤ 2 min bar, list common files to add to
+`ignore`, and tell projects to gitignore `<stateDir>/`.
 
 ### 5.3 Glob dialect (shared contract; Node and Go implementations)
 
@@ -166,14 +181,17 @@ excluded and exists as a regular file or symlink: `sha256:<hex>` of the bytes, o
 map**: `cmd:<argv joined by U+001F>` ⇒ sha256 of stdout; `env:<NAME>` ⇒ sha256 of the value or
 `unset`.
 
-**Adopt** (`--also-state <dir>`): if `<dir>` holds a usable state whose `lastFullAt` is later than the
-primary's (`null` is earliest), or the primary is not usable, plan from it; `run` then copies its two
-files into `stateDir` (temp file + rename); `plan` adopts in memory only.
+**Adopt** (`--also-state <dir>`, repeatable): candidates are the primary `stateDir` and each
+`<dir>`; only usable candidates count. If the primary is usable, it is kept unless another candidate
+has a later `lastFullAt` (`null` is earliest). If the primary is not usable, the usable candidate
+with the greatest (`lastFullAt`, `completedAt`) is chosen. `run` copies an adopted state's two files
+into `stateDir` (temp file + rename); `plan` adopts in memory only.
 
-**Usable**: `attestation.json` parses with `schemaVersion` 1 and `tool` =
-`metareview-mutation-incremental`, and `incremental.json`'s sha256 equals `reportSha256`. Otherwise
-**cold**: incremental mode runs nothing and records deferral `no usable state` on `["*"]`; full mode
-runs a full run.
+**Usable**: `attestation.json` parses with `schemaVersion` 1, `tool` =
+`metareview-mutation-incremental` and `toolVersion` equal to the running harness's version, and
+`incremental.json`'s sha256 equals `reportSha256`. Otherwise **cold**: incremental mode runs nothing
+and records deferral `no usable state` on `["*"]`; full mode runs a full run. (A harness upgrade thus
+costs one full run; the gate never looks at `toolVersion`.)
 
 **Change set** `C`: paths whose digest differs from the attestation, new paths, attested paths absent
 from `S`, differing runtime keys. A path whose category changed is in `C` under both categories.
@@ -185,19 +203,25 @@ not `import type`/`export type`, not `vi.mock`. A specifier **resolves** when it
 `./`/`../` (relative to the file) or with a configured `aliases` key (longest key's prefix replaced),
 to a regular file in `S`: the path, then + each extension above, then `<path>/index` + each
 extension; a `.js/.jsx/.mjs/.cjs` specifier also tries its stem + `.ts .tsx .mts .cts`. A specifier
-is a **package** when it is a Node builtin (`node:` prefix or `module.builtinModules`) or resolves
-with Node's resolution to a path under a `node_modules/` directory whose realpath is not inside the
-top-level. Anything else is **unresolved**, and its file is an **open importer**. **Importer tests of
-P** = `test` files that reach P through edges transitively, plus every `test` file that reaches an
-open importer. `plan` lists open importers and their unresolved specifiers so projects can add
-`aliases` (workspace packages linked into the repo are the typical case).
+is a **package** when it is a Node builtin (`node:` prefix or `module.builtinModules`), or when
+walking up from the importing file finds `node_modules/<name>` (`<name>` = first segment, or first
+two for `@scope/`) whose realpath still contains a `node_modules/` segment — true for npm, pnpm and
+yarn with `nodeLinker: node-modules`, false for workspace links into the repo's own sources. Anything
+else is **unresolved**, and its file is an **open importer**. A file **reaches** P if it is P or
+imports P through edges transitively. **Importer tests of P** = `test` files that reach P, plus every
+`test` file that reaches an open importer (including a test file that is itself an open importer).
+`plan` lists open importers and their unresolved specifiers so projects can add `aliases`.
 
 **Steps** (current category; deleted paths by their attested category):
 
-1. `mutate` changed/new ⇒ **scope**. `mutate` deleted ⇒ nothing (F1).
+1. `mutate` changed/new ⇒ **edited** (forced whole-file, decision 12). `mutate` deleted ⇒ nothing
+   (F1).
 2. `test` changed/deleted with an entry in `R.testFiles` ⇒ files with a mutant whose `killedBy` or
-   `coveredBy` intersects its `tests[].id` ⇒ **scope**. `test` new, or changed without an entry ⇒
-   files in `R` with a `Survived` or `NoCoverage` mutant ⇒ **scope**.
+   `coveredBy` intersects its `tests[].id` ⇒ **scope**. For every changed or new `test` file T:
+   `mutate` files that T reaches which are absent from `R.files` or have `Survived`/`NoCoverage`
+   mutants ⇒ **scope** (a new module's first test, or a new case covering an uncovered file); if T is
+   an open importer or reaches one, every `mutate` file absent from `R.files` and every file in `R`
+   with `Survived`/`NoCoverage` mutants ⇒ **scope**.
 3. `support` changed/new ⇒ mutants whose `killedBy` or `coveredBy` intersects the ids of its importer
    tests ⇒ **forced**; no importer test ⇒ deferral `support <p> has no resolvable importer` on
    `["*"]`. `support` deleted ⇒ deferral `support <p> deleted` on `["*"]`.
@@ -211,22 +235,29 @@ open importer. `plan` lists open importers and their unresolved specifiers so pr
 
 **Normalise**:
 
-- Drop from scope and forced every path that is not a regular file in `S` (deleted files; F1 drops
-  their mutants).
-- A file in both scope and forced is forced whole-file.
-- Budget: `N` = mutants of every status in `R`; `b` = `floor(maxForcedShare × N)`, lowered to
-  `maxForcedMutants` when that is non-null and smaller; `forcedCount` = distinct forced mutants
-  (whole-file entries count all their mutants). In `bounded` mode, `forcedCount > b` ⇒ forced emptied
-  and deferral `forced set <forcedCount> exceeds budget <b>` on the forced files. `strict` ignores the
-  budget.
+- Drop from edited, scope and forced every path that is not a regular file in `S` (deleted files;
+  F1 drops their mutants).
+- Edited files are forced whole-file and removed from scope; they are exempt from the budget.
+- A non-edited file in both scope and forced is removed from scope and forced whole-file.
+- Budget (applies to forced files that are not edited): `N` = mutants of every status in `R`;
+  `b` = `floor(maxForcedShare × N)`, lowered to `maxForcedMutants` when that is non-null and smaller;
+  `forcedCount` = distinct such forced mutants (whole-file entries count all their mutants). In
+  `bounded` mode, `forcedCount > b` ⇒ those forced entries are dropped, files that were moved out of
+  scope by the previous rule return to scope, and deferral `forced set <forcedCount> exceeds budget
+  <b>` is recorded on **every** file that had forced mutants (including those back in scope, whose
+  un-forced reuse is not trusted). `strict` ignores the budget.
 - Forced ranges `<file>:<startLine>-<endLine>` (whole-file: `<file>`), merged when `end + 1 >= start`.
 - A scope or forced path containing `, { } [ ] ( ) ! * ? :` or a newline ⇒ exit 2 naming it.
 
-Plan JSON: `{ "cold", "scope", "forced", "forcedCount", "deferrals": [{"reason","paths"}],
-"changes": [{"path","category","kind"}], "openImporters": [{"path","specifiers"}] }`. Object keys in
-byte order; `scope`, `paths`, `openImporters`, `specifiers` in byte order; `forced` by file then
-numeric start line; `deferrals` by `reason` then first path; `changes` by `path` then `category`.
-Deferral de-duplication compares `reason` and sorted `paths`.
+Plan JSON: `{ "cold", "pendingFull", "scope", "forced", "forcedCount", "deferrals":
+[{"reason","paths"}], "changes": [{"path","category","kind"}], "openImporters":
+[{"path","specifiers"}], "unclassified": [paths] }`. `kind` ∈ `changed|new|deleted`; runtime keys
+appear in `changes` and reasons by their key (e.g. `cmd:node␟--version`). `pendingFull` = cold, or
+the (adopted) prior attestation has deferrals, or this plan adds any. A cold plan has empty `scope`,
+`forced` and `changes`. `unclassified` lists changed unclassified paths so projects can extend
+`ignore`. Object keys in byte order; `scope`, `paths`, `openImporters`, `specifiers`, `unclassified`
+in byte order; `forced` by file then numeric start line; `deferrals` by `reason` then first path;
+`changes` by `path` then `category`. Deferral de-duplication compares `reason` and sorted `paths`.
 
 ### 5.5 Attestation `<stateDir>/attestation.json` (contract read by metareview)
 
@@ -242,17 +273,26 @@ Deferral de-duplication compares `reason` and sorted `paths`.
   "lastFullAt": "2026-09-22T09:00:00.000Z",
   "report": "incremental.json",
   "reportSha256": "<lowercase hex>",
+  "thresholdBreak": false,
   "lists": { "mutate": [], "test": [], "support": [], "global": [], "ignore": [] },
-  "exclusions": [".mutation/**", ".mutation-full/**", ".stryker-tmp/**", "reports/mutation/mutation.json", "reports/mutation/mutation.html"],
+  "exclusions": [".mutation/**", ".stryker-tmp/**", "reports/mutation/mutation.json", "reports/mutation/mutation.html"],
   "files": { "src/a.ts": { "digest": "sha256:<hex>", "category": "mutate", "tracked": true } },
   "runtime": { "cmd:node\u001f--version": "<hex>" },
   "deferrals": [ { "reason": "global input changed: package-lock.json", "paths": ["*"] } ]
 }
 ```
 
+- `schemaVersion` is the gate contract; changes to the harness's planning rules change `toolVersion`
+  only (§5.4 Usable).
 - `engineVersion` from `node_modules/@stryker-mutator/core/package.json`; timestamps UTC with
   milliseconds; hex lowercase; `mode` is `incremental`, `full` or `seed`; `lastFullAt` is the
-  `completedAt` of the last successful full run (null if none), carried forward by other runs.
+  `completedAt` of the last successful full run (null if none, and null after `seed`), carried
+  forward by other runs.
+- `thresholdBreak` = the committed report's mutation score is below the current Stryker config's
+  `thresholds.break` (score = (Killed + Timeout) / (Killed + Timeout + Survived + NoCoverage) × 100,
+  Stryker's definition; `false` when `thresholds.break` is null or absent). Recomputed on every run.
+- Report keys are repo-relative POSIX paths (Stryker runs at the top-level); a key that is not is
+  treated by the gate as absent from `files` (unbound).
 - `lists` include the implicit `global` entries; `exclusions` are the resolved patterns of §4 other
   than `ignore` and gitlinks.
 - `files` is the start-of-run snapshot; a path whose on-disk digest at the end of the run differs
@@ -268,82 +308,94 @@ Deferral de-duplication compares `reason` and sorted `paths`.
 2. **Work directory.** Remove `<stateDir>/work/` if present and create it.
 3. **Adopt** (§5.4), then **plan**.
 4. **Invoke.** Incremental mode: invocation 1 = scope (if non-empty, no `--force`); invocation 2 =
-   forced (if non-empty, `--force`), run only when invocation 1 succeeded or scope was empty. Each
+   edited + forced (if non-empty, `--force`), run unless invocation 1 timed out or failed. Each
    invocation k uses `work/inv-k.json`, a copy of the latest successful output (or of
    `incremental.json`; in full mode, no file, so Stryker starts fresh). argv (no shell):
    `<command> run <configFile> --incremental --incrementalFile <stateDir>/work/inv-k.json [--force]
    [--mutate <list joined by ,>] <extraArgs>`, spawned in its own process group. On exceeding
-   `maxMinutesPerInvocation` (incremental mode only) and on SIGINT/SIGTERM to the harness, the group
-   gets SIGTERM, then SIGKILL after 30 s, and the harness waits for it to exit.
+   `maxMinutesPerInvocation` (incremental mode only) and on SIGINT/SIGTERM/SIGHUP to the harness, the
+   group gets SIGTERM, then SIGKILL after 30 s, and the harness waits for it to exit.
 5. **Judge.** An invocation **succeeded** iff it exited 0 or 1, its file was written during the
    invocation (mtime/size/inode changed, or created), and it parses as a mutation-testing-report
    with a `files` object (selected files absent from `files` have zero mutants, F9). Outcomes:
-   - success ⇒ latest output; exit 1 ⇒ threshold break;
-   - exit 1, file not written, combined stdout+stderr contains `No tests were executed` ⇒ **nothing
-     is recorded**: no test reaches those files, so no kill can depend on them (they keep their
-     snapshot digests); not a failure;
-   - timeout ⇒ deferral `time budget exceeded` on the selection's files; not a failure;
-   - other failure of invocation 1 or of the full-mode invocation ⇒ remove `work/`, exit 4;
-   - other failure of invocation 2 ⇒ deferral `forced run failed` on the forced files; commit
-     invocation 1's output; exit 4.
-   When invocation 1 times out, invocation 2 is skipped and its files get deferral
-   `blocked by deferred scope`.
-6. **No invocation needed** ⇒ the latest output is the canonical `incremental.json`.
+   - success ⇒ latest output;
+   - exit 1, file not written, combined stdout+stderr contains `No tests were executed` ⇒ **no
+     reachable tests**: not a failure; the latest output is unchanged. Selected files that have
+     `Killed` mutants in the latest output get deferral `no reachable tests: <p>` (their killing
+     tests no longer reach them, e.g. the only test was deleted); selected files without kills
+     (type-only files, new modules before their first test) record nothing. A new module is picked up
+     when a test first reaches it (§5.4 step 2);
+   - timeout ⇒ deferral `time budget exceeded` on the selection's files; not a failure; if it is
+     invocation 1, invocation 2 is skipped and its files get deferral `blocked by deferred scope`;
+   - interrupted ⇒ remove `work/`, commit nothing, exit 130;
+   - any other failure ⇒ remove `work/`, commit nothing, exit 4 (the run is retryable as is).
+6. **No successful invocation** (none needed, or all no-tests/deferred) ⇒ the latest output is the
+   canonical `incremental.json` unchanged; the attestation is still rewritten (new snapshot, new
+   deferrals, recomputed `thresholdBreak`).
 7. **Commit.** Write the attestation for the latest output's bytes to `work/attestation.json`; rename
    the output over `incremental.json`, then the attestation over `attestation.json`; remove `work/`.
    A crash between the renames leaves a pair whose hashes disagree ⇒ cold next time, never trusted.
-   A cold incremental run with no `incremental.json` writes nothing and reports `pending_full=true`.
+   A cold incremental run with an `incremental.json` present re-attests those bytes with
+   `lastFullAt: null` and the `no usable state` deferral; with no `incremental.json` it writes nothing
+   and reports `pending_full=true`.
 
-### 5.7 CI workflow template (`templates/mutation-incremental/github-workflow.yml`)
+### 5.7 State storage and CI workflow template (`templates/mutation-incremental/github-workflow.yml`)
 
-`permissions: contents: read`; triggers `push` (branches: main) and `pull_request`; checkout with
-`persist-credentials: false`, `fetch-depth: 0`; no secrets passed to mutation jobs (project setup
-secrets, if any, stay scoped to their own step). The state directory embeds sources and test failure
-text and is readable by every pull request, including forks: never put secrets in it. Marked
-insertion points hold project setup (Node, `npm ci`, services).
+**Durable state (change-based, decision 13).** Two branches, each a single commit holding
+`attestation.json` and `incremental.json` at the root: `mutation-state/inc` (main's latest
+incremental state) and `mutation-state/full` (main's latest full-run state). `publish-state --kind
+<k>` builds the commit with git plumbing (`hash-object`, `mktree`, `commit-tree`, author
+`mutation-incremental <noreply@localhost>`) and force-pushes it to `refs/heads/mutation-state/<k>`.
+It pushes only when the canonical state is usable, and each branch has a single writer (below), so
+it is replaced only when main's state changes; nothing expires. `fetch-state` fetches both branches
+(depth 1; a missing branch is skipped) and writes their two files into `<stateDir>/remote/inc/` and
+`<stateDir>/remote/full/`.
 
-Two cache families, each saved and restored with one identical path list (F10): **inc** =
-`<stateDir>/attestation.json` + `<stateDir>/incremental.json`; **full** =
-`.mutation-full/attestation.json` + `.mutation-full/incremental.json`.
+**Fast path.** `actions/cache` keeps the two canonical files (one identical path list, F10:
+`<stateDir>/attestation.json` + `<stateDir>/incremental.json`) for quick restores while entries are
+within GitHub's 7-day window; a cache miss falls back to the branches, never to cold.
 
-- Job `incremental` (timeout 60 min; concurrency `mutation-inc-${{ github.ref }}`, cancel in
-  progress on PRs only):
-  1. restore **inc**: key `mutation-<main-inc|pr-N>-${{ github.sha }}`, restore-keys `mutation-pr-N-`
-     then `mutation-main-inc-` (PRs) or `mutation-main-inc-` (main);
-  2. restore **full**: restore-keys `mutation-main-full-`;
-  3. `run --mode incremental --also-state .mutation-full`, `continue-on-error: true`, exposing
-     `pending_full` and `exit_code`;
-  4. when `exit_code` ∈ {0, 1, 4}: save **inc** with key
-     `mutation-<main-inc|pr-N>-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}`, and on
-     main upload artifact `mutation-state-main` (the two **inc** files, `include-hidden-files: true`,
-     retention 30 days);
-  5. fail the job when `exit_code` ≠ 0.
+The state files embed sources and test failure text and are readable by anyone who can read the
+repository (for public repositories: everyone, including fork PRs): never put secrets in them.
+
+Workflow (`push` to main and `pull_request` only; checkout with `fetch-depth: 0`; no secrets passed
+to mutation jobs; marked insertion points hold project setup such as Node, `npm ci`, services):
+
+- Job `incremental` (timeout 60 min; `permissions: contents: read` on PRs, `contents: write` on main
+  for `publish-state`; concurrency `mutation-inc-${{ github.ref }}`, cancel in progress on PRs only):
+  1. restore the cache: key `mutation-<main|pr-N>-${{ github.sha }}`, restore-keys `mutation-pr-N-`
+     then `mutation-main-` (PRs) or `mutation-main-` (main);
+  2. `fetch-state`;
+  3. `run --mode incremental --also-state <stateDir>/remote/full --also-state <stateDir>/remote/inc`,
+     `continue-on-error: true`, exposing `pending_full` and `exit_code`;
+  4. when `exit_code` ∈ {0, 1}: save the cache with key
+     `mutation-<main|pr-N>-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}`, and on
+     main `publish-state --kind inc`;
+  5. write `pending_full` and the deferral reasons (from the attestation) to `$GITHUB_STEP_SUMMARY`,
+     so a green job is never mistaken for fully verified work;
+  6. fail the job when `exit_code` is empty or ≠ 0.
 - Job `full` (main only; `needs: incremental`;
   `if: ${{ !cancelled() && needs.incremental.outputs.pending_full == 'true' }}`; timeout 350 min;
-  concurrency `mutation-main-full`, no cancel in progress): restore **inc** (restore-keys
-  `mutation-main-inc-${{ github.sha }}-`) and **full**; `plan --also-state .mutation-full`; stop if it
-  shows no pending full run; else `run --mode full`, copy the two state files into `.mutation-full/`,
-  save **full** with key `mutation-main-full-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}`.
-  A threshold break fails the job.
-- Incremental runs adopt the newest full state (`--also-state`, by `lastFullAt`), so a full run's
-  results reach every later run on main and every PR regardless of save order.
-- Cache limits: GitHub evicts entries unused for 7 days and least-recently-used entries past 10 GB;
-  eviction ⇒ cold ⇒ one full run on main, never wrong results. The doc says an idle repository starts
-  cold and recommends deleting `mutation-pr-<N>-*` caches when a PR closes.
+  `permissions: contents: write`; concurrency `mutation-main-full`, no cancel in progress — a newer
+  pending run replaces an older one, which is safe because planning is content-based):
+  `fetch-state`; `plan --also-state <stateDir>/remote/full --also-state <stateDir>/remote/inc`; stop
+  if its `pendingFull` is false; else `run --mode full` with `continue-on-error: true`; when
+  `exit_code` ∈ {0, 1}: `publish-state --kind full`; then fail the job when `exit_code` is empty or
+  ≠ 0 (a threshold break is red, but its state is published, so the full run is not repeated on
+  every push).
+- Every later incremental run on main and every PR adopts the full-run state by `lastFullAt`,
+  regardless of the order in which jobs finished.
+- Local use: `fetch-state`, then `run --mode incremental --also-state <stateDir>/remote/full
+  --also-state <stateDir>/remote/inc`. A new worktree can instead use `--also-state <first
+  checkout>/.mutation`.
 
 ### 5.8 Seeding
 
-Both forms take the lock, refuse when usable state exists unless `--replace` (which first copies the
-current pair into `<stateDir>/replaced/<UTC timestamp>/`), and commit as §5.6 step 7.
-
-- `seed --from <report>`: the report must parse; its bytes become `incremental.json`; the attestation
-  has the current snapshot, `mode: "seed"`, and deferral `seeded from <report>` on `["*"]` — the kills
-  are pending until the first full run on main.
-- `seed --from-state <dir>`: copies `<dir>/attestation.json` and `<dir>/incremental.json`, which must
-  form a usable state. The doc fetches main's latest state by run id:
-  `gh run list --workflow <file> --branch main --event push --status success --limit 1 --json databaseId`,
-  then `gh run download <id> --name mutation-state-main --dir <stateDir>/download`, then
-  `seed --from-state <stateDir>/download`.
+`seed --from <report> [--replace]` takes the lock and refuses when usable state exists unless
+`--replace` (which first copies the current pair into `<stateDir>/replaced/<UTC timestamp>/`); the
+report must parse; its bytes become `incremental.json`; the attestation has the current snapshot,
+`mode: "seed"`, `lastFullAt: null`, and deferral `seeded from <report>` on `["*"]` — the kills are
+pending until the first full run on main. It commits as §5.6 step 7.
 
 ## 6. Part 2 — Gate-side verification (metareview Go)
 
@@ -381,8 +433,8 @@ Each kill gets one class, first match wins:
 1. **stale** — a cause applies, checked in order: its own file changed; a changed `test` file whose
    ids intersect its `killedBy`; a changed `mutate` file Y whose mutants' `coveredBy` union
    intersects its `killedBy` (the planner's residual rule); any changed `support`, `global` or
-   `unclassified` path. The first cause found (ties by byte order of path) is the kill's cause in the
-   re-run list. Every changed path that is a cause for at least one kill gets its own finding.
+   `unclassified` path. The first cause found (ties by byte order of path) is the kill's recorded
+   cause. Findings and the re-run list are keyed on recorded causes.
 2. **pending** — its file is covered by a deferral.
 3. **unbound** — its file is not in `files`, or its `killedBy` is empty.
 4. **verified**.
@@ -402,11 +454,14 @@ mode.
 
 | Fingerprint | One per | Advisory mode | Enforce (pr-ready, epic-ready) | Owner |
 |---|---|---|---|---|
-| `mutation:stale:<mode>:<engine>:<cause>:<cause8>` | changed causing path | advisory, medium | blocking, high | implementer |
+| `mutation:stale:<mode>:<engine>:<cause>:<cause8>` | distinct recorded cause | advisory, medium | blocking, high | implementer |
 | `mutation:pending:<mode>:<engine>:<report8>` | report with pending kills | advisory, medium | advisory, medium | reviewer |
 | `mutation:unattested:<mode>:<engine>:<report8>` | unattested **stryker** report | advisory, medium | blocking, high | reviewer |
 
-- `<cause8>` = first 8 hex of sha256 of `<cause>=<current digest or absent>`.
+- `<cause8>` = first 8 hex of sha256 of `<cause>=<current digest or absent>`. With several reports
+  sharing a cause, their counts are summed into one finding.
+- Pending stays advisory even under enforce: deferred work is never read as evidence (it is
+  excluded from the score and shown separately), and full runs never block PRs (decision 2).
 - Titles: `Mutation evidence stale: <cause> changed` / `Mutation evidence pending: <n> kills` /
   `Mutation report has no attestation`. Text templates are fixed in the implementation plan;
   evidence `{Type: "mutant", Path: <cause or report path>}`.
@@ -414,12 +469,15 @@ mode.
   `critical`/`high` (`internal/findings/findings.go:806-815`).
 - Non-Stryker unattested reports (gremlins) get no finding; the log states
   `freshness not verifiable for <engine>`.
-- **Ledger lifecycle** (`findings.Reconcile`, for the three `mutation:` prefixes above only): on every
-  run, a row with the same scope and target (`sameRunTarget`) that is absent from the current run and
-  `open`, `override-pending` or `overridden` becomes `superseded` (never `fixed`; `fixedInRunId`
-  empty); rows of other scopes or targets are untouched. `superseded` rows are not active, so a
-  recurring fingerprint opens a new `open` row. FINDINGS.md keeps override request/grant lines on
-  superseded rows.
+- **Ledger lifecycle** (`findings.Reconcile`, for the three `mutation:` prefixes above only), applied
+  only on runs that supplied at least one `--mutation-report` (a quick run without reports leaves
+  these rows and their overrides alone): a row with the same scope and target (`sameRunTarget`) that
+  is absent from the current run and `open`, `override-pending` or `overridden` becomes `superseded`
+  (never `fixed`; `fixedInRunId` empty); rows of other scopes or targets are untouched. Code changes
+  this requires: the existing fix branch skips these prefixes under both of its conditions
+  (`--previous-run` and escalation reset); `activeExisting` excludes `superseded` rows of these
+  prefixes, so a recurring fingerprint opens a new `open` row; `overrideLines` renders the override
+  request/grant of superseded rows, tagged `[superseded]`.
 
 The score summary excludes stale, pending, unbound and unattested kills and counts them; metareview
 applies no score threshold, so this changes no verdict by itself.
@@ -445,7 +503,7 @@ sharded-review block:
 | `src/a.ts` | `src/a.ts` | 12 |
 ```
 
-One row per file with stale kills (its cause), sorted by file; omitted when empty. The docs note
+One row per (file, recorded cause), sorted by file then cause; omitted when empty. The docs note
 that pr-ready reads HEAD, so commit before re-running the harness.
 
 ### 6.7 pr-ready digest
@@ -475,55 +533,70 @@ prefixes in `knowledgeFromFindings`, `repeatedBlockerThemes` and `confidenceForF
 **Fixture** `testdata/mutation-incremental-e2e/` (committed; its README lists every file verbatim and
 each scenario's exact edit):
 
-- `src/a.ts` — `clamp(n, lo, hi)`, three statements on lines 2–4.
-- `src/b.ts` — imports `clamp` from `./a` and `type { Range }` from `./types`; an expression-bodied
-  arrow on line 4.
-- `src/c.ts` — independent `twice(n)` on line 2, tested only by `tests/c.test.ts`.
+- `src/a.ts` — `clamp(n, lo, hi)` with a block body on lines 1–5 (three statements on lines 2–4), so
+  Stryker's `BlockStatement` mutant spans lines 1–5.
+- `src/b.ts` — `import { clamp } from './a'` and `import type { Range } from './types'`; an
+  expression-bodied arrow on line 4.
+- `src/c.ts` — independent expression-bodied arrow `twice` on line 2, tested only by
+  `tests/c.test.ts`.
 - `src/types.ts` — `export interface Range { lo: number; hi: number }` (no mutants).
-- `src/index.ts` — barrel `export * from './a'` (no mutants).
+- `src/index.ts` — barrel `export * from './a'` (no mutants), imported by `tests/index.test.ts`.
 - `tests/a.test.ts` (imports `a` and `node:assert`), `tests/b.test.ts` (imports `b`, `vitest` and
-  `./helpers/make`), `tests/c.test.ts` (imports `@app/c` via `aliases: {"@app/": "src/"}` and
-  `./helpers/fmt`), `tests/helpers/make.ts`, `tests/helpers/fmt.ts`.
-- Vitest 4.1.11, StrykerJS 10.0.0, pinned lockfile, `.gitignore` for `node_modules/`, `.mutation/`,
-  `.mutation-full/`, `reports/`, `.stryker-tmp/`. Fixture config: `maxForcedShare: 1` except in the
-  budget scenario.
+  `./helpers/make`), `tests/c.test.ts` (imports `@app/c` and `./helpers/fmt`), `tests/index.test.ts`
+  (imports `../src/index`), `tests/helpers/make.ts`, `tests/helpers/fmt.ts`.
+- `aliases: {"@app/": "src/"}` in the harness config and the same alias in `vitest.config.ts`
+  (`resolve.alias`).
+- Vitest 4.1.11, StrykerJS 10.0.0 with `disableBail: true` (so `killedBy` lists every killing test
+  and does not depend on test order), pinned lockfile, `.gitignore` for `node_modules/`, `.mutation/`,
+  `reports/`, `.stryker-tmp/`. Fixture config: `maxForcedShare: 1` except in the budget scenario.
 - `testdata/mutation-incremental/expectations.json` states, per scenario, `N`, the budget, the
-  hand-derived `forcedCount`, scope, forced ranges, deferral reasons, invocation argv, and mutant
+  hand-derived `forcedCount`, scope, forced entries, deferral reasons, invocation argv, and mutant
   identities `(file, mutatorName, start line, replacement)` — derived by hand from the fixture
   source, never from planner output. The script and the offline Node tests both read it.
 
 `tests/e2e-mutation-incremental.sh` (local; needs network for `npm ci`; not in CI) copies the fixture
-to `<worktree>/.e2e/<run-id>/` (gitignored; never `/tmp`), runs `git init` and commits, and points
-`stryker.command` at a shim that records argv and counts invocations.
+to `<worktree>/.e2e/<run-id>/` (gitignored; never `/tmp`), runs `git init`, adds a local bare remote
+for `publish-state`/`fetch-state`, commits, and points `stryker.command` at a shim that records argv
+and counts invocations.
 
 | Scenario | Must hold |
 |---|---|
-| cold incremental | 0 invocations; deferral `no usable state` |
+| cold incremental | 0 invocations; `plan` shows `cold`, deferral `no usable state`; stderr `pending_full=true` |
 | full | 1 invocation; deferrals `[]`; `lastFullAt` set |
 | no change | 0 invocations |
-| behaviour-preserving edit on `src/a.ts` line 3 | scope `[src/a.ts]`; forced `[src/b.ts:4-4]` |
+| behaviour-preserving edit on `src/a.ts` line 3 | scope `[]`; forced `[src/a.ts, src/b.ts:4-4]` (edited whole file + residual) |
+| behaviour-changing edit on `src/a.ts` line 2 that makes a line-4 mutant survive | forced `[src/a.ts, …]`; that mutant is `Survived` in the new report; equivalence holds |
 | edit `tests/b.test.ts` | scope `[src/a.ts, src/b.ts]` |
-| new test file | scope = expectations |
-| edit `tests/helpers/make.ts` | forced `[src/a.ts:2-4, src/b.ts:4-4]`; `vitest`/`node:assert` imports are packages, not open importers |
+| new test file `tests/b2.test.ts` importing `src/b.ts` | scope = `src/b.ts` if it has Survived/NoCoverage mutants, else `[]` (per expectations) |
+| edit `tests/helpers/make.ts` | forced `[src/a.ts:1-5, src/b.ts:4-4]`; `vitest`/`node:assert` imports are packages, not open importers |
 | edit `tests/helpers/fmt.ts` | forced `[src/c.ts:2-2]` |
-| remove the alias, edit `tests/helpers/fmt.ts` | `c.test` is an open importer; forced includes `src/c.ts:2-2`; `plan` lists `@app/c` |
+| remove the alias from the harness config, edit `tests/helpers/fmt.ts` | `c.test` is an open importer; forced includes `src/c.ts:2-2`; `plan` lists `@app/c`; also deferral `global input changed: mutation-incremental.json` |
 | helper nothing imports | deferral `support … has no resolvable importer` |
 | edit `package-lock.json` | deferral `global input changed: package-lock.json` |
-| budget overflow | forced empty; budget deferral |
-| edit only `src/types.ts` | 1 invocation; `No tests were executed`; nothing recorded; exit 0; `pending_full=false` |
-| edit `src/a.ts` and `src/types.ts` together | 1 invocation; success |
-| edit `src/index.ts` | success; `files` has no `src/index.ts` entry |
-| delete `src/b.ts` and `tests/b.test.ts` together | scope `[src/a.ts]`; forced per expectations; `src/b.ts` mutants absent from the report afterwards |
-| `git mv src/c.ts src/d.ts` with its test updated | no exit 2; `src/d.ts` in scope |
+| budget overflow (support edit, `maxForcedMutants: 1`) | support-forced entries dropped; budget deferral on every file that had forced mutants |
+| edit only `src/types.ts` | 1 invocation (forced `[src/types.ts]`); `No tests were executed`; no deferral; exit 0; `pending_full=false`; next `plan` shows no change |
+| edit `src/a.ts` and `src/types.ts` together | 1 invocation, forced `[src/a.ts, src/b.ts:4-4, src/types.ts]`; succeeds |
+| edit `src/types.ts` and `tests/helpers/make.ts` together | 1 invocation, forced `[src/a.ts:1-5, src/b.ts:4-4, src/types.ts]`; succeeds |
+| edit `src/index.ts` | forced `[src/index.ts]`; success; `files` has no `src/index.ts` entry |
+| delete `tests/c.test.ts` alone | scope `[src/c.ts]`; `No tests were executed`; deferral `no reachable tests: src/c.ts`; gate: `src/c.ts` kills pending |
+| add `src/u.ts` alone, run; then add `tests/u.test.ts` importing it, run | first run: no-tests, no deferral; second run: scope includes `src/u.ts`; its mutants appear |
+| add `src/v.ts` alone, run; then import it from existing `tests/a.test.ts`, run | second run: scope includes `src/v.ts`; its mutants appear |
+| delete `src/b.ts` and `tests/b.test.ts` together | scope `[]`; forced `[src/a.ts]` (whole file: scoped via b.test and residual-forced); `src/b.ts` mutants absent afterwards |
+| `git mv src/c.ts src/d.ts` with its test updated | no exit 2; `src/d.ts` forced whole-file |
 | `residual.mode: off` / `strict` | deferral `residual off: src/a.ts` on `src/b.ts` / forced ignores budget |
-| threshold break (fixture variant with a survivor) | exit 1; state committed |
-| Stryker killed mid-run | exit 4; canonical files unchanged |
+| threshold break (fixture variant with a survivor and `thresholds.break: 100`) | exit 1; state committed |
+| threshold break, then re-run with no change | exit 1 again |
+| threshold break, then lower `thresholds.break` in `stryker.config.json` | exit 0; `pending_full=true` |
+| Stryker killed mid-run | exit 4; canonical files unchanged; re-run retries the same plan |
+| Ctrl-C / terminal closed (SIGHUP) mid-run | exit 130; canonical files unchanged |
 | time budget exceeded | deferral `time budget exceeded`; exit 0 |
 | concurrent run / `break-lock` | exit 3 / lock removed |
-| seed / from-state / `--replace` | deferral `seeded from …` / pair copied / old pair in `replaced/<ts>/` |
-| **equivalence** | after each edit scenario, a fresh non-incremental run on the same tree; mutants matched by `(file, mutatorName, location, replacement)`; every kill the gate classifies `verified` is a fresh kill (a fresh `Timeout` is re-run once) |
+| `publish-state --kind inc`, fresh clone, `fetch-state`, `run --also-state …` | warm plan; no `no usable state` deferral |
+| newer full state on `mutation-state/full` than the local state | adopted by `lastFullAt` |
+| seed / `--replace` | deferral `seeded from …` / old pair in `replaced/<ts>/` |
+| **equivalence** | after each edit scenario, a fresh non-incremental run on the same tree; mutants matched by `(file, mutatorName, location, replacement)`; every kill the gate classifies `verified` is a fresh kill (a fresh `Timeout` is re-run once); the number of compared kills is recorded so an empty comparison is visible |
 | **equivalence negative control** | scenario `e-flip` (README) with the residual step disabled by a test-only switch: equivalence fails for exactly the listed mutant |
-| **gate** | edit committed, `metareview review pr-ready --mutation-report …` before re-running: one stale finding with cause `src/a.ts`; after re-running: none; enforce: blocking; revert without re-running: the finding recurs and blocks; after a `package-lock.json` edit and re-run: pending finding |
+| **gate** | edit committed, `metareview review pr-ready --mutation-report …` before re-running: one stale finding with cause `src/a.ts`; after re-running: none; enforce: blocking; revert without re-running: a stale finding with cause `src/a.ts` recurs and blocks; after a `package-lock.json` edit and re-run: pending finding |
 
 The script writes `testdata/mutation-incremental/real/manifest.json` (sha256 of the planner- and
 report-affecting template modules, fixture sources, `expectations.json`, the script, lockfile,
@@ -537,49 +610,71 @@ rewritten to `.`.
   run by a root-package Go test that fails (not skips) when `CI` is set and Node ≥ 22.8 is missing,
   fails on a non-zero exit, and asserts every non-test `.mjs` under the template appears in the
   coverage table at 100%. Tests: glob vectors; import graph (relative, aliases, packages incl.
-  builtins, open importers); the planner replaying every `real/<scenario>/` against
-  `expectations.json`; budget; deleted/renamed paths dropped from scope; runner outcomes with a fake
-  engine (success, not written, `No tests were executed`, timeout, invocation-2 failure, threshold);
-  commit ordering; lock and `break-lock`; seeding; exit precedence and the `GITHUB_OUTPUT` lines;
-  config validation; and a static workflow test (triggers, permissions, identical cache path lists per
-  family, `continue-on-error`, outputs, `!cancelled()`, restore-key order, `include-hidden-files`).
-- A CI test recomputes the manifest's hashes (template modules, fixture, expectations, script, and
-  each committed `real/<scenario>/` tree) and fails on any difference.
+  builtins, open importers incl. a test that is itself one); the planner replaying every
+  `real/<scenario>/` against `expectations.json`; edited files forced whole-file and exempt from the
+  budget; budget overflow deferring every forced file; step 2's reached-module scoping; deleted and
+  renamed paths dropped; runner outcomes with a fake engine (success, not written,
+  `No tests were executed` with and without kills in the selection, invocation 2 after a no-tests
+  invocation 1, timeout, any failure ⇒ nothing committed, interrupt incl. SIGHUP); `thresholdBreak`
+  computed from report and config; adoption via repeated `--also-state` (primary kept unless a later
+  `lastFullAt`; best candidate when the primary is unusable; `run` copies, `plan` does not);
+  `publish-state`/`fetch-state` against a local bare remote; the `changed-during-run` digest; commit
+  ordering; lock and `break-lock`; seeding; exit precedence and the `GITHUB_OUTPUT` lines; config
+  validation; and a static workflow test (triggers, per-job permissions with `contents: write` only
+  on main's publishing steps, identical cache path lists, `continue-on-error`, outputs,
+  `!cancelled()`, restore-key order, publish only on main and only on exit 0/1, empty exit code
+  fails).
+- A CI test recomputes the manifest's hashes (planner- and report-affecting template modules,
+  fixture, expectations, script, and each committed `real/<scenario>/` tree) and fails on any
+  difference.
 - Go, 100% statement coverage (`make cover`): glob vectors; parser fields; unchanged existing
   fingerprints; attestation validation (each unattested reason); HEAD reader with `.gitattributes
   eol=crlf` and a symlink; `tracked:false` handling; new-path handling per category; each kill class
-  and cause order including the residual cause; one finding per causing path; Timeout never a kill;
-  modes including invalid value and task-done under enforce; findings per mode, gate and severity;
-  gremlins no finding; `Reconcile` supersedes absent `mutation:*` rows of the same scope and target
-  only and reopens a recurring fingerprint; log section; digest behaviour; escalation bounds (stale +
-  non-stale blocker still escalates at `maxAttempts`); learning filter. Classification tests use the
-  committed real reports plus derived fixtures (with `reportSha256` recomputed) for states a real
-  report cannot produce.
+  and cause order including the residual cause; one finding per recorded cause and summed counts;
+  Timeout never a kill; modes including invalid value and task-done under enforce; findings per mode,
+  gate and severity; gremlins no finding; `Reconcile` supersedes absent `mutation:*` rows of the same
+  scope and target only on runs with reports, never on a run without reports (override granted →
+  run without reports → run with reports: the override still holds), skips the fix branch under
+  both conditions, reopens a recurring fingerprint, and renders superseded override lines; log
+  section keyed by (file, cause); digest behaviour; escalation bounds (stale + non-stale blocker
+  still escalates at `maxAttempts`); learning filter. Classification tests use the committed real
+  reports plus derived fixtures (with `reportSha256` recomputed) for states a real report cannot
+  produce.
 
 ## 8. Known residuals
 
 - Code in a changed module that carries no mutants (constants, type-only code) affects tests without
-  appearing in coverage; the import-graph step narrows but does not close this; `residual.mode:
-  strict` does not close it either.
+  appearing in coverage; the residual rule works from coverage, so it does not see this, and
+  `residual.mode: strict` does not close it either.
+- A new module with no test yet produces no mutants (no NoCoverage entries) until a test reaches it.
+- Deleting a module together with its own test, with nothing else changed, leaves its old survivors
+  in the report until the next run that invokes Stryker (the gate marks its kills stale).
 - Computed specifiers (`import(variable)`) and files read by path at runtime are invisible to the
   import graph; support files with no importer defer everything, which covers the common fixture
   case.
 - State outside the repo beyond the declared `runtime` inputs.
 - The gate trusts the harness's attestation (G3).
 - Stryker semantics are version-specific; the harness requires StrykerJS 10.x.
-- On integration-heavy suites residual forcing may often exceed the budget and defer; the external
-  trial measures how often and tunes the budget.
-- An idle repository (no push for 7 days) starts cold and pays one full run.
+- On integration-heavy suites residual forcing may often exceed the budget and defer, and edited
+  large files cost their full mutant count; the external trial measures both.
 
 ## 9. Documentation deliverables
 
-- `docs/mutation-harness.md` (setup, config and defaults, aliases and open importers, sizing the
-  budget and time ceiling against the ≤ 2 min bar, CI, seeding, cache limits, commit-before-rerun for
-  pr-ready, reading the gate's freshness section), linked from `USAGE.md`, `docs/quickstart.md` and
-  the `--mutation-report` help text.
+- `docs/mutation-harness.md`: setup; config and defaults; which files to add to `ignore` and to
+  gitignore (`<stateDir>/`); aliases and open importers; sizing the budget and time ceiling against
+  the ≤ 2 min bar and the CI job timeout; the state branches, `fetch-state`/`publish-state` and the
+  cache fast path; warm-starting a new worktree; that dependency bumps (global inputs) trigger one
+  full run on main; that a threshold break on main makes PRs red until fixed; that an enforced stale
+  finding clears only on a later run that supplies reports (or by override), and that overrides on
+  pending/unattested findings last only for that report; commit-before-rerun for pr-ready; reading
+  the gate's freshness section; the planned 0.14.0 default enforcement. Linked from `USAGE.md`,
+  `docs/quickstart.md` and the `--mutation-report` help text.
+- Release notes word 0.13.0 as "harness plus freshness gate; the ≤ 2 min bar is pending the external
+  trial".
 - `docs/0.13.0-candidates.md` §1: next to the "prefer metareview's anchor-pin model" bullet, add that
   the transferable idea is scoped, attested binding (pins verify targeted fix claims, not a mutation
-  score); add the external-trial follow-up (≤ 2 min p50) and the survivor-severity follow-up (§3).
+  score); add the external-trial follow-up (≤ 2 min p50 and the share of PR runs ending pending) and
+  the survivor-severity follow-up (§3).
 - `CHANGELOG.md`; `docs/ARCHITECTURE.md` (mutation freshness in the review model).
 
 ## 10. Decisions (user, 2026-09-23)
@@ -596,4 +691,10 @@ rewritten to `.`.
 8. Stale-only runs escalate at 2 × `maxAttempts` (supersedes "never escalate").
 9. External-trial pass bar: a one-line edit's incremental run ≤ 2 min p50.
 10. After three full review rounds, r4 was re-reviewed only by the lenses that failed r3.
-11. r5 got a small verification pass scoped to real workflows, assuming trust; no overengineering.
+11. Reviews use a pragmatic brief: real workflows and real edge cases, assume trust, no
+    overengineering.
+12. Edited source files are re-run whole (`--force`), because Stryker otherwise reuses kills in their
+    unchanged regions.
+13. Mutation state lives on change-based git branches (`mutation-state/inc`, `mutation-state/full`),
+    with `actions/cache` as a fast path while its entries are within GitHub's 7-day window.
+14. Validity and storage are change-based, never date-based.
