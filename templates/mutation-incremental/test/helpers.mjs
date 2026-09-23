@@ -4,6 +4,10 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+// Test repositories live under os.tmpdir(), which loadConfig refuses for real state; allow it here
+// so a bare `node --test` works without the variable (the Go wrapper also sets it).
+process.env.MUTATION_ALLOW_TMP_STATE ??= '1';
+
 export const baseConfig = () => ({
   schemaVersion: 1,
   stateDir: '.mutation',
