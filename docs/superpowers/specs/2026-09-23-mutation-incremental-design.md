@@ -1,6 +1,6 @@
 # Change-driven mutation testing + attested evidence freshness — design
 
-Status: r21 — final review pending (§11 amendment; r18 approved by `mrv-20260923-205431264136000-…`; r19 and r20 reviewed by `mrv-20260923-210334450256000-…` and `mrv-20260923-210703118968000-…`, one major each, fixed). Blocking only on major or critical findings.
+Status: r21 — APPROVED for planning by all ten adversarial lenses on this exact text (review `mrv-20260923-211009828247000-…`, 10/10 PASS, zero major or critical findings; user brief: block only on major or critical). §§1–10 approved at r14; §11 is the adoption amendment. Advisories are carried into the implementation plans (see that review log).
 `mrv-20260923-182025208234000-…`, r2 `mrv-20260923-183942601569000-…`, r3
 `mrv-20260923-185110177502000-…`; targeted review r4 `mrv-20260923-190310858720000-…`; verification
 of r5; full pragmatic reviews r6 `mrv-20260923-192628041933000-…`, r7
