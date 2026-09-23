@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import { readCandidate, changeSet, adopt, STATE_VERSION, TOOL } from '../lib/state.mjs';
 import { sha256 } from '../lib/snapshot.mjs';
 import { writeState } from './helpers.mjs';
+import { canonicalPendingFull, primaryCandidate } from '../lib/state.mjs';
+import { loadConfig } from '../lib/config.mjs';
+import { makeRepo } from './helpers.mjs';
 
 const dir = () => mkdtempSync(join(tmpdir(), 'mi-state-'));
 const opts = { label: 'x', primary: false };
@@ -95,4 +98,16 @@ test('adopt: no deferrals first, then smallest change set, then primary, then or
   assert.deepEqual(adopt([cand('p', true, near)], s).changes, []);
   assert.equal(adopt([{ label: 'u', usable: false }], s), null);
   assert.equal(adopt([], s), null);
+});
+
+
+test('canonicalPendingFull: an unusable state or one with deferrals is a pending full run', () => {
+  const r = makeRepo();
+  const config = loadConfig(r.top);
+  assert.equal(canonicalPendingFull(config), true);
+  writeState(config.stateDir, { report: { files: {} } });
+  assert.equal(canonicalPendingFull(config), false);
+  writeState(config.stateDir, { report: { files: {} }, attestation: { deferrals: [{ reason: 'no usable state', paths: ['*'] }] } });
+  assert.equal(canonicalPendingFull(config), true);
+  assert.deepEqual([primaryCandidate(config).label, primaryCandidate(config).primary], ['.mutation', true]);
 });

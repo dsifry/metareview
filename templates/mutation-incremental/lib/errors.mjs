@@ -19,3 +19,10 @@ export class EngineError extends Error {
     this.exitCode = 4;
   }
 }
+
+export class InterruptedError extends Error {
+  constructor(message) {
+    super(message);
+    this.exitCode = 130;
+  }
+}

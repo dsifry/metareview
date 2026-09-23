@@ -100,3 +100,11 @@ export function adopt(candidates, snapshot) {
     .sort((x, y) => x.deferred - y.deferred || x.changes.length - y.changes.length || Number(y.c.primary) - Number(x.c.primary) || x.order - y.order);
   return ranked.length === 0 ? null : { ...ranked[0].c, changes: ranked[0].changes };
 }
+
+export const primaryCandidate = (config) => readCandidate(config.stateDir, { label: config.stateDirRaw, primary: true });
+
+// Spec §4: a pending full run is a state that is not usable, or one whose attestation has deferrals.
+export function canonicalPendingFull(config) {
+  const state = primaryCandidate(config);
+  return !state.usable || state.attestation.deferrals.length > 0;
+}

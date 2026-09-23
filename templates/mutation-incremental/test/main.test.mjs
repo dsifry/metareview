@@ -8,6 +8,7 @@ import { nodeVersionWarning } from '../lib/nodever.mjs';
 import { loadConfig } from '../lib/config.mjs';
 import { takeSnapshot } from '../lib/snapshot.mjs';
 import { makeRepo, writeState } from './helpers.mjs';
+import { loadHarnessConfig } from '../lib/inputs.mjs';
 
 const capture = () => {
   const out = { text: '', write(s) { this.text += s; } };
@@ -21,7 +22,14 @@ async function run(args, cwd) {
 }
 
 test('parseArgs', () => {
-  assert.deepEqual(parseArgs(['plan', '--also-state', 'a', '--config', 'c.json', '--also-state', 'b']), { command: 'plan', config: 'c.json', alsoState: ['a', 'b'], rest: [] });
+  assert.deepEqual(parseArgs(['plan', '--also-state', 'a', '--config', 'c.json', '--also-state', 'b']), {
+    command: 'plan', config: 'c.json', mode: undefined, maxMinutes: undefined, remote: undefined, kind: undefined,
+    alsoState: ['a', 'b'], from: [], pr: false, replace: false,
+  });
+  assert.deepEqual(parseArgs(['run', '--mode', 'incremental', '--pr', '--max-minutes', '60', '--replace', '--from', 'r1', '--from', 'r2', '--remote', 'up', '--kind', 'inc']), {
+    command: 'run', config: undefined, mode: 'incremental', maxMinutes: '60', remote: 'up', kind: 'inc',
+    alsoState: [], from: ['r1', 'r2'], pr: true, replace: true,
+  });
   assert.throws(() => parseArgs(['plan', '--config']), (e) => e.exitCode === 2);
   assert.throws(() => parseArgs(['plan', '--bogus']), (e) => e.exitCode === 2);
   assert.deepEqual(parseArgs([]).command, undefined);
@@ -98,6 +106,15 @@ test('nodeVersionWarning: prefix match on components, aliases skipped, first fil
   const nv = makeRepo({ files: { '.node-version': '20.1' } });
   assert.match(nodeVersionWarning(nv.top, 'v20.11.0'), /\.node-version pins Node 20\.1/);
   assert.equal(nodeVersionWarning(makeRepo().top, 'v22.9.0'), null);
+});
+
+test('loadHarnessConfig prints the Node-version warning only when asked', () => {
+  const r = makeRepo({ files: { '.nvmrc': '1.2\n' } });
+  const err = capture();
+  loadHarnessConfig({ cwd: r.top, stderr: err }, {}, false);
+  assert.equal(err.text, '');
+  loadHarnessConfig({ cwd: r.top, stderr: err }, {}, true);
+  assert.match(err.text, /pins Node 1\.2/);
 });
 
 test('cli.mjs runs main with process.argv', async () => {
