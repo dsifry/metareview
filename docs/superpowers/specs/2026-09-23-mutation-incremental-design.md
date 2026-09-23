@@ -1,6 +1,6 @@
 # Change-driven mutation testing + attested evidence freshness — design
 
-Status: r15 — final review pending (§11 amendment from the adoption contract; blocking only on major or critical findings). r14 was approved by final review `mrv-20260923-201040808900000-…` (10/10 PASS). Review history: full artifact reviews r1
+Status: r16 — final review pending (§11 amendment from the adoption contract, revised after r15 review `mrv-20260923-204202233770000-…`; blocking only on major or critical findings). r14 was approved by final review `mrv-20260923-201040808900000-…` (10/10 PASS). Review history: full artifact reviews r1
 `mrv-20260923-182025208234000-…`, r2 `mrv-20260923-183942601569000-…`, r3
 `mrv-20260923-185110177502000-…`; targeted review r4 `mrv-20260923-190310858720000-…`; verification
 of r5; full pragmatic reviews r6 `mrv-20260923-192628041933000-…`, r7
@@ -864,7 +864,7 @@ rewritten to `.`.
     worth its complexity). When main is below the threshold, PRs are red and the step summary
     says main is below it.
 
-## 11. Amendment r15 (adoption contract)
+## 11. Amendment (r15, revised r16; adoption contract)
 
 Source: `docs/superpowers/specs/2026-09-23-mutation-incremental-adoption-contract.md` (decisions
 K1–K9, user, 2026-09-23). This section is normative and overrides the sections it names; everything
@@ -872,102 +872,141 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
 
 ### 11.1 Project verifier (K1; amends §5.1, §5.2, §5.6 step 7)
 
-- Config `verify: {"command": [argv]}` (optional). After every commit of state (§5.6 step 7), in
-  both modes, the harness runs it (no shell, cwd = top-level) once per view (§11.3), or once when no
-  views are configured, with environment `MUTATION_REPORT=<stateDir>/incremental.json`,
-  `MUTATION_ATTESTATION=<stateDir>/attestation.json`, and, per view, `MUTATION_VIEW=<name>` and
-  `MUTATION_VIEW_PATTERNS=<JSON array>` (both unset without views). The verifier reads the whole
-  report; view scoping and any waiver semantics are the project's (waivers are per mutant, so a
-  mutant in several views is judged consistently).
-- A non-zero exit from any invocation is a verify failure: exit 1, the same class as a threshold
-  break (state stays committed; stderr names each failing view). A command that cannot be spawned is
-  exit 2. `thresholds.break` becomes optional; either check failing gives exit 1.
-- Stated explicitly (replaces the implicit split): **CI enforces the project's bar (threshold and/or
-  verifier); the metareview gate judges only evidence freshness.** A gate-side survivor bar is out of
-  scope for 0.13.0.
+- Config `verify: {"command": [argv], "timeoutMinutes": <n or null>}` (optional). After `run`
+  commits state (§5.6 step 7), in both modes, the harness runs it (no shell, cwd = top-level, own
+  process group with §5.6's signal handling) once per view (§11.3), or once when no views are
+  configured. Environment: the harness's own environment plus `MUTATION_REPORT=<stateDir>/incremental.json`,
+  `MUTATION_ATTESTATION=<stateDir>/attestation.json`, and per view `MUTATION_VIEW=<name>`,
+  `MUTATION_VIEW_PATTERNS=<JSON array>` and `MUTATION_VIEW_FILES=<JSON array of the resolved
+  paths>` (all three unset without views).
+- The verifier reads the whole report; view scoping and waiver semantics are the project's (waivers
+  are per mutant, so a mutant in several views is judged consistently). Kills covered by a deferral
+  still show their previous status in the report; a verifier enforcing a survivor bar must treat
+  them as unverified (the attestation's `deferrals` and `viewSummaries[view].pending`); the docs say
+  so.
+- Any verify failure is exit 1, the same class as a threshold break (state stays committed and is
+  published): a non-zero exit, a command that cannot be spawned, or exceeding `timeoutMinutes`;
+  stderr names each failing view and the reason. `thresholds.break` becomes optional; either check
+  failing gives exit 1; a config with neither is valid and enforces nothing (docs).
+- Not run when nothing was committed (a cold run with no `incremental.json`) and not run by `seed`.
+  `verify` and `views` commands run only inside `run` and `plan`, never in `fetch-state` or
+  `publish-state`; the static workflow test asserts `MUTATION_STATE_TOKEN` is absent from `run`
+  steps. Verifier output lands in public logs and summaries (docs).
+- Stated explicitly: **CI enforces the project's bar (threshold and/or verifier); the metareview
+  gate judges only evidence freshness.** A gate-side survivor bar is out of scope for 0.13.0.
 - Recommended waiver identity (docs): `(file, mutatorName, location, replacement)` plus the file's
-  digest; mutant ids are report-local.
+  digest; mutant ids are report-local. The docs suggest a single-pass verifier that loops over the
+  views in the attestation when per-view invocations are costly.
 
 ### 11.2 Pending on PRs (K2; amends §5.1, §5.7, decision 2)
 
 - Config `pendingOnPr: "allow" | "full" | "full-on-global"`, default `allow` (decision 2 unchanged
-  for projects that do not opt in).
-- `run` gains `--unbudgeted` (the forced-set budget is disabled for this run, as in `strict`; edited
-  files and changed-hunk mutants were already exempt) and `--max-minutes <n>` (overrides
-  `maxMinutesPerInvocation` for this run).
-- **Deferral causes.** `run` appends `pending_cause=<none|global|other>` to `GITHUB_OUTPUT`,
-  computed only from deferrals **this run added**: `global` if it added any `global input changed`
-  deferral (runtime keys included); else `other` if it added any other deferral; else `none`.
-  Deferrals carried from the adopted baseline (**inherited**) never set a cause: they belong to
-  main's `full` job, and the step summary lists them as "inherited from main, cleared by main's full
-  run".
-- Job `incremental-pr` under `full`: step 3 passes `--unbudgeted --max-minutes <m>`; when
-  `pending_cause` ≠ `none`, a following step runs `run --mode full`, and the job's result is that
-  run's exit code.
-- Under `full-on-global`: step 3 passes `--unbudgeted --max-minutes <m>`; `pending_cause=global` ⇒
-  `run --mode full` as above; `pending_cause=other` ⇒ the job fails, and the step summary names each
-  cause (for example `time budget exceeded: src/App.tsx`). Because the run is unbudgeted, no budget
-  deferral can occur; a time deferral means the unbudgeted work did not fit `<m>` and is reported,
-  never turned green or deferred implicitly. "Pending PR" thus means only global-input pending.
-- `<m>` and the job timeout are template inputs: for `full`/`full-on-global` the PR job timeout must
-  fit a full sweep (Keeper: 240–350 min), and `<m>` is set below it with room for setup (docs).
-- A local run never turns a PR green; there is no import of local state into CI (the rejected
-  option (b) of the contract).
+  for projects that do not opt in). `residual.mode: "off"` together with `full-on-global` is exit 2
+  (every residual edit would fail the PR).
+- `run --pr` marks a PR run. With `pendingOnPr` ≠ `allow`, a PR run is **unbudgeted** (the
+  forced-set budget is disabled, as in `strict`) and uses `--max-minutes <m>` in place of
+  `maxMinutesPerInvocation`.
+- **Counted and inherited deferrals.** A deferral in the run's resulting attestation is
+  **inherited** only when an identical `{reason, paths}` appears in the attestation of one of the
+  run's `--also-state` directories (main's fetched `remote/inc` or `remote/full`; parsed, whether or
+  not usable). Every other deferral is **counted**, including deferrals carried from the PR's own
+  cached state. So a deferral a PR caused never turns into "inherited" on a re-run or a later push.
+  Inherited deferrals belong to main's `full` job; the step summary lists them as "inherited from
+  main, cleared by main's full run".
+- **Cause.** On exit 0 or 1 only, `run` appends `pending_cause` to `GITHUB_OUTPUT`: `global` if any
+  counted deferral has `paths: ["*"]` (global or runtime input, `no usable state`, a deleted or
+  importer-less support file, an importer-less unclassified file, seeding); else `other` if any
+  counted deferral exists (per-file: `time budget exceeded`, `blocked by deferred scope`,
+  `no reachable tests`); else `none`. Follow-up steps are gated on `exit_code` ∈ {0, 1}.
+- **Shortcut.** In a PR run with `pendingOnPr` ≠ `allow`, when the plan already contains a counted
+  `["*"]` deferral, no invocation runs (the state is re-attested as in §5.6 step 6) and the cause is
+  `global`; the job goes straight to the full sweep.
+- Job `incremental-pr` under `full`: step 3 passes `--pr --max-minutes <m>`; when `pending_cause` ≠
+  `none`, a following step runs `run --mode full`; its exit code is the job's result, and on exit
+  0/1 its state is saved to the cache (key suffix `-full`). Under `full-on-global`: the same, except
+  that `pending_cause=other` fails the job with each counted cause named in the step summary (for
+  example `time budget exceeded: src/App.tsx`, or `no reachable tests: src/x.ts` — add a test or
+  remove the module). Step 4's cache save of the incremental state runs only when `pending_cause` is
+  `none` or `pendingOnPr` is `allow`.
+- **Sizing.** For `full`/`full-on-global` the PR job timeout must be ≥ setup + 2 × `<m>` + one full
+  sweep (Keeper: roughly 240–350 min). The docs also warn that under `full` every PR that exceeds
+  `<m>` becomes a full sweep.
+- A local run never turns a PR green; no local state is imported into CI (contract option (b)
+  rejected).
 
 ### 11.3 Views (K3; amends §5.2, §5.5, §6.1, §6.5, §6.6)
 
-- One state whose `mutate` is unchanged; views are named pattern sets (§5.3 dialect) over it.
-  Config `views`: `{"command": [argv]}` printing `{"<name>": [patterns]}` on stdout, or
-  `{"inline": {"<name>": [patterns]}}`. Absent ⇒ no views.
+- One state whose `mutate` is unchanged; views are named pattern sets over it. Config `views`:
+  `{"command": [argv]}` printing a JSON object `{"<name>": [patterns]}` on stdout, or
+  `{"inline": {...}}` (Keeper uses `command`). Names match `[A-Za-z0-9._-]+`. A view matches a path
+  per the §5.3 list rule (`!` entries applied). A views command that exits non-zero or prints
+  anything but that shape is exit 2.
 - **Read-time only.** Views never affect planning, budgets, invocations, adoption or validity. The
-  views command is not a runtime input, and a view-map change invalidates no kill.
-- **Completeness (exit 2, checked at plan time before any invocation):** a view pattern matching a
-  path in `S` whose category is not `mutate`; a view name that is empty or duplicated; or a `mutate`
-  file in `S` that no view matches. Views may overlap; per-view counts are never summed.
+  views command is not a runtime input; a view-map change invalidates no kill.
+- **Completeness (exit 2, at plan time before any invocation):** a view matching a path in `S` whose
+  category is not `mutate`; an empty or duplicate name; or a `mutate` file in `S` that no view
+  matches (deliberately stricter than "every file with mutants": a new file must be assigned before
+  it has mutants). A bad map therefore also stops main's jobs; the PR job catches it first. Views
+  may overlap; per-view counts are never summed.
 - **Attestation** gains `views` (the resolved map, byte-ordered) and `viewSummaries`
-  (`{name: {<Stryker status>: count, "pending": count}}`, `pending` = kills covered by a deferral).
-  The gate scopes with exactly this recorded map, and a map change shows in the attestation diff.
-- **Gate:** `--mutation-view <name>` (repeatable) restricts classification, findings, the score
-  summary and the §6.6 section to kills in files the recorded map assigns to that view; a name
-  absent from the map is a usage error (exit 2). With a view, fingerprints gain `:<view>` after
-  `<engine>` (`mutation:stale:<mode>:<engine>:<view>:<cause>:<cause8>` and likewise for pending and
-  unattested), and the §6.5 supersede rule additionally requires the same view, so overlapping
-  views never supersede each other's rows.
+  (`{name: {<Stryker status>: count, "pending": count}}`, `pending` = kills covered by a
+  deferral). `publish-state` never re-runs the views command.
+- **Gate `--mutation-view <name>`** (repeatable): the name must appear in the map of every supplied
+  attested report that has `views`; otherwise exit 2. An unattested report, or an attested one
+  without `views`, is not scoped: it produces its usual findings under the view's fingerprint. Each
+  view yields its own classification, findings, score summary and §6.6 section (never a union).
+  With a view, fingerprints gain `:<view>` after `<engine>`
+  (`mutation:stale:<mode>:<engine>:<view>:<cause>:<cause8>`, likewise for pending and unattested).
+- **Ledger with views (amends §6.5, and `openForRun` for these three prefixes):** a run with views
+  counts as open, and may supersede, only rows whose view is in its `--mutation-view` set; a run
+  without views counts and supersedes all rows of these prefixes, viewed or not. On any run that
+  supplies a report of the same engine, an `open` or `override-pending` row whose view is absent
+  from every supplied attested report's current map becomes `superseded` (a renamed or removed view
+  never strands a blocker). `overridden` rows are left as in §6.5. An override on one view's
+  fingerprint does not cover the same cause under another view (docs).
 
-### 11.4 Edited files (K5; amends §5.4 steps 1 and 4, Normalise, decision 12)
+### 11.4 Edited files (K5; amends §5.4 steps 1 and 4, Normalise, §5.6 step 4, decision 12)
 
 - Config `editedFiles: "residual" | "whole"`, default `"residual"`. `whole` is r14's rule.
-- In `residual` mode, for each changed `mutate` file Y with an entry in `R.files`:
-  1. **Hunks are content-based:** a line diff of `R.files[Y].source` (the attested source embedded
-     in the report) against Y's current bytes; never commits or `git diff`. Unchanged lines map old
-     line numbers to new ones.
-  2. **Changed-hunk mutants** (the current-coordinate line ranges of changed hunks; pure deletions
-     contribute no range) are forced as `<file>:<start>-<end>` ranges; they are mandatory and
-     budget-exempt, like edited files in r14.
-  3. **Closure by coverage, not proximity:** `T_H` = union of `coveredBy` of `R`'s mutants whose old
-     location intersects a changed hunk's old-side range; plus, when some changed hunk (old side or
-     new side) intersects no mutant of `R` (a constant, static code, a pure addition), Y's importer
-     tests. Every Killed mutant in any file (Y included, mapped to current lines) whose `killedBy`
-     intersects `T_H` is forced; these are budget-subject (overflow defers them as in §5.4).
-  4. **Prerequisite:** the Stryker config has `disableBail: true` (§11.5; `allowBail` is refused in
-     this mode), because the closure reads `killedBy`.
-- A changed `mutate` file with no entry in `R.files` (new, or no mutants) is handled as in r14
-  (edited, forced whole-file; zero-mutant residual via importer tests).
-- The §4 term "Edited files" and step 4's cross-file residual still apply; in `residual` mode step 4
-  uses `T_H` for Y instead of Y's whole `coveredBy` union.
+- In `residual` mode, for each changed `mutate` file Y with an entry in `R.files` and at most 1 MiB
+  (larger files use `whole`):
+  1. **Hunks are content-based:** a minimal Myers line diff (deterministic tie-breaking) of
+     `R.files[Y].source` (the attested source embedded in the report) against Y's current bytes,
+     both with line endings normalised to LF and a leading BOM removed; never commits or `git diff`.
+     Unchanged lines map old line numbers to new ones. Node and Go share conformance vectors for the
+     diff, as for the glob dialect.
+  2. **Placement:** Y goes whole-file into the **unforced scope** (invocation 1). Stryker rebuilds
+     every mutant of Y, re-runs those whose code changed (changed-hunk and enclosing mutants alike;
+     a mutant is only created inside its full span, so hunk ranges alone would drop mutants spanning
+     the edit) and reuses unchanged-region results per F1. Scope is never budgeted, so changed-hunk
+     mutants are mandatory and budget-exempt. The Normalise rule "a file in both scope and forced is
+     forced whole-file" does not apply to Y.
+  3. **Closure by coverage, not proximity:** a mutant of `R` in Y **intersects** a hunk when its old
+     line range overlaps the hunk's old-side range, or, for a pure insertion, contains the insertion
+     point. `T_H` = union of `coveredBy` of the intersecting mutants; plus Y's importer tests when
+     some hunk intersects no mutant of `R` (a constant, static code, a pure addition outside every
+     mutant). Every Killed mutant (any file; Y's own mapped to current lines) whose `killedBy`
+     intersects `T_H` is forced in invocation 2 as ranges; these are budget-subject (overflow defers
+     them as in §5.4). With `residual.mode: "off"` the closure forces nothing and records
+     `residual off: <p>` on the files it would have forced.
+  4. **Prerequisite:** `disableBail: true` (§11.5); `allowBail` is refused in this mode.
+- A changed `mutate` file with no entry in `R.files` (new, or no mutants) is handled as in r14.
+- Step 4's cross-file residual uses `T_H` for Y in `residual` mode.
 - **Stated plainly:** `residual` widens the §8 residual relative to `whole` (a behaviour change that
   reaches same-file kills only through paths no covering test of the changed hunk exercises). It is
   accepted because the same class is already accepted for cross-file kills and full runs backstop
   it.
-- **Gate:** unchanged; a changed file's own kills are stale by cause 1, which is stricter than the
-  planner and clears when the harness re-runs.
+- **Gate:** unchanged in this respect; a changed file's own kills are stale by cause 1 (stricter than
+  the planner; clears when the harness re-runs).
 
 ### 11.5 Static code and bail (K4, K6; amends §5.2 validation, §5.4 step 4, §6.3)
 
-- **Out-of-mutant hunks in `whole` mode (K4):** when a hunk (computed as in §11.4.1) of a changed
-  `mutate` file intersects no mutant of `R`, Y's importer tests are added to `T_Y`. **Gate mirror:**
-  using the attested source embedded in the report, a changed `mutate` file with a hunk that
-  intersects no mutant (any status) is a blanket cause, like a zero-mutant file (§6.3).
+- **Out-of-mutant hunks, both modes (K4):** a hunk (§11.4.1) intersects no mutant of `R` when, by
+  the §11.4.3 rule, no mutant of any status intersects it. In `whole` mode such a hunk adds Y's
+  importer tests to `T_Y`; in `residual` mode §11.4.3 already does. **Gate mirror (both modes):**
+  using the attested source embedded in the report and the shared diff, a changed `mutate` file
+  with such a hunk is a blanket cause, like a zero-mutant file (§6.3). This is conservative and
+  noisy for comment or import edits until the harness re-runs (docs).
 - **Bail (K6):** config validation exits 2 unless the Stryker config has `disableBail: true` or the
   harness config sets `allowBail: true`; `allowBail: true` with `editedFiles: "residual"` is exit 2.
 - `statically_tested`-style pins map to metareview anchor pins once R3 (prove cannot verify non-Go
@@ -976,41 +1015,60 @@ not named here is unchanged from r14. Implementation plans read §§1–10 throu
 ### 11.6 State version, seeding, cutover, meta-artifacts (K7–K9; amends §5.4 Usable, §5.5, §5.8, §9)
 
 - Attestation gains `stateVersion` (integer, starts at 1). **Usable** requires `stateVersion` equal
-  to the harness's; `toolVersion` becomes informational. `stateVersion` is bumped only when
-  planning or attestation semantics change, so patch releases keep state.
-- `seed --from <report>` is repeatable; the reports' `files` and `testFiles` are merged; a path
-  present in two reports with different content is exit 2.
-- Docs add: the cutover sequence (advisory; adopt with one state and views; first main push runs the
-  full sweep and publishes; existing reports show `unattested`, advisory, until then; enforce only
-  after `mutation-state/full` exists; 0.14.0 release notes repeat it); meta-artifact classification
+  to the harness's; `toolVersion` becomes informational (§5.5's first bullet reads "`stateVersion`"
+  where it says `toolVersion`). `stateVersion` is bumped only when planning or attestation
+  semantics change; a Node test fails when the planner's golden outputs change without a bump.
+- `seed --from <report>` is repeatable. Tests are re-keyed by (file, name) and renumbered; a path in
+  several reports must have the same `source` (else exit 2); a mutant in several reports is merged
+  (Killed if killed in any, test lists unioned). `seed` does not run `verify`.
+- Docs add: the cutover sequence (advisory; adopt with one state and views; `pendingOnPr` stays
+  `allow` until `mutation-state/full` exists, since before then every PR run is cold and, under
+  `full`/`full-on-global`, pays a full sweep; the first main push runs the full sweep and publishes;
+  existing reports show `unattested`, advisory, until then; enforce only after
+  `mutation-state/full` exists; 0.14.0 release notes repeat it); meta-artifact classification
   (files tests import or read → `support`; tooling-only catalog/decomposition JSON and docs →
   `ignore`; `global` only for inputs everything depends on; `tests/**` → `test`,
   helpers/factories → `support`; files read by path are invisible to the import graph).
 
 ### 11.7 Verification additions (amends §7)
 
-- Fixture: a `views` map with two overlapping views covering every `mutate` file;
-  `disableBail: true` already set.
-- §7.1 rows: `residual` vs `whole` for the line-2 and line-3 edits of `src/a.ts` (residual forces the
-  changed-hunk range plus the closure; whole forces the file), and an edit to a module-scope line
-  with no mutant (importer tests added); a view pattern outside `mutate` and an unviewed `mutate`
-  file (exit 2); `verify` failing for one view (exit 1, view named); a PR under `full-on-global`
-  with a lockfile edit (full run), with a time-budget deferral (job fails, cause named), and on a
-  baseline with inherited deferrals (no failure, summary lists them); `--mutation-view` scoping and
-  per-view fingerprints at the gate.
-- §7.2 Node tests: the line diff and old→new mapping; `T_H`; budget exemption of changed-hunk
-  mutants; `pending_cause` including inherited deferrals; `--unbudgeted`/`--max-minutes`; views
-  completeness; `viewSummaries`; `verify` environment and per-view invocation; `stateVersion`;
-  seed merge. Go tests: `--mutation-view` scoping, per-view fingerprints and supersede, the
-  out-of-mutant-hunk blanket cause.
+- Fixture: a `views` map with two overlapping views covering every `mutate` file; `disableBail:
+  true`; `expectations.json` keyed by `editedFiles` mode, the r14 rows being the `whole`-mode rows;
+  `src/e.ts` with two independent multi-line functions `inc` (lines 1–4) and `dec` (lines 6–9),
+  tested by `tests/e-inc.test.ts` and `tests/e-dec.test.ts` respectively, so the residual closure is
+  narrower than the whole file.
+- §7.1 rows: `residual` vs `whole` for the line-2 and line-3 edits of `src/a.ts`; a one-line edit
+  inside `inc` (residual: `dec`'s kills reused, `inc`'s block mutant still present in the report,
+  closure forces only mutants killed by `e-inc` tests); a pure-deletion hunk; an edit to a line with
+  no mutant (importer tests added); a residual negative control (README `e-flip-residual`: the
+  closure disabled by a test-only switch makes equivalence fail for exactly the listed mutant); a
+  view pattern outside `mutate`, an unviewed `mutate` file and a failing views command (exit 2);
+  `verify` failing for one view (exit 1, view named) and not run on a cold run; PRs under
+  `full-on-global` with a lockfile edit (shortcut, full run), with a time-budget deferral (job
+  fails, cause named; re-run with no change fails again), with inherited deferrals only (no
+  failure, summary lists them), and on a cold baseline after a `stateVersion` bump (cause
+  `global`, full run); a PR under `full` whose follow-up full run succeeds (cache saved, next push
+  no full sweep); the gate's `--mutation-view` scoping, per-view fingerprints, cross-view isolation,
+  a renamed view superseding its rows, and an unattested report under a view.
+- §7.2 Node tests: the line diff (shared vectors), EOL/BOM normalisation, old→new mapping, pure
+  insertions and deletions, `T_H`, the scope placement of Y, the 1 MiB fallback; counted vs
+  inherited deferrals and `pending_cause` (only on exit 0/1); the shortcut; `--pr`/`--max-minutes`;
+  config validation (`allowBail` with `residual`, missing `disableBail`, `residual off` with
+  `full-on-global`); views shape, names and completeness; `viewSummaries`; `verify` environment,
+  per-view invocation, spawn failure and timeout (exit 1); `stateVersion` and its golden-output
+  guard; seed merge and re-keying. Go tests: `--mutation-view` scoping and exit 2 on an unknown
+  name; per-view fingerprints, view-aware `openForRun` and supersede, renamed views; the
+  out-of-mutant-hunk blanket cause with the shared diff vectors.
 
 ### 11.8 Decisions (amends §10)
 
 - Decision 2 is amended: projects may opt into `pendingOnPr: "full" | "full-on-global"`.
-- Decision 12 is revised: edited files use `editedFiles`, default `residual` (in-file residual,
-  §11.4); `whole` is available.
+- Decision 12 is revised: edited files use `editedFiles`, default `residual` (§11.4); `whole` is
+  available.
 16. CI enforces the project's bar (threshold and/or verifier); the gate judges freshness.
 17. One state per repository; per-unit evidence comes from overlapping, read-time views.
 18. No local state is imported into CI.
-19. Adoption on Keeper proceeds only if the plan replay projects ≤ 20% pending PR runs in
-    `residual` mode (contract §3).
+19. A demanding consumer's adoption is gated by the adoption spec's viability measurement
+    (contract §3; for Keeper, ≤ 20% projected pending PR runs in `residual` mode).
+20. Only deferrals found in main's published state are inherited; everything else a PR run carries
+    counts toward its outcome.
