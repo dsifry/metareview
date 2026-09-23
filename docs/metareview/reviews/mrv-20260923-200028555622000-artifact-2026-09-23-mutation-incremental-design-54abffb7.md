@@ -43,7 +43,7 @@ Use `rubrics/artifact-review-rubric.md` and the context pack above. Run these le
 ## Orchestrator Notes (not findings)
 
 - Round r11: full 10-lens review with the pragmatic brief. 9 PASS, 1 NEEDS_REVISION (testing-quality). The r10 gate blocker and the switch to the absolute threshold were verified by every lens.
-- r12 fixes the single blocker, folds in the advisories and has the `full` job publish a green catch-up (architecture advisory). It is re-reviewed by testing-quality plus the lenses whose areas r12 touched (architecture, runtime-reliability, mechanical-precision), following decision 10's precedent.
+- r12 fixes the single blocker, folds in the advisories and has the `full` job publish a green catch-up (architecture advisory). It is re-reviewed by all ten lenses so every required row is fresh.
 | Scope and alignment | PASS | 0 | 0 | decision 15 applied consistently, no relative residue; all §10 decisions honoured; advisories: optional trims (Node warning, seed), overlapping threshold rows |
 | Completeness | PASS | 0 | 0 | all workflows traced; advisories: step 5 cold-run wording, missing `--also-state` dir is simply unusable, full job green on catch-up threshold break, PR CI state is not gate evidence |
 | Security | PASS | 0 | 0 | credential wiring holds for same-repo, fork, Dependabot, private, local; advisories: step summary/logs are public too, token is CI-only, restrict ruleset bypass to Actions |

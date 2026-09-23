@@ -43,7 +43,7 @@ Use `rubrics/artifact-review-rubric.md` and the context pack above. Run these le
 ## Orchestrator Notes (not findings)
 
 - r16 review (10 lenses, blocking only on major or critical findings): 7 PASS, 3 NEEDS_REVISION with narrow major findings in §11.2, §11.1 and §11.3. All six r15 majors are verified fixed; feasibility re-checked §11.4.2 against the StrykerJS 10 source.
-- r17 fixes all three. Per the decision 10 precedent it is verified by the lenses that raised them (completeness, intent preservation, runtime reliability, mechanical precision).
+- r17 fixes all three. Per the decision 10 precedent it is re-reviewed by all ten lenses so every required row is fresh.
 | Feasibility | PASS | 0 | 0 | §11.4.2 verified in StrykerJS 10 source (whole-file unforced rebuild; forced ranges carry out-of-scope mutants); advisories: rebased PR during main pending pays a sweep, time-budget exits under full-on-global, Myers vs diff-match-patch mapping, single-pass verifier, run plan locally after adding a module |
 | Completeness | NEEDS_REVISION | 1 | 0 | MAJOR: verifier cannot tell inherited from counted pending (not in attestation or env), so a survivor-bar verifier fails every PR during main's pending window or ignores the PR's own pending |
 | Scope and alignment | PASS | 0 | 0 | §11 implements K1–K9 exactly, additions minimal; advisory: verifier inherited/counted visibility |

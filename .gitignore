@@ -26,3 +26,8 @@ docs/metareview/.FINDINGS.md.tmp-*
 !.metareview/knowledge/metareview.jsonl
 !.metareview/calibration.jsonl
 !.metareview/learning-runs.jsonl
+
+# Local beads issue tracker (bd) and its tool integrations; kept out of git
+.beads/
+.agents/
+.codex/
