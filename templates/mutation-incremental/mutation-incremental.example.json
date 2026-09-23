@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "stateDir": ".mutation",
+  "stryker": { "command": ["npx", "--no-install", "stryker"], "configFile": "stryker.config.json", "extraArgs": [] },
+  "mutate":  ["src/**/*.ts", "!src/**/*.d.ts"],
+  "test":    ["tests/**/*.test.ts"],
+  "support": ["tests/helpers/**", "tests/factories/**", "tests/fixtures/**"],
+  "global":  ["package.json", "package-lock.json", "stryker.config.json", "vitest.config.ts", "tsconfig*.json", "migrations/**", ".env*", ".nvmrc", ".node-version"],
+  "ignore":  ["docs/**", "**/*.md", ".github/**", ".vscode/**", ".gitignore", "LICENSE*", "Dockerfile", "Makefile", ".metareview/**", ".beads/**", ".claude/**"],
+  "aliases": {},
+  "runtime": { "commands": [], "env": [] },
+  "budget":  { "maxForcedShare": 0.25, "maxForcedMutants": null, "maxMinutesPerInvocation": 20 },
+  "residual": { "mode": "bounded" }
+}
