@@ -5,6 +5,7 @@ import { resolveViews } from './views.mjs';
 import { loadHarnessConfig, planInputs, summaryLine } from './inputs.mjs';
 import { breakLockCommand } from './lock.mjs';
 import { runCommand } from './run.mjs';
+import { seedCommand } from './seed.mjs';
 
 const USAGE = `usage: cli.mjs <command> [--config <path>]
   plan [--also-state <dir>]...
@@ -54,7 +55,7 @@ function planCommand(io, options) {
   return 0;
 }
 
-const COMMANDS = { plan: planCommand, run: runCommand, 'break-lock': breakLockCommand };
+const COMMANDS = { plan: planCommand, run: runCommand, seed: seedCommand, 'break-lock': breakLockCommand };
 
 export async function main(args, io = { stdout: process.stdout, stderr: process.stderr, cwd: process.cwd() }) {
   try {
