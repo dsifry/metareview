@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-1a-planner-shard-1-20260923",
+  "kind": "shard",
+  "shardId": "shard-1",
+  "shardHash": "628cfeafb3bc6f0a",
+  "planHash": "ad83f0d9bbe79762",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-shard-reviewer",
+  "reviewedAt": "2026-09-23T22:39:07Z",
+  "evidence": [
+    {
+      "path": "templates/mutation-incremental/test/helpers.mjs",
+      "line": 9,
+      "note": "process.env.MUTATION_ALLOW_TMP_STATE ??= '1' defaults the guard for bare `node --test`; grep confirms this file is imported only by test/*.test.mjs, never by production lib code, so the relaxation cannot leak into a real run."
+    },
+    {
+      "path": "templates/mutation-incremental/lib/config.mjs",
+      "line": 99,
+      "note": "loadConfig's tmp-state guard at line 99 (`if (!process.env.MUTATION_ALLOW_TMP_STATE)`) is the gate the helper default satisfies; verified with `env -u MUTATION_ALLOW_TMP_STATE node --test` from templates/mutation-incremental — 143/143 pass with the var unset at shell level, confirming the described fix works end-to-end."
+    },
+    {
+      "path": "templates/mutation-incremental/lib/snapshot.mjs",
+      "line": 66,
+      "note": "configDigest() parses the raw config file and deletes raw.views before hashing canonicalJSON(raw), matching spec K3.4/§11.3 (views is read-time-only and must not affect the invalidation digest); config.mjs's own duplicate-key/shape validation runs separately in loadConfig, so this second parse in configDigest is redundant but not incorrect."
+    },
+    {
+      "path": "templates/mutation-incremental/lib/json.mjs",
+      "line": 15,
+      "note": "duplicateKey()'s escape-skip (`j += text[j] === '\\\\' ? 2 : 1`) only special-cases a 2-char jump for backslash escapes, but this is correct even for \\uXXXX: skipping the backslash+u pair leaves the 4 trailing hex digits to be scanned normally, and hex digits can never be a quote or backslash, so the closing quote is still found correctly."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "lib/main.mjs's planCommand calls resolveViews(config, snapshot) strictly for its validation side effect (throwing on a bad views config) after computePlan() has already run and before the plan is serialized to stdout; the returned view map is discarded. Not a normal-usage failure (the plan output is unaffected and validation still happens before commands complete), but it reads as coincidental ordering rather than an intentional contract, worth a comment or restructure when Plan 1b wires in view summaries so a future edit doesn't assume resolveViews's return value already feeds the emitted plan.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/main.mjs", "line": 61, "note": "resolveViews(config, snapshot) is called and its result unused, between computePlan and the stdout write" }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

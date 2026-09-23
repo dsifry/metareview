@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-cross-shard-ad83f0d9bbe79762",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "ad83f0d9bbe79762",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-sonnet-5",
+  "reviewedAt": "2026-09-23T22:39:33Z",
+  "evidence": [
+    { "path": "templates/mutation-incremental/lib/main.mjs", "line": 42 },
+    { "path": "templates/mutation-incremental/lib/plan.mjs", "line": 23 },
+    { "path": "templates/mutation-incremental/lib/state.mjs", "line": 95 },
+    { "path": "templates/mutation-incremental/lib/graph.mjs", "line": 74 },
+    { "path": "templates/mutation-incremental/lib/deferrals.mjs", "line": 30 },
+    { "note": "Traced the full config -> snapshot -> graph -> diff -> state -> plan -> deferrals -> views -> main call chain by reading each lib file end-to-end and cross-checking field names/shapes actually passed between them." }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "main.mjs:59 (planCommand) calls resolveViews(config, snapshot) purely for its validation side effect (it throws UsageError on an incomplete/invalid view map) and discards the returned map; the public plan output (plan.mjs PUBLIC_KEYS) carries no view information, and viewSummaries (spec: attestation-time, needs a report + classified deferrals that don't exist yet in the deterministic-planner-only scope of Plan 1a) is correctly not computed here. Confirmed intentional via the views.mjs:15 comment ('views are read-time only; completeness is checked at plan time before any invocation'), so this is a note for the next plan's reviewer rather than a defect: Plan 1b/1c must not silently drop this validation call when execution is wired in.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/main.mjs", "line": 59 },
+        { "path": "templates/mutation-incremental/lib/views.mjs", "line": 15 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "deferrals.mjs's REASONS table (lines 30-42) declares five reason patterns -- 'no reachable tests: ', 'seeded from ', 'time budget exceeded', 'blocked by deferred scope' -- that no code path in this plan's shipped modules (config/snapshot/graph/diff/state/plan/views/main) ever produces; they are only exercised directly by deferrals.test.mjs's unit tests, not through an end-to-end planner scenario. This matches the spec, which assigns those reasons to the execution/state-writing harness (Plan 1b/1c), so it is not a missing requirement for Plan 1a -- flagging only so the next plan's integration review confirms every one of these five reasons becomes reachable once invocations are wired in, and that reasonInfo's regex table (deferrals.mjs:44-50) is exercised against the real strings the harness emits, not just hand-written test fixtures.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/deferrals.mjs", "line": 30 },
+        { "path": "docs/superpowers/specs/2026-09-23-mutation-incremental-design.md", "line": 356 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "The already-written shard-2 and shard-3 result files in this same resultsDir carry an internal planHash field ('72d8d12c269280e8') that does not match this plan's planHash ('ad83f0d9bbe79762') recorded in plan.json and in this cross-shard result, even though their filenames use the correct current shardHash. This looks like a stale planHash left over from a prior sharding run rather than a defect in the reviewed mutation-incremental code; noting it so the gate step that re-runs with --previous-run doesn't mistake a planHash mismatch inside those files for a re-review requirement, and so shard-0/shard-1 results (not yet present) are written with the current planHash.",
+      "evidence": [
+        { "path": "docs/metareview/shards/task-done/docs-superpowers-plans-2026-09-23-mutation-incre-cd5310ba/shard-2.f96c3780256e230b.result.json", "line": 6 },
+        { "path": "docs/metareview/shards/task-done/docs-superpowers-plans-2026-09-23-mutation-incre-cd5310ba/shard-3.05209a333ca9cf4f.result.json", "line": 6 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

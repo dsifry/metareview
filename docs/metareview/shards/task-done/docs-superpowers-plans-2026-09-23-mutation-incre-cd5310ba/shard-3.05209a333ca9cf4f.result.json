@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-3-05209a333ca9cf4f",
+  "kind": "shard",
+  "shardId": "shard-3",
+  "shardHash": "05209a333ca9cf4f",
+  "planHash": "72d8d12c269280e8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-5",
+  "reviewedAt": "2026-09-23T22:34:40Z",
+  "evidence": [
+    { "path": "mutationtemplate_test.go", "line": 68 },
+    { "path": "templates/mutation-incremental/lib/deferrals.mjs", "line": 197 },
+    { "path": "templates/mutation-incremental/lib/glob.mjs", "line": 290 },
+    { "path": "templates/mutation-incremental/lib/nodever.mjs", "line": 6 },
+    { "path": "templates/mutation-incremental/lib/errors.mjs", "line": 2 },
+    { "path": "templates/mutation-incremental/test/config.test.mjs", "line": 434 },
+    { "path": "templates/mutation-incremental/test/state.test.mjs", "line": 663 },
+    { "note": "No eval, no TODO/FIXME markers, no truncated chunks (all part 1/1), and each new lib file has a corresponding test file in this shard or shard-0/2." }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "templates/mutation-incremental/lib/nodever.mjs:5-16: nodeVersionWarning stops at the first of .nvmrc/.node-version that exists and returns null immediately if that file's contents are a non-numeric alias (e.g. 'lts/*'), even when the other file exists and pins a numeric version. This matches the literal spec wording ('first of .nvmrc and .node-version that exists ... Aliases are skipped') so it is not a contract violation, just a corner case worth a comment; not a credible normal-usage failure since aliasing both files is unusual.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/nodever.mjs", "line": 8 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "mutationtemplate_test.go:100-108: per-file coverage check greps the Node coverage report by filename with a word-boundary regex and counts '100.00' occurrences (>=3) on the matched line to assert 100% lines/branches/functions. This is coupled to Node's --test-coverage table formatting; if Node changes the report layout the assertion could false-negative/positive silently. Advisory only — it is a test-harness fragility, not a broken happy path in the reviewed code, and the suite reportedly runs green today (142/142 at 100% coverage)."
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-task-done-2026-09-23-mutation-incremental-1a-planner-shard-0",
+  "kind": "shard",
+  "shardId": "shard-0",
+  "shardHash": "3f51761dd819b38b",
+  "planHash": "ad83f0d9bbe79762",
+  "verdict": "PASS",
+  "reviewer": "claude-shard-reviewer",
+  "reviewedAt": "2026-09-23T22:38:35Z",
+  "evidence": [
+    {
+      "path": "templates/mutation-incremental/test/helpers.mjs",
+      "line": 7,
+      "note": "process.env.MUTATION_ALLOW_TMP_STATE ??= '1' fix from commit 72169b5"
+    },
+    {
+      "note": "Verified `node --test templates/mutation-incremental/test/*.test.mjs` with MUTATION_ALLOW_TMP_STATE unset in the environment: 142/142 tests pass (previously failed on loadConfig's tmp-dir guard)."
+    },
+    {
+      "path": "templates/mutation-incremental/lib/graph.mjs",
+      "line": 443,
+      "note": "alias specifier that resolves to no file falls through to isInstalledPackage before being counted unresolved, matching plan note re: '@' aliasing '@testing-library/react'"
+    },
+    {
+      "path": "templates/mutation-incremental/test/graph.test.mjs",
+      "line": 696,
+      "note": "test 'an alias key that prefixes a scoped package name...' exercises the fallthrough and asserts the package is not an open importer"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "disposition": "fixed",
+      "note": "Bare `node --test` on this shard's test files failed without MUTATION_ALLOW_TMP_STATE=1, because loadConfig (lib/config.mjs:99-103, now :193-197 in this diff) refuses repos under the OS temp dir where test-created repos live. Fixed in commit 72169b5 by defaulting the env var in test/helpers.mjs for test-created repos; the Go CI wrapper already set it independently. Re-ran the full suite with the variable unset: 142/142 pass. The guard itself (spec S4: state must never live under a purged temp dir) is intended behavior, not a bug.",
+      "evidence": [
+        {
+          "path": "templates/mutation-incremental/test/helpers.mjs",
+          "line": 7,
+          "note": "MUTATION_ALLOW_TMP_STATE ??= '1' added for test-created repos"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

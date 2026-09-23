@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "mrv-shard-2-72d8d12c269280e8-f96c3780256e230b",
+  "kind": "shard",
+  "shardId": "shard-2",
+  "shardHash": "f96c3780256e230b",
+  "planHash": "72d8d12c269280e8",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-shard-reviewer",
+  "reviewedAt": "2026-09-23T22:35:15Z",
+  "evidence": [
+    { "path": "templates/mutation-incremental/lib/plan.mjs", "line": 140 },
+    { "path": "templates/mutation-incremental/lib/views.mjs", "line": 453 },
+    { "path": "templates/mutation-incremental/test/plan.test.mjs", "line": 712 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "addForced (plan.mjs:140-153) maps a mutant's start/end through d.oldToNew[start]/[end] without the containing()-based fallback used elsewhere (plan.mjs:262-263) for lines inside a hunk. It is only reached after hunkIntersects has already returned false for every hunk, so in every path exercised by plan.test.mjs the endpoints are outside changed hunks and the mapping is always defined; not a credible normal-usage failure given the residual/hunk edge cases (block open/close, insertion, deletion, capped diff) are all covered by tests. Flagging as hardening only in case a future hunk-adjacency change lets addForced see an endpoint that touches a deletion.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/plan.mjs", "line": 144 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "resolveViews's failure message at views.mjs:453 appends r.error.message when present, but spawnSync's own timeout kill (VIEWS_TIMEOUT_MS at views.mjs:440) does not reliably populate r.error with an ETIMEDOUT-style message on all platforms -- the unit test at views.test.mjs simulates {status:null, error: new Error('ETIMEDOUT')} directly rather than exercising a real timeout, so a genuine hang would likely surface only 'failed (exit null)' without naming the cause. This is a diagnostics/UX gap, not a functional failure: the command still fails safely as a UsageError (exit 2) either way.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/views.mjs", "line": 453 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}
