@@ -1,7 +1,7 @@
 # Mutation-incremental: Keeper-shaped adoption contract
 
-Status: draft for review. Companion to the locked design
-`docs/superpowers/specs/2026-09-23-mutation-incremental-design.md` (r14, approved). This document
+Status: decisions settled; specified in design §11. Companion to the design
+`docs/superpowers/specs/2026-09-23-mutation-incremental-design.md` (r14 approved; §11 amendment). This document
 states what the template must support for a real, demanding consumer, so its interface can be
 checked before Plan 1 freezes it. Items marked **spec change** become a single r15 amendment to the
 design once this contract is accepted. The Keeper migration steps themselves are a separate,
@@ -52,13 +52,9 @@ everyone else):
   the step summary. This is Keeper's setting: the common hot-file case should not cost 3.5 h.
 - Consequence, documented: with `full` or `full-on-global` the PR job's timeout must fit a full
   sweep (for Keeper ~240–350 min instead of 60).
-- **Open (needs design before r15):** under `full-on-global` a failed PR "requires a local run", but
-  local state never reaches the PR job (PR state lives only in its own cache; `publish-state` is
-  CI-only), so a local run cannot turn the PR green. Candidate resolutions: (a) the PR job re-runs
-  the deferred selection with no budget or time ceiling (bounded by the job timeout; for a hot-file
-  deferral minutes to under an hour, not 3.5 h); (b) a sanctioned way to carry a local run's state
-  to the PR job (e.g. committing `<stateDir>` files to the PR branch, verified by digest). (a) needs
-  no new trust path and is recommended.
+- **Settled (user, 2026-09-23):** option (a): under `full`/`full-on-global` the PR run is
+  unbudgeted, bounded by the job timeout, and fails with a named reason when it does not fit;
+  option (b), importing local state into CI, is rejected. Specified in design §11.2.
 
 **K3. One state, per-unit views (answers A2).** Scopes share one test corpus and one import graph,
 so per-scope state adds no accuracy and costs 16 dry runs per change (what Keeper pays today).
