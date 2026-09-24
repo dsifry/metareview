@@ -24,11 +24,11 @@ async function run(args, cwd) {
 test('parseArgs', () => {
   assert.deepEqual(parseArgs(['plan', '--also-state', 'a', '--config', 'c.json', '--also-state', 'b']), {
     command: 'plan', config: 'c.json', mode: undefined, maxMinutes: undefined, remote: undefined, kind: undefined,
-    alsoState: ['a', 'b'], from: [], pr: false, replace: false,
+    job: undefined, exitCode: undefined, alsoState: ['a', 'b'], from: [], pr: false, replace: false,
   });
-  assert.deepEqual(parseArgs(['run', '--mode', 'incremental', '--pr', '--max-minutes', '60', '--replace', '--from', 'r1', '--from', 'r2', '--remote', 'up', '--kind', 'inc']), {
+  assert.deepEqual(parseArgs(['run', '--mode', 'incremental', '--pr', '--max-minutes', '60', '--replace', '--from', 'r1', '--from', 'r2', '--remote', 'up', '--kind', 'inc', '--job', 'pr', '--exit-code', '1']), {
     command: 'run', config: undefined, mode: 'incremental', maxMinutes: '60', remote: 'up', kind: 'inc',
-    alsoState: [], from: ['r1', 'r2'], pr: true, replace: true,
+    job: 'pr', exitCode: '1', alsoState: [], from: ['r1', 'r2'], pr: true, replace: true,
   });
   assert.throws(() => parseArgs(['plan', '--config']), (e) => e.exitCode === 2);
   assert.throws(() => parseArgs(['plan', '--bogus']), (e) => e.exitCode === 2);

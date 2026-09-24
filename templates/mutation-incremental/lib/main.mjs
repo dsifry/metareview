@@ -7,6 +7,7 @@ import { breakLockCommand } from './lock.mjs';
 import { runCommand } from './run.mjs';
 import { seedCommand } from './seed.mjs';
 import { fetchStateCommand, publishStateCommand } from './remote.mjs';
+import { summaryCommand } from './summary.mjs';
 
 const USAGE = `usage: cli.mjs <command> [--config <path>]
   plan [--also-state <dir>]...
@@ -14,15 +15,16 @@ const USAGE = `usage: cli.mjs <command> [--config <path>]
   seed --from <report>... [--replace]
   fetch-state [--remote <name>]
   publish-state --kind inc|full [--remote <name>]
-  break-lock`;
+  break-lock
+  summary --job pr|pr-full|main|full [--exit-code <n>] [--pr]`;
 
-const VALUE_OPTIONS = { '--config': 'config', '--mode': 'mode', '--max-minutes': 'maxMinutes', '--remote': 'remote', '--kind': 'kind' };
+const VALUE_OPTIONS = { '--config': 'config', '--mode': 'mode', '--max-minutes': 'maxMinutes', '--remote': 'remote', '--kind': 'kind', '--job': 'job', '--exit-code': 'exitCode' };
 const LIST_OPTIONS = { '--also-state': 'alsoState', '--from': 'from' };
 const FLAG_OPTIONS = { '--pr': 'pr', '--replace': 'replace' };
 
 // One option grammar for every command; each command reads the options it uses (spec §5.1).
 export function parseArgs(args) {
-  const out = { command: args[0], config: undefined, mode: undefined, maxMinutes: undefined, remote: undefined, kind: undefined, alsoState: [], from: [], pr: false, replace: false };
+  const out = { command: args[0], config: undefined, mode: undefined, maxMinutes: undefined, remote: undefined, kind: undefined, job: undefined, exitCode: undefined, alsoState: [], from: [], pr: false, replace: false };
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
     if (Object.hasOwn(FLAG_OPTIONS, a)) {
@@ -63,6 +65,7 @@ const COMMANDS = {
   'fetch-state': fetchStateCommand,
   'publish-state': publishStateCommand,
   'break-lock': breakLockCommand,
+  summary: summaryCommand,
 };
 
 export async function main(args, io = { stdout: process.stdout, stderr: process.stderr, cwd: process.cwd() }) {
