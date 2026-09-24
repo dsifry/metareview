@@ -19,19 +19,54 @@ import (
 type strykerReport struct {
 	SchemaVersion string `json:"schemaVersion"`
 	Files         map[string]struct {
+		Source  string `json:"source"`
 		Mutants []struct {
-			MutatorName string `json:"mutatorName"`
-			Status      string `json:"status"`
+			ID          string   `json:"id"`
+			MutatorName string   `json:"mutatorName"`
+			Status      string   `json:"status"`
+			KilledBy    []string `json:"killedBy"`
+			CoveredBy   []string `json:"coveredBy"`
 			Location    struct {
 				Start struct {
 					Line   int `json:"line"`
 					Column int `json:"column"`
 				} `json:"start"`
+				End struct {
+					Line int `json:"line"`
+				} `json:"end"`
 			} `json:"location"`
 			Description  string `json:"description,omitempty"`
 			StatusReason string `json:"statusReason,omitempty"`
 		} `json:"mutants"`
 	} `json:"files"`
+	TestFiles map[string]struct {
+		Tests []struct {
+			ID string `json:"id"`
+		} `json:"tests"`
+	} `json:"testFiles"`
+}
+
+// StrykerDetail is what the freshness gate reads from a mutation-testing-report-schema report
+// (spec §6.1). Ids are meaningful only within one report.
+type StrykerDetail struct {
+	Files   map[string]StrykerFile
+	TestIDs map[string][]string // test file → its test ids
+}
+
+// StrykerFile is one mutated file: the source Stryker read and its mutants.
+type StrykerFile struct {
+	Source  string
+	Mutants []StrykerMutant
+}
+
+// StrykerMutant carries the ids and span freshness needs.
+type StrykerMutant struct {
+	ID        string
+	Status    Status
+	KilledBy  []string
+	CoveredBy []string
+	StartLine int
+	EndLine   int
 }
 
 // ParseStryker normalises a mutation-testing-report-schema report.
@@ -53,6 +88,22 @@ func ParseStryker(data []byte, target string) (Report, error) {
 				Operator: m.MutatorName,
 				Detail:   firstNonEmpty(m.StatusReason, m.Description),
 			})
+		}
+	}
+	r.Detail = &StrykerDetail{Files: map[string]StrykerFile{}, TestIDs: map[string][]string{}}
+	for path, f := range raw.Files {
+		file := StrykerFile{Source: f.Source}
+		for _, m := range f.Mutants {
+			file.Mutants = append(file.Mutants, StrykerMutant{
+				ID: m.ID, Status: strykerStatus(m.Status), KilledBy: m.KilledBy, CoveredBy: m.CoveredBy,
+				StartLine: m.Location.Start.Line, EndLine: m.Location.End.Line,
+			})
+		}
+		r.Detail.Files[path] = file
+	}
+	for path, tf := range raw.TestFiles {
+		for _, test := range tf.Tests {
+			r.Detail.TestIDs[path] = append(r.Detail.TestIDs[path], test.ID)
 		}
 	}
 	return r, nil
