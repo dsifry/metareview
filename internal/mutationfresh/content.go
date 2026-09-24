@@ -163,14 +163,14 @@ func (h *head) Read(paths []string) (map[string]Entry, error) {
 	if err := h.load(); err != nil {
 		return nil, err
 	}
-	todo := map[string]bool{}
+	unread := map[string]bool{}
 	for _, p := range paths {
 		_, cached := h.cache[p]
 		if mode, ok := h.modes[p]; ok && mode != "160000" && !cached {
-			todo[p] = true
+			unread[p] = true
 		}
 	}
-	if err := h.fill(todo); err != nil {
+	if err := h.fill(unread); err != nil {
 		return nil, err
 	}
 	out := map[string]Entry{}
@@ -183,16 +183,16 @@ func (h *head) Read(paths []string) (map[string]Entry, error) {
 }
 
 // fill reads the given paths into the cache through at most headReaders git processes.
-func (h *head) fill(todo map[string]bool) error {
+func (h *head) fill(unread map[string]bool) error {
 	type result struct {
 		path string
 		data []byte
 		err  error
 	}
 	jobs := make(chan string)
-	results := make(chan result, len(todo))
+	results := make(chan result, len(unread))
 	var wg sync.WaitGroup
-	for w := 0; w < min(headReaders, len(todo)); w++ {
+	for w := 0; w < min(headReaders, len(unread)); w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -202,7 +202,7 @@ func (h *head) fill(todo map[string]bool) error {
 			}
 		}()
 	}
-	for p := range todo {
+	for p := range unread {
 		jobs <- p
 	}
 	close(jobs)
