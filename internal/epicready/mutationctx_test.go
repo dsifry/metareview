@@ -12,7 +12,7 @@ import (
 // A skipped report is indistinguishable from a package with no survivors, so the failure mode of
 // getting this wrong is a gate that passes because it looked at less.
 func TestAnUnreadableMutationReportStopsTheReview(t *testing.T) {
-	if _, err := mutationContextFor(t.TempDir(), nil); err != nil {
+	if _, err := mutationContextFor(t.TempDir(), nil, nil); err != nil {
 		t.Errorf("no reports at all is the ordinary case: %v", err)
 	}
 	for name, path := range map[string]string{
@@ -21,7 +21,7 @@ func TestAnUnreadableMutationReportStopsTheReview(t *testing.T) {
 		"empty file":    writeTemp(t, ""),
 		"files is text": writeTemp(t, `{"files":"none"}`),
 	} {
-		ctx, err := mutationContextFor(t.TempDir(), []string{path})
+		ctx, err := mutationContextFor(t.TempDir(), []string{path}, nil)
 		if err == nil {
 			t.Errorf("%s: must be an error, got %d reports", name, len(ctx.Reports))
 			continue
@@ -35,7 +35,7 @@ func TestAnUnreadableMutationReportStopsTheReview(t *testing.T) {
 // A readable report reaches the reviewers, so the review actually acts on it.
 func TestAReadableMutationReportReachesTheReviewers(t *testing.T) {
 	path := writeTemp(t, `{"go_module":"m","files":[{"file_name":"a.go","mutations":[{"type":"T","status":"LIVED","line":3}]}]}`)
-	ctx, err := mutationContextFor(t.TempDir(), []string{path})
+	ctx, err := mutationContextFor(t.TempDir(), []string{path}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

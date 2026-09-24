@@ -31,6 +31,8 @@ type Options struct {
 	// MutationReportPaths are --mutation-report files: a mutation-testing engine's output,
 	// either mutation-testing-report-schema or gremlins JSON. Empty is the ordinary case.
 	MutationReportPaths []string
+	// MutationViews are --mutation-view names (spec §11.3): the evidence is judged per view.
+	MutationViews []string
 }
 
 type Result struct {
@@ -146,7 +148,7 @@ func Create(root, target string, options Options) (Result, error) {
 	if report.Capabilities.Beads || report.Capabilities.Metaswarm {
 		gateEffect = "gate"
 	}
-	mutationContext, err := mutationContextFor(root, options.MutationReportPaths)
+	mutationContext, err := mutationContextFor(root, options.MutationReportPaths, options.MutationViews)
 	if err != nil {
 		return Result{}, err
 	}
@@ -189,10 +191,12 @@ func Create(root, target string, options Options) (Result, error) {
 			previousRunIDs = append(previousRunIDs, link.ID)
 		}
 		reconciled, err := reconcileFindings(root, run, rawFindings, findings.Options{
-			PreviousRunID:   options.PreviousRunID,
-			PreviousRunIDs:  previousRunIDs,
-			ResetRunIDs:     chain.ResetRunIDs,
-			MutationEngines: mutationContext.Engines(),
+			PreviousRunID:    options.PreviousRunID,
+			PreviousRunIDs:   previousRunIDs,
+			ResetRunIDs:      chain.ResetRunIDs,
+			MutationEngines:  mutationContext.Engines(),
+			MutationViews:    mutationContext.Views,
+			MutationViewMaps: mutationContext.ViewMaps(),
 		})
 		if err != nil {
 			return err
@@ -855,6 +859,6 @@ func firstNonEmpty(values ...string) string {
 // mutationContextFor loads the declared mutation reports. An unreadable or unrecognised report is
 // an error that stops the review, never a skipped file: a mutation gate that quietly drops a
 // report is a gate that passes because it looked at less.
-func mutationContextFor(root string, paths []string) (reviewers.MutationContext, error) {
-	return reviewers.LoadMutationContext(root, paths, "epic-ready", false)
+func mutationContextFor(root string, paths, views []string) (reviewers.MutationContext, error) {
+	return reviewers.LoadMutationContext(root, paths, views, "epic-ready", false)
 }

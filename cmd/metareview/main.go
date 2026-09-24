@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -116,9 +117,9 @@ Usage:
   metareview evidence run -- <command> [args...]
   metareview evidence import --github-checks <pr-number> [--repo <owner/repo>]
   metareview review artifact <path> [--previous-run <run-id>] [--scaffold-only]
-  metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--shard-result <path>]... [--cross-shard-result <path>]
-  metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]...
-  metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
+  metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--mutation-view <name>]... [--shard-result <path>]... [--cross-shard-result <path>]
+  metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--mutation-view <name>]...
+  metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--mutation-view <name>]... [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
   METAREVIEW_MUTATION_FRESHNESS=advisory|enforce  freshness of --mutation-report evidence (docs/mutation-harness.md)
   metareview review record-lenses [--scope pr-ready|task-done|epic-ready] [--base <ref>] [--verdict <v>] [--mode subagent-adjudicated|in-session-emulated] [--lenses a,b,c] [--from-run <fsm-run-id>]
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
@@ -319,6 +320,9 @@ func dispatch(args []string) {
 			case "--mutation-report":
 				options.MutationReportPaths = append(options.MutationReportPaths, mustMutationReport(flagValue(args, i, "--mutation-report")))
 				i++
+			case "--mutation-view":
+				options.MutationViews = appendUnique(options.MutationViews, flagValue(args, i, "--mutation-view"))
+				i++
 			case "--shard-result":
 				options.ShardResultPaths = append(options.ShardResultPaths, mustResultFile(flagValue(args, i, "--shard-result")))
 				i++
@@ -330,6 +334,7 @@ func dispatch(args []string) {
 				exit(2)
 			}
 		}
+		mustMutationViews(options.MutationReportPaths, options.MutationViews)
 		result, err := taskdone.Create(workdir, args[2], options)
 		exitOnErr(err)
 		_, _ = fmt.Fprintln(stdout, result.ReviewRel)
@@ -359,11 +364,15 @@ func dispatch(args []string) {
 			case "--mutation-report":
 				options.MutationReportPaths = append(options.MutationReportPaths, mustMutationReport(flagValue(args, i, "--mutation-report")))
 				i++
+			case "--mutation-view":
+				options.MutationViews = appendUnique(options.MutationViews, flagValue(args, i, "--mutation-view"))
+				i++
 			default:
 				_, _ = fmt.Fprintf(stderr, "Unknown option: %s\n", args[i])
 				exit(2)
 			}
 		}
+		mustMutationViews(options.MutationReportPaths, options.MutationViews)
 		result, err := epicready.Create(workdir, args[2], options)
 		exitOnErr(err)
 		_, _ = fmt.Fprintln(stdout, result.ReviewRel)
@@ -564,6 +573,9 @@ func dispatch(args []string) {
 			case "--mutation-report":
 				options.MutationReportPaths = append(options.MutationReportPaths, mustMutationReport(flagValue(args, i, "--mutation-report")))
 				i++
+			case "--mutation-view":
+				options.MutationViews = appendUnique(options.MutationViews, flagValue(args, i, "--mutation-view"))
+				i++
 			case "--github-pr":
 				options.GitHubPR = flagValue(args, i, "--github-pr")
 				i++
@@ -580,6 +592,7 @@ func dispatch(args []string) {
 				exit(2)
 			}
 		}
+		mustMutationViews(options.MutationReportPaths, options.MutationViews)
 		result, err := prready.Create(workdir, options)
 		exitOnErr(err)
 		_, _ = fmt.Fprintln(stdout, result.ReviewRel)
@@ -1186,6 +1199,33 @@ func mustFreshnessMode() {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		exit(2)
 	}
+}
+
+// mustMutationViews rejects --mutation-view names the review could not scope (spec §11.3): a view
+// without a report, an invalid name, or one missing from an attested report's view map.
+func mustMutationViews(reportPaths, views []string) {
+	if len(views) == 0 {
+		return
+	}
+	if len(reportPaths) == 0 {
+		_, _ = fmt.Fprintln(stderr, "--mutation-view needs --mutation-report")
+		exit(2)
+	}
+	reports, err := mutation.LoadAll(reportPaths)
+	if err == nil {
+		err = mutationfresh.CheckViews(reports, views)
+	}
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+		exit(2)
+	}
+}
+
+func appendUnique(list []string, value string) []string {
+	if slices.Contains(list, value) {
+		return list
+	}
+	return append(list, value)
 }
 
 // mustMutationReport rejects a --mutation-report file the review could not act on, at the point

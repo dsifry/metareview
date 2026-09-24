@@ -259,11 +259,11 @@ func freshnessRepo(t *testing.T) (root, report string) {
 }
 
 func TestLoadMutationContext(t *testing.T) {
-	if ctx, err := LoadMutationContext(t.TempDir(), nil, "pr-ready", true); err != nil || ctx.Mode != "" || len(ctx.Freshness) != 0 {
+	if ctx, err := LoadMutationContext(t.TempDir(), nil, nil, "pr-ready", true); err != nil || ctx.Mode != "" || len(ctx.Freshness) != 0 {
 		t.Errorf("no reports: nothing loaded, nothing serialized: %+v %v", ctx, err)
 	}
 	root, report := freshnessRepo(t)
-	ctx, err := LoadMutationContext(root, []string{report}, "task-done", false)
+	ctx, err := LoadMutationContext(root, []string{report}, nil, "task-done", false)
 	if err != nil || ctx.Mode != "advisory" || ctx.Freshness[0].Verified != 1 || !strings.Contains(ctx.FreshnessSection, "1 verified") {
 		t.Fatalf("worktree: %+v %v", ctx, err)
 	}
@@ -275,8 +275,8 @@ func TestLoadMutationContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("METAREVIEW_MUTATION_FRESHNESS", "enforce")
-	wt, _ := LoadMutationContext(root, []string{report}, "pr-ready", false)
-	head, _ := LoadMutationContext(root, []string{report}, "pr-ready", true)
+	wt, _ := LoadMutationContext(root, []string{report}, nil, "pr-ready", false)
+	head, _ := LoadMutationContext(root, []string{report}, nil, "pr-ready", true)
 	if wt.Freshness[0].Stale != 1 || head.Freshness[0].Stale != 0 || wt.Mode != "enforce" {
 		t.Errorf("working tree %+v, HEAD %+v", wt.Freshness[0], head.Freshness[0])
 	}
@@ -288,14 +288,14 @@ func TestLoadMutationContext(t *testing.T) {
 		t.Errorf("the enforced stale finding joins the context's findings: %+v", wt.Findings())
 	}
 	t.Setenv("METAREVIEW_MUTATION_FRESHNESS", "bogus")
-	if _, err := LoadMutationContext(root, []string{report}, "pr-ready", false); err == nil {
+	if _, err := LoadMutationContext(root, []string{report}, nil, "pr-ready", false); err == nil {
 		t.Error("an invalid mode is an error")
 	}
 	t.Setenv("METAREVIEW_MUTATION_FRESHNESS", "")
-	if _, err := LoadMutationContext(root, []string{filepath.Join(root, "missing.json")}, "pr-ready", false); err == nil {
+	if _, err := LoadMutationContext(root, []string{filepath.Join(root, "missing.json")}, nil, "pr-ready", false); err == nil {
 		t.Error("an unreadable report is an error")
 	}
-	if _, err := LoadMutationContext(t.TempDir(), []string{report}, "pr-ready", false); err == nil {
+	if _, err := LoadMutationContext(t.TempDir(), []string{report}, nil, "pr-ready", false); err == nil {
 		t.Error("a content error (not a repository) is an error")
 	}
 }
