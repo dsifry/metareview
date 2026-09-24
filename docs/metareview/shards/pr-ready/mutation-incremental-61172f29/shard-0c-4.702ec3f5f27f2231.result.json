@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0c-4",
+  "kind": "shard",
+  "shardId": "shard-0c-4",
+  "shardHash": "702ec3f5f27f2231",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:54:19Z",
+  "evidence": [
+    {
+      "path": "templates/mutation-incremental/lib/attest.mjs",
+      "line": 61,
+      "note": "commitState renames report then attestation so a crash leaves a detectably stale pair; installAdopted mirrors order; helpers.mjs and make.ts fixtures are unremarkable"
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

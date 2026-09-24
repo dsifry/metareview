@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-13",
+  "kind": "shard",
+  "shardId": "shard-13",
+  "shardHash": "6fd552b4d84bf357",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:51:37Z",
+  "evidence": [
+    { "path": "internal/epicready/mutationctx_test.go", "line": 49 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

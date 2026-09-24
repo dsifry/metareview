@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-b",
+  "kind": "shard",
+  "shardId": "shard-b",
+  "shardHash": "fac8e12ccab401b5",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:42:14Z",
+  "evidence": [
+    { "note": "Reviewed candidates.go skipping freshness fingerprints from learning candidates, stryker.go StrykerDetail/StrykerFile/StrykerMutant additions, headcache_test.go verifying per-path caching and 40 parallel git reads, and taskdone freshness_test.go asserting the advisory-mode log section; all consistent with spec 6.9 and 6.4 through 6.6, no blockers." }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

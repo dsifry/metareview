@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-b93351e9eeedc69d",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-5",
+  "reviewedAt": "2026-09-23T00:00:00Z",
+  "evidence": [
+    { "path": "templates/mutation-incremental/lib/main.mjs", "line": 12 },
+    { "path": "templates/mutation-incremental/github-workflow.yml", "line": 60 },
+    { "path": "mutationworkflow_test.go", "line": 65 },
+    { "path": "templates/mutation-incremental/lib/deferrals.mjs", "line": 82 },
+    { "path": "templates/mutation-incremental/lib/run.mjs", "line": 172 },
+    { "path": "templates/mutation-incremental/lib/summary.mjs", "line": 46 },
+    { "path": "tests/e2e-mutation-incremental.mjs", "line": 155 },
+    { "path": "testdata/mutation-incremental-e2e/src/a.ts", "line": 3 },
+    { "path": "docs/mutation-harness.md", "line": 180 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Checked whether templates/mutation-incremental/github-workflow.yml's commands/flags (run --mode, --pr, --max-minutes, --also-state, fetch-state, publish-state --kind, summary --job/--exit-code/--pr) and its GITHUB_OUTPUT keys exit_code/pending_full/route match lib/main.mjs's USAGE/VALUE_OPTIONS/LIST_OPTIONS/FLAG_OPTIONS and run.mjs's writeOutputs; they match exactly. No divergence found.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/main.mjs", "line": 12 },
+        { "path": "templates/mutation-incremental/github-workflow.yml", "line": 60 },
+        { "path": "templates/mutation-incremental/lib/run.mjs", "line": 172 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Checked mutationworkflow_test.go's named() step lookups (install, catch-up, full run, publish catch-up, summary, verdict) against the workflow template's step `name:` fields; every lookup resolves to a step that exists with that exact name.",
+      "evidence": [
+        { "path": "mutationworkflow_test.go", "line": 65 },
+        { "path": "templates/mutation-incremental/github-workflow.yml", "line": 175 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Checked routeFor (deferrals.mjs) usage in run.mjs (writeOutputs route) and summary.mjs (route for 'sweep'/'fail' markdown lines); both call it with the same (pendingOnPr, cause, pr) signature and the full-on-global-only-unreachable-fails behavior matches the docs/mutation-harness.md pending-on-PRs table (allow/full/full-on-global rows) exactly.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/deferrals.mjs", "line": 82 },
+        { "path": "templates/mutation-incremental/lib/run.mjs", "line": 172 },
+        { "path": "templates/mutation-incremental/lib/summary.mjs", "line": 46 },
+        { "path": "docs/mutation-harness.md", "line": 180 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Spot-checked the e2e script's edit() calls against the fixture: A_LINE3 (\"  if (score > top) return 'over';\") matches src/a.ts line 3, the limits/types/helper-make/e.ts edits match their fixture lines exactly, and the e-flip edit's ambiguous 'return r;' match (present in both inc() and dec()) resolves to the first occurrence (inc, line 3) which is consistent with the test's intent of making the line-2 ArithmeticOperator mutant on n+1 go unobserved/Survived.",
+      "evidence": [
+        { "path": "tests/e2e-mutation-incremental.mjs", "line": 155 },
+        { "path": "testdata/mutation-incremental-e2e/src/a.ts", "line": 3 },
+        { "path": "testdata/mutation-incremental-e2e/src/e.ts", "line": 3 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "false-positive",
+      "note": "Checked docs/mutation-harness.md's CLI synopsis block and workflow job table against lib/main.mjs's USAGE string and the actual github-workflow.yml job/step structure; commands, flags, job names, and control flow descriptions match.",
+      "evidence": [
+        { "path": "docs/mutation-harness.md", "line": 118 },
+        { "path": "templates/mutation-incremental/lib/main.mjs", "line": 12 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

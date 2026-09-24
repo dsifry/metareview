@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1c-4",
+  "kind": "shard",
+  "shardId": "shard-1c-4",
+  "shardHash": "be593ec3be0e0643",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T00:00:00Z",
+  "evidence": [
+    {
+      "path": "testdata/mutation-incremental/real/time-budget/attestation.json",
+      "line": 1
+    },
+    {
+      "note": "Generated Stryker fixture; parsed cleanly with python3 -m json.tool, sanity-check only"
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

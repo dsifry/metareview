@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "name": "example",
+      "text": "{\n  \"schemaVersion\": 1,\n  \"stateDir\": \".mutation\",\n  \"stryker\": { \"command\": [\"npx\", \"--no-install\", \"stryker\"], \"configFile\": \"stryker.config.json\", \"extraArgs\": [] },\n  \"mutate\": [\"src/**/*.ts\", \"!src/**/*.d.ts\"],\n  \"test\": [\"tests/**/*.test.ts\"],\n  \"support\": [\"tests/helpers/**\"],\n  \"global\": [\"package.json\", \"package-lock.json\"],\n  \"ignore\": [\"docs/**\", \"**/*.md\"],\n  \"aliases\": { \"@app/\": \"src/\" },\n  \"runtime\": { \"commands\": [], \"env\": [] },\n  \"budget\": { \"maxForcedShare\": 0.25, \"maxForcedMutants\": null, \"maxMinutesPerInvocation\": 20 },\n  \"residual\": { \"mode\": \"bounded\" }\n}\n",
+      "digest": "sha256:763670c25f71a226d6092c2e3dbd6efaded1c786067614454639e2d4a0c8e15a"
+    },
+    {
+      "name": "example with inline views",
+      "text": "{\n  \"schemaVersion\": 1,\n  \"stateDir\": \".mutation\",\n  \"stryker\": { \"command\": [\"npx\", \"--no-install\", \"stryker\"], \"configFile\": \"stryker.config.json\", \"extraArgs\": [] },\n  \"mutate\": [\"src/**/*.ts\", \"!src/**/*.d.ts\"],\n  \"test\": [\"tests/**/*.test.ts\"],\n  \"support\": [\"tests/helpers/**\"],\n  \"global\": [\"package.json\", \"package-lock.json\"],\n  \"ignore\": [\"docs/**\", \"**/*.md\"],\n  \"aliases\": { \"@app/\": \"src/\" },\n  \"runtime\": { \"commands\": [], \"env\": [] },\n  \"budget\": { \"maxForcedShare\": 0.25, \"maxForcedMutants\": null, \"maxMinutesPerInvocation\": 20 },\n  \"residual\": { \"mode\": \"bounded\" },\n  \"views\": { \"inline\": { \"core\": [\"src/**\"] } }\n}\n",
+      "digest": "sha256:763670c25f71a226d6092c2e3dbd6efaded1c786067614454639e2d4a0c8e15a"
+    },
+    {
+      "name": "example reformatted",
+      "text": "{\"residual\":{\"mode\":\"bounded\"},\"budget\":{\"maxMinutesPerInvocation\":20,\"maxForcedMutants\":null,\"maxForcedShare\":0.25},\"runtime\":{\"env\":[],\"commands\":[]},\"aliases\":{\"@app/\":\"src/\"},\"ignore\":[\"docs/**\",\"**/*.md\"],\"global\":[\"package.json\",\"package-lock.json\"],\"support\":[\"tests/helpers/**\"],\"test\":[\"tests/**/*.test.ts\"],\"mutate\":[\"src/**/*.ts\",\"!src/**/*.d.ts\"],\"stryker\":{\"extraArgs\":[],\"configFile\":\"stryker.config.json\",\"command\":[\"npx\",\"--no-install\",\"stryker\"]},\"stateDir\":\".mutation\",\"schemaVersion\":1}",
+      "digest": "sha256:763670c25f71a226d6092c2e3dbd6efaded1c786067614454639e2d4a0c8e15a"
+    },
+    {
+      "name": "example with another budget",
+      "text": "{\n  \"schemaVersion\": 1,\n  \"stateDir\": \".mutation\",\n  \"stryker\": { \"command\": [\"npx\", \"--no-install\", \"stryker\"], \"configFile\": \"stryker.config.json\", \"extraArgs\": [] },\n  \"mutate\": [\"src/**/*.ts\", \"!src/**/*.d.ts\"],\n  \"test\": [\"tests/**/*.test.ts\"],\n  \"support\": [\"tests/helpers/**\"],\n  \"global\": [\"package.json\", \"package-lock.json\"],\n  \"ignore\": [\"docs/**\", \"**/*.md\"],\n  \"aliases\": { \"@app/\": \"src/\" },\n  \"runtime\": { \"commands\": [], \"env\": [] },\n  \"budget\": { \"maxForcedShare\": 0.5, \"maxForcedMutants\": 1000, \"maxMinutesPerInvocation\": 7.5 },\n  \"residual\": { \"mode\": \"bounded\" }\n}\n",
+      "digest": "sha256:ab39d5c336237b76ff6ba10fb889e660a07fccdf65f0a108fe1a29e88fe07f8a"
+    },
+    {
+      "name": "non-ascii, escapes and html characters",
+      "text": "{\"schemaVersion\":1,\"note\":\"café <b>&</b> \\\"quoted\\\" \\\\ tab\\there\",\"views\":{\"command\":[\"node\",\"views.mjs\"]}}\n",
+      "digest": "sha256:636206de79d8146f9a00dcb74bdae692a150b0e54df21020378d26d773417336"
+    },
+    {
+      "name": "numbers",
+      "text": "{\"a\":1.0,\"b\":1e3,\"c\":0.000001,\"e\":123456789012,\"f\":[0.1,2.50]}\n",
+      "digest": "sha256:a8f3eb4a2976813fcf62036460bbaa82dfc8caf255fc1cd4d572c1ebeb6f6951"
+    }
+  ]
+}

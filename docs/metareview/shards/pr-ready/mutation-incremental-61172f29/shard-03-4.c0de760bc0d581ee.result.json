@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-03-4",
+  "kind": "shard",
+  "shardId": "shard-03-4",
+  "shardHash": "c0de760bc0d581ee",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:52:37Z",
+  "evidence": [
+    { "path": "testdata/mutation-incremental/real/test-b/attestation.json", "note": "generated harness attestation fixture, sanity-checked: valid sha256 digests, consistent views/lists, schemaVersion 1" }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

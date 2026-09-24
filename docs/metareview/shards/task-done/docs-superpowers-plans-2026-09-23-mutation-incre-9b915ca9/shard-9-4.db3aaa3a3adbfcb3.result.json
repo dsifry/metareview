@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-9-4-review-1c-proof",
+  "kind": "shard",
+  "shardId": "shard-9-4",
+  "shardHash": "db3aaa3a3adbfcb3",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "subagent-shard-reviewer",
+  "reviewedAt": "2026-09-24T03:48:21Z",
+  "evidence": [
+    { "path": "tests/e2e-mutation-incremental.mjs", "line": 65 },
+    { "path": "tests/e2e-mutation-incremental.mjs", "line": 379 },
+    { "path": "tests/e2e-mutation-incremental.sh", "line": 3 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "cli()'s GITHUB_OUTPUT parser (line 65) does `l.slice(0, l.indexOf('='))` / `l.slice(l.indexOf('=') + 1)` with no guard for a line missing '='; indexOf returns -1, silently mis-parsing that line into {key: line.slice(0,-1), '': line}. Not a normal-usage failure here since every writer always emits KEY=VALUE, and this is local-only harness-proof code excluded from CI, so it is advisory rather than blocking.",
+      "evidence": [
+        { "path": "tests/e2e-mutation-incremental.mjs", "line": 65 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "equivalence()/freshStatuses() (lines 105-121) invoke the real stryker binary directly via node_modules/.bin/stryker rather than through the harness CLI, so the equivalence check's ground truth bypasses the harness's own Stryker invocation path (env, config rewriting, shim). This is intentional (comparing incremental results against an independent fresh run) but is worth a one-line comment noting why it deliberately does not go through cli(); not a defect.",
+      "evidence": [
+        { "path": "tests/e2e-mutation-incremental.mjs", "line": 106 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

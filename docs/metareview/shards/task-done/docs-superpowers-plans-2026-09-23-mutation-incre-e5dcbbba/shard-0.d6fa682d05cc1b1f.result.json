@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0",
+  "kind": "shard",
+  "shardId": "shard-0",
+  "shardHash": "d6fa682d05cc1b1f",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:42:14Z",
+  "evidence": [
+    { "note": "Reviewed freshness_test.go, main.go mustFreshnessMode wiring, findings.go freshness supersession, attest.go readAttestation logic, mutationctx_test signature updates, and a-survivor attestation fixture; all consistent with spec sections 6 and 11, tests cover the new behavior, no blockers." }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

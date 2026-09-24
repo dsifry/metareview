@@ -61,6 +61,9 @@ func ExtractCandidates(input Input) Result {
 func knowledgeFromFindings(records []findings.Record) []Candidate {
 	var candidates []Candidate
 	for _, record := range records {
+		if findings.IsFreshnessFingerprint(record.Fingerprint) {
+			continue // freshness is evidence bookkeeping, not a lesson (spec §6.9)
+		}
 		if record.KnowledgeCandidate {
 			candidates = append(candidates, Candidate{
 				Kind:           "knowledge-candidate",
@@ -90,6 +93,9 @@ func knowledgeFromFindings(records []findings.Record) []Candidate {
 func repeatedBlockerThemes(records []findings.Record) []Candidate {
 	groups := map[string][]findings.Record{}
 	for _, record := range records {
+		if findings.IsFreshnessFingerprint(record.Fingerprint) {
+			continue // freshness is evidence bookkeeping, not a lesson (spec §6.9)
+		}
 		if !isBlocking(record) {
 			continue
 		}

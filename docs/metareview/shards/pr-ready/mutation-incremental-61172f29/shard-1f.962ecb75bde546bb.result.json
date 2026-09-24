@@ -1,0 +1,33 @@
+{
+  "id": "shard-1f",
+  "kind": "shard",
+  "shardId": "shard-1f",
+  "shardHash": "962ecb75bde546bb",
+  "verdict": "PASS",
+  "evidence": [
+    {
+      "path": "templates/mutation-incremental/lib/deferrals.mjs",
+      "line": 63,
+      "note": "inheritance requires identical deferral in main's state with unchanged named inputs; produced and cold no-usable-state forced counted"
+    },
+    {
+      "path": "templates/mutation-incremental/lib/deferrals.mjs",
+      "line": 76,
+      "note": "global detected via ['*'] paths; every global-cause reason in plan.mjs/seed.mjs is emitted on ['*'], so precedence is sound"
+    },
+    {
+      "path": "templates/mutation-incremental/test/golden.test.mjs",
+      "line": 42,
+      "note": "regeneration refused without a STATE_VERSION bump"
+    },
+    {
+      "note": "node --test attest/golden and deferrals tests pass"
+    }
+  ],
+  "findings": [],
+  "schemaVersion": 1,
+  "planHash": "d05fa31fc60a9cb8",
+  "reviewer": "claude-opus-subagent",
+  "reviewedAt": "2026-09-24T05:53:00Z",
+  "blockingCount": 0
+}

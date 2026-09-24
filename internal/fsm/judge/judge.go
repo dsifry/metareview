@@ -684,7 +684,7 @@ func (j *realJudge) Call(ctx context.Context, r Request) (v Verdict, err error) 
 	start := j.clock.Now()
 	defer func() { v.Duration = j.clock.Now().Sub(start) }()
 	var lastErr error
-	capRaised := false // one output-cap bump per Call: a second cap failure is fatal
+	capRaised := false        // one output-cap bump per Call: a second cap failure is fatal
 	retryImmediately := false // the pending attempt is a deterministic cap-raise: no backoff before it
 	attempt := 0
 	for attempt < MaxAttempts {

@@ -50,6 +50,10 @@ type Report struct {
 	Engine  string   `json:"engine"`
 	Target  string   `json:"target,omitempty"`
 	Mutants []Mutant `json:"mutants"`
+	// SHA256 is the report file's sha256 (lowercase hex); Detail is the Stryker data the freshness
+	// gate reads (spec §6.1). Neither reaches JSON, so fingerprints and digests are unchanged.
+	SHA256 string         `json:"-"`
+	Detail *StrykerDetail `json:"-"`
 }
 
 // Score is the honest summary: every class counted, nothing folded away.

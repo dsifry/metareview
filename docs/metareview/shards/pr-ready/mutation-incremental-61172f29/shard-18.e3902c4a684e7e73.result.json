@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-18",
+  "kind": "shard",
+  "shardId": "shard-18",
+  "shardHash": "e3902c4a684e7e73",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:51:57Z",
+  "evidence": [
+    { "path": "internal/prready/evidence.go", "line": 146 },
+    { "path": "mutationtemplate_test.go", "line": 143 },
+    { "path": "internal/mutation/stryker_test.go", "line": 63 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

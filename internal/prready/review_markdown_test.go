@@ -60,7 +60,7 @@ func TestReviewMarkdownSeparatesNonBlockingFindings(t *testing.T) {
 
 func TestVerdictForNonBlockingFindingsIsPassAdvisory(t *testing.T) {
 	counts := findings.ClassCounts{Advisory: 1, FollowUp: 1}
-	verdict, status, blocking, reason := verdictForCounts(counts, "gate", 1, 3)
+	verdict, status, blocking, reason := verdictForCounts(counts, "gate", 1, 3, false)
 	if verdict != "PASS_ADVISORY" || status != "passed" || blocking || reason != "" {
 		t.Fatalf("non-blocking findings must produce PASS_ADVISORY, got verdict=%s status=%s blocking=%v reason=%q", verdict, status, blocking, reason)
 	}

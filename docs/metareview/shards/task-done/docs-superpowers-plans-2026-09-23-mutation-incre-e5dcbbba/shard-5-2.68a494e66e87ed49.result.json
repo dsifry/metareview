@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-5-2",
+  "kind": "shard",
+  "shardId": "shard-5-2",
+  "shardHash": "68a494e66e87ed49",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:43:05Z",
+  "evidence": [
+    {
+      "note": "testdata/mutation-incremental/real/limits/incremental.json is a re-exported real StrykerJS incremental report fixture; content is well-formed JSON with consistent mutant/test id cross-references, sanity-checked only per task instructions."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

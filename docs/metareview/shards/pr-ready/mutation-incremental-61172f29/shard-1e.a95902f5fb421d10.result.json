@@ -1,0 +1,28 @@
+{
+  "id": "shard-1e",
+  "kind": "shard",
+  "shardId": "shard-1e",
+  "shardHash": "a95902f5fb421d10",
+  "verdict": "PASS",
+  "evidence": [
+    {
+      "path": "CHANGELOG.md",
+      "line": 33,
+      "note": "out-of-mutant blanket rule matches classify.go causeFinder/outOfMutant after HEAD commit 93cd41c"
+    },
+    {
+      "path": "internal/mutationfresh/mode.go",
+      "line": 9,
+      "note": "METAREVIEW_MUTATION_FRESHNESS advisory|enforce, default advisory, as the changelog states"
+    },
+    {
+      "note": "Changelog claims (commands list, state branches, freshness classes, 2x maxAttempts escalation, --mutation-view) checked against cli.mjs, spec 6.4/6.8 and findings.go; accurate"
+    }
+  ],
+  "findings": [],
+  "schemaVersion": 1,
+  "planHash": "d05fa31fc60a9cb8",
+  "reviewer": "claude-opus-subagent",
+  "reviewedAt": "2026-09-24T05:53:00Z",
+  "blockingCount": 0
+}

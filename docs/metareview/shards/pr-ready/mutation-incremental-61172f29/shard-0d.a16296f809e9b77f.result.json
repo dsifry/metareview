@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0d",
+  "kind": "shard",
+  "shardId": "shard-0d",
+  "shardHash": "a16296f809e9b77f",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:54:19Z",
+  "evidence": [
+    {
+      "path": "templates/mutation-incremental/lib/lock.mjs",
+      "line": 38,
+      "note": "acquireLock/breakLockCommand match spec 5.6/5.1; adoption-contract.md options (pendingOnPr, editedFiles, allowBail, views/verify command) all found implemented in config.mjs, plan.mjs, verify.mjs, views.mjs"
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

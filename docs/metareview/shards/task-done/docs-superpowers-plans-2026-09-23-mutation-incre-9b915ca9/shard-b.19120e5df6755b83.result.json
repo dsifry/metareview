@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-b-review-1c-proof",
+  "kind": "shard",
+  "shardId": "shard-b",
+  "shardHash": "19120e5df6755b83",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "subagent-shard-reviewer",
+  "reviewedAt": "2026-09-24T03:48:21Z",
+  "evidence": [
+    { "path": "templates/mutation-incremental/test/deferrals.test.mjs", "line": 77 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-9-2-result-1c-proof",
+  "kind": "shard",
+  "shardId": "shard-9-2",
+  "shardHash": "da9b22fc3d2a483b",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "claude-shard-reviewer",
+  "reviewedAt": "2026-09-24T04:10:00Z",
+  "evidence": [
+    {
+      "path": "testdata/mutation-incremental-e2e/package-lock.json",
+      "line": 1323,
+      "note": "node_modules/@stryker-mutator/core entry in this shard's byte range resolves to registry.npmjs.org/@stryker-mutator/core/-/core-10.0.0.tgz with a sha512- integrity hash, consistent with the declared pinned version."
+    },
+    {
+      "path": "testdata/mutation-incremental-e2e/package-lock.json",
+      "line": 1397,
+      "note": "node_modules/@stryker-mutator/vitest-runner entry resolves to registry.npmjs.org with sha512- integrity, matching the declared pinned version 10.0.0; no absolute paths or secrets found in this part of the lockfile."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

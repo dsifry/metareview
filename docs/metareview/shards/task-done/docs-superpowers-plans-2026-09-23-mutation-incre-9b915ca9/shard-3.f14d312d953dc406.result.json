@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3-review-1c-proof",
+  "kind": "shard",
+  "shardId": "shard-3",
+  "shardHash": "f14d312d953dc406",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "subagent-shard-reviewer",
+  "reviewedAt": "2026-09-24T04:00:00Z",
+  "evidence": [
+    { "path": "testdata/mutation-incremental-e2e/tests/b.test.ts", "line": 1 },
+    { "path": "testdata/mutation-incremental/real/time-budget/incremental.json", "line": 1 },
+    { "path": "testdata/mutation-incremental/real/types-only/incremental.json", "line": 1 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-9",
+  "kind": "shard",
+  "shardId": "shard-9",
+  "shardHash": "87d842e09c0111d2",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:43:10Z",
+  "evidence": [
+    { "note": "Reviewed internal/reviewers/mutation.go LoadMutationContext(root, paths, scope, head) addition and MutationContext.Engines(), cross-checked call sites in internal/taskdone/review.go:794, internal/epicready/review.go:858 and internal/prready/review.go:1615 which all pass consistent (root, paths, scope, head) arguments; internal/epicready/mutationctx_test.go updated in step with the new signature; a-survivor incremental.json is a regenerated real fixture with reordered killedBy/coveredBy arrays and a swapped test id (no behavioral divergence). No blockers." }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

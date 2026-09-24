@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3-2",
+  "kind": "shard",
+  "shardId": "shard-3-2",
+  "shardHash": "9e90245f150b754e",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:42:35Z",
+  "evidence": [
+    {
+      "note": "Regenerated real Stryker fixture data for the types-only case: same kill/status set, killedBy arrays reordered only; no source logic in this shard."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

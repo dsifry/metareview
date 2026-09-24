@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-01",
+  "kind": "shard",
+  "shardId": "shard-01",
+  "shardHash": "4a2526ed9e89ec41",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T00:00:00Z",
+  "evidence": [
+    { "path": "internal/prready/review.go", "line": 1621 },
+    { "path": "internal/prready/review.go", "line": 1321 },
+    { "path": "templates/mutation-incremental/lib/graph.mjs", "line": 26 },
+    { "path": "templates/mutation-incremental/test/graph.test.mjs", "line": 332 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "internal/prready/verdict_evidence_test.go:37 updates the call to verdictForCounts for the new 5th 'staleOnly' parameter but every table case still passes false, so this test file exercises no staleOnly=true path; the actual §6.8 escalation-exemption behavior is instead covered by findings.TestOnlyStaleBlockers and by epicready/prready review-level tests, so this is a coverage gap in one file rather than an untested behavior overall.",
+      "evidence": [
+        { "path": "internal/prready/verdict_evidence_test.go", "line": 37 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

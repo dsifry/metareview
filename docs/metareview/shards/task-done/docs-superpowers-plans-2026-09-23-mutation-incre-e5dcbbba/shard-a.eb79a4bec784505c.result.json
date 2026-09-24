@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-a",
+  "kind": "shard",
+  "shardId": "shard-a",
+  "shardHash": "eb79a4bec784505c",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:43:30Z",
+  "evidence": [
+    { "note": "Reviewed internal/mutationfresh/digest_test.go covering digestOf/configDigest against shared config-digest-vectors.json fixture, and internal/taskdone/review.go changes wiring mutationContextFor(root, paths) at line 794 into reconcileFindings' new MutationEngines field, matching internal/findings/findings.go:34-36,231-232 supersession logic verified in shard-0/shard-e review context; delete-c-test incremental.json is a regenerated real fixture with no logic changes. No blockers." }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

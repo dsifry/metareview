@@ -297,7 +297,10 @@ func TestAttemptSummary(t *testing.T) {
 		{name: "at limit", review: ReviewEvidence{AttemptNumber: 3, MaxAttempts: 3}, want: " attempt 3/3"},
 		{name: "no counters", review: ReviewEvidence{}, want: ""},
 		{name: "zero max", review: ReviewEvidence{AttemptNumber: 5, MaxAttempts: 0}, want: ""},
-		{name: "over limit no note", review: ReviewEvidence{AttemptNumber: 5, MaxAttempts: 3}, want: " attempt 5 (exceeds recorded limit; no override recorded)"},
+		{name: "over limit no note", review: ReviewEvidence{AttemptNumber: 7, MaxAttempts: 3}, want: " attempt 7 (exceeds recorded limit; no override recorded)"},
+		// Spec §6.8: only a chain blocked by stale mutation evidence alone continues past its limit
+		// without an override, and only up to 2 × maxAttempts.
+		{name: "within the stale-evidence allowance", review: ReviewEvidence{AttemptNumber: 5, MaxAttempts: 3}, want: " attempt 5 (over the recorded limit of 3; within the stale mutation evidence allowance of 6)"},
 		{name: "over limit with note", review: ReviewEvidence{AttemptNumber: 5, MaxAttempts: 3, AttemptNote: "override granted by boss"}, want: " attempt 5 (override granted by boss)"},
 	}
 	for _, tc := range cases {

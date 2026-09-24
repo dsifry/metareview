@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-19",
+  "kind": "shard",
+  "shardId": "shard-19",
+  "shardHash": "dbbcf9640168fa54",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:51:57Z",
+  "evidence": [
+    { "path": "templates/mutation-incremental/lib/glob.mjs", "line": 97 },
+    { "path": "templates/mutation-incremental/lib/inputs.mjs", "line": 154 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

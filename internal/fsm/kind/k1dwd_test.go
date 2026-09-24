@@ -12,7 +12,6 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/run"
 )
 
-
 // TestK1DecodeWithDiff pins the production review-lenses decode: the typed contract enforced
 // against the diff the node reviewed. Every bucket (schema/enum/anchor/suppression/kept),
 // the canonical candidate forms, the caps, and the WarningEmitter telemetry.

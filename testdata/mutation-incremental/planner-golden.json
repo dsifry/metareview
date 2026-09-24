@@ -1,0 +1,171 @@
+{
+  "stateVersion": 1,
+  "outputs": {
+    "cold": {
+      "baseline": null,
+      "changes": [],
+      "cold": true,
+      "deferrals": [
+        {
+          "paths": [
+            "*"
+          ],
+          "reason": "no usable state"
+        }
+      ],
+      "forced": [],
+      "forcedCount": 0,
+      "openImporters": [],
+      "pendingFull": true,
+      "scope": [],
+      "unclassified": []
+    },
+    "residual-edit": {
+      "baseline": ".mutation",
+      "changes": [
+        {
+          "category": "mutate",
+          "kind": "changed",
+          "path": "src/a.ts"
+        }
+      ],
+      "cold": false,
+      "deferrals": [],
+      "forced": [
+        "src/a.ts:2-3"
+      ],
+      "forcedCount": 1,
+      "openImporters": [],
+      "pendingFull": false,
+      "scope": [
+        "src/a.ts"
+      ],
+      "unclassified": []
+    },
+    "whole-edit": {
+      "baseline": ".mutation",
+      "changes": [
+        {
+          "category": "mutate",
+          "kind": "changed",
+          "path": "src/a.ts"
+        }
+      ],
+      "cold": false,
+      "deferrals": [],
+      "forced": [
+        "src/a.ts"
+      ],
+      "forcedCount": 0,
+      "openImporters": [],
+      "pendingFull": false,
+      "scope": [],
+      "unclassified": []
+    },
+    "test-edit": {
+      "baseline": ".mutation",
+      "changes": [
+        {
+          "category": "test",
+          "kind": "changed",
+          "path": "tests/a.test.ts"
+        }
+      ],
+      "cold": false,
+      "deferrals": [],
+      "forced": [],
+      "forcedCount": 0,
+      "openImporters": [],
+      "pendingFull": false,
+      "scope": [
+        "src/a.ts"
+      ],
+      "unclassified": []
+    },
+    "support-edit": {
+      "baseline": ".mutation",
+      "changes": [
+        {
+          "category": "support",
+          "kind": "changed",
+          "path": "tests/helpers/h.ts"
+        }
+      ],
+      "cold": false,
+      "deferrals": [],
+      "forced": [
+        "src/a.ts:2-3"
+      ],
+      "forcedCount": 2,
+      "openImporters": [],
+      "pendingFull": false,
+      "scope": [],
+      "unclassified": []
+    },
+    "global-edit": {
+      "baseline": ".mutation",
+      "changes": [
+        {
+          "category": "global",
+          "kind": "changed",
+          "path": "package.json"
+        }
+      ],
+      "cold": false,
+      "deferrals": [
+        {
+          "paths": [
+            "*"
+          ],
+          "reason": "global input changed: package.json"
+        }
+      ],
+      "forced": [],
+      "forcedCount": 0,
+      "openImporters": [],
+      "pendingFull": true,
+      "scope": [],
+      "unclassified": []
+    },
+    "new-module": {
+      "baseline": ".mutation",
+      "changes": [
+        {
+          "category": "mutate",
+          "kind": "new",
+          "path": "src/n.ts"
+        }
+      ],
+      "cold": false,
+      "deferrals": [],
+      "forced": [
+        "src/n.ts"
+      ],
+      "forcedCount": 0,
+      "openImporters": [],
+      "pendingFull": false,
+      "scope": [],
+      "unclassified": []
+    },
+    "deleted-test": {
+      "baseline": ".mutation",
+      "changes": [
+        {
+          "category": "test",
+          "kind": "deleted",
+          "path": "tests/a.test.ts"
+        }
+      ],
+      "cold": false,
+      "deferrals": [],
+      "forced": [],
+      "forcedCount": 0,
+      "openImporters": [],
+      "pendingFull": false,
+      "scope": [
+        "src/a.ts"
+      ],
+      "unclassified": []
+    }
+  }
+}

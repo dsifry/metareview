@@ -34,7 +34,7 @@ func TestVerdictForCounts(t *testing.T) {
 		{"clean gated pass", findings.ClassCounts{}, "gate", 1, 3, "PASS", false, true},
 	}
 	for _, c := range cases {
-		verdict, _, blocking, reason := verdictForCounts(c.counts, c.gateEffect, c.attempt, c.max)
+		verdict, _, blocking, reason := verdictForCounts(c.counts, c.gateEffect, c.attempt, c.max, false)
 		if verdict != c.verdict || blocking != c.blocking || (reason == "") != c.reasonEmpty {
 			t.Errorf("%s: got (%q, blocking=%v, reason=%q), want (%q, blocking=%v, reasonEmpty=%v)",
 				c.name, verdict, blocking, reason, c.verdict, c.blocking, c.reasonEmpty)

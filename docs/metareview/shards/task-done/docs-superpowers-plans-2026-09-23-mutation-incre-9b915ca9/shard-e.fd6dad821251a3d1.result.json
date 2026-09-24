@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-e-review-2026-09-23",
+  "kind": "shard",
+  "shardId": "shard-e",
+  "shardHash": "fd6dad821251a3d1",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "subagent-shard-reviewer",
+  "reviewedAt": "2026-09-23T12:00:00Z",
+  "evidence": [
+    { "path": "mutationworkflow_test.go", "line": 120 },
+    { "path": "mutationworkflow_test.go", "line": 267 },
+    { "path": "templates/mutation-incremental/lib/run.mjs", "line": 61 },
+    { "path": "templates/mutation-incremental/lib/run.mjs", "line": 164 },
+    { "path": "templates/mutation-incremental/test/deferrals.test.mjs", "line": 62 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "templates/mutation-incremental/lib/run.mjs:64 reads process.env.MUTATION_TEST_DISABLE_RESIDUAL unconditionally in the production executeIncremental path (passed as disableResidual to computePlan). It is an undocumented (outside the e2e README) hidden switch that can silently disable residual re-verification for any invocation, not just the e2e harness. Low risk because it requires deliberately setting an unusual env var and is explained/used only by testdata/mutation-incremental-e2e/README.md's negative-control scenario (lines 100-105), but a stray env var of that name in a real CI environment would silently change verdict semantics with no warning.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/run.mjs", "line": 61 },
+        { "path": "testdata/mutation-incremental-e2e/README.md", "line": 103 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "templates/mutation-incremental/lib/run.mjs previously threw a UsageError when --pr was combined with pendingOnPr: 'allow' (deleted line: 'if (options.pr && config.pendingOnPr === \"allow\") throw new UsageError(...)'). The replacement comment above the new `routed` computation (run.mjs line ~164) documents the new behavior (a PR run under 'allow' becomes an ordinary, unrouted run) but this is a user-visible CLI behavior change — a previously-rejected invocation now silently succeeds with different semantics (maxMinutes dropped). Worth confirming docs/mutation-harness.md documents this so operators relying on the old validation error aren't surprised. Not blocking: the change is intentional and spec-referenced (§11.2) and covered indirectly by routeFor's exhaustive test table in deferrals.test.mjs.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/run.mjs", "line": 164 },
+        { "path": "templates/mutation-incremental/test/deferrals.test.mjs", "line": 62 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

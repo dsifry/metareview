@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0-review-1c-proof",
+  "kind": "shard",
+  "shardId": "shard-0",
+  "shardHash": "02b65ebca17c222e",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "subagent-shard-reviewer",
+  "reviewedAt": "2026-09-24T04:00:00Z",
+  "evidence": [
+    { "path": "docs/ARCHITECTURE.md", "line": 236 },
+    { "path": "templates/mutation-incremental/github-workflow.yml", "line": 1 },
+    { "path": "testdata/mutation-incremental-e2e/.gitignore", "line": 1 },
+    { "path": "testdata/mutation-incremental/planner-golden.json", "line": 1 },
+    { "path": "testdata/mutation-incremental/real/a-survivor/attestation.json", "line": 1 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

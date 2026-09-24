@@ -156,6 +156,9 @@ Coverage tells you what *ran*; it does not tell you what's *tested*. metareview 
   `metareview review task-done <target> --base <ref> --mutation-report <file>` (gremlins JSON for Go; the
   Stryker schema for TS; mutmut for Python). A run whose mutation summary is dishonest (e.g. timeouts
   scored as kills) is refused rather than trusted.
+- **Change-driven StrykerJS runs.** For TypeScript/JavaScript projects, the mutation-incremental harness
+  re-runs only what a change can affect and attests exactly what it verified, so a one-line edit does not
+  cost a full mutation run. See [docs/mutation-harness.md](docs/mutation-harness.md).
 - **Coverage gate.** The repo ships a Go-native coverage gate (`make cover`) that holds critical packages
   at 100% of statements and floors the rest, so coverage can only ratchet up.
 

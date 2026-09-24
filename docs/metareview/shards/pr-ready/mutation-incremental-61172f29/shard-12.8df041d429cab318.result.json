@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-12",
+  "kind": "shard",
+  "shardId": "shard-12",
+  "shardHash": "8df041d429cab318",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:51:37Z",
+  "evidence": [
+    { "path": "internal/reviewers/mutation.go", "line": 269 },
+    { "path": "tests/e2e-mutation-incremental.mjs", "line": 1 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "tests/e2e-mutation-incremental.mjs is a large (364-line) local-only proof script explicitly marked \"Not run in CI\" and needs network access; it is exercised manually rather than by an automated gate, so its own coverage is unverified by CI. Acceptable given its stated purpose as a manual real-Stryker proof (spec §7.1, §11.7); no correctness issue found in the reviewed logic (LoadMutationContext, view maps, freshness wiring all look consistent with reviewers/mutation.go).",
+      "evidence": [
+        { "path": "tests/e2e-mutation-incremental.mjs", "line": 320 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

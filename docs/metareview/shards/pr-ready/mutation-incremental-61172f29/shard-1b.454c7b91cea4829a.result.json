@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1b",
+  "kind": "shard",
+  "shardId": "shard-1b",
+  "shardHash": "454c7b91cea4829a",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/prready/review.go",
+      "line": 1321
+    },
+    {
+      "path": "internal/prready/stale_escalation_test.go",
+      "line": 95
+    },
+    {
+      "note": "Verified verdictForCounts boundary math (attempt vs 2x maxAttempts) against all five test cases by hand; all match"
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

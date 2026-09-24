@@ -1,0 +1,61 @@
+{
+  "id": "shard-1e-2",
+  "kind": "shard",
+  "shardId": "shard-1e-2",
+  "shardHash": "a10c779d55892102",
+  "verdict": "PASS_ADVISORY",
+  "evidence": [
+    {
+      "path": "docs/superpowers/specs/2026-09-23-mutation-incremental-design.md",
+      "line": 135,
+      "note": "exit codes 2/3/4/130 match templates/mutation-incremental/lib/errors.mjs"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-23-mutation-incremental-design.md",
+      "line": 497,
+      "note": "6.2 HEAD content (ls-tree modes, cat-file --filters, gitlinks excluded) matches internal/mutationfresh/content.go"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-23-mutation-incremental-design.md",
+      "line": 505,
+      "note": "6.3 changed-paths and cause order match classify.go changedPaths/causeFinder"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "Spec drift (code is the stronger behaviour, docs/mutation-harness.md is current): 5.4 import resolution still says a specifier tries 'the path, then + each extension, then <path>/index', but graph.mjs now resolves '.', '..' and a trailing '/' only to the directory index; files over 1 MiB are now open importers rather than simply unparsed.",
+      "evidence": [
+        {
+          "path": "docs/superpowers/specs/2026-09-23-mutation-incremental-design.md",
+          "line": 222
+        },
+        {
+          "path": "templates/mutation-incremental/lib/graph.mjs",
+          "line": 26
+        }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "Spec drift: 5.4 step 4 defines T_Y as the union of coveredBy, which is empty for Stryker static mutants; plan.mjs adds a touched static mutant's killers and Y's importer tests. Amend the spec to match.",
+      "evidence": [
+        {
+          "path": "docs/superpowers/specs/2026-09-23-mutation-incremental-design.md",
+          "line": 250
+        },
+        {
+          "path": "templates/mutation-incremental/lib/plan.mjs",
+          "line": 136
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 1,
+  "planHash": "d05fa31fc60a9cb8",
+  "reviewer": "claude-opus-subagent",
+  "reviewedAt": "2026-09-24T05:53:00Z",
+  "blockingCount": 0
+}

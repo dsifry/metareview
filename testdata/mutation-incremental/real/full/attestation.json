@@ -1,0 +1,296 @@
+{
+  "completedAt": "2026-09-24T04:29:00.335Z",
+  "config": "mutation-incremental.json",
+  "deferrals": [],
+  "engine": "stryker",
+  "engineVersion": "10.0.0",
+  "exclusions": [
+    ".mutation/**",
+    ".stryker-tmp/**",
+    "reports/mutation/mutation.json",
+    "reports/mutation/mutation.html"
+  ],
+  "files": {
+    "mutation-incremental.json": {
+      "category": "global",
+      "digest": "sha256:4664d911e239c83ac395d41ae1c37d33789dacdc268b3a74a27c44edd6af3278",
+      "tracked": true
+    },
+    "package-lock.json": {
+      "category": "global",
+      "digest": "sha256:9670f7d70b78d951148ce2dcee01fa20fe0260fc359185aebca4438c4bbb6c3d",
+      "tracked": true
+    },
+    "package.json": {
+      "category": "global",
+      "digest": "sha256:9fa6fba8cdc62e9873fecd8e2fa0ef2afbfc9bedb8aaad7f6b74ac65276c9bcb",
+      "tracked": true
+    },
+    "src/a.ts": {
+      "category": "mutate",
+      "digest": "sha256:059e3d3e1c68743f13b2f460de7a6d89da754485a589115b34ca66e513d52404",
+      "tracked": true
+    },
+    "src/b.ts": {
+      "category": "mutate",
+      "digest": "sha256:8bcdedef7b100ea591c9877b5d8ff9a6aae915ff760eea70ac41c02badccbb63",
+      "tracked": true
+    },
+    "src/c.ts": {
+      "category": "mutate",
+      "digest": "sha256:8ebd6da46eefebf2b7a64e398199c2082250484075a0c0c446ab4691745d71ad",
+      "tracked": true
+    },
+    "src/e.ts": {
+      "category": "mutate",
+      "digest": "sha256:94daf13c153509f7bb8db741999f04ca813d714c0f42ad219838b5492fd94eaf",
+      "tracked": true
+    },
+    "src/index.ts": {
+      "category": "mutate",
+      "digest": "sha256:81bb40dad4e6194fbc36ff1694d63284f5dfb415ac771732baf51c9c20c6eda6",
+      "tracked": true
+    },
+    "src/limits.ts": {
+      "category": "mutate",
+      "digest": "sha256:2f6f4547727e25de32b6d20bda5e0f3ee092df52aac611f109081ade26bacce5",
+      "tracked": true
+    },
+    "src/types.ts": {
+      "category": "mutate",
+      "digest": "sha256:3dcda410d23beba9f7fe4eac7fb0416e74f32fd5a0f7658c49e781a7867c7aa9",
+      "tracked": true
+    },
+    "stryker.config.json": {
+      "category": "global",
+      "digest": "sha256:ab94f9e19fd39bc44464bdf29f2141b4344c13a2fa66c78d9c1186a977ab6ba8",
+      "tracked": true
+    },
+    "tests/a.test.ts": {
+      "category": "test",
+      "digest": "sha256:e337157acab9c46016cf85d6aa6dbc30769d2b95586c74ce0b5bdfd8393dee6d",
+      "tracked": true
+    },
+    "tests/b.test.ts": {
+      "category": "test",
+      "digest": "sha256:d9cb62ea8b374f22e263f08d3a3226506a11f63eaabe66282ca5757b946999e9",
+      "tracked": true
+    },
+    "tests/c.test.ts": {
+      "category": "test",
+      "digest": "sha256:531c71dc10987a22d899fe456ac5d8926586ef99f032d81b87a4c894c1f09f84",
+      "tracked": true
+    },
+    "tests/e-dec.test.ts": {
+      "category": "test",
+      "digest": "sha256:31770be8173a06f416ad41e9610652701aa003cf8fa6bd14fac31abc3417b4f5",
+      "tracked": true
+    },
+    "tests/e-inc.test.ts": {
+      "category": "test",
+      "digest": "sha256:4f9ff5845c59c1149ec13e010af8dfa3f884971b6e94d6db402faf13bc89e0ee",
+      "tracked": true
+    },
+    "tests/helpers/fmt.ts": {
+      "category": "support",
+      "digest": "sha256:130de3ddf952eb4f32354806f812712bf7a23ae875acfdebd96d5ce9b563d1f7",
+      "tracked": true
+    },
+    "tests/helpers/make.ts": {
+      "category": "support",
+      "digest": "sha256:1630184963b17f95127cc56f3f54f02d863b73cf752ee20bcdb8c50912325763",
+      "tracked": true
+    },
+    "tests/index.test.ts": {
+      "category": "test",
+      "digest": "sha256:6cf7dcdfaed09cc5aa13a89ae17eef9ba7e7644cae97a9b250d3f116e61d4b77",
+      "tracked": true
+    },
+    "tools/mutation-incremental/cli.mjs": {
+      "category": "global",
+      "digest": "sha256:429a80baa22fe2046d13fc3329be5b74388cbd71889a51a11032ee3e7adad454",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/attest.mjs": {
+      "category": "global",
+      "digest": "sha256:c49b55e27033c5b909071c33de6fc689ee33d38dca80a8455bf2acbadf5d4457",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/config.mjs": {
+      "category": "global",
+      "digest": "sha256:b9b6a64abf84849b9f31ab61cd2e48edf5d957c7fb868d9ade92d0ebb45d9280",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/deferrals.mjs": {
+      "category": "global",
+      "digest": "sha256:78a1e0af2df56bf0134299020dc21da8b3c7cd2e2a9858192df3660e06299d2e",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/diff.mjs": {
+      "category": "global",
+      "digest": "sha256:44b0354393a39b7f20f2ff58bc86de11423bebd676b597b4fea9e129c86787f9",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/engine.mjs": {
+      "category": "global",
+      "digest": "sha256:68955f3d20e29284a2a7e002f796764bbde1d64b529611daa319385faad5e7d3",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/errors.mjs": {
+      "category": "global",
+      "digest": "sha256:64dedd04882a3fd26ec03fb3ccbcf2d08516a7031ef49b8bef1498b4b6e77687",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/glob.mjs": {
+      "category": "global",
+      "digest": "sha256:661c5c71d12609b9dbf882db32f8b5fd7ecc5df1bffdb3f2c8596556526c634f",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/graph.mjs": {
+      "category": "global",
+      "digest": "sha256:f73138b5aa2408df8bdaf72e0913b75430dbc7f440bcd849acea25b2b5ebd000",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/inputs.mjs": {
+      "category": "global",
+      "digest": "sha256:c43185fd8ab75afd1a03fb6d660a9303c2bdbbf756fd232610ba1ff2a962b5a8",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/json.mjs": {
+      "category": "global",
+      "digest": "sha256:63abe52e40623740149d67ff4a70b152b5277b213ae66379543aaebc57e6d1f7",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/lock.mjs": {
+      "category": "global",
+      "digest": "sha256:4cf7013beddb1426cfce751c76ca3bc3a134589c7e07852d65c6e97d0ff62347",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/main.mjs": {
+      "category": "global",
+      "digest": "sha256:ec467e7e54aede0d1d741ea1560f9e5a96aee8e1697f4371a26633e6e7b3089b",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/nodever.mjs": {
+      "category": "global",
+      "digest": "sha256:ee3d00930050a5d1e5f8fdb71776c8f345e0e41a18cfe53b8ed19865c2532572",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/plan.mjs": {
+      "category": "global",
+      "digest": "sha256:cbb2e816010efcfbea3f9f3e4bc7562de5fab79d60e9946e03a47377fd6bc8f6",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/proc.mjs": {
+      "category": "global",
+      "digest": "sha256:c18c6c36bb42b2cd70a953c98cf604c9a745668092e044586979e115386af71d",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/remote.mjs": {
+      "category": "global",
+      "digest": "sha256:9752e79feb7e8acdcebaca6bca478cad3a1b4c4df78c00e611b57d9cc0ce3d5e",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/report.mjs": {
+      "category": "global",
+      "digest": "sha256:aa88e693369a60ee3ca7e2eb212e230b563fc6a7dd0630513c4bf53703ce442c",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/run.mjs": {
+      "category": "global",
+      "digest": "sha256:d70d18d124cc5df2c229b69983bb2d227af085a110a8bb7db24e079c4f79b00f",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/seed.mjs": {
+      "category": "global",
+      "digest": "sha256:d09aa20325e3e484a9c412e5a499ca982c4f2dd67ad270ea9415cfac15507974",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/snapshot.mjs": {
+      "category": "global",
+      "digest": "sha256:cb4e66c2fec456e7e1e5e9194f8a0c68ac68dfaf8aba3ab9496be48dbbac1e77",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/state.mjs": {
+      "category": "global",
+      "digest": "sha256:8c44762a4258ca6943ea4df545932b9d93f12ba85ddb1f1bf88ed71b08221d73",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/summary.mjs": {
+      "category": "global",
+      "digest": "sha256:55bedc967c5fb3ae75d2561a4c0908359367a8325a64ed84d5a583db56596d37",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/verify.mjs": {
+      "category": "global",
+      "digest": "sha256:175882e9cea364c1c11df61a7b621d41a3c52666a1bb90a3e2949cbd9f72cb80",
+      "tracked": true
+    },
+    "tools/mutation-incremental/lib/views.mjs": {
+      "category": "global",
+      "digest": "sha256:7dfb6e5a4f01442fbaefa01ff509ee897475fff7b3033194d56d59be94deff60",
+      "tracked": true
+    },
+    "vitest.config.ts": {
+      "category": "global",
+      "digest": "sha256:4842c22aeb5f44a8b677d5b9c94b5e8078b1897f14d8bceb84af5cb3bab4f0c9",
+      "tracked": true
+    }
+  },
+  "lastFullAt": "2026-09-24T04:29:00.335Z",
+  "lists": {
+    "global": [
+      "package.json",
+      "package-lock.json",
+      "stryker.config.json",
+      "vitest.config.ts",
+      "mutation-incremental.json",
+      "tools/mutation-incremental/**"
+    ],
+    "ignore": [
+      "README.md",
+      ".gitignore",
+      "reports/**"
+    ],
+    "mutate": [
+      "src/**/*.ts"
+    ],
+    "support": [
+      "tests/helpers/**"
+    ],
+    "test": [
+      "tests/**/*.test.ts"
+    ]
+  },
+  "mode": "full",
+  "report": "incremental.json",
+  "reportSha256": "ca4e2924211ab1ef48487f6dcf2c94b6887a33782f91500b097d894cc8cad21f",
+  "runtime": {},
+  "schemaVersion": 1,
+  "score": 100,
+  "stateVersion": 1,
+  "thresholdBreak": false,
+  "tool": "metareview-mutation-incremental",
+  "toolVersion": "0.13.0",
+  "viewSummaries": {
+    "core": {
+      "Killed": 24,
+      "pendingCounted": 0,
+      "pendingInherited": 0
+    },
+    "edge": {
+      "Killed": 7,
+      "pendingCounted": 0,
+      "pendingInherited": 0
+    }
+  },
+  "views": {
+    "core": [
+      "src/**/*.ts"
+    ],
+    "edge": [
+      "src/c.ts",
+      "src/e.ts"
+    ]
+  }
+}

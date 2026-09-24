@@ -233,6 +233,13 @@ list below is illustrative, omitting e.g. `judge`, `gate`, `converge`, `export`)
   30`; `--workers 8 --timeout-coefficient 120` is a faster config with a few flaky timeouts. Timeouts are
   recompile contention, not real survivors. 100% line coverage still leaves killable mutants — construct the
   distinguishing test before calling a survivor equivalent.
+- **Mutation evidence freshness (StrykerJS):** the change-driven harness is a zero-dependency Node template in
+  `templates/mutation-incremental/` that projects copy to `tools/mutation-incremental/`. The repository owns
+  what runs; metareview owns the attestation contract (`<stateDir>/attestation.json`, spec §5.5) and the
+  glob dialect (vectors in `testdata/mutation-incremental/`). CI enforces the project's own bar (threshold
+  and/or verifier); the gate judges only freshness. The template's Node suite runs under `go test` at 100%
+  coverage (`mutationtemplate_test.go`), and its workflow has a static test (`mutationworkflow_test.go`). The
+  real-Stryker proof is local-only (`tests/e2e-mutation-incremental.mjs`). Guide: `docs/mutation-harness.md`.
 - **Review-first, then bots:** run metareview's adversarial review BEFORE opening the PR, so CodeRabbit/Cursor
   measure only the *residual* we missed — the recall yardstick. Reviewing after the PR opens confounds it.
 

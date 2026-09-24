@@ -87,6 +87,22 @@ metareview is built around review patterns that work well when humans and coding
 - **Review artifact accountability:** write durable Markdown context and review logs so future humans and agents can inspect what was reviewed, what blocked, and why it passed.
 - **Post-merge reflection:** after a PR lands, extract accepted learnings, discarded candidates, and reviewer calibration so the next review starts smarter.
 
+## Highlights in 0.13.0
+
+0.13.0 is the mutation-incremental release (guide: [docs/mutation-harness.md](docs/mutation-harness.md)):
+
+- **Change-driven StrykerJS runs.** A zero-dependency harness template (`templates/mutation-incremental/`)
+  plans from content digests, never dates. It re-runs only what a change can affect, defers what it
+  cannot re-verify within budget to a visible full run, and records what it verified in an attested
+  state. A GitHub workflow template keeps that state on `mutation-state/{inc,full}` branches. The
+  release was proven locally against real StrykerJS 10 and Vitest 4, including a check that every
+  incremental kill equals a fresh one.
+- **Mutation evidence freshness gate.** task-done, pr-ready and epic-ready re-derive whether each kill
+  in a `--mutation-report` still describes the code under review, and classify it as verified, stale
+  (with its cause), pending, unbound or unattested. They run in `advisory` or `enforce` mode, and
+  `--mutation-view` gives each view its own findings. Fresh evidence supersedes stale findings
+  instead of "fixing" them.
+
 ## Highlights in 0.12.0
 
 0.12.0 is the typed-contract release (evidence in [dsifry/metareview#159](https://github.com/dsifry/metareview/issues/159)):

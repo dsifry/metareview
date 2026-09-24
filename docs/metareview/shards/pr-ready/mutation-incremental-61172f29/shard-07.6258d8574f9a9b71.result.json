@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-07",
+  "kind": "shard",
+  "shardId": "shard-07",
+  "shardHash": "6258d8574f9a9b71",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:52:37Z",
+  "evidence": [
+    { "path": "internal/mutationfresh/diff.go", "line": 33 },
+    { "path": "internal/mutationfresh/diff.go", "line": 127 },
+    { "path": "templates/mutation-incremental/lib/diff.mjs", "line": 342 },
+    { "note": "Verified the Go editOps/backtrack Myers diff in diff.go is a faithful line-for-line port of lib/diff.mjs's editOps/backtrack, including the same tie rule and trace/v array sizing (2*(n+m)+3), and that both share testdata/mutation-incremental/diff-vectors.json per the file comments." }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

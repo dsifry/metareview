@@ -19,7 +19,7 @@ func TestEpicReadyReviewMarkdownEmitsRoundTrippableCoveredPaths(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	md := reviewMarkdown("mrv-epic-cov", "epic-1", "ctx.md", "", "gate", "PASS", []string{"internal/foo.go", "a,b.go"}, nil, reviewMetadata{})
+	md := reviewMarkdown("mrv-epic-cov", "epic-1", "ctx.md", "", "gate", "PASS", []string{"internal/foo.go", "a,b.go"}, nil, "", reviewMetadata{})
 	if err := os.WriteFile(filepath.Join(dir, "mrv-epic-cov.md"), []byte(md), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -39,11 +39,11 @@ func TestReviewMarkdownSeparatesNonBlockingFindings(t *testing.T) {
 		{Reviewer: "acceptance-reviewer", Classification: "follow-up", Severity: "low", Title: "Track cleanup", Finding: "Cleanup belongs in a later target."},
 		{Reviewer: "architecture-reviewer", Classification: "warning", Severity: "high", Title: "Unknown class", Finding: "Unknown classification was downgraded to warning."},
 	}
-	md := reviewMarkdown("mrv-epic", "epic-1", "ctx.md", "", "gate", "PASS_ADVISORY", []string{"internal/foo.go"}, records, reviewMetadata{AdvisoryFindingCount: 1, FollowUpFindingCount: 1, WarningFindingCount: 1})
+	md := reviewMarkdown("mrv-epic", "epic-1", "ctx.md", "", "gate", "PASS_ADVISORY", []string{"internal/foo.go"}, records, "## Mutation Evidence Freshness\n\n- Mode: `advisory`", reviewMetadata{AdvisoryFindingCount: 1, FollowUpFindingCount: 1, WarningFindingCount: 1})
 	if strings.Contains(md, "| epic-integration-reviewer | NEEDS_REVISION | 1 |") || strings.Contains(md, "| acceptance-reviewer | NEEDS_REVISION | 1 |") {
 		t.Fatalf("non-blocking findings must not render as blocking reviewer failures:\n%s", md)
 	}
-	for _, required := range []string{"| epic-integration-reviewer | PASS_ADVISORY | 0 | Prefer helper |", "## Advisory Findings", "## Follow-up Findings", "## Warnings", "Unknown classification was downgraded to warning."} {
+	for _, required := range []string{"PASS_ADVISORY\n\n## Mutation Evidence Freshness\n\n- Mode: `advisory`\n\n## Reviewer Results", "| epic-integration-reviewer | PASS_ADVISORY | 0 | Prefer helper |", "## Advisory Findings", "## Follow-up Findings", "## Warnings", "Unknown classification was downgraded to warning."} {
 		if !strings.Contains(md, required) {
 			t.Fatalf("review markdown missing %q:\n%s", required, md)
 		}
@@ -52,7 +52,7 @@ func TestReviewMarkdownSeparatesNonBlockingFindings(t *testing.T) {
 
 func TestVerdictForNonBlockingFindingsIsPassAdvisory(t *testing.T) {
 	counts := findings.ClassCounts{Advisory: 1, FollowUp: 1}
-	verdict, status, blocking, reason := verdictForCounts(counts, "gate", 1, 3)
+	verdict, status, blocking, reason := verdictForCounts(counts, "gate", 1, 3, false)
 	if verdict != "PASS_ADVISORY" || status != "passed" || blocking || reason != "" {
 		t.Fatalf("non-blocking findings must produce PASS_ADVISORY, got verdict=%s status=%s blocking=%v reason=%q", verdict, status, blocking, reason)
 	}

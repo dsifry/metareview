@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-4-result-2026-09-24T03:48:31Z",
+  "kind": "shard",
+  "shardId": "shard-4",
+  "shardHash": "a9868b3a10c3ed42",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "subagent-shard-reviewer",
+  "reviewedAt": "2026-09-24T03:48:31Z",
+  "evidence": [
+    { "path": "USAGE.md", "line": 159 },
+    { "path": "templates/mutation-incremental/test/run.test.mjs", "line": 279 },
+    { "path": "templates/mutation-incremental/test/run.test.mjs", "line": 294 },
+    { "path": "testdata/mutation-incremental-e2e/tests/e-dec.test.ts", "line": 4 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

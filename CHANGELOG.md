@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.13.0 - 2026-09-24
+
+### Added
+
+- **mutation-incremental harness template (`templates/mutation-incremental/`).** Change-driven
+  StrykerJS runs: the harness plans from content digests (never dates), re-runs only what a change
+  can affect, and records what it verified in an attested state (`attestation.json` +
+  `incremental.json`). Work it cannot re-verify within its budget or time limit is deferred to a
+  full run, visibly. Commands: `plan`, `run`, `seed`, `fetch-state`, `publish-state`, `break-lock`
+  and `summary`. A GitHub workflow template keeps state on `mutation-state/{inc,full}` branches
+  (cache as a fast path), with PR routing (`pendingOnPr`), a per-view project verifier, and read-time
+  views. Proven locally against real StrykerJS 10 and Vitest 4, including an equivalence check that
+  every incremental kill is a fresh kill. The gate reads its attestation (next entry). The ≤ 2 min
+  p50 bar for a one-line edit is pending the external trial. Guide: `docs/mutation-harness.md`.
+- **Mutation evidence freshness gate.** `review task-done`, `pr-ready` and `epic-ready` now judge
+  whether the kills in each `--mutation-report` still describe the code under review. They read the
+  harness's `attestation.json` beside the report and classify every kill from content digests:
+  verified, stale (with its recorded cause), pending (covered by a deferral), unbound or unattested.
+  - pr-ready reads HEAD, and the other gates read the working tree.
+  - `METAREVIEW_MUTATION_FRESHNESS=advisory|enforce` (default `advisory`; task-done is always
+    advisory). Under `enforce`, stale and unattested findings block; pending never does.
+  - Each review log gains a "Mutation Evidence Freshness" section with a re-run list.
+  - Fresh evidence supersedes earlier freshness findings instead of marking them fixed, and
+    post-merge learning ignores them.
+  - A chain blocked only by stale evidence waits for a refresh for up to 2 × `maxAttempts` before
+    escalating.
+  - Runs without reports review exactly as before, and their pr-ready input digest is unchanged.
+  - `--mutation-view <name>` (repeatable) judges the evidence per view of the harness's view map.
+    Each view gets its own counts, findings and fingerprints, and a table row in the section.
+    Findings of other views are left alone, and a renamed view's findings are superseded.
+  - An edit to a mutated file that touches no mutant stales every kill until the harness re-runs.
+    Pending kills are split into counted and inherited.
+
 ## 0.12.0 - 2026-09-10
 
 ### Added

@@ -1,0 +1,11 @@
+{
+  "name": "mutation-incremental-e2e-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "vitest run" },
+  "devDependencies": {
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
+    "vitest": "4.1.11"
+  }
+}

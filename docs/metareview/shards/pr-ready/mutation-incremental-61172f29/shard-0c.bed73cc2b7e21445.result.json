@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0c",
+  "kind": "shard",
+  "shardId": "shard-0c",
+  "shardHash": "bed73cc2b7e21445",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:52:01Z",
+  "evidence": [
+    { "path": "docs/mutation-harness.md", "line": 192, "note": "exit code precedence table cross-checked against templates/mutation-incremental/lib/run.mjs and deferrals.mjs" },
+    { "path": "templates/mutation-incremental/lib/deferrals.mjs", "line": 73 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

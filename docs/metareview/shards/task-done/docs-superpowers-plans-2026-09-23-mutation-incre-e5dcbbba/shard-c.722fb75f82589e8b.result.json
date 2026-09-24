@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-c",
+  "kind": "shard",
+  "shardId": "shard-c",
+  "shardHash": "722fb75f82589e8b",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:42:14Z",
+  "evidence": [
+    { "note": "Reviewed stryker_test.go addition verifying ParseStryker populates Detail (ids, spans, killedBy/coveredBy) while keeping the extra detail out of the JSON-serialized Report; sound round trip check, no blockers." }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

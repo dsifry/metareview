@@ -1,6 +1,9 @@
 package mutation
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -190,5 +193,30 @@ func TestParseEdgesAndFindingCaps(t *testing.T) {
 	}
 	if !strings.Contains(got[0].Finding, "and 18 more") {
 		t.Errorf("the example list must be capped and say how many it dropped: %q", got[0].Finding)
+	}
+}
+
+func TestParseKeepsFreshnessDetailOutOfJSON(t *testing.T) {
+	data := []byte(`{"schemaVersion":"1","files":{"src/a.ts":{"source":"x","mutants":[
+		{"id":"1","mutatorName":"M","status":"Killed","killedBy":["t1"],"coveredBy":["t1","t2"],"location":{"start":{"line":2,"column":3},"end":{"line":4,"column":1}}}]}},
+		"testFiles":{"tests/a.test.ts":{"tests":[{"id":"t1"},{"id":"t2"}]}}}`)
+	r, err := Parse(data, "r.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	if r.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Errorf("SHA256 %q", r.SHA256)
+	}
+	m := r.Detail.Files["src/a.ts"].Mutants[0]
+	if m.ID != "1" || m.Status != Killed || m.StartLine != 2 || m.EndLine != 4 || len(m.KilledBy) != 1 || len(m.CoveredBy) != 2 {
+		t.Errorf("mutant detail %+v", m)
+	}
+	if r.Detail.Files["src/a.ts"].Source != "x" || len(r.Detail.TestIDs["tests/a.test.ts"]) != 2 {
+		t.Errorf("detail %+v", r.Detail)
+	}
+	encoded, _ := json.Marshal(r)
+	if strings.Contains(string(encoded), "coveredBy") || strings.Contains(string(encoded), r.SHA256) {
+		t.Errorf("freshness detail must not reach JSON (fingerprints and digests are unchanged): %s", encoded)
 	}
 }

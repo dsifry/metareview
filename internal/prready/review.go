@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -21,7 +22,6 @@ import (
 	"github.com/dsifry/metareview/internal/githubcontext"
 	"github.com/dsifry/metareview/internal/knowledge"
 	"github.com/dsifry/metareview/internal/markdown"
-	"github.com/dsifry/metareview/internal/mutation"
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewers"
 	"github.com/dsifry/metareview/internal/reviewlog"
@@ -48,6 +48,8 @@ type Options struct {
 	// MutationReportPaths are --mutation-report files: a mutation-testing engine's output,
 	// either mutation-testing-report-schema or gremlins JSON. Empty is the ordinary case.
 	MutationReportPaths []string
+	// MutationViews are --mutation-view names (spec §11.3): the evidence is judged per view.
+	MutationViews []string
 	// ShardWriter is the pack-writing seam; nil uses the real filesystem.
 	ShardWriter shardpack.Writer
 }
@@ -265,6 +267,7 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	blockers = slices.DeleteFunc(blockers, func(r findings.Record) bool { return !findings.InViewScope(r, options.MutationViews) })
 	// The full ledger (every status) lets the evidence renderer reconcile a
 	// historical review against how its findings were actually cleared (#40). Read
 	// before this run reconciles: the overrides/fixes that clear a historical
@@ -331,7 +334,7 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	mutationContext, err := mutationContextFor(options.MutationReportPaths)
+	mutationContext, err := mutationContextFor(root, options.MutationReportPaths, options.MutationViews, !options.IncludeWorkingTree)
 	if err != nil {
 		return Result{}, err
 	}
@@ -471,18 +474,21 @@ func Create(root string, options Options) (Result, error) {
 				ReusedFromReviewPath: reused.Path,
 				HistoricalBlockers:   projection.HistoricalBlockers(),
 			}
-			return writeFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, reused.Verdict, reviewGit.ChangedFiles, nil, prEvidence, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
+			return writeFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, reused.Verdict, reviewGit.ChangedFiles, nil, prEvidence, joinSections(reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), mutationContext.FreshnessSection), meta)), 0o644)
 		}
 		reconciled, err := reconcileFindings(root, run, rawFindings, findings.Options{
-			PreviousRunID:  options.PreviousRunID,
-			PreviousRunIDs: previousRunIDs,
-			ResetRunIDs:    chain.ResetRunIDs,
+			PreviousRunID:    options.PreviousRunID,
+			PreviousRunIDs:   previousRunIDs,
+			ResetRunIDs:      chain.ResetRunIDs,
+			MutationEngines:  mutationContext.Engines(),
+			MutationViews:    mutationContext.Views,
+			MutationViewMaps: mutationContext.ViewMaps(),
 		})
 		if err != nil {
 			return err
 		}
 		counts := findings.CountByClass(reconciled.OpenFindings)
-		verdict, status, blocking, escalationReason := verdictForCounts(counts, gateEffect, chain.AttemptNumber, chain.MaxAttempts)
+		verdict, status, blocking, escalationReason := verdictForCounts(counts, gateEffect, chain.AttemptNumber, chain.MaxAttempts, findings.OnlyStaleBlockers(reconciled.OpenFindings))
 		result.Verdict = verdict
 		result.Blocking = blocking
 		record := runRecord{
@@ -529,7 +535,7 @@ func Create(root string, options Options) (Result, error) {
 			ReviewInputDigest:    reviewInputDigest,
 			HistoricalBlockers:   projection.HistoricalBlockers(),
 		}
-		return writeFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, prEvidence, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
+		return writeFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, prEvidence, joinSections(reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), mutationContext.FreshnessSection), meta)), 0o644)
 	}()
 	if err != nil {
 		restoreSnapshots(snapshots)
@@ -1312,11 +1318,19 @@ type reviewMetadata struct {
 	HistoricalBlockers   []findings.Record
 }
 
-func verdictForCounts(counts findings.ClassCounts, gateEffect string, attemptNumber, maxAttempts int) (string, string, bool, string) {
+func verdictForCounts(counts findings.ClassCounts, gateEffect string, attemptNumber, maxAttempts int, staleOnly bool) (string, string, bool, string) {
 	blocking := counts.Blocking > 0
 	nonBlocking := counts.Advisory > 0 || counts.FollowUp > 0 || counts.Warnings > 0
 	if blocking && attemptNumber >= maxAttempts {
+		// Spec §6.8: a chain blocked only by stale mutation evidence waits for a refresh, up to
+		// 2 × maxAttempts, before it escalates.
+		if staleOnly && attemptNumber < 2*maxAttempts {
+			return "NEEDS_REVISION", "needs-revision", true, ""
+		}
 		reason := fmt.Sprintf("blocking findings remain after attempt %d of %d", attemptNumber, maxAttempts)
+		if staleOnly {
+			reason = fmt.Sprintf("stale mutation evidence not refreshed after %d attempts", attemptNumber)
+		}
 		return "ESCALATED", "escalated", true, reason
 	}
 	if blocking {
@@ -1604,13 +1618,17 @@ func shardTargetID(git gitcontext.Context) string {
 // mutationContextFor loads the declared mutation reports. An unreadable or unrecognised report is
 // an error that stops the review, never a skipped file: a mutation gate that quietly drops a
 // report is a gate that passes because it looked at less.
-func mutationContextFor(paths []string) (reviewers.MutationContext, error) {
-	if len(paths) == 0 {
-		return reviewers.MutationContext{}, nil
+func mutationContextFor(root string, paths, views []string, head bool) (reviewers.MutationContext, error) {
+	return reviewers.LoadMutationContext(root, paths, views, "pr-ready", head)
+}
+
+// joinSections joins the non-empty sections that follow the verdict line.
+func joinSections(sections ...string) string {
+	var kept []string
+	for _, s := range sections {
+		if s != "" {
+			kept = append(kept, s)
+		}
 	}
-	reports, err := mutation.LoadAll(paths)
-	if err != nil {
-		return reviewers.MutationContext{}, err
-	}
-	return reviewers.MutationContext{Reports: reports}, nil
+	return strings.Join(kept, "\n\n")
 }

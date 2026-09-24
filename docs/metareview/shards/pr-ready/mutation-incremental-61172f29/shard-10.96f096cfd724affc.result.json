@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-10",
+  "kind": "shard",
+  "shardId": "shard-10",
+  "shardHash": "96f096cfd724affc",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:54:19Z",
+  "evidence": [
+    {
+      "path": "templates/mutation-incremental/lib/state.mjs",
+      "line": 107,
+      "note": "canonicalPendingFull short-circuits on !state.usable before touching state.attestation, avoiding a null deref; go test ./internal/mutationfresh/... and node --test plan.test.mjs (37/37) pass"
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

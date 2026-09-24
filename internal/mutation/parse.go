@@ -1,6 +1,8 @@
 package mutation
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,13 +34,13 @@ func Parse(data []byte, target string) (Report, error) {
 			if err != nil {
 				return r, err
 			}
-			return checkMeasured(r, target)
+			return checkMeasured(r, target, data)
 		case '[':
 			r, err := ParseGremlins(data, target)
 			if err != nil {
 				return r, err
 			}
-			return checkMeasured(r, target)
+			return checkMeasured(r, target, data)
 		}
 	}
 	// No `files` at all, or something that is neither. Refusing is the point: a report this code
@@ -55,10 +57,11 @@ func Parse(data []byte, target string) (Report, error) {
 var errNoMutants = errors.New("describes no mutants, so it measured nothing")
 
 // checkMeasured rejects a parsed report that carries no mutants.
-func checkMeasured(r Report, target string) (Report, error) {
+func checkMeasured(r Report, target string, data []byte) (Report, error) {
 	if len(r.Mutants) == 0 {
 		return Report{}, fmt.Errorf("mutation: %s %w", reportName(target), errNoMutants)
 	}
+	r.SHA256 = reportSHA256(data)
 	return r, nil
 }
 
@@ -109,4 +112,10 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// reportSHA256 is the report file's digest, which its attestation's reportSha256 must equal (spec §6.1).
+func reportSHA256(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }

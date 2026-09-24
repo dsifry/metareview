@@ -1,6 +1,12 @@
 package reviewers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -208,5 +214,88 @@ func TestTheUnresolvedFingerprintSurvivesADifferentPath(t *testing.T) {
 		{File: "a.go", Line: 1, Status: "timeout"}, {File: "z.go", Line: 2, Status: "timeout"}}}).Findings()[0].Fingerprint
 	if shuffled != reversed {
 		t.Errorf("emission order changed the fingerprint:\n  %s\n  %s", shuffled, reversed)
+	}
+}
+
+// A repository with src/a.ts committed and an attested report whose one kill is in src/a.ts.
+func freshnessRepo(t *testing.T) (root, report string) {
+	t.Helper()
+	root = t.TempDir()
+	gitIn := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src/a.ts"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn("init", "-q")
+	gitIn("config", "user.email", "t@example.com")
+	gitIn("config", "user.name", "T")
+	gitIn("add", "-A")
+	gitIn("commit", "-qm", "init")
+	state := filepath.Join(root, ".state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reportText := `{"files":{"src/a.ts":{"source":"a","mutants":[{"id":"1","mutatorName":"M","status":"Killed","killedBy":["t1"],"coveredBy":["t1"],"location":{"start":{"line":1},"end":{"line":1}}}]}},"testFiles":{"t.test.ts":{"tests":[{"id":"t1"}]}}}`
+	sum := func(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+	att := fmt.Sprintf(`{"schemaVersion":1,"tool":"metareview-mutation-incremental","engine":"stryker","report":"incremental.json","reportSha256":%q,
+		"lists":{"mutate":["src/**"],"test":["*.test.ts"],"support":[],"global":[],"ignore":[".state/**"]},"exclusions":[".state/**"],
+		"files":{"src/a.ts":{"digest":"sha256:%s","category":"mutate","tracked":true}},"deferrals":[]}`, sum(reportText), sum("a"))
+	report = filepath.Join(state, "incremental.json")
+	if err := os.WriteFile(report, []byte(reportText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "attestation.json"), []byte(att), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root, report
+}
+
+func TestLoadMutationContext(t *testing.T) {
+	if ctx, err := LoadMutationContext(t.TempDir(), nil, nil, "pr-ready", true); err != nil || ctx.Mode != "" || len(ctx.Freshness) != 0 {
+		t.Errorf("no reports: nothing loaded, nothing serialized: %+v %v", ctx, err)
+	}
+	root, report := freshnessRepo(t)
+	ctx, err := LoadMutationContext(root, []string{report}, nil, "task-done", false)
+	if err != nil || ctx.Mode != "advisory" || ctx.Freshness[0].Verified != 1 || !strings.Contains(ctx.FreshnessSection, "1 verified") {
+		t.Fatalf("worktree: %+v %v", ctx, err)
+	}
+	if got := ctx.Engines(); len(got) != 1 || got[0] != "stryker" {
+		t.Errorf("engines %v", got)
+	}
+	// Uncommitted: stale in the working tree, not in HEAD mode.
+	if err := os.WriteFile(filepath.Join(root, "src/a.ts"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("METAREVIEW_MUTATION_FRESHNESS", "enforce")
+	wt, _ := LoadMutationContext(root, []string{report}, nil, "pr-ready", false)
+	head, _ := LoadMutationContext(root, []string{report}, nil, "pr-ready", true)
+	if wt.Freshness[0].Stale != 1 || head.Freshness[0].Stale != 0 || wt.Mode != "enforce" {
+		t.Errorf("working tree %+v, HEAD %+v", wt.Freshness[0], head.Freshness[0])
+	}
+	found := false
+	for _, f := range wt.Findings() {
+		found = found || (strings.HasPrefix(f.Fingerprint, "mutation:stale:enforce:stryker:src/a.ts:") && f.Classification == "blocking")
+	}
+	if !found {
+		t.Errorf("the enforced stale finding joins the context's findings: %+v", wt.Findings())
+	}
+	t.Setenv("METAREVIEW_MUTATION_FRESHNESS", "bogus")
+	if _, err := LoadMutationContext(root, []string{report}, nil, "pr-ready", false); err == nil {
+		t.Error("an invalid mode is an error")
+	}
+	t.Setenv("METAREVIEW_MUTATION_FRESHNESS", "")
+	if _, err := LoadMutationContext(root, []string{filepath.Join(root, "missing.json")}, nil, "pr-ready", false); err == nil {
+		t.Error("an unreadable report is an error")
+	}
+	if _, err := LoadMutationContext(t.TempDir(), []string{report}, nil, "pr-ready", false); err == nil {
+		t.Error("a content error (not a repository) is an error")
 	}
 }

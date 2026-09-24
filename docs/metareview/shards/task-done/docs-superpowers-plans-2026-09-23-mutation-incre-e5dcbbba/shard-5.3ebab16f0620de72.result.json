@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-5",
+  "kind": "shard",
+  "shardId": "shard-5",
+  "shardHash": "3ebab16f0620de72",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:43:32Z",
+  "evidence": [
+    {
+      "path": "internal/mutationfresh/classify.go",
+      "line": 95
+    },
+    {
+      "path": "internal/mutationfresh/classify.go",
+      "line": 206
+    },
+    {
+      "note": "internal/reviewers/mutation_test.go TestLoadMutationContext exercises verified, stale (worktree vs HEAD), invalid-mode-error, unreadable-report-error and non-repo-error paths."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

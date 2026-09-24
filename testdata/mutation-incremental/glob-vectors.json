@@ -1,0 +1,48 @@
+{
+  "match": [
+    { "pattern": "src/**/*.ts", "path": "src/a.ts", "match": true },
+    { "pattern": "src/**/*.ts", "path": "src/x/y/a.ts", "match": true },
+    { "pattern": "src/**/*.ts", "path": "src/.hidden/a.ts", "match": false },
+    { "pattern": "src/**/*.ts", "path": "lib/a.ts", "match": false },
+    { "pattern": "./src/*.ts", "path": "src/a.ts", "match": true },
+    { "pattern": "src/*.ts", "path": "src/x/a.ts", "match": false },
+    { "pattern": "tests/helpers/**", "path": "tests/helpers", "match": true },
+    { "pattern": "tests/helpers/**", "path": "tests/helpers/a/b.ts", "match": true },
+    { "pattern": "**/*.md", "path": "README.md", "match": true },
+    { "pattern": "**/*.md", "path": "docs/x/y.md", "match": true },
+    { "pattern": "**/.*", "path": ".eslintrc", "match": true },
+    { "pattern": "**/.*", "path": "a/.nvmrc", "match": true },
+    { "pattern": "*", "path": ".env", "match": false },
+    { "pattern": "tsconfig*.json", "path": "tsconfig.build.json", "match": true },
+    { "pattern": "src/{a,b}.ts", "path": "src/b.ts", "match": true },
+    { "pattern": "src/{a,b}.ts", "path": "src/c.ts", "match": false },
+    { "pattern": "src/?.ts", "path": "src/a.ts", "match": true },
+    { "pattern": "src/?.ts", "path": "src/ab.ts", "match": false },
+    { "pattern": "src/a?.ts", "path": "src/ab.ts", "match": true },
+    { "pattern": "**", "path": "a/b/c", "match": true },
+    { "pattern": "a.b", "path": "axb", "match": false },
+    { "pattern": ".mutation/**", "path": ".mutation/attestation.json", "match": true }
+  ],
+  "list": [
+    { "list": ["src/**/*.ts", "!src/**/*.d.ts"], "path": "src/a.ts", "match": true },
+    { "list": ["src/**/*.ts", "!src/**/*.d.ts"], "path": "src/a.d.ts", "match": false },
+    { "list": [], "path": "src/a.ts", "match": false }
+  ],
+  "categorize": {
+    "lists": {
+      "global": ["package.json"],
+      "support": ["tests/helpers/**"],
+      "test": ["tests/**/*.test.ts"],
+      "mutate": ["src/**/*.ts"],
+      "ignore": ["**/*.md"]
+    },
+    "cases": [
+      { "path": "package.json", "category": "global" },
+      { "path": "tests/helpers/x.md", "category": "support" },
+      { "path": "tests/a.test.ts", "category": "test" },
+      { "path": "src/a.ts", "category": "mutate" },
+      { "path": "docs/a.md", "category": "ignore" },
+      { "path": "scripts/x.sh", "category": "unclassified" }
+    ]
+  }
+}

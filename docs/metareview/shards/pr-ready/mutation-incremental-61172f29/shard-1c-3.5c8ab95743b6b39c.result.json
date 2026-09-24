@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1c-3",
+  "kind": "shard",
+  "shardId": "shard-1c-3",
+  "shardHash": "5c8ab95743b6b39c",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T00:00:00Z",
+  "evidence": [
+    {
+      "path": "internal/mutationfresh/glob.go",
+      "line": 21
+    },
+    {
+      "path": "templates/mutation-incremental/lib/run.mjs",
+      "line": 139
+    },
+    {
+      "note": "testdata JSON fixtures (full, helper-make incremental.json) parsed cleanly with python3 -m json.tool"
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}
