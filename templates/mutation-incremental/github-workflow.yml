@@ -1,0 +1,289 @@
+# metareview mutation-incremental CI (spec §5.7, §11.2). Copy to .github/workflows/mutation.yml,
+# together with tools/mutation-incremental/ and mutation-incremental.json (docs/mutation-harness.md).
+#
+# - Make both incremental-pr and pr-full required checks (a skipped job satisfies a required check).
+# - Edit the push branch if the default branch is not main.
+# - Replace the "project setup" steps with the project's own (Node from .nvmrc, npm ci, services).
+# - Outputs reach shell steps through env:, never through ${{ }} inside run:.
+name: mutation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+env:
+  MUTATION_CLI: tools/mutation-incremental/cli.mjs
+  # Per-invocation minutes for PR runs when pendingOnPr is full or full-on-global (ignored under allow).
+  MUTATION_PR_MAX_MINUTES: '60'
+
+jobs:
+  incremental-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # >= setup + 2 x (MUTATION_PR_MAX_MINUTES + 1) + max(1, views) x (verify.timeoutMinutes + 0.5)
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    concurrency:
+      group: mutation-inc-${{ github.ref }}
+      cancel-in-progress: true
+    outputs:
+      exit_code: ${{ steps.run.outputs.exit_code }}
+      route: ${{ steps.run.outputs.route }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # >>> project setup >>>
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: install
+        run: npm ci
+      # <<< project setup <<<
+      - name: restore state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .mutation/attestation.json
+            .mutation/incremental.json
+          key: mutation-pr-${{ github.event.pull_request.number }}-${{ github.sha }}
+          restore-keys: |
+            mutation-pr-${{ github.event.pull_request.number }}-
+            mutation-main-
+      - name: fetch state
+        run: node "$MUTATION_CLI" fetch-state
+        env:
+          MUTATION_STATE_TOKEN: ${{ github.token }}
+      - name: run
+        id: run
+        continue-on-error: true
+        run: node "$MUTATION_CLI" run --mode incremental --pr --max-minutes "$MUTATION_PR_MAX_MINUTES" --also-state .mutation/remote/full --also-state .mutation/remote/inc
+      - name: save state cache
+        if: (steps.run.outputs.exit_code == '0' || steps.run.outputs.exit_code == '1') && steps.run.outputs.route == 'verdict' && hashFiles('.mutation/attestation.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .mutation/attestation.json
+            .mutation/incremental.json
+          key: mutation-pr-${{ github.event.pull_request.number }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: summary
+        if: always()
+        env:
+          EXIT_CODE: ${{ steps.run.outputs.exit_code }}
+        run: node "$MUTATION_CLI" summary --job pr --pr --exit-code "$EXIT_CODE" || true
+      - name: verdict
+        env:
+          EXIT_CODE: ${{ steps.run.outputs.exit_code }}
+          ROUTE: ${{ steps.run.outputs.route }}
+        run: |
+          case "$EXIT_CODE:$ROUTE" in
+            0:sweep|1:sweep) echo "verdict deferred to pr-full" ;;
+            0:verdict) ;;
+            0:fail|1:fail) echo "no reachable tests (see the step summary)"; exit 1 ;;
+            *) echo "mutation run exit code '$EXIT_CODE'"; exit 1 ;;
+          esac
+
+  pr-full:
+    needs: incremental-pr
+    if: needs.incremental-pr.outputs.route == 'sweep' && (needs.incremental-pr.outputs.exit_code == '0' || needs.incremental-pr.outputs.exit_code == '1')
+    runs-on: ubuntu-latest
+    # >= setup + one full run + max(1, views) x verify.timeoutMinutes
+    timeout-minutes: 350
+    permissions:
+      contents: read
+    concurrency:
+      group: mutation-pr-full-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # >>> project setup >>>
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: install
+        run: npm ci
+      # <<< project setup <<<
+      - name: run
+        id: run
+        continue-on-error: true
+        run: node "$MUTATION_CLI" run --mode full
+      - name: save state cache
+        if: (steps.run.outputs.exit_code == '0' || steps.run.outputs.exit_code == '1') && hashFiles('.mutation/attestation.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .mutation/attestation.json
+            .mutation/incremental.json
+          key: mutation-pr-${{ github.event.pull_request.number }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-full
+      - name: summary
+        if: always()
+        env:
+          EXIT_CODE: ${{ steps.run.outputs.exit_code }}
+        run: node "$MUTATION_CLI" summary --job pr-full --exit-code "$EXIT_CODE" || true
+      - name: verdict
+        env:
+          EXIT_CODE: ${{ steps.run.outputs.exit_code }}
+        run: |
+          if [ "$EXIT_CODE" != "0" ]; then echo "mutation sweep exit code '$EXIT_CODE'"; exit 1; fi
+
+  incremental-main:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # >= setup + 2 x (maxMinutesPerInvocation + 1) + max(1, views) x (verify.timeoutMinutes + 0.5)
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    concurrency:
+      group: mutation-inc-${{ github.ref }}
+      cancel-in-progress: false
+    outputs:
+      exit_code: ${{ steps.run.outputs.exit_code }}
+      pending_full: ${{ steps.run.outputs.pending_full }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # >>> project setup >>>
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: install
+        run: npm ci
+      # <<< project setup <<<
+      - name: restore state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .mutation/attestation.json
+            .mutation/incremental.json
+          key: mutation-main-${{ github.sha }}
+          restore-keys: |
+            mutation-main-
+      - name: fetch state
+        run: node "$MUTATION_CLI" fetch-state
+        env:
+          MUTATION_STATE_TOKEN: ${{ github.token }}
+      - name: run
+        id: run
+        continue-on-error: true
+        run: node "$MUTATION_CLI" run --mode incremental --also-state .mutation/remote/full --also-state .mutation/remote/inc
+      - name: save state cache
+        if: (steps.run.outputs.exit_code == '0' || steps.run.outputs.exit_code == '1') && hashFiles('.mutation/attestation.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .mutation/attestation.json
+            .mutation/incremental.json
+          key: mutation-main-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: publish inc
+        if: (steps.run.outputs.exit_code == '0' || steps.run.outputs.exit_code == '1') && hashFiles('.mutation/attestation.json') != ''
+        run: node "$MUTATION_CLI" publish-state --kind inc
+        env:
+          MUTATION_STATE_TOKEN: ${{ github.token }}
+      - name: summary
+        if: always()
+        env:
+          EXIT_CODE: ${{ steps.run.outputs.exit_code }}
+        run: node "$MUTATION_CLI" summary --job main --exit-code "$EXIT_CODE" || true
+      - name: verdict
+        env:
+          EXIT_CODE: ${{ steps.run.outputs.exit_code }}
+        run: |
+          if [ "$EXIT_CODE" != "0" ]; then echo "mutation run exit code '$EXIT_CODE'"; exit 1; fi
+
+  full:
+    needs: incremental-main
+    if: ${{ !cancelled() && needs.incremental-main.outputs.pending_full == 'true' }}
+    runs-on: ubuntu-latest
+    # >= setup + catch-up (2 x maxMinutesPerInvocation) + full run + 2 x max(1, views) x verify.timeoutMinutes
+    timeout-minutes: 350
+    permissions:
+      contents: write
+    concurrency:
+      group: mutation-main-full
+      cancel-in-progress: false
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # >>> project setup >>>
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: install
+        run: npm ci
+      # <<< project setup <<<
+      - name: fetch state
+        run: node "$MUTATION_CLI" fetch-state
+        env:
+          MUTATION_STATE_TOKEN: ${{ github.token }}
+      - name: catch-up
+        id: catchup
+        continue-on-error: true
+        run: node "$MUTATION_CLI" run --mode incremental --also-state .mutation/remote/full --also-state .mutation/remote/inc
+      - name: save catch-up cache
+        if: (steps.catchup.outputs.exit_code == '0' || steps.catchup.outputs.exit_code == '1') && steps.catchup.outputs.pending_full == 'false' && hashFiles('.mutation/attestation.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .mutation/attestation.json
+            .mutation/incremental.json
+          key: mutation-main-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-catchup
+      - name: publish catch-up
+        if: (steps.catchup.outputs.exit_code == '0' || steps.catchup.outputs.exit_code == '1') && steps.catchup.outputs.pending_full == 'false' && hashFiles('.mutation/attestation.json') != ''
+        run: node "$MUTATION_CLI" publish-state --kind full
+        env:
+          MUTATION_STATE_TOKEN: ${{ github.token }}
+      - name: full run
+        id: full
+        if: ${{ !((steps.catchup.outputs.exit_code == '0' || steps.catchup.outputs.exit_code == '1') && steps.catchup.outputs.pending_full == 'false') }}
+        continue-on-error: true
+        run: node "$MUTATION_CLI" run --mode full
+      - name: save full cache
+        if: (steps.full.outputs.exit_code == '0' || steps.full.outputs.exit_code == '1') && hashFiles('.mutation/attestation.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .mutation/attestation.json
+            .mutation/incremental.json
+          key: mutation-main-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-full
+      - name: publish full
+        if: (steps.full.outputs.exit_code == '0' || steps.full.outputs.exit_code == '1') && hashFiles('.mutation/attestation.json') != ''
+        run: node "$MUTATION_CLI" publish-state --kind full
+        env:
+          MUTATION_STATE_TOKEN: ${{ github.token }}
+      - name: summary
+        if: always()
+        env:
+          FULL_OUTCOME: ${{ steps.full.outcome }}
+          FULL_EXIT: ${{ steps.full.outputs.exit_code }}
+          CATCHUP_EXIT: ${{ steps.catchup.outputs.exit_code }}
+        run: |
+          if [ "$FULL_OUTCOME" = "skipped" ]; then final="$CATCHUP_EXIT"; else final="$FULL_EXIT"; fi
+          node "$MUTATION_CLI" summary --job full --exit-code "$final" || true
+      - name: verdict
+        env:
+          FULL_OUTCOME: ${{ steps.full.outcome }}
+          FULL_EXIT: ${{ steps.full.outputs.exit_code }}
+          CATCHUP_EXIT: ${{ steps.catchup.outputs.exit_code }}
+        run: |
+          if [ "$FULL_OUTCOME" = "skipped" ]; then final="$CATCHUP_EXIT"; else final="$FULL_EXIT"; fi
+          if [ "$final" != "0" ]; then echo "mutation full job exit code '$final'"; exit 1; fi
