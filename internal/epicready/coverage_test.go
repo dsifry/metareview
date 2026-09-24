@@ -322,16 +322,16 @@ func TestFilterGeneratedHelpers(t *testing.T) {
 }
 
 func TestVerdictForCounts(t *testing.T) {
-	if v, _, blk, r := verdictForCounts(findings.ClassCounts{Blocking: 1}, "gate", 3, 3); v != "ESCALATED" || !blk || r == "" {
+	if v, _, blk, r := verdictForCounts(findings.ClassCounts{Blocking: 1}, "gate", 3, 3, false); v != "ESCALATED" || !blk || r == "" {
 		t.Fatalf("ESCALATED: %q %v %q", v, blk, r)
 	}
-	if v, _, blk, _ := verdictForCounts(findings.ClassCounts{Blocking: 1}, "gate", 1, 3); v != "NEEDS_REVISION" || !blk {
+	if v, _, blk, _ := verdictForCounts(findings.ClassCounts{Blocking: 1}, "gate", 1, 3, false); v != "NEEDS_REVISION" || !blk {
 		t.Fatalf("NEEDS_REVISION: %q %v", v, blk)
 	}
-	if v, _, blk, _ := verdictForCounts(findings.ClassCounts{Advisory: 1}, "gate", 1, 3); v != "PASS_ADVISORY" || blk {
+	if v, _, blk, _ := verdictForCounts(findings.ClassCounts{Advisory: 1}, "gate", 1, 3, false); v != "PASS_ADVISORY" || blk {
 		t.Fatalf("PASS_ADVISORY: %q %v", v, blk)
 	}
-	if v, _, blk, _ := verdictForCounts(findings.ClassCounts{}, "gate", 1, 3); v != "PASS" || blk {
+	if v, _, blk, _ := verdictForCounts(findings.ClassCounts{}, "gate", 1, 3, false); v != "PASS" || blk {
 		t.Fatalf("PASS: %q %v", v, blk)
 	}
 }

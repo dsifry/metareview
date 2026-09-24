@@ -482,7 +482,7 @@ func Create(root string, options Options) (Result, error) {
 			return err
 		}
 		counts := findings.CountByClass(reconciled.OpenFindings)
-		verdict, status, blocking, escalationReason := verdictForCounts(counts, gateEffect, chain.AttemptNumber, chain.MaxAttempts)
+		verdict, status, blocking, escalationReason := verdictForCounts(counts, gateEffect, chain.AttemptNumber, chain.MaxAttempts, findings.OnlyStaleBlockers(reconciled.OpenFindings))
 		result.Verdict = verdict
 		result.Blocking = blocking
 		record := runRecord{
@@ -1312,11 +1312,19 @@ type reviewMetadata struct {
 	HistoricalBlockers   []findings.Record
 }
 
-func verdictForCounts(counts findings.ClassCounts, gateEffect string, attemptNumber, maxAttempts int) (string, string, bool, string) {
+func verdictForCounts(counts findings.ClassCounts, gateEffect string, attemptNumber, maxAttempts int, staleOnly bool) (string, string, bool, string) {
 	blocking := counts.Blocking > 0
 	nonBlocking := counts.Advisory > 0 || counts.FollowUp > 0 || counts.Warnings > 0
 	if blocking && attemptNumber >= maxAttempts {
+		// Spec §6.8: a chain blocked only by stale mutation evidence waits for a refresh, up to
+		// 2 × maxAttempts, before it escalates.
+		if staleOnly && attemptNumber < 2*maxAttempts {
+			return "NEEDS_REVISION", "needs-revision", true, ""
+		}
 		reason := fmt.Sprintf("blocking findings remain after attempt %d of %d", attemptNumber, maxAttempts)
+		if staleOnly {
+			reason = fmt.Sprintf("stale mutation evidence not refreshed after %d attempts", attemptNumber)
+		}
 		return "ESCALATED", "escalated", true, reason
 	}
 	if blocking {
