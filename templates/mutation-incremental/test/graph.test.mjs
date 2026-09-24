@@ -122,6 +122,28 @@ test('files over 1 MiB, symlinks and non-source files are not parsed', () => {
   const snap = takeSnapshot(cfg);
   const g = buildGraph(snap.files, cfg);
   assert.equal([...(g.reverse.get('src/a.ts') ?? [])].includes('src/big.ts'), false);
+  // An unparsed source file's imports are unknown, so it is an open importer (the conservative side).
+  assert.deepEqual(openImporters(g), [{ path: 'src/big.ts', specifiers: ['<source over 1 MiB>'] }]);
+  assert.equal(g.forward.has('src/alias.ts') || g.open.has('src/alias.ts'), false);
+  assert.equal(g.forward.has('tests/data.json') || g.open.has('tests/data.json'), false);
+});
+
+test('directory specifiers resolve to the directory index', () => {
+  const r = graphRepo();
+  r.write('src/idx/dot.test.ts', "import { a } from '.';");
+  r.write('src/idx/slash.test.ts', "import { a } from './';");
+  r.write('src/idx/sub/up.test.ts', "import { a } from '..';");
+  r.write('index.ts', 'export const top = 1;');
+  r.write('root.test.ts', "import { top } from '.';");
+  mkdirSync(join(r.top, 'node_modules'), { recursive: true }); // '.' must not probe the repo's own node_modules
+  const cfg = loadConfig(r.top);
+  const snap = takeSnapshot(cfg);
+  const g = buildGraph(snap.files, cfg);
+  for (const t of ['src/idx/dot.test.ts', 'src/idx/slash.test.ts', 'src/idx/sub/up.test.ts']) {
+    assert.deepEqual([...(g.forward.get(t) ?? [])], ['src/idx/index.ts'], t);
+  }
+  assert.deepEqual([...(g.forward.get('root.test.ts') ?? [])], ['index.ts']);
+  assert.deepEqual(openImporters(g), []);
 });
 
 test('an alias key that prefixes a scoped package name does not hide the installed package', () => {

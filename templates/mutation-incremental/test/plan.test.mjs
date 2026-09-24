@@ -176,8 +176,7 @@ test('whole and residual: a hunk outside every mutant adds the file importer tes
 test('residual falls back to whole above RESIDUAL_MAX_BYTES', () => {
   const s = scenario({ edit: { 'src/a.ts': A3 }, config: residual });
   const p = computePlan({ ...s, readText: (f) => (f === 'src/a.ts' ? 'x'.repeat(RESIDUAL_MAX_BYTES + 1) : '') });
-  assert.equal(p.forced[0], 'src/a.ts');
-  assert.deepEqual(p.scope, []);
+  assert.deepEqual([p.scope, p.forced], [[], ['src/a.ts', 'src/b.ts:4-4']]);
 });
 
 test('zero-mutant module: importer tests drive the residual (limits.ts, index.ts)', () => {
@@ -330,4 +329,17 @@ test('without readText the edited source is read from the repository', () => {
   const s = scenario({ edit: { 'src/a.ts': A3 }, config: { ...residual, top } });
   const p = computePlan({ ...s, readText: undefined });
   assert.deepEqual([p.scope, p.forced], [['src/a.ts'], ['src/a.ts:2-3', 'src/b.ts:4-4']]);
+});
+
+// A static (module-level) mutant has no coveredBy: every test ran it. An edit touching one adds the
+// file's importer tests and the mutant's killers, so a constants module still reaches the kills of
+// the tests that read it (here b2, killed by tests/c.test.ts, which imports src/c.ts).
+test('an edit touching a static mutant adds its importer tests and killers', () => {
+  const statics = (rep) => {
+    Object.assign(rep.files['src/c.ts'].mutants[0], { static: true, coveredBy: [] });
+    rep.files['src/b.ts'].mutants.push(mk('b2', 4, 4, 'Killed', ['tc'], ['tc']));
+  };
+  const C3 = C.replace('n * 2', 'n * 3');
+  assert.deepEqual(plan({ edit: { 'src/c.ts': C3 }, mutate: statics }).forced, ['src/b.ts:4-4', 'src/c.ts']);
+  assert.deepEqual(plan({ edit: { 'src/c.ts': C3 } }).forced, ['src/c.ts']);
 });

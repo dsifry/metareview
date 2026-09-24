@@ -26,6 +26,7 @@ type strykerReport struct {
 			Status      string   `json:"status"`
 			KilledBy    []string `json:"killedBy"`
 			CoveredBy   []string `json:"coveredBy"`
+			Static      bool     `json:"static"`
 			Location    struct {
 				Start struct {
 					Line   int `json:"line"`
@@ -65,6 +66,8 @@ type StrykerMutant struct {
 	Status    Status
 	KilledBy  []string
 	CoveredBy []string
+	// Static is Stryker's module-level mutant: every test ran it, so coveredBy is empty.
+	Static    bool
 	StartLine int
 	EndLine   int
 }
@@ -95,7 +98,7 @@ func ParseStryker(data []byte, target string) (Report, error) {
 		file := StrykerFile{Source: f.Source}
 		for _, m := range f.Mutants {
 			file.Mutants = append(file.Mutants, StrykerMutant{
-				ID: m.ID, Status: strykerStatus(m.Status), KilledBy: m.KilledBy, CoveredBy: m.CoveredBy,
+				ID: m.ID, Status: strykerStatus(m.Status), KilledBy: m.KilledBy, CoveredBy: m.CoveredBy, Static: m.Static,
 				StartLine: m.Location.Start.Line, EndLine: m.Location.End.Line,
 			})
 		}

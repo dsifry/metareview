@@ -231,8 +231,9 @@ func changedPaths(att Attestation, content Content) (map[string]change, error) {
 // causeFinder returns a kill's recorded cause, in the §6.3 order: its own file; the byte-smallest
 // changed test whose ids it was killed by; the byte-smallest changed mutate file with mutants whose
 // coverage includes a killing test; else the byte-smallest changed support, global, unclassified or
-// mutate path with no mutants or with an edit outside every mutant (§11.5): the gate has no import
-// graph, so these invalidate every kill.
+// mutate path with no mutants, with an edit outside every mutant (§11.5), or with a static mutant
+// (whose coveredBy is empty because every test ran it): the gate has no import graph, so these
+// invalidate every kill.
 func causeFinder(d *mutation.StrykerDetail, changed map[string]change) func(file string, killedBy []string) string {
 	testOf := map[string]string{}
 	type covering struct {
@@ -249,7 +250,7 @@ func causeFinder(d *mutation.StrykerDetail, changed map[string]change) func(file
 					testOf[id] = p
 				}
 			}
-		case c.category == "mutate" && len(d.Files[p].Mutants) > 0 && !outOfMutant(d.Files[p], c):
+		case c.category == "mutate" && len(d.Files[p].Mutants) > 0 && !outOfMutant(d.Files[p], c) && !hasStatic(d.Files[p]):
 			ids := map[string]bool{}
 			for _, m := range d.Files[p].Mutants {
 				for _, id := range m.CoveredBy {
@@ -286,6 +287,15 @@ func causeFinder(d *mutation.StrykerDetail, changed map[string]change) func(file
 		}
 		return ""
 	}
+}
+
+func hasStatic(file mutation.StrykerFile) bool {
+	for _, m := range file.Mutants {
+		if m.Static {
+			return true
+		}
+	}
+	return false
 }
 
 // outOfMutant: the file's edit has a hunk that no mutant of any status intersects, or cannot be

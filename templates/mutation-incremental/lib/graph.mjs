@@ -24,7 +24,8 @@ export function specifiers(source) {
 }
 
 function resolveFile(base, files) {
-  const candidates = [base, ...SOURCE_EXTS.map((e) => base + e), ...SOURCE_EXTS.map((e) => `${base}/index${e}`)];
+  const dir = base === '.' ? '' : `${base}/`; // a directory specifier at the repository root
+  const candidates = [base, ...SOURCE_EXTS.map((e) => base + e), ...SOURCE_EXTS.map((e) => `${dir}index${e}`)];
   const js = base.match(/^(.*)\.[mc]?jsx?$/);
   if (js) candidates.push(...TS_EXTS.map((e) => js[1] + e));
   return candidates.find((c) => files[c]?.digest.startsWith('sha256:')) ?? null;
@@ -46,9 +47,10 @@ function isInstalledPackage(spec, fromFile, top) {
 
 function classify(spec, fromFile, ctx) {
   let base = null;
-  const relative = spec.startsWith('./') || spec.startsWith('../');
+  // '.' and '..' name a directory (its index), like './' and '../'.
+  const relative = spec === '.' || spec === '..' || spec.startsWith('./') || spec.startsWith('../');
   if (relative) {
-    base = posix.normalize(posix.join(posix.dirname(fromFile), spec));
+    base = posix.normalize(posix.join(posix.dirname(fromFile), spec)).replace(/(.)\/$/, '$1');
   } else {
     const key = Object.keys(ctx.aliases).filter((k) => spec.startsWith(k)).sort((a, b) => b.length - a.length)[0];
     if (key !== undefined) base = posix.normalize(ctx.aliases[key] + spec.slice(key.length));
@@ -79,7 +81,10 @@ export function buildGraph(files, { top, aliases }) {
   for (const [path, info] of Object.entries(files)) {
     if (!info.digest.startsWith('sha256:') || !SOURCE_EXTS.some((e) => path.endsWith(e))) continue;
     const source = readFileSync(join(top, path), 'utf8');
-    if (source.length > MAX_BYTES) continue;
+    if (source.length > MAX_BYTES) {
+      open.set(path, ['<source over 1 MiB>']); // its imports are unknown: an open importer
+      continue;
+    }
     for (const spec of specifiers(source)) {
       const r = classify(spec, path, ctx);
       if (r.edge) {

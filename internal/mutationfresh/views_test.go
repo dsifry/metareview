@@ -13,7 +13,7 @@ import (
 // The e2e fixture's views: core = src/**/*.ts (all 24 kills), edge = src/c.ts, src/e.ts (3 + 4).
 var bothViews = []string{"core", "edge"}
 
-const editedC = "export function clamp(n: number): number {\n  return n;\n}\n"
+const editedE = "export function inc(n: number): number {\n  const r = n + 2;\n  return r;\n}\n\nexport function dec(n: number): number {\n  const r = n - 1;\n  return r;\n}\n"
 
 func classifyViews(t *testing.T, report, root string, views []string) ReportFreshness {
 	t.Helper()
@@ -63,13 +63,13 @@ func TestViewsOverlapAndAreNotSummed(t *testing.T) {
 	if strings.Join(f.ViewNames, ",") != "core,edge" {
 		t.Errorf("view names %v", f.ViewNames)
 	}
-	write(t, root, "src/c.ts", editedC)
+	write(t, root, "src/e.ts", editedE)
 	f = classifyViews(t, report, root, bothViews)
 	core, edge := view(f, "core"), view(f, "edge")
-	if f.Stale != 3 || core.Stale != 3 || core.Verified != 21 || edge.Stale != 3 || edge.Verified != 4 {
-		t.Errorf("edited c.ts: report %+v core %+v edge %+v", f.Tally, core, edge)
+	if f.Stale != 4 || core.Stale != 4 || core.Verified != 20 || edge.Stale != 4 || edge.Verified != 3 {
+		t.Errorf("edited e.ts: report %+v core %+v edge %+v", f.Tally, core, edge)
 	}
-	if len(edge.Causes) != 1 || edge.Causes[0].Cause != "src/c.ts" || len(edge.ReRun) != 1 {
+	if len(edge.Causes) != 1 || edge.Causes[0].Cause != "src/e.ts" || len(edge.ReRun) != 1 {
 		t.Errorf("edge causes %+v rows %+v", edge.Causes, edge.ReRun)
 	}
 	if none := classifyViews(t, report, root, nil); none.Views != nil {
@@ -178,31 +178,31 @@ func buildViews(t *testing.T, report, root, mode string, views []string) Result 
 // a table row per view and a re-run list with a View column.
 func TestBuildWithViews(t *testing.T) {
 	report, root := realCase(t, "full")
-	write(t, root, "src/c.ts", editedC)
+	write(t, root, "src/e.ts", editedE)
 	res := buildViews(t, report, root, Enforce, bothViews)
 	if len(res.Findings) != 2 {
 		t.Fatalf("findings: %+v", res.Findings)
 	}
 	for i, name := range bothViews {
 		f := res.Findings[i]
-		if f.View != name || f.Title != "Mutation evidence stale ("+name+"): src/c.ts changed" ||
-			!strings.HasPrefix(f.Fingerprint, "mutation:stale:enforce:stryker:"+name+":src/c.ts:") || f.Classification != "blocking" {
+		if f.View != name || f.Title != "Mutation evidence stale ("+name+"): src/e.ts changed" ||
+			!strings.HasPrefix(f.Fingerprint, "mutation:stale:enforce:stryker:"+name+":src/e.ts:") || f.Classification != "blocking" {
 			t.Errorf("finding %d: %+v", i, f)
 		}
 	}
 	want := "## Mutation Evidence Freshness\n\n" +
 		"- Mode: `enforce`\n" +
 		"- Reports: 1 (1 attested)\n" +
-		"- Kills: 21 verified, 3 stale, 0 pending, 0 unbound, 0 unattested\n" +
+		"- Kills: 20 verified, 4 stale, 0 pending, 0 unbound, 0 unattested\n" +
 		"\n### Views\n\n" +
 		"| View | Verified | Stale | Pending counted | Pending inherited | Unbound | Unattested |\n" +
 		"| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n" +
-		"| `core` | 21 | 3 | 0 | 0 | 0 | 0 |\n" +
-		"| `edge` | 4 | 3 | 0 | 0 | 0 | 0 |\n" +
+		"| `core` | 20 | 4 | 0 | 0 | 0 | 0 |\n" +
+		"| `edge` | 3 | 4 | 0 | 0 | 0 | 0 |\n" +
 		"\n### Re-run list\n\n" +
 		"| View | File | Cause | Stale kills |\n| --- | --- | --- | ---: |\n" +
-		"| `core` | `src/c.ts` | `src/c.ts` | 3 |\n" +
-		"| `edge` | `src/c.ts` | `src/c.ts` | 3 |"
+		"| `core` | `src/e.ts` | `src/e.ts` | 4 |\n" +
+		"| `edge` | `src/e.ts` | `src/e.ts` | 4 |"
 	if res.Section != want {
 		t.Errorf("section:\n%s\nwant:\n%s", res.Section, want)
 	}

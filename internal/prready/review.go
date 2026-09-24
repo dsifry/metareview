@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -266,6 +267,7 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	blockers = slices.DeleteFunc(blockers, func(r findings.Record) bool { return !findings.InViewScope(r, options.MutationViews) })
 	// The full ledger (every status) lets the evidence renderer reconcile a
 	// historical review against how its findings were actually cleared (#40). Read
 	// before this run reconciles: the overrides/fixes that clear a historical

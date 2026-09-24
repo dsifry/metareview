@@ -66,7 +66,7 @@ test('indexReport flattens mutants and test ids', () => {
     files: { 'src/a.ts': { mutants: [{ id: 1, status: 'Killed', killedBy: [0], coveredBy: [0, 1], location: { start: { line: 2 }, end: { line: 3 } } }, { id: '2', status: 'NoCoverage', location: { start: { line: 4 }, end: { line: 4 } } }] } },
     testFiles: { 'tests/a.test.ts': { tests: [{ id: 0 }, { id: '1' }] }, 'tests/b.test.ts': {} },
   });
-  assert.deepEqual(idx.mutants[0], { file: 'src/a.ts', id: '1', status: 'Killed', killedBy: ['0'], coveredBy: ['0', '1'], startLine: 2, endLine: 3 });
+  assert.deepEqual(idx.mutants[0], { file: 'src/a.ts', id: '1', status: 'Killed', killedBy: ['0'], coveredBy: ['0', '1'], static: false, startLine: 2, endLine: 3 });
   assert.deepEqual(idx.mutants[1].killedBy, []);
   assert.deepEqual(idx.testIds, { 'tests/a.test.ts': ['0', '1'], 'tests/b.test.ts': [] });
   assert.deepEqual(indexReport({}), { mutants: [], testIds: {} });

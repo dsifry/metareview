@@ -143,7 +143,13 @@ func attemptSummary(review ReviewEvidence) string {
 		return fmt.Sprintf(" attempt %d/%d", review.AttemptNumber, review.MaxAttempts)
 	}
 	note := review.AttemptNote
-	if note == "" {
+	switch {
+	case note != "":
+	case review.AttemptNumber <= 2*review.MaxAttempts:
+		// Without an override, only a chain blocked by stale mutation evidence alone continues past
+		// its limit, up to 2 × maxAttempts (spec §6.8).
+		note = fmt.Sprintf("over the recorded limit of %d; within the stale mutation evidence allowance of %d", review.MaxAttempts, 2*review.MaxAttempts)
+	default:
 		note = "exceeds recorded limit; no override recorded"
 	}
 	return fmt.Sprintf(" attempt %d (%s)", review.AttemptNumber, note)

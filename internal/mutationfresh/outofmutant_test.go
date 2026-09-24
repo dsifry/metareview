@@ -38,13 +38,14 @@ func TestUndiffableMutateFileIsABlanketCause(t *testing.T) {
 }
 
 // A deleted mutate file keeps 2a's rule: its own kills and those of the tests covering it.
+// (src/e.ts has no static mutant.)
 func TestDeletedMutateFileIsNotBlanket(t *testing.T) {
 	report, root := realCase(t, "full")
-	if err := os.Remove(filepath.Join(root, "src/c.ts")); err != nil {
+	if err := os.Remove(filepath.Join(root, "src/e.ts")); err != nil {
 		t.Fatal(err)
 	}
 	f := classifyAt(t, report, root)
-	if f.Stale < 3 || f.Stale == 24 || causes(f)["src/c.ts"] != f.Stale {
+	if f.Stale < 4 || f.Stale == 24 || causes(f)["src/e.ts"] != f.Stale {
 		t.Errorf("deleted c.ts: %+v", f)
 	}
 }
@@ -61,5 +62,16 @@ func TestDeletedUnattestedPathIsNotAChange(t *testing.T) {
 	}
 	if f := classifyAt(t, report, root); f.Stale != 0 || f.Verified != 24 {
 		t.Errorf("rm'd helper: %+v", f)
+	}
+}
+
+// Stryker reports a static (module-level) mutant with no coveredBy: every test ran it, and the gate
+// has no import graph to say which tests read it. A changed file with one is a blanket cause.
+// src/c.ts's line-2 mutants include static mutant 17 in the real report.
+func TestStaticMutantFileIsABlanketCause(t *testing.T) {
+	report, root := realCase(t, "full")
+	write(t, root, "src/c.ts", "import { LIMIT } from './limits';\nexport const twice = (n: number) => Math.min(n * 3, LIMIT);\n")
+	if f := classifyAt(t, report, root); f.Stale != 24 || causes(f)["src/c.ts"] != 24 {
+		t.Errorf("edited c.ts: %+v", f)
 	}
 }

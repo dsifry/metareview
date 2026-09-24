@@ -133,6 +133,11 @@ export function computePlan({ config, snapshot, graph, chosen, disableResidual =
       const d = diffs.get(Y);
       const touching = residualEdited.has(Y) ? mine.filter((m) => d.hunks.some((h) => hunkIntersects(m.startLine, m.endLine, h))) : mine;
       const T = new Set(touching.flatMap((m) => m.coveredBy));
+      // A static mutant's coveredBy is empty (every test ran it): its killers and Y's importer tests
+      // are the tests that read the module-level code.
+      const statics = touching.filter((m) => m.static);
+      for (const id of statics.flatMap((m) => m.killedBy)) T.add(id);
+      if (statics.length > 0) for (const id of importerIds(Y)) T.add(id);
       const outsideEveryMutant = mine.length === 0 || !d || d.hunks.some((h) => !mine.some((m) => hunkIntersects(m.startLine, m.endLine, h)));
       // Spec §5.4 step 4 / §11.5: only a *changed* Y falls back to (or adds) its importer tests.
       if (c.kind === 'changed' && outsideEveryMutant) for (const id of importerIds(Y)) T.add(id);

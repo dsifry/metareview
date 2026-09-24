@@ -10,6 +10,8 @@ export function indexReport(report) {
         status: m.status,
         killedBy: (m.killedBy ?? []).map(String),
         coveredBy: (m.coveredBy ?? []).map(String),
+        // Stryker's module-level mutant: every test ran it, so coveredBy is empty.
+        static: m.static === true,
         startLine: m.location.start.line,
         endLine: m.location.end.line,
       });

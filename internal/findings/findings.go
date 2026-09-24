@@ -249,13 +249,13 @@ func supersedesFreshness(record Record, run Run, options Options, current map[st
 	}
 	names, mapped := options.MutationViewMaps[engine]
 	renamed := record.View != "" && mapped && !slices.Contains(names, record.View)
-	return inViewScope(record, options) || renamed
+	return InViewScope(record, options.MutationViews) || renamed
 }
 
-// inViewScope: a run with --mutation-view owns only the freshness rows of its views (spec §11.3).
-func inViewScope(record Record, options Options) bool {
-	return len(options.MutationViews) == 0 || !IsFreshnessFingerprint(record.Fingerprint) ||
-		slices.Contains(options.MutationViews, record.View)
+// InViewScope: a run with --mutation-view owns only the freshness rows of its views (spec §11.3);
+// a run without views owns them all, and every other row is always in scope.
+func InViewScope(record Record, views []string) bool {
+	return len(views) == 0 || !IsFreshnessFingerprint(record.Fingerprint) || slices.Contains(views, record.View)
 }
 
 // OnlyStaleBlockers reports that every open blocking finding is stale mutation evidence (spec §6.8).
@@ -907,7 +907,7 @@ func classForCount(classification, severity string) string {
 func openForRun(records []Record, run Run, options Options) []Record {
 	open := make([]Record, 0, len(records))
 	for _, record := range records {
-		if Blocks(record.Status) && sameRunTarget(record, run) && inViewScope(record, options) {
+		if Blocks(record.Status) && sameRunTarget(record, run) && InViewScope(record, options.MutationViews) {
 			open = append(open, record)
 		}
 	}
