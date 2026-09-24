@@ -26,6 +26,7 @@ import (
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/learning"
 	"github.com/dsifry/metareview/internal/mutation"
+	"github.com/dsifry/metareview/internal/mutationfresh"
 	"github.com/dsifry/metareview/internal/prready"
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
@@ -118,6 +119,7 @@ Usage:
   metareview review task-done <task-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--shard-result <path>]... [--cross-shard-result <path>]
   metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]...
   metareview review pr-ready [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>] [--mutation-report <path>]... [--github-pr <number>] [--include-working-tree] [--shard-result <path>]... [--cross-shard-result <path>]
+  METAREVIEW_MUTATION_FRESHNESS=advisory|enforce  freshness of --mutation-report evidence (docs/mutation-harness.md)
   metareview review record-lenses [--scope pr-ready|task-done|epic-ready] [--base <ref>] [--verdict <v>] [--mode subagent-adjudicated|in-session-emulated] [--lenses a,b,c] [--from-run <fsm-run-id>]
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
 
@@ -298,6 +300,7 @@ func dispatch(args []string) {
 	}
 
 	if len(args) >= 3 && args[0] == "review" && args[1] == "task-done" {
+		mustFreshnessMode()
 		options := taskdone.Options{}
 		for i := 3; i < len(args); i++ {
 			switch args[i] {
@@ -337,6 +340,7 @@ func dispatch(args []string) {
 	}
 
 	if len(args) >= 3 && args[0] == "review" && args[1] == "epic-ready" {
+		mustFreshnessMode()
 		options := epicready.Options{}
 		for i := 3; i < len(args); i++ {
 			switch args[i] {
@@ -541,6 +545,7 @@ func dispatch(args []string) {
 		exit(0)
 	}
 	if len(args) >= 2 && args[0] == "review" && args[1] == "pr-ready" {
+		mustFreshnessMode()
 		options := prready.Options{}
 		for i := 2; i < len(args); i++ {
 			switch args[i] {
@@ -1173,6 +1178,14 @@ func mustResultFile(path string) string {
 		reject("is not a metareview review result")
 	}
 	return path
+}
+
+// mustFreshnessMode refuses an invalid METAREVIEW_MUTATION_FRESHNESS before any review runs (spec §6.4).
+func mustFreshnessMode() {
+	if _, err := mutationfresh.ModeFromEnv(os.Getenv); err != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+		exit(2)
+	}
 }
 
 // mustMutationReport rejects a --mutation-report file the review could not act on, at the point

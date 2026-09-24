@@ -3,7 +3,6 @@ package taskdone
 import (
 	"errors"
 	"fmt"
-	"github.com/dsifry/metareview/internal/mutation"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,7 +160,7 @@ func Create(root, target string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	mutationContext, err := mutationContextFor(options.MutationReportPaths)
+	mutationContext, err := mutationContextFor(root, options.MutationReportPaths)
 	if err != nil {
 		return Result{}, err
 	}
@@ -230,9 +229,10 @@ func Create(root, target string, options Options) (Result, error) {
 			previousRunIDs = append(previousRunIDs, link.ID)
 		}
 		reconciled, err := reconcileFindings(root, run, rawFindings, findings.Options{
-			PreviousRunID:  options.PreviousRunID,
-			PreviousRunIDs: previousRunIDs,
-			ResetRunIDs:    chain.ResetRunIDs,
+			PreviousRunID:   options.PreviousRunID,
+			PreviousRunIDs:  previousRunIDs,
+			ResetRunIDs:     chain.ResetRunIDs,
+			MutationEngines: mutationContext.Engines(),
 		})
 		if err != nil {
 			return err
@@ -282,7 +282,7 @@ func Create(root, target string, options Options) (Result, error) {
 			FollowUpFindingCount: counts.FollowUp,
 			WarningFindingCount:  counts.Warnings,
 		}
-		return writeFile(reviewPath, []byte(reviewMarkdown(runID, target, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
+		return writeFile(reviewPath, []byte(reviewMarkdown(runID, target, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, joinSections(reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), mutationContext.FreshnessSection), meta)), 0o644)
 	}()
 	if err != nil {
 		restoreSnapshots(snapshots)
@@ -791,13 +791,17 @@ func firstNonEmpty(values ...string) string {
 // mutationContextFor loads the declared mutation reports. An unreadable or unrecognised report is
 // an error that stops the review, never a skipped file: a mutation gate that quietly drops a
 // report is a gate that passes because it looked at less.
-func mutationContextFor(paths []string) (reviewers.MutationContext, error) {
-	if len(paths) == 0 {
-		return reviewers.MutationContext{}, nil
+func mutationContextFor(root string, paths []string) (reviewers.MutationContext, error) {
+	return reviewers.LoadMutationContext(root, paths, "task-done", false)
+}
+
+// joinSections joins the non-empty sections that follow the verdict line.
+func joinSections(sections ...string) string {
+	var kept []string
+	for _, s := range sections {
+		if s != "" {
+			kept = append(kept, s)
+		}
 	}
-	reports, err := mutation.LoadAll(paths)
-	if err != nil {
-		return reviewers.MutationContext{}, err
-	}
-	return reviewers.MutationContext{Reports: reports}, nil
+	return strings.Join(kept, "\n\n")
 }

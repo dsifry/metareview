@@ -21,7 +21,6 @@ import (
 	"github.com/dsifry/metareview/internal/githubcontext"
 	"github.com/dsifry/metareview/internal/knowledge"
 	"github.com/dsifry/metareview/internal/markdown"
-	"github.com/dsifry/metareview/internal/mutation"
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewers"
 	"github.com/dsifry/metareview/internal/reviewlog"
@@ -331,7 +330,7 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	mutationContext, err := mutationContextFor(options.MutationReportPaths)
+	mutationContext, err := mutationContextFor(root, options.MutationReportPaths, !options.IncludeWorkingTree)
 	if err != nil {
 		return Result{}, err
 	}
@@ -471,12 +470,13 @@ func Create(root string, options Options) (Result, error) {
 				ReusedFromReviewPath: reused.Path,
 				HistoricalBlockers:   projection.HistoricalBlockers(),
 			}
-			return writeFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, reused.Verdict, reviewGit.ChangedFiles, nil, prEvidence, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
+			return writeFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, reused.Verdict, reviewGit.ChangedFiles, nil, prEvidence, joinSections(reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), mutationContext.FreshnessSection), meta)), 0o644)
 		}
 		reconciled, err := reconcileFindings(root, run, rawFindings, findings.Options{
-			PreviousRunID:  options.PreviousRunID,
-			PreviousRunIDs: previousRunIDs,
-			ResetRunIDs:    chain.ResetRunIDs,
+			PreviousRunID:   options.PreviousRunID,
+			PreviousRunIDs:  previousRunIDs,
+			ResetRunIDs:     chain.ResetRunIDs,
+			MutationEngines: mutationContext.Engines(),
 		})
 		if err != nil {
 			return err
@@ -529,7 +529,7 @@ func Create(root string, options Options) (Result, error) {
 			ReviewInputDigest:    reviewInputDigest,
 			HistoricalBlockers:   projection.HistoricalBlockers(),
 		}
-		return writeFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, prEvidence, reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), meta)), 0o644)
+		return writeFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, prEvidence, joinSections(reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), mutationContext.FreshnessSection), meta)), 0o644)
 	}()
 	if err != nil {
 		restoreSnapshots(snapshots)
@@ -1604,13 +1604,17 @@ func shardTargetID(git gitcontext.Context) string {
 // mutationContextFor loads the declared mutation reports. An unreadable or unrecognised report is
 // an error that stops the review, never a skipped file: a mutation gate that quietly drops a
 // report is a gate that passes because it looked at less.
-func mutationContextFor(paths []string) (reviewers.MutationContext, error) {
-	if len(paths) == 0 {
-		return reviewers.MutationContext{}, nil
+func mutationContextFor(root string, paths []string, head bool) (reviewers.MutationContext, error) {
+	return reviewers.LoadMutationContext(root, paths, "pr-ready", head)
+}
+
+// joinSections joins the non-empty sections that follow the verdict line.
+func joinSections(sections ...string) string {
+	var kept []string
+	for _, s := range sections {
+		if s != "" {
+			kept = append(kept, s)
+		}
 	}
-	reports, err := mutation.LoadAll(paths)
-	if err != nil {
-		return reviewers.MutationContext{}, err
-	}
-	return reviewers.MutationContext{Reports: reports}, nil
+	return strings.Join(kept, "\n\n")
 }

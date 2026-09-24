@@ -2,7 +2,6 @@ package epicready
 
 import (
 	"fmt"
-	"github.com/dsifry/metareview/internal/mutation"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,7 +146,7 @@ func Create(root, target string, options Options) (Result, error) {
 	if report.Capabilities.Beads || report.Capabilities.Metaswarm {
 		gateEffect = "gate"
 	}
-	mutationContext, err := mutationContextFor(options.MutationReportPaths)
+	mutationContext, err := mutationContextFor(root, options.MutationReportPaths)
 	if err != nil {
 		return Result{}, err
 	}
@@ -190,9 +189,10 @@ func Create(root, target string, options Options) (Result, error) {
 			previousRunIDs = append(previousRunIDs, link.ID)
 		}
 		reconciled, err := reconcileFindings(root, run, rawFindings, findings.Options{
-			PreviousRunID:  options.PreviousRunID,
-			PreviousRunIDs: previousRunIDs,
-			ResetRunIDs:    chain.ResetRunIDs,
+			PreviousRunID:   options.PreviousRunID,
+			PreviousRunIDs:  previousRunIDs,
+			ResetRunIDs:     chain.ResetRunIDs,
+			MutationEngines: mutationContext.Engines(),
 		})
 		if err != nil {
 			return err
@@ -242,7 +242,7 @@ func Create(root, target string, options Options) (Result, error) {
 			FollowUpFindingCount: counts.FollowUp,
 			WarningFindingCount:  counts.Warnings,
 		}
-		return writeFile(reviewPath, []byte(reviewMarkdown(runID, target, contextRel, options.PreviousRunID, gateEffect, verdict, git.ChangedFiles, reconciled.OpenFindings, meta)), 0o644)
+		return writeFile(reviewPath, []byte(reviewMarkdown(runID, target, contextRel, options.PreviousRunID, gateEffect, verdict, git.ChangedFiles, reconciled.OpenFindings, mutationContext.FreshnessSection, meta)), 0o644)
 	}()
 	if err != nil {
 		restoreSnapshots(snapshots)
@@ -637,7 +637,10 @@ func verdictForCounts(counts findings.ClassCounts, gateEffect string, attemptNum
 	return "PASS", "passed", false, ""
 }
 
-func reviewMarkdown(runID, target, contextRel, previousRun, gateEffect, verdict string, coveredPaths []string, records []findings.Record, meta reviewMetadata) string {
+func reviewMarkdown(runID, target, contextRel, previousRun, gateEffect, verdict string, coveredPaths []string, records []findings.Record, freshnessSection string, meta reviewMetadata) string {
+	if freshnessSection != "" {
+		freshnessSection += "\n\n"
+	}
 	// Covered paths: the exclude-filtered source files this review examined, so `status` can credit a
 	// clean review for the files it read (see reviewlog.DecodeCoveredPaths / status coverage accounting).
 	return "# metareview: epic-ready review\n\n" +
@@ -648,7 +651,7 @@ func reviewMarkdown(runID, target, contextRel, previousRun, gateEffect, verdict 
 		"Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +
 		"Previous run: " + markdown.InlineCode(firstNonEmpty(previousRun, "none")) + "\n\n" +
 		reviewlog.CoveredPathsLabel + " " + markdown.InlineCode(reviewlog.EncodeCoveredPaths(coveredPaths)) + "\n\n" +
-		"## Verdict\n\n" + verdict + "\n\n" +
+		"## Verdict\n\n" + verdict + "\n\n" + freshnessSection +
 		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n" +
 		reviewerTable(records) + "\n\n" +
 		findingsMarkdown(records) + "\n" +
@@ -844,13 +847,6 @@ func firstNonEmpty(values ...string) string {
 // mutationContextFor loads the declared mutation reports. An unreadable or unrecognised report is
 // an error that stops the review, never a skipped file: a mutation gate that quietly drops a
 // report is a gate that passes because it looked at less.
-func mutationContextFor(paths []string) (reviewers.MutationContext, error) {
-	if len(paths) == 0 {
-		return reviewers.MutationContext{}, nil
-	}
-	reports, err := mutation.LoadAll(paths)
-	if err != nil {
-		return reviewers.MutationContext{}, err
-	}
-	return reviewers.MutationContext{Reports: reports}, nil
+func mutationContextFor(root string, paths []string) (reviewers.MutationContext, error) {
+	return reviewers.LoadMutationContext(root, paths, "epic-ready", false)
 }
