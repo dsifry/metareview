@@ -170,6 +170,13 @@ func dispatch(args []string) {
 		return
 	}
 
+	// `review <subcommand> --help` prints usage and runs nothing: without this, the review
+	// subcommands took "--help" as the target and ran (and logged) a full review of it.
+	if args[0] == "review" && slices.ContainsFunc(args[1:], func(a string) bool { return a == "--help" || a == "-h" }) {
+		printHelp()
+		return
+	}
+
 	if len(args) >= 1 && args[0] == "setup" {
 		handleSetup(args[1:])
 		return
