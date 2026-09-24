@@ -1,0 +1,10 @@
+{
+  "testRunner": "vitest",
+  "vitest": { "configFile": "vitest.config.ts" },
+  "mutate": ["src/**/*.ts"],
+  "ignorePatterns": [".mutation"],
+  "disableBail": true,
+  "reporters": ["clear-text"],
+  "thresholds": { "high": 80, "low": 60, "break": null },
+  "tempDirName": ".stryker-tmp"
+}

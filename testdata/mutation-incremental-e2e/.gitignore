@@ -1,0 +1,4 @@
+node_modules/
+.mutation/
+reports/
+.stryker-tmp/
