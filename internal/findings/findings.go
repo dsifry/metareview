@@ -34,6 +34,12 @@ type Options struct {
 	// MutationEngines are the engines of this run's --mutation-report files, and empty when the run
 	// supplied none, so mutation-freshness rows and their overrides are left alone (spec §6.5).
 	MutationEngines []string
+	// MutationViews are this run's --mutation-view names (spec §11.3). With views, only freshness
+	// rows of those views count as open and may be superseded; without, every freshness row does.
+	MutationViews []string
+	// MutationViewMaps holds, per engine, the view names in the maps of this run's attested reports
+	// of that engine that carry one. An engine is absent when none does; the rename sweep needs it.
+	MutationViewMaps map[string][]string
 }
 
 type Evidence struct {
@@ -80,6 +86,8 @@ type Record struct {
 	Fingerprint        string     `json:"fingerprint"`
 	Target             any        `json:"target"`
 	FixedInRunID       string     `json:"fixedInRunId,omitempty"`
+	// View is the mutation view of a freshness row (spec §11.3), empty for every other row.
+	View string `json:"view,omitempty"`
 
 	// Process-exception provenance (see override.go). An override is never a fix:
 	// FixedInRunID stays empty.
@@ -183,7 +191,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		return Result{}, err
 	}
 	activeCurrent := make([]Record, 0, len(current))
-	openFindings := openForRun(all, run)
+	openFindings := openForRun(all, run, options)
 	for _, record := range all {
 		if record.Status == "open" &&
 			record.Fingerprint != "" &&
@@ -228,12 +236,26 @@ func freshnessEngine(fingerprint string) string {
 	return parts[3]
 }
 
-// supersedesFreshness: this run supplied reports of the row's engine and did not reproduce it.
+// supersedesFreshness: this run supplied reports of the row's engine and did not reproduce it, and
+// the row is of one of the run's views (spec §11.3), or of a view that no view map of the run's
+// reports of that engine names any more (the rename sweep).
 func supersedesFreshness(record Record, run Run, options Options, current map[string]bool) bool {
-	return len(options.MutationEngines) > 0 && IsFreshnessFingerprint(record.Fingerprint) &&
-		slices.Contains(options.MutationEngines, freshnessEngine(record.Fingerprint)) &&
-		(record.Status == "open" || record.Status == StatusOverridePending) &&
-		sameRunTarget(record, run) && !current[record.Fingerprint]
+	engine := freshnessEngine(record.Fingerprint)
+	if len(options.MutationEngines) == 0 || !IsFreshnessFingerprint(record.Fingerprint) ||
+		!slices.Contains(options.MutationEngines, engine) ||
+		(record.Status != "open" && record.Status != StatusOverridePending) ||
+		!sameRunTarget(record, run) || current[record.Fingerprint] || record.RunID == run.ID {
+		return false
+	}
+	names, mapped := options.MutationViewMaps[engine]
+	renamed := record.View != "" && mapped && !slices.Contains(names, record.View)
+	return inViewScope(record, options) || renamed
+}
+
+// inViewScope: a run with --mutation-view owns only the freshness rows of its views (spec §11.3).
+func inViewScope(record Record, options Options) bool {
+	return len(options.MutationViews) == 0 || !IsFreshnessFingerprint(record.Fingerprint) ||
+		slices.Contains(options.MutationViews, record.View)
 }
 
 // OnlyStaleBlockers reports that every open blocking finding is stale mutation evidence (spec §6.8).
@@ -789,6 +811,7 @@ func normalize(run Run, finding Input, index int, createdAt string) Record {
 		KnowledgeCandidate: finding.KnowledgeCandidate,
 		BeadsFollowupID:    nil,
 		Fingerprint:        finding.Fingerprint,
+		View:               finding.View,
 		Target:             run.Target,
 		CreatedAt:          createdAt,
 		UpdatedAt:          createdAt,
@@ -881,10 +904,10 @@ func classForCount(classification, severity string) string {
 	}
 }
 
-func openForRun(records []Record, run Run) []Record {
+func openForRun(records []Record, run Run, options Options) []Record {
 	open := make([]Record, 0, len(records))
 	for _, record := range records {
-		if Blocks(record.Status) && sameRunTarget(record, run) {
+		if Blocks(record.Status) && sameRunTarget(record, run) && inViewScope(record, options) {
 			open = append(open, record)
 		}
 	}
