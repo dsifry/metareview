@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-e",
+  "kind": "shard",
+  "shardId": "shard-e",
+  "shardHash": "0795d10edc9694ba",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:43:23Z",
+  "evidence": [
+    {
+      "path": "internal/mutationfresh/content.go",
+      "line": 525
+    },
+    {
+      "note": "head.fill (content.go:525-558) spawns min(16,len(todo)) git-cat-file workers writing only to a per-call `results` channel; h.cache is written only after wg.Wait() returns, single-threaded, so there is no data race on the map. Confirmed via internal/mutationfresh/build.go:24-34 (Build) and classify.go:128 that Classify calls content.Read exactly once per report inside a sequential for-loop (no concurrent external callers of the same head instance), so the doc comment's 'in parallel' refers only to the internal git subprocess fan-out, which is safe."
+    },
+    {
+      "note": "Verified head.Read/head.fill drain the results channel fully (buffered to len(todo), all senders finished before close) before returning, including on the early-return error path, so no goroutine leak."
+    },
+    {
+      "path": "internal/mutationfresh/glob.go",
+      "line": 30
+    },
+    {
+      "note": "internal/findings/override.go supersededFreshness() and overrideLines() StatusSuperseded branch cross-checked against internal/findings/freshness_test.go's TestOverriddenFreshnessRowsStayAndSupersededRowsTakeEscalatedOverrides; the two-phase escalation-required override semantics match."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

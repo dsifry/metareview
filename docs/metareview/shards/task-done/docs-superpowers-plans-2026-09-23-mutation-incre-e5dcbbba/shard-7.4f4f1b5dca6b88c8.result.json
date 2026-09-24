@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-7",
+  "kind": "shard",
+  "shardId": "shard-7",
+  "shardHash": "4f4f1b5dca6b88c8",
+  "planHash": "edeacff8273fa5e4",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:47:40Z",
+  "evidence": [
+    {
+      "path": "internal/prready/review.go",
+      "line": 298
+    },
+    {
+      "path": "internal/epicready/stale_escalation_test.go",
+      "line": 105
+    },
+    {
+      "path": "internal/mutationfresh/digest.go",
+      "line": 23
+    },
+    {
+      "path": "internal/learning/freshness_test.go",
+      "line": 24
+    },
+    {
+      "note": "Only change since plan 28a9de61df9c3434 (previously reviewed PASS) is commit aed71ce, confirmed via git show: it renames the test fingerprint string \"quality:todo\" to \"quality:lint-marker\" in this shard's internal/learning/freshness_test.go line 24 (ordinary.Fingerprint) purely as a neutral non-freshness fingerprint fixture; the rest of the shard's files (internal/epicready/review_markdown_test.go, stale_escalation_test.go, internal/mutationfresh/digest.go, internal/prready/review.go, testdata/mutation-incremental/config-digest-vectors.json) are byte-identical to the prior pack."
+    },
+    {
+      "note": "Ran go test -count=1 ./internal/findings/ ./internal/learning/ and go test ./internal/mutationfresh/... ./internal/prready/... ./internal/epicready/... in this worktree; all packages pass, including TestLearningSkipsFreshnessFindings which now uses quality:lint-marker as its ordinary (non-freshness) fingerprint and still exercises the same behavior."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

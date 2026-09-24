@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1",
+  "kind": "shard",
+  "shardId": "shard-1",
+  "shardHash": "478d32da4dd5c18a",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:42:14Z",
+  "evidence": [
+    { "note": "Reviewed prready freshness_test.go covering HEAD-mode staleness and supersession end to end, plus three real attestation fixture refreshes; test asserts stale row then superseded status, matching spec 6.2 through 6.5, no blockers." }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

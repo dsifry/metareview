@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-8",
+  "kind": "shard",
+  "shardId": "shard-8",
+  "shardHash": "76893d92a38fba7f",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:43:00Z",
+  "evidence": [
+    { "note": "Reviewed internal/mutation/parse.go reportSHA256 addition (Report.SHA256 field confirmed present with json:\"-\" tag in report.go), internal/mutationfresh/build_test.go and helpers_test.go coverage for stale/pending/unattested classification and mode wiring, and the types-only real attestation fixture regeneration; all consistent with spec section 6, well covered by tests, no blockers." }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

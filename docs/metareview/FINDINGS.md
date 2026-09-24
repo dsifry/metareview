@@ -1,6 +1,6 @@
 # metareview Findings
 
-No unresolved findings recorded yet.
+- mrvf-20260924-044639306140000-task-done-2026-09-23-mutation-incremental-2a-gate-ed03c179-001 [high] Review context risk (architecture-reviewer)
 
 ## Process Overrides
 

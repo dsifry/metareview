@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-e-2",
+  "kind": "shard",
+  "shardId": "shard-e-2",
+  "shardHash": "dbcff8f7debd56d8",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:43:23Z",
+  "evidence": [
+    {
+      "note": "testdata/mutation-incremental/real/helper-make/incremental.json and real/time-budget/attestation.json diffs are regenerated real Stryker fixtures: reordered mutant entries with regenerated IDs/killedBy sets for the same source/tests, and refreshed timestamps/digests/config field respectively; no semantic change to fixture intent."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

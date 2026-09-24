@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-7",
+  "kind": "shard",
+  "shardId": "shard-7",
+  "shardHash": "a6778c633dec1978",
+  "planHash": "28a9de61df9c3434",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T04:43:05Z",
+  "evidence": [
+    {
+      "path": "internal/prready/review.go",
+      "line": 298
+    },
+    {
+      "path": "internal/epicready/stale_escalation_test.go",
+      "line": 105
+    },
+    {
+      "path": "internal/mutationfresh/digest_test.go",
+      "line": 23
+    },
+    {
+      "note": "Ran go test ./internal/mutationfresh/... ./internal/prready/... ./internal/epicready/... ./internal/learning/... in the worktree; all packages pass, including TestConfigDigestVectors against the new testdata/mutation-incremental/config-digest-vectors.json fixture and TestStaleOnlyChainsWaitForFreshEvidence covering the new staleOnly branch in verdictForCounts."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}
