@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **mutation-incremental harness template (`templates/mutation-incremental/`).** Change-driven
+  StrykerJS runs: the harness plans from content digests (never dates), re-runs only what a change
+  can affect, and records what it verified in an attested state (`attestation.json` +
+  `incremental.json`). Work it cannot re-verify within its budget or time limit is deferred to a
+  full run, visibly. Commands: `plan`, `run`, `seed`, `fetch-state`, `publish-state`, `break-lock`
+  and `summary`. A GitHub workflow template keeps state on `mutation-state/{inc,full}` branches
+  (cache as a fast path), with PR routing (`pendingOnPr`), a per-view project verifier, and read-time
+  views. Proven locally against real StrykerJS 10 and Vitest 4, including an equivalence check that
+  every incremental kill is a fresh kill. Gate integration (evidence freshness) follows in 0.13.0.
+  The ≤ 2 min p50 bar for a one-line edit is pending the external trial. Guide:
+  `docs/mutation-harness.md`.
+
 ## 0.12.0 - 2026-09-10
 
 ### Added

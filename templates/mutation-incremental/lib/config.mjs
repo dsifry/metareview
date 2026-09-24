@@ -96,6 +96,7 @@ export function loadConfig(top, configArg) {
 
   const stateDir = resolve(top, raw.stateDir);
   if (!inside(top, stateDir) || stateDir === resolve(top)) fail('stateDir must be inside the repository');
+  // Test-only escape hatch (the harness's own unit tests create repositories under the OS temp dir).
   if (!process.env.MUTATION_ALLOW_TMP_STATE) {
     for (const t of [tmpdir(), '/tmp']) {
       if (inside(realpathSync(t), realpathSync(top))) fail('stateDir must not be under the OS temp directory (it is purged)');
