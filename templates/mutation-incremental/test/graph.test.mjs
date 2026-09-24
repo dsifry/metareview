@@ -133,6 +133,7 @@ test('directory specifiers resolve to the directory index', () => {
   r.write('src/idx/dot.test.ts', "import { a } from '.';");
   r.write('src/idx/slash.test.ts', "import { a } from './';");
   r.write('src/idx/sub/up.test.ts', "import { a } from '..';");
+  r.write('src/idx.ts', 'export const sibling = 1;'); // a directory specifier never names this file
   r.write('index.ts', 'export const top = 1;');
   r.write('root.test.ts', "import { top } from '.';");
   mkdirSync(join(r.top, 'node_modules'), { recursive: true }); // '.' must not probe the repo's own node_modules

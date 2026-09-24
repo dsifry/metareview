@@ -314,7 +314,7 @@ and main pays one full run (`stateVersion` changes make older states cold).
     killed it, or a support, global or unclassified input changed; the first cause is recorded.
     A changed `mutate` file whose edit touches no mutant (a comment, an import, a new function
     before it has mutants) counts like a global input and stales every kill until the harness
-    re-runs. So does a changed `mutate` file with a static (module-level) mutant, which Stryker
+    re-runs. So does an edit touching a static (module-level) mutant, which Stryker
     reports with no covering tests. This is conservative on purpose: the gate has no import graph;
   - **pending** — its file is covered by a deferral. It is "inherited" when only deferrals
     carried from main's state cover it, and "counted" when the run's own changes caused it;

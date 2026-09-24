@@ -231,9 +231,9 @@ func changedPaths(att Attestation, content Content) (map[string]change, error) {
 // causeFinder returns a kill's recorded cause, in the §6.3 order: its own file; the byte-smallest
 // changed test whose ids it was killed by; the byte-smallest changed mutate file with mutants whose
 // coverage includes a killing test; else the byte-smallest changed support, global, unclassified or
-// mutate path with no mutants, with an edit outside every mutant (§11.5), or with a static mutant
-// (whose coveredBy is empty because every test ran it): the gate has no import graph, so these
-// invalidate every kill.
+// mutate path with no mutants, with an edit outside every mutant (§11.5), or with an edit touching
+// a static mutant (whose coveredBy is empty because every test ran it): the gate has no import
+// graph, so these invalidate every kill.
 func causeFinder(d *mutation.StrykerDetail, changed map[string]change) func(file string, killedBy []string) string {
 	testOf := map[string]string{}
 	type covering struct {
@@ -250,7 +250,7 @@ func causeFinder(d *mutation.StrykerDetail, changed map[string]change) func(file
 					testOf[id] = p
 				}
 			}
-		case c.category == "mutate" && len(d.Files[p].Mutants) > 0 && !outOfMutant(d.Files[p], c) && !hasStatic(d.Files[p]):
+		case c.category == "mutate" && len(d.Files[p].Mutants) > 0 && !outOfMutant(d.Files[p], c) && !staticTouched(d.Files[p], c):
 			ids := map[string]bool{}
 			for _, m := range d.Files[p].Mutants {
 				for _, id := range m.CoveredBy {
@@ -289,10 +289,21 @@ func causeFinder(d *mutation.StrykerDetail, changed map[string]change) func(file
 	}
 }
 
-func hasStatic(file mutation.StrykerFile) bool {
+// staticTouched: the edit intersects a static mutant, like the planner's rule (a deleted file is
+// changed everywhere). Reached only for a diffable present file, or a deleted one.
+func staticTouched(file mutation.StrykerFile, c change) bool {
+	hunks, _ := lineDiff(file.Source, string(c.data))
 	for _, m := range file.Mutants {
-		if m.Static {
+		if !m.Static {
+			continue
+		}
+		if c.digest == Absent {
 			return true
+		}
+		for _, h := range hunks {
+			if hunkIntersects(m.StartLine, m.EndLine, h) {
+				return true
+			}
 		}
 	}
 	return false

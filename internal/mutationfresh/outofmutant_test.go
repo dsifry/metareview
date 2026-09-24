@@ -1,6 +1,7 @@
 package mutationfresh
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -65,6 +66,44 @@ func TestDeletedUnattestedPathIsNotAChange(t *testing.T) {
 	}
 }
 
+// Like the planner, the gate reacts only to a static mutant the edit touches: an edit inside a
+// function of a file that also has a static mutant keeps the coverage rule (its own kills and those
+// of its covering tests), and an edit to the static line is a blanket cause.
+func TestOnlyATouchedStaticMutantIsBlanket(t *testing.T) {
+	k := "const A = 1;\nexport function f() {\n  return A + 1;\n}\n"
+	o := "export const o = 2;\n"
+	root := gitRepo(t, map[string]string{"src/k.ts": k, "src/o.ts": o})
+	dir := t.TempDir()
+	report := `{"files":{` +
+		`"src/k.ts":{"source":` + jsonString(k) + `,"mutants":[` +
+		`{"id":"s1","mutatorName":"M","status":"Killed","static":true,"killedBy":["t1"],"coveredBy":[],"location":{"start":{"line":1},"end":{"line":1}}},` +
+		`{"id":"m2","mutatorName":"M","status":"Killed","killedBy":["t1"],"coveredBy":["t1"],"location":{"start":{"line":3},"end":{"line":3}}}]},` +
+		`"src/o.ts":{"source":` + jsonString(o) + `,"mutants":[` +
+		`{"id":"o1","mutatorName":"M","status":"Killed","killedBy":["t2"],"coveredBy":["t2"],"location":{"start":{"line":1},"end":{"line":1}}}]}},` +
+		`"testFiles":{"k.test.ts":{"tests":[{"id":"t1"}]},"o.test.ts":{"tests":[{"id":"t2"}]}}}`
+	write(t, dir, "incremental.json", report)
+	att := validAttestation(sha256Hex([]byte(report)))
+	att["files"] = map[string]any{
+		"src/k.ts": map[string]any{"digest": digestOf(Entry{Data: []byte(k)}), "category": "mutate", "tracked": true},
+		"src/o.ts": map[string]any{"digest": digestOf(Entry{Data: []byte(o)}), "category": "mutate", "tracked": true},
+	}
+	writeAttestation(t, dir, att)
+	path := filepath.Join(dir, "incremental.json")
+	write(t, root, "src/k.ts", "const A = 1;\nexport function f() {\n  return A + 2;\n}\n")
+	if f := classifyAt(t, path, root); f.Stale != 2 || f.Verified != 1 {
+		t.Errorf("an edit inside f: %+v", f)
+	}
+	write(t, root, "src/k.ts", "const A = 5;\nexport function f() {\n  return A + 1;\n}\n")
+	if f := classifyAt(t, path, root); f.Stale != 3 || causes(f)["src/k.ts"] != 3 {
+		t.Errorf("an edit to the static line: %+v", f)
+	}
+}
+
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
 // Stryker reports a static (module-level) mutant with no coveredBy: every test ran it, and the gate
 // has no import graph to say which tests read it. A changed file with one is a blanket cause.
 // src/c.ts's line-2 mutants include static mutant 17 in the real report.
@@ -73,5 +112,12 @@ func TestStaticMutantFileIsABlanketCause(t *testing.T) {
 	write(t, root, "src/c.ts", "import { LIMIT } from './limits';\nexport const twice = (n: number) => Math.min(n * 3, LIMIT);\n")
 	if f := classifyAt(t, report, root); f.Stale != 24 || causes(f)["src/c.ts"] != 24 {
 		t.Errorf("edited c.ts: %+v", f)
+	}
+	// A deleted file is changed everywhere, so its static mutant is touched too.
+	if err := os.Remove(filepath.Join(root, "src/c.ts")); err != nil {
+		t.Fatal(err)
+	}
+	if f := classifyAt(t, report, root); f.Stale != 24 || causes(f)["src/c.ts"] != 24 {
+		t.Errorf("deleted c.ts: %+v", f)
 	}
 }

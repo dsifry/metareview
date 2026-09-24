@@ -23,9 +23,11 @@ export function specifiers(source) {
   return [...out];
 }
 
-function resolveFile(base, files) {
+// A directory specifier ('.', '..', a trailing '/') names only the directory's index.
+function resolveFile(base, files, directory = false) {
   const dir = base === '.' ? '' : `${base}/`; // a directory specifier at the repository root
-  const candidates = [base, ...SOURCE_EXTS.map((e) => base + e), ...SOURCE_EXTS.map((e) => `${dir}index${e}`)];
+  const index = SOURCE_EXTS.map((e) => `${dir}index${e}`);
+  const candidates = directory ? index : [base, ...SOURCE_EXTS.map((e) => base + e), ...index];
   const js = base.match(/^(.*)\.[mc]?jsx?$/);
   if (js) candidates.push(...TS_EXTS.map((e) => js[1] + e));
   return candidates.find((c) => files[c]?.digest.startsWith('sha256:')) ?? null;
@@ -49,6 +51,7 @@ function classify(spec, fromFile, ctx) {
   let base = null;
   // '.' and '..' name a directory (its index), like './' and '../'.
   const relative = spec === '.' || spec === '..' || spec.startsWith('./') || spec.startsWith('../');
+  const directory = spec === '.' || spec === '..' || spec.endsWith('/');
   if (relative) {
     base = posix.normalize(posix.join(posix.dirname(fromFile), spec)).replace(/(.)\/$/, '$1');
   } else {
@@ -58,7 +61,7 @@ function classify(spec, fromFile, ctx) {
   if (base !== null) {
     // Spec §5.4: a relative or alias specifier that reaches no regular file in the snapshot (outside
     // the repo, gitignored or generated, excluded) is unresolved, so its file is an open importer.
-    const to = base.startsWith('../') ? null : resolveFile(base, ctx.files);
+    const to = base.startsWith('../') ? null : resolveFile(base, ctx.files, directory);
     if (to) return { edge: to };
     // An alias key can also prefix a package name ("@" and "@testing-library/react"); an alias
     // specifier that reaches no file is still a package when one is installed under that name.
