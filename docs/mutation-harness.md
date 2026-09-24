@@ -187,6 +187,30 @@ With `GITHUB_OUTPUT` set, `run` appends:
   are the verifier's timeout, setup, and the `pr-full` job timeout. An overrun is red and
   re-runnable, never silently green.
 
+**Sizing under `pendingOnPr: "full"` or `"full-on-global"`.**
+
+- The workflow variable `MUTATION_PR_MAX_MINUTES` (`<m>`, default 60) replaces
+  `maxMinutesPerInvocation` on routed PR runs. Size it so a timeout is rare. A timeout costs a sweep,
+  not a failure.
+- `incremental-pr`'s `timeout-minutes` must be at least:
+
+  setup + 2 × (`<m>` + 1) + max(1, views) × (`verify.timeoutMinutes` + 0.5)
+
+  This keeps a job-level timeout from pre-empting the harness and turning a PR red because of runner
+  speed. The template's 150 fits the defaults (60 minutes, one view, no verifier); raise it as views
+  and verifier time grow.
+- `pr-full`'s `timeout-minutes` must be at least setup + one full run + max(1, views) ×
+  `verify.timeoutMinutes`. Size it like main's `full` job. An overrun is red and re-runnable.
+- Under `full`, every PR that exceeds `<m>` pays a sweep.
+- A PR that keeps timing out pays a sweep on every push until `<m>` is raised.
+- A force-push during a running sweep lets that sweep finish (its state is reused by the next push)
+  and queues one more sweep if the new commit also needs one.
+- A PR rebased (or not rebased) during main's pending window may pay a sweep when its lockfile digest
+  differs from main's. That is correct, just slower.
+- A push whose `incremental-pr` finishes before a running sweep saves its cache re-plans from the
+  older state, and may pay one more sweep.
+- Watch main's `full` job: while it is red, PRs stay green on inherited pending.
+
 **What things cost.**
 
 - A change to a global input costs one full run on main. That includes a dependency bump, and
