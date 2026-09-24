@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-06",
+  "kind": "shard",
+  "shardId": "shard-06",
+  "shardHash": "72ded15e16276851",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:52:37Z",
+  "evidence": [
+    { "path": "internal/prready/evidence_test.go", "line": 303 },
+    { "path": "testdata/mutation-incremental-e2e/tests/b.test.ts", "note": "fixture test file matching src/b.ts's inRange helper, sane" }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-14",
+  "kind": "shard",
+  "shardId": "shard-14",
+  "shardHash": "2740d6b29a3b0838",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:51:57Z",
+  "evidence": [
+    { "path": "templates/mutation-incremental/lib/views.mjs", "line": 147 },
+    { "path": "internal/mutationfresh/digest_test.go", "line": 93 },
+    { "path": "docs/quickstart.md", "line": 51 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

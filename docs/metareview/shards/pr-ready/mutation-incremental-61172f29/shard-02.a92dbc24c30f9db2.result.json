@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-02",
+  "kind": "shard",
+  "shardId": "shard-02",
+  "shardHash": "a92dbc24c30f9db2",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-23T00:00:00Z",
+  "evidence": [
+    { "path": "templates/mutation-incremental/lib/config.mjs", "line": 146 },
+    { "path": "templates/mutation-incremental/lib/engine.mjs", "line": 261 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "config.mjs lines 149-153: the OS-temp-dir guard checks inside(realpathSync(t), realpathSync(top)) i.e. whether the repo root is under tmpdir, not whether stateDir itself is. It only works because line 147 already forces stateDir to be inside top, so the two are equivalent given that invariant, but the check reads as checking the wrong operands and would silently stop guarding anything if the stateDir-inside-top invariant were ever relaxed. Consider checking inside(realpathSync(t), realpathSync(stateDir)) directly for clarity/robustness.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/config.mjs", "line": 150 }
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "engine.mjs invoke(): when the report file is written and exit code is 0/1 but parseReport() returns null (corrupt/unexpected JSON shape), the function falls through to the generic outcome:'failed' branch with detail derived only from r.error/r.code, discarding the fact that a report was actually produced but malformed. Not a normal-usage failure (Stryker's own report shape is trusted here) so not blocking, but a slightly more specific detail message would aid debugging a future Stryker version bump.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/engine.mjs", "line": 285 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

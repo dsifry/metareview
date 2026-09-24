@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1c",
+  "kind": "shard",
+  "shardId": "shard-1c",
+  "shardHash": "6a2b5cacb12cd93e",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T00:00:00Z",
+  "evidence": [
+    {
+      "path": "docs/superpowers/plans/2026-09-23-mutation-incremental-2a-gate.md",
+      "line": 71
+    },
+    {
+      "path": "internal/mutationfresh/mode.go",
+      "line": 14
+    },
+    {
+      "note": "File Structure section (glob.go/digest.go/content.go/attest.go/classify.go/build.go/mode.go) matches internal/mutationfresh layout on disk"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "Plan 2a's inline code listings for Classify()/Build()/freshnessFindings()/section() omit the views parameter (e.g. plan line ~1609 'func Classify(r mutation.Report, content Content) (ReportFreshness, error)'), while the current code (internal/mutationfresh/classify.go:120, build.go:25) takes an added views []string parameter. This is explained by the plan header itself (line 27-30: views are explicitly deferred to Plan 2b, already merged onto this branch), so it is stale-by-design documentation rather than a contradiction; not a normal-usage failure.",
+      "evidence": [
+        {
+          "path": "docs/superpowers/plans/2026-09-23-mutation-incremental-2a-gate.md",
+          "line": 1609
+        },
+        {
+          "path": "internal/mutationfresh/classify.go",
+          "line": 120
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

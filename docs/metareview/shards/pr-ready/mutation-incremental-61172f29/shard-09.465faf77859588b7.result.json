@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-09",
+  "kind": "shard",
+  "shardId": "shard-09",
+  "shardHash": "465faf77859588b7",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:52:01Z",
+  "evidence": [
+    { "path": "templates/mutation-incremental/test/run.test.mjs", "line": 1 },
+    { "path": "templates/mutation-incremental/lib/run.mjs", "line": 39 },
+    { "path": "internal/taskdone/mutationctx_test.go", "line": 50 },
+    { "path": "testdata/mutation-incremental-e2e/tests/e-dec.test.ts", "line": 1 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

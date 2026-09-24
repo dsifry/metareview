@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-17",
+  "kind": "shard",
+  "shardId": "shard-17",
+  "shardHash": "665b52c76597c56b",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:51:57Z",
+  "evidence": [
+    { "path": "templates/mutation-incremental/lib/plan.mjs", "line": 329 },
+    { "path": "internal/mutationfresh/headcache_test.go", "line": 88 },
+    { "path": "internal/learning/candidates.go", "line": 50 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "plan.mjs line 333 falls back to containing(d, m.startLine).newStart when oldToNew has no entry; this assumes the line always lies inside a hunk's old range. The invariant appears sound by construction (hunks partition the diff) and is covered by the diff-vectors.json shared test suite, but a future change to lineDiff's hunk assembly could silently reintroduce an undefined dereference here with no local guard.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/plan.mjs", "line": 333 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

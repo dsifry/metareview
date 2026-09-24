@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-03-3",
+  "kind": "shard",
+  "shardId": "shard-03-3",
+  "shardHash": "9e2dcda91a4f1cb8",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:52:30Z",
+  "evidence": [
+    {
+      "path": "internal/mutationfresh/views.go",
+      "line": 18
+    },
+    {
+      "path": "internal/prready/freshness_test.go",
+      "line": 935
+    },
+    {
+      "path": "templates/mutation-incremental/lib/graph.mjs",
+      "line": 1025
+    },
+    {
+      "note": "CheckViews call site verified at cmd/metareview/main.go:1216 and Attestation.Views field at internal/mutationfresh/attest.go:23, matching usage"
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

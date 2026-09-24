@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-08",
+  "kind": "shard",
+  "shardId": "shard-08",
+  "shardHash": "97bcad824dda4eae",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:52:37Z",
+  "evidence": [
+    { "path": "internal/mutationfresh/content_test.go", "line": 37 },
+    { "path": "internal/reviewers/viewmaps_test.go", "line": 12 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "internal/mutationfresh/content_test.go:39-45 (TestWorktreeReadErrorsStopTheReview) chmod(0o000) on a file and a directory then expects Read to fail; as root (common in containerized CI images) permission checks are bypassed, so the read would succeed and the test's t.Error would fire, giving a false failure signal rather than verifying the intended error path. Companion of the same pattern in classify_test.go (shard-04). Test-hygiene gap only; the reviewed content.go read logic itself (Worktree/Head paths, symlink handling, gitlink exclusion) is otherwise sound.",
+      "evidence": [
+        { "path": "internal/mutationfresh/content_test.go", "line": 39 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

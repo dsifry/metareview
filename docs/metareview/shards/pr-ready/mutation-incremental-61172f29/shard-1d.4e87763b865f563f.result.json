@@ -1,0 +1,55 @@
+{
+  "id": "shard-1d",
+  "kind": "shard",
+  "shardId": "shard-1d",
+  "shardHash": "4e87763b865f563f",
+  "verdict": "PASS_ADVISORY",
+  "evidence": [
+    {
+      "path": "internal/findings/override.go",
+      "line": 74,
+      "note": "superseded freshness rows take an override only with an escalation, same as fixed rows; requester != grantor still enforced at line 118"
+    },
+    {
+      "path": "internal/findings/findings.go",
+      "line": 241,
+      "note": "supersedesFreshness also supersedes override-pending rows; overrideLines renders them as [superseded] and PendingOverrides stops counting them (finding no longer present)"
+    },
+    {
+      "path": "internal/mutationfresh/content.go",
+      "line": 186,
+      "note": "HEAD reader: bounded worker pool, results channel buffered to len(unread), no goroutine leak on early error; gitlinks and non-regular paths are absent"
+    },
+    {
+      "path": "internal/mutationfresh/outofmutant_test.go",
+      "line": 72,
+      "note": "TestOnlyATouchedStaticMutantIsBlanket covers both branches of staticTouched (edit inside f vs edit to static line); deleted file covered at line 116"
+    },
+    {
+      "path": "templates/mutation-incremental/lib/nodever.mjs",
+      "line": 14,
+      "note": "numeric prefix match; aliases (lts/*) skipped; first existing file wins per spec 5.1"
+    },
+    {
+      "note": "go test ./internal/findings ./internal/mutationfresh and root Mutation* tests pass; node --test state/attest/golden pass (13/13)"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "Test failure message mislabels the file: TestDeletedMutateFileIsNotBlanket removes src/e.ts but reports 'deleted c.ts'. Cosmetic only.",
+      "evidence": [
+        {
+          "path": "internal/mutationfresh/outofmutant_test.go",
+          "line": 50
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 1,
+  "planHash": "d05fa31fc60a9cb8",
+  "reviewer": "claude-opus-subagent",
+  "reviewedAt": "2026-09-24T05:53:00Z",
+  "blockingCount": 0
+}

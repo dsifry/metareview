@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0f-2",
+  "kind": "shard",
+  "shardId": "shard-0f-2",
+  "shardHash": "86f08f60c6360b98",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:54:19Z",
+  "evidence": [
+    {
+      "path": "internal/mutationfresh/digest.go",
+      "line": 36,
+      "note": "configDigest matches lib/json.mjs canonicalJSON exactly; verified config-digest-vectors.json against both JS reimplementation and go test -run TestConfigDigestVectors, all pass"
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-05",
+  "kind": "shard",
+  "shardId": "shard-05",
+  "shardHash": "110cd9542e5eddaa",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:52:37Z",
+  "evidence": [
+    { "path": "internal/epicready/review.go", "line": 628 },
+    { "path": "internal/epicready/review.go", "line": 151 },
+    { "path": "templates/mutation-incremental/lib/seed.mjs", "line": 36 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "templates/mutation-incremental/lib/seed.mjs:36 mergeReports keeps only the first report's metadata for a given test-file path (testFileEntries) while it does verify source equality for mutant files; if --from reports disagree on a shared test file's non-tests metadata, the mismatch is silently dropped rather than checked. Low-risk since --from reports are expected to come from the same commit's Stryker output (spec §5.8/§11.6), not adversarial inputs.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/seed.mjs", "line": 36 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

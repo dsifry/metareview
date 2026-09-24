@@ -1,0 +1,59 @@
+{
+  "id": "cross-shard",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "verdict": "PASS_ADVISORY",
+  "evidence": [
+    {
+      "path": "templates/mutation-incremental/lib/attest.mjs",
+      "line": 26,
+      "note": "harness writes schemaVersion 1, tool, engine stryker, report, reportSha256, config, lists, exclusions, deferrals, views; Go Attestation (internal/mutationfresh/attest.go) reads exactly these and validates version/tool/engine/report/hash"
+    },
+    {
+      "path": "internal/mutationfresh/digest.go",
+      "line": 25,
+      "note": "digest formats sha256:/symlink: and config-without-views canonical JSON match lib/snapshot.mjs; pinned by config-digest-vectors on both sides"
+    },
+    {
+      "path": "internal/mutationfresh/classify.go",
+      "line": 253,
+      "note": "gate static/out-of-mutant rule mirrors plan.mjs step 4; gate is narrower than whole-mode planner only where per-test coverage already bounds the effect"
+    },
+    {
+      "path": "internal/mutationfresh/build.go",
+      "line": 108,
+      "note": "fingerprints mutation:<kind>:<mode>:<engine>[:view]:... match findings.freshnessPrefixes and freshnessEngine (parts[3])"
+    },
+    {
+      "path": "internal/reviewers/mutation.go",
+      "line": 122,
+      "note": "HEAD vs worktree content selection per scope; both harness and gate key paths on git toplevel"
+    },
+    {
+      "note": "glob, diff and config-digest conformance vectors are consumed by both Go and Node tests"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "Design spec lags the static-mutant and directory-specifier rules the last two commits added to both planner and gate (see shard-1e-2/1e-3). Code and docs/mutation-harness.md agree with each other; only the spec is behind.",
+      "evidence": [
+        {
+          "path": "docs/superpowers/specs/2026-09-23-mutation-incremental-design.md",
+          "line": 250
+        },
+        {
+          "path": "docs/mutation-harness.md",
+          "line": 317
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 1,
+  "planHash": "d05fa31fc60a9cb8",
+  "reviewer": "claude-opus-subagent",
+  "reviewedAt": "2026-09-24T05:53:00Z",
+  "blockingCount": 0
+}

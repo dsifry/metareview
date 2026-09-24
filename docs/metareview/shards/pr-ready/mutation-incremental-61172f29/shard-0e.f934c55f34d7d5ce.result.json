@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0e",
+  "kind": "shard",
+  "shardId": "shard-0e",
+  "shardHash": "f934c55f34d7d5ce",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:54:19Z",
+  "evidence": [
+    {
+      "path": "internal/prready/review.go",
+      "line": 1321,
+      "note": "verdictForCounts stale-only escalation gated at 2x maxAttempts before ESCALATED; go test ./internal/prready/... and ./internal/epicready/... pass with count=1"
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

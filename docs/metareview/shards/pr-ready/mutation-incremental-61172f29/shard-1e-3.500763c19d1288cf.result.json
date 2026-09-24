@@ -1,0 +1,44 @@
+{
+  "id": "shard-1e-3",
+  "kind": "shard",
+  "shardId": "shard-1e-3",
+  "shardHash": "500763c19d1288cf",
+  "verdict": "PASS_ADVISORY",
+  "evidence": [
+    {
+      "path": "docs/superpowers/specs/2026-09-23-mutation-incremental-design.md",
+      "line": 1083,
+      "note": "11.5 out-of-mutant gate mirror implemented by classify.go outOfMutant using the shared lineDiff"
+    },
+    {
+      "path": "templates/mutation-incremental/lib/errors.mjs",
+      "line": 1,
+      "note": "exit-code classes match spec 5.1 contract"
+    },
+    {
+      "note": "testdata e-flip-control attestation and types.ts fixture sanity-checked: schemaVersion 1, tool metareview-mutation-incremental, types.ts has no mutants as spec 7 says"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "Spec drift: 11.4.3/11.5 describe static code as an out-of-mutant hunk and do not state the implemented rule (planner adds killers + importer tests of a touched static mutant; gate blankets only when the edit touches a static mutant or the file is deleted). docs/mutation-harness.md line 317 documents it; the spec should be amended.",
+      "evidence": [
+        {
+          "path": "docs/superpowers/specs/2026-09-23-mutation-incremental-design.md",
+          "line": 1068
+        },
+        {
+          "path": "internal/mutationfresh/classify.go",
+          "line": 292
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 1,
+  "planHash": "d05fa31fc60a9cb8",
+  "reviewer": "claude-opus-subagent",
+  "reviewedAt": "2026-09-24T05:53:00Z",
+  "blockingCount": 0
+}

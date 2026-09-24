@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-15",
+  "kind": "shard",
+  "shardId": "shard-15",
+  "shardHash": "303b54cb594a2e4a",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:51:57Z",
+  "evidence": [
+    { "path": "internal/taskdone/review.go", "line": 299 },
+    { "path": "internal/findings/views_test.go", "line": 98 },
+    { "path": ".gitignore", "line": 55 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-04",
+  "kind": "shard",
+  "shardId": "shard-04",
+  "shardHash": "a62e65cef5db5666",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:52:37Z",
+  "evidence": [
+    { "path": "internal/mutationfresh/build.go", "line": 25 },
+    { "path": "internal/mutationfresh/build.go", "line": 144 },
+    { "path": "internal/mutationfresh/classify_test.go", "line": 247 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "internal/mutationfresh/classify_test.go:247 (TestClassifyStopsOnContentErrors) chmod(0o000) then expects Worktree(root).Read to fail; this is a no-op when the test runner's effective UID is 0 (root), which is common in containerized CI images, so the test would silently pass through and the intended regression check would go unverified rather than fail loudly. Same pattern recurs elsewhere in this package (see shard-08 finding on content_test.go). Not a defect in the reviewed production code (Build/freshnessFindings/section in build.go look correct against the spec references in comments); flagged as a pre-existing test-hygiene gap rather than a normal-usage failure of the gate itself.",
+      "evidence": [
+        { "path": "internal/mutationfresh/classify_test.go", "line": 247 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

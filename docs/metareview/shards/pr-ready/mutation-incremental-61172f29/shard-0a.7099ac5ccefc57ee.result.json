@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0a",
+  "kind": "shard",
+  "shardId": "shard-0a",
+  "shardHash": "7099ac5ccefc57ee",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:52:01Z",
+  "evidence": [
+    { "path": "internal/mutationfresh/classify.go", "line": 171 },
+    { "path": "internal/mutationfresh/classify.go", "line": 288 },
+    { "path": "templates/mutation-incremental/lib/json.mjs", "line": 1 },
+    { "path": "templates/mutation-incremental/lib/summary.mjs", "line": 512 },
+    { "path": "templates/mutation-incremental/test/remote.test.mjs", "line": 1 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

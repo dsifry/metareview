@@ -1,6 +1,6 @@
 # metareview Findings
 
-No unresolved findings recorded yet.
+- mrvf-20260924-054904626720000-pr-ready-branch-10d735e5-001 [high] Unresolved review blockers (pr-readiness-reviewer)
 
 ## Process Overrides
 

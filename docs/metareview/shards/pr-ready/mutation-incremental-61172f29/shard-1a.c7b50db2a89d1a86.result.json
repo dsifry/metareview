@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1a",
+  "kind": "shard",
+  "shardId": "shard-1a",
+  "shardHash": "c7b50db2a89d1a86",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T00:00:00Z",
+  "evidence": [
+    {
+      "path": "templates/mutation-incremental/lib/remote.mjs",
+      "line": 61
+    },
+    {
+      "path": "templates/mutation-incremental/lib/remote.mjs",
+      "line": 105
+    },
+    {
+      "note": "authEnv covered by templates/mutation-incremental/test/remote.test.mjs"
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

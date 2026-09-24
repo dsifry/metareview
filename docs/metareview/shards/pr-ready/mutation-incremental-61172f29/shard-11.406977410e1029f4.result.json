@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-11",
+  "kind": "shard",
+  "shardId": "shard-11",
+  "shardHash": "406977410e1029f4",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T05:51:37Z",
+  "evidence": [
+    { "path": "internal/mutation/parse.go", "line": 90 },
+    { "path": "templates/mutation-incremental/lib/proc.mjs", "line": 393 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "spawnGroup's killTimer variable is reassigned if stop() runs twice (timeout then interrupt), losing the handle to the first SIGKILL timer; finish() only clears the latest one. Harmless in practice since signalGroup swallows ESRCH once the child is gone, but it is a small leaked-timer smell in templates/mutation-incremental/lib/proc.mjs around line 393-396.",
+      "evidence": [
+        { "path": "templates/mutation-incremental/lib/proc.mjs", "line": 393 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

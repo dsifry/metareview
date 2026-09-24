@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-00",
+  "kind": "shard",
+  "shardId": "shard-00",
+  "shardHash": "cb386adabecd893b",
+  "planHash": "d05fa31fc60a9cb8",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-24T00:00:00Z",
+  "evidence": [
+    { "path": "internal/findings/findings.go", "line": 368 },
+    { "path": "internal/mutationfresh/build.go", "line": 108 },
+    { "path": "internal/findings/freshness_test.go", "line": 46 },
+    { "path": "cmd/metareview/main.go", "line": 196 }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "internal/findings/findings.go:325 calls supersedesFreshness for every existing record on every run, unconditionally (not gated by previousRuns/resetRuns like the adjacent 'fixed' transition at line 152). Verified this is intentional per spec §6.5/§11.3 (freshness rows are re-evaluated by any newer run of matching engine, not tied to run-chain lineage) and covered by TestFreshEvidenceSupersedesAStaleRowNeverFixesIt; noting only because the asymmetry with the neighboring fixed-transition guard is easy to misread as a bug on a quick pass.",
+      "evidence": [
+        { "path": "internal/findings/findings.go", "line": 325 }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}
