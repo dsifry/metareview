@@ -27,6 +27,11 @@
   - A chain blocked only by stale evidence waits for a refresh for up to 2 × `maxAttempts` before
     escalating.
   - Runs without reports review exactly as before, and their pr-ready input digest is unchanged.
+  - `--mutation-view <name>` (repeatable) judges the evidence per view of the harness's view map.
+    Each view gets its own counts, findings and fingerprints, and a table row in the section.
+    Findings of other views are left alone, and a renamed view's findings are superseded.
+  - An edit to a mutated file that touches no mutant stales every kill until the harness re-runs.
+    Pending kills are split into counted and inherited.
 
 ## 0.12.0 - 2026-09-10
 

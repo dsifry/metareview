@@ -311,8 +311,12 @@ and main pays one full run (`stateVersion` changes make older states cold).
   digests whether the kill still describes the code under review:
   - **verified** — nothing it depends on changed;
   - **stale** — its file changed, a test that killed it changed, a changed file's covering tests
-    killed it, or a support, global or unclassified input changed; the first cause is recorded;
-  - **pending** — its file is covered by a deferral;
+    killed it, or a support, global or unclassified input changed; the first cause is recorded.
+    A changed `mutate` file whose edit touches no mutant (a comment, an import, a new function
+    before it has mutants) counts like a global input and stales every kill until the harness
+    re-runs. This is conservative on purpose: the gate has no import graph;
+  - **pending** — its file is covered by a deferral. It is "inherited" when only deferrals
+    carried from main's state cover it, and "counted" when the run's own changes caused it;
   - **unbound** — its file is not attested, or no test is recorded as killing it;
   - **unattested** — the report has no valid attestation.
 - **What it reads.** task-done and epic-ready read the working tree. pr-ready reads HEAD (unless
@@ -327,7 +331,19 @@ and main pays one full run (`stateVersion` changes make older states cold).
   pending and unattested findings it no longer produces. A run without reports leaves them alone.
 - **Escalation.** A chain blocked only by stale evidence waits for a refresh for up to
   2 × `maxAttempts` before it escalates ("stale mutation evidence not refreshed after N attempts").
-- **Views.** `--mutation-view` (per-view findings) arrives with views support.
+- **Views.** Pass `--mutation-view <name>` (repeatable) to judge the evidence per view.
+  - Each view gets its own counts and findings. The finding's title names the view, as in
+    `Mutation evidence stale (core): src/a.ts changed`, and its fingerprint carries it.
+  - The section gains a table with a row per view: verified, stale, pending counted, pending
+    inherited, unbound and unattested. The re-run list gains a View column.
+  - Views are never summed.
+  - A report without a view map is not scoped: every kill counts under every view. This covers an
+    unattested report, and one attested before views were adopted.
+  - These are usage errors (exit 2): an invalid name, `--mutation-view` without `--mutation-report`,
+    and a name missing from an attested report's map.
+  - A run with views owns only its views' findings. A run without views owns them all.
+  - When the reports' maps no longer name a view (it was renamed or removed), that view's open
+    findings are superseded.
 - An enforced stale finding clears only on a later run that supplies reports, or by override.
   Overrides on pending or unattested findings last only for that report. Every mutation override is
   tied to the mode in its fingerprint, and an override on one view does not cover the same cause
