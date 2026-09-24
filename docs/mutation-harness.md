@@ -99,6 +99,9 @@ Sizing:
   - `tests/**` is `test`; helpers and factories are `support`.
   - `global` is only for inputs everything depends on: lockfile, Stryker/Vitest/TS config,
     migrations, `.nvmrc`.
+  - Keep metareview's own files (`.metareview/**`, `docs/metareview/**`) in `ignore`, as the
+    example config does. Otherwise a review log committed after the harness ran counts as a new
+    unclassified path, and the gate reads every kill as stale.
 - **Aliases and open importers.** A relative or alias specifier that reaches no file in the
   repository, and is not an installed package or a Node builtin, makes its file an **open
   importer**. Every test reaching an open importer is treated as reaching everything. `plan` lists
@@ -303,11 +306,28 @@ and main pays one full run (`stateVersion` changes make older states cold).
 ## 11. The gate
 
 - Pass `<stateDir>/incremental.json` — not Stryker's `reports/mutation/mutation.json` — and every
-  report on gated runs.
-- Commit before re-running the harness for `pr-ready`.
-- The metareview gate's freshness findings (stale, pending, unattested), `--mutation-view`, and the
-  enforcement modes ship in the same 0.13.0 release; see `metareview review --help` for
-  `--mutation-report`.
+  report on gated runs. The gate reads `attestation.json` beside each report.
+- **What the gate checks.** For every kill in an attested report, it re-derives from content
+  digests whether the kill still describes the code under review:
+  - **verified** — nothing it depends on changed;
+  - **stale** — its file changed, a test that killed it changed, a changed file's covering tests
+    killed it, or a support, global or unclassified input changed; the first cause is recorded;
+  - **pending** — its file is covered by a deferral;
+  - **unbound** — its file is not attested, or no test is recorded as killing it;
+  - **unattested** — the report has no valid attestation.
+- **What it reads.** task-done and epic-ready read the working tree. pr-ready reads HEAD (unless
+  `--include-working-tree`), so commit before re-running the harness.
+- **Modes.** Set `METAREVIEW_MUTATION_FRESHNESS=advisory|enforce`; the default is `advisory`, and
+  any other value is a usage error (exit 2). task-done is always advisory.
+  - Under `enforce` (pr-ready, epic-ready), stale and unattested Stryker findings block.
+  - Pending never blocks: deferred work is not evidence, and full runs never block PRs.
+- **The review log** gains a "Mutation Evidence Freshness" section: mode, reports, kill counts by
+  class, deferral reasons, and a re-run list of (file, cause) rows.
+- **Clearing.** A later run that supplies fresh reports of the same engine supersedes stale,
+  pending and unattested findings it no longer produces. A run without reports leaves them alone.
+- **Escalation.** A chain blocked only by stale evidence waits for a refresh for up to
+  2 × `maxAttempts` before it escalates ("stale mutation evidence not refreshed after N attempts").
+- **Views.** `--mutation-view` (per-view findings) arrives with views support.
 - An enforced stale finding clears only on a later run that supplies reports, or by override.
   Overrides on pending or unattested findings last only for that report. Every mutation override is
   tied to the mode in its fingerprint, and an override on one view does not cover the same cause

@@ -12,9 +12,21 @@
   and `summary`. A GitHub workflow template keeps state on `mutation-state/{inc,full}` branches
   (cache as a fast path), with PR routing (`pendingOnPr`), a per-view project verifier, and read-time
   views. Proven locally against real StrykerJS 10 and Vitest 4, including an equivalence check that
-  every incremental kill is a fresh kill. Gate integration (evidence freshness) follows in 0.13.0.
-  The ≤ 2 min p50 bar for a one-line edit is pending the external trial. Guide:
-  `docs/mutation-harness.md`.
+  every incremental kill is a fresh kill. The gate reads its attestation (next entry). The ≤ 2 min
+  p50 bar for a one-line edit is pending the external trial. Guide: `docs/mutation-harness.md`.
+- **Mutation evidence freshness gate.** `review task-done`, `pr-ready` and `epic-ready` now judge
+  whether the kills in each `--mutation-report` still describe the code under review. They read the
+  harness's `attestation.json` beside the report and classify every kill from content digests:
+  verified, stale (with its recorded cause), pending (covered by a deferral), unbound or unattested.
+  - pr-ready reads HEAD, and the other gates read the working tree.
+  - `METAREVIEW_MUTATION_FRESHNESS=advisory|enforce` (default `advisory`; task-done is always
+    advisory). Under `enforce`, stale and unattested findings block; pending never does.
+  - Each review log gains a "Mutation Evidence Freshness" section with a re-run list.
+  - Fresh evidence supersedes earlier freshness findings instead of marking them fixed, and
+    post-merge learning ignores them.
+  - A chain blocked only by stale evidence waits for a refresh for up to 2 × `maxAttempts` before
+    escalating.
+  - Runs without reports review exactly as before, and their pr-ready input digest is unchanged.
 
 ## 0.12.0 - 2026-09-10
 

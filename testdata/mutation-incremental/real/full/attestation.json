@@ -1,5 +1,6 @@
 {
-  "completedAt": "2026-09-24T03:37:41.017Z",
+  "completedAt": "2026-09-24T04:29:00.335Z",
+  "config": "mutation-incremental.json",
   "deferrals": [],
   "engine": "stryker",
   "engineVersion": "10.0.0",
@@ -12,7 +13,7 @@
   "files": {
     "mutation-incremental.json": {
       "category": "global",
-      "digest": "sha256:f6ca015b7d238b8684417469c9f178eca2609a82521af59f0b7c7ee95a4ab262",
+      "digest": "sha256:4664d911e239c83ac395d41ae1c37d33789dacdc268b3a74a27c44edd6af3278",
       "tracked": true
     },
     "package-lock.json": {
@@ -112,12 +113,12 @@
     },
     "tools/mutation-incremental/lib/attest.mjs": {
       "category": "global",
-      "digest": "sha256:07046687976d210ea8609c3271786de8deb647e936356f566b308ce23dbb897d",
+      "digest": "sha256:c49b55e27033c5b909071c33de6fc689ee33d38dca80a8455bf2acbadf5d4457",
       "tracked": true
     },
     "tools/mutation-incremental/lib/config.mjs": {
       "category": "global",
-      "digest": "sha256:f9b42233917b29404209f43b5616c2c06fd3d4151ca2a23d4897caa931405217",
+      "digest": "sha256:b9b6a64abf84849b9f31ab61cd2e48edf5d957c7fb868d9ade92d0ebb45d9280",
       "tracked": true
     },
     "tools/mutation-incremental/lib/deferrals.mjs": {
@@ -207,7 +208,7 @@
     },
     "tools/mutation-incremental/lib/snapshot.mjs": {
       "category": "global",
-      "digest": "sha256:ced5b136132ad26a31b004073b52921a6892406ede84bdc9bde05b323ffb5afa",
+      "digest": "sha256:cb4e66c2fec456e7e1e5e9194f8a0c68ac68dfaf8aba3ab9496be48dbbac1e77",
       "tracked": true
     },
     "tools/mutation-incremental/lib/state.mjs": {
@@ -236,7 +237,7 @@
       "tracked": true
     }
   },
-  "lastFullAt": "2026-09-24T03:37:41.017Z",
+  "lastFullAt": "2026-09-24T04:29:00.335Z",
   "lists": {
     "global": [
       "package.json",
@@ -263,7 +264,7 @@
   },
   "mode": "full",
   "report": "incremental.json",
-  "reportSha256": "c0f7c8e6817b7179fa0dfbe32ec67e9b7bac3036a89813121b43dff2aa71a431",
+  "reportSha256": "ca4e2924211ab1ef48487f6dcf2c94b6887a33782f91500b097d894cc8cad21f",
   "runtime": {},
   "schemaVersion": 1,
   "score": 100,
