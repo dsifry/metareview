@@ -39,7 +39,10 @@ type ReRunRow struct {
 	Kills int    `json:"kills"`
 }
 
-type change struct{ category, digest string }
+type change struct {
+	category, digest string
+	data             []byte // current content; nil when absent
+}
 
 // Classify reads the report's attestation and gives every kill exactly one class (spec §6.3):
 // stale (first cause wins), pending, unbound or verified. Kills in an unattested report are
@@ -140,13 +143,15 @@ func changedPaths(att Attestation, content Content) (map[string]change, error) {
 		}
 		entry, attested := att.Files[p]
 		if !attested {
-			changed[p] = change{category: Categorize(p, att.Lists), digest: digest}
+			if digest != Absent { // a listed path removed from disk is not present (§6.3)
+				changed[p] = change{category: Categorize(p, att.Lists), digest: digest}
+			}
 			continue
 		}
 		if digest == entry.Digest || (content.Head() && !entry.Tracked && digest == Absent) {
 			continue
 		}
-		changed[p] = change{category: entry.Category, digest: digest}
+		changed[p] = change{category: entry.Category, digest: digest, data: entries[p].Data}
 	}
 	return changed, nil
 }
@@ -154,7 +159,8 @@ func changedPaths(att Attestation, content Content) (map[string]change, error) {
 // causeFinder returns a kill's recorded cause, in the §6.3 order: its own file; the byte-smallest
 // changed test whose ids it was killed by; the byte-smallest changed mutate file with mutants whose
 // coverage includes a killing test; else the byte-smallest changed support, global, unclassified or
-// zero-mutant mutate path (the gate has no import graph, so these invalidate every kill).
+// mutate path with no mutants or with an edit outside every mutant (§11.5): the gate has no import
+// graph, so these invalidate every kill.
 func causeFinder(d *mutation.StrykerDetail, changed map[string]change) func(file string, killedBy []string) string {
 	testOf := map[string]string{}
 	type covering struct {
@@ -171,7 +177,7 @@ func causeFinder(d *mutation.StrykerDetail, changed map[string]change) func(file
 					testOf[id] = p
 				}
 			}
-		case c.category == "mutate" && len(d.Files[p].Mutants) > 0:
+		case c.category == "mutate" && len(d.Files[p].Mutants) > 0 && !outOfMutant(d.Files[p], c):
 			ids := map[string]bool{}
 			for _, m := range d.Files[p].Mutants {
 				for _, id := range m.CoveredBy {
@@ -208,6 +214,29 @@ func causeFinder(d *mutation.StrykerDetail, changed map[string]change) func(file
 		}
 		return ""
 	}
+}
+
+// outOfMutant: the file's edit has a hunk that no mutant of any status intersects, or cannot be
+// diffed at all. Mutant spans are lines of the source Stryker read, the diff's old side. A deleted
+// file is changed everywhere, which its mutants intersect.
+func outOfMutant(file mutation.StrykerFile, c change) bool {
+	if c.digest == Absent {
+		return false
+	}
+	hunks, ok := lineDiff(file.Source, string(c.data))
+	if !ok {
+		return true
+	}
+	for _, h := range hunks {
+		hit := false
+		for _, m := range file.Mutants {
+			hit = hit || hunkIntersects(m.StartLine, m.EndLine, h)
+		}
+		if !hit {
+			return true
+		}
+	}
+	return false
 }
 
 func deferred(deferrals []Deferral, file string) bool {
