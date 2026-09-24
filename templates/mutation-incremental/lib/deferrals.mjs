@@ -77,3 +77,11 @@ export function pendingCause(classified) {
   const cause = ['unreachable', 'other', 'timeout'].find((c) => infos.some((i) => i.cause === c)) ?? 'none';
   return { cause, counted };
 }
+
+// Spec §11.2 Routing. Without --pr, or under allow, the exit code alone decides ("verdict"). Under
+// full every cause but none routes to the sweep; under full-on-global only unreachable fails the PR,
+// so a PR's verdict never depends on runner speed.
+export function routeFor(pendingOnPr, cause, pr) {
+  if (!pr || pendingOnPr === 'allow' || cause === 'none') return 'verdict';
+  return pendingOnPr === 'full-on-global' && cause === 'unreachable' ? 'fail' : 'sweep';
+}

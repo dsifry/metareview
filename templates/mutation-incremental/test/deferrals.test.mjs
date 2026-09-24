@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { reasonInfo, classifyDeferrals, pendingCause, deferralKey } from '../lib/deferrals.mjs';
+import { routeFor } from '../lib/deferrals.mjs';
 
 test('reasonInfo: every canonical reason and its named key', () => {
   const cases = [
@@ -72,4 +73,21 @@ test('pendingCause precedence: global > unreachable > other > timeout > none', (
   assert.equal(cause(c('forced set 4 exceeds budget 1', ['a'])), 'timeout');
   assert.deepEqual(pendingCause([c('blocked by deferred scope', ['a']), c('x', ['*'], true)]).counted, [c('blocked by deferred scope', ['a'])]);
   assert.throws(() => pendingCause([c('mystery', ['a'])]), (e) => e.exitCode === 2);
+});
+
+
+test('routeFor follows §11.2', () => {
+  const rows = [
+    // pendingOnPr, cause, pr → route
+    ['allow', 'global', true, 'verdict'],
+    ['full', 'timeout', false, 'verdict'],
+    ['full', 'none', true, 'verdict'],
+    ['full', 'unreachable', true, 'sweep'],
+    ['full', 'other', true, 'sweep'],
+    ['full-on-global', 'global', true, 'sweep'],
+    ['full-on-global', 'timeout', true, 'sweep'],
+    ['full-on-global', 'unreachable', true, 'fail'],
+    ['full-on-global', 'none', true, 'verdict'],
+  ];
+  for (const [mode, cause, pr, route] of rows) assert.equal(routeFor(mode, cause, pr), route, `${mode} ${cause} ${pr}`);
 });

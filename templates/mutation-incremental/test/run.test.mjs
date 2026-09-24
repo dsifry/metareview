@@ -32,7 +32,7 @@ test('run --mode full starts fresh, attests the report and clears pending', asyn
   assert.equal(usable(r), true);
   assert.equal(existsSync(join(r.top, '.mutation/work')), false);
   assert.equal(existsSync(join(r.top, '.mutation/lock')), false);
-  assert.deepEqual(res.output, { pending_full: 'false', exit_code: '0', pending_cause: 'none', pending_causes: '[]' });
+  assert.deepEqual(res.output, { pending_full: 'false', exit_code: '0', pending_cause: 'none', pending_causes: '[]', route: 'verdict' });
   assert.match(res.stderr, /command=run invocations=1 scope=0 forced=0 deferrals=0 pending_full=false\n$/);
 });
 
@@ -100,7 +100,7 @@ test('a cold incremental run with no report runs nothing and writes nothing', as
   assert.equal(res.code, 0);
   assert.deepEqual(r.calls(), []);
   assert.equal(existsSync(join(r.top, '.mutation/attestation.json')), false);
-  assert.deepEqual(res.output, { pending_full: 'true', exit_code: '0', pending_cause: 'global', pending_causes: '[{"reason":"no usable state","paths":["*"]}]' });
+  assert.deepEqual(res.output, { pending_full: 'true', exit_code: '0', pending_cause: 'global', pending_causes: '[{"reason":"no usable state","paths":["*"]}]', route: 'verdict' });
 });
 
 test('a cold run re-attests an existing report with lastFullAt null and no usable state', async () => {
@@ -264,9 +264,45 @@ test('run option errors are exit 2 and still write outputs', async () => {
     assert.equal(res.code, 2, args.join(' '));
     assert.deepEqual(res.output, { pending_full: 'false', exit_code: '2' }, args.join(' '));
   }
-  const allow = await cli(r, ['run', '--mode', 'incremental', '--pr']);
-  assert.deepEqual([allow.code, allow.output.pending_full], [2, 'true']);
-  assert.match(allow.stderr, /--pr is for pendingOnPr "full" or "full-on-global"/);
+});
+
+test('under allow, --pr and --max-minutes change nothing; the route is the verdict', async () => {
+  const r = runRepo();
+  await warm(r);
+  r.write('src/a.ts', A3);
+  const res = await cli(r, ['run', '--mode', 'incremental', '--pr', '--max-minutes', '0.0001']);
+  assert.equal(res.code, 0);
+  assert.equal(r.calls().length, 2); // not timed out: --max-minutes is ignored under allow
+  assert.equal(res.output.route, 'verdict');
+});
+
+test('a routed PR run routes its cause: a timeout to the sweep, an unreachable module to fail', async () => {
+  const r = runRepo({ config: ROUTED });
+  await warm(r);
+  r.write('src/a.ts', A3);
+  r.steps([{ sleepMs: 10000 }]);
+  const slow = await cli(r, ['run', '--mode', 'incremental', '--pr', '--max-minutes', '0.005']);
+  assert.deepEqual([slow.code, slow.output.pending_cause, slow.output.route], [0, 'timeout', 'sweep']);
+  r.steps([{ report: reportFor() }]);
+  await warm(r);
+  rmSync(join(r.top, 'tests/a.test.ts'));
+  r.steps([{ exit: 1, output: 'No tests were executed' }]);
+  const gone = await cli(r, ['run', '--mode', 'incremental', '--pr']);
+  assert.deepEqual([gone.code, gone.output.pending_cause, gone.output.route], [0, 'unreachable', 'fail']);
+});
+
+test('the test-only residual switch drops the coverage closure', async () => {
+  const r = runRepo();
+  await warm(r);
+  r.write('src/a.ts', A3);
+  process.env.MUTATION_TEST_DISABLE_RESIDUAL = '1';
+  try {
+    assert.equal((await cli(r, ['run', '--mode', 'incremental'])).code, 0);
+  } finally {
+    delete process.env.MUTATION_TEST_DISABLE_RESIDUAL;
+  }
+  // Without the closure only the changed line is forced (the closure adds the line-2 kill: 2-3).
+  assert.deepEqual(r.calls()[1], inv(2, '--force', '--mutate', 'src/a.ts:3-3'));
 });
 
 test('a file edited while Stryker runs is attested as changed-during-run', async () => {

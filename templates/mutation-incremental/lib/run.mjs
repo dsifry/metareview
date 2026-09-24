@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { EngineError, InterruptedError, UsageError } from './errors.mjs';
 import { loadHarnessConfig, planInputs, summaryLine } from './inputs.mjs';
 import { computePlan } from './plan.mjs';
-import { classifyDeferrals, dedupeDeferrals, deferralKey, pendingCause, sortDeferrals } from './deferrals.mjs';
+import { classifyDeferrals, dedupeDeferrals, deferralKey, pendingCause, routeFor, sortDeferrals } from './deferrals.mjs';
 import { resolveViews, viewSummaries } from './views.mjs';
 import { acquireLock } from './lock.mjs';
 import { buildAttestation, commitState, installAdopted, markChangedDuringRun, WORK_DIR } from './attest.mjs';
@@ -58,15 +58,15 @@ function noReachableDeferrals(files, report) {
 }
 
 async function executeIncremental(ctx) {
-  const { config, inputs, options, interrupt } = ctx;
+  const { config, inputs, interrupt } = ctx;
   const { snapshot, graph, candidates, chosen } = inputs;
   // Spec §11.2 (i): main's fetched states count whether or not they are usable.
   const alsoAttestations = candidates.filter((c) => !c.primary && c.attestation !== null).map((c) => c.attestation);
   if (chosen !== null && !chosen.primary) installAdopted(config.stateDir, chosen.dir);
-  const plan = computePlan({ config, snapshot, graph, chosen, unbudgeted: options.pr });
+  const plan = computePlan({ config, snapshot, graph, chosen, unbudgeted: ctx.routed, disableResidual: process.env.MUTATION_TEST_DISABLE_RESIDUAL === '1' });
   // Counted/inherited at plan time decides the shortcut (spec §11.2; review advisory).
   const planned = classifyDeferrals({ deferrals: plan.deferrals, alsoAttestations, snapshot, cold: plan.cold });
-  const shortcut = options.pr && pendingCause(planned).cause === 'global';
+  const shortcut = ctx.routed && pendingCause(planned).cause === 'global';
   let latest = readOutput(join(config.stateDir, REPORT_FILE));
   const produced = [];
   let invocations = 0;
@@ -145,7 +145,6 @@ export async function runCommand(io, options) {
   try {
     const maxMinutes = checkOptions(options);
     ({ config } = loadHarnessConfig(io, options, true));
-    if (options.pr && config.pendingOnPr === 'allow') throw new UsageError('--pr is for pendingOnPr "full" or "full-on-global"; under "allow" the workflow never passes it');
     mkdirSync(config.stateDir, { recursive: true });
     release = acquireLock(config.stateDir);
     const work = join(config.stateDir, WORK_DIR);
@@ -154,20 +153,23 @@ export async function runCommand(io, options) {
     const inputs = planInputs(config.top, config, options.alsoState);
     // Spec §11.3: view completeness is checked at plan time, before any invocation.
     const views = resolveViews(config, inputs.snapshot);
-    const ctx = { config, inputs, views, options, interrupt, maxMinutes, graceMs: io.killGraceMs ?? KILL_GRACE_MS, onOutput: (chunk) => io.stderr.write(chunk) };
+    // Spec §11.2: --pr and --max-minutes take effect only when pendingOnPr routes PRs; under allow a
+    // PR run is an ordinary run (budgeted, MUTATION_RUN_KIND=other).
+    const routed = options.pr && config.pendingOnPr !== 'allow';
+    const ctx = { config, inputs, views, options, interrupt, routed, maxMinutes: routed ? maxMinutes : null, graceMs: io.killGraceMs ?? KILL_GRACE_MS, onOutput: (chunk) => io.stderr.write(chunk) };
     const result = options.mode === 'full' ? await executeFull(ctx) : await executeIncremental(ctx);
     const attestation = commit(ctx, result);
     const failures = [];
     if (attestation !== null) {
       if (attestation.thresholdBreak) failures.push(`score ${attestation.score} is below thresholds.break ${config.thresholdBreak}`);
-      failures.push(...(await runVerify(config, { views, snapshot: inputs.snapshot, pr: options.pr, interrupt, graceMs: ctx.graceMs, onOutput: ctx.onOutput })));
+      failures.push(...(await runVerify(config, { views, snapshot: inputs.snapshot, pr: routed, interrupt, graceMs: ctx.graceMs, onOutput: ctx.onOutput })));
     }
     if (interrupt.interrupted) throw new InterruptedError('interrupted; the state is committed');
     for (const f of failures) io.stderr.write(`mutation-incremental: ${f}\n`);
     const code = failures.length > 0 ? 1 : 0;
     const pendingFull = attestation === null || result.classified.length > 0;
     const { cause, counted } = pendingCause(result.classified);
-    writeOutputs([['pending_full', pendingFull], ['exit_code', code], ['pending_cause', cause], ['pending_causes', causesJSON(counted)]]);
+    writeOutputs([['pending_full', pendingFull], ['exit_code', code], ['pending_cause', cause], ['pending_causes', causesJSON(counted)], ['route', routeFor(config.pendingOnPr, cause, options.pr)]]);
     io.stderr.write(summaryLine({
       command: 'run',
       invocations: result.invocations,
