@@ -55,7 +55,7 @@ function defaultRunCommand(argv, cwd) {
 
 // Spec K3.4, §11.3: the view map invalidates no kill, so the always-global config file is digested
 // without it (canonical JSON, so formatting-only edits are no change either).
-function configDigest(absPath) {
+export function configDigest(absPath) {
   const raw = JSON.parse(readFileSync(absPath, 'utf8'));
   delete raw.views;
   return `sha256:${sha256(canonicalJSON(raw))}`;

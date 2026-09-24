@@ -30,7 +30,7 @@ test('buildAttestation writes the §5.5 contract', () => {
   const { config, snapshot } = fixture();
   const att = build(config, snapshot);
   assert.deepEqual(Object.keys(att).sort(), [
-    'completedAt', 'deferrals', 'engine', 'engineVersion', 'exclusions', 'files', 'lastFullAt', 'lists', 'mode', 'report',
+    'completedAt', 'config', 'deferrals', 'engine', 'engineVersion', 'exclusions', 'files', 'lastFullAt', 'lists', 'mode', 'report',
     'reportSha256', 'runtime', 'schemaVersion', 'score', 'stateVersion', 'thresholdBreak', 'tool', 'toolVersion',
   ]);
   assert.deepEqual(
@@ -39,6 +39,7 @@ test('buildAttestation writes the §5.5 contract', () => {
   );
   assert.equal(att.thresholdBreak, false); // no thresholds.break configured
   assert.deepEqual([att.files, att.lists, att.exclusions], [snapshot.files, config.lists, config.exclusions]);
+  assert.equal(att.config, 'mutation-incremental.json');
 });
 
 test('thresholdBreak: strictly below the break, never for a null score', () => {

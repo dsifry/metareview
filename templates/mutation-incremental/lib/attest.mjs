@@ -31,6 +31,8 @@ export function buildAttestation({ config, files, runtime, reportBytes, report, 
     engineVersion: config.engineVersion,
     mode,
     completedAt,
+    // The config file the gate digests without its views (spec K3.4; metareview's mutationfresh).
+    config: config.configRel,
     lastFullAt,
     report: REPORT_FILE,
     reportSha256: sha256(reportBytes),
