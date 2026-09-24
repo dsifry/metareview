@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-6-result-2026-09-24T03:48:31Z",
+  "kind": "shard",
+  "shardId": "shard-6",
+  "shardHash": "0fd11d94a467a04d",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "subagent-shard-reviewer",
+  "reviewedAt": "2026-09-24T03:48:31Z",
+  "evidence": [
+    { "path": "docs/mutation-harness.md", "line": 1 },
+    { "path": "docs/mutation-harness.md", "line": 353 },
+    { "path": "templates/mutation-incremental/lib/main.mjs", "line": 10 },
+    { "path": "templates/mutation-incremental/lib/main.mjs", "line": 68 },
+    { "path": "testdata/mutation-incremental-e2e/tests/helpers/make.ts", "line": 1 },
+    { "path": "testdata/mutation-incremental/real/e-residual/incremental.json", "line": 1 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1-review-1c-proof",
+  "kind": "shard",
+  "shardId": "shard-1",
+  "shardHash": "bd7ff7696993a41f",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "subagent-shard-reviewer",
+  "reviewedAt": "2026-09-24T04:00:00Z",
+  "evidence": [
+    { "path": "templates/mutation-incremental/lib/config.mjs", "line": 100 },
+    { "path": "testdata/mutation-incremental-e2e/package.json", "line": 1 },
+    { "path": "testdata/mutation-incremental-e2e/tests/c.test.ts", "line": 1 },
+    { "path": "testdata/mutation-incremental/real/delete-c-test/attestation.json", "line": 1 },
+    { "path": "testdata/mutation-incremental/real/lockfile/attestation.json", "line": 1 },
+    { "path": "testdata/mutation-incremental/real/test-b/attestation.json", "line": 1 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

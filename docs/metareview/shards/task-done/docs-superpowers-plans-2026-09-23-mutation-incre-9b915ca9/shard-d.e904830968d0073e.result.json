@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-d-review-2026-09-23",
+  "kind": "shard",
+  "shardId": "shard-d",
+  "shardHash": "e904830968d0073e",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "subagent-shard-reviewer",
+  "reviewedAt": "2026-09-23T12:00:00Z",
+  "evidence": [
+    { "path": "testdata/mutation-incremental-e2e/README.md", "line": 100 },
+    { "path": "testdata/mutation-incremental/real/a-preserving/attestation.json", "line": 1 },
+    { "path": "testdata/mutation-incremental/real/full/attestation.json", "line": 1 },
+    { "path": "testdata/mutation-incremental/real/lockfile/incremental.json", "line": 1 },
+    { "path": "testdata/mutation-incremental/real/test-b/incremental.json", "line": 1 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

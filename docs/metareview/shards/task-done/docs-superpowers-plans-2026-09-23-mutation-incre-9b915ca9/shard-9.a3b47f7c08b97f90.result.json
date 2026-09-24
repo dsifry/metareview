@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-9-result-1c-proof",
+  "kind": "shard",
+  "shardId": "shard-9",
+  "shardHash": "a3b47f7c08b97f90",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "claude-shard-reviewer",
+  "reviewedAt": "2026-09-24T04:10:00Z",
+  "evidence": [
+    {
+      "path": "testdata/mutation-incremental-e2e/package-lock.json",
+      "line": 9,
+      "note": "devDependencies pin @stryker-mutator/core, @stryker-mutator/vitest-runner to 10.0.0 and vitest to 4.1.11, matching the declared fixture pins exactly."
+    },
+    {
+      "path": "testdata/mutation-incremental-e2e/package-lock.json",
+      "line": 62,
+      "note": "resolved URLs in this shard's portion of the lockfile use registry.npmjs.org with sha512- integrity hashes; verified across the full file that all 232 resolved entries are registry.npmjs.org with sha512 integrity and no absolute paths or secret-like keys appear anywhere in the file."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

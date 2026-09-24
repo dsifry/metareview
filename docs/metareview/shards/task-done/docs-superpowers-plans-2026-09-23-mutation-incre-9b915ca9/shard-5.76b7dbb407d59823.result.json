@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-5-result-2026-09-24T03:48:31Z",
+  "kind": "shard",
+  "shardId": "shard-5",
+  "shardHash": "76b7dbb407d59823",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "subagent-shard-reviewer",
+  "reviewedAt": "2026-09-24T03:48:31Z",
+  "evidence": [
+    { "path": "templates/mutation-incremental/lib/summary.mjs", "line": 1 },
+    { "path": "templates/mutation-incremental/lib/summary.mjs", "line": 77 },
+    { "path": "testdata/mutation-incremental-e2e/src/a.ts", "line": 1 },
+    { "path": "testdata/mutation-incremental-e2e/src/index.ts", "line": 1 },
+    { "path": "testdata/mutation-incremental/real/e-flip/attestation.json", "line": 1 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

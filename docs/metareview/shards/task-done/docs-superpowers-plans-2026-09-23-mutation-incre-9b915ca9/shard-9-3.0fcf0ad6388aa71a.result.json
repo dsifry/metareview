@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-9-3-result-1c-proof",
+  "kind": "shard",
+  "shardId": "shard-9-3",
+  "shardHash": "0fcf0ad6388aa71a",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "claude-shard-reviewer",
+  "reviewedAt": "2026-09-24T04:10:00Z",
+  "evidence": [
+    {
+      "path": "testdata/mutation-incremental-e2e/package-lock.json",
+      "line": 3391,
+      "note": "node_modules/vitest entry (final part of the lockfile) pins version 4.1.11 resolved from registry.npmjs.org with a sha512- integrity hash, matching the declared devDependency pin exactly."
+    },
+    {
+      "path": "testdata/mutation-incremental/real/a-survivor/incremental.json",
+      "line": 4,
+      "note": "projectRoot is rewritten to \".\" as expected for an exported e2e report; no absolute paths or secrets present, and top-level shape (config, files, framework, projectRoot, schemaVersion, testFiles, thresholds) matches sibling incremental.json reports."
+    },
+    {
+      "path": "testdata/mutation-incremental/real/e-flip-control/incremental.json",
+      "line": 4,
+      "note": "projectRoot rewritten to \".\"; same consistent shape as other real/**/incremental.json reports, no absolute paths or secrets."
+    },
+    {
+      "path": "testdata/mutation-incremental/real/limits/attestation.json",
+      "line": 1,
+      "note": "Top-level keys (completedAt, deferrals, engine, engineVersion, exclusions, files, lastFullAt, lists, mode, report, reportSha256, runtime, schemaVersion, score, stateVersion, thresholdBreak, tool, toolVersion, viewSummaries, views) match the shape of other exported attestation.json fixtures; no absolute paths or secrets found."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

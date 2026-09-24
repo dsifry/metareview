@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-8-result-1c-proof",
+  "kind": "shard",
+  "shardId": "shard-8",
+  "shardHash": "a98bad4e3cde4704",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "claude-shard-reviewer",
+  "reviewedAt": "2026-09-24T04:10:00Z",
+  "evidence": [
+    {
+      "path": "testdata/mutation-incremental-e2e/tests/helpers/fmt.ts",
+      "line": 1,
+      "note": "Trivial one-line fixture helper (export const fmt = (n: number) => String(n);); consistent with its declared role as an e2e fixture support file."
+    },
+    {
+      "path": "testdata/mutation-incremental/real/types-only/attestation.json",
+      "line": 300,
+      "note": "projectRoot-equivalent fields are relative; no absolute paths, credentials, or secrets found in the exported attestation."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

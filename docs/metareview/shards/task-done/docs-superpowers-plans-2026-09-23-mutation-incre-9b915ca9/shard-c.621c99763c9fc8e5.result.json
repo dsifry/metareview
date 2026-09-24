@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-c-review-1c-proof",
+  "kind": "shard",
+  "shardId": "shard-c",
+  "shardHash": "621c99763c9fc8e5",
+  "planHash": "b93351e9eeedc69d",
+  "verdict": "PASS",
+  "reviewer": "subagent-shard-reviewer",
+  "reviewedAt": "2026-09-24T03:48:21Z",
+  "evidence": [
+    { "path": "testdata/mutation-incremental-e2e/tests/a.test.ts", "line": 1 }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}
