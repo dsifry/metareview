@@ -55,6 +55,8 @@ type Input struct {
 	Owner              string     `json:"owner,omitempty"`
 	KnowledgeCandidate bool       `json:"knowledgeCandidate,omitempty"`
 	Fingerprint        string     `json:"fingerprint"`
+	// View is the mutation view a freshness finding belongs to (spec §11.3), stored on its row.
+	View string `json:"view,omitempty"`
 }
 
 type Record struct {

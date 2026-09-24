@@ -100,7 +100,7 @@ func LoadMutationContext(root string, paths []string, scope string, head bool) (
 	if head {
 		content = mutationfresh.Head(root)
 	}
-	res, err := mutationfresh.Build(reports, content, mutationfresh.EffectiveMode(scope, mode))
+	res, err := mutationfresh.Build(reports, content, mutationfresh.EffectiveMode(scope, mode), nil)
 	if err != nil {
 		return MutationContext{}, err
 	}

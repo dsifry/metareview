@@ -20,6 +20,7 @@ type Attestation struct {
 	Exclusions    []string             `json:"exclusions"`
 	Files         map[string]FileEntry `json:"files"`
 	Deferrals     []Deferral           `json:"deferrals"`
+	Views         map[string][]string  `json:"views"`
 }
 
 // FileEntry is one attested path: its start-of-run digest, category and whether git tracked it.

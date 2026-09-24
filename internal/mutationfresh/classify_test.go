@@ -70,7 +70,7 @@ func classifyAt(t *testing.T, report, root string) ReportFreshness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := Classify(r, Worktree(root))
+	f, err := Classify(r, Worktree(root), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestClassifySyntheticRules(t *testing.T) {
 	}
 	// HEAD mode: an untracked attested path absent from HEAD is skipped; everything is unchanged.
 	r, _ := mutation.Load(path)
-	head, err := Classify(r, Head(root))
+	head, err := Classify(r, Head(root), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestClassifySyntheticRules(t *testing.T) {
 	write(t, root, "tests/new.test.ts", "n") // nor can a new test
 	write(t, root, "notes.md", "n")          // ignored
 	r, _ = mutation.Load(path)
-	f, _ = Classify(r, Head(root))
+	f, _ = Classify(r, Head(root), nil)
 	if f.Stale != 0 {
 		t.Errorf("uncommitted edits are not seen in HEAD mode: %+v", f)
 	}
@@ -223,7 +223,7 @@ func TestClassifyUnattestedAndGremlins(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "incremental.json", `{"files":{"a.ts":{"mutants":[{"id":"1","mutatorName":"M","status":"Killed","location":{"start":{"line":1}}}]}}}`)
 	r, _ := mutation.Load(filepath.Join(dir, "incremental.json"))
-	f, err := Classify(r, Worktree(t.TempDir()))
+	f, err := Classify(r, Worktree(t.TempDir()), nil)
 	if err != nil || f.Attested || f.UnattestedReason != "missing" || f.Unattested != 1 {
 		t.Errorf("unattested stryker: %+v %v", f, err)
 	}
@@ -231,7 +231,7 @@ func TestClassifyUnattestedAndGremlins(t *testing.T) {
 	g := mutation.Report{Engine: "stryker", Target: filepath.Join(dir, "incremental.json"), SHA256: r.SHA256,
 		Mutants: []mutation.Mutant{{Status: mutation.Killed}}}
 	writeAttestation(t, dir, validAttestation(r.SHA256))
-	f, _ = Classify(g, Worktree(t.TempDir()))
+	f, _ = Classify(g, Worktree(t.TempDir()), nil)
 	if f.UnattestedReason != "engine" {
 		t.Errorf("no detail: %+v", f)
 	}
@@ -240,14 +240,14 @@ func TestClassifyUnattestedAndGremlins(t *testing.T) {
 func TestClassifyStopsOnContentErrors(t *testing.T) {
 	report, _ := realCase(t, "full")
 	r, _ := mutation.Load(report)
-	if _, err := Classify(r, Worktree(t.TempDir())); err == nil {
+	if _, err := Classify(r, Worktree(t.TempDir()), nil); err == nil {
 		t.Error("listing paths outside a repository stops the review")
 	}
 	root := gitRepo(t, map[string]string{"src/a.ts": "a"})
 	if err := os.Chmod(filepath.Join(root, "src/a.ts"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Classify(r, Worktree(root)); err == nil {
+	if _, err := Classify(r, Worktree(root), nil); err == nil {
 		t.Error("an unreadable attested path stops the review")
 	}
 }

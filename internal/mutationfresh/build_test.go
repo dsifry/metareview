@@ -34,7 +34,7 @@ func buildAt(t *testing.T, root, mode string, reports ...string) Result {
 		}
 		loaded = append(loaded, r)
 	}
-	res, err := Build(loaded, Worktree(root), mode)
+	res, err := Build(loaded, Worktree(root), mode, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestBuildSection(t *testing.T) {
 	if res.Section != want {
 		t.Errorf("section:\n%s\n--- want ---\n%s", res.Section, want)
 	}
-	if empty, _ := Build(nil, Worktree(root), Advisory); empty.Section != "" || len(empty.Findings) != 0 {
+	if empty, _ := Build(nil, Worktree(root), Advisory, nil); empty.Section != "" || len(empty.Findings) != 0 {
 		t.Errorf("no reports, no section: %+v", empty)
 	}
 }
@@ -143,7 +143,7 @@ func TestBuildOrdersFindingsAndRows(t *testing.T) {
 func TestBuildStopsOnContentErrors(t *testing.T) {
 	report, _ := realCase(t, "full")
 	r, _ := mutation.Load(report)
-	if _, err := Build([]mutation.Report{r}, Worktree(t.TempDir()), Advisory); err == nil {
+	if _, err := Build([]mutation.Report{r}, Worktree(t.TempDir()), Advisory, nil); err == nil {
 		t.Error("a content error stops the review")
 	}
 }
