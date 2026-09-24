@@ -71,7 +71,7 @@ func RequestOverride(root, findingID string, request OverrideRequest) error {
 		// escalation whose hard stop it asks to lift (request.Escalation — issue #147):
 		// the run-level stop can outlive the finding-level fix, and the recorded request
 		// is what makes the later grant two-phase (requester ≠ grantor).
-		fixedWithEscalation := record.Status == "fixed" && strings.TrimSpace(request.Escalation) != ""
+		fixedWithEscalation := (record.Status == "fixed" || supersededFreshness(*record)) && strings.TrimSpace(request.Escalation) != ""
 		if record.Status != "open" && !fixedWithEscalation {
 			return fmt.Errorf("finding %s is %s, not open", findingID, record.Status)
 		}
@@ -113,7 +113,7 @@ func GrantOverride(root, findingID string, grant OverrideGrant) error {
 		// escalation was already filed (record.OverrideEscalation — issue #147): the
 		// run-level stop can outlive the finding-level fix, and lifting it is the human
 		// decision the grant records — with requester ≠ grantor enforced below.
-		fixedWithEscalation := record.Status == "fixed" && strings.TrimSpace(record.OverrideEscalation) != ""
+		fixedWithEscalation := (record.Status == "fixed" || supersededFreshness(*record)) && strings.TrimSpace(record.OverrideEscalation) != ""
 		if record.Status != "open" && !fixedWithEscalation && record.Status != StatusOverridePending {
 			return fmt.Errorf("finding %s is %s and cannot be overridden", findingID, record.Status)
 		}
@@ -186,6 +186,12 @@ func mutateFinding(root, findingID string, apply func(*Record) error) error {
 	return RenderIndexWithRecords(root, records)
 }
 
+// supersededFreshness: a freshness row that fresh evidence replaced. Like a fixed row, it takes an
+// override only with an escalation, so a stale-only escalation (spec §6.8) can still be lifted.
+func supersededFreshness(record Record) bool {
+	return record.Status == StatusSuperseded && IsFreshnessFingerprint(record.Fingerprint)
+}
+
 // overrideLines renders the process-exception section of the findings index.
 func overrideLines(records []Record) []string {
 	var lines []string
@@ -201,6 +207,11 @@ func overrideLines(records []Record) []string {
 		case StatusOverridePending:
 			lines = append(lines, withEscalation(fmt.Sprintf("- %s [pending] %s — requested by %s at %s: %s",
 				record.ID, title, reqBy, reqAt, reqReason), record))
+		case StatusSuperseded:
+			if record.OverrideRequestedBy != "" {
+				lines = append(lines, withEscalation(fmt.Sprintf("- %s [superseded] %s — requested by %s at %s: %s",
+					record.ID, title, reqBy, reqAt, reqReason), record))
+			}
 		case StatusOverridden:
 			detail := fmt.Sprintf("- %s [granted] %s — granted by %s at %s: %s",
 				record.ID, title, grantedBy, grantedAt, singleLine(record.OverrideGrantReason))

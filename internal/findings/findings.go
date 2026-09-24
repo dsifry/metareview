@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +31,9 @@ type Options struct {
 	PreviousRunID  string
 	PreviousRunIDs []string
 	ResetRunIDs    []string
+	// MutationEngines are the engines of this run's --mutation-report files, and empty when the run
+	// supplied none, so mutation-freshness rows and their overrides are left alone (spec §6.5).
+	MutationEngines []string
 }
 
 type Evidence struct {
@@ -140,9 +144,15 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			sameRunTarget(record, run) &&
 			(record.Status == "open" || record.Status == StatusOverridePending) &&
 			record.Fingerprint != "" &&
+			!IsFreshnessFingerprint(record.Fingerprint) &&
 			!currentFingerprints[record.Fingerprint] {
 			record.Status = "fixed"
 			record.FixedInRunID = run.ID
+			record.UpdatedAt = now
+			record.GitHead = run.GitHead
+		}
+		if supersedesFreshness(record, run, options, currentFingerprints) {
+			record.Status = StatusSuperseded
 			record.UpdatedAt = now
 			record.GitHead = run.GitHead
 		}
@@ -151,7 +161,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 
 	activeExisting := map[string]bool{}
 	for _, record := range updated {
-		if record.Status != "fixed" && record.Fingerprint != "" && sameRunTarget(record, run) {
+		if record.Status != "fixed" && record.Status != StatusSuperseded && record.Fingerprint != "" && sameRunTarget(record, run) {
 			activeExisting[record.Fingerprint] = true
 		}
 	}
@@ -192,6 +202,52 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 // neither open (so it never blocks) nor fixed (so learning never reads it as a
 // correction), and its fixedInRunId stays empty for the same reason.
 const StatusSuperseded = "superseded"
+
+// freshnessPrefixes are the mutation-freshness findings (spec §6.5). Fresh evidence supersedes
+// them; they are never "fixed", because a refresh is not a correction learning should read.
+var freshnessPrefixes = []string{"mutation:stale:", "mutation:pending:", "mutation:unattested:"}
+
+// IsFreshnessFingerprint reports a mutation-freshness finding.
+func IsFreshnessFingerprint(fingerprint string) bool {
+	for _, prefix := range freshnessPrefixes {
+		if strings.HasPrefix(fingerprint, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// freshnessEngine is the <engine> field of mutation:<kind>:<mode>:<engine>:….
+func freshnessEngine(fingerprint string) string {
+	parts := strings.SplitN(fingerprint, ":", 5)
+	if len(parts) < 4 {
+		return ""
+	}
+	return parts[3]
+}
+
+// supersedesFreshness: this run supplied reports of the row's engine and did not reproduce it.
+func supersedesFreshness(record Record, run Run, options Options, current map[string]bool) bool {
+	return len(options.MutationEngines) > 0 && IsFreshnessFingerprint(record.Fingerprint) &&
+		slices.Contains(options.MutationEngines, freshnessEngine(record.Fingerprint)) &&
+		(record.Status == "open" || record.Status == StatusOverridePending) &&
+		sameRunTarget(record, run) && !current[record.Fingerprint]
+}
+
+// OnlyStaleBlockers reports that every open blocking finding is stale mutation evidence (spec §6.8).
+func OnlyStaleBlockers(records []Record) bool {
+	blocking := 0
+	for _, record := range records {
+		if !IsBlockingClass(record) {
+			continue
+		}
+		if !strings.HasPrefix(record.Fingerprint, "mutation:stale:") {
+			return false
+		}
+		blocking++
+	}
+	return blocking > 0
+}
 
 // legacyContextRiskPrefixes are the reason-bearing context-risk fingerprints
 // 0.8.3 replaced with reason-independent ones.
