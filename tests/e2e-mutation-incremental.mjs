@@ -176,6 +176,25 @@ const ROWS = [
     for (const f of STATE_FILES) cpSync(join(REPO, '.mutation', f), join(WORK, 'baseline', f));
     exportRow('full');
   }],
+  // The gate on the live state (spec §7.1, §11.3): pr-ready with both views reads HEAD, where the
+  // full run's attested content is unchanged, so every kill is verified in its view; an unknown
+  // view is a usage error.
+  ['gate', async () => {
+    reset();
+    const bin = join(WORK, 'metareview');
+    execFileSync('go', ['build', '-o', bin, './cmd/metareview'], { cwd: ROOT, stdio: 'inherit' });
+    const env = { ...process.env, METAREVIEW_ALLOW_MECHANICAL_PASS: '1', METAREVIEW_MUTATION_FRESHNESS: 'enforce' };
+    const gate = (...views) => spawnSync(bin, ['review', 'pr-ready', '--base', 'HEAD', '--mutation-report', '.mutation/incremental.json',
+      ...views.flatMap((v) => ['--mutation-view', v])], { cwd: REPO, env, encoding: 'utf8' });
+    const r = gate('core', 'edge');
+    const logPath = r.stdout.trim().split('\n').pop();
+    const log = logPath && existsSync(join(REPO, logPath)) ? readFileSync(join(REPO, logPath), 'utf8') : '';
+    check('gate: one freshness section with a row per view',
+      log.split('## Mutation Evidence Freshness').length === 2 && log.includes('| `core` | 24 | 0 |') && log.includes('| `edge` | 7 | 0 |'),
+      `exit ${r.status}: ${r.stderr.slice(-500)}\n${log.slice(0, 1500)}`);
+    const bad = gate('nope');
+    check('gate: an unknown view is exit 2', bad.status === 2 && bad.stderr.includes('"nope"'), `exit ${bad.status}: ${bad.stderr}`);
+  }],
   ['no-change', async () => {
     reset();
     const r = await cli(['run', '--mode', 'incremental']);
