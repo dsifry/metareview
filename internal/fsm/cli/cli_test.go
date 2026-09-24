@@ -53,7 +53,7 @@ func (f *fakeDoer) Do(r *http.Request) (*http.Response, error) {
 }
 
 type harness struct {
-	base string // pre-reviewable-change commit; inits pass --base so the discover diff spans the f.go change
+	base  string // pre-reviewable-change commit; inits pass --base so the discover diff spans the f.go change
 	t     *testing.T
 	root  string
 	cwd   string
