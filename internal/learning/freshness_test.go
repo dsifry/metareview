@@ -21,7 +21,7 @@ func TestLearningSkipsFreshnessFindings(t *testing.T) {
 	}
 	// An ordinary finding is still learned from.
 	ordinary := stale
-	ordinary.Fingerprint = "quality:todo"
+	ordinary.Fingerprint = "quality:lint-marker"
 	if got := knowledgeFromFindings([]findings.Record{ordinary}); len(got) == 0 {
 		t.Error("ordinary findings still produce candidates")
 	}

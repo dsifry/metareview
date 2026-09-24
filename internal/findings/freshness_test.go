@@ -33,7 +33,7 @@ func statusOf(t *testing.T, root, fingerprint string) []string {
 
 func TestIsFreshnessFingerprint(t *testing.T) {
 	for fp, want := range map[string]bool{staleFP: true, "mutation:pending:advisory:stryker:0123abcd": true,
-		"mutation:unattested:advisory:stryker:0123abcd": true, "mutation:survived:M:a.ts:1": false, "quality:todo": false} {
+		"mutation:unattested:advisory:stryker:0123abcd": true, "mutation:survived:M:a.ts:1": false, "quality:lint-marker": false} {
 		if IsFreshnessFingerprint(fp) != want {
 			t.Errorf("%s: want %v", fp, want)
 		}
@@ -129,7 +129,7 @@ func TestOverriddenFreshnessRowsStayAndSupersededRowsTakeEscalatedOverrides(t *t
 
 func TestOnlyStaleBlockers(t *testing.T) {
 	stale := Record{Classification: "blocking", Severity: "high", Fingerprint: staleFP}
-	other := Record{Classification: "blocking", Severity: "high", Fingerprint: "quality:todo"}
+	other := Record{Classification: "blocking", Severity: "high", Fingerprint: "quality:lint-marker"}
 	advisory := Record{Classification: "advisory", Severity: "medium", Fingerprint: "x"}
 	if !OnlyStaleBlockers([]Record{stale, advisory}) || OnlyStaleBlockers([]Record{stale, other}) || OnlyStaleBlockers([]Record{advisory}) {
 		t.Error("true only when every blocker is stale mutation evidence and there is one")
