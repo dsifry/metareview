@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.1 - 2026-09-24
+
+### Fixed
+
+- **`metareview review <subcommand> --help` prints usage.** Before, `review task-done --help` and
+  `review epic-ready --help` treated `--help` (or `-h`) as the target and ran, and logged, a full
+  review of it. `pr-ready`, `record-lenses` and a trailing `--help` exited 2 as an unknown option.
+  Any `--help`/`-h` after `review` now prints the usage and runs nothing.
+
 ## 0.13.0 - 2026-09-24
 
 ### Added
