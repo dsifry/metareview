@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -111,6 +112,7 @@ func (w worktree) Paths() ([]string, error) {
 type head struct {
 	root  string
 	modes map[string]string // path → git mode at HEAD
+	cache map[string]Entry  // content already read in this review
 }
 
 // Head reads the committed tree at HEAD through the repository's filters (spec §6.2).
@@ -127,6 +129,7 @@ func (h *head) load() error {
 		return err
 	}
 	h.modes = map[string]string{}
+	h.cache = map[string]Entry{}
 	for _, line := range splitZ(out) {
 		// "<mode> <type> <object>\t<path>"
 		h.modes[line[strings.IndexByte(line, '\t')+1:]] = line[:strings.IndexByte(line, ' ')]
@@ -149,24 +152,67 @@ func (h *head) Paths() ([]string, error) {
 	return out, nil
 }
 
+// headReaders bounds the git processes that read HEAD content at once.
+const headReaders = 16
+
 // Read is `git cat-file --filters HEAD:<path>` per present path (spec §6.2). Batch mode cannot be used:
 // with --filters its header reports the unfiltered size while the content is filtered, so the output
-// cannot be split. A symlink's blob is its link text; gitlinks are absent.
+// cannot be split. Paths are read once per review (Build classifies every report against one Content)
+// and in parallel. A symlink's blob is its link text; gitlinks are absent.
 func (h *head) Read(paths []string) (map[string]Entry, error) {
 	if err := h.load(); err != nil {
 		return nil, err
 	}
+	todo := map[string]bool{}
+	for _, p := range paths {
+		_, cached := h.cache[p]
+		if mode, ok := h.modes[p]; ok && mode != "160000" && !cached {
+			todo[p] = true
+		}
+	}
+	if err := h.fill(todo); err != nil {
+		return nil, err
+	}
 	out := map[string]Entry{}
 	for _, p := range paths {
-		mode, ok := h.modes[p]
-		if !ok || mode == "160000" {
-			continue
+		if e, ok := h.cache[p]; ok {
+			out[p] = e
 		}
-		data, err := runGit(h.root, nil, "cat-file", "--filters", "HEAD:"+p)
-		if err != nil {
-			return nil, err
-		}
-		out[p] = Entry{Data: data, Symlink: mode == "120000"}
 	}
 	return out, nil
+}
+
+// fill reads the given paths into the cache through at most headReaders git processes.
+func (h *head) fill(todo map[string]bool) error {
+	type result struct {
+		path string
+		data []byte
+		err  error
+	}
+	jobs := make(chan string)
+	results := make(chan result, len(todo))
+	var wg sync.WaitGroup
+	for w := 0; w < min(headReaders, len(todo)); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for p := range jobs {
+				data, err := runGit(h.root, nil, "cat-file", "--filters", "HEAD:"+p)
+				results <- result{path: p, data: data, err: err}
+			}
+		}()
+	}
+	for p := range todo {
+		jobs <- p
+	}
+	close(jobs)
+	wg.Wait()
+	close(results)
+	for r := range results { // every reader has finished, so returning early leaks nothing
+		if r.err != nil {
+			return r.err
+		}
+		h.cache[r.path] = Entry{Data: r.data, Symlink: h.modes[r.path] == "120000"}
+	}
+	return nil
 }
