@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-e",
+  "kind": "shard",
+  "shardId": "shard-e",
+  "shardHash": "fb6f2b2aee1472e1",
+  "planHash": "6e4356555ecf2acd",
+  "verdict": "PASS",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-23T22:05:00-07:00",
+  "evidence": [
+    {
+      "path": "internal/mutationfresh/content.go",
+      "line": 165
+    },
+    {
+      "note": "Only change since plan edeacff8273fa5e4 (previously reviewed PASS) is commit 288482f, confirmed via git show 288482f --stat: it renames the local variable/parameter `todo` to `unread` in head.Read and head.fill (internal/mutationfresh/content.go lines 165-192), a pure rename with identical control flow, channel sizing (len(unread) in place of len(todo)), and worker count (min(headReaders, len(unread))). No other file in this shard changed."
+    },
+    {
+      "path": "internal/mutationfresh/content.go",
+      "line": 183
+    },
+    {
+      "note": "Re-verified the concurrency shape the prior review signed off on still holds under the new name: head.fill spawns min(16,len(unread)) git-cat-file workers writing only to the per-call buffered `results` channel; h.cache is written single-threaded after wg.Wait()/close(results), so there is no data race, and the results channel is always fully drained (buffered to len(unread)) before return, including on the early-return error path, so no goroutine leak was introduced by the rename."
+    },
+    {
+      "note": "internal/findings/freshness_test.go, internal/findings/override.go, internal/mutationfresh/attest_test.go, internal/mutationfresh/glob.go, internal/mutationfresh/mode.go, and the two testdata fixtures in this shard are byte-identical to the prior pack (edeacff8273fa5e4); their chunk hashes in the new plan.json match what was reviewed PASS previously, so no re-review of their logic was needed."
+    },
+    {
+      "note": "Ran go test -race ./internal/mutationfresh/... in this worktree; all tests pass, including TestHead-style coverage of Read/fill, confirming the rename introduced no behavior change and no new race under -race instrumentation."
+    }
+  ],
+  "findings": [],
+  "blockingCount": 0
+}

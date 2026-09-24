@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "6e4356555ecf2acd",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-sonnet-subagent",
+  "reviewedAt": "2026-09-23T22:05:00-07:00",
+  "evidence": [
+    {
+      "note": "Only delta since plan edeacff8273fa5e4 (previously reviewed PASS_ADVISORY) is commit 288482f, verified via git show 288482f --stat: internal/mutationfresh/content.go only, renaming the local todo map to unread in head.Read/head.fill. No production behavior, cross-shard seam, or test fixture changed."
+    },
+    {
+      "path": "internal/mutationfresh/content.go",
+      "line": 165,
+      "note": "head.Read still computes the not-yet-cached path set (now named `unread`) the same way before calling head.fill; classify.go's per-report call pattern into Content is unaffected by the identifier rename."
+    },
+    {
+      "path": "internal/mutationfresh/classify.go",
+      "line": 137,
+      "note": "p == att.Config config-digest selection logic unchanged by 288482f; no interaction with content.go's renamed variable beyond the same Read/fill call sites."
+    },
+    {
+      "note": "Ran go test -race ./internal/mutationfresh/... and go test ./internal/findings/... ./internal/prready/... ./internal/epicready/... ./internal/taskdone/... ./internal/learning/... in this worktree; all packages pass, confirming the rename is behavior-preserving across every consumer package."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Worktree-mode 'fresh path' set disagrees with the harness for a tracked file deleted from the working tree but still in the index (plain rm, not git rm). worktree.Paths() lists `git ls-files -c` entries without filtering absent ones (an Lstat error is not skipped), and changedPaths adds any unattested non-mutate/test path as changed with digest `absent`; the harness lists the same path but skips it (digestOf null), so it is never attested. Result: if the deleted file is support/global/unclassified (e.g. an old tests/helpers file or an un-ignored doc), task-done (and pr-ready --include-working-tree) report every kill stale with cause <path>=absent, and the recommended fix 're-run the harness' can never clear it until the deletion is staged or committed. Spec 6.3 says 'present paths not in files', so absent fresh paths should be skipped (e.g. `if !attested && digest == Absent { continue }`). Not blocking: task-done is always advisory, epic-ready already blocks dirty trees, and pr-ready defaults to HEAD mode where ls-tree lists only present paths; the only enforced path is the opt-in --include-working-tree + enforce combination. Carried forward unchanged from plan edeacff8273fa5e4: commit 288482f touched only content.go's internal variable naming and did not touch classify.go, snapshot.mjs, or the design doc, so this finding still applies as-is; already scheduled for the next plan.",
+      "evidence": [
+        {"path": "internal/mutationfresh/content.go", "line": 97},
+        {"path": "internal/mutationfresh/classify.go", "line": 142},
+        {"path": "templates/mutation-incremental/lib/snapshot.mjs", "line": 76},
+        {"path": "docs/superpowers/specs/2026-09-23-mutation-incremental-design.md", "line": 506}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}
