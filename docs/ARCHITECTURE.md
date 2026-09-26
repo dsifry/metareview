@@ -198,7 +198,10 @@ list below is illustrative, omitting e.g. `judge`, `gate`, `converge`, `export`)
 - **Review state & logs:** `reviewlog` (parse/discover `.md` logs), `reviewstate`, `reviewmanifest`,
   `findings`, `runchain` (lineage), `state`/`jsonl` (append/scan), `reviewprompt`.
 - **Gate & install:** `setup` (mode/prereqs + hook install), `status` (branch scope, `CommitGate`/`PushGate`,
-  `BuildForBranch`, coverage/unreviewed), `githooktest` (black-box hook tests), `covergate` (floor gate).
+  `BuildForBranch`, coverage/unreviewed), `session` (binds a host session to the worktree its work is in, so
+  the Stop hook `hooks/pre-finish.sh` evaluates that worktree rather than the checkout the host launched in —
+  hosts such as Codex report only the launch checkout), `githooktest` (black-box hook tests), `covergate`
+  (floor gate).
 - **Context & evidence:** `gitcontext` (exclude-filtered diff), `githubcontext`, `contextpack`,
   `contextprofile`, `shardpack` (shard packs), `evidence`, `mutation` (Stryker/gremlins report), `knowledge`,
   `markdown`, `classify` (file class), `testconv` (test-file convention).

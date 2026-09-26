@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.13.2 - 2026-09-26
+
+### Fixed
+
+- **The Stop hook evaluates the worktree a session is working in, not the checkout it was launched
+  in.** A session opened on one checkout that works in a sibling worktree (via `cd`) was evaluated
+  against the launch checkout on every turn, so it was blocked on that checkout's unreviewed files
+  and could never clear them. A real Codex Stop event (2026-09-26) showed that nothing the host
+  sends identifies the worktree: the hook's working directory and the payload's `cwd` both named
+  the launch checkout. The hook now takes the session id from the payload and asks
+  `metareview session resolve` which checkout to evaluate. The block reason names the checkout it
+  evaluated and, for an unbound session, gives the exact `metareview session bind <session-id>
+  <worktree>` command.
+- **The Stop hook finds a project's own `bin/metareview`.** It looked only on `PATH`, so a
+  project that builds metareview into `./bin` got "metareview is not installed", or an older global
+  binary answered instead. It now looks in the same places as the pre-push hook: `METAREVIEW_BIN`,
+  `PATH`, `$CLAUDE_PROJECT_DIR/bin`, then the checkout's `bin/`.
+- **The Stop hook prefers the payload's `cwd` over the directory the host started it in.**
+
+### Added
+
+- **`metareview session bind|resolve|unbind`.** `bind <session-id> <worktree-path>` records which
+  worktree a session's work is in. Bindings are stored in the repository's shared git directory,
+  so every worktree sees them. Only worktrees of the same repository are accepted, and a binding
+  is re-checked on every resolve: one whose worktree is gone, or that was edited to point
+  elsewhere, falls back to the launch checkout with a warning. A binding only chooses which
+  checkout to evaluate; that worktree's own pending reviews still block. An older CLI without
+  `session` leaves the hook evaluating the checkout it runs in.
+
+### Known issue
+
+- Under Codex, the Stop payload was observed with `stop_hook_active: false` during a run of
+  repeated hook-driven continuations. The hook relies on that flag to stop blocking on its second
+  pass, so under Codex a blocker the session genuinely cannot clear may block repeatedly.
+  Tracked separately (beads `mr-j30`).
+
 ## 0.13.1 - 2026-09-24
 
 ### Fixed

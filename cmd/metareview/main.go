@@ -112,6 +112,7 @@ Usage:
   metareview override request <finding-id> --reason "<text>" [--by <who>] [--escalation "<text>"]
   metareview override grant <finding-id> --reason "<text>" [--by <who>]
   metareview override list [--pending]
+  metareview session bind <session-id> <worktree-path> | resolve [<session-id>] | unbind <session-id>
   metareview context build <path>
   metareview context diff [--base <ref>]
   metareview evidence run -- <command> [args...]
@@ -135,6 +136,8 @@ Commands:
   override request           Record an out-of-workflow escalation against a finding (still blocks)
   override grant             Acknowledge a process exception from outside the workflow (stops blocking)
   override list              List process exceptions; --pending exits 1 while any are unacknowledged
+  session bind|resolve|unbind
+                             Point a host session's Stop hook at the worktree its work is in
   context build <path>       Build a Markdown context pack for an artifact
   context diff               Print git diff context as JSON
   evidence run               Run a command and print a structured JSON receipt
@@ -246,6 +249,11 @@ func dispatch(args []string) {
 
 	if args[0] == "override" {
 		handleOverride(args[1:])
+		return
+	}
+
+	if args[0] == "session" {
+		handleSession(args[1:])
 		return
 	}
 

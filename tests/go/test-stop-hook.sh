@@ -201,4 +201,91 @@ chmod +x "$TMP/noisy"
 out="$(printf '{}' | METAREVIEW_BIN="$TMP/noisy" bash "$HOOK" 2>/dev/null)"
 assert_json_block "$out" "internal/noisy.go"
 
+# 16-20. The session is launched on one checkout and works in a sibling worktree. Captured from a
+#        real Codex Stop event on 2026-09-26: the hook's $PWD and the payload's cwd BOTH named the
+#        launch checkout (main), while the work was in another worktree — so the hook evaluated
+#        main on every turn and blocked on files the session never touched. Nothing in the payload
+#        names the worktree; the session binds it once, by the id the payload does carry.
+keeper="$TMP/keeper"
+git -C "$repo" worktree add -q -b keeper "$keeper" main
+printf 'package p // keeper\n' > "$keeper/keeper.go"
+git -C "$keeper" add keeper.go
+git -C "$keeper" -c commit.gpgsign=false commit -qm keeper
+keeper_head="$(git -C "$keeper" rev-parse HEAD)"
+keeper_real="$(cd "$keeper" && pwd -P)"
+repo_real="$(cd "$repo" && pwd -P)"
+payload="{\"session_id\":\"sess-1\",\"cwd\":\"$repo\",\"stop_hook_active\":false}"
+
+# 16. Unbound: the hook evaluates the launch checkout, says WHICH checkout it evaluated, and quotes
+#     the exact command — session id included — that points it at the right worktree.
+out="$(cd "$repo" && printf '%s' "$payload" | METAREVIEW_BIN="$TMP/mrv" bash "$HOOK")"
+assert_json_block "$out" "NEEDS_REVISION"
+printf '%s' "$out" | grep -qF "$repo_real" || { echo "FAIL: the block must name the checkout it evaluated: $out"; exit 1; }
+printf '%s' "$out" | grep -qF "metareview session bind sess-1 " || { echo "FAIL: the block must quote the bind command: $out"; exit 1; }
+
+# 16b. A session id `session bind` would refuse is never quoted into a command for the agent to
+#      run — the block still names the checkout, but offers no bind line.
+out="$(cd "$repo" && printf '{"session_id":"x; rm -rf ~","cwd":"%s"}' "$repo" | METAREVIEW_BIN="$TMP/mrv" bash "$HOOK")"
+assert_json_block "$out" "NEEDS_REVISION"
+if printf '%s' "$out" | grep -q "session bind"; then echo "FAIL: an unsafe session id was quoted into a command: $out"; exit 1; fi
+
+# 17. Bound: evaluated in the worktree, from the SAME launch checkout. The worktree's own pending
+#     review surfaces — a binding selects a checkout, it never exempts one — and main's blocker
+#     does not.
+(cd "$repo" && "$TMP/mrv" session bind sess-1 "$keeper" >/dev/null)
+out="$(cd "$repo" && printf '%s' "$payload" | METAREVIEW_BIN="$TMP/mrv" bash "$HOOK")"
+assert_json_block "$out" "keeper.go"
+printf '%s' "$out" | grep -qF "$keeper_real" || { echo "FAIL: the block must name the bound worktree: $out"; exit 1; }
+if printf '%s' "$out" | grep -q "NEEDS_REVISION\|session bind"; then
+  echo "FAIL: a bound session must not report the launch checkout's blockers or re-offer the bind: $out"; exit 1
+fi
+
+# 18. Once the worktree's work is reviewed, the bound session finishes — silently — even though
+#     the launch checkout is still blocked. This is the livelock the yield used to paper over.
+mkdir -p "$keeper/docs/metareview/reviews"
+printf '# metareview: pr-ready review\n\nRun ID: `mrv-k`\n\nTarget: `current branch`\n\nHead: `%s`\n\nCovered paths: `["keeper.go"]`\n\n## Verdict\n\nPASS\n' \
+  "$keeper_head" > "$keeper/docs/metareview/reviews/mrv-k-pr-ready.md"
+out="$(cd "$repo" && printf '%s' "$payload" | METAREVIEW_BIN="$TMP/mrv" bash "$HOOK" 2>"$TMP/err4")"
+if [ -n "$out" ] || [ -s "$TMP/err4" ]; then
+  echo "FAIL: a bound, reviewed worktree must pass quietly: out=$out err=$(cat "$TMP/err4")"; exit 1
+fi
+
+# 19. The payload's cwd is preferred over the process directory: a host may start the hook
+#     somewhere else entirely and still report where the session is.
+out="$(cd "$TMP" && printf '{"cwd":"%s"}' "$repo" | METAREVIEW_BIN="$TMP/mrv" bash "$HOOK")"
+assert_json_block "$out" "NEEDS_REVISION"
+
+# 20. A binding whose worktree is gone falls back to the launch checkout — and says so.
+git -C "$repo" worktree remove --force "$keeper"
+out="$(cd "$repo" && printf '%s' "$payload" | METAREVIEW_BIN="$TMP/mrv" bash "$HOOK" 2>"$TMP/err5")"
+assert_json_block "$out" "NEEDS_REVISION"
+grep -q "cannot be used" "$TMP/err5" || { echo "FAIL: a stale binding must be reported:"; cat "$TMP/err5"; exit 1; }
+(cd "$repo" && "$TMP/mrv" session unbind sess-1 >/dev/null)
+
+# 21. An older CLI without `session` still gates: resolve fails, the hook stays where it is, and
+#     the old binary's complaint does not leak into the transcript.
+cat > "$TMP/old" <<EOF
+#!/bin/sh
+if [ "\$1" = session ]; then echo "Unknown command: session" >&2; exit 2; fi
+exec "$TMP/mrv" "\$@"
+EOF
+chmod +x "$TMP/old"
+out="$(cd "$repo" && printf '%s' "$payload" | METAREVIEW_BIN="$TMP/old" bash "$HOOK" 2>"$TMP/err6")"
+assert_json_block "$out" "NEEDS_REVISION"
+if grep -q "Unknown command" "$TMP/err6"; then echo "FAIL: an old CLI's usage error leaked:"; cat "$TMP/err6"; exit 1; fi
+
+# 22. With no METAREVIEW_BIN and nothing on PATH, the hook finds the checkout's own bin/metareview
+#     — as the pre-push hook does — instead of blocking on "not installed".
+minpath="$(dirname "$(command -v git)"):$(dirname "$(command -v python3)"):/usr/bin:/bin"
+if PATH="$minpath" command -v metareview >/dev/null 2>&1; then
+  echo "test-stop-hook: skipping 22 (a metareview is on the minimal PATH)"
+else
+  # Ignored, as a project's own build is: an untracked binary would itself be an unreviewed file.
+  mkdir -p "$repo/bin" && cp "$TMP/mrv" "$repo/bin/metareview"
+  printf 'bin/\n' >> "$(git -C "$repo" rev-parse --git-common-dir)/info/exclude"
+  out="$(cd "$repo/internal/deep" && printf '{}' | env -u METAREVIEW_BIN -u CLAUDE_PROJECT_DIR PATH="$minpath" bash "$HOOK")"
+  assert_json_block "$out" "NEEDS_REVISION"
+  rm -rf "${repo:?}/bin"
+fi
+
 echo "test-stop-hook: ok"
