@@ -344,3 +344,25 @@ func TestScrubGitEnv(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+// A directory whose .git FILE points at the repository shares its common directory without being
+// one of its worktrees. Only a worktree git itself lists is accepted — on bind and on resolve.
+func TestBindRefusesAGitFileThatIsNotAListedWorktree(t *testing.T) {
+	f := newFixture(t)
+	fake := filepath.Join(filepath.Dir(f.main), "fake")
+	if err := os.MkdirAll(fake, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fake, ".git"), []byte("gitdir: "+filepath.Join(f.main, ".git")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Bind(f.main, sid, fake, "", time.Unix(0, 0)); !errors.Is(err, ErrNotSameRepository) {
+		t.Fatalf("an unlisted checkout must be refused, got %v", err)
+	}
+	if err := writeAtomic(bindingPath(filepath.Join(f.main, ".git"), sid), []byte(`{"schemaVersion":1,"sessionId":"`+sid+`","worktree":"`+fake+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := Resolve(f.main, sid); got.Bound || got.Warning == "" {
+		t.Fatalf("an unlisted checkout must be rejected on resolve: %+v", got)
+	}
+}

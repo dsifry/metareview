@@ -25,7 +25,8 @@ still block.
 
 Commands:
   bind     Record that <session-id>'s work is in the worktree containing <worktree-path>
-  resolve  Print the checkout root to evaluate for <session-id> (exit 0; warnings on stderr)
+  resolve  Print the checkout root to evaluate for <session-id>, then "bound" on a second line
+           when a binding chose it (exit 0; warnings on stderr)
   unbind   Remove <session-id>'s binding
 `)
 }
@@ -50,6 +51,11 @@ func handleSession(args []string) {
 			_, _ = fmt.Fprintln(stderr, "metareview: "+r.Warning)
 		}
 		_, _ = fmt.Fprintln(stdout, r.Dir)
+		if r.Bound {
+			// A second line, so a hook reads "bound" from the answer instead of inferring it from
+			// a path comparison that a nested repository marker can fool.
+			_, _ = fmt.Fprintln(stdout, "bound")
+		}
 	case len(args) == 2 && args[0] == "unbind":
 		removed, err := session.Unbind(workdir, args[1])
 		exitOnErr(err)

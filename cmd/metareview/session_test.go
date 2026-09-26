@@ -45,8 +45,10 @@ func TestSessionBindResolveUnbind(t *testing.T) {
 		t.Fatalf("bind: code=%d out=%q err=%q", code, out, errOut)
 	}
 
+	// Bound: the checkout, then a line saying the binding chose it — so the hook need not infer
+	// "bound" from a path comparison that a nested marker directory can fool.
 	code, out, errOut = runCLI(t, root, nil, "session", "resolve", "s-1")
-	if code != 0 || strings.TrimSpace(out) != wt || errOut != "" {
+	if code != 0 || out != wt+"\nbound\n" || errOut != "" {
 		t.Fatalf("bound resolve: code=%d out=%q err=%q", code, out, errOut)
 	}
 
@@ -83,7 +85,7 @@ func TestSessionResolveWarnsOnAStaleBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errOut := runCLI(t, root, nil, "session", "resolve", "s-2")
-	if code != 0 || strings.TrimSpace(out) != root || !strings.Contains(errOut, "cannot be used") {
+	if code != 0 || out != root+"\n" || !strings.Contains(errOut, "cannot be used") {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 	}
 }

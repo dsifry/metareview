@@ -73,14 +73,16 @@ $FIELDS
 EOF
 
 # Where the session is. The payload's cwd is the host's own statement of it, so it wins over the
-# directory the host happened to start this process in.
+# directory the host happened to start this process in. (A relative METAREVIEW_BIN is relative
+# to that original directory, so it is remembered first.)
+ORIG_PWD="$(pwd)"
 if [ -n "$HOST_CWD" ] && [ -d "$HOST_CWD" ]; then
   cd "$HOST_CWD" 2>/dev/null || true
 fi
 
 # Find the binary the way the pre-push hook does. Plain `metareview` on PATH was the only lookup,
-# so a project that pins its own build in ./bin (and removes the global one so an old release
-# cannot answer) got "not installed" — or, worse, an older global binary answering for it.
+# so a project that builds its own into ./bin, with nothing on PATH, got "not installed". PATH
+# still wins when it has one, exactly as in pre-push.
 BIN="${METAREVIEW_BIN:-}"
 if [ -z "$BIN" ]; then
   TOP="$(git rev-parse --show-toplevel 2>/dev/null || true)"
@@ -94,6 +96,13 @@ if [ -z "$BIN" ]; then
     BIN="metareview"
   fi
 fi
+
+# The hook changes directory again below (into a bound worktree), so a relative path would stop
+# naming the binary it was checked as: absolute from here on.
+case "$BIN" in
+  /*) ;;
+  */*) BIN="$ORIG_PWD/$BIN" ;;
+esac
 
 if ! command -v "$BIN" >/dev/null 2>&1; then
   # Absent tooling is reported, never treated as a pass: a check that did not run must not read
@@ -115,19 +124,28 @@ fi
 # none). An older CLI without `session` fails here and the hook simply stays where it is; its
 # usage error is not the operator's business. A warning from a CLI that DID answer is.
 LAUNCHED="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+LAUNCHED="$(cd "$LAUNCHED" 2>/dev/null && pwd -P || printf '%s' "$LAUNCHED")"
 BOUND=""
-if [ -n "$SESSION_ID" ]; then
-  RES_ERR="$(mktemp "${TMPDIR:-/tmp}/metareview-resolve.XXXXXX" 2>/dev/null || true)"
-  if RESOLVED="$("$BIN" session resolve "$SESSION_ID" 2>"${RES_ERR:-/dev/null}")"; then
-    [ -n "$RES_ERR" ] && [ -s "$RES_ERR" ] && cat "$RES_ERR" >&2
-    if [ -n "$RESOLVED" ] && [ -d "$RESOLVED" ] && cd "$RESOLVED" 2>/dev/null; then
-      [ "$(pwd -P)" != "$(cd "$LAUNCHED" 2>/dev/null && pwd -P)" ] && BOUND="yes"
-    fi
+CHECKED=""
+# Asked even without a session id: resolve prints the root status will evaluate (which honours
+# nested metareview markers the git toplevel does not), so the reason names what was checked.
+# "bound" on its second line is the ONLY evidence of a binding — never inferred from paths.
+RES_ERR="$(mktemp "${TMPDIR:-/tmp}/metareview-resolve.XXXXXX" 2>/dev/null || true)"
+if RESOLVED="$("$BIN" session resolve ${SESSION_ID:+"$SESSION_ID"} 2>"${RES_ERR:-/dev/null}")"; then
+  [ -n "$RES_ERR" ] && [ -s "$RES_ERR" ] && cat "$RES_ERR" >&2
+  { IFS= read -r RES_DIR; IFS= read -r RES_MARK; } <<EOF || true
+$RESOLVED
+EOF
+  if [ -n "$RES_DIR" ] && [ -d "$RES_DIR" ] && cd "$RES_DIR" 2>/dev/null; then
+    CHECKED="$(pwd -P)"
+    [ "${RES_MARK:-}" = "bound" ] && BOUND="yes"
   fi
-  [ -n "$RES_ERR" ] && rm -f "$RES_ERR"
 fi
-CHECKED="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
-CHECKED="$(cd "$CHECKED" 2>/dev/null && pwd -P || printf '%s' "$CHECKED")"
+[ -n "$RES_ERR" ] && rm -f "$RES_ERR"
+if [ -z "$CHECKED" ]; then
+  CHECKED="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+  CHECKED="$(cd "$CHECKED" 2>/dev/null && pwd -P || printf '%s' "$CHECKED")"
+fi
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 export MRV_CHECKED="$CHECKED" MRV_BRANCH="$BRANCH" MRV_SESSION_ID="$SESSION_ID" MRV_BOUND="$BOUND"
 
@@ -168,7 +186,13 @@ print("metareview: clear them, or record one with `metareview override request`.
 fi
 
 if [ "$CODE" -eq 0 ]; then
-  exit 0   # nothing to clear: the host proceeds
+  # Nothing to clear: the host proceeds. A pass in a BOUND worktree is still announced — a binding
+  # moves the gate off the launch checkout, and one chosen to dodge its blockers must be visible.
+  if [ -n "$BOUND" ]; then
+    printf 'metareview: passed in bound worktree %s%s for session %s; the launch checkout %s was not evaluated.\n' \
+      "$CHECKED" "${BRANCH:+ (branch $BRANCH)}" "$SESSION_ID" "$LAUNCHED" >&2
+  fi
+  exit 0
 fi
 
 # Exit 1 means "something must be cleared". Anything else is a failure of the check itself, and

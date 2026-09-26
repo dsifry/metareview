@@ -229,6 +229,18 @@ out="$(cd "$repo" && printf '{"session_id":"x; rm -rf ~","cwd":"%s"}' "$repo" | 
 assert_json_block "$out" "NEEDS_REVISION"
 if printf '%s' "$out" | grep -q "session bind"; then echo "FAIL: an unsafe session id was quoted into a command: $out"; exit 1; fi
 
+# 16c. A subdirectory carrying its own metareview marker is evaluated as its own root (as before),
+#      and the hook says so — without claiming a binding that does not exist.
+mkdir -p "$repo/pkg/docs/metareview"
+out="$(printf '{"session_id":"sess-9","cwd":"%s"}' "$repo/pkg" | METAREVIEW_BIN="$TMP/mrv" bash "$HOOK" 2>"$TMP/err16c" || true)"
+if printf '%s' "$out" | grep -q "is bound" || grep -q "bound worktree" "$TMP/err16c"; then
+  echo "FAIL: an unbound session was reported as bound: out=$out err=$(cat "$TMP/err16c")"; exit 1
+fi
+if [ -n "$out" ]; then
+  printf '%s' "$out" | grep -qF "Evaluated $repo_real/pkg" || { echo "FAIL: the reason must name the root status evaluated: $out"; exit 1; }
+fi
+rm -rf "${repo:?}/pkg"
+
 # 17. Bound: evaluated in the worktree, from the SAME launch checkout. The worktree's own pending
 #     review surfaces — a binding selects a checkout, it never exempts one — and main's blocker
 #     does not.
@@ -245,10 +257,23 @@ fi
 mkdir -p "$keeper/docs/metareview/reviews"
 printf '# metareview: pr-ready review\n\nRun ID: `mrv-k`\n\nTarget: `current branch`\n\nHead: `%s`\n\nCovered paths: `["keeper.go"]`\n\n## Verdict\n\nPASS\n' \
   "$keeper_head" > "$keeper/docs/metareview/reviews/mrv-k-pr-ready.md"
+#     It passes WITHOUT a block decision, but never silently: a bound pass says on stderr which
+#     worktree passed and that the launch checkout was not evaluated, so a binding chosen to dodge
+#     the launch checkout's blockers is visible in the transcript.
 out="$(cd "$repo" && printf '%s' "$payload" | METAREVIEW_BIN="$TMP/mrv" bash "$HOOK" 2>"$TMP/err4")"
-if [ -n "$out" ] || [ -s "$TMP/err4" ]; then
-  echo "FAIL: a bound, reviewed worktree must pass quietly: out=$out err=$(cat "$TMP/err4")"; exit 1
+if [ -n "$out" ]; then
+  echo "FAIL: a bound, reviewed worktree must not block: out=$out"; exit 1
 fi
+if ! { grep -qF "$keeper_real" "$TMP/err4" && grep -qF "$repo_real" "$TMP/err4" && grep -q "not evaluated" "$TMP/err4"; }; then
+  echo "FAIL: a bound pass must name the worktree and the unevaluated launch checkout:"; cat "$TMP/err4"; exit 1
+fi
+
+# 18b. A relative METAREVIEW_BIN still works once the hook has moved into the bound worktree.
+mkdir -p "$repo/tools" && cp "$TMP/mrv" "$repo/tools/mrv"
+printf 'tools/\n' >> "$(git -C "$repo" rev-parse --git-common-dir)/info/exclude"
+out="$(cd "$repo" && printf '%s' "$payload" | METAREVIEW_BIN=tools/mrv bash "$HOOK" 2>"$TMP/err4b")"
+if [ -n "$out" ]; then echo "FAIL: a relative METAREVIEW_BIN broke after the bind cd: $out"; exit 1; fi
+rm -rf "${repo:?}/tools"
 
 # 19. The payload's cwd is preferred over the process directory: a host may start the hook
 #     somewhere else entirely and still report where the session is.

@@ -124,6 +124,19 @@ func inspect(dir string) (checkout, error) {
 	return checkout{top: top, common: common}, nil
 }
 
+// listed reports whether top is one of the working trees git itself records for dir's repository.
+// Sharing the common directory is not enough: a directory holding only a `.git` FILE that points
+// at the repository shares it too, without being a worktree anyone created.
+func listed(dir, top string) bool {
+	out, _ := gitOut(dir, "worktree", "list", "--porcelain")
+	for _, line := range strings.Split(out, "\n") {
+		if path, ok := strings.CutPrefix(line, "worktree "); ok && path == top {
+			return true
+		}
+	}
+	return false
+}
+
 func bindingPath(common, sessionID string) string {
 	return filepath.Join(common, "metareview", "sessions", sessionID+".json")
 }
@@ -156,6 +169,9 @@ func Bind(start, sessionID, target, by string, now time.Time) (Binding, error) {
 	}
 	if there.common != here.common {
 		return Binding{}, fmt.Errorf("%s: %w (its git directory is %s, this repository's is %s)", there.top, ErrNotSameRepository, there.common, here.common)
+	}
+	if !listed(start, there.top) {
+		return Binding{}, fmt.Errorf("%s: %w (`git worktree list` does not include it)", there.top, ErrNotSameRepository)
 	}
 	branch, _ := gitOut(there.top, "rev-parse", "--abbrev-ref", "HEAD")
 	b := Binding{
@@ -244,7 +260,7 @@ func Resolve(start, sessionID string) Resolution {
 	if err != nil {
 		return unusable("bound worktree " + b.Worktree + " is gone: " + err.Error())
 	}
-	if there.common != here.common {
+	if there.common != here.common || !listed(start, there.top) {
 		return unusable("bound path " + b.Worktree + " is " + ErrNotSameRepository.Error())
 	}
 	return Resolution{Dir: there.top, Bound: true}

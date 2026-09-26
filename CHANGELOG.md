@@ -14,9 +14,11 @@
   evaluated and, for an unbound session, gives the exact `metareview session bind <session-id>
   <worktree>` command.
 - **The Stop hook finds a project's own `bin/metareview`.** It looked only on `PATH`, so a
-  project that builds metareview into `./bin` got "metareview is not installed", or an older global
-  binary answered instead. It now looks in the same places as the pre-push hook: `METAREVIEW_BIN`,
-  `PATH`, `$CLAUDE_PROJECT_DIR/bin`, then the checkout's `bin/`.
+  project that builds metareview into `./bin` and has none on `PATH` got "metareview is not
+  installed". It now looks in the same places, in the same order, as the pre-push hook:
+  `METAREVIEW_BIN`, `PATH`, `$CLAUDE_PROJECT_DIR/bin`, then the checkout's `bin/`. A `metareview`
+  on `PATH` still wins, so remove an outdated global install. A relative `METAREVIEW_BIN` is
+  resolved before the hook changes directory.
 - **The Stop hook prefers the payload's `cwd` over the directory the host started it in.**
 
 ### Added
@@ -26,8 +28,12 @@
   so every worktree sees them. Only worktrees of the same repository are accepted, and a binding
   is re-checked on every resolve: one whose worktree is gone, or that was edited to point
   elsewhere, falls back to the launch checkout with a warning. A binding only chooses which
-  checkout to evaluate; that worktree's own pending reviews still block. An older CLI without
-  `session` leaves the hook evaluating the checkout it runs in.
+  checkout to evaluate; that worktree's own pending reviews still block. Even a passing check in a
+  bound worktree is reported on stderr, naming the launch checkout that was not evaluated, so a
+  binding cannot hide the launch checkout's blockers without leaving a trace. `bind` accepts only
+  worktrees listed by `git worktree list`; a directory holding a hand-made `.git` file is refused.
+  `resolve` prints the checkout, then `bound` on a second line when a binding chose it. An older
+  CLI without `session` leaves the hook evaluating the checkout it runs in.
 
 ### Known issue
 
