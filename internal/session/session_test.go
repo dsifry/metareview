@@ -279,7 +279,12 @@ func TestBindReportsWriteFailures(t *testing.T) {
 	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Bind(f.main, sid, f.worktree, "", time.Unix(0, 0)); err == nil {
+	// Privileged processes (root in a container) ignore the mode, so the obstruction is probed first.
+	probe := filepath.Join(dir, ".probe")
+	if os.WriteFile(probe, nil, 0o644) == nil {
+		_ = os.Remove(probe)
+		t.Log("sessions directory is writable despite mode 0555 (privileged process); skipping the write-failure case")
+	} else if _, err := Bind(f.main, sid, f.worktree, "", time.Unix(0, 0)); err == nil {
 		t.Fatal("bind must fail when the binding cannot be written")
 	}
 	if err := os.Chmod(dir, 0o755); err != nil {

@@ -87,7 +87,13 @@ BIN="${METAREVIEW_BIN:-}"
 if [ -z "$BIN" ]; then
   TOP="$(git rev-parse --show-toplevel 2>/dev/null || true)"
   if command -v metareview >/dev/null 2>&1; then
-    BIN="metareview"
+    # The path PATH resolved, not the bare name: a relative PATH entry (`bin`) would otherwise
+    # name a different binary, or none, once the hook moves into a bound worktree.
+    BIN="$(command -v metareview)"
+    case "$BIN" in
+      /*) ;;
+      *) BIN="$PWD/$BIN" ;;
+    esac
   elif [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -x "$CLAUDE_PROJECT_DIR/bin/metareview" ]; then
     BIN="$CLAUDE_PROJECT_DIR/bin/metareview"
   elif [ -n "$TOP" ] && [ -x "$TOP/bin/metareview" ]; then

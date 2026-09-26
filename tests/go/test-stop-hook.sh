@@ -275,6 +275,15 @@ out="$(cd "$repo" && printf '%s' "$payload" | METAREVIEW_BIN=tools/mrv bash "$HO
 if [ -n "$out" ]; then echo "FAIL: a relative METAREVIEW_BIN broke after the bind cd: $out"; exit 1; fi
 rm -rf "${repo:?}/tools"
 
+# 18c. Likewise a metareview found through a RELATIVE PATH entry: the bound worktree has no such
+#      directory, so the name must be pinned to the binary that was found, before any cd.
+mkdir -p "$repo/relbin" && cp "$TMP/mrv" "$repo/relbin/metareview"
+printf 'relbin/\n' >> "$(git -C "$repo" rev-parse --git-common-dir)/info/exclude"
+relpath="relbin:$(dirname "$(command -v git)"):$(dirname "$(command -v python3)"):/usr/bin:/bin"
+out="$(cd "$repo" && printf '%s' "$payload" | env -u METAREVIEW_BIN PATH="$relpath" bash "$HOOK" 2>"$TMP/err4c")"
+if [ -n "$out" ]; then echo "FAIL: a relative PATH entry broke after the bind cd: $out"; exit 1; fi
+rm -rf "${repo:?}/relbin"
+
 # 19. The payload's cwd is preferred over the process directory: a host may start the hook
 #     somewhere else entirely and still report where the session is.
 out="$(cd "$TMP" && printf '{"cwd":"%s"}' "$repo" | METAREVIEW_BIN="$TMP/mrv" bash "$HOOK")"

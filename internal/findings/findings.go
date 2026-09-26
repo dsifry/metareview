@@ -140,6 +140,12 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			record.GitHead = firstNonEmpty(run.GitHead, record.GitHead)
 			record.UpdatedAt = now
 		}
+		// Before the fix transition below: a summary is never "fixed", even from a chained run.
+		if supersedesUnreproducedSummary(record, run, currentFingerprints) {
+			record.Status = StatusSuperseded
+			record.UpdatedAt = now
+			record.GitHead = run.GitHead
+		}
 		// override-pending closes here too, not just open. A requested override
 		// that is then genuinely fixed had no way out: the fix transition matched
 		// only "open", so the record stayed pending, Blocks kept returning true,
@@ -158,11 +164,6 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			!currentFingerprints[record.Fingerprint] {
 			record.Status = "fixed"
 			record.FixedInRunID = run.ID
-			record.UpdatedAt = now
-			record.GitHead = run.GitHead
-		}
-		if supersedesUnreproducedSummary(record, run, currentFingerprints) {
-			record.Status = StatusSuperseded
 			record.UpdatedAt = now
 			record.GitHead = run.GitHead
 		}

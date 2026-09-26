@@ -1686,3 +1686,31 @@ func countOpen(records []Record, fingerprint string) int {
 	}
 	return n
 }
+
+// A summary from a run IN the chain is superseded too — never marked fixed, which learning would read
+// as a correction — including one with a pending override request.
+func TestReconcileSupersedesAChainedSummaryRatherThanFixingIt(t *testing.T) {
+	root := t.TempDir()
+	target := map[string]string{"type": "branch", "id": "work"}
+	summary := Input{Reviewer: "pr-readiness-reviewer", Severity: "high", Classification: "blocking",
+		Title: "Unresolved review blockers", Fingerprint: "pr:unresolved-review-blockers:work"}
+	runA := Run{ID: "mrv-a", Scope: "pr-ready", Target: target, RepoRoot: root, GitHead: "aaa"}
+	seeded, err := Reconcile(root, runA, []Input{summary}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RequestOverride(root, seeded.NewFindings[0].ID, OverrideRequest{By: "agent", Reason: "accidental duplicate run", Now: "2026-09-26T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	runB := Run{ID: "mrv-b", Scope: "pr-ready", Target: target, RepoRoot: root, GitHead: "aaa"}
+	if _, err := Reconcile(root, runB, nil, Options{PreviousRunID: "mrv-a"}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := All(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].Status != StatusSuperseded || all[0].FixedInRunID != "" {
+		t.Fatalf("a chained summary must be superseded, not fixed: %+v", all)
+	}
+}
