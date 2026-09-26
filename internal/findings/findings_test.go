@@ -1624,3 +1624,65 @@ func TestConcurrentRenderLostUpdateSelfHeals(t *testing.T) {
 		}
 	}
 }
+
+// "Unresolved review blockers" summarises OTHER blockers and is re-derived by every pr-ready run. An
+// out-of-chain copy of it (a standalone re-run at the same head) is superseded when this run does not
+// raise it again — pending override request included — instead of blocking forever; any ordinary
+// out-of-chain finding keeps blocking (TestReconcileKeepsSameHeadOpenFindingsWithoutPreviousRun).
+func TestReconcileSupersedesAnUnreproducedUnresolvedBlockersSummary(t *testing.T) {
+	root := t.TempDir()
+	target := map[string]string{"type": "branch", "id": "work"}
+	summary := Input{Reviewer: "pr-readiness-reviewer", Severity: "high", Classification: "blocking",
+		Title: "Unresolved review blockers", Fingerprint: "pr:unresolved-review-blockers:work"}
+	other := unsafeEval("eval is introduced.")
+	other.Fingerprint = "security:eval:lib/example.js"
+	runA := Run{ID: "mrv-a", Scope: "pr-ready", Target: target, RepoRoot: root, GitHead: "aaa"}
+	seeded, err := Reconcile(root, runA, []Input{summary, other}, Options{})
+	if err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := RequestOverride(root, seeded.NewFindings[0].ID, OverrideRequest{By: "agent", Reason: "accidental duplicate run", Now: "2026-09-26T00:00:00Z"}); err != nil {
+		t.Fatalf("request override: %v", err)
+	}
+
+	runB := Run{ID: "mrv-b", Scope: "pr-ready", Target: target, RepoRoot: root, GitHead: "aaa"}
+	result, err := Reconcile(root, runB, []Input{other}, Options{})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if result.OpenBlockingCount != 1 || result.OpenFindings[0].Fingerprint != other.Fingerprint {
+		t.Fatalf("only the ordinary blocker should stay open: %+v", result.OpenFindings)
+	}
+	all, err := All(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range all {
+		if r.Fingerprint == summary.Fingerprint && (r.Status != StatusSuperseded || r.FixedInRunID != "") {
+			t.Fatalf("the summary must be superseded, never fixed: %+v", r)
+		}
+	}
+
+	// Reproduced by this run, it stays open; on another scope or target it is untouched.
+	runC := Run{ID: "mrv-c", Scope: "pr-ready", Target: target, RepoRoot: root, GitHead: "aaa"}
+	if again, err := Reconcile(root, runC, []Input{summary}, Options{}); err != nil || again.OpenBlockingCount != 2 {
+		t.Fatalf("a reproduced summary must block: %+v %v", again, err)
+	}
+	runD := Run{ID: "mrv-d", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
+	if _, err := Reconcile(root, runD, nil, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := All(root); countOpen(after, summary.Fingerprint) != 1 {
+		t.Fatalf("a task-done run must not supersede a pr-ready summary")
+	}
+}
+
+func countOpen(records []Record, fingerprint string) int {
+	n := 0
+	for _, r := range records {
+		if r.Fingerprint == fingerprint && r.Status == "open" {
+			n++
+		}
+	}
+	return n
+}

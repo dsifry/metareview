@@ -161,6 +161,11 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			record.UpdatedAt = now
 			record.GitHead = run.GitHead
 		}
+		if supersedesUnreproducedSummary(record, run, currentFingerprints) {
+			record.Status = StatusSuperseded
+			record.UpdatedAt = now
+			record.GitHead = run.GitHead
+		}
 		if supersedesFreshness(record, run, options, currentFingerprints) {
 			record.Status = StatusSuperseded
 			record.UpdatedAt = now
@@ -206,6 +211,24 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		OpenFindings:      openFindings,
 		OpenBlockingCount: CountByClass(openFindings).Blocking,
 	}, nil
+}
+
+// UnresolvedReviewBlockersPrefix prefixes the fingerprint of pr-ready's "Unresolved review blockers"
+// finding (internal/reviewers). It SUMMARISES other blockers and is re-derived by every pr-ready run.
+const UnresolvedReviewBlockersPrefix = "pr:unresolved-review-blockers:"
+
+// supersedesUnreproducedSummary: an open (or override-pending) "Unresolved review blockers" row for
+// this run's scope and target that this run did not raise again. Ordinary findings close only
+// through the run chain, but this one is a summary of state every run re-reads, so a copy left by
+// a run outside the chain (a standalone re-run at the same head) otherwise stayed open forever and
+// only an override could clear it. Superseded, not fixed: nothing was corrected, the summary is
+// simply no longer true, and learning must not read it as a fix.
+func supersedesUnreproducedSummary(record Record, run Run, currentFingerprints map[string]bool) bool {
+	return strings.HasPrefix(record.Fingerprint, UnresolvedReviewBlockersPrefix) &&
+		(record.Status == "open" || record.Status == StatusOverridePending) &&
+		strings.TrimSpace(record.Scope) == strings.TrimSpace(run.Scope) &&
+		sameRunTarget(record, run) &&
+		!currentFingerprints[record.Fingerprint]
 }
 
 // StatusSuperseded marks a row whose fingerprint an upgrade replaced. It is

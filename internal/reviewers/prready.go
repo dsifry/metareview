@@ -73,7 +73,7 @@ func RunPRReady(context PRReadyContext) []Finding {
 			Found:          "Blocked targets: " + strings.Join(blocked, ", "),
 			Evidence:       []findings.Evidence{{Type: "review-log"}},
 			Recommendation: "Resolve blockers and re-run the relevant task or epic review before PR-ready.",
-			Fingerprint:    "pr:unresolved-review-blockers:" + strings.Join(blocked, "|"),
+			Fingerprint:    findings.UnresolvedReviewBlockersPrefix + strings.Join(blocked, "|"),
 		}))
 	}
 	if !hasPRValidationEvidence(context.EvidenceText) {

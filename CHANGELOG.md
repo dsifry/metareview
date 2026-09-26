@@ -20,6 +20,14 @@
   on `PATH` still wins, so remove an outdated global install. A relative `METAREVIEW_BIN` is
   resolved before the hook changes directory.
 - **The Stop hook prefers the payload's `cwd` over the directory the host started it in.**
+- **`review pr-ready` no longer blocks on its own "Unresolved review blockers" finding.** A
+  standalone re-run at the same commit (for example one started without `--previous-run`) raised
+  that finding against the branch. Every later run in the real chain then inherited it under the
+  same id and raised it again from itself, so only a human override could clear it. That finding
+  only summarises other blockers, so a run no longer counts it as a blocker. A copy left by a run
+  outside the chain is marked superseded, not fixed, when the current run does not raise it again;
+  a pending override request on it is closed the same way. The blockers it summarised,
+  task-done/epic-ready blockers, other `pr-ready` findings and the escalation lock are unchanged.
 
 ### Added
 

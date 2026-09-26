@@ -297,14 +297,15 @@ func Create(root string, options Options) (Result, error) {
 		CurrentTarget:    targetRecord,
 		LinkedTargets:    linkedTargets,
 	})
-	reviewLogs := append(latestLogsByTarget(projection.CurrentReviewLogs()), blockerLogs(projection.CurrentBlockers())...)
+	liveBlockers := withoutOwnPRReadyFindings(projection.CurrentBlockers(), targetRecord)
+	reviewLogs := append(latestLogsByTarget(projection.CurrentReviewLogs()), blockerLogs(liveBlockers)...)
 	blockingReviewLogs := gateReviewLogs(reviewLogs, allFindings)
 	prEvidence := RenderEvidence(EvidenceInput{
 		Summary:     branchSummary(analysisGit),
 		Validation:  validationLines(evidenceText),
 		TaskReviews: taskReviewEvidence(reviewLogs),
 		EpicReviews: epicReviewEvidence(reviewLogs),
-		Blockers:    blockerEvidence(projection.CurrentBlockers()),
+		Blockers:    blockerEvidence(liveBlockers),
 		GitHub:      ghCtx,
 		Findings:    allFindings,
 	})
@@ -1013,6 +1014,25 @@ func latestLogsByTarget(logs []reviewlog.Summary) []reviewlog.Summary {
 		return result[i].Target < result[j].Target
 	})
 	return result
+}
+
+// withoutOwnPRReadyFindings drops pr-ready's own earlier "Unresolved review blockers" findings
+// against this branch from what that same reviewer reads. The finding is derived entirely from other
+// blockers, so counting it as one made the gate block on itself: a standalone re-run at the same head
+// raised it against the branch, every later run inherited it under the same id and raised it again
+// from itself, and only an override could clear it. The blockers it summarised still pass through and
+// block on their own; other pr-ready findings (a stale mutation row this run does not re-check) and
+// task-done/epic-ready blockers are untouched, and the escalation lock is separate.
+func withoutOwnPRReadyFindings(blockers []findings.Record, target map[string]string) []findings.Record {
+	kept := make([]findings.Record, 0, len(blockers))
+	for _, blocker := range blockers {
+		if blocker.Scope == "pr-ready" && strings.HasPrefix(blocker.Fingerprint, findings.UnresolvedReviewBlockersPrefix) &&
+			findingTargetID(blocker.Target) == target["id"] {
+			continue
+		}
+		kept = append(kept, blocker)
+	}
+	return kept
 }
 
 func blockerLogs(blockers []findings.Record) []reviewlog.Summary {
