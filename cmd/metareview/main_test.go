@@ -1224,3 +1224,22 @@ func TestRecordLensesRejectsMockRuns(t *testing.T) {
 		t.Fatalf("real run: code=%d out=%q err=%q", code, out, errOut)
 	}
 }
+
+// TestReviewTaskDoneRejectsFlagShapedTargets (#187): a task-done target that starts with '-' is a flag typed where
+// the target belongs (e.g. the target was omitted), not a task. Recording a review under it would create a log
+// nobody can re-run, so the CLI refuses it before running anything.
+func TestReviewTaskDoneRejectsFlagShapedTargets(t *testing.T) {
+	root := gitRepo(t)
+	for _, args := range [][]string{
+		{"review", "task-done", "--verbose", "--base", "main"},
+		{"review", "task-done", "--base", "main"},
+	} {
+		code, _, errOut := runCLI(t, root, nil, args...)
+		if code != 2 || !strings.Contains(errOut, "must not start with '-'") {
+			t.Errorf("%v: code=%d err=%q, want exit 2 refusing the flag-shaped target", args, code, errOut)
+		}
+	}
+	if entries, _ := os.ReadDir(filepath.Join(root, "docs", "metareview", "reviews")); len(entries) != 0 {
+		t.Fatalf("a refused task-done must not write a review log, found %d", len(entries))
+	}
+}

@@ -316,6 +316,13 @@ func dispatch(args []string) {
 	}
 
 	if len(args) >= 3 && args[0] == "review" && args[1] == "task-done" {
+		// A target that starts with '-' is a flag typed where the target belongs (usually an omitted target), not
+		// a task. Recording a review under it creates a log nobody can re-run or supersede (#187), so refuse it
+		// before anything runs.
+		if strings.HasPrefix(args[2], "-") {
+			_, _ = fmt.Fprintf(stderr, "review task-done: the task target must not start with '-' (got %q); pass the task id or path before any options\n", args[2])
+			exit(2)
+		}
 		mustFreshnessMode()
 		options := taskdone.Options{}
 		for i := 3; i < len(args); i++ {

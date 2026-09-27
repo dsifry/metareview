@@ -12,8 +12,7 @@ import (
 )
 
 // writeTaskDoneLog writes a committed-style task-done NEEDS_REVISION review log and its context pack, shaped like
-// the real ones (header, Covered paths, a blocking finding) and recording headSHA only in the pack's Git section —
-// as a log from another clone, with no local run record, does.
+// the real ones (header, Covered paths, a blocking finding, a Git section in the pack).
 func writeTaskDoneLog(t *testing.T, root, runID, target, headSHA, branch string, covered string) {
 	t.Helper()
 	contextRel := "docs/metareview/context/" + runID + "-context.md"
@@ -49,9 +48,8 @@ func revParse(t *testing.T, root, ref string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// historyRepo builds main: A → B (the fork point), feature: B → C (checked out), and an unmerged branch old: A → D
-// standing in for a squash-merged feature branch whose commits never reach main.
-func historyRepo(t *testing.T) (root string, a, b, c, d string) {
+// taskReviewRepo builds main: A, and feature: A → C (checked out), and returns A and C.
+func taskReviewRepo(t *testing.T) (root, a, c string) {
 	t.Helper()
 	root = t.TempDir()
 	run := func(args ...string) {
@@ -62,9 +60,9 @@ func historyRepo(t *testing.T) (root string, a, b, c, d string) {
 			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 		}
 	}
-	commit := func(file, body, msg string) string {
+	commit := func(body, msg string) string {
 		t.Helper()
-		if err := os.WriteFile(filepath.Join(root, file), []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "seed.txt"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		run("add", ".")
@@ -76,14 +74,10 @@ func historyRepo(t *testing.T) (root string, a, b, c, d string) {
 	run("config", "--local", "core.hooksPath", filepath.Join(root, ".git", "hooks"))
 	run("config", "user.email", "test@example.com")
 	run("config", "user.name", "Test User")
-	a = commit("seed.txt", "a\n", "A")
-	run("checkout", "-q", "-b", "old")
-	d = commit("other.txt", "d\n", "D")
-	run("checkout", "-q", "main")
-	b = commit("seed.txt", "b\n", "B")
+	a = commit("a\n", "A")
 	run("checkout", "-q", "-b", "feature")
-	c = commit("seed.txt", "c\n", "C")
-	return root, a, b, c, d
+	c = commit("c\n", "C")
+	return root, a, c
 }
 
 // TestPRReadyRetiresOnlyFlagTargetTaskReviews is #187: a task-done review whose target is a command-line flag (the
@@ -103,11 +97,12 @@ func TestPRReadyRetiresOnlyFlagTargetTaskReviews(t *testing.T) {
 	}{
 		{"flag target (the --help artifact)", "--help", "A", "main", false},
 		{"short flag target", "-h", "A", "main", false},
+		{"any other dash target is a real review", "--verbose", "A", "main", true},
 		{"the same stale review under an ordinary target", "help", "A", "main", true},
 		{"this branch's own work", "feat", "C", "feature", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root, a, _, c, _ := historyRepo(t)
+			root, a, c := taskReviewRepo(t)
 			head := map[string]string{"A": a, "C": c}[tc.headOf]
 			writeTaskDoneLog(t, root, "mrv-20260905-223221349809000-task-done-x-9a8265a5", tc.target, head, tc.branch, "seed.txt")
 			result, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: now})
@@ -123,13 +118,16 @@ func TestPRReadyRetiresOnlyFlagTargetTaskReviews(t *testing.T) {
 	}
 }
 
-// TestFlagTargetTaskReviewRunIDs pins the selection: task-done only, a run id, and a target that is a flag.
+// TestFlagTargetTaskReviewRunIDs pins the selection: task-done only, a run id, and a target that is exactly
+// --help or -h — the only flags that were ever recorded as targets (before #164).
 func TestFlagTargetTaskReviewRunIDs(t *testing.T) {
 	logs := []reviewlog.Summary{
 		{RunID: "mrv-help", Kind: "task-done", Target: "--help"},
 		{RunID: "mrv-h", Kind: "task-done", Target: " -h "},
 		{RunID: "mrv-task", Kind: "task-done", Target: "task-1"},
 		{RunID: "mrv-dash-inside", Kind: "task-done", Target: "fix--help"},
+		{RunID: "mrv-verbose", Kind: "task-done", Target: "--verbose"},
+		{RunID: "mrv-help-arg", Kind: "task-done", Target: "--help=x"},
 		{RunID: "", Kind: "task-done", Target: "--help"},
 		{RunID: "mrv-pr", Kind: "pr-ready", Target: "--help"},
 		{RunID: "mrv-empty", Kind: "task-done", Target: ""},

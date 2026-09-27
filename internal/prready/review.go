@@ -730,19 +730,22 @@ func historicalPRReadyRunIDsForCurrentTarget(root string, logs []reviewlog.Summa
 	return ids
 }
 
-// flagTargetTaskReviewRunIDs (#187) returns the task-done reviews whose target is a command-line flag ("--help",
-// "-h", …). Such a log was never a review of work: before #164 made `review task-done --help` print usage, the flag
-// was taken as the task target and a real gate run was recorded against it. Its blockers can never be resolved — a
-// run for that target cannot be made again — yet its covered paths made it block every later PR touching them.
+// flagTargetTaskReviewRunIDs (#187) returns the task-done reviews whose target is exactly --help or -h. Such a log
+// was never a review of work: before #164 made `review task-done --help` print usage, the flag was taken as the
+// task target and a real gate run was recorded against it. Its blockers can never be resolved — a run for that
+// target cannot be made again — yet its covered paths made it block every later PR touching them. Only these two
+// are matched: any other dash target (`--verbose`, an omitted target before `--base`) is now refused by the CLI,
+// and a log recorded under one before that was a real review of current work, so it keeps blocking.
 //
 // This is deliberately the only automatic retirement. Inferring from heads and branches that a review covered
 // someone else's, landed work fails open: task-done also reviews uncommitted changes and records only HEAD, and
 // rebases, renames, detached checkouts and a moving base all defeat the inference. Any other stale blocker is
-// cleared through a human-granted process override (#188), which records who decided and why.
+// cleared through a human-granted process override, which records who decided and why; making that work for
+// blockers that exist only in committed review logs is tracked in #188.
 func flagTargetTaskReviewRunIDs(logs []reviewlog.Summary) []string {
 	var ids []string
 	for _, log := range logs {
-		if log.RunID != "" && log.Kind == "task-done" && strings.HasPrefix(strings.TrimSpace(log.Target), "-") {
+		if target := strings.TrimSpace(log.Target); log.RunID != "" && log.Kind == "task-done" && (target == "--help" || target == "-h") {
 			ids = append(ids, log.RunID)
 		}
 	}
