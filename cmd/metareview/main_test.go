@@ -1206,15 +1206,16 @@ func TestRecordLensesRejectsMockRuns(t *testing.T) {
 	passing, _ := json.Marshal(fsmrun.TransitionData{Outcome: fsmrun.OutcomeReviewed})
 
 	mockInit, _ := json.Marshal(fsmrun.InitData{BaseSHA: base, Head: head, Mock: "mock/scenario.yaml"})
-	writeRawFSMRun(t, root, "mockinit", fsmrun.Event{Type: fsmrun.TypeInit, Data: mockInit}, fsmrun.Event{Type: fsmrun.TypeTransition, Data: passing})
+	writeRawFSMRun(t, root, "run-scripted", fsmrun.Event{Type: fsmrun.TypeInit, Data: mockInit}, fsmrun.Event{Type: fsmrun.TypeTransition, Data: passing})
 
 	realInit, _ := json.Marshal(fsmrun.InitData{BaseSHA: base, Head: head})
-	writeRawFSMRun(t, root, "mocktainted", fsmrun.Event{Type: fsmrun.TypeInit, Data: realInit}, fsmrun.Event{Type: fsmrun.TypeTransition, Data: passing, Mock: true})
+	writeRawFSMRun(t, root, "run-tainted", fsmrun.Event{Type: fsmrun.TypeInit, Data: realInit}, fsmrun.Event{Type: fsmrun.TypeTransition, Data: passing, Mock: true})
 
-	for _, id := range []string{"mockinit", "mocktainted"} {
+	// The ids avoid the word "mock" so the message match proves which branch rejected the run.
+	for id, want := range map[string]string{"run-scripted": "init names a mock scenario", "run-tainted": "mock-stamped event"} {
 		code, _, errOut := runCLI(t, root, nil, "review", "record-lenses", "--scope", "pr-ready", "--base", "main", "--mode", "subagent-adjudicated", "--from-run", id, "--lenses", "security")
-		if code != 2 || !strings.Contains(errOut, "mock") {
-			t.Errorf("%s: code=%d err=%q, want exit 2 naming mock", id, code, errOut)
+		if code != 2 || !strings.Contains(errOut, want) {
+			t.Errorf("%s: code=%d err=%q, want exit 2 with %q", id, code, errOut, want)
 		}
 	}
 	// A real run over the same diff is still accepted.
