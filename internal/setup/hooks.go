@@ -2,6 +2,7 @@ package setup
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -383,14 +384,24 @@ func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 		return false, err
 	}
 	// The opt-in goes with the gate. Unset exits 5 when the key is already absent (an install from before
-	// #194), which is not a failure.
-	_, _ = git(root, "config", "--local", "--unset", StopGateKey)
+	// #194), which is not a failure; anything else is — reporting "uninstalled" while metareview.stopGate
+	// survives would leave pre-finish.sh gating a repository the user just removed it from.
+	var unsetErr error
+	if _, err := git(root, "config", "--local", "--unset", StopGateKey); err != nil && !isExitCode(err, 5) {
+		unsetErr = fmt.Errorf("removing the Stop-gate opt-in (%s): %w", StopGateKey, err)
+	}
 	// Remove the materialized hook dir we own, so uninstall leaves no dangling scripts. A non-existent or
 	// legacy (committed) dir is left alone: RemoveAll on the materialized target only.
 	if mine, e := hookTargetDir(root); e == nil {
 		_ = os.RemoveAll(mine)
 	}
-	return true, nil
+	return true, unsetErr
+}
+
+// isExitCode reports whether err is a git process that exited with code.
+func isExitCode(err error, code int) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.ExitCode() == code
 }
 
 // activeGitHooks lists the non-sample hook files in the repo's COMMON .git/hooks — the hooks a core.hooksPath

@@ -195,3 +195,32 @@ func TestStopGateTogglesEdgeCases(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Uninstall must not report success while the opt-in survives: only git's missing-key exit (5) is benign when
+// unsetting it; any other failure is returned (CodeRabbit on #195).
+func TestUninstallSurfacesAFailedOptInRemoval(t *testing.T) {
+	root, g := tempRepo(t)
+	plan, _ := PlanHookInstall(root, g)
+	if err := ApplyHookInstall(root, plan, false, g); err != nil {
+		t.Fatal(err)
+	}
+	failing := func(r string, args ...string) ([]byte, error) {
+		if len(args) == 4 && args[2] == "--unset" && args[3] == StopGateKey {
+			return nil, errors.New("could not lock config file")
+		}
+		return g(r, args...)
+	}
+	if _, err := UninstallHookInstall(root, failing); err == nil || !strings.Contains(err.Error(), "opt-in") {
+		t.Fatalf("a failed opt-in removal must surface: %v", err)
+	}
+	// A pre-#194 install has no opt-in to remove: git's missing-key exit is not a failure.
+	if _, err := g(root, "config", "--local", "core.hooksPath", plan.Target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g(root, "config", "--local", "--unset", StopGateKey); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := UninstallHookInstall(root, g); err != nil || !changed {
+		t.Fatalf("uninstalling without an opt-in: %v %v", changed, err)
+	}
+}
