@@ -491,7 +491,9 @@ func dispatch(args []string) {
 			if scope == "epic-ready" {
 				wantWorkflow = "epic-review-loop"
 			}
-			if err := validateFromRunDiff(root, fromRun, gc.BaseSHA, gc.HeadSHA, wantWorkflow); err != nil {
+			// The run is read from the store the FSM wrote it to — the main worktree — while base..head
+			// above stays this worktree's diff. From a linked worktree the two roots differ (#169).
+			if err := validateFromRunDiff(repo.RunStoreRoot(workdir), fromRun, gc.BaseSHA, gc.HeadSHA, wantWorkflow); err != nil {
 				_, _ = fmt.Fprintf(stderr, "record-lenses: --from-run %q: %v\n", fromRun, err)
 				exit(2)
 			}

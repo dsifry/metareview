@@ -21,6 +21,7 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/mockai"
 	"github.com/dsifry/metareview/internal/fsm/run"
 	"github.com/dsifry/metareview/internal/fsm/workflow"
+	"github.com/dsifry/metareview/internal/repo"
 )
 
 // Env names the CLI reads (spec 5 §6: the closed set).
@@ -105,14 +106,12 @@ func (c *ctxDeps) rootOf() (string, error) {
 	if err != nil || code != 0 {
 		return "", errs.E(CodeNotARepo, "not inside a git repository", "cwd", c.cwd)
 	}
-	block, _, _ := strings.Cut(out, "\n\n") // the first block is the main worktree; its first line is `worktree <path>`
-	lines := strings.Split(block, "\n")
-	for _, line := range lines {
-		if line == "bare" {
-			return "", errs.E(CodeNotARepo, "the main worktree is bare", "reason", "bare")
-		}
+	// Shared with record-lenses' run lookup (repo.RunStoreRoot), so the writer and reader agree (#169).
+	path, bare := repo.MainWorktreeFromPorcelain(out)
+	if bare {
+		return "", errs.E(CodeNotARepo, "the main worktree is bare", "reason", "bare")
 	}
-	return strings.TrimPrefix(lines[0], "worktree "), nil
+	return path, nil
 }
 
 // toplevel is the current worktree (init's WorkDir default).

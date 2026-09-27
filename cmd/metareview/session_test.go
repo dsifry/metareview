@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,5 +130,48 @@ func TestSessionUsage(t *testing.T) {
 	}
 	if code, _, errOut := runCLI(t, root, nil, "session", "unbind", "../x"); code != 1 || !strings.Contains(errOut, "invalid session id") {
 		t.Errorf("unbind invalid id: code=%d err=%q", code, errOut)
+	}
+}
+
+// Issue #169: `fsm init` from a linked worktree stores the run under the MAIN worktree's
+// .metareview/runs/, so record-lenses run from that same linked worktree must read the run from
+// there too — not report "no such FSM run" for a run the FSM just created.
+func TestRecordLensesFindsFSMRunCreatedFromLinkedWorktree(t *testing.T) {
+	root := gitRepo(t)
+	wt := sessionWorktree(t, root)
+	base, head := diffEndpoints(t, wt)
+
+	code, out, errOut := runCLI(t, wt, nil, "fsm", "init", "--workflow", "review-loop", "--base", base, "--var", "JUDGE=codex/gpt-6-luna", "--var", "JUDGE_EFFORT=low")
+	if code != 0 {
+		t.Fatalf("fsm init from linked worktree: code=%d out=%q err=%q", code, out, errOut)
+	}
+	var initOut struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(out), &initOut); err != nil || initOut.RunID == "" {
+		t.Fatalf("parse fsm init output: %v: %q", err, out)
+	}
+
+	// The run is unfinished: registration must FIND it and reject its outcome, not claim it is missing.
+	code, _, errOut = runCLI(t, wt, nil, "review", "record-lenses", "--scope", "task-done", "--base", base, "--mode", "subagent-adjudicated", "--from-run", initOut.RunID, "--lenses", "feasibility")
+	if code != 2 || strings.Contains(errOut, "no such FSM run") || !strings.Contains(errOut, "not a passing review") {
+		t.Fatalf("unfinished run from linked worktree: code=%d err=%q", code, errOut)
+	}
+
+	// A completed, passing run over the same base..head in the shared run store registers without
+	// copying state into the linked worktree.
+	writeFSMRun(t, root, "passing-from-wt", base, head, "")
+	code, out, errOut = runCLI(t, wt, nil, "review", "record-lenses", "--scope", "task-done", "--base", base, "--mode", "subagent-adjudicated", "--from-run", "passing-from-wt", "--lenses", "feasibility")
+	if code != 0 || !strings.Contains(out, "Recorded task-done") {
+		t.Fatalf("passing run from linked worktree: code=%d out=%q err=%q", code, out, errOut)
+	}
+	if _, err := os.Stat(filepath.Join(wt, ".metareview", "runs", "passing-from-wt")); err == nil {
+		t.Fatal("the run must be read from the shared store, not copied into the linked worktree")
+	}
+
+	// Diff identity stays the linked worktree's: a run over a different head is still rejected.
+	writeFSMRun(t, root, "other-head", base, base, "")
+	if code, _, errOut := runCLI(t, wt, nil, "review", "record-lenses", "--scope", "task-done", "--base", base, "--mode", "subagent-adjudicated", "--from-run", "other-head", "--lenses", "feasibility"); code != 2 || !strings.Contains(errOut, "different diff") {
+		t.Fatalf("mismatched head from linked worktree: code=%d err=%q", code, errOut)
 	}
 }
