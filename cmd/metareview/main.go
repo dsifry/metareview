@@ -745,7 +745,7 @@ func bundleExitCode(bundle evidence.Bundle) int {
 // told the operator they had review findings, while emitting no JSON and so no blockers to act
 // on — an unreadable review log became "you have work to do, and I cannot say what". A check that
 // did not run must never be reported as a check that found something.
-// validateFromRunDiff confirms that the FSM run named by --from-run is a real review run that (a) reviewed
+// validateFromRunDiff confirms that the FSM run named by --from-run is a real, non-mock review run that (a) reviewed
 // the SAME base..head the marker claims (its init event) and (b) reached a PASSING terminal transition
 // (outcome clean|reviewed|fixed). This keeps a subagent-adjudicated marker from being pointed at an empty
 // audit, a run over a different diff, or a run that reviewed the diff and did NOT come out clean. It scans
@@ -774,6 +774,17 @@ func validateFromRunDiff(root, runID, wantBase, wantHead, wantWorkflow string) e
 	var d fsmrun.InitData
 	if json.Unmarshal(events[0].Data, &d) != nil {
 		return errors.New("its init event is unreadable")
+	}
+	// A mock run is test infrastructure: its judge verdicts come from a scripted scenario, so it is never evidence
+	// that an independent review happened (#185). That covers a run initialised with a mock scenario and a real run
+	// that took a mock-stamped event (the FSM's own mock taint).
+	if d.Mock != "" {
+		return errors.New("it is a mock run (init names a mock scenario); a mock run never satisfies a gate")
+	}
+	for _, ev := range events {
+		if ev.Mock {
+			return errors.New("it is mock-tainted (it carries a mock-stamped event); a mock run never satisfies a gate")
+		}
 	}
 	if d.Head != wantHead || d.BaseSHA != wantBase {
 		return fmt.Errorf("it reviewed a different diff (run base..head %s..%s, marker %s..%s)", short(d.BaseSHA), short(d.Head), short(wantBase), short(wantHead))

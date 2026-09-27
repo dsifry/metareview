@@ -83,7 +83,8 @@ The FSM stays scope-agnostic: the **agent** bridges its run into a marker with `
 FSM emitting scope-specific markers. Because a CLI seam cannot witness that independent subagents actually
 ran, `record-lenses --mode subagent-adjudicated` is admitted **only** when `--from-run` names an FSM run that
 reviewed the same `base..head` (its init) AND reached a passing terminal transition (`clean|reviewed|fixed`);
-an empty, wrong-diff, incomplete, or failed run is rejected, and a self-attested review has no such run and
+an empty, wrong-diff, incomplete, failed, or **mock** run is rejected (a run initialised with `--mock-ai`, or one
+carrying a mock-stamped event, is test infrastructure and never evidence — #185), and a self-attested review has no such run and
 must record the labeled, advisory `in-session-emulated` mode. This keeps a hand-typed one-liner from
 laundering a fake review as full-strength independent evidence. A marker attests the committed `base..HEAD`
 only, so a `--include-working-tree` run over a dirty tree blocks on a `working-tree-unattested` reviewer

@@ -1175,3 +1175,51 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+// writeRawFSMRun writes an audit.jsonl from ready-made events, for runs writeFSMRun cannot express.
+func writeRawFSMRun(t *testing.T, root, runID string, events ...fsmrun.Event) {
+	t.Helper()
+	var b strings.Builder
+	for _, ev := range events {
+		line, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Write(line)
+		b.WriteByte('\n')
+	}
+	p := filepath.Join(root, ".metareview", "runs", runID, "audit.jsonl")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRecordLensesRejectsMockRuns (#185): a mock run is test infrastructure, never evidence. Neither a run whose
+// init names a mock scenario nor a real run carrying a mock-stamped event may back a subagent-adjudicated marker,
+// even over the right diff with a passing outcome.
+func TestRecordLensesRejectsMockRuns(t *testing.T) {
+	root := gitRepo(t)
+	base, head := diffEndpoints(t, root)
+	passing, _ := json.Marshal(fsmrun.TransitionData{Outcome: fsmrun.OutcomeReviewed})
+
+	mockInit, _ := json.Marshal(fsmrun.InitData{BaseSHA: base, Head: head, Mock: "mock/scenario.yaml"})
+	writeRawFSMRun(t, root, "mockinit", fsmrun.Event{Type: fsmrun.TypeInit, Data: mockInit}, fsmrun.Event{Type: fsmrun.TypeTransition, Data: passing})
+
+	realInit, _ := json.Marshal(fsmrun.InitData{BaseSHA: base, Head: head})
+	writeRawFSMRun(t, root, "mocktainted", fsmrun.Event{Type: fsmrun.TypeInit, Data: realInit}, fsmrun.Event{Type: fsmrun.TypeTransition, Data: passing, Mock: true})
+
+	for _, id := range []string{"mockinit", "mocktainted"} {
+		code, _, errOut := runCLI(t, root, nil, "review", "record-lenses", "--scope", "pr-ready", "--base", "main", "--mode", "subagent-adjudicated", "--from-run", id, "--lenses", "security")
+		if code != 2 || !strings.Contains(errOut, "mock") {
+			t.Errorf("%s: code=%d err=%q, want exit 2 naming mock", id, code, errOut)
+		}
+	}
+	// A real run over the same diff is still accepted.
+	writeFSMRun(t, root, "realrun", base, head, "")
+	if code, out, errOut := runCLI(t, root, nil, "review", "record-lenses", "--scope", "pr-ready", "--base", "main", "--mode", "subagent-adjudicated", "--from-run", "realrun", "--lenses", "security"); code != 0 || !strings.Contains(out, "Recorded") {
+		t.Fatalf("real run: code=%d out=%q err=%q", code, out, errOut)
+	}
+}
