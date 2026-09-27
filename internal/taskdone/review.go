@@ -190,6 +190,7 @@ func Create(root, target string, options Options) (Result, error) {
 		packRollback, err = packWriter.Write(root, shardPlan, shardpack.Header{
 			Scope:    "task-done",
 			TargetID: task.ID,
+			Target:   target,
 			Base:     reviewGit.BaseSHA,
 			Head:     reviewGit.HeadSHA,
 			Budget:   contextprofile.DefaultMaxBytesPerShard,

@@ -1173,3 +1173,32 @@ func TestCrossShardPackStatesItsOwnContract(t *testing.T) {
 		t.Fatal("shard pack must keep the shard result contract")
 	}
 }
+
+// TestRerunCommandIsRunnable (#187): the '## Re-run' line an agent copies must be a command the CLI accepts. For
+// task-done it names the target (without it the CLI took '--base' as the target, and now refuses it). The run id is
+// left to the agent, because packs must stay byte-reproducible across runs.
+func TestRerunCommandIsRunnable(t *testing.T) {
+	for _, tc := range []struct {
+		h    Header
+		want string
+	}{
+		{Header{Scope: "task-done", TargetID: "t", Target: "docs/tasks/t.md", Base: "base-sha", Head: "head-sha", Budget: 400},
+			"metareview review task-done docs/tasks/t.md --base base-sha"},
+		{Header{Scope: "task-done", TargetID: "t", Target: "my task", Base: "base-sha", Head: "head-sha", Budget: 400},
+			`metareview review task-done "my task" --base base-sha`},
+		{Header{Scope: "pr-ready", TargetID: "feature", Base: "base-sha", Head: "head-sha", Budget: 400},
+			"metareview review pr-ready --base base-sha"},
+	} {
+		root, plan, files := fixture(t)
+		if _, err := New(OSDeps()).Write(root, plan, tc.h, files); err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(filepath.Join(Dir(root, tc.h.Scope, tc.h.TargetID, plan.PlanHash), "shard-"+plan.Shards[0].ID+".md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), "## Re-run\n\n`"+tc.want+"`, adding `--previous-run <run-id>`") {
+			t.Errorf("%s: Re-run line missing %q", tc.h.Scope, tc.want)
+		}
+	}
+}

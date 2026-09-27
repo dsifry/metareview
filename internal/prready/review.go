@@ -745,7 +745,9 @@ func historicalPRReadyRunIDsForCurrentTarget(root string, logs []reviewlog.Summa
 func flagTargetTaskReviewRunIDs(logs []reviewlog.Summary) []string {
 	var ids []string
 	for _, log := range logs {
-		if target := strings.TrimSpace(log.Target); log.RunID != "" && log.Kind == "task-done" && (target == "--help" || target == "-h") {
+		// Exact, untrimmed: the artifacts parse as exactly "--help"/"-h". A padded variant (" --help") was typed on
+		// purpose and may be a real review of current work, so it keeps blocking.
+		if log.RunID != "" && log.Kind == "task-done" && (log.Target == "--help" || log.Target == "-h") {
 			ids = append(ids, log.RunID)
 		}
 	}

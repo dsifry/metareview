@@ -1225,7 +1225,8 @@ func TestRecordLensesRejectsMockRuns(t *testing.T) {
 	}
 }
 
-// TestReviewTaskDoneRejectsFlagShapedTargets (#187): a task-done target that starts with '-' is a flag typed where
+// TestReviewTaskDoneRejectsFlagShapedTargets (#187): a task-done or epic-ready target that starts with '-' (after
+// trimming whitespace) is a flag typed where
 // the target belongs (e.g. the target was omitted), not a task. Recording a review under it would create a log
 // nobody can re-run, so the CLI refuses it before running anything.
 func TestReviewTaskDoneRejectsFlagShapedTargets(t *testing.T) {
@@ -1233,6 +1234,10 @@ func TestReviewTaskDoneRejectsFlagShapedTargets(t *testing.T) {
 	for _, args := range [][]string{
 		{"review", "task-done", "--verbose", "--base", "main"},
 		{"review", "task-done", "--base", "main"},
+		{"review", "task-done", " --help", "--base", "main"},
+		{"review", "task-done", "\t-h", "--base", "main"},
+		{"review", "epic-ready", "--verbose", "--base", "main"},
+		{"review", "epic-ready", " --x", "--base", "main"},
 	} {
 		code, _, errOut := runCLI(t, root, nil, args...)
 		if code != 2 || !strings.Contains(errOut, "must not start with '-'") {

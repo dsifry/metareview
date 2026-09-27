@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dsifry/metareview/internal/contextprofile"
@@ -52,9 +53,27 @@ func OSDeps() Deps {
 type Header struct {
 	Scope    string
 	TargetID string
-	Base     string
-	Head     string
-	Budget   int
+	// Target is the target argument the review was run with (task-done, epic-ready); "" for pr-ready. The Re-run
+	// command must repeat it: TargetID is a resolved id, not necessarily what the CLI accepts.
+	Target string
+	Base   string
+	Head   string
+	Budget int
+}
+
+// rerunCommand is the command a pack tells an agent to run once the shard results are written: the same review,
+// with the target it was run for (#187: without it the CLI took '--base' as the target). The run id is not part of
+// it — packs must stay byte-reproducible across runs — so the pack tells the agent to add --previous-run.
+func rerunCommand(h Header) string {
+	cmd := "metareview review " + h.Scope
+	if h.Target != "" {
+		target := h.Target
+		if strings.ContainsAny(target, " \t\"'$`\\") {
+			target = strconv.Quote(target)
+		}
+		cmd += " " + target
+	}
+	return cmd + " --base " + h.Base
 }
 
 // Found is the outcome of one discovery pass over a target's result directory.
@@ -525,7 +544,7 @@ func shardPack(plan contextprofile.ShardPlan, shard contextprofile.Shard, header
 	b.WriteString("Report findings with file:line evidence.\n\n")
 	b.WriteString("## Result contract\n\n" + resultContractFor(false) + "\n\n")
 	b.WriteString("## Re-run\n\n" +
-		markdown.InlineCode(fmt.Sprintf("metareview review %s --base %s", header.Scope, header.Base)) + "\n\n")
+		markdown.InlineCode(rerunCommand(header)) + ", adding `--previous-run <run-id>` with the run id this gate printed.\n\n")
 	for _, c := range shard.Chunks {
 		text := files[c.Path].Diff[c.ByteStart:c.ByteEnd]
 		fmt.Fprintf(&b, "### %s (part %d/%d)\n\n", markdown.InlineCode(c.Path), c.Part, c.Parts)

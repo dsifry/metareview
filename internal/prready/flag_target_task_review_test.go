@@ -118,12 +118,14 @@ func TestPRReadyRetiresOnlyFlagTargetTaskReviews(t *testing.T) {
 	}
 }
 
-// TestFlagTargetTaskReviewRunIDs pins the selection: task-done only, a run id, and a target that is exactly
-// --help or -h — the only flags that were ever recorded as targets (before #164).
+// TestFlagTargetTaskReviewRunIDs pins the selection: task-done only, a run id, and a target that is exactly --help or
+// -h — the pre-#164 artifacts that were never reviews of work. Any other dash target, or a padded one, may have
+// been a real review of current work, so it keeps blocking.
 func TestFlagTargetTaskReviewRunIDs(t *testing.T) {
 	logs := []reviewlog.Summary{
 		{RunID: "mrv-help", Kind: "task-done", Target: "--help"},
-		{RunID: "mrv-h", Kind: "task-done", Target: " -h "},
+		{RunID: "mrv-h", Kind: "task-done", Target: "-h"},
+		{RunID: "mrv-padded", Kind: "task-done", Target: " --help"}, // a real review recorded under a padded flag keeps blocking
 		{RunID: "mrv-task", Kind: "task-done", Target: "task-1"},
 		{RunID: "mrv-dash-inside", Kind: "task-done", Target: "fix--help"},
 		{RunID: "mrv-verbose", Kind: "task-done", Target: "--verbose"},

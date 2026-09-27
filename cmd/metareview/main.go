@@ -316,13 +316,7 @@ func dispatch(args []string) {
 	}
 
 	if len(args) >= 3 && args[0] == "review" && args[1] == "task-done" {
-		// A target that starts with '-' is a flag typed where the target belongs (usually an omitted target), not
-		// a task. Recording a review under it creates a log nobody can re-run or supersede (#187), so refuse it
-		// before anything runs.
-		if strings.HasPrefix(args[2], "-") {
-			_, _ = fmt.Fprintf(stderr, "review task-done: the task target must not start with '-' (got %q); pass the task id or path before any options\n", args[2])
-			exit(2)
-		}
+		refuseFlagShapedTarget("task-done", args[2])
 		mustFreshnessMode()
 		options := taskdone.Options{}
 		for i := 3; i < len(args); i++ {
@@ -367,6 +361,7 @@ func dispatch(args []string) {
 	}
 
 	if len(args) >= 3 && args[0] == "review" && args[1] == "epic-ready" {
+		refuseFlagShapedTarget("epic-ready", args[2])
 		mustFreshnessMode()
 		options := epicready.Options{}
 		for i := 3; i < len(args); i++ {
@@ -838,6 +833,16 @@ func short(sha string) string {
 		return sha[:12]
 	}
 	return sha
+}
+
+// refuseFlagShapedTarget exits 2 when a review target starts with '-' once whitespace is trimmed: that is a flag
+// typed where the target belongs (usually an omitted target), not a task or epic. Recording a review under it
+// creates a log nobody can re-run or supersede (#187), so it is refused before anything runs.
+func refuseFlagShapedTarget(scope, target string) {
+	if strings.HasPrefix(strings.TrimSpace(target), "-") {
+		_, _ = fmt.Fprintf(stderr, "review %s: the target must not start with '-' (got %q); pass the target before any options\n", scope, target)
+		exit(2)
+	}
 }
 
 func exitGateBroken(err error) {
