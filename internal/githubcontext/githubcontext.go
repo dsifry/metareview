@@ -86,6 +86,12 @@ func keyIsWordInterior(text string, start, end int) bool {
 	if strings.IndexFunc(text[start:end], func(r rune) bool { return r >= 'A' && r <= 'Z' }) >= 0 {
 		return false
 	}
+	return continuesWord(text, start)
+}
+
+// continuesWord reports whether the byte before start is a lowercase letter that continues a word rather than
+// ending an escape (\n, %3d, \x3d, \u003d, ESC[0m).
+func continuesWord(text string, start int) bool {
 	if start == 0 || !isLowerASCII(text[start-1]) {
 		return false
 	}
@@ -136,23 +142,48 @@ func isHexASCII(c byte) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
+// anchoredKeyPrefixPatterns are keyPrefixPatterns anchored at the start, to test one candidate position.
+var anchoredKeyPrefixPatterns = func() []*regexp.Regexp {
+	out := make([]*regexp.Regexp, len(keyPrefixPatterns))
+	for i, p := range keyPrefixPatterns {
+		out[i] = regexp.MustCompile(`^(?:` + p.String() + `)`)
+	}
+	return out
+}()
+
 // redactKeyPrefixes replaces every key-prefix match that is not word-interior with the marker, leaving the text
-// around it untouched.
+// around it untouched. A skipped word-interior match may still hide a separately delimited key inside it
+// ("task-done-sk-…" first matches from the "sk-" in "task"), so its span is searched once for a later prefix that
+// does not continue a word. Any such inner match shares the outer one's character class, so it is uppercase-free
+// and ends where the outer one does: only the byte before it decides. Each skipped span is walked once, keeping
+// redaction linear — resuming the regex one byte into it was quadratic on long runs of lowercase text.
 func redactKeyPrefixes(text string) string {
-	for _, pattern := range keyPrefixPatterns {
+	for i, pattern := range keyPrefixPatterns {
+		literal, _ := pattern.LiteralPrefix()
 		var b strings.Builder
 		last := 0
-		for pos := last; pos < len(text); {
+		for pos := 0; pos < len(text); {
 			loc := pattern.FindStringIndex(text[pos:])
 			if loc == nil {
 				break
 			}
 			start, end := pos+loc[0], pos+loc[1]
 			if keyIsWordInterior(text, start, end) {
-				// Skipping the whole match would hide a separately delimited key inside it ("task-done-sk-…"
-				// first matches from the "sk-" in "task"), so the scan resumes one byte into the match.
-				pos = start + 1
-				continue
+				inner, innerEnd := -1, 0
+				for p := start + 1; p < end; p++ {
+					if continuesWord(text, p) || !strings.HasPrefix(text[p:end], literal) {
+						continue
+					}
+					if m := anchoredKeyPrefixPatterns[i].FindStringIndex(text[p:end]); m != nil {
+						inner, innerEnd = p, p+m[1]
+						break
+					}
+				}
+				if inner < 0 {
+					pos = end
+					continue
+				}
+				start, end = inner, innerEnd
 			}
 			b.WriteString(text[last:start])
 			b.WriteString(redactionMarker)

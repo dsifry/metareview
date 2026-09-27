@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // withSeams installs fake external-process seams for the test: lookGh returns lookErr, and runCommand
@@ -390,5 +391,18 @@ func TestRedactFindsAKeyInsideASkippedMatch(t *testing.T) {
 		if got := Redact(in); got != want {
 			t.Errorf("Redact(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// Redaction stays linear on a long run of word-interior matches: rescanning each skipped match from its next
+// byte made 100KB of "task-done-" take ~9s (Redact runs on untruncated PR comments and session history).
+func TestRedactIsLinearOnLongWordInteriorRuns(t *testing.T) {
+	in := strings.Repeat("task-done-", 100_000) // 1MB, one unbroken run
+	start := time.Now()
+	if got := Redact(in); got != in {
+		t.Fatal("a run of word-interior text must pass through unchanged")
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("Redact took %v on 1MB of word-interior text; it must be linear", d)
 	}
 }
