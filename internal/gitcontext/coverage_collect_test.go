@@ -21,7 +21,7 @@ func fakeGitFunc(fail func(args []string) error) func(string, ...string) (string
 			return "deadbeefdeadbeef", nil
 		}
 		if len(args) > 0 && args[0] == "show-ref" { // no test ref is a branch: "base" resolves exactly (#175)
-			return "", errors.New("not a ref")
+			return "", &gitExitError{message: "not a ref", code: 1}
 		}
 		return "", nil
 	}
@@ -174,7 +174,7 @@ func TestCollectSurfacesUntrackedError(t *testing.T) {
 			return "deadbeefdeadbeef", nil
 		}
 		if len(args) > 0 && args[0] == "show-ref" {
-			return "", errors.New("not a ref")
+			return "", &gitExitError{message: "not a ref", code: 1}
 		}
 		return "", nil
 	})
@@ -194,7 +194,7 @@ func TestCollectSurfacesRawUntrackedError(t *testing.T) {
 			return "deadbeefdeadbeef", nil
 		}
 		if len(args) > 0 && args[0] == "show-ref" {
-			return "", errors.New("not a ref")
+			return "", &gitExitError{message: "not a ref", code: 1}
 		}
 		return "", nil
 	})
@@ -250,7 +250,7 @@ func truncatingGit(_ string, args ...string) (string, error) {
 	case len(args) > 0 && args[0] == "rev-parse":
 		return "deadbeefdeadbeef", nil
 	case len(args) > 0 && args[0] == "show-ref": // "base" is not a branch, so it resolves exactly
-		return "", errors.New("not a ref")
+		return "", &gitExitError{message: "not a ref", code: 1}
 	case isDiff(args) && hasRange(args) && hasPathspec(args): // the filtered branch diff
 		return strings.Repeat("x", maxDiffBytes+10), nil
 	case argsHave(args, "--name-only"): // raw file lists feeding exactExcludesExcept/generated
@@ -305,5 +305,30 @@ func TestResolveExplicitBaseSurfacesTimeout(t *testing.T) {
 	installFakeGit(t, func(string, ...string) (string, error) { return "", ErrTimeout })
 	if _, err := resolveBase("root", "main"); !errors.Is(err, ErrTimeout) {
 		t.Fatalf("err = %v, want ErrTimeout", err)
+	}
+}
+
+// Only git's absent-ref exit (1) means "not a branch". An operational show-ref failure (exit 128) must fail the
+// resolution rather than silently resolve the branch name to its tip (CodeRabbit on #191).
+func TestResolveExplicitBaseSurfacesOperationalShowRefFailure(t *testing.T) {
+	installFakeGit(t, func(_ string, args ...string) (string, error) {
+		switch args[0] {
+		case "show-ref":
+			return "", &gitExitError{message: "fatal: bad ref store", code: 128}
+		case "rev-parse":
+			return "deadbeefdeadbeef", nil
+		}
+		return "", nil
+	})
+	if _, err := resolveBase("root", "main"); err == nil || !strings.Contains(err.Error(), "bad ref store") {
+		t.Fatalf("err = %v, want the show-ref failure", err)
+	}
+}
+
+func TestGitExitErrorKeepsTheMessageAndCode(t *testing.T) {
+	err := error(&gitExitError{message: "fatal: nope", code: 1})
+	var exit *gitExitError
+	if err.Error() != "fatal: nope" || !errors.As(err, &exit) || exit.code != 1 {
+		t.Fatalf("got %v", err)
 	}
 }

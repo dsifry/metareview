@@ -317,10 +317,11 @@ func resolveBase(root, requestedBase string) (string, error) {
 		// revision to itself — see baseref.
 		return baseref.Resolve(func(args ...string) (string, bool, error) {
 			out, err := git(root, args...)
-			if errors.Is(err, ErrTimeout) {
-				return "", false, err
+			var exit *gitExitError
+			if errors.As(err, &exit) && exit.code == 1 { // git's "no": not a ref, no merge base
+				return "", false, nil
 			}
-			return out, err == nil, nil
+			return out, err == nil, err // a timeout or an operational failure aborts
 		}, requestedBase)
 	}
 	// These two run BEFORE the loop, and discarding their errors undid the guard below twice
@@ -468,10 +469,24 @@ func gitReal(root string, args ...string) (string, error) {
 		if message == "" {
 			message = err.Error()
 		}
-		return "", fmt.Errorf("%s", message)
+		code := -1
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			code = exit.ExitCode()
+		}
+		return "", &gitExitError{message: message, code: code}
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// gitExitError is a failed git command: its stderr as the message, and its exit code (-1 if it never ran), so a
+// caller can tell git's "no" (exit 1: absent ref, no merge base) from an operational failure.
+type gitExitError struct {
+	message string
+	code    int
+}
+
+func (e *gitExitError) Error() string { return e.message }
 
 func tryGit(root string, args ...string) string {
 	out, err := git(root, args...)
