@@ -292,7 +292,7 @@ func Create(root string, options Options) (Result, error) {
 		Scope:            "pr-ready",
 		Target:           targetRecord,
 		PreviousRunIDs:   previousRunIDs,
-		HistoricalRunIDs: append(historicalPRReadyRunIDsForCurrentTarget(root, logs, targetRecord, git), landedTaskReviewRunIDs(root, logs, git)...),
+		HistoricalRunIDs: append(historicalPRReadyRunIDsForCurrentTarget(root, logs, targetRecord, git), flagTargetTaskReviewRunIDs(logs)...),
 		ChangedPaths:     reviewedPaths(analysisGit),
 		CurrentTarget:    targetRecord,
 		LinkedTargets:    linkedTargets,
@@ -730,66 +730,23 @@ func historicalPRReadyRunIDsForCurrentTarget(root string, logs []reviewlog.Summa
 	return ids
 }
 
-// landedTaskReviewRunIDs (#187) returns the task-done reviews that covered someone else's, already-landed work, so
-// they are history for this PR even when their covered paths overlap the branch diff. Without this, a stale
-// NEEDS_REVISION review — tied to a head weeks old, which can never be re-run — blocked every later PR that
-// touched the files it once covered. The reviewed head comes from the local run record, else from the log's
-// committed context pack (a log from another clone has no run record); the branch comes from the pack.
-func landedTaskReviewRunIDs(root string, logs []reviewlog.Summary, git gitcontext.Context) []string {
-	if !validGitObjectID(git.BaseSHA) || !validGitObjectID(git.HeadSHA) {
-		return nil
-	}
+// flagTargetTaskReviewRunIDs (#187) returns the task-done reviews whose target is a command-line flag ("--help",
+// "-h", …). Such a log was never a review of work: before #164 made `review task-done --help` print usage, the flag
+// was taken as the task target and a real gate run was recorded against it. Its blockers can never be resolved — a
+// run for that target cannot be made again — yet its covered paths made it block every later PR touching them.
+//
+// This is deliberately the only automatic retirement. Inferring from heads and branches that a review covered
+// someone else's, landed work fails open: task-done also reviews uncommitted changes and records only HEAD, and
+// rebases, renames, detached checkouts and a moving base all defeat the inference. Any other stale blocker is
+// cleared through a human-granted process override (#188), which records who decided and why.
+func flagTargetTaskReviewRunIDs(logs []reviewlog.Summary) []string {
 	var ids []string
 	for _, log := range logs {
-		if log.RunID == "" || log.Kind != "task-done" {
-			continue
-		}
-		head, branch := log.HeadSHA, ""
-		if identity, err := readLegacyPRReadyContextIdentity(root, log.ContextRel); err == nil {
-			if head == "" {
-				head = identity.Head
-			}
-			branch = identity.Branch
-		}
-		if taskReviewIsHistory(root, head, branch, git) {
+		if log.RunID != "" && log.Kind == "task-done" && strings.HasPrefix(strings.TrimSpace(log.Target), "-") {
 			ids = append(ids, log.RunID)
 		}
 	}
 	return ids
-}
-
-// taskReviewIsHistory decides whose work a task-done review covered. task-done records the HEAD commit but also
-// reviews staged, working-tree and untracked changes, so the head alone cannot say the work landed: this branch's
-// first chunk, reviewed before its first commit, records the fork point. Every rule therefore fails closed — a
-// review stays current (keeps blocking) unless it demonstrably covered other work:
-//
-//   - an invalid head, or one at the fork point (the base), stays current;
-//   - a review recorded on this branch stays current, even if a rebase has since rewritten its head;
-//   - a head inside base..HEAD is this PR's history, so it stays current whatever branch it names;
-//   - a detached review (no branch) of a commit in this history, or of a head git cannot place, stays current;
-//   - anything else — a commit on the base before the fork point, or another branch's commit, including a
-//     squash-merged branch whose commits never reach main or have been collected — is history.
-func taskReviewIsHistory(root, head, branch string, git gitcontext.Context) bool {
-	if !validGitObjectID(head) || head == git.BaseSHA {
-		return false
-	}
-	if branch != "" && branch == git.Branch {
-		return false
-	}
-	if !gitCommitExists(root, head) {
-		return branch != ""
-	}
-	inHistory := gitCommitIsAncestor(root, head, git.HeadSHA)
-	if inHistory && !gitCommitIsAncestor(root, head, git.BaseSHA) {
-		return false
-	}
-	return !(branch == "" && inHistory)
-}
-
-func gitCommitExists(root, sha string) bool {
-	cmd := exec.Command("git", "cat-file", "-e", sha+"^{commit}")
-	cmd.Dir = root
-	return cmd.Run() == nil
 }
 
 func legacyEscalatedPRReadyForTarget(root string, logs []reviewlog.Summary, targetRecord map[string]string, git gitcontext.Context) (string, bool) {

@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/reviewlog"
 )
 
@@ -87,76 +86,55 @@ func historyRepo(t *testing.T) (root string, a, b, c, d string) {
 	return root, a, b, c, d
 }
 
-// TestPRReadyTaskReviewHistoryIsAboutWhoseWorkItWas is #187 end to end: a task-done review that covered other,
-// landed work — on main before the fork point, or on another (squash-merged) branch — does not block pr-ready
-// even though its covered paths overlap the diff; a review of this branch's own work still blocks, including the
-// first chunk reviewed before it was committed (recorded at the fork point, on this branch).
-func TestPRReadyTaskReviewHistoryIsAboutWhoseWorkItWas(t *testing.T) {
+// TestPRReadyRetiresOnlyFlagTargetTaskReviews is #187: a task-done review whose target is a command-line flag (the
+// "--help" artifact of the bug #164 fixed) was never a review of work, so it does not block pr-ready even though its
+// covered paths overlap the diff. Nothing else is inferred: the same stale review under an ordinary target, and a
+// review of this branch's own work, still block — other stale blockers are cleared by a human-granted override.
+func TestPRReadyRetiresOnlyFlagTargetTaskReviews(t *testing.T) {
 	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
 	evidence := filepath.Join(t.TempDir(), "evidence.md")
 	if err := os.WriteFile(evidence, []byte("go test ./... exited 0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 9, 27, 7, 0, 0, 0, time.UTC)
-	gate := func(t *testing.T, target, headOf, branch string) (bool, string) {
-		t.Helper()
-		root, a, b, c, d := historyRepo(t)
-		head := map[string]string{"A": a, "B": b, "C": c, "D": d}[headOf]
-		writeTaskDoneLog(t, root, "mrv-20260905-223221349809000-task-done-"+target+"-9a8265a5", target, head, branch, "seed.txt")
-		result, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: now})
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, _ := os.ReadFile(filepath.Join(root, filepath.FromSlash(result.ReviewRel)))
-		return result.Blocking && strings.Contains(string(body), "Blocked targets: "+target), string(body)
-	}
 	for _, tc := range []struct {
-		name, target, head, branch string
-		blocks                     bool
+		name, target, headOf, branch string
+		blocks                       bool
 	}{
-		{"main before the fork point (the --help case)", "help", "A", "main", false},
-		{"another, squash-merged branch", "oldtask", "D", "old", false},
-		{"this branch's first chunk, uncommitted, at the fork point", "firstchunk", "B", "feature", true},
-		{"this branch's committed work", "feat", "C", "feature", true},
+		{"flag target (the --help artifact)", "--help", "A", "main", false},
+		{"short flag target", "-h", "A", "main", false},
+		{"the same stale review under an ordinary target", "help", "A", "main", true},
+		{"this branch's own work", "feat", "C", "feature", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if blocked, body := gate(t, tc.target, tc.head, tc.branch); blocked != tc.blocks {
+			root, a, _, c, _ := historyRepo(t)
+			head := map[string]string{"A": a, "C": c}[tc.headOf]
+			writeTaskDoneLog(t, root, "mrv-20260905-223221349809000-task-done-x-9a8265a5", tc.target, head, tc.branch, "seed.txt")
+			result, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: now})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := os.ReadFile(filepath.Join(root, filepath.FromSlash(result.ReviewRel)))
+			blocked := result.Blocking && strings.Contains(string(body), "Blocked targets: "+tc.target)
+			if blocked != tc.blocks {
 				t.Fatalf("blocks=%v, want %v\n%s", blocked, tc.blocks, body)
 			}
 		})
 	}
 }
 
-// TestLandedTaskReviewRunIDsFailsClosed covers each rule of taskReviewIsHistory, including every fail-closed one.
-func TestLandedTaskReviewRunIDsFailsClosed(t *testing.T) {
-	root, a, b, c, d := historyRepo(t)
-	git := gitcontext.Context{BaseSHA: b, HeadSHA: c, Branch: "feature"}
-	pack := func(id, head, branch string) reviewlog.Summary {
-		writeTaskDoneLog(t, root, id, "t", head, branch, "seed.txt")
-		return reviewlog.Summary{RunID: id, Kind: "task-done", ContextRel: "docs/metareview/context/" + id + "-context.md"}
-	}
-	unknown := strings.Repeat("a", 40)
+// TestFlagTargetTaskReviewRunIDs pins the selection: task-done only, a run id, and a target that is a flag.
+func TestFlagTargetTaskReviewRunIDs(t *testing.T) {
 	logs := []reviewlog.Summary{
-		pack("mrv-main-old", a, "main"),                           // history: on main, before the fork point
-		pack("mrv-other-branch", d, "old"),                        // history: another branch's commit
-		pack("mrv-gone", unknown, "old"),                          // history: another branch's head git no longer has
-		pack("mrv-fork-point", b, "main"),                         // current: at the fork point (maybe this branch's first chunk)
-		pack("mrv-own-branch", a, "feature"),                      // current: recorded on this branch (e.g. before a rebase)
-		pack("mrv-in-range", c, "renamed"),                        // current: head inside base..HEAD
-		pack("mrv-detached", a, ""),                               // current: detached review of a commit in this history
-		pack("mrv-detached-gone", unknown, ""),                    // current: detached review of a head git cannot place
-		pack("mrv-ref-name", "main", "old"),                       // current: a ref name is not a commit id
-		{RunID: "mrv-record-head", Kind: "task-done", HeadSHA: a}, // current: run-record head with no pack has no known branch
-		{RunID: "", Kind: "task-done", HeadSHA: a},                // ignored: no run id
-		{RunID: "mrv-pr", Kind: "pr-ready", HeadSHA: a},           // ignored: not a task review
+		{RunID: "mrv-help", Kind: "task-done", Target: "--help"},
+		{RunID: "mrv-h", Kind: "task-done", Target: " -h "},
+		{RunID: "mrv-task", Kind: "task-done", Target: "task-1"},
+		{RunID: "mrv-dash-inside", Kind: "task-done", Target: "fix--help"},
+		{RunID: "", Kind: "task-done", Target: "--help"},
+		{RunID: "mrv-pr", Kind: "pr-ready", Target: "--help"},
+		{RunID: "mrv-empty", Kind: "task-done", Target: ""},
 	}
-	got := landedTaskReviewRunIDs(root, logs, git)
-	if strings.Join(got, ",") != "mrv-main-old,mrv-other-branch,mrv-gone" {
-		t.Fatalf("history ids = %v", got)
-	}
-	for _, bad := range []gitcontext.Context{{BaseSHA: "main", HeadSHA: c, Branch: "feature"}, {BaseSHA: b, HeadSHA: "HEAD", Branch: "feature"}} {
-		if got := landedTaskReviewRunIDs(root, logs, bad); got != nil {
-			t.Fatalf("an unresolved base or head must yield nothing, got %v", got)
-		}
+	if got := strings.Join(flagTargetTaskReviewRunIDs(logs), ","); got != "mrv-help,mrv-h" {
+		t.Fatalf("flag-target ids = %q", got)
 	}
 }

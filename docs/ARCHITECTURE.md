@@ -172,12 +172,11 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   checkout the two coincide. Tripwires, not proofs (they match literal path forms only):
   `TestFSMRootsAreDeclared` (a `root: store|work` declaration at each such site in `internal/fsm`) and
   `TestRunStoreReadersAreDeclared` (run-store readers outside the FSM). Still per-directory and planned in #171: `status`' abandoned-run scan and findings.
-- **Task reviews of other, landed work are history (#187):** pr-ready drops a task-done review that
-  demonstrably covered someone else's work — a commit on the base before the fork point, or another (e.g.
-  squash-merged) branch's commit — even when its covered paths overlap the diff. The head comes from the local run
-  record, else the committed context pack; the branch from the pack. Because task-done also reviews uncommitted
-  changes and records only HEAD, every rule fails closed: a review at the fork point, recorded on this branch,
-  with its head in base..HEAD, detached, or with an unknown head stays current and keeps blocking.
+- **Stale task reviews (#187):** pr-ready automatically retires only task-done reviews whose target is a
+  command-line flag (`--help`, `-h`: artifacts of the bug #164 fixed, never reviews of work). It does *not* infer
+  from heads or branches that a review covered someone else's landed work: task-done also reviews uncommitted
+  changes and records only HEAD, so any such inference fails open under rebases, renames, detached checkouts or a
+  moving base. Any other stale blocker is cleared by a human-granted process override (#188).
 - **Run lineage:** a NEEDS_REVISION parent is retired when a clean same-target+same-kind child links via
   `previousRunId` (supersede). Repair via `--previous-run <run-id>`; never `git add -A` failed-run artifacts.
 - **Evidence receipts:** `evidence run -- <cmd>` records a validation receipt (kind + exitCode + hashes);
