@@ -79,8 +79,9 @@ var keyPrefixPatterns = []*regexp.Regexp{
 // keyIsWordInterior reports whether the key-prefix match text[start:end] is ordinary lowercase text rather than
 // a key: it has no uppercase letter AND it continues a lowercase word — the byte before it is a lowercase letter
 // that does not end a two-character backslash escape (\n, \t, \b …) or a %XX percent-escape. Real provider
-// keys are random base62 and carry uppercase letters, so they are redacted in any context — after ANSI colour codes (ESC[32m), \u003c or \x3d escapes,
-// or plain letters — without enumerating contexts; a lowercase-only match is redacted unless it is word-interior.
+// keys are random base62 and carry uppercase letters, so they are redacted in any context — after ANSI colour
+// codes (ESC[32m), \u003c or \x3d escapes, or plain letters — without enumerating contexts; a lowercase-only
+// match is redacted unless it is word-interior.
 func keyIsWordInterior(text string, start, end int) bool {
 	if strings.IndexFunc(text[start:end], func(r rune) bool { return r >= 'A' && r <= 'Z' }) >= 0 {
 		return false

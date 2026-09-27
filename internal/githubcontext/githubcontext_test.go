@@ -270,9 +270,10 @@ func TestExcerptExactlyAtBoundary(t *testing.T) {
 	}
 }
 
-// TestRedactLeavesWordsThatContainKeyPrefixes (#184): the sk- and gh*_ patterns must not start inside a word.
-// Every task-done review path contains "sk-done-…" (ta*sk-done*), which the unanchored sk- pattern redacted,
-// so pr-ready logs listed unresolvable "ta[REDACTED]" evidence paths.
+// TestRedactLeavesWordsThatContainKeyPrefixes (#184): a key-prefix match that is lowercase-only text inside a
+// word is left alone. Every task-done review path contains "sk-done-…" (ta*sk-done*), which the sk- pattern used
+// to redact, so pr-ready logs listed unresolvable "ta[REDACTED]" evidence paths. Real keys, which carry uppercase
+// letters, are still redacted wherever they appear.
 func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 	for _, keep := range []string{
 		"docs/metareview/reviews/mrv-20260831-183207933768000-task-done-mechanical-precision-lens-c79c1389.md",
@@ -298,8 +299,9 @@ func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 		"ghp_abcdefghijklmnopqrstuvwxyz0123456789",
 		"(ghs_abcdefghijklmnop)",
 		"github_pat_abcdefghijklmnopqrstuvwxyz",
-		// Shapes where the preceding character is not a lowercase letter, all redacted before #184 and still
-		// redacted after it: percent-encoding, a literal escape in pasted JSON/log text, underscores, emphasis.
+		// Lowercase-only keys in shapes that are not word-interior, all redacted before #184 and still redacted
+		// after it: percent-encoding, underscores and _emphasis_ (a non-lowercase byte precedes the key), and a
+		// literal \n or \t escape in pasted JSON/log text (the backslash-escape exception).
 		"?api_key%3Dsk-abcdefghijklmnopqrstuvwxyz",
 		"https%3A%2F%2Fghp_abcdefghijklmnopqrstuvwxyz%40github.com",
 		"%20ghp_abcdefghijklmnopqrstuvwxyz",
@@ -326,6 +328,9 @@ func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 		// A key whose only uppercase letter is its last byte, at both ends of the uppercase range.
 		"xghp_abcdefghijklmnopA",
 		"xghp_abcdefghijklmnopZ",
+		// A skipped word-interior match must not end the scan: a real key later in the same text is still redacted.
+		"see task-done-mechanical-precision-lens then sk-abcdefghijklmnopqrstuvwxyz0123",
+		"laughs_12345678 and ghs_ABCDEFGHIJKLMNOP1234",
 	} {
 		if got := Redact(secret); !strings.Contains(got, redactionMarker) || strings.Contains(got, "abcdefghijklmnop") {
 			t.Errorf("Redact(%q) = %q, want the key redacted", secret, got)
