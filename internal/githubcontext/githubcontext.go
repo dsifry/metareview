@@ -92,7 +92,7 @@ func keyIsWordInterior(text string, start, end int) bool {
 	if start >= 2 && text[start-2] == '\\' { // a \n, \t, \b … escape
 		return false
 	}
-	if start >= 3 && text[start-3] == '%' && isHexASCII(text[start-2]) { // a %2f, %3d … escape
+	if start >= 3 && text[start-3] == '%' && isHexASCII(text[start-2]) && isHexASCII(text[start-1]) { // a %2f, %3d … escape
 		return false
 	}
 	return true

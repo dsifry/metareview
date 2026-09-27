@@ -435,3 +435,15 @@ func TestRenderEvidenceDistinguishesStructuredValidation(t *testing.T) {
 		}
 	}
 }
+
+// TestReviewListKeepsTaskDoneEvidencePaths is #184's end-to-end criterion: the rendered pr-ready evidence line for
+// a task-done review keeps its review-log path and finding ids intact, so readers can open the evidence. The
+// secret redactor used to turn every "task-done-…" path into an unresolvable "ta[REDACTED]".
+func TestReviewListKeepsTaskDoneEvidencePaths(t *testing.T) {
+	path := "docs/metareview/reviews/mrv-20260831-183207933768000-task-done-mechanical-precision-lens-c79c1389.md"
+	finding := "mrvf-20260831-183207933768000-task-done-mechanical-precision-lens-c79c1389-001"
+	got := reviewList([]ReviewEvidence{{Target: "mechanical-precision-lens", Verdict: "PASS_ADVISORY", Path: path, FindingIDs: []string{finding}}}, "none")
+	if !strings.Contains(got, "("+path+")") || !strings.Contains(got, finding) || strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("rendered evidence line lost its task-done path or finding id: %q", got)
+	}
+}

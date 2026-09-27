@@ -281,6 +281,8 @@ func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 		"the risk-proj-abcdefghijklmnop-assessment",
 		"laughs_12345678 and neighs_abcdefgh",
 		"see mygithub_pat_abcdefghijklmnop for the naming scheme",
+		// "%2g" is not a percent-escape (g is not hex), so a lowercase-only match after it is word-interior.
+		"x%2gsk-abcdefghijklmnopqrstu",
 		// Word-interior matches near the start of the text (keyIsWordInterior's index bounds), after 'z' (the top
 		// of the lowercase range), and with uppercase text right after the match, outside it.
 		"xsk-abcdefghijklmnopqrstu",
@@ -309,7 +311,9 @@ func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 		`\tsk-abcdefghijklmnopqrstuvwxyz`,
 		"OPENAI_API_KEY_sk-abcdefghijklmnopqrstuvwxyz",
 		"_ghp_abcdefghijklmnopqrstuvwxyz_",
-		// Lowercase-hex percent-encoding and other backslash escapes end in a lowercase letter.
+		// Lowercase-hex percent-encoding and other backslash escapes end in a lowercase letter. The mixed-case keys
+		// here are redacted by the uppercase rule; the lowercase-only ones (token%3dsk-proj-…, %2fghp_…) are what
+		// exercise the %XX exception, including a percent-escape at the very start of the text.
 		"?next=%2fghp_ABCDEFGH12345678",
 		"token%3dsk-proj-abcdefghijklmnopqrstuv",
 		"x%3aghs_ABCDEFGH1234abcdefghijklmnop",
@@ -331,6 +335,8 @@ func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 		// A skipped word-interior match must not end the scan: a real key later in the same text is still redacted.
 		"see task-done-mechanical-precision-lens then sk-abcdefghijklmnopqrstuvwxyz0123",
 		"laughs_12345678 and ghs_ABCDEFGHIJKLMNOP1234",
+		"%2fghp_abcdefghijklmnopqrst",
+		"?q=%2fghp_abcdefghijklmnopqrst",
 	} {
 		if got := Redact(secret); !strings.Contains(got, redactionMarker) || strings.Contains(got, "abcdefghijklmnop") {
 			t.Errorf("Redact(%q) = %q, want the key redacted", secret, got)
