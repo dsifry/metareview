@@ -136,8 +136,8 @@ func TestUnresolvableBasesFail(t *testing.T) {
 	r.git("checkout", "-q", "--orphan", "island")
 	r.commitFile("island.txt", "island")
 	r.git("checkout", "-q", "feat")
-	if _, err := Resolve(r.run, "island"); err == nil {
-		t.Error("a branch with no merge-base must fail")
+	if _, err := Resolve(r.run, "island"); err == nil || strings.Contains(err.Error(), "shallow") {
+		t.Errorf("a branch with no merge-base in a full clone must fail without a shallow-clone hint: %v", err)
 	}
 }
 

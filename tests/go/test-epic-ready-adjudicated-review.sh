@@ -166,7 +166,7 @@ repo="$(mktemp -d)"
 )
 rm -rf "$repo"
 
-# 9. AC-3.2 (#175): after main ADVANCES past the branch point, `review epic-ready --base main`, `fsm init --workflow
+# 10. AC-3.2 (#175): after main ADVANCES past the branch point, `review epic-ready --base main`, `fsm init --workflow
 # epic-review-loop --base main` and `record-lenses --scope epic-ready --base main` all resolve the SAME base — the
 # merge-base, not main's tip — so the marker satisfies the gate with no SHA passed by hand.
 repo="$(mktemp -d)"
@@ -191,6 +191,8 @@ repo="$(mktemp -d)"
   grep -q '"requested_base":"main"' ".metareview/runs/$run/audit.jsonl" || { echo "FAIL: [base-advanced] fsm init did not record the requested base"; exit 1; }
   grep -q '"kind":"review-evidence".*"requestedBase":"main"' .metareview/runs.jsonl || { echo "FAIL: [base-advanced] the marker did not record the requested base"; exit 1; }
   grep -q '"scope":"epic-ready".*"requestedBase":"main"' .metareview/runs.jsonl || { echo "FAIL: [base-advanced] the epic-ready run did not record the requested base"; exit 1; }
+  grep -qF -- '- Requested base: `main`' docs/metareview/context/*epic-ready*-context.md ||
+    { echo "FAIL: [base-advanced] the epic-ready context pack does not name the requested base"; exit 1; }
   echo "ok: base-advanced -> $got"
 )
 rm -rf "$repo"
