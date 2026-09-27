@@ -380,22 +380,22 @@ func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 	if !isOurHookPath(root, current, target) {
 		return false, fmt.Errorf("core.hooksPath is %s, not metareview's — leaving it unchanged", current)
 	}
+	// The opt-in goes FIRST, with the gate. Unset exits 5 when the key is already absent (an install from before
+	// #194), which is not a failure; anything else stops here with nothing taken apart, so the same command can
+	// finish the job once the failure clears. (Removing core.hooksPath first left a retry that found nothing to
+	// uninstall while metareview.stopGate kept pre-finish.sh gating the repository.)
+	if _, err := git(root, "config", "--local", "--unset", StopGateKey); err != nil && !isExitCode(err, 5) {
+		return false, fmt.Errorf("removing the Stop-gate opt-in (%s): %w", StopGateKey, err)
+	}
 	if _, err := git(root, "config", "--local", "--unset", "core.hooksPath"); err != nil {
 		return false, err
-	}
-	// The opt-in goes with the gate. Unset exits 5 when the key is already absent (an install from before
-	// #194), which is not a failure; anything else is — reporting "uninstalled" while metareview.stopGate
-	// survives would leave pre-finish.sh gating a repository the user just removed it from.
-	var unsetErr error
-	if _, err := git(root, "config", "--local", "--unset", StopGateKey); err != nil && !isExitCode(err, 5) {
-		unsetErr = fmt.Errorf("removing the Stop-gate opt-in (%s): %w", StopGateKey, err)
 	}
 	// Remove the materialized hook dir we own, so uninstall leaves no dangling scripts. A non-existent or
 	// legacy (committed) dir is left alone: RemoveAll on the materialized target only.
 	if mine, e := hookTargetDir(root); e == nil {
 		_ = os.RemoveAll(mine)
 	}
-	return true, unsetErr
+	return true, nil
 }
 
 // isExitCode reports whether err is a git process that exited with code.

@@ -210,8 +210,19 @@ func TestUninstallSurfacesAFailedOptInRemoval(t *testing.T) {
 		}
 		return g(r, args...)
 	}
-	if _, err := UninstallHookInstall(root, failing); err == nil || !strings.Contains(err.Error(), "opt-in") {
-		t.Fatalf("a failed opt-in removal must surface: %v", err)
+	if changed, err := UninstallHookInstall(root, failing); err == nil || changed || !strings.Contains(err.Error(), "opt-in") {
+		t.Fatalf("a failed opt-in removal must surface and change nothing: %v %v", changed, err)
+	}
+	// Nothing was taken apart, so the same command can finish the job once the failure clears.
+	if got := hooksPath(t, root, g); got != plan.Target {
+		t.Fatalf("core.hooksPath must survive a failed opt-in removal, got %q", got)
+	}
+	if changed, err := UninstallHookInstall(root, g); err != nil || !changed || stopGate(t, root, g) != "" {
+		t.Fatalf("the retry must complete the uninstall: %v %v", changed, err)
+	}
+	plan, _ = PlanHookInstall(root, g)
+	if err := ApplyHookInstall(root, plan, false, g); err != nil {
+		t.Fatal(err)
 	}
 	// A pre-#194 install has no opt-in to remove: git's missing-key exit is not a failure.
 	if _, err := g(root, "config", "--local", "core.hooksPath", plan.Target); err != nil {
@@ -222,5 +233,27 @@ func TestUninstallSurfacesAFailedOptInRemoval(t *testing.T) {
 	}
 	if changed, err := UninstallHookInstall(root, g); err != nil || !changed {
 		t.Fatalf("uninstalling without an opt-in: %v %v", changed, err)
+	}
+}
+
+// If core.hooksPath cannot be unset after the opt-in is gone, the error surfaces; the push gate stays installed
+// without the opt-in, which the Stop hook announces rather than hides, and a retry finishes the job.
+func TestUninstallSurfacesAFailedHooksPathRemoval(t *testing.T) {
+	root, g := tempRepo(t)
+	plan, _ := PlanHookInstall(root, g)
+	if err := ApplyHookInstall(root, plan, false, g); err != nil {
+		t.Fatal(err)
+	}
+	failing := func(r string, args ...string) ([]byte, error) {
+		if len(args) == 4 && args[2] == "--unset" && args[3] == "core.hooksPath" {
+			return nil, errors.New("could not lock config file")
+		}
+		return g(r, args...)
+	}
+	if changed, err := UninstallHookInstall(root, failing); err == nil || changed {
+		t.Fatalf("a failed core.hooksPath removal must surface: %v %v", changed, err)
+	}
+	if changed, err := UninstallHookInstall(root, g); err != nil || !changed {
+		t.Fatalf("the retry must complete the uninstall: %v %v", changed, err)
 	}
 }
