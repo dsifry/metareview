@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.13.4 - 2026-09-27
+
+### Fixed
+
+- **`review record-lenses --from-run` finds FSM runs created from a linked Git worktree.** The FSM
+  stores every run under the main worktree's `.metareview/runs/`, but `record-lenses` looked for
+  the run under the current worktree. From a linked worktree it therefore reported `no such FSM
+  run under .metareview/runs/` for a run the FSM had just created, and completed reviews could only
+  be registered by copying the audit between worktrees. Both sides now resolve the run store with
+  one shared parser of `git worktree list --porcelain`. Only the run lookup moved: the base..head
+  the marker attests still comes from the current worktree, and the diff, workflow, outcome and
+  run-id checks are unchanged. The broader branch- and worktree-awareness work this uncovered is
+  planned in #169. Reported in #169.
+
 ## 0.13.3 - 2026-09-26
 
 ### Security
