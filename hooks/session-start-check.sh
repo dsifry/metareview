@@ -38,7 +38,19 @@ else
   MSG="metareview: the git-native review gate is NOT installed (or its hook scripts are missing) on this repo — an unreviewed 'git push' will NOT be blocked. To install it (non-destructive; refuses on conflict): run \`metareview setup --install-hooks\` interactively, or \`metareview setup --install-hooks --yes\` headlessly, or \`--dry-run\` to preview."
   # Another tool owns core.hooksPath (husky, lefthook, beads): --install-hooks refuses there, and --force would
   # override that tool. The Stop gate does not need core.hooksPath, so name the opt-in that works (#194).
-  if [ -n "$CUR" ] && [ "$(git -C "$ROOT" config --local --get metareview.stopGate 2>/dev/null || true)" != "true" ]; then
+  # "Another tool" means what the installer treats as a conflict — NOT metareview's own paths, which it reclaims
+  # without --force (internal/setup isOurHookPath): the materialized target (its scripts may have vanished) and a
+  # legacy hooks/git that is absent or whose pre-push is metareview's gate.
+  FOREIGN=""
+  if [ -n "$CURABS" ] && [ "$(norm "$CURABS")" != "$(norm "$WANT")" ]; then
+    FOREIGN="yes"
+    if [ "$(norm "$CURABS")" = "$(norm "$ROOT/hooks/git")" ]; then
+      if [ ! -d "$CURABS" ] || grep -q "review gate --push" "$CURABS/pre-push" 2>/dev/null; then
+        FOREIGN=""
+      fi
+    fi
+  fi
+  if [ -n "$FOREIGN" ] && [ "$(git -C "$ROOT" config --local --get metareview.stopGate 2>/dev/null || true)" != "true" ]; then
     MSG="$MSG core.hooksPath is set to $CUR by another tool, so install will refuse; to gate session completion here without changing it, run \`metareview setup --enable-stop-gate\`."
   fi
 fi

@@ -37,4 +37,20 @@ git config core.hooksPath .husky
 out="$(CLAUDE_PROJECT_DIR="$husky" bash "$HOOK")"
 printf '%s' "$out" | grep -q "enable-stop-gate" || { echo "FAIL: a repo with its own hook manager must be told about --enable-stop-gate, got: $out"; exit 1; }
 
+# metareview's OWN paths are not "another tool": install reclaims them without --force, so the notice must steer
+# to --install-hooks, not claim a refusal. (1) The scripts vanished from the git-ignored materialized dir;
+# (2) a legacy install pointing at hooks/git whose pre-push is metareview's.
+own="$TMP/own"
+mkdir -p "$own"
+cd "$own"
+git init -q -b main
+git config core.hooksPath "$own/.metareview/git-hooks"
+out="$(CLAUDE_PROJECT_DIR="$own" bash "$HOOK")"
+if printf '%s' "$out" | grep -q "another tool"; then echo "FAIL: metareview's own vanished hook dir is not another tool's: $out"; exit 1; fi
+mkdir -p hooks/git
+printf '#!/bin/sh\nexec metareview review gate --push\n' > hooks/git/pre-push
+git config core.hooksPath hooks/git
+out="$(CLAUDE_PROJECT_DIR="$own" bash "$HOOK")"
+if printf '%s' "$out" | grep -q "another tool"; then echo "FAIL: metareview's legacy hooks/git is not another tool's: $out"; exit 1; fi
+
 echo "test-session-start-check: ok"
