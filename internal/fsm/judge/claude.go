@@ -79,6 +79,12 @@ func (j *claudeJudge) Call(ctx context.Context, r Request) (v Verdict, err error
 		// remains a denial rather than a hang in a headless run.
 		"--disallowed-tools", "*",
 		"--permission-mode", "dontAsk",
+		// Behind the isolated working directory (isolatedDir): load the user's settings only,
+		// never a project's or a local override, and no MCP server that is not passed explicitly
+		// (none is). --bare would also skip hooks but skips the keychain, and with it the OAuth
+		// session this transport exists to use.
+		"--setting-sources", "user",
+		"--strict-mcp-config",
 		// The system prompt must always be passed. Without it `claude -p` can
 		// silently fall back to Haiku for the work turn even with --model set —
 		// the judge would then be a different model than the one recorded in the
@@ -105,9 +111,15 @@ func (j *claudeJudge) Call(ctx context.Context, r Request) (v Verdict, err error
 			case <-j.clock.After(backoff(classBackoff, attempt-1)):
 			}
 		}
+		dir, cleanup, dirErr := isolatedDir()
+		if dirErr != nil {
+			lastErr = errs.E(CodeJudgeTransport, "claude could not be given an isolated working directory: "+dirErr.Error(), "provider", "claude-cli")
+			continue
+		}
 		actx, cancel := context.WithTimeout(ctx, j.timeout())
-		stdout, code, execErr := j.exec(actx, "", args, user)
+		stdout, code, execErr := j.exec(actx, dir, args, user)
 		cancel()
+		cleanup()
 
 		text, tokens, found, transient := parseClaudeResult(stdout)
 		v.Tokens = v.Tokens.Add(tokens)

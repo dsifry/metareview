@@ -440,8 +440,10 @@ func TestCodexJudgeRunsInItsConfiguredWorkDir(t *testing.T) {
 	}
 }
 
-// Unset means "inherit", which is today's behaviour: the seam must not invent a directory.
-func TestCodexJudgeWithNoWorkDirPassesEmpty(t *testing.T) {
+// Unset no longer means "inherit": the caller's directory is the repository under review, whose
+// AGENTS.md a headless codex would splice into the judge's instructions. Unset means a fresh,
+// empty, isolated directory (see isolation_test.go for the full contract).
+func TestCodexJudgeWithNoWorkDirIsIsolated(t *testing.T) {
 	var gotDir = "unset"
 	f := func(_ context.Context, dir string, _ []string, _ string) ([]byte, int, error) {
 		gotDir = dir
@@ -451,8 +453,8 @@ func TestCodexJudgeWithNoWorkDirPassesEmpty(t *testing.T) {
 	if _, err := j.Call(context.Background(), codexRequest()); err != nil {
 		t.Fatalf("call: %v", err)
 	}
-	if gotDir != "" {
-		t.Errorf("exec dir = %q, want empty when unconfigured", gotDir)
+	if gotDir == "" || gotDir == "unset" || !strings.Contains(gotDir, "metareview-judge-") {
+		t.Errorf("exec dir = %q, want a fresh isolated directory when unconfigured", gotDir)
 	}
 }
 
@@ -481,8 +483,8 @@ func TestWithCodexWorkDirConfinesOnlyCodexJudges(t *testing.T) {
 	if _, err := base.Call(context.Background(), codexRequest()); err != nil {
 		t.Fatalf("base call: %v", err)
 	}
-	if gotDir != "" {
-		t.Errorf("confining one judge changed the original, which ran in %q", gotDir)
+	if gotDir == "/evidence" || !strings.Contains(gotDir, "metareview-judge-") {
+		t.Errorf("confining one judge changed the original, which ran in %q (want its own isolated dir)", gotDir)
 	}
 
 	// a judge that is not the HTTP/codex router is returned as-is

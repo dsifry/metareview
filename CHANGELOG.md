@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- **The `claude-cli/` and `codex/` judges no longer run inside the repository under review.** Each
+  judge attempt now starts the model CLI in a fresh, empty, private temp directory, removed after
+  the call. Before, the CLI inherited metareview's working directory, which is normally the
+  repository being reviewed, and in headless mode a CLI can still load that repository's
+  project-level configuration without the interactive trust prompt. Disabling tools does not
+  switch that configuration off. So reviewing an untrusted checkout, such as a fork's PR branch,
+  was not isolated from it. The Claude judge also passes `--setting-sources user
+  --strict-mcp-config`. The Codex judge passes `-c project_doc_max_bytes=0`, which also covers the
+  escalation path's materialized evidence tree (still honoured as an explicit work dir). If no
+  private directory can be made, the attempt fails as a transport error and nothing is spawned in
+  the caller's directory. Reported while reviewing #165; plan in #167 (W0).
+
 ## 0.13.2 - 2026-09-26
 
 ### Fixed

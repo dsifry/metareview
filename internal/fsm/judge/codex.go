@@ -38,7 +38,7 @@ type codexJudge struct {
 	exec           CodexExec
 	nonce          func() string
 	clock          Clock
-	workDir        string        // empty: inherit the caller's directory
+	workDir        string        // empty: a fresh isolated directory per attempt (isolatedDir)
 	attemptTimeout time.Duration // zero: the AttemptTimeout default
 }
 
@@ -71,6 +71,10 @@ func (j *codexJudge) Call(ctx context.Context, r Request) (v Verdict, err error)
 		"--color", "never",
 		"-m", wireModel(r.Model),
 		"-c", "model_reasoning_effort=" + r.Effort,
+		// AGENTS.md is read from the working directory up and would be spliced into the judge's
+		// instructions. The default directory is isolated and empty, but an explicit work dir is a
+		// materialized copy of the change under review, which can carry one: project docs off.
+		"-c", "project_doc_max_bytes=0",
 		"-", // the prompt arrives on stdin, never as an argv the process table would show
 	}
 	// The same attempt ceiling, per-attempt deadline and backoff as the HTTP arm.
@@ -98,9 +102,18 @@ func (j *codexJudge) Call(ctx context.Context, r Request) (v Verdict, err error)
 			case <-j.clock.After(backoff(classBackoff, attempt-1)):
 			}
 		}
+		dir, cleanup := j.workDir, func() {}
+		if dir == "" {
+			var dirErr error
+			if dir, cleanup, dirErr = isolatedDir(); dirErr != nil {
+				lastErr = errs.E(CodeJudgeTransport, "codex could not be given an isolated working directory: "+dirErr.Error(), "provider", "codex")
+				continue
+			}
+		}
 		actx, cancel := context.WithTimeout(ctx, j.timeout())
-		stdout, code, execErr := j.exec(actx, j.workDir, args, prompt)
+		stdout, code, execErr := j.exec(actx, dir, args, prompt)
 		cancel()
+		cleanup()
 
 		text, tokens, found := parseCodexEvents(stdout)
 		v.Tokens = v.Tokens.Add(tokens)
