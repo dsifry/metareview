@@ -66,6 +66,7 @@ func (j *codexJudge) Call(ctx context.Context, r Request) (v Verdict, err error)
 
 	args := []string{
 		"exec", "--json",
+		"--ephemeral",            // a judge call is not a session: persist nothing (one fresh dir per attempt)
 		"--sandbox", "read-only", // a judge reads; it must never edit the tree it is judging
 		"--skip-git-repo-check", // judging is not tied to a repository
 		"--color", "never",
@@ -110,10 +111,12 @@ func (j *codexJudge) Call(ctx context.Context, r Request) (v Verdict, err error)
 				continue
 			}
 		}
-		actx, cancel := context.WithTimeout(ctx, j.timeout())
-		stdout, code, execErr := j.exec(actx, dir, args, prompt)
-		cancel()
-		cleanup()
+		stdout, code, execErr := func() ([]byte, int, error) {
+			defer cleanup() // deferred: a panic in the seam must not leave the directory behind
+			actx, cancel := context.WithTimeout(ctx, j.timeout())
+			defer cancel()
+			return j.exec(actx, dir, args, prompt)
+		}()
 
 		text, tokens, found := parseCodexEvents(stdout)
 		v.Tokens = v.Tokens.Add(tokens)

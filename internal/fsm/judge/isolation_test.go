@@ -166,9 +166,15 @@ func TestJudgesRefuseToRunWithoutAnIsolatedDir(t *testing.T) {
 	}
 }
 
-// The real directory maker: private (0700), empty, outside the caller's tree, and removed by its
-// cleanup.
+// The real directory maker: private (0700), empty, under the user's own cache directory (not a
+// shared temp dir, where another local user could plant a .git root and repo-scoped skills a CLI
+// walks up to), and removed by its cleanup.
 func TestIsolatedDir(t *testing.T) {
+	cache := t.TempDir()
+	saved := userCacheDir
+	t.Cleanup(func() { userCacheDir = saved })
+	userCacheDir = func() (string, error) { return cache, nil }
+
 	dir, cleanup, err := isolatedDir()
 	if err != nil {
 		t.Fatal(err)
@@ -177,19 +183,103 @@ func TestIsolatedDir(t *testing.T) {
 	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
 		t.Fatalf("stat %s: %v %v", dir, info, err)
 	}
+	if want := filepath.Join(cache, "metareview", "judge") + string(filepath.Separator); !strings.HasPrefix(dir, want) {
+		t.Fatalf("dir %s is not under the user cache base %s", dir, want)
+	}
+	base, err := os.Stat(filepath.Join(cache, "metareview", "judge"))
+	if err != nil || base.Mode().Perm() != 0o700 {
+		t.Fatalf("the base must be private: %v %v", base, err)
+	}
 	cleanup()
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("cleanup left %s", dir)
 	}
 }
 
-// With no usable temp directory the real maker reports the error rather than returning a
-// directory the CLI would then be run in.
+// No user cache directory (HOME unset), or one that cannot hold the base: fall back to the temp
+// directory rather than refuse to judge.
+func TestIsolatedDirFallsBackToTheTempDir(t *testing.T) {
+	saved := userCacheDir
+	t.Cleanup(func() { userCacheDir = saved })
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	blocked := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, cacheDir := range map[string]func() (string, error){
+		"no cache dir":   func() (string, error) { return "", errors.New("$HOME is not defined") },
+		"unusable cache": func() (string, error) { return blocked, nil }, // a file: MkdirAll fails
+	} {
+		userCacheDir = cacheDir
+		dir, cleanup, err := isolatedDir()
+		if err != nil || !strings.HasPrefix(dir, tmp) {
+			t.Fatalf("%s: want a dir under %s, got %q %v", name, tmp, dir, err)
+		}
+		cleanup()
+	}
+}
+
+// With no usable directory anywhere the maker reports the error rather than returning a directory
+// the CLI would then be run in.
 func TestIsolatedDirReportsAnUnusableTempDir(t *testing.T) {
+	saved := userCacheDir
+	t.Cleanup(func() { userCacheDir = saved })
+	userCacheDir = func() (string, error) { return "", errors.New("no home") }
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))
 	dir, cleanup, err := isolatedDir()
 	if err == nil || dir != "" {
 		t.Fatalf("want an error and no dir, got %q %v", dir, err)
 	}
 	cleanup() // a no-op, but always safe to call
+}
+
+// A panic inside the CLI seam still removes the attempt's directory.
+func TestJudgesRemoveTheDirEvenOnPanic(t *testing.T) {
+	for name, call := range map[string]func(ClaudeExec){
+		"claude": func(e ClaudeExec) {
+			_, _ = (&claudeJudge{exec: e, nonce: func() string { return "n0" }, clock: codexClock()}).Call(context.Background(), claudeRequest())
+		},
+		"codex": func(e ClaudeExec) {
+			_, _ = (&codexJudge{exec: CodexExec(e), nonce: func() string { return "n0" }, clock: codexClock()}).Call(context.Background(), codexRequest())
+		},
+	} {
+		var dir string
+		func() {
+			defer func() { _ = recover() }()
+			call(func(_ context.Context, d string, _ []string, _ string) ([]byte, int, error) {
+				dir = d
+				panic("boom")
+			})
+		}()
+		if dir == "" {
+			t.Fatalf("%s: the seam was never called", name)
+		}
+		if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s: a panic left %s behind", name, dir)
+		}
+	}
+}
+
+// Judge calls are not sessions: nothing is persisted (and with a fresh directory per attempt,
+// persisting would leave one transcript directory behind per call).
+func TestJudgesPersistNoSession(t *testing.T) {
+	f := &fakeClaude{stdout: claudeJSON(`{"reasoning":"r","is_real":true,"confidence":0.9}`)}
+	if _, err := (&claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}).Call(context.Background(), claudeRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(f.args, " "), "--no-session-persistence") {
+		t.Fatalf("claude args %q", f.args)
+	}
+	var args []string
+	x := &codexJudge{exec: func(_ context.Context, _ string, a []string, _ string) ([]byte, int, error) {
+		args = a
+		return []byte(codexStream(`{"reasoning":"r","is_real":true,"confidence":0.9}`)), 0, nil
+	}, nonce: func() string { return "n0" }, clock: codexClock()}
+	if _, err := x.Call(context.Background(), codexRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(args, " "), "--ephemeral") {
+		t.Fatalf("codex args %q", args)
+	}
 }

@@ -14,7 +14,13 @@
   --strict-mcp-config`. The Codex judge passes `-c project_doc_max_bytes=0`, which also covers the
   escalation path's materialized evidence tree (still honoured as an explicit work dir). If no
   private directory can be made, the attempt fails as a transport error and nothing is spawned in
-  the caller's directory. Reported while reviewing #165; plan in #167 (W0).
+  the caller's directory. The directory is created under the user's own cache directory
+  (`os.UserCacheDir`), not a shared temp dir, because Codex walks up from its working directory to
+  a `.git` root and loads repo-scoped skills it finds there; the temp dir is only a fallback when
+  there is no cache directory. Judge calls also no longer persist sessions: Claude gets
+  `--no-session-persistence` and Codex `--ephemeral`, so a judge's full prompt and diff are no
+  longer written into the user's session transcripts. Reported while reviewing #165; plan in #167
+  (W0).
 
 ## 0.13.2 - 2026-09-26
 

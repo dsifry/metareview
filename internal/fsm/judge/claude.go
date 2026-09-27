@@ -85,6 +85,9 @@ func (j *claudeJudge) Call(ctx context.Context, r Request) (v Verdict, err error
 		// session this transport exists to use.
 		"--setting-sources", "user",
 		"--strict-mcp-config",
+		// A judge call is not a session: nothing to resume, and with a fresh directory per
+		// attempt a saved transcript would leave one project directory behind per call.
+		"--no-session-persistence",
 		// The system prompt must always be passed. Without it `claude -p` can
 		// silently fall back to Haiku for the work turn even with --model set —
 		// the judge would then be a different model than the one recorded in the
@@ -116,10 +119,12 @@ func (j *claudeJudge) Call(ctx context.Context, r Request) (v Verdict, err error
 			lastErr = errs.E(CodeJudgeTransport, "claude could not be given an isolated working directory: "+dirErr.Error(), "provider", "claude-cli")
 			continue
 		}
-		actx, cancel := context.WithTimeout(ctx, j.timeout())
-		stdout, code, execErr := j.exec(actx, dir, args, user)
-		cancel()
-		cleanup()
+		stdout, code, execErr := func() ([]byte, int, error) {
+			defer cleanup() // deferred: a panic in the seam must not leave the directory behind
+			actx, cancel := context.WithTimeout(ctx, j.timeout())
+			defer cancel()
+			return j.exec(actx, dir, args, user)
+		}()
 
 		text, tokens, found, transient := parseClaudeResult(stdout)
 		v.Tokens = v.Tokens.Add(tokens)
