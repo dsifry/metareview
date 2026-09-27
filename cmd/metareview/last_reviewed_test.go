@@ -66,6 +66,10 @@ func TestLastReviewedBase(t *testing.T) {
 	if base := lastRunBase(t, root, "task-done"); base != c3 {
 		t.Fatalf("task-done --base last-reviewed reviewed from %s, want %s", base, c3)
 	}
+	if runs, _ := os.ReadFile(filepath.Join(root, ".metareview", "runs.jsonl")); !strings.Contains(string(runs), `"scope":"task-done"`) ||
+		!strings.Contains(string(runs), `"requestedBase":"last-reviewed"`) {
+		t.Fatalf("the incremental task-done run must record the token:\n%s", runs)
+	}
 	// No passing pr-ready marker at all: exit 2, naming the problem, and nothing is recorded.
 	for _, args := range [][]string{{"review", "checkpoint", "--scope", "pr-ready"}, {"review", "pr-ready", "--base", "last-reviewed"}} {
 		code, _, errOut := runCLI(t, root, nil, args...)
@@ -173,5 +177,39 @@ func TestLastReviewedSkipsStaleMarkersAndServesEpicReady(t *testing.T) {
 	runCLI(t, root, nil, "review", "epic-ready", "docs/tasks/t.md", "--base", "last-reviewed")
 	if base := lastRunBase(t, root, "epic-ready"); base != checkpoint {
 		t.Fatalf("epic-ready --base last-reviewed reviewed from %s, want %s", base, checkpoint)
+	}
+	if runs, _ := os.ReadFile(filepath.Join(root, ".metareview", "runs.jsonl")); !strings.Contains(string(runs), `"scope":"epic-ready"`) ||
+		strings.Count(string(runs), `"requestedBase":"last-reviewed"`) < 1 {
+		t.Fatalf("the incremental epic-ready run must record the token:\n%s", runs)
+	}
+}
+
+// A checkpoint must vouch back to the fork point: a passing review recorded over a narrow base (C2..C3) leaves
+// fork..C2 unreviewed, so it is not a checkpoint.
+func TestLastReviewedRefusesANarrowBaseReview(t *testing.T) {
+	root := gitRepo(t)
+	c2 := commitIn(t, root, "c2.txt")
+	commitIn(t, root, "c3.txt")
+	if code, _, errOut := runCLI(t, root, nil, "review", "record-lenses", "--scope", "task-done", "--base", c2,
+		"--verdict", "PASS", "--mode", "in-session-emulated", "--lenses", "security"); code != 0 {
+		t.Fatalf("record-lenses: %d %s", code, errOut)
+	}
+	commitIn(t, root, "c4.txt")
+	if code, out, errOut := runCLI(t, root, nil, "review", "checkpoint", "--scope", "task-done"); code != 2 || !strings.Contains(errOut, "fork point") {
+		t.Fatalf("a narrow-base review must not be a checkpoint: %d %q %q", code, out, errOut)
+	}
+}
+
+// Without a local main or master there is no fork point to vouch back to, so last-reviewed is refused rather than
+// silently measured from HEAD~1.
+func TestLastReviewedNeedsAForkPoint(t *testing.T) {
+	root := gitRepo(t)
+	recordMarker(t, root, "pr-ready", "PASS")
+	commitIn(t, root, "c2.txt")
+	gitIn(t, root, "branch", "-q", "-m", "main", "develop")
+	for _, args := range [][]string{{"review", "checkpoint", "--scope", "pr-ready"}, {"review", "pr-ready", "--base", "last-reviewed"}} {
+		if code, _, errOut := runCLI(t, root, nil, args...); code != 2 || !strings.Contains(errOut, "no local main or master") {
+			t.Fatalf("%v: code=%d stderr=%q", args, code, errOut)
+		}
 	}
 }

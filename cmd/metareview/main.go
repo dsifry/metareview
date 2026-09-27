@@ -879,8 +879,12 @@ func resolveBaseToken(scope, base string) string {
 	root := repo.RootOr(workdir)
 	head, err := gitcontext.Head(root)
 	exitOnErr(err)
-	forkPoint, err := gitcontext.DefaultBase(root)
+	forkPoint, forked, err := gitcontext.ForkPoint(root)
 	exitOnErr(err)
+	if !forked {
+		_, _ = fmt.Fprintf(stderr, "--base %s: HEAD has no fork point (no local main or master it branched from), so no review can be shown to cover the whole branch; pass an explicit --base\n", reviewstate.LastReviewedBase)
+		exit(2)
+	}
 	sha, ok, err := reviewstate.Checkpoint(root, scope, head, forkPoint, func(ancestor, descendant string) (bool, error) {
 		// A marker's head or base that no longer exists here (a rebased head pruned by gc, runs.jsonl copied from
 		// another clone) is simply not an ancestor, not a fatal error.
@@ -891,7 +895,7 @@ func resolveBaseToken(scope, base string) string {
 	})
 	exitOnErr(err)
 	if !ok {
-		_, _ = fmt.Fprintf(stderr, "--base %s: no passing %s review is recorded on an ancestor of HEAD; review the whole change first (e.g. --base main)\n", reviewstate.LastReviewedBase, scope)
+		_, _ = fmt.Fprintf(stderr, "--base %s: no passing %s review on an ancestor of HEAD covers the branch back to its fork point (a later NEEDS_REVISION, a narrow --base, or a marker with no recorded base does not); review from the fork point first (e.g. --base main)\n", reviewstate.LastReviewedBase, scope)
 		exit(2)
 	}
 	return sha

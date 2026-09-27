@@ -190,7 +190,8 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   from the review-evidence markers in this checkout's `runs.jsonl` (no new state): the **nearest** head that is a
   *strict* ancestor of HEAD, whose **latest** marker of the scope passed (a later NEEDS_REVISION at the same head
   withdraws an earlier PASS, as the gate's last-recorded-wins rule does), and whose marker's base reaches back to
-  the fork point — directly, or through a chain of qualifying heads in this history. So a checkpoint always vouches
+  the fork point (`gitcontext.ForkPoint`: the merge-base with a local main/master — never the HEAD~1 fallback; with
+  no fork point the token is refused) — directly, or through a chain of qualifying heads in this history. So a checkpoint always vouches
   for fork..checkpoint, and a marker recorded over a narrow base, before a rebase, or with no base (pre-#175) never
   qualifies. A marker at HEAD is skipped (after recording C3..C5 the token still resolves to C3, so the gate finds
   that marker); a marker whose head no longer exists here (pruned after a rebase) is skipped. None → exit 2 before
@@ -198,8 +199,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   whole branch (`prready.Options.Incremental`), so an open finding on a file changed before the checkpoint still
   blocks. Every incremental run and marker records `requestedBase: last-reviewed` beside the checkpoint SHA, and the
   context pack says so. `fsm init` takes no scope: pass `--base $(metareview review checkpoint --scope pr-ready)`.
-  Known limit (tracked by #182): after merging main into the branch, checkpoint..HEAD includes the merged upstream
-  changes, so the increment is wider — never narrower — than the branch's own work.
+  Known limits: after merging main into the branch, checkpoint..HEAD includes the merged upstream changes, so the
+  increment is wider — never narrower — than the branch's own work (tracked by #182). A later NEEDS_REVISION at a
+  *descendant* head does not withdraw an earlier checkpoint (only a later marker at the same head does), and a
+  checkpoint resting on an in-session-emulated marker is not surfaced as the whole-branch gate's emulated advisory.
 - **Stale task reviews (#187):** pr-ready and `status` automatically retire only task-done and epic-ready reviews
   whose target is exactly `--help` or `-h` (artifacts of the bug #164 fixed, never reviews of work), through one
   shared predicate, `reviewstate.FlagTargetRunIDs`. The task-done and epic-ready CLIs now refuse any target starting

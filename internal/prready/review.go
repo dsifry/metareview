@@ -264,7 +264,14 @@ func Create(root string, options Options) (Result, error) {
 	}
 	blockerScopePaths := reviewedPaths(analysisGit)
 	if options.Incremental {
-		whole, err := gitcontext.CollectWithExcludes(root, "", generatedMetareviewPathExcludes())
+		forkPoint, forked, err := gitcontext.ForkPoint(root)
+		if err == nil && !forked {
+			err = fmt.Errorf("incremental pr-ready: HEAD has no fork point (no local main or master), so blockers cannot be scoped to the whole branch")
+		}
+		var whole gitcontext.Context
+		if err == nil {
+			whole, err = gitcontext.CollectWithExcludes(root, forkPoint, generatedMetareviewPathExcludes())
+		}
 		if err != nil {
 			return Result{}, err
 		}

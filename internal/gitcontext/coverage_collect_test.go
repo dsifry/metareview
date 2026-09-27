@@ -332,3 +332,11 @@ func TestGitExitErrorKeepsTheMessageAndCode(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A stall while looking for the fork point aborts rather than reading as "no fork point".
+func TestForkPointSurfacesTimeout(t *testing.T) {
+	installFakeGit(t, func(string, ...string) (string, error) { return "", ErrTimeout })
+	if _, _, err := ForkPoint("root"); !errors.Is(err, ErrTimeout) {
+		t.Fatalf("err = %v, want ErrTimeout", err)
+	}
+}

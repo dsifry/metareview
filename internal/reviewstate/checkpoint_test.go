@@ -183,3 +183,13 @@ func TestCheckpointChainStaysInThisHistory(t *testing.T) {
 		t.Fatalf("a chain through a commit outside this history was accepted: %q", got)
 	}
 }
+
+// The one cycle that really occurs: a marker whose base IS its head (record-lenses --base HEAD). It terminates and
+// proves nothing.
+func TestCheckpointSelfBaseTerminates(t *testing.T) {
+	root := t.TempDir()
+	recordAll(t, root, ReviewEvidence{ReviewedScope: "pr-ready", BaseSHA: "C3", HeadSHA: "C3", AdjudicatedVerdict: "PASS"})
+	if got, ok := checkpoint(t, root, "pr-ready"); ok {
+		t.Fatalf("a base==head marker must not qualify: %q", got)
+	}
+}

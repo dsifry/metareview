@@ -63,14 +63,25 @@ func TestHeadAndIsAncestor(t *testing.T) {
 	}
 }
 
-func TestDefaultBaseIsTheForkPoint(t *testing.T) {
+// ForkPoint is where HEAD forked from main or master — never the HEAD~1 fallback the default base uses on the
+// default branch or without a main/master, which would let a narrow review pass as covering the whole branch (#176).
+func TestForkPoint(t *testing.T) {
 	r := newRepo(t)
 	fork := strings.TrimSpace(r.git("rev-parse", "HEAD"))
+	if _, ok, err := ForkPoint(r.root); err != nil || ok {
+		t.Fatalf("on main itself there is no fork point: ok=%v err=%v", ok, err)
+	}
 	r.git("checkout", "-q", "-b", "feat")
 	r.write("f.go", "package p\n")
-	r.commit("feat")
-	if got, err := DefaultBase(r.root); err != nil || got != fork {
-		t.Fatalf("DefaultBase = %s %v, want %s", got, err, fork)
+	r.commit("feat 1")
+	r.write("g.go", "package p\n")
+	r.commit("feat 2") // HEAD~1 is no longer the fork point
+	if got, ok, err := ForkPoint(r.root); err != nil || !ok || got != fork {
+		t.Fatalf("ForkPoint = %s %v %v, want %s", got, ok, err, fork)
+	}
+	r.git("branch", "-q", "-m", "main", "develop") // a trunk that is neither main nor master
+	if _, ok, err := ForkPoint(r.root); err != nil || ok {
+		t.Fatalf("without a local main or master there is no fork point: ok=%v err=%v", ok, err)
 	}
 }
 
