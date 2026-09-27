@@ -23,3 +23,15 @@ func TestTaskDoneRecordsTheRequestedBase(t *testing.T) {
 		t.Fatalf("the context pack must name the requested base (%v):\n%s", err, pack)
 	}
 }
+
+// An incremental review (#176) records the token it was asked for, beside the checkpoint SHA it resolved to.
+func TestTaskDoneIncrementalRecordsTheToken(t *testing.T) {
+	root := smallTaskRepo(t)
+	if _, err := Create(root, smallTarget, Options{Base: "main", Incremental: true}); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := os.ReadFile(filepath.Join(root, ".metareview", "runs.jsonl"))
+	if err != nil || !strings.Contains(string(runs), `"requestedBase":"last-reviewed"`) {
+		t.Fatalf("the run record must name the last-reviewed token (%v):\n%s", err, runs)
+	}
+}

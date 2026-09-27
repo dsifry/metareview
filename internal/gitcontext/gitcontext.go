@@ -622,3 +622,20 @@ func IsAncestor(root, ancestor, descendant string) (bool, error) {
 	}
 	return err == nil, err
 }
+
+// DefaultBase returns the base a command uses when no --base is given: the fork point from main or master, or
+// HEAD~1 on the default branch itself.
+func DefaultBase(root string) (string, error) {
+	return resolveBase(root, "")
+}
+
+// CommitExists reports whether sha names a commit in this repository. git's "no" (exit 1) is false; any other
+// failure is an error.
+func CommitExists(root, sha string) (bool, error) {
+	_, err := git(root, "rev-parse", "--verify", "--quiet", "--end-of-options", sha+"^{commit}")
+	var exit *gitExitError
+	if errors.As(err, &exit) && exit.code == 1 {
+		return false, nil
+	}
+	return err == nil, err
+}

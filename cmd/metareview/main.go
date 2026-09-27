@@ -356,6 +356,7 @@ func dispatch(args []string) {
 			}
 		}
 		mustMutationViews(options.MutationReportPaths, options.MutationViews)
+		options.Incremental = options.Base == reviewstate.LastReviewedBase
 		options.Base = resolveBaseToken("task-done", options.Base)
 		result, err := taskdone.Create(workdir, args[2], options)
 		exitOnErr(err)
@@ -396,6 +397,7 @@ func dispatch(args []string) {
 			}
 		}
 		mustMutationViews(options.MutationReportPaths, options.MutationViews)
+		options.Incremental = options.Base == reviewstate.LastReviewedBase
 		options.Base = resolveBaseToken("epic-ready", options.Base)
 		result, err := epicready.Create(workdir, args[2], options)
 		exitOnErr(err)
@@ -495,6 +497,9 @@ func dispatch(args []string) {
 		root := repo.RootOr(workdir)
 		gc, err := gitcontext.Collect(root, resolveBaseToken(scope, base))
 		exitOnErr(err) // a repo with no HEAD/base fails here ("invalid git base"), so gc.HeadSHA is non-empty below
+		if base == reviewstate.LastReviewedBase {
+			gc.RequestedBase = base // the marker records the token it was asked for, beside the checkpoint SHA
+		}
 		// A CLI seam cannot witness that independent subagents actually ran, so it must not let a hand-typed
 		// `--mode subagent-adjudicated` launder a self-attested review as independent, full-strength evidence
 		// (the gate would then trust it with no advisory trace). subagent-adjudicated is therefore admitted
@@ -637,6 +642,7 @@ func dispatch(args []string) {
 			}
 		}
 		mustMutationViews(options.MutationReportPaths, options.MutationViews)
+		options.Incremental = options.Base == reviewstate.LastReviewedBase
 		options.Base = resolveBaseToken("pr-ready", options.Base)
 		result, err := prready.Create(workdir, options)
 		exitOnErr(err)
@@ -861,11 +867,9 @@ func short(sha string) string {
 	return sha
 }
 
-// refuseFlagShapedTarget exits 2 when a review target starts with '-' once whitespace is trimmed: that is a flag
-// typed where the target belongs (usually an omitted target), not a task or epic. Recording a review under it
-// creates a log nobody can re-run or supersede (#187), so it is refused before anything runs.
-// resolveBaseToken turns the reserved `--base last-reviewed` into the head of the last passing review of scope on an
-// ancestor of HEAD (#176), read from the markers recorded in this checkout; any other base is returned unchanged.
+// resolveBaseToken turns the reserved `--base last-reviewed` into the scope's checkpoint (#176) — the nearest head
+// on this branch whose latest review passed and whose reviews reach back to the fork point, read from the markers
+// recorded in this checkout (reviewstate.Checkpoint); any other base is returned unchanged.
 // With no such review there is nothing to be incremental from: exit 2 naming the problem, before anything is
 // recorded.
 func resolveBaseToken(scope, base string) string {
@@ -875,7 +879,14 @@ func resolveBaseToken(scope, base string) string {
 	root := repo.RootOr(workdir)
 	head, err := gitcontext.Head(root)
 	exitOnErr(err)
-	sha, ok, err := reviewstate.Checkpoint(root, scope, head, func(ancestor, descendant string) (bool, error) {
+	forkPoint, err := gitcontext.DefaultBase(root)
+	exitOnErr(err)
+	sha, ok, err := reviewstate.Checkpoint(root, scope, head, forkPoint, func(ancestor, descendant string) (bool, error) {
+		// A marker's head or base that no longer exists here (a rebased head pruned by gc, runs.jsonl copied from
+		// another clone) is simply not an ancestor, not a fatal error.
+		if exists, err := gitcontext.CommitExists(root, ancestor); err != nil || !exists {
+			return false, err
+		}
 		return gitcontext.IsAncestor(root, ancestor, descendant)
 	})
 	exitOnErr(err)
@@ -886,6 +897,9 @@ func resolveBaseToken(scope, base string) string {
 	return sha
 }
 
+// refuseFlagShapedTarget exits 2 when a review target starts with '-' once whitespace is trimmed: that is a flag
+// typed where the target belongs (usually an omitted target), not a task or epic. Recording a review under it
+// creates a log nobody can re-run or supersede (#187), so it is refused before anything runs.
 func refuseFlagShapedTarget(scope, target string) {
 	if strings.HasPrefix(strings.TrimSpace(target), "-") {
 		_, _ = fmt.Fprintf(stderr, "review %s: the target must not start with '-' (got %q); pass the target before any options\n", scope, target)

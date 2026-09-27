@@ -25,6 +25,8 @@ import (
 )
 
 type Options struct {
+	// Incremental marks a review whose Base is a last-reviewed checkpoint (#176); the run records the token.
+	Incremental   bool
 	Base          string
 	PreviousRunID string
 	EvidencePath  string
@@ -117,6 +119,9 @@ func Create(root, target string, options Options) (Result, error) {
 	git, err := gitcontext.CollectWithExcludesExcept(root, options.Base, generatedMetareviewPathExcludes(), exceptions)
 	if err != nil {
 		return Result{}, err
+	}
+	if options.Incremental {
+		git.RequestedBase = reviewstate.LastReviewedBase
 	}
 	reviewGit := git
 	if len(exceptions) == 0 {

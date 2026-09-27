@@ -110,3 +110,68 @@ func lastRunBase(t *testing.T, root, scope string) string {
 	}
 	return base
 }
+
+// An incremental pr-ready reviews only checkpoint..HEAD, but its BLOCKERS stay scoped to the whole branch: an open
+// task-done finding on a file changed before the checkpoint must still block (#176 security review: it was
+// projected as "unrelated" and pr-ready passed).
+func TestIncrementalPRReadyKeepsWholeBranchBlockers(t *testing.T) {
+	root := gitRepo(t) // on feature; src/a.go changed
+	if err := os.WriteFile(filepath.Join(root, "src", "a.go"), []byte("package src\n\n// TODO: finish\nfunc A() { panic(\"TODO\") }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, root, "add", "-A")
+	gitIn(t, root, "commit", "-q", "-m", "a with a TODO")
+	if code, out, errOut := runCLI(t, root, nil, "review", "task-done", "src/a.go", "--base", "main"); code != 1 {
+		t.Fatalf("the task-done review must block on the TODO: %d %s %s", code, out, errOut)
+	}
+	commitIn(t, root, "b.txt")
+	recordMarker(t, root, "pr-ready", "PASS") // the checkpoint: a passing lens review of main..HEAD
+	commitIn(t, root, "c.txt")
+	if code, _, errOut := runCLI(t, root, nil, "review", "record-lenses", "--scope", "pr-ready", "--base", "last-reviewed",
+		"--verdict", "PASS", "--mode", "in-session-emulated", "--lenses", "security"); code != 0 {
+		t.Fatalf("record-lenses --base last-reviewed: %d %s", code, errOut)
+	}
+	if runs, _ := os.ReadFile(filepath.Join(root, ".metareview", "runs.jsonl")); !strings.Contains(string(runs), `"requestedBase":"last-reviewed"`) {
+		t.Fatalf("the marker must record the last-reviewed token:\n%s", runs)
+	}
+	evidence := filepath.Join(t.TempDir(), "evidence.json")
+	_, receipt, _ := runCLI(t, root, nil, "evidence", "run", "--", "true")
+	if err := os.WriteFile(evidence, []byte(receipt), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := runCLI(t, root, nil, "review", "pr-ready", "--base", "last-reviewed", "--evidence", evidence)
+	if code != 1 {
+		t.Fatalf("an incremental pr-ready must still block on the open task-done finding: %d %s %s", code, out, errOut)
+	}
+	log, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(strings.TrimSpace(out))))
+	if err != nil || !strings.Contains(string(log), "Blocked targets: src/a.go") {
+		t.Fatalf("the pr-ready log must name the blocked target (%v):\n%s", err, log)
+	}
+}
+
+// A marker whose head no longer exists here (a rebased head pruned by gc, or runs.jsonl copied from another clone)
+// is skipped, not fatal; and the epic-ready gate resolves the token with its own scope.
+func TestLastReviewedSkipsStaleMarkersAndServesEpicReady(t *testing.T) {
+	root := gitRepo(t)
+	fork := gitIn(t, root, "merge-base", "HEAD", "main")
+	recordMarker(t, root, "epic-ready", "PASS")
+	checkpoint := gitIn(t, root, "rev-parse", "HEAD")
+	stale := `{"schemaVersion":1,"kind":"review-evidence","scope":"review-evidence","reviewedScope":"epic-ready","headSha":"` +
+		strings.Repeat("e", 40) + `","baseSha":"` + fork + `","lensSet":["x"],"adjudicatedVerdict":"PASS","executionMode":"in-session-emulated","createdAt":"2026-09-27T00:00:00Z"}` + "\n"
+	f, err := os.OpenFile(filepath.Join(root, ".metareview", "runs.jsonl"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(stale); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	commitIn(t, root, "e2.txt")
+	if code, out, errOut := runCLI(t, root, nil, "review", "checkpoint", "--scope", "epic-ready"); code != 0 || strings.TrimSpace(out) != checkpoint {
+		t.Fatalf("checkpoint with a stale marker = %d %q %q, want %s", code, out, errOut, checkpoint)
+	}
+	runCLI(t, root, nil, "review", "epic-ready", "docs/tasks/t.md", "--base", "last-reviewed")
+	if base := lastRunBase(t, root, "epic-ready"); base != checkpoint {
+		t.Fatalf("epic-ready --base last-reviewed reviewed from %s, want %s", base, checkpoint)
+	}
+}

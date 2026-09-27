@@ -52,6 +52,10 @@ type Options struct {
 	MutationViews []string
 	// ShardWriter is the pack-writing seam; nil uses the real filesystem.
 	ShardWriter shardpack.Writer
+	// Incremental marks a review whose Base is a last-reviewed checkpoint (#176): the reviewers see only
+	// checkpoint..HEAD, but blockers stay scoped to the whole branch from its fork point — an open finding on a
+	// file changed before the checkpoint must not read as unrelated and stop blocking.
+	Incremental bool
 }
 
 type Result struct {
@@ -236,6 +240,9 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if options.Incremental {
+		git.RequestedBase = reviewstate.LastReviewedBase
+	}
 	reviewGit := filterGeneratedGitContext(git)
 	dirtyFiles := workingTreeDirtyFiles(reviewGit)
 	analysisGit := reviewGit
@@ -254,6 +261,18 @@ func Create(root string, options Options) (Result, error) {
 	knowledgeContext, err := collectKnowledge(root)
 	if err != nil {
 		return Result{}, err
+	}
+	blockerScopePaths := reviewedPaths(analysisGit)
+	if options.Incremental {
+		whole, err := gitcontext.CollectWithExcludes(root, "", generatedMetareviewPathExcludes())
+		if err != nil {
+			return Result{}, err
+		}
+		wholeGit := filterGeneratedGitContext(whole)
+		if !options.IncludeWorkingTree {
+			wholeGit = branchOnlyGitContext(wholeGit)
+		}
+		blockerScopePaths = uniqueStrings(append(blockerScopePaths, reviewedPaths(wholeGit)...))
 	}
 	targetRecord := map[string]string{"type": "branch", "id": firstNonEmpty(git.Branch, git.HeadSHA)}
 	logs, err := discoverLogs(root)
@@ -294,7 +313,7 @@ func Create(root string, options Options) (Result, error) {
 		Target:           targetRecord,
 		PreviousRunIDs:   previousRunIDs,
 		HistoricalRunIDs: append(historicalPRReadyRunIDsForCurrentTarget(root, logs, targetRecord, git), reviewstate.FlagTargetRunIDs(logs)...),
-		ChangedPaths:     reviewedPaths(analysisGit),
+		ChangedPaths:     blockerScopePaths,
 		CurrentTarget:    targetRecord,
 		LinkedTargets:    linkedTargets,
 	})

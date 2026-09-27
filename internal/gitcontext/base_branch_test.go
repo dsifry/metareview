@@ -62,3 +62,28 @@ func TestHeadAndIsAncestor(t *testing.T) {
 		t.Fatal("Head outside a repository must fail")
 	}
 }
+
+func TestDefaultBaseIsTheForkPoint(t *testing.T) {
+	r := newRepo(t)
+	fork := strings.TrimSpace(r.git("rev-parse", "HEAD"))
+	r.git("checkout", "-q", "-b", "feat")
+	r.write("f.go", "package p\n")
+	r.commit("feat")
+	if got, err := DefaultBase(r.root); err != nil || got != fork {
+		t.Fatalf("DefaultBase = %s %v, want %s", got, err, fork)
+	}
+}
+
+func TestCommitExists(t *testing.T) {
+	r := newRepo(t)
+	head := strings.TrimSpace(r.git("rev-parse", "HEAD"))
+	if ok, err := CommitExists(r.root, head); err != nil || !ok {
+		t.Fatalf("HEAD exists: %v %v", ok, err)
+	}
+	if ok, err := CommitExists(r.root, strings.Repeat("e", 40)); err != nil || ok {
+		t.Fatalf("an unknown commit does not exist: %v %v", ok, err)
+	}
+	if _, err := CommitExists(t.TempDir(), head); err == nil {
+		t.Fatal("outside a repository must be an error")
+	}
+}

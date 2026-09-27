@@ -20,6 +20,8 @@ metareview fsm record node-output --run <id> --node <node> --data <file|->
 metareview fsm advance --run <id>        # repeat until DONE / STOPPED / GATE_FAILED
 ```
 
+`fsm init` takes no review scope, so for an incremental review pass the checkpoint SHA: `--base $(metareview review checkpoint --scope pr-ready)`, and the same `--base last-reviewed` to the gate and `record-lenses`.
+
 - If you do not know where a run is: `metareview fsm state --run <id>` and follow `next_action` (`advance` | `record` | `none`).
 - `advance` is idempotent at `NEEDS_INPUT`: repeating it re-emits the same payload.
 - `exec` in a `NEEDS_INPUT` payload: `inline` = you do it, in this session, with the context you already have — do not

@@ -57,7 +57,9 @@ children's changes) with the roll-up (child logs, parent intent) as context; dri
 (#175):** every command resolves `--base` the same way: a branch name (`main`, `origin/main`) is the point HEAD
 forked from it, `merge-base(HEAD, <branch>)`, and a SHA or revision expression (`a1b2c3d`, `HEAD~2`) is that exact
 commit. So `review epic-ready --base main`, `fsm --workflow epic-review-loop --base main` and `record-lenses
---scope epic-ready --base main` agree even after main advances. epic-ready folds the working tree into its
+--scope epic-ready --base main` agree even after main advances. For a long-lived branch, `--base last-reviewed` (task-done,
+epic-ready, pr-ready, record-lenses) reviews only what is new since the last passing review of that scope; `review
+checkpoint --scope <s>` prints that commit, which is what to pass to `fsm init --base`. epic-ready folds the working tree into its
 reviewed surface, so a dirty tree blocks on `working-tree-unattested` even with a valid marker — commit first.
 
 Exit handling: `0` means verify `PASS`/`PASS_ADVISORY` with zero blockers; `1` with a review path means follow that log; nonzero without a path means read stderr. For `metareview fsm`: `3` = the FSM needs the host to do a node's work; `1` + `GATE_FAILED` = run `resume_hint` (it forks a child — a new run id); `1` + `ERR_*` = read `code` (`detail` is data); `2` = nothing was recorded, fix the input and retry unless it is a consent or escalation code, which waits for a human; `STOPPED`/`DONE` are terminal. FSM escalation is per fork lineage: forking an ancestor or re-running `init` on the same base is a human decision.

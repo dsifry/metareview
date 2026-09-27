@@ -13,7 +13,7 @@ Run this before declaring an epic ready to land.
 metareview review epic-ready <epic-id-or-path> [--base <ref>] [--previous-run <run-id>] [--max-attempts <n>] [--evidence <path>]
 ```
 
-Use `--base` for the reviewed diff, `--previous-run` after fixes, and `--evidence` for validation or acceptance notes. Use `--max-attempts` only on the first run; it sets the chain budget (default 3), with the first blocker run as attempt 1.
+Use `--base` for the reviewed diff, `--previous-run` after fixes, and `--evidence` for validation or acceptance notes. Use `--max-attempts` only on the first run; it sets the chain budget (default 3), with the first blocker run as attempt 1. A branch name resolves to where HEAD forked from it; `--base last-reviewed` reviews only what is new since the last passing review of this scope (`metareview review checkpoint --scope epic-ready` prints that commit; with none recorded it exits 2).
 
 ## Workflow
 
