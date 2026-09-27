@@ -95,7 +95,39 @@ func keyIsWordInterior(text string, start, end int) bool {
 	if start >= 3 && text[start-3] == '%' && isHexASCII(text[start-2]) && isHexASCII(text[start-1]) { // a %2f, %3d … escape
 		return false
 	}
-	return true
+	return !endsMultiCharEscape(text[:start])
+}
+
+// endsMultiCharEscape reports whether before ends in an escape whose last character is a lowercase letter: a
+// \xHH or \uHHHH escape (\x3d, \u003d) or an ANSI SGR/CSI sequence (ESC[0m, ESC[1;31m), with ESC written raw
+// or as \x1b, \u001b, \033 or \e. The letter before the key then ends the escape, not a word.
+func endsMultiCharEscape(before string) bool {
+	n := len(before)
+	if n >= 4 && before[n-4] == '\\' && before[n-3] == 'x' && isHexASCII(before[n-2]) && isHexASCII(before[n-1]) {
+		return true
+	}
+	if n >= 6 && before[n-6] == '\\' && before[n-5] == 'u' && isHexASCII(before[n-4]) && isHexASCII(before[n-3]) &&
+		isHexASCII(before[n-2]) && isHexASCII(before[n-1]) {
+		return true
+	}
+	// CSI: ESC '[' then parameter digits/semicolons, ending in the final letter just before the key.
+	i := n - 2
+	for i >= 0 && (before[i] >= '0' && before[i] <= '9' || before[i] == ';') {
+		i--
+	}
+	if i < 0 || before[i] != '[' {
+		return false
+	}
+	esc := before[:i]
+	if strings.HasSuffix(esc, "\x1b") {
+		return true
+	}
+	for _, e := range []string{`\x1b`, `\x1B`, `\u001b`, `\u001B`, `\033`, `\e`} {
+		if strings.HasSuffix(esc, e) {
+			return true
+		}
+	}
+	return false
 }
 
 func isLowerASCII(c byte) bool { return c >= 'a' && c <= 'z' }
@@ -110,13 +142,21 @@ func redactKeyPrefixes(text string) string {
 	for _, pattern := range keyPrefixPatterns {
 		var b strings.Builder
 		last := 0
-		for _, m := range pattern.FindAllStringIndex(text, -1) {
-			if keyIsWordInterior(text, m[0], m[1]) {
+		for pos := last; pos < len(text); {
+			loc := pattern.FindStringIndex(text[pos:])
+			if loc == nil {
+				break
+			}
+			start, end := pos+loc[0], pos+loc[1]
+			if keyIsWordInterior(text, start, end) {
+				// Skipping the whole match would hide a separately delimited key inside it ("task-done-sk-…"
+				// first matches from the "sk-" in "task"), so the scan resumes one byte into the match.
+				pos = start + 1
 				continue
 			}
-			b.WriteString(text[last:m[0]])
+			b.WriteString(text[last:start])
 			b.WriteString(redactionMarker)
-			last = m[1]
+			last, pos = end, end
 		}
 		b.WriteString(text[last:])
 		text = b.String()

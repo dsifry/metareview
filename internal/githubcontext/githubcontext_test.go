@@ -360,3 +360,35 @@ func TestRedactKeepsTheCharacterBeforeAKey(t *testing.T) {
 		}
 	}
 }
+
+// A lowercase key after a multi-character escape is not word-interior: the letter before it ends the escape
+// (\x3d, =, an ANSI colour code), not a word. CodeRabbit on #190.
+func TestRedactLowercaseKeysAfterMultiCharacterEscapes(t *testing.T) {
+	key := "sk-abcdefghijklmnopqrstuvwxyz0123"
+	for _, prefix := range []string{`token\x3d`, `token\u003d`, "\x1b[32m", `\u001b[0m`, `\x1b[1;31m`, `\033[0m`, `\e[0m`} {
+		if got := Redact(prefix + key); got != prefix+redactionMarker {
+			t.Errorf("Redact(%q) = %q, want the key redacted", prefix+key, got)
+		}
+	}
+	// Not an escape: a word that merely has hex-looking letters before the key keeps the word-interior rule.
+	// Nor does a bracket that no ESC introduces make a CSI sequence.
+	for _, word := range []string{"x3dsk-abcdefghijklmnopqrstuvwxyz0123", "arr[0msk-abcdefghijklmnopqrstuvwxyz0123"} {
+		if got := Redact(word); got != word {
+			t.Errorf("a plain lowercase word must stay word-interior, got %q", got)
+		}
+	}
+}
+
+// A skipped word-interior match must not hide a separately delimited key inside it: "task-done-sk-…" first
+// matches from the "sk-" in "task", and the real key after the hyphen must still be found. CodeRabbit on #190.
+func TestRedactFindsAKeyInsideASkippedMatch(t *testing.T) {
+	for in, want := range map[string]string{
+		"task-done-sk-abcdefghijklmnopqrstuvwxyz0123":                                                          "task-done-" + redactionMarker,
+		"docs/task-done-review-sk-abcdefghijklmnopqrstuvwxyz0123.md":                                           "docs/task-done-review-" + redactionMarker + ".md",
+		"docs/metareview/reviews/mrv-20260831-183207933768000-task-done-mechanical-precision-lens-c79c1389.md": "docs/metareview/reviews/mrv-20260831-183207933768000-task-done-mechanical-precision-lens-c79c1389.md",
+	} {
+		if got := Redact(in); got != want {
+			t.Errorf("Redact(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
