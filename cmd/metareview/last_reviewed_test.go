@@ -225,3 +225,24 @@ func TestLastReviewedNoForkPointMessageNamesTheCause(t *testing.T) {
 		t.Fatalf("code=%d stderr=%q, want the no-commits-of-its-own cause", code, errOut)
 	}
 }
+
+// #194: the standalone Stop-gate opt-in, for a repository whose hook manager owns core.hooksPath.
+func TestSetupStopGateToggles(t *testing.T) {
+	root := gitRepo(t)
+	code, out, errOut := runCLI(t, root, nil, "setup", "--enable-stop-gate")
+	if code != 0 || !strings.Contains(out, "opted in") {
+		t.Fatalf("enable: %d %q %q", code, out, errOut)
+	}
+	if got := gitIn(t, root, "config", "--local", "--get", "metareview.stopGate"); got != "true" {
+		t.Fatalf("metareview.stopGate = %q", got)
+	}
+	if code, out, errOut := runCLI(t, root, nil, "setup", "--disable-stop-gate"); code != 0 || !strings.Contains(out, "no longer") {
+		t.Fatalf("disable: %d %q %q", code, out, errOut)
+	}
+	if code, out, _ := runCLI(t, root, nil, "setup", "--disable-stop-gate"); code != 0 || !strings.Contains(out, "had not opted in") {
+		t.Fatalf("disable twice: %d %q", code, out)
+	}
+	if code, _, _ := runCLI(t, t.TempDir(), nil, "setup", "--enable-stop-gate"); code == 0 {
+		t.Fatal("enable outside a repository must fail")
+	}
+}

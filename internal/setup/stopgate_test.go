@@ -2,6 +2,8 @@ package setup
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -81,7 +83,7 @@ func TestEnforcementReportsTheStopGateOptIn(t *testing.T) {
 	if got.OptedIn || !strings.Contains(got.Remediation, "has not opted in") || !strings.Contains(got.Remediation, "setup --install-hooks") {
 		t.Fatalf("not opted in: %+v", got)
 	}
-	if got := withStopGateOptIn(registered, true); !got.OptedIn || got.Remediation != "" {
+	if got := withStopGateOptIn(registered, true); !got.OptedIn || !got.Active || got.Remediation != "" {
 		t.Fatalf("opted in: %+v", got)
 	}
 	// An unregistered hook keeps its own remediation.
@@ -104,5 +106,92 @@ func TestStopGateOptedIn(t *testing.T) {
 	}
 	if stopGateOptedIn(t.TempDir(), nil) {
 		t.Fatal("a directory outside any repository has not opted in")
+	}
+}
+
+// The standalone opt-in (#194 review): a repository whose own hook manager owns core.hooksPath (husky, lefthook,
+// beads) cannot take `setup --install-hooks` without --force, but can still opt into the Stop gate.
+func TestEnableAndDisableStopGate(t *testing.T) {
+	root, g := tempRepo(t)
+	if _, err := g(root, "config", "--local", "core.hooksPath", ".husky"); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnableStopGate(root, g); err != nil {
+		t.Fatal(err)
+	}
+	if got := stopGate(t, root, g); got != "true" {
+		t.Fatalf("enable must record the opt-in, got %q", got)
+	}
+	if got := hooksPath(t, root, g); got != ".husky" {
+		t.Fatalf("enable must not touch core.hooksPath, got %q", got)
+	}
+	if changed, err := DisableStopGate(root, g); err != nil || !changed {
+		t.Fatalf("disable: %v %v", changed, err)
+	}
+	if changed, err := DisableStopGate(root, g); err != nil || changed {
+		t.Fatalf("disabling twice changes nothing: %v %v", changed, err)
+	}
+	if got := stopGate(t, root, g); got != "" {
+		t.Fatalf("disable must remove the opt-in, got %q", got)
+	}
+	nonRepo := t.TempDir()
+	if err := EnableStopGate(nonRepo, isolatedGit(nonRepo)); err == nil {
+		t.Fatal("enable outside a repository must fail")
+	}
+	if _, err := DisableStopGate(nonRepo, isolatedGit(nonRepo)); err == nil {
+		t.Fatal("disable outside a repository must fail")
+	}
+	if err := EnableStopGate(root, nil); err != nil { // nil runner uses real git
+		t.Fatal(err)
+	}
+}
+
+// A repository that has not opted in has no active Stop gate, whatever is registered (#194 AC3).
+func TestUnoptedRegisteredHookIsInactive(t *testing.T) {
+	got := withStopGateOptIn(EnforcementStatus{Active: true, Source: "/p/hooks/hooks.json", ScriptPresent: true}, false)
+	if got.Active || got.Source == "" {
+		t.Fatalf("a registered hook without the opt-in must report inactive (keeping its source): %+v", got)
+	}
+}
+
+// setup --check wires the opt-in into its report.
+func TestCheckReportsTheOptIn(t *testing.T) {
+	root, g := tempRepo(t)
+	if Check(root, Options{}).Enforcement.OptedIn {
+		t.Fatal("a fresh repository has not opted in")
+	}
+	if err := EnableStopGate(root, g); err != nil {
+		t.Fatal(err)
+	}
+	if !Check(root, Options{}).Enforcement.OptedIn {
+		t.Fatal("setup --check must report the recorded opt-in")
+	}
+}
+
+// The hook and the installer must agree on the key: a drifted constant makes install report success while the
+// hook stays inert everywhere.
+func TestHookReadsTheStopGateKey(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", "hooks", "pre-finish.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(script), "--get "+StopGateKey+" ") {
+		t.Fatalf("hooks/pre-finish.sh does not read %s", StopGateKey)
+	}
+}
+
+func TestStopGateTogglesEdgeCases(t *testing.T) {
+	root, g := tempRepo(t)
+	failing := func(r string, args ...string) ([]byte, error) {
+		if len(args) >= 3 && args[0] == "config" && args[len(args)-1] == "true" {
+			return nil, errors.New("boom")
+		}
+		return g(r, args...)
+	}
+	if err := EnableStopGate(root, failing); err == nil || !strings.Contains(err.Error(), "opt-in") {
+		t.Fatalf("a failed write must surface: %v", err)
+	}
+	if _, err := DisableStopGate(root, nil); err != nil { // nil runner uses real git
+		t.Fatal(err)
 	}
 }

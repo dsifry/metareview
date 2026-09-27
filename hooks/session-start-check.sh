@@ -28,10 +28,15 @@ norm() { python3 -c 'import os,sys; print(os.path.normpath(sys.argv[1]))' "$1" 2
 # .metareview/git-hooks is git-ignored, so the scripts can vanish while config still points at them — that is
 # an inert gate, and the reminder must fire so the agent reinstalls, not stay silent on a config match alone.
 if [ -n "$CURABS" ] && [ "$(norm "$CURABS")" = "$(norm "$WANT")" ] && [ -x "$WANT/pre-push" ] && [ -x "$WANT/post-commit" ]; then
-  exit 0 # installed and the hooks are present — nothing to say
+  # The push gate is installed. The Stop gate is a separate, per-repository opt-in (#194): an install from
+  # before it has no opt-in, and would lose the Stop gate on upgrade with nothing in the session saying so.
+  if [ "$(git -C "$ROOT" config --local --get metareview.stopGate 2>/dev/null || true)" = "true" ]; then
+    exit 0 # both gates in place — nothing to say
+  fi
+  MSG="metareview: the git-native push gate is installed, but this repository has not opted into the Stop gate, so session completion is not gated here. Run \`metareview setup --enable-stop-gate\` to opt in."
+else
+  MSG="metareview: the git-native review gate is NOT installed (or its hook scripts are missing) on this repo — an unreviewed 'git push' will NOT be blocked. To install it (non-destructive; refuses on conflict): run \`metareview setup --install-hooks\` interactively, or \`metareview setup --install-hooks --yes\` headlessly, or \`--dry-run\` to preview."
 fi
-
-MSG="metareview: the git-native review gate is NOT installed (or its hook scripts are missing) on this repo — an unreviewed 'git push' will NOT be blocked. To install it (non-destructive; refuses on conflict): run \`metareview setup --install-hooks\` interactively, or \`metareview setup --install-hooks --yes\` headlessly, or \`--dry-run\` to preview."
 CTX="$(printf '%s' "$MSG" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))' 2>/dev/null)"
 [ -n "$CTX" ] || CTX='"metareview: run `metareview setup --install-hooks` to enable the review gate (an unreviewed push is not blocked until you do)."'
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":%s}}\n' "$CTX"

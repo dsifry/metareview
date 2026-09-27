@@ -289,7 +289,9 @@ func TestSessionStartCheckNormalizesEquivalentHooksPath(t *testing.T) {
 		t.Fatalf("an unset core.hooksPath must produce the not-installed reminder; got %q", out)
 	}
 	// A non-canonical but EQUIVALENT spelling of the materialized target, with scripts present, reads as
-	// installed → no reminder.
+	// installed → no reminder. (With the Stop-gate opt-in recorded too: without it the notice now names the
+	// missing opt-in, #194.)
+	git("config", "metareview.stopGate", "true")
 	git("config", "core.hooksPath", root+"/./.metareview/git-hooks")
 	if out := run(); out != "" {
 		t.Fatalf("$ROOT/./.metareview/git-hooks with scripts present must read as installed; got %q", out)

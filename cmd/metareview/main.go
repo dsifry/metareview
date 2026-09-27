@@ -105,6 +105,7 @@ func printHelp() {
 
 Usage:
   metareview setup --check
+  metareview setup --install-hooks | --uninstall-hooks | --enable-stop-gate | --disable-stop-gate
   metareview setup --bootstrap-prereqs --dry-run
   metareview status [--json]
   metareview fsm <subcommand> [flags]        (metareview fsm --agent-prompt for the driver contract)
@@ -131,6 +132,8 @@ Usage:
 
 Commands:
   setup --check              Detect repository mode and prerequisites without writing files
+  setup --install-hooks      Install the git-native push gate and opt this repository into the Stop gate
+  setup --enable-stop-gate   Opt this repository into the Stop gate only (when another tool owns core.hooksPath)
   setup --bootstrap-prereqs  Print or execute prerequisite bootstrap actions
   status [--json [--target <path> | --scope branch [--base <ref>]]]
                              Print repository review capability status; --json emits the
@@ -938,6 +941,24 @@ func handleSetup(args []string) {
 		return
 	}
 
+	// The Stop-gate opt-in alone (#194): for a repository whose own hook manager owns core.hooksPath, where
+	// --install-hooks refuses rather than override it.
+	if len(args) == 1 && args[0] == "--enable-stop-gate" {
+		exitOnErr(setup.EnableStopGate(repo.RootOr(workdir), nil))
+		_, _ = fmt.Fprintln(stdout, "metareview: this repository has opted into the Stop gate (metareview.stopGate=true); the plugin's Stop hook now gates session completion here.")
+		return
+	}
+	if len(args) == 1 && args[0] == "--disable-stop-gate" {
+		changed, err := setup.DisableStopGate(repo.RootOr(workdir), nil)
+		exitOnErr(err)
+		if changed {
+			_, _ = fmt.Fprintln(stdout, "metareview: this repository no longer opts into the Stop gate.")
+		} else {
+			_, _ = fmt.Fprintln(stdout, "metareview: this repository had not opted into the Stop gate; nothing changed.")
+		}
+		return
+	}
+
 	bootstrap, installHooks, uninstallHooks, yes, force, dryRun := false, false, false, false, false, false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -969,7 +990,7 @@ func handleSetup(args []string) {
 	}
 
 	if !bootstrap {
-		_, _ = fmt.Fprintln(stderr, "Usage: metareview setup --check | --install-hooks [--dry-run|--yes|--force] | --uninstall-hooks [--dry-run|--yes] | --bootstrap-prereqs [--dry-run] [--confirm-bootstrap-prereqs]")
+		_, _ = fmt.Fprintln(stderr, "Usage: metareview setup --check | --install-hooks [--dry-run|--yes|--force] | --uninstall-hooks [--dry-run|--yes] | --enable-stop-gate | --disable-stop-gate | --bootstrap-prereqs [--dry-run] [--confirm-bootstrap-prereqs]")
 		exit(2)
 	}
 	options := setup.BootstrapOptions{DryRun: dryRun, Confirm: yes}

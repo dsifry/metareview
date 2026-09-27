@@ -156,8 +156,11 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   `hooks/pre-finish.sh` in every host session on the machine, so the script is inert — exit 0, no output,
   before it even looks for the binary — unless the repository it stands in has `metareview.stopGate=true` in its
   *local* git config. `setup --install-hooks` records that opt-in (and `--uninstall-hooks` removes it); an install
-  from before #194 is not `AlreadyDone` until the opt-in is recorded. `setup --check` reports `optedIn` and names
-  the opt-in when a registered hook does not gate the repository. Unrelated projects, non-repositories and the FSM
+  from before #194 is not `AlreadyDone` until the opt-in is recorded; `setup --enable-stop-gate` /
+  `--disable-stop-gate` toggle it alone (for a repository whose hook manager owns `core.hooksPath`). A repository
+  with metareview's git gate installed but no opt-in is never *silently* ungated: the Stop hook says so on stderr
+  and the SessionStart notice names `--enable-stop-gate`. `setup --check` reports `optedIn`, and `active` is false
+  for a registered hook that does not gate the repository. Unrelated projects, non-repositories and the FSM
   judge's `codex exec` sessions are never gated (a gate there corrupted judge reasoning, #193).
 
 ## 6. State, evidence & storage

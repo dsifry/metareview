@@ -87,6 +87,15 @@ fi
 # binary: a "metareview is not installed" block in a project that never opted in is a gate nobody
 # asked for (and in a judge session it replaced the verdict's reasoning, #193).
 if [ "$(git config --local --get metareview.stopGate 2>/dev/null || true)" != "true" ]; then
+  # Standing down silently is right for a repository that never asked — but not for one that installed
+  # metareview's git gate (core.hooksPath -> .metareview/git-hooks) and has lost the opt-in: an install from
+  # before #194, or `git config --unset` from inside the session. That stands down LOUDLY, on stderr, so the
+  # transcript shows the Stop gate was not applied and how to restore it.
+  case "$(git config --get core.hooksPath 2>/dev/null || true)" in
+    *.metareview/git-hooks|*.metareview/git-hooks/)
+      printf 'metareview: the Stop gate is NOT applied here — metareview'"'"'s git gate is installed but this repository has not opted into the Stop gate (metareview.stopGate is unset). Run `metareview setup --enable-stop-gate` to restore it.\n' >&2
+      ;;
+  esac
   exit 0
 fi
 

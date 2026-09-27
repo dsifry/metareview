@@ -144,6 +144,37 @@ type HookInstallPlan struct {
 // and `setup --install-hooks` is what sets it.
 const StopGateKey = "metareview.stopGate"
 
+// EnableStopGate records the Stop-gate opt-in and nothing else, so a repository whose own hook manager owns
+// core.hooksPath (husky, lefthook, beads) — where `setup --install-hooks` refuses rather than override it — can
+// still opt in.
+func EnableStopGate(root string, git GitRunner) error {
+	if git == nil {
+		git = realGitRunner
+	}
+	if _, err := git(root, "rev-parse", "--git-dir"); err != nil {
+		return fmt.Errorf("cannot opt in: %s is not a usable git repository: %w", root, err)
+	}
+	if _, err := git(root, "config", "--local", StopGateKey, "true"); err != nil {
+		return fmt.Errorf("recording the Stop-gate opt-in: %w", err)
+	}
+	return nil
+}
+
+// DisableStopGate removes the Stop-gate opt-in, reporting whether one was recorded.
+func DisableStopGate(root string, git GitRunner) (bool, error) {
+	if git == nil {
+		git = realGitRunner
+	}
+	if _, err := git(root, "rev-parse", "--git-dir"); err != nil {
+		return false, fmt.Errorf("cannot opt out: %s is not a usable git repository: %w", root, err)
+	}
+	if !stopGateOptedIn(root, git) {
+		return false, nil
+	}
+	_, err := git(root, "config", "--local", "--unset", StopGateKey)
+	return err == nil, err
+}
+
 // PlanHookInstall inspects the repo READ-ONLY and returns what installing the gate would do. Two conflicts
 // are detected before anything is touched: (1) core.hooksPath is already set to a DIFFERENT path — we will
 // not override a user's choice; (2) core.hooksPath is unset but there are active (non-sample) hooks in

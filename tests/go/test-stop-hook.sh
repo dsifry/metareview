@@ -48,8 +48,16 @@ if [ -n "$out" ]; then echo "FAIL: a repository that has not opted in must not b
 nonrepo="$TMP/not-a-repo"; mkdir -p "$nonrepo"
 out="$(printf '{"cwd":"%s"}' "$nonrepo" | METAREVIEW_BIN=definitely-not-installed bash "$HOOK")"
 if [ -n "$out" ]; then echo "FAIL: a directory outside any repository must be left alone, got: $out"; exit 1; fi
-# From here on the repository has opted in, exactly as `setup --install-hooks` records it.
-git config --local metareview.stopGate true
+# A repository with metareview's git gate installed but no opt-in (an install from before #194, or an unset
+# from inside the session) still is not gated — but says so, on stderr, never silently.
+git config --local core.hooksPath "$repo/.metareview/git-hooks"
+err="$(METAREVIEW_BIN="$TMP/mrv" bash "$HOOK" 2>&1 >/dev/null)"
+out="$(METAREVIEW_BIN="$TMP/mrv" bash "$HOOK" 2>/dev/null)"
+if [ -n "$out" ]; then echo "FAIL: a lost opt-in must not block, got: $out"; exit 1; fi
+printf '%s' "$err" | grep -q "enable-stop-gate" || { echo "FAIL: a lost opt-in must be announced on stderr, got: $err"; exit 1; }
+git config --local --unset core.hooksPath
+# From here on the repository has opted in — through the CLI, so the hook and the installer must agree on the key.
+"$TMP/mrv" setup --enable-stop-gate >/dev/null
 
 # 1. Absent tooling blocks. A check that did not run must never read as a check that found
 #    nothing wrong.

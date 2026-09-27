@@ -162,7 +162,8 @@ func enforcementStatus(root, home, pluginRoot string, gitGateInstalled bool) Enf
 func withStopGateOptIn(s EnforcementStatus, optedIn bool) EnforcementStatus {
 	s.OptedIn = optedIn
 	if s.Active && !optedIn {
-		s.Remediation = "A Stop hook is registered in " + s.Source + ", but this repository has not opted in, so it does not gate session completion here. Run `metareview setup --install-hooks` to opt in."
+		s.Active = false // registered, but it gates nothing here
+		s.Remediation = "A Stop hook is registered in " + s.Source + ", but this repository has not opted in, so it does not gate session completion here. Run `metareview setup --enable-stop-gate` (or `metareview setup --install-hooks`, which also installs the push gate)."
 	}
 	return s
 }
