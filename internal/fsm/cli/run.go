@@ -942,13 +942,14 @@ func (in *invocation) export() int {
 	if err != nil {
 		work = o.root // no checkout around cwd: fall back to the store root, as a single checkout would
 	}
-	m, err := export.Export(in.c.ctx, in.c.exportDeps(o.root, work, o.md), o.id, opts)
+	deps := in.c.exportDeps(o.root, work, o.md)
+	m, err := export.Export(in.c.ctx, deps, o.id, opts)
 	if err != nil {
 		return in.fail(env, err, phaseNone, false)
 	}
 	out := opts.Out
 	if out == "" {
-		out = filepath.Join(work, "docs", "metareview", "fsm", o.id) // root: work — must match export's default
+		out = export.DefaultOut(deps, o.id)
 	}
 	env["manifest"], env["out"], env["untrusted"] = m, out, []string{}
 	return in.ok(env, StatusOK, 0)

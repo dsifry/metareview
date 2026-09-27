@@ -119,6 +119,12 @@ set — the `review-lenses` node's rubric is a per-workflow param defaulting to 
 own freshness (child logs/evidence/intent, which live outside the diff) is guarded by the deterministic
 pre-checks in `RunEpicReady`, which re-read current state on every gate run.
 
+**Where a run lives (two roots, §6).** A run's audit, sidecars and terminal `runs.jsonl` row live under the
+**store root** — the main worktree, whichever worktree ran `fsm init` — so every worktree sees one store and run
+ids stay unique. The run *reviews* its **work dir** (default: the checkout `init` ran in; `--work-dir` overrides),
+and a default `fsm export` bundle is written under the checkout that ran `export`
+(`export.DefaultOut`), so it is committed on that branch.
+
 Exit contract (`metareview fsm`): `3` = the FSM needs the host to do a node's work; `1`+`GATE_FAILED` = run
 `resume_hint` (forks a child = new run id); `1`+`ERR_*` = read `code`; `2` = nothing recorded (fix input and
 retry unless it's a consent/escalation code); `STOPPED`/`DONE` terminal. Escalation is per fork lineage.
