@@ -76,7 +76,7 @@ func rerunCommand(h Header) string {
 // as '\”.
 func shellQuote(s string) string {
 	for _, r := range s {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_./:@%+=,-", r)) {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune("_./:@%+=,-", r) {
 			return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 		}
 	}
@@ -550,8 +550,9 @@ func shardPack(plan contextprofile.ShardPlan, shard contextprofile.Shard, header
 	b.WriteString("\n## Review\n\nReview the diff below against `rubrics/task-done-review-rubric.md`. ")
 	b.WriteString("Report findings with file:line evidence.\n\n")
 	b.WriteString("## Result contract\n\n" + resultContractFor(false) + "\n\n")
-	b.WriteString("## Re-run\n\n" +
-		markdown.InlineCode(rerunCommand(header)) + ", adding `--previous-run <run-id>` with the run id this gate printed, and the same `--evidence` (and any " +
+	// A fenced block keeps the command byte-exact; an inline code span would flatten a newline in the target.
+	b.WriteString("## Re-run\n\n" + markdown.FencedCodeBlock("sh", rerunCommand(header)) + "\n\n" +
+		"Add `--previous-run <run-id>` with the run id this gate printed, and the same `--evidence` (and any " +
 		"mutation) options the gate was run with.\n\n")
 	for _, c := range shard.Chunks {
 		text := files[c.Path].Diff[c.ByteStart:c.ByteEnd]

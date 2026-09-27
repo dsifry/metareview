@@ -669,8 +669,17 @@ func ResolverPhrase(record findings.Record) string {
 // cleared through a human-granted process override, which records who decided and why; making that work for
 // blockers that exist only in committed review logs is tracked in #188.
 func FlagTargetRunIDs(logs []reviewlog.Summary) []string {
+	// Callers retire by run id alone, so an id another log shares (duplicated or hand-authored) would retire that
+	// log too: an ambiguous id is never selected, and both records keep blocking.
+	seen := map[string]int{}
+	for _, log := range logs {
+		seen[log.RunID]++
+	}
 	var ids []string
 	for _, log := range logs {
+		if seen[log.RunID] != 1 {
+			continue
+		}
 		// Exact, untrimmed: the artifacts parse as exactly "--help"/"-h". A padded variant (" --help") was typed on
 		// purpose and may be a real review of current work, so it keeps blocking.
 		if log.RunID != "" && (log.Kind == "task-done" || log.Kind == "epic-ready") && (log.Target == "--help" || log.Target == "-h") {

@@ -1205,6 +1205,8 @@ func TestRerunCommandIsRunnable(t *testing.T) {
 		// quote inside is written as '\''.
 		{Header{Scope: "task-done", TargetID: "t", Target: "a$HOME;b&c*", Base: "base-sha", Head: "head-sha", Budget: 400},
 			"metareview review task-done 'a$HOME;b&c*' --base base-sha"},
+		{Header{Scope: "task-done", TargetID: "t", Target: "line1\nline2", Base: "base-sha", Head: "head-sha", Budget: 400},
+			"metareview review task-done 'line1\nline2' --base base-sha"},
 		{Header{Scope: "task-done", TargetID: "t", Target: "it's", Base: "base-sha", Head: "head-sha", Budget: 400},
 			`metareview review task-done 'it'\''s' --base base-sha`},
 		{Header{Scope: "pr-ready", TargetID: "feature", Base: "base-sha", Head: "head-sha", Budget: 400},
@@ -1218,7 +1220,8 @@ func TestRerunCommandIsRunnable(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(body), "## Re-run\n\n`"+tc.want+"`, adding `--previous-run <run-id>`") {
+		// A fenced block, not an inline code span: an inline span flattens a newline in the target.
+		if !strings.Contains(string(body), "## Re-run\n\n```sh\n"+tc.want+"\n```\n\nAdd `--previous-run <run-id>`") {
 			t.Errorf("%s: Re-run line missing %q", tc.h.Scope, tc.want)
 		}
 		// The pack cannot know the gate's other options, so it must tell the agent to repeat them: a pr-ready
