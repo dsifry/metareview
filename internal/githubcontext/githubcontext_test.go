@@ -366,7 +366,7 @@ func TestRedactKeepsTheCharacterBeforeAKey(t *testing.T) {
 // (\x3d, =, an ANSI colour code), not a word. CodeRabbit on #190.
 func TestRedactLowercaseKeysAfterMultiCharacterEscapes(t *testing.T) {
 	key := "sk-abcdefghijklmnopqrstuvwxyz0123"
-	for _, prefix := range []string{`token\x3d`, `token\u003d`, "\x1b[32m", `\u001b[0m`, `\x1b[1;31m`, `\033[0m`, `\e[0m`} {
+	for _, prefix := range []string{`token\x3d`, `token\u003d`, "\x1b[32m", `\u001b[0m`, `\x1b[1;31m`, `\033[0m`, `\e[0m`, "\x1b[?25l", `\x1b[38:5:2m`, "\x1b[1 q"} {
 		if got := Redact(prefix + key); got != prefix+redactionMarker {
 			t.Errorf("Redact(%q) = %q, want the key redacted", prefix+key, got)
 		}

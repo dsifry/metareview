@@ -105,7 +105,7 @@ func continuesWord(text string, start int) bool {
 }
 
 // endsMultiCharEscape reports whether before ends in an escape whose last character is a lowercase letter: a
-// \xHH or \uHHHH escape (\x3d, \u003d) or an ANSI SGR/CSI sequence (ESC[0m, ESC[1;31m), with ESC written raw
+// \xHH or \uHHHH escape (\x3d, \u003d) or an ANSI CSI sequence (ESC[0m, ESC[1;31m, ESC[?25l), with ESC written raw
 // or as \x1b, \u001b, \033 or \e. The letter before the key then ends the escape, not a word.
 func endsMultiCharEscape(before string) bool {
 	n := len(before)
@@ -116,9 +116,10 @@ func endsMultiCharEscape(before string) bool {
 		isHexASCII(before[n-2]) && isHexASCII(before[n-1]) {
 		return true
 	}
-	// CSI: ESC '[' then parameter digits/semicolons, ending in the final letter just before the key.
+	// CSI: ESC '[' then parameter bytes (0x30-0x3f: digits, ; : < = > ?) and intermediate bytes (0x20-0x2f),
+	// ending in the final letter just before the key.
 	i := n - 2
-	for i >= 0 && (before[i] >= '0' && before[i] <= '9' || before[i] == ';') {
+	for i >= 0 && before[i] >= 0x20 && before[i] <= 0x3f {
 		i--
 	}
 	if i < 0 || before[i] != '[' {
