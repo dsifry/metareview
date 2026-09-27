@@ -606,3 +606,19 @@ func untrackedExcerpt(rel, text string) string {
 	}
 	return "--- " + rel + "\n" + strings.Join(lines, "\n")
 }
+
+// Head returns the commit HEAD names.
+func Head(root string) (string, error) {
+	return git(root, "rev-parse", "HEAD")
+}
+
+// IsAncestor reports whether ancestor is an ancestor of (or equal to) descendant. git's "no" (exit 1) is false; any
+// other failure — an unknown commit, a timeout — is an error.
+func IsAncestor(root, ancestor, descendant string) (bool, error) {
+	_, err := git(root, "merge-base", "--is-ancestor", ancestor, descendant)
+	var exit *gitExitError
+	if errors.As(err, &exit) && exit.code == 1 {
+		return false, nil
+	}
+	return err == nil, err
+}

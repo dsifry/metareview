@@ -185,6 +185,13 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   SHA equals what the base resolves to now — a SHA `--base`, or a branch that has not moved past the fork point.
   One recorded with `--base main` after main advanced holds main's tip, a different diff, so it no longer matches
   and the review is re-recorded.
+- **Incremental review, `--base last-reviewed` (#176):** a reserved token for task-done, epic-ready, pr-ready and
+  `record-lenses`. It resolves to the head of the most recently recorded **passing** marker of that scope whose
+  head is a *strict* ancestor of HEAD (`reviewstate.Checkpoint`, derived from the markers in this checkout's
+  `runs.jsonl` — no new state); `review checkpoint --scope <s>` prints it. A marker at HEAD is skipped, so after
+  recording C3..C5 the token still resolves to C3 and the gate finds that marker. No such marker → exit 2 before
+  anything is recorded. `fsm init` takes no scope, so pass it the SHA: `--base $(metareview review checkpoint
+  --scope pr-ready)`.
 - **Stale task reviews (#187):** pr-ready and `status` automatically retire only task-done and epic-ready reviews
   whose target is exactly `--help` or `-h` (artifacts of the bug #164 fixed, never reviews of work), through one
   shared predicate, `reviewstate.FlagTargetRunIDs`. The task-done and epic-ready CLIs now refuse any target starting

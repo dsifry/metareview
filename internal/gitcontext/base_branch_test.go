@@ -38,3 +38,27 @@ func TestABranchBaseReviewsOnlyTheBranchAfterTheBaseAdvances(t *testing.T) {
 		t.Errorf("--base <sha> = %s (%v), want %s", exact.BaseSHA, err, tip)
 	}
 }
+
+func TestHeadAndIsAncestor(t *testing.T) {
+	r := newRepo(t)
+	first := strings.TrimSpace(r.git("rev-parse", "HEAD"))
+	r.write("b.go", "package p\n")
+	r.commit("second")
+	second := strings.TrimSpace(r.git("rev-parse", "HEAD"))
+	if head, err := Head(r.root); err != nil || head != second {
+		t.Fatalf("Head = %s %v", head, err)
+	}
+	if ok, err := IsAncestor(r.root, first, second); err != nil || !ok {
+		t.Fatalf("first is an ancestor of second: %v %v", ok, err)
+	}
+	if ok, err := IsAncestor(r.root, second, first); err != nil || ok {
+		t.Fatalf("second is not an ancestor of first: %v %v", ok, err)
+	}
+	// An unknown commit is an operational failure (exit 128), not "no".
+	if _, err := IsAncestor(r.root, strings.Repeat("f", 40), second); err == nil {
+		t.Fatal("an unknown commit must be an error")
+	}
+	if _, err := Head(t.TempDir()); err == nil {
+		t.Fatal("Head outside a repository must fail")
+	}
+}
