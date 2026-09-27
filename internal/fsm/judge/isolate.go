@@ -16,16 +16,20 @@ var userCacheDir = os.UserCacheDir
 // judge reads a byte of the prompt. The prompt arrives on stdin, so the CLI needs no files of the
 // repository at all. A var so the failure path is testable.
 //
-// The directory lives under the user's own cache directory, not a shared temp dir: Codex walks up
-// from its working directory to a .git root and loads the repo-scoped skills it finds there, so
-// under a world-writable /tmp another local user could plant both. The temp dir is only the
-// fallback when there is no usable cache directory (no $HOME).
+// The directory lives under the user's own cache directory and nowhere else: Codex walks up from
+// its working directory to a project root and loads the repo-scoped skills it finds on the way
+// (project_doc_max_bytes=0 does not switch those off), so under a shared temp dir another local
+// user could plant a .git root and skills in /tmp. There is deliberately no temp-dir fallback:
+// without a usable cache directory the attempt fails, and the CLI judges need $HOME for their
+// OAuth session anyway.
 var isolatedDir = func() (string, func(), error) {
-	base := os.TempDir()
-	if cache, err := userCacheDir(); err == nil {
-		if b := filepath.Join(cache, "metareview", "judge"); os.MkdirAll(b, 0o700) == nil {
-			base = b
-		}
+	cache, err := userCacheDir()
+	if err != nil {
+		return "", func() {}, err
+	}
+	base := filepath.Join(cache, "metareview", "judge")
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return "", func() {}, err
 	}
 	dir, err := os.MkdirTemp(base, "metareview-judge-")
 	if err != nil {

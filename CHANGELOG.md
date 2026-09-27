@@ -16,8 +16,9 @@
   private directory can be made, the attempt fails as a transport error and nothing is spawned in
   the caller's directory. The directory is created under the user's own cache directory
   (`os.UserCacheDir`), not a shared temp dir, because Codex walks up from its working directory to
-  a `.git` root and loads repo-scoped skills it finds there; the temp dir is only a fallback when
-  there is no cache directory. Judge calls also no longer persist sessions: Claude gets
+  a `.git` root and loads repo-scoped skills it finds there. There is no temp-dir fallback: without
+  a usable cache directory the judge attempt fails (the CLI judges need `$HOME` for their OAuth
+  session anyway). Judge calls also no longer persist sessions: Claude gets
   `--no-session-persistence` and Codex `--ephemeral`, so a judge's full prompt and diff are no
   longer written into the user's session transcripts. Reported while reviewing #165; plan in #167
   (W0).

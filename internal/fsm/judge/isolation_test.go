@@ -196,42 +196,41 @@ func TestIsolatedDir(t *testing.T) {
 	}
 }
 
-// No user cache directory (HOME unset), or one that cannot hold the base: fall back to the temp
-// directory rather than refuse to judge.
-func TestIsolatedDirFallsBackToTheTempDir(t *testing.T) {
+// No usable user cache directory: refuse, never fall back to a shared temp dir. Under /tmp another
+// local user could plant a .git root and repo-scoped skills that Codex walks up to and loads
+// (project_doc_max_bytes=0 does not switch skills off). The CLI judges need $HOME for their OAuth
+// session anyway, so refusing costs nothing a working setup has.
+func TestIsolatedDirFailsClosedWithoutAUserCacheDir(t *testing.T) {
 	saved := userCacheDir
 	t.Cleanup(func() { userCacheDir = saved })
-	tmp := t.TempDir()
-	t.Setenv("TMPDIR", tmp)
 	blocked := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	readOnly := t.TempDir()
+	base := filepath.Join(readOnly, "metareview", "judge")
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(base, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(base, 0o700) })
 	for name, cacheDir := range map[string]func() (string, error){
-		"no cache dir":   func() (string, error) { return "", errors.New("$HOME is not defined") },
-		"unusable cache": func() (string, error) { return blocked, nil }, // a file: MkdirAll fails
+		"no cache dir":    func() (string, error) { return "", errors.New("$HOME is not defined") },
+		"unusable cache":  func() (string, error) { return blocked, nil },  // a file: MkdirAll fails
+		"unwritable base": func() (string, error) { return readOnly, nil }, // MkdirTemp fails
 	} {
+		if name == "unwritable base" && os.Geteuid() == 0 {
+			continue // root ignores the mode
+		}
 		userCacheDir = cacheDir
 		dir, cleanup, err := isolatedDir()
-		if err != nil || !strings.HasPrefix(dir, tmp) {
-			t.Fatalf("%s: want a dir under %s, got %q %v", name, tmp, dir, err)
+		if err == nil || dir != "" {
+			t.Fatalf("%s: want an error and no dir, got %q %v", name, dir, err)
 		}
-		cleanup()
+		cleanup() // a no-op, but always safe to call
 	}
-}
-
-// With no usable directory anywhere the maker reports the error rather than returning a directory
-// the CLI would then be run in.
-func TestIsolatedDirReportsAnUnusableTempDir(t *testing.T) {
-	saved := userCacheDir
-	t.Cleanup(func() { userCacheDir = saved })
-	userCacheDir = func() (string, error) { return "", errors.New("no home") }
-	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))
-	dir, cleanup, err := isolatedDir()
-	if err == nil || dir != "" {
-		t.Fatalf("want an error and no dir, got %q %v", dir, err)
-	}
-	cleanup() // a no-op, but always safe to call
 }
 
 // A panic inside the CLI seam still removes the attempt's directory.
