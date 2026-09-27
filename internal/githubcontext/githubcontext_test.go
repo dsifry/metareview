@@ -301,9 +301,32 @@ func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 		`\tsk-abcdefghijklmnopqrstuvwxyz`,
 		"OPENAI_API_KEY_sk-abcdefghijklmnopqrstuvwxyz",
 		"_ghp_abcdefghijklmnopqrstuvwxyz_",
+		// Lowercase-hex percent-encoding and other backslash escapes end in a lowercase letter.
+		"?next=%2fghp_ABCDEFGH12345678",
+		"token%3dsk-proj-abcdefghijklmnopqrstuv",
+		"x%3aghs_ABCDEFGH1234abcdefghijklmnop",
+		`\\bghp_abcdefghijklmnopqrstuvwxyz`,
+		`"\\rsk-abcdefghijklmnopqrstuvwxyz"`,
 	} {
 		if got := Redact(secret); !strings.Contains(got, redactionMarker) || strings.Contains(got, "abcdefghijklmnop") {
 			t.Errorf("Redact(%q) = %q, want the key redacted", secret, got)
+		}
+	}
+}
+
+// TestRedactKeepsTheCharacterBeforeAKey pins the exact output: only the key is replaced, so the character in front
+// of it (the guard the pattern consumes) survives, and a bearer token is redacted whole, tail and all (#184).
+func TestRedactKeepsTheCharacterBeforeAKey(t *testing.T) {
+	for in, want := range map[string]string{
+		"key=sk-abcdefghijklmnopqrstuvwxyz":                          "key=" + redactionMarker,
+		"(ghs_abcdefghijklmnop)":                                     "(" + redactionMarker + ")",
+		`"line\\nghp_abcdefghijklmnopqrstuvwxyz"`:                    `"line\\n` + redactionMarker + `"`,
+		"?next=%2fghp_ABCDEFGH12345678&x=1":                          "?next=%2f" + redactionMarker + "&x=1",
+		"Authorization: Bearer sk-abcdefghijklmnopqrstuv.SECRETTAIL": "Authorization: Bearer " + redactionMarker,
+		"authorization: bearer ghp_abcdefghijklmnopqrstuvwxyz":       "Authorization: Bearer " + redactionMarker,
+	} {
+		if got := Redact(in); got != want {
+			t.Errorf("Redact(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

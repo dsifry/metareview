@@ -68,11 +68,12 @@ var secretPatterns = []*regexp.Regexp{
 
 // keyPrefixPatterns match provider keys by their prefix. The key (group 1) must not continue a lowercase word:
 // unguarded, "sk-" matched the "sk-done-…" in every "task-done-…" review path and "ghs_" matched "laughs_…",
-// redacting ordinary text (#184). The guard is deliberately narrower than \b: a key after an uppercase letter,
-// digit, underscore or a literal \n, \r or \t escape is still redacted — percent-encoding (%3Dsk-…, %2Fghp_…),
-// pasted JSON/log escapes (\nghp_…) and snake_case or _emphasis_ all put one of those before a real key. The
-// guard character is consumed by the match, so only group 1 is replaced (see redactKeyPrefixes).
-const keyGuard = `(?:^|[^a-z]|\\[nrt])`
+// redacting ordinary text (#184). The guard is deliberately narrower than \b: a key is still redacted after
+// anything else — an uppercase letter, digit, underscore or punctuation; a percent-escape in either case
+// (%3Dsk-…, %2fghp_…); or a literal backslash escape (\nghp_…, \bsk-…) — because percent-encoding, pasted
+// JSON/log text and snake_case or _emphasis_ all put one of those before a real key. The guard is consumed by
+// the match, so only group 1 is replaced (see redactKeyPrefixes).
+const keyGuard = `(?:^|[^a-z]|\\[a-z]|%[0-9A-Fa-f]{2})`
 
 var keyPrefixPatterns = []*regexp.Regexp{
 	regexp.MustCompile(keyGuard + `(gh[pousr]_[A-Za-z0-9_]{8,})`),
@@ -180,11 +181,13 @@ func realCommand(root, name string, args ...string) (string, error) {
 }
 
 func Redact(text string) string {
-	redacted := redactKeyPrefixes(text)
+	redacted := text
+	// The whole-value patterns run first: an Authorization: Bearer value or a token=… value is redacted entire,
+	// tail and all, before the key-prefix pass could replace only the key and leave the rest behind (#184).
 	for _, pattern := range secretPatterns {
 		redacted = pattern.ReplaceAllStringFunc(redacted, redactMatch)
 	}
-	return redacted
+	return redactKeyPrefixes(redacted)
 }
 
 // credKeyName matches exactly the key names of the token/secret/password/api_key pattern, so only a
