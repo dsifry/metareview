@@ -54,6 +54,7 @@ func (s *jsonlStore) TornFiles(runID string) ([]TornFile, error) {
 	return out, nil
 }
 
+// root: store — the run store; s.root is the CLI's storeRoot.
 func (s *jsonlStore) runsDir() string { return filepath.Join(s.root, ".metareview", "runs") }
 
 func (s *jsonlStore) runDir(id string) string { return filepath.Join(s.runsDir(), id) }
@@ -98,7 +99,7 @@ func (s *jsonlStore) validate(id string) error {
 	if err := ValidateRunID(id); err != nil {
 		return storeErrf(CodeStorePath, 0, err.Error())
 	}
-	return s.checkComponents(".metareview", "runs", id)
+	return s.checkComponents(".metareview", "runs", id) // root: store
 }
 
 // ensureRuns creates .metareview/runs (0700) and its self-ignoring .gitignore (temp + rename).
@@ -304,7 +305,7 @@ func truncateTo(path string, offset int64) error {
 }
 
 func (s *jsonlStore) List() ([]RunSummary, error) {
-	if err := s.checkComponents(".metareview", "runs"); err != nil {
+	if err := s.checkComponents(".metareview", "runs"); err != nil { // root: store
 		return nil, err
 	}
 	entries, err := os.ReadDir(s.runsDir())

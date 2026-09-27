@@ -154,6 +154,16 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   clean.
 - **Transient, local (git-ignored)** under `.metareview/`: `findings.jsonl`, `runs.jsonl`, `runs/`,
   `shards/`, `git-hooks/`. A `mock: true` FSM run never satisfies a gate.
+- **Two roots — store vs work (#169, #172; plan in #171).** Every `.metareview`/`docs` path names which root it
+  means. **Store root** = the main worktree (`git worktree list --porcelain`, shared parser
+  `repo.MainWorktreeFromPorcelain`): the FSM run store `.metareview/runs/<id>/`, the FSM's terminal row in
+  `runs.jsonl` (run ids are store-unique; `record.Exists` checks it), run listing, escalation lineage, and the
+  run a `record-lenses --from-run` reads (`repo.RunStoreRoot`). **Work root** = the checkout the command runs in
+  (`rev-parse --show-toplevel`): a run's default work dir, the diff base..head, and work output meant to be
+  committed on that branch — a default `fsm export` bundle lands in the *requesting* worktree's
+  `docs/metareview/fsm/`. In a single checkout the two coincide. Tripwires: `TestFSMRootsAreDeclared`
+  (`root: store|work` at every such site in `internal/fsm`) and `TestRunStoreReadersAreDeclared` (every run-store
+  reader outside the FSM). Still per-directory and planned in #171: `status`' abandoned-run scan and findings.
 - **Run lineage:** a NEEDS_REVISION parent is retired when a clean same-target+same-kind child links via
   `previousRunId` (supersede). Repair via `--previous-run <run-id>`; never `git add -A` failed-run artifacts.
 - **Evidence receipts:** `evidence run -- <cmd>` records a validation receipt (kind + exitCode + hashes);
@@ -248,6 +258,9 @@ list below is illustrative, omitting e.g. `judge`, `gate`, `converge`, `export`)
 
 ## 10. Gotchas that have bitten us
 
+- "The repository root" is two roots once linked worktrees exist (§6). A path built from the wrong one works in
+  a single checkout and silently breaks in a worktree (#169: runs written to main, read from the linked tree).
+  Declare the root at the site; the tripwire tests fail otherwise.
 - A single-package test fixture hides multi-package `go test ./...` classification bugs — key on the target's
   own `-v` markers.
 - A mock judge ignores model/effort — a node that calls the judge needs `model` in the YAML or it's DOA in

@@ -59,6 +59,7 @@ const (
 	StatusEscalated      = "escalated"
 )
 
+// root: store — the terminal row is store-level: run ids are unique across the store, and Exists checks it.
 func path(root string) string { return filepath.Join(root, ".metareview", "runs.jsonl") }
 
 // RowFor maps a terminal view to its row (spec 3 §6).
@@ -215,7 +216,7 @@ func appendRow(root string, row Row) error {
 	}
 	var steps []func() error
 	if t.fragment != nil {
-		torn := filepath.Join(root, ".metareview", "runs", ".torn")
+		torn := filepath.Join(root, ".metareview", "runs", ".torn") // root: store
 		steps = append(steps,
 			func() error { return os.MkdirAll(torn, 0o700) },
 			func() error {

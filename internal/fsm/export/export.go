@@ -49,8 +49,20 @@ type Deps struct {
 	Kinds    machine.Registry
 	FS       FS
 	Clock    machine.Clock
-	RepoRoot string // the path root for relativisation and the default Out
+	RepoRoot string // the store root (main worktree): the path root for relativisation
+	// WorkRoot is the checkout that asked for the export. The default Out — a bundle meant to be committed —
+	// lives under it, so an export from a linked worktree lands on that worktree's branch (#172). "" means
+	// RepoRoot (a single checkout, where the two coincide).
+	WorkRoot string
 	Home     string // the "~" prefix; "" disables
+}
+
+// defaultOutRoot is the root a default Out is built under: the requesting checkout, else the store root.
+func (d Deps) defaultOutRoot() string {
+	if d.WorkRoot != "" {
+		return d.WorkRoot
+	}
+	return d.RepoRoot
 }
 
 // Options parameterizes Export.
@@ -119,7 +131,7 @@ func Export(ctx context.Context, deps Deps, runID string, opts Options) (Manifes
 		if opts.IncludeVars {
 			return Manifest{}, errs.E(CodeExportDest, "--include-vars needs an explicit --out: cleartext var values never land in the default, committed tree", "reason", "include_vars_default")
 		}
-		out = filepath.Join(deps.RepoRoot, "docs", "metareview", "fsm", runID)
+		out = filepath.Join(deps.defaultOutRoot(), "docs", "metareview", "fsm", runID) // root: work
 	}
 	max := opts.MaxBytes
 	if max <= 0 {

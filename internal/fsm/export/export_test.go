@@ -588,6 +588,24 @@ func TestOSFS(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "docs", "metareview", "fsm", runA, "manifest.json")); err != nil {
 		t.Fatal(err)
 	}
+	// With a WorkRoot (a linked worktree asked for the export), the default Out is under it, not the store root.
+	work, err := filepath.EvalSymlinks(t.TempDir()) // export refuses symlinked components (macOS /var → /private/var)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2 := newHarness(t)
+	h2.deps.FS = OSFS{}
+	h2.deps.RepoRoot = t.TempDir()
+	h2.deps.WorkRoot = work
+	if _, err := Export(context.Background(), h2.deps, runA, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(work, "docs", "metareview", "fsm", runA, "manifest.json")); err != nil {
+		t.Fatalf("default Out must be under WorkRoot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(h2.deps.RepoRoot, "docs")); err == nil {
+		t.Fatal("default Out must not be written under the store root when WorkRoot is set")
+	}
 }
 
 // ---- more fakes ------------------------------------------------------------------------------------

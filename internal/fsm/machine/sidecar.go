@@ -45,7 +45,7 @@ type FSSidecar struct {
 }
 
 func (f FSSidecar) path(runID, name string) string {
-	return filepath.Join(f.Root, ".metareview", "runs", runID, name)
+	return filepath.Join(f.Root, ".metareview", "runs", runID, name) // root: store
 }
 
 func (f FSSidecar) open(path string, flag int, perm os.FileMode) (io.ReadWriteCloser, error) {

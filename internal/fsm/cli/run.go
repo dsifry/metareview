@@ -194,7 +194,7 @@ type opened struct {
 func (in *invocation) openRun(mode judgeMode, readOnly, repair bool) (*opened, envelope, int, bool) {
 	c := in.c
 	base := envelope{}
-	root, err := c.rootOf()
+	root, err := c.storeRoot()
 	if err != nil {
 		return nil, base, in.fail(base, err, phaseOpen, false), false
 	}
@@ -253,13 +253,13 @@ func (in *invocation) init() int {
 	if !p.has("workflow") {
 		return in.usage("--workflow is required")
 	}
-	root, err := c.rootOf()
+	root, err := c.storeRoot()
 	if err != nil {
 		return in.fail(base, err, phaseInit, false)
 	}
 	workDir := in.abs(p.flags["work-dir"])
 	if workDir == "" {
-		if workDir, err = c.toplevel(); err != nil {
+		if workDir, err = c.workRoot(); err != nil {
 			return in.fail(base, err, phaseInit, false)
 		}
 	}
@@ -891,7 +891,7 @@ func (in *invocation) diff() int {
 		return in.usage("diff needs --a <run> --b <run>")
 	}
 	c := in.c
-	root, err := c.rootOf()
+	root, err := c.storeRoot()
 	if err != nil {
 		return in.fail(envelope{}, err, phaseNone, false)
 	}
@@ -937,13 +937,17 @@ func (in *invocation) export() int {
 	}
 	env := base
 	viewKeys(env, o.m.View())
-	m, err := export.Export(in.c.ctx, in.c.exportDeps(o.root, o.md), o.id, opts)
+	work, err := in.c.workRoot()
+	if err != nil {
+		work = o.root // no checkout around cwd: fall back to the store root, as a single checkout would
+	}
+	m, err := export.Export(in.c.ctx, in.c.exportDeps(o.root, work, o.md), o.id, opts)
 	if err != nil {
 		return in.fail(env, err, phaseNone, false)
 	}
 	out := opts.Out
 	if out == "" {
-		out = filepath.Join(o.root, "docs", "metareview", "fsm", o.id)
+		out = filepath.Join(work, "docs", "metareview", "fsm", o.id) // root: work — must match export's default
 	}
 	env["manifest"], env["out"], env["untrusted"] = m, out, []string{}
 	return in.ok(env, StatusOK, 0)
@@ -952,7 +956,7 @@ func (in *invocation) export() int {
 // StatusLines renders the `metareview status` FSM section (spec 5 §6): read-only over Store.List() at the main root.
 func StatusLines(ctx context.Context, deps Deps, cwd string) []string {
 	c := &ctxDeps{ctx: ctx, deps: deps, cwd: cwd}
-	root, err := c.rootOf()
+	root, err := c.storeRoot()
 	if err != nil {
 		return nil
 	}
