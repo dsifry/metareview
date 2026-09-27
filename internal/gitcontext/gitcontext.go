@@ -631,11 +631,18 @@ func IsAncestor(root, ancestor, descendant string) (bool, error) {
 }
 
 // ForkPoint returns where HEAD forked from main or master, and false when there is no such point (HEAD is on
-// the default branch, or neither branch exists) — the default base's HEAD~1 fallback is never a fork point.
+// the default branch or reachable from main, or neither branch exists) — the default base's HEAD~1 fallback, or
+// HEAD itself, is never a fork point.
 func ForkPoint(root string) (string, bool, error) {
 	base, forked, err := defaultBase(root)
 	if forked {
-		return base, true, nil
+		// HEAD itself (a detached main tip, a branch fast-forwarded into main) is where this work starts, not a
+		// point it forked from: a review over any base would "reach" it.
+		head, headErr := git(root, "rev-parse", "HEAD")
+		if headErr == nil && base != head {
+			return base, true, nil
+		}
+		return "", false, headErr
 	}
 	if errors.Is(err, ErrTimeout) {
 		return "", false, err // a stall aborts; a missing HEAD~1 just means no fork point either

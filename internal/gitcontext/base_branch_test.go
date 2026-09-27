@@ -79,6 +79,13 @@ func TestForkPoint(t *testing.T) {
 	if got, ok, err := ForkPoint(r.root); err != nil || !ok || got != fork {
 		t.Fatalf("ForkPoint = %s %v %v, want %s", got, ok, err, fork)
 	}
+	// Detached at main's tip (or a branch fast-forwarded into main): the merge-base is HEAD itself, so there is no
+	// work of this branch's own and nothing a review could be shown to cover back to — not a fork point.
+	r.git("checkout", "-q", "--detach", "main")
+	if _, ok, err := ForkPoint(r.root); err != nil || ok {
+		t.Fatalf("a HEAD reachable from main has no fork point: ok=%v err=%v", ok, err)
+	}
+	r.git("checkout", "-q", "feat")
 	r.git("branch", "-q", "-m", "main", "develop") // a trunk that is neither main nor master
 	if _, ok, err := ForkPoint(r.root); err != nil || ok {
 		t.Fatalf("without a local main or master there is no fork point: ok=%v err=%v", ok, err)
