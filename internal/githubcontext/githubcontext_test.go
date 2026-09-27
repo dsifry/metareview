@@ -279,6 +279,7 @@ func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 		"- docs-0.6.0-documentation: PASS (docs/metareview/reviews/mrv-20260705-161047045358000-task-done-docs-0-6-0-documentation-1a2b3c4d.md)",
 		"the risk-proj-abcdefghijklmnop-assessment",
 		"laughs_12345678 and neighs_abcdefgh",
+		"see mygithub_pat_abcdefghijklmnop for the naming scheme",
 	} {
 		if got := Redact(keep); got != keep {
 			t.Errorf("Redact(%q) = %q, want it unchanged", keep, got)
@@ -290,6 +291,16 @@ func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 		"key: sk-proj-abcdefghijklmnopqrstuvwx",
 		"ghp_abcdefghijklmnopqrstuvwxyz0123456789",
 		"(ghs_abcdefghijklmnop)",
+		"github_pat_abcdefghijklmnopqrstuvwxyz",
+		// Shapes where the preceding character is not a lowercase letter, all redacted before #184 and still
+		// redacted after it: percent-encoding, a literal escape in pasted JSON/log text, underscores, emphasis.
+		"?api_key%3Dsk-abcdefghijklmnopqrstuvwxyz",
+		"https%3A%2F%2Fghp_abcdefghijklmnopqrstuvwxyz%40github.com",
+		"%20ghp_abcdefghijklmnopqrstuvwxyz",
+		`"line\nghp_abcdefghijklmnopqrstuvwxyz"`,
+		`\tsk-abcdefghijklmnopqrstuvwxyz`,
+		"OPENAI_API_KEY_sk-abcdefghijklmnopqrstuvwxyz",
+		"_ghp_abcdefghijklmnopqrstuvwxyz_",
 	} {
 		if got := Redact(secret); !strings.Contains(got, redactionMarker) || strings.Contains(got, "abcdefghijklmnop") {
 			t.Errorf("Redact(%q) = %q, want the key redacted", secret, got)

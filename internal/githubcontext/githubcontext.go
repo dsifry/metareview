@@ -59,17 +59,43 @@ type author struct {
 	Login string `json:"login"`
 }
 
-// The key-prefix patterns are anchored with \b so they cannot start inside a word: unanchored, "sk-" matched the
-// "sk-done-…" in every "task-done-…" review path and "ghs_" matched "laughs_…", redacting ordinary text (#184).
 var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)authorization:\s*bearer\s+[A-Za-z0-9._~+/=-]+`),
-	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9_]{8,}`),
-	regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]+`),
-	regexp.MustCompile(`\bsk-proj-[A-Za-z0-9_-]{16,}`),
-	regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}`),
 	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
 	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----`),
 	regexp.MustCompile(`(?i)\b(token|secret|password|api[_-]?key)\s*[:=]\s*("[^"]+"|'[^']+'|[^\s` + "`" + `,;]+)`),
+}
+
+// keyPrefixPatterns match provider keys by their prefix. The key (group 1) must not continue a lowercase word:
+// unguarded, "sk-" matched the "sk-done-…" in every "task-done-…" review path and "ghs_" matched "laughs_…",
+// redacting ordinary text (#184). The guard is deliberately narrower than \b: a key after an uppercase letter,
+// digit, underscore or a literal \n, \r or \t escape is still redacted — percent-encoding (%3Dsk-…, %2Fghp_…),
+// pasted JSON/log escapes (\nghp_…) and snake_case or _emphasis_ all put one of those before a real key. The
+// guard character is consumed by the match, so only group 1 is replaced (see redactKeyPrefixes).
+const keyGuard = `(?:^|[^a-z]|\\[nrt])`
+
+var keyPrefixPatterns = []*regexp.Regexp{
+	regexp.MustCompile(keyGuard + `(gh[pousr]_[A-Za-z0-9_]{8,})`),
+	regexp.MustCompile(keyGuard + `(github_pat_[A-Za-z0-9_]+)`),
+	regexp.MustCompile(keyGuard + `(sk-proj-[A-Za-z0-9_-]{16,})`),
+	regexp.MustCompile(keyGuard + `(sk-[A-Za-z0-9_-]{20,})`),
+}
+
+// redactKeyPrefixes replaces group 1 of every keyPrefixPatterns match with the marker, leaving the guard
+// character in place so "key=sk-…" keeps its "=" and "(ghs_…)" keeps its "(".
+func redactKeyPrefixes(text string) string {
+	for _, pattern := range keyPrefixPatterns {
+		var b strings.Builder
+		last := 0
+		for _, m := range pattern.FindAllStringSubmatchIndex(text, -1) {
+			b.WriteString(text[last:m[2]])
+			b.WriteString(redactionMarker)
+			last = m[3]
+		}
+		b.WriteString(text[last:])
+		text = b.String()
+	}
+	return text
 }
 
 // runCommand and lookGh are the external-process seams. Production shells out (realCommand, exec.LookPath);
@@ -154,7 +180,7 @@ func realCommand(root, name string, args ...string) (string, error) {
 }
 
 func Redact(text string) string {
-	redacted := text
+	redacted := redactKeyPrefixes(text)
 	for _, pattern := range secretPatterns {
 		redacted = pattern.ReplaceAllStringFunc(redacted, redactMatch)
 	}
