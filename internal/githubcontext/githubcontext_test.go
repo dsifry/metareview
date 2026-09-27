@@ -269,3 +269,30 @@ func TestExcerptExactlyAtBoundary(t *testing.T) {
 		t.Fatalf("excerpt at exactly maxExcerptRunes should be unchanged, got %d runes ending %q", len([]rune(got)), got[max(0, len(got)-4):])
 	}
 }
+
+// TestRedactLeavesWordsThatContainKeyPrefixes (#184): the sk- and gh*_ patterns must not start inside a word.
+// Every task-done review path contains "sk-done-…" (ta*sk-done*), which the unanchored sk- pattern redacted,
+// so pr-ready logs listed unresolvable "ta[REDACTED]" evidence paths.
+func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
+	for _, keep := range []string{
+		"docs/metareview/reviews/mrv-20260831-183207933768000-task-done-mechanical-precision-lens-c79c1389.md",
+		"- docs-0.6.0-documentation: PASS (docs/metareview/reviews/mrv-20260705-161047045358000-task-done-docs-0-6-0-documentation-1a2b3c4d.md)",
+		"the risk-proj-abcdefghijklmnop-assessment",
+		"laughs_12345678 and neighs_abcdefgh",
+	} {
+		if got := Redact(keep); got != keep {
+			t.Errorf("Redact(%q) = %q, want it unchanged", keep, got)
+		}
+	}
+	for _, secret := range []string{
+		"sk-abcdefghijklmnopqrstuvwxyz0123",
+		"OPENAI=sk-abcdefghijklmnopqrstuvwxyz0123",
+		"key: sk-proj-abcdefghijklmnopqrstuvwx",
+		"ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+		"(ghs_abcdefghijklmnop)",
+	} {
+		if got := Redact(secret); !strings.Contains(got, redactionMarker) || strings.Contains(got, "abcdefghijklmnop") {
+			t.Errorf("Redact(%q) = %q, want the key redacted", secret, got)
+		}
+	}
+}

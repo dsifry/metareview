@@ -59,12 +59,14 @@ type author struct {
 	Login string `json:"login"`
 }
 
+// The key-prefix patterns are anchored with \b so they cannot start inside a word: unanchored, "sk-" matched the
+// "sk-done-…" in every "task-done-…" review path and "ghs_" matched "laughs_…", redacting ordinary text (#184).
 var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)authorization:\s*bearer\s+[A-Za-z0-9._~+/=-]+`),
-	regexp.MustCompile(`gh[pousr]_[A-Za-z0-9_]{8,}`),
-	regexp.MustCompile(`github_pat_[A-Za-z0-9_]+`),
-	regexp.MustCompile(`sk-proj-[A-Za-z0-9_-]{16,}`),
-	regexp.MustCompile(`sk-[A-Za-z0-9_-]{20,}`),
+	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9_]{8,}`),
+	regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]+`),
+	regexp.MustCompile(`\bsk-proj-[A-Za-z0-9_-]{16,}`),
+	regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}`),
 	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
 	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----`),
 	regexp.MustCompile(`(?i)\b(token|secret|password|api[_-]?key)\s*[:=]\s*("[^"]+"|'[^']+'|[^\s` + "`" + `,;]+)`),
