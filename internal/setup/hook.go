@@ -20,6 +20,9 @@ import (
 type EnforcementStatus struct {
 	// Active is true when some settings file this repository can see registers a Stop hook.
 	Active bool `json:"active"`
+	// OptedIn is whether this repository opted into the Stop gate (#194): the hook gates only where
+	// `setup --install-hooks` recorded metareview.stopGate=true, so a registered hook is inert elsewhere.
+	OptedIn bool `json:"optedIn"`
 	// Source names where the registration was found, empty when there is none.
 	Source string `json:"source,omitempty"`
 	// ScriptPresent is whether hooks/pre-finish.sh exists AND is executable. Existence alone was
@@ -152,6 +155,25 @@ func enforcementStatus(root, home, pluginRoot string, gitGateInstalled bool) Enf
 		}
 	}
 	return s
+}
+
+// withStopGateOptIn folds the repository's Stop-gate opt-in into s: a hook that is registered but not opted into
+// here gates nothing here, so that is the remediation.
+func withStopGateOptIn(s EnforcementStatus, optedIn bool) EnforcementStatus {
+	s.OptedIn = optedIn
+	if s.Active && !optedIn {
+		s.Remediation = "A Stop hook is registered in " + s.Source + ", but this repository has not opted in, so it does not gate session completion here. Run `metareview setup --install-hooks` to opt in."
+	}
+	return s
+}
+
+// stopGateOptedIn reports whether root's own git config records the Stop-gate opt-in.
+func stopGateOptedIn(root string, git GitRunner) bool {
+	if git == nil {
+		git = realGitRunner
+	}
+	out, err := git(root, "config", "--local", "--get", StopGateKey)
+	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
 // stopHookCommands reports whether path registers METAREVIEW's Stop hook, and separately whether

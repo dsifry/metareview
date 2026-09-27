@@ -80,6 +80,16 @@ if [ -n "$HOST_CWD" ] && [ -d "$HOST_CWD" ]; then
   cd "$HOST_CWD" 2>/dev/null || true
 fi
 
+# Opt-in (#194). The plugin registers this hook in EVERY session on the machine — unrelated projects,
+# directories that are not repositories, the FSM judge's throwaway `codex exec` sessions. It gates only
+# a repository that asked for it: `metareview setup --install-hooks` records metareview.stopGate=true in
+# the repository's own config. Anywhere else it exits at once, silently, before even looking for the
+# binary: a "metareview is not installed" block in a project that never opted in is a gate nobody
+# asked for (and in a judge session it replaced the verdict's reasoning, #193).
+if [ "$(git config --local --get metareview.stopGate 2>/dev/null || true)" != "true" ]; then
+  exit 0
+fi
+
 # Find the binary the way the pre-push hook does. Plain `metareview` on PATH was the only lookup,
 # so a project that builds its own into ./bin, with nothing on PATH, got "not installed". PATH
 # still wins when it has one, exactly as in pre-push.

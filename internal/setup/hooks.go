@@ -139,6 +139,11 @@ type HookInstallPlan struct {
 	Conflicts []string
 }
 
+// StopGateKey is the repository-local git config key that opts a repository into the Stop-hook gate (#194). The
+// plugin registers hooks/pre-finish.sh in every session on the machine; the hook gates only where this is "true",
+// and `setup --install-hooks` is what sets it.
+const StopGateKey = "metareview.stopGate"
+
 // PlanHookInstall inspects the repo READ-ONLY and returns what installing the gate would do. Two conflicts
 // are detected before anything is touched: (1) core.hooksPath is already set to a DIFFERENT path — we will
 // not override a user's choice; (2) core.hooksPath is unset but there are active (non-sample) hooks in
@@ -176,7 +181,10 @@ func PlanHookInstall(root string, git GitRunner) (HookInstallPlan, error) {
 	// so a reinstall could not restore Gap B for an already-installed repo. All three must hold, or we fall
 	// through and ApplyHookInstall re-materializes the scripts and (re)writes the gitignore block.
 	plan.HooksCurrent = local != "" && sameHookPath(root, local, target) && hooksCurrent(target)
-	if plan.HooksCurrent && gitpolicy.Present(root) {
+	// An install from before the Stop-gate opt-in (#194) has current hooks but no opt-in: not done, so a
+	// re-install records it and the Stop gate keeps working after the upgrade.
+	optIn, _ := git(root, "config", "--local", "--get", StopGateKey)
+	if plan.HooksCurrent && gitpolicy.Present(root) && strings.TrimSpace(string(optIn)) == "true" {
 		plan.AlreadyDone = true
 		return plan, nil
 	}
@@ -252,6 +260,9 @@ func ApplyHookInstall(root string, plan HookInstallPlan, force bool, git GitRunn
 	_ = gitpolicy.Ensure(root)
 	if _, err := git(root, "config", "--local", "core.hooksPath", plan.Target); err != nil {
 		return fmt.Errorf("setting core.hooksPath: %w", err)
+	}
+	if _, err := git(root, "config", "--local", StopGateKey, "true"); err != nil {
+		return fmt.Errorf("recording the Stop-gate opt-in: %w", err)
 	}
 	// Verify the gate is genuinely in place before the caller says so.
 	if !hooksMaterialized(plan.Target) {
@@ -340,6 +351,9 @@ func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 	if _, err := git(root, "config", "--local", "--unset", "core.hooksPath"); err != nil {
 		return false, err
 	}
+	// The opt-in goes with the gate. Unset exits 5 when the key is already absent (an install from before
+	// #194), which is not a failure.
+	_, _ = git(root, "config", "--local", "--unset", StopGateKey)
 	// Remove the materialized hook dir we own, so uninstall leaves no dangling scripts. A non-existent or
 	// legacy (committed) dir is left alone: RemoveAll on the materialized target only.
 	if mine, e := hookTargetDir(root); e == nil {

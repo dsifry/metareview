@@ -37,6 +37,20 @@ assert d["reason"], d
   printf '%s' "$1" | grep -q "$2" || { printf "FAIL: reason missing %s: %s\n" "" "" >&2; exit 1; }
 }
 
+# 0. Opt-in (#194). The plugin registers this hook in EVERY session, so it must be inert — exit 0, no
+#    output — wherever the repository has not opted in with `metareview setup --install-hooks`: an
+#    unrelated project, a directory that is not a repository, the FSM judge's scratch session. Even
+#    with metareview absent it must say nothing: "not installed" there is a block nobody asked for.
+out="$(METAREVIEW_BIN=definitely-not-installed bash "$HOOK")"
+if [ -n "$out" ]; then echo "FAIL: a repository that has not opted in must be left alone, got: $out"; exit 1; fi
+out="$(METAREVIEW_BIN="$TMP/mrv" bash "$HOOK")"
+if [ -n "$out" ]; then echo "FAIL: a repository that has not opted in must not be gated, got: $out"; exit 1; fi
+nonrepo="$TMP/not-a-repo"; mkdir -p "$nonrepo"
+out="$(printf '{"cwd":"%s"}' "$nonrepo" | METAREVIEW_BIN=definitely-not-installed bash "$HOOK")"
+if [ -n "$out" ]; then echo "FAIL: a directory outside any repository must be left alone, got: $out"; exit 1; fi
+# From here on the repository has opted in, exactly as `setup --install-hooks` records it.
+git config --local metareview.stopGate true
+
 # 1. Absent tooling blocks. A check that did not run must never read as a check that found
 #    nothing wrong.
 out="$(METAREVIEW_BIN=definitely-not-installed bash "$HOOK")"

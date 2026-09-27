@@ -103,7 +103,7 @@ func Check(root string, options Options) Report {
 		Files:         base.Files,
 		Prerequisites: prereqs,
 		Install:       InstallStatus{Path: options.ExecutablePath},
-		Enforcement:   enforcementStatus(root, home, pluginRoot(home), gitGate.Installed),
+		Enforcement:   withStopGateOptIn(enforcementStatus(root, home, pluginRoot(home), gitGate.Installed), stopGateOptedIn(root, nil)),
 		GitGate:       gitGate,
 		Standalone: StandaloneReadiness{
 			AdvisoryOnly:             len(missing) > 0,
