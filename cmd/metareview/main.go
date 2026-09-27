@@ -882,7 +882,7 @@ func resolveBaseToken(scope, base string) string {
 	forkPoint, forked, err := gitcontext.ForkPoint(root)
 	exitOnErr(err)
 	if !forked {
-		_, _ = fmt.Fprintf(stderr, "--base %s: HEAD has no fork point (no local main or master it branched from), so no review can be shown to cover the whole branch; pass an explicit --base\n", reviewstate.LastReviewedBase)
+		_, _ = fmt.Fprintf(stderr, "--base %s: HEAD has no fork point — there is no local main or master, or HEAD has no commits of its own past it (a detached main tip, a branch already in main) — so no review can be shown to cover the whole branch; pass an explicit --base\n", reviewstate.LastReviewedBase)
 		exit(2)
 	}
 	sha, ok, err := reviewstate.Checkpoint(root, scope, head, forkPoint, func(ancestor, descendant string) (bool, error) {

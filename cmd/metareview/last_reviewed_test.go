@@ -214,3 +214,14 @@ func TestLastReviewedNeedsAForkPoint(t *testing.T) {
 		}
 	}
 }
+
+// With main present but HEAD reachable from it (a detached main tip), the refusal must name that cause — not claim
+// main is missing (mr-dvf).
+func TestLastReviewedNoForkPointMessageNamesTheCause(t *testing.T) {
+	root := gitRepo(t)
+	gitIn(t, root, "checkout", "-q", "--detach", "main")
+	code, _, errOut := runCLI(t, root, nil, "review", "checkpoint", "--scope", "pr-ready")
+	if code != 2 || !strings.Contains(errOut, "no commits of its own") {
+		t.Fatalf("code=%d stderr=%q, want the no-commits-of-its-own cause", code, errOut)
+	}
+}

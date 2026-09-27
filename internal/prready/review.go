@@ -266,7 +266,7 @@ func Create(root string, options Options) (Result, error) {
 	if options.Incremental {
 		forkPoint, forked, err := gitcontext.ForkPoint(root)
 		if err == nil && !forked {
-			err = fmt.Errorf("incremental pr-ready: HEAD has no fork point (no local main or master), so blockers cannot be scoped to the whole branch")
+			err = fmt.Errorf("incremental pr-ready: HEAD has no fork point (no local main or master, or no commits of its own past it), so blockers cannot be scoped to the whole branch")
 		}
 		var whole gitcontext.Context
 		if err == nil {
