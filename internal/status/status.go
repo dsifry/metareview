@@ -148,6 +148,10 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 	if err != nil {
 		return r, err
 	}
+	// A review recorded against the target --help/-h (#187) was never a review of work: it neither blocks nor
+	// answers for the paths it listed. Dropped here, before any scoping, so the target, branch and unscoped reports
+	// all agree with pr-ready, which retires the same runs through the same predicate.
+	logs = dropRuns(logs, reviewstate.FlagTargetRunIDs(logs))
 	// Scoping narrows the whole report, not just must_clear. A document that says
 	// `"target": "t-1"` while listing every other target's reviews invites the reader to think
 	// they are seeing everything, which is the misreading the field exists to prevent.
@@ -181,7 +185,9 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 	// never clear. The latest same-head/same-base run supersedes the earlier ones (a fix loop reviews a
 	// DIFFERENT commit, and two runs at the same head but a DIFFERENT base — different diffs — are not
 	// collapsed, issue #99). Shared with the projector so the gate and pr-ready agree.
-	retireRuns(superseded, logs)
+	for id := range reviewstate.StaleSameHeadRunIDs(logs) {
+		superseded[id] = true
+	}
 	resolved := reconcileLogsAgainstLedger(root, logs, &r.Warnings)
 	for _, s := range logs {
 		if !reviewstate.LogBlocks(s) { // unresolved blockers OR an ESCALATED verdict — one shared predicate
@@ -547,7 +553,9 @@ func buildForBranch(root, base string, run RunGit, committedOnly bool) (Report, 
 	// the earlier ones, so re-running `review pr-ready` over one commit renders the branch as a single blocker
 	// rather than one per run. Computed over the FULL log set (all), like supersededRuns, so lineage is
 	// complete. Shared with Build and the projector.
-	retireRuns(superseded, all)
+	for id := range reviewstate.StaleSameHeadRunIDs(all) {
+		superseded[id] = true
+	}
 	resolved2 := reconcileLogsAgainstLedger(root, all, &r.Warnings)
 	for _, s := range scoped {
 		if !reviewstate.LogBlocks(s) || superseded[s.RunID] { // unresolved blockers OR ESCALATED — shared predicate
@@ -701,14 +709,17 @@ func covers(s reviewlog.Summary, target string, current map[string]bool) bool {
 	return false
 }
 
-// retireRuns marks the reviews no later gate can clear by re-running: the earlier same-head re-runs (#97) and the
-// reviews recorded against the target --help/-h (#187). The same predicates pr-ready's projection applies, so the
-// gate and status agree.
-func retireRuns(superseded map[string]bool, logs []reviewlog.Summary) {
-	for id := range reviewstate.StaleSameHeadRunIDs(logs) {
-		superseded[id] = true
+// dropRuns returns logs without the named runs.
+func dropRuns(logs []reviewlog.Summary, ids []string) []reviewlog.Summary {
+	drop := map[string]bool{}
+	for _, id := range ids {
+		drop[id] = true
 	}
-	for _, id := range reviewstate.FlagTargetRunIDs(logs) {
-		superseded[id] = true
+	kept := logs[:0:0]
+	for _, s := range logs {
+		if !drop[s.RunID] {
+			kept = append(kept, s)
+		}
 	}
+	return kept
 }

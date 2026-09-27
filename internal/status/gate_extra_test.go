@@ -533,3 +533,22 @@ func TestPushGateEscalationLiftRequiresTheTwoPhaseFlow(t *testing.T) {
 		t.Fatalf("after the two-phase grant the escalation lifts: blocked=%v err=%v", blocked, err)
 	}
 }
+
+// A retired --help/-h log (#187) was never a review of work, so it must not answer for a file either: retiring its
+// blocker while its CoveredPaths still credited the path left `status --target a.go` blocked:false for a file no
+// real review read. It is dropped before coverage scoping, and the path stays UNREVIEWED.
+func TestBuildForByTargetDoesNotCreditAFlagTargetLog(t *testing.T) {
+	root, _, head := gitRepo(t)
+	mustWriteFile(t, filepath.Join(root, "docs", "metareview", "reviews", "h.md"),
+		"# metareview: task-done review\n\nRun ID: `mrv-h`\nTarget: `--help`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	mustWriteFile(t, filepath.Join(root, ".metareview", "runs.jsonl"),
+		`{"id":"mrv-h","scope":"task-done","verdict":"NEEDS_REVISION","headSha":"`+head+`","coveredPaths":["a.go"]}`+"\n")
+
+	got, err := BuildFor(root, "a.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Blocked || len(got.MustClear) != 1 || got.MustClear[0].Verdict != VerdictUnreviewed {
+		t.Fatalf("a.go must stay UNREVIEWED when only a --help log covered it; must_clear=%+v", got.MustClear)
+	}
+}
