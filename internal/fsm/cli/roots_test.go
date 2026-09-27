@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -183,5 +184,30 @@ func TestRunsIgnoredChecksTheStoreRoot(t *testing.T) {
 	w := env["warnings"].([]any)
 	if len(w) != 1 || w[0].(map[string]any)["code"] != WarnRunsNotIgnored || !strings.Contains(w[0].(map[string]any)["detail"].(string), h.root) {
 		t.Fatalf("want one runs-not-ignored warning naming the store root %s, got %v", h.root, w)
+	}
+}
+
+// TestExportDoesNotFallBackOnAGitFailureInsideAWorktree: the store-root fallback is only for "there is no work
+// tree around cwd" (cwd inside .git). If --show-toplevel fails for any other reason inside a real worktree,
+// falling back would silently write the bundle to the main checkout — the bug #172 fixes — so it must fail.
+func TestExportDoesNotFallBackOnAGitFailureInsideAWorktree(t *testing.T) {
+	h := newHarness(t)
+	wt := h.linkedWorktree()
+	h.cwd = wt
+	id := h.must(StatusOK, 0, h.mockInit()...)["run_id"].(string)
+	real := h.deps.Exec
+	h.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
+		for _, a := range args {
+			if a == "--show-toplevel" {
+				return nil, []byte("fatal: simulated failure"), 128, nil
+			}
+		}
+		return real(ctx, dir, env, args...)
+	}
+	if env, code := h.run("export", "--run", id); code == 0 {
+		t.Fatalf("export must fail rather than fall back to the main checkout; got %v", env)
+	}
+	if _, err := os.Stat(filepath.Join(h.root, "docs", "metareview", "fsm", id)); err == nil {
+		t.Fatal("bundle written into the main checkout")
 	}
 }

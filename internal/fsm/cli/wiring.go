@@ -135,6 +135,13 @@ func (c *ctxDeps) workRoot() (string, error) {
 	return out, nil
 }
 
+// outsideWorkTree reports whether git positively says cwd is not inside a work tree (it prints "false", as it does
+// inside .git). A git failure is not "outside": callers must treat it as an error, not as a reason to fall back.
+func (c *ctxDeps) outsideWorkTree() bool {
+	out, code, err := c.git(c.cwd, "rev-parse", "--is-inside-work-tree")
+	return err == nil && code == 0 && out == "false"
+}
+
 // runsIgnored reports whether .metareview/runs.jsonl is ignored in dir (git check-ignore exits 0). Callers pass
 // the store root: that is where the FSM appends its terminal row.
 func (c *ctxDeps) runsIgnored(dir string) bool {

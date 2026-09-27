@@ -940,7 +940,13 @@ func (in *invocation) export() int {
 	viewKeys(env, o.m.View())
 	work, err := in.c.workRoot()
 	if err != nil {
-		work = o.root // no checkout around cwd: fall back to the store root, as a single checkout would
+		// Fall back to the store root only when there is genuinely no work tree around cwd (cwd inside .git).
+		// Any other failure inside a real worktree is returned: falling back there would silently write the
+		// bundle to the main checkout, which is the bug this root split fixes (#172).
+		if !in.c.outsideWorkTree() {
+			return in.fail(env, err, phaseNone, false)
+		}
+		work = o.root
 	}
 	deps := in.c.exportDeps(o.root, work, o.md)
 	m, err := export.Export(in.c.ctx, deps, o.id, opts)
