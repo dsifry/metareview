@@ -330,8 +330,9 @@ func (in *invocation) init() int {
 	env := envelope{}
 	viewKeys(env, v)
 	in.warns = append(in.warns, in.warnEvents(md.Store, v.RunID)...)
-	if !c.runsIgnored(workDir) {
-		in.warns = append(in.warns, WarnRunsNotIgnored+": .metareview/runs.jsonl is not ignored in "+workDir)
+	// root: store — the terminal row is appended at the store root (record.path), so ask there, not the work dir.
+	if !c.runsIgnored(root) {
+		in.warns = append(in.warns, WarnRunsNotIgnored+": .metareview/runs.jsonl is not ignored in "+root)
 	}
 	names := []string{}
 	for _, a := range v.Snapshot.AllowedCmds {

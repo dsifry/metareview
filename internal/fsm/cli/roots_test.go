@@ -89,10 +89,23 @@ func TestLinkedWorktreeStoreAndWorkRoots(t *testing.T) {
 	}
 }
 
+// buildsRootedPath reports whether a line of code names a .metareview or docs/metareview path, in either the
+// split form (filepath.Join(root, ".metareview", …), "docs", "metareview") or a slash-joined string literal
+// (".metareview/runs.jsonl", "docs/metareview/…").
+func buildsRootedPath(code string) bool {
+	for _, lit := range []string{`".metareview"`, `"docs", "metareview"`, `".metareview/`, `"docs/metareview`} {
+		if strings.Contains(code, lit) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestFSMRootsAreDeclared keeps #169/#172 from recurring inside the FSM: every line in internal/fsm that
-// builds a .metareview or docs/metareview path must say which root it means — `root: store` (shared state,
+// names a .metareview or docs/metareview path must say which root it means — `root: store` (shared state,
 // the main worktree) or `root: work` (the checkout the command runs in) — on that line or within the three
-// lines above. It is a tripwire over the literal path elements, not proof; comment lines are skipped.
+// lines above. It is a tripwire over those literal path forms (split elements and slash-joined strings), not
+// proof: a path assembled any other way is not seen. Comment lines are skipped.
 func TestFSMRootsAreDeclared(t *testing.T) {
 	const window = 3
 	fsmDir := filepath.Join("..")
@@ -111,7 +124,7 @@ func TestFSMRootsAreDeclared(t *testing.T) {
 		lines := strings.Split(string(src), "\n")
 		for i, line := range lines {
 			code := strings.TrimSpace(line)
-			if strings.HasPrefix(code, "//") || !(strings.Contains(code, `".metareview"`) || strings.Contains(code, `"docs", "metareview"`)) {
+			if strings.HasPrefix(code, "//") || !buildsRootedPath(code) {
 				continue
 			}
 			sites++
@@ -145,5 +158,30 @@ func TestExportWithoutACheckoutFallsBackToTheStoreRoot(t *testing.T) {
 	env := h.must(StatusOK, 0, "export", "--run", id)
 	if want := filepath.Join(h.root, "docs", "metareview", "fsm", id); env["out"] != want {
 		t.Fatalf("export out = %v, want the store-root fallback %s", env["out"], want)
+	}
+}
+
+// TestRunsIgnoredChecksTheStoreRoot: the terminal runs.jsonl row is written under the store root, so the
+// not-ignored warning must ask the store root, not the worktree the run was started from. Here the main
+// checkout ignores runs.jsonl in a commit the linked worktree does not have.
+func TestRunsIgnoredChecksTheStoreRoot(t *testing.T) {
+	h := newHarness(t)
+	wt := h.linkedWorktree() // at a commit whose .gitignore does not cover runs.jsonl
+	h.file("../.gitignore", "mock/\nfixtures/\nexp/\nsmall/\ndocs/\n.metareview/runs.jsonl\n")
+	git(t, h.root, "add", ".gitignore")
+	git(t, h.root, "commit", "-q", "-m", "ignore runs.jsonl in the main checkout only")
+	h.cwd = wt
+	env := h.must(StatusOK, 0, h.mockInit()...)
+	if w := env["warnings"].([]any); len(w) != 0 {
+		t.Fatalf("runs.jsonl is ignored where it is written (the store root); no warning expected, got %v", w)
+	}
+	// And the other direction: a store root that does not ignore it warns, naming the store root.
+	h.file("../.gitignore", "mock/\nfixtures/\nexp/\nsmall/\ndocs/\n")
+	git(t, h.root, "add", ".gitignore")
+	git(t, h.root, "commit", "-q", "-m", "stop ignoring runs.jsonl")
+	env = h.must(StatusOK, 0, h.mockInit()...)
+	w := env["warnings"].([]any)
+	if len(w) != 1 || w[0].(map[string]any)["code"] != WarnRunsNotIgnored || !strings.Contains(w[0].(map[string]any)["detail"].(string), h.root) {
+		t.Fatalf("want one runs-not-ignored warning naming the store root %s, got %v", h.root, w)
 	}
 }

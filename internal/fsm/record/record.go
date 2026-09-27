@@ -86,6 +86,7 @@ func RowFor(v machine.View, now run.Time) Row {
 		SchemaVersion: 1, ID: v.RunID, Scope: "fsm-" + s.Workflow, Target: map[string]string{"type": "fsm", "id": s.Workflow + "@" + base},
 		Status: status, Verdict: verdict, ExecutionMode: "fsm", PreviousRunID: s.ParentRunID, AttemptNumber: attempt, MaxAttempts: machine.MaxAttempts,
 		BaseSHA: s.BaseSHA, HeadSHA: s.Head, CreatedAt: s.CreatedAt.UTC().Format(rfc3339Nano), UpdatedAt: now.UTC().Format(rfc3339Nano),
+		// root: store — FSMRunDir is relative to RepoRoot, the store root the run lives under.
 		RepoRoot: s.RepoRoot, Mock: s.Mock != "" || s.MockTainted, Outcome: string(s.Outcome), FSMRunDir: ".metareview/runs/" + v.RunID + "/",
 		WorkflowHash: s.WorkflowHash, WorkflowSource: source, EscalationReason: reason,
 	}

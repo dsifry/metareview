@@ -161,9 +161,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   run a `record-lenses --from-run` reads (`repo.RunStoreRoot`). **Work root** = the checkout the command runs in
   (`rev-parse --show-toplevel`): a run's default work dir, the diff base..head, and work output meant to be
   committed on that branch — a default `fsm export` bundle lands in the *requesting* worktree's
-  `docs/metareview/fsm/`. In a single checkout the two coincide. Tripwires: `TestFSMRootsAreDeclared`
-  (`root: store|work` at every such site in `internal/fsm`) and `TestRunStoreReadersAreDeclared` (every run-store
-  reader outside the FSM). Still per-directory and planned in #171: `status`' abandoned-run scan and findings.
+  `docs/metareview/fsm/`; the runs-not-ignored warning asks the store root, where the row is written. In a single
+  checkout the two coincide. Tripwires, not proofs (they match literal path forms only):
+  `TestFSMRootsAreDeclared` (a `root: store|work` declaration at each such site in `internal/fsm`) and
+  `TestRunStoreReadersAreDeclared` (run-store readers outside the FSM). Still per-directory and planned in #171: `status`' abandoned-run scan and findings.
 - **Run lineage:** a NEEDS_REVISION parent is retired when a clean same-target+same-kind child links via
   `previousRunId` (supersede). Repair via `--previous-run <run-id>`; never `git add -A` failed-run artifacts.
 - **Evidence receipts:** `evidence run -- <cmd>` records a validation receipt (kind + exitCode + hashes);

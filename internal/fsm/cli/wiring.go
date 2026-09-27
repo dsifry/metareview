@@ -107,8 +107,9 @@ func (c *ctxDeps) removeSandboxes() {
 //   - workRoot — the checkout the command runs in: the default work dir a run reviews, and work output meant to be
 //     committed on that checkout's branch, such as a default export bundle.
 //
-// In a single checkout the two coincide. TestFSMRootsAreDeclared enforces that every .metareview/docs path built
-// in internal/fsm names its root.
+// In a single checkout the two coincide. Every .metareview/docs path in internal/fsm carries a `root: store` or
+// `root: work` declaration. TestFSMRootsAreDeclared is a tripwire for that over the literal path forms (split
+// elements and slash-joined strings), not proof: a path assembled any other way is not seen.
 
 // storeRoot resolves the main worktree of cwd (spec 5 §2): the first `worktree` line of `git worktree list --porcelain`;
 // a bare main or a non-repository is ERR_NOT_A_REPO.
@@ -134,9 +135,10 @@ func (c *ctxDeps) workRoot() (string, error) {
 	return out, nil
 }
 
-// runsIgnored reports whether .metareview/runs.jsonl is ignored in workDir (git check-ignore exits 0).
-func (c *ctxDeps) runsIgnored(workDir string) bool {
-	_, code, err := c.git(workDir, "check-ignore", "-q", ".metareview/runs.jsonl")
+// runsIgnored reports whether .metareview/runs.jsonl is ignored in dir (git check-ignore exits 0). Callers pass
+// the store root: that is where the FSM appends its terminal row.
+func (c *ctxDeps) runsIgnored(dir string) bool {
+	_, code, err := c.git(dir, "check-ignore", "-q", ".metareview/runs.jsonl") // root: store (dir is the store root)
 	return err == nil && code == 0
 }
 
