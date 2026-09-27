@@ -71,7 +71,9 @@ func TestRunStoreReadersAreDeclared(t *testing.T) {
 			}
 			lines := strings.Split(string(src), "\n")
 			for i, line := range lines {
-				if !strings.Contains(line, `".metareview", "runs"`) {
+				// Comments mention the path too; only code builds it, and only code may count toward
+				// the non-vacuity check below.
+				if strings.HasPrefix(strings.TrimSpace(line), "//") || !strings.Contains(line, `".metareview", "runs"`) {
 					continue
 				}
 				sites++
@@ -136,5 +138,14 @@ func TestRunStoreRootIgnoresExportedGitDir(t *testing.T) {
 	}
 	if got != main {
 		t.Fatalf("RunStoreRoot with GIT_DIR exported: got %q, want the linked worktree's main checkout %q", got, main)
+	}
+}
+
+// TestRunStoreRootOutsideARepositoryFallsBack drives the real git call (no seam) from a directory
+// that is not in any repository: git fails, and RunStoreRoot falls back to RootOr.
+func TestRunStoreRootOutsideARepositoryFallsBack(t *testing.T) {
+	start := t.TempDir()
+	if got := RunStoreRoot(start); got != RootOr(start) {
+		t.Fatalf("outside a repository: got %q, want the RootOr fallback %q", got, RootOr(start))
 	}
 }
