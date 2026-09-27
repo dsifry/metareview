@@ -307,6 +307,16 @@ func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 		"x%3aghs_ABCDEFGH1234abcdefghijklmnop",
 		`\\bghp_abcdefghijklmnopqrstuvwxyz`,
 		`"\\rsk-abcdefghijklmnopqrstuvwxyz"`,
+		// Real keys are random base62 and carry an uppercase letter, so they are redacted whatever precedes them:
+		// ANSI colour codes, multi-character hex and unicode escapes, a plain lowercase letter.
+		"\x1b[32mghp_ABCDEFGHIJKLMNOP1234\x1b[0m",
+		`\x3dghp_ABCDEFGHIJKLMNOP1234`,
+		`\u003cghp_ABCDEFGHIJKLMNOP1234`,
+		`\u001b[1msk-proj-ABCDEFGHIJKLMNOPqrstuv`,
+		"askghp_ABCDEFGHIJKLMNOP1234",
+		// A lowercase-only key still redacts in a context that is not a word interior.
+		"KEYghp_abcdefghijklmnopqrstuvwxyz",
+		"0sk-abcdefghijklmnopqrstuvwxyz",
 	} {
 		if got := Redact(secret); !strings.Contains(got, redactionMarker) || strings.Contains(got, "abcdefghijklmnop") {
 			t.Errorf("Redact(%q) = %q, want the key redacted", secret, got)

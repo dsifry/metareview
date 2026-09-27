@@ -66,32 +66,56 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(token|secret|password|api[_-]?key)\s*[:=]\s*("[^"]+"|'[^']+'|[^\s` + "`" + `,;]+)`),
 }
 
-// keyPrefixPatterns match provider keys by their prefix. The key (group 1) must not continue a lowercase word:
-// unguarded, "sk-" matched the "sk-done-…" in every "task-done-…" review path and "ghs_" matched "laughs_…",
-// redacting ordinary text (#184). The guard is deliberately narrower than \b: a key is still redacted after
-// anything else — an uppercase letter, digit, underscore or punctuation; a percent-escape in either case
-// (%3Dsk-…, %2fghp_…); or a literal backslash escape (\nghp_…, \bsk-…) — because percent-encoding, pasted
-// JSON/log text and snake_case or _emphasis_ all put one of those before a real key. The guard is consumed by
-// the match, so only group 1 is replaced (see redactKeyPrefixes).
-const keyGuard = `(?:^|[^a-z]|\\[a-z]|%[0-9A-Fa-f]{2})`
-
+// keyPrefixPatterns match provider keys by their prefix. Unfiltered, "sk-" matched the "sk-done-…" in every
+// "task-done-…" review path and "ghs_" matched "laughs_…", redacting ordinary text (#184). So each match is
+// kept only if it is word-interior text — see keyIsWordInterior; everything else is redacted.
 var keyPrefixPatterns = []*regexp.Regexp{
-	regexp.MustCompile(keyGuard + `(gh[pousr]_[A-Za-z0-9_]{8,})`),
-	regexp.MustCompile(keyGuard + `(github_pat_[A-Za-z0-9_]+)`),
-	regexp.MustCompile(keyGuard + `(sk-proj-[A-Za-z0-9_-]{16,})`),
-	regexp.MustCompile(keyGuard + `(sk-[A-Za-z0-9_-]{20,})`),
+	regexp.MustCompile(`gh[pousr]_[A-Za-z0-9_]{8,}`),
+	regexp.MustCompile(`github_pat_[A-Za-z0-9_]+`),
+	regexp.MustCompile(`sk-proj-[A-Za-z0-9_-]{16,}`),
+	regexp.MustCompile(`sk-[A-Za-z0-9_-]{20,}`),
 }
 
-// redactKeyPrefixes replaces group 1 of every keyPrefixPatterns match with the marker, leaving the guard
-// character in place so "key=sk-…" keeps its "=" and "(ghs_…)" keeps its "(".
+// keyIsWordInterior reports whether the key-prefix match text[start:end] is ordinary lowercase text rather than
+// a key: it has no uppercase letter AND it continues a lowercase word — the byte before it is a lowercase letter
+// that does not end a two-character backslash escape (\n, \t, \b …) or a %XX percent-escape. Real provider
+// keys are random base62 and carry uppercase letters, so they are redacted in any context — after ANSI colour codes (ESC[32m), \u003c or \x3d escapes,
+// or plain letters — without enumerating contexts; a lowercase-only match is redacted unless it is word-interior.
+func keyIsWordInterior(text string, start, end int) bool {
+	if strings.IndexFunc(text[start:end], func(r rune) bool { return r >= 'A' && r <= 'Z' }) >= 0 {
+		return false
+	}
+	if start == 0 || !isLowerASCII(text[start-1]) {
+		return false
+	}
+	if start >= 2 && text[start-2] == '\\' { // a \n, \t, \b … escape
+		return false
+	}
+	if start >= 3 && text[start-3] == '%' && isHexASCII(text[start-2]) { // a %2f, %3d … escape
+		return false
+	}
+	return true
+}
+
+func isLowerASCII(c byte) bool { return c >= 'a' && c <= 'z' }
+
+func isHexASCII(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+// redactKeyPrefixes replaces every key-prefix match that is not word-interior with the marker, leaving the text
+// around it untouched.
 func redactKeyPrefixes(text string) string {
 	for _, pattern := range keyPrefixPatterns {
 		var b strings.Builder
 		last := 0
-		for _, m := range pattern.FindAllStringSubmatchIndex(text, -1) {
-			b.WriteString(text[last:m[2]])
+		for _, m := range pattern.FindAllStringIndex(text, -1) {
+			if keyIsWordInterior(text, m[0], m[1]) {
+				continue
+			}
+			b.WriteString(text[last:m[0]])
 			b.WriteString(redactionMarker)
-			last = m[3]
+			last = m[1]
 		}
 		b.WriteString(text[last:])
 		text = b.String()
