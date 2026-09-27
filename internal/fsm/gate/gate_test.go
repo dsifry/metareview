@@ -588,3 +588,65 @@ func TestG2DiffPrefixesPinnedUnderNoPrefixConfig(t *testing.T) {
 		t.Fatalf("WorkingDiff lost b/ prefix under diff.noprefix=true: %q", wd)
 	}
 }
+
+// ResolveBase (#175): `fsm init --base main` resolves exactly as the review gates and record-lenses do — a branch
+// name to where HEAD forked from it, anything else exactly — so a marker can match once main advances.
+func TestResolveBaseRealGit(t *testing.T) {
+	ctx := context.Background()
+	dir, c1, _ := repo(t)
+	git(t, dir, "checkout", "-qb", "feat", c1)
+	write(t, dir, "f.txt", "feat\n")
+	git(t, dir, "add", "f.txt")
+	git(t, dir, "commit", "-qm", "feat")
+	g := NewExec(dir, RealExec)
+	for ref, want := range map[string]string{"main": c1, "HEAD~1": c1, c1: c1} {
+		if got, err := g.ResolveBase(ctx, ref); err != nil || got != want {
+			t.Errorf("ResolveBase %s = %s %v, want %s", ref, got, err, want)
+		}
+	}
+	if _, err := g.ResolveBase(ctx, "nope"); !errs.Is(err, CodeGit) || errs.As(err).Field("ref") != "nope" {
+		t.Fatalf("unknown ref: %v", err)
+	}
+	if _, err := g.ResolveBase(ctx, "-bad"); !errs.Is(err, CodeGitRef) {
+		t.Fatalf("bad ref: %v", err)
+	}
+	// An execution failure is returned as the coded git error, not reported as an unknown ref.
+	broken := NewExec("/", func(context.Context, string, []string, ...string) ([]byte, []byte, int, error) {
+		return nil, []byte("fatal: broken"), 128, nil
+	})
+	if _, err := broken.ResolveBase(ctx, "main"); !errs.Is(err, CodeGit) || errs.As(err).Field("exit") != "128" {
+		t.Fatalf("exec failure: %v", err)
+	}
+	// A short or malformed answer is refused, as RevParse refuses it.
+	odd := NewExec("/", func(_ context.Context, _ string, _ []string, args ...string) ([]byte, []byte, int, error) {
+		if args[0] == "show-ref" {
+			return nil, nil, 1, nil
+		}
+		return []byte("abc\n"), nil, 0, nil
+	})
+	if _, err := odd.ResolveBase(ctx, "v1"); !errs.Is(err, CodeGit) {
+		t.Fatalf("short sha: %v", err)
+	}
+}
+
+func TestFakeResolveBase(t *testing.T) {
+	ctx := context.Background()
+	f := &Fake{HeadSHA: shaA, Refs: map[string]string{"main": shaB}}
+	if r, _ := f.ResolveBase(ctx, "HEAD"); r != shaA {
+		t.Fatal("HEAD")
+	}
+	if r, _ := f.ResolveBase(ctx, "main"); r != shaB {
+		t.Fatal("main")
+	}
+	if _, err := f.ResolveBase(ctx, "nope"); !errs.Is(err, CodeGit) {
+		t.Fatal("unknown ref")
+	}
+	boom := errors.New("boom")
+	f.Err = boom
+	if _, err := f.ResolveBase(ctx, "main"); err != boom {
+		t.Fatal("err")
+	}
+	if len(f.Calls) != 4 || f.Calls[0] != "[ResolveBase HEAD]" {
+		t.Fatalf("calls %v", f.Calls)
+	}
+}

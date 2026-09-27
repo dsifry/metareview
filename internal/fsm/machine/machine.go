@@ -137,7 +137,7 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 	if base == "" {
 		base = "HEAD"
 	}
-	baseSHA, err := g.RevParse(ctx, base)
+	baseSHA, err := g.ResolveBase(ctx, base)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 	initData := run.InitData{
 		RunID: runID, CreatedAt: now, Workflow: w.Name, WorkflowHash: w.Hash, Vars: vars, Calibration: o.Calibration,
 		Mock: mock, RepoMode: w.RepoMode, AllowedCmds: allowed, CmdsSHA256: sha, RepoRoot: o.RepoRoot, WorkDir: o.WorkDir,
-		BaseSHA: baseSHA, Head: head, InitialState: w.Initial, InitialKind: initialKind, Goldens: goldens, Lineage: []string{}, WorkflowSource: source,
+		BaseSHA: baseSHA, RequestedBase: o.Base, Head: head, InitialState: w.Initial, InitialKind: initialKind, Goldens: goldens, Lineage: []string{}, WorkflowSource: source,
 	}
 	m := &Machine{deps: deps, runID: runID}
 	first := run.Event{SchemaVersion: run.SchemaVersion, At: now, Type: run.TypeInit, Data: run.MarshalCanonical(initData)}

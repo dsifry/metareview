@@ -76,6 +76,7 @@ type runRecord struct {
 	AttemptNumber        int                 `json:"attemptNumber"`
 	MaxAttempts          int                 `json:"maxAttempts"`
 	BaseSHA              string              `json:"baseSha"`
+	RequestedBase        string              `json:"requestedBase,omitempty"`
 	HeadSHA              string              `json:"headSha"`
 	ContextPath          string              `json:"contextPackPath"`
 	ReviewPath           string              `json:"reviewLogPath"`
@@ -441,6 +442,7 @@ func Create(root string, options Options) (Result, error) {
 				AttemptNumber:        chain.AttemptNumber,
 				MaxAttempts:          chain.MaxAttempts,
 				BaseSHA:              git.BaseSHA,
+				RequestedBase:        git.RequestedBase,
 				HeadSHA:              git.HeadSHA,
 				ContextPath:          contextRel,
 				ReviewPath:           reviewRel,
@@ -504,6 +506,7 @@ func Create(root string, options Options) (Result, error) {
 			AttemptNumber:        chain.AttemptNumber,
 			MaxAttempts:          chain.MaxAttempts,
 			BaseSHA:              git.BaseSHA,
+			RequestedBase:        git.RequestedBase,
 			HeadSHA:              git.HeadSHA,
 			ContextPath:          contextRel,
 			ReviewPath:           reviewRel,

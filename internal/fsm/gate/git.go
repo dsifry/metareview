@@ -16,6 +16,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/dsifry/metareview/internal/baseref"
 	"github.com/dsifry/metareview/internal/fsm/errs"
 )
 
@@ -30,6 +31,9 @@ type Git interface {
 	Head(ctx context.Context) (string, error)
 	// RevParse resolves any ref (branch, HEAD~1, sha) to a full commit sha.
 	RevParse(ctx context.Context, ref string) (string, error)
+	// ResolveBase resolves a requested review base with the rule every command shares (#175): a branch name to
+	// merge-base(HEAD, ref), anything else exactly — see baseref.
+	ResolveBase(ctx context.Context, ref string) (string, error)
 	// IsAncestor reports whether a is an ancestor of b (exit 1 → false, nil).
 	IsAncestor(ctx context.Context, a, b string) (bool, error)
 	// CommitCount counts from..to.
@@ -152,6 +156,26 @@ func (g *execGit) RevParse(ctx context.Context, ref string) (string, error) {
 	sha := strings.TrimSpace(out)
 	if code != 0 || !shaPattern.MatchString(sha) || len(sha) != 40 {
 		return "", errs.E(CodeGit, "unknown ref", "ref", ref, "op", "rev-parse")
+	}
+	return sha, nil
+}
+
+func (g *execGit) ResolveBase(ctx context.Context, ref string) (string, error) {
+	if !ValidRef(ref) {
+		return "", errs.E(CodeGitRef, "invalid ref", "ref", ref)
+	}
+	sha, err := baseref.Resolve(func(args ...string) (string, bool, error) {
+		out, code, err := g.run(ctx, args...)
+		return strings.TrimSpace(out), code == 0, err
+	}, ref)
+	if err != nil {
+		if errs.As(err) != nil { // an execution failure, already coded
+			return "", err
+		}
+		return "", errs.E(CodeGit, err.Error(), "ref", ref, "op", "resolve-base")
+	}
+	if !shaPattern.MatchString(sha) || len(sha) != 40 {
+		return "", errs.E(CodeGit, "unknown ref", "ref", ref, "op", "resolve-base")
 	}
 	return sha, nil
 }

@@ -163,7 +163,7 @@ func TestM1InitErrors(t *testing.T) {
 	h.reg.mock = false
 	// git failures at each Init call site are returned unchanged (ERR_GIT{op})
 	boom := errs.E(gate.CodeGit, "boom", "op", "x")
-	for _, at := range []string{"CommonDir", "Head", "RevParse", "Status", "WorkTree"} {
+	for _, at := range []string{"CommonDir", "Head", "ResolveBase", "Status", "WorkTree"} {
 		h.git.byDir["/repo"] = &failingGit{Git: h.git.def, at: at, err: boom}
 		if _, err := h.init(InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars}); !errors.Is(err, boom) {
 			t.Errorf("git %s: %v", at, err)

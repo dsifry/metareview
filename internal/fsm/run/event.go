@@ -64,6 +64,7 @@ type InitData struct {
 	RepoRoot       string            `json:"repo_root"`
 	WorkDir        string            `json:"work_dir"`
 	BaseSHA        string            `json:"base_sha"`
+	RequestedBase  string            `json:"requested_base,omitempty"` // --base as typed ("" = default), beside the SHA it resolved to (#175)
 	Head           string            `json:"head"`
 	InitialState   State             `json:"initial_state"`
 	InitialKind    Kind              `json:"initial_kind,omitempty"`

@@ -5,7 +5,7 @@ version: 1
 # cross-child regression, architecture coherence) do NOT move in lockstep with the default task-done lenses.
 # The agent drives this workflow over the epic's INTEGRATION DIFF (base..head, the union of the children's
 # changes), then bridges the run into an epic-ready review-evidence marker with
-# `record-lenses --scope epic-ready --from-run <run>` (identical --base on both sides).
+# `record-lenses --scope epic-ready --from-run <run>` (--base <branch> resolves to the same merge-base on both sides).
 vars:
   REVIEWER:     {default: claude-opus-5}
   JUDGE:        {required: true}

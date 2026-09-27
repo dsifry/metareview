@@ -417,14 +417,13 @@ func dispatch(args []string) {
 		root := repo.RootOr(workdir)
 		scope, err := status.ResolveBranchScope(root, base, nil)
 		exitOnErr(err)
-		label := base
-		if label == "" {
-			label = scope.Base
-			if len(label) > 12 {
-				label = label[:12]
-			}
+		// Label and classify with the RESOLVED base (#175): `--base main` means the fork point, and a reviewer
+		// told to read `main..HEAD` would diff main's tip instead.
+		label := scope.Base
+		if len(label) > 12 {
+			label = label[:12]
 		}
-		_, _ = fmt.Fprint(stdout, reviewprompt.Build(label, scope.Files, status.ChangeKinds(root, base, nil)))
+		_, _ = fmt.Fprint(stdout, reviewprompt.Build(label, scope.Files, status.ChangeKinds(root, scope.Base, nil)))
 		exit(0)
 	}
 	if len(args) >= 2 && args[0] == "review" && args[1] == "record-lenses" {
@@ -513,7 +512,7 @@ func dispatch(args []string) {
 			exit(2)
 		}
 		exitOnErr(reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
-			ReviewedScope: scope, HeadSHA: gc.HeadSHA, BaseSHA: gc.BaseSHA,
+			ReviewedScope: scope, HeadSHA: gc.HeadSHA, BaseSHA: gc.BaseSHA, RequestedBase: gc.RequestedBase,
 			LensSet: lenses, AdjudicatedVerdict: verdict, ExecutionMode: mode, FromFSMRunID: fromRun,
 		}))
 		_, _ = fmt.Fprintf(stdout, "Recorded %s review-evidence at head %s (mode=%s, verdict=%s).\n", scope, gc.HeadSHA, mode, verdict)

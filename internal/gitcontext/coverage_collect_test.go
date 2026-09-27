@@ -20,6 +20,9 @@ func fakeGitFunc(fail func(args []string) error) func(string, ...string) (string
 		if len(args) > 0 && args[0] == "rev-parse" {
 			return "deadbeefdeadbeef", nil
 		}
+		if len(args) > 0 && args[0] == "show-ref" { // no test ref is a branch: "base" resolves exactly (#175)
+			return "", errors.New("not a ref")
+		}
 		return "", nil
 	}
 }
@@ -170,6 +173,9 @@ func TestCollectSurfacesUntrackedError(t *testing.T) {
 		if len(args) > 0 && args[0] == "rev-parse" {
 			return "deadbeefdeadbeef", nil
 		}
+		if len(args) > 0 && args[0] == "show-ref" {
+			return "", errors.New("not a ref")
+		}
 		return "", nil
 	})
 	if _, err := collect("root", "base", nil, nil); err == nil {
@@ -186,6 +192,9 @@ func TestCollectSurfacesRawUntrackedError(t *testing.T) {
 		}
 		if len(args) > 0 && args[0] == "rev-parse" {
 			return "deadbeefdeadbeef", nil
+		}
+		if len(args) > 0 && args[0] == "show-ref" {
+			return "", errors.New("not a ref")
 		}
 		return "", nil
 	})
@@ -240,6 +249,8 @@ func truncatingGit(_ string, args ...string) (string, error) {
 	switch {
 	case len(args) > 0 && args[0] == "rev-parse":
 		return "deadbeefdeadbeef", nil
+	case len(args) > 0 && args[0] == "show-ref": // "base" is not a branch, so it resolves exactly
+		return "", errors.New("not a ref")
 	case isDiff(args) && hasRange(args) && hasPathspec(args): // the filtered branch diff
 		return strings.Repeat("x", maxDiffBytes+10), nil
 	case argsHave(args, "--name-only"): // raw file lists feeding exactExcludesExcept/generated
@@ -286,5 +297,13 @@ func TestCollectWithSurfacesMeasureBranchFilesError(t *testing.T) {
 		Base: "base", Excludes: []string{"docs/**"}, RunGit: runGit,
 	}); err == nil {
 		t.Fatalf("a raw branch-file measurement failure must surface")
+	}
+}
+
+// A stalled git while resolving an explicit base aborts with the timeout, never reads as "not a branch" (#175).
+func TestResolveExplicitBaseSurfacesTimeout(t *testing.T) {
+	installFakeGit(t, func(string, ...string) (string, error) { return "", ErrTimeout })
+	if _, err := resolveBase("root", "main"); !errors.Is(err, ErrTimeout) {
+		t.Fatalf("err = %v, want ErrTimeout", err)
 	}
 }

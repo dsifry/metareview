@@ -46,6 +46,21 @@ func (f *Fake) RevParse(_ context.Context, ref string) (string, error) {
 	return "", errs.E(CodeGit, "unknown ref", "ref", ref, "op", "rev-parse")
 }
 
+// ResolveBase answers from Refs like RevParse: a fake's Refs already hold the resolved base.
+func (f *Fake) ResolveBase(_ context.Context, ref string) (string, error) {
+	f.call("ResolveBase", ref)
+	if f.Err != nil {
+		return "", f.Err
+	}
+	if ref == "HEAD" {
+		return f.HeadSHA, nil
+	}
+	if sha, ok := f.Refs[ref]; ok {
+		return sha, nil
+	}
+	return "", errs.E(CodeGit, "unknown ref", "ref", ref, "op", "resolve-base")
+}
+
 func (f *Fake) IsAncestor(_ context.Context, a, b string) (bool, error) {
 	f.call("IsAncestor", a, b)
 	return f.Ancestors[a+" "+b], f.Err

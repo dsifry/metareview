@@ -166,4 +166,33 @@ repo="$(mktemp -d)"
 )
 rm -rf "$repo"
 
+# 9. AC-3.2 (#175): after main ADVANCES past the branch point, `review epic-ready --base main`, `fsm init --workflow
+# epic-review-loop --base main` and `record-lenses --scope epic-ready --base main` all resolve the SAME base — the
+# merge-base, not main's tip — so the marker satisfies the gate with no SHA passed by hand.
+repo="$(mktemp -d)"
+(
+  build_epic_repo "$repo"
+  fork="$(git rev-parse main)"
+  git checkout -q main; printf 'other\n' > docs/other.md; git add docs/other.md; git -c commit.gpgsign=false commit -qm "main moves on"
+  git checkout -q work
+  [ "$(git rev-parse main)" != "$fork" ] || { echo "FAIL: [base-advanced] main did not advance"; exit 1; }
+  # init only checks the judge key is present; nothing here calls the judge.
+  init="$(OPENAI_API_KEY=unused "$BIN" fsm init --workflow epic-review-loop --base main --var JUDGE=gpt-5.2 --var JUDGE_EFFORT=medium 2>/dev/null || true)"
+  run="$(printf '%s' "$init" | sed -n 's/.*"run_id":"\([^"]*\)".*/\1/p')"
+  [ -n "$run" ] || { echo "FAIL: [base-advanced] fsm init produced no run: $init"; exit 1; }
+  grep -q "\"base_sha\":\"$fork\"" ".metareview/runs/$run/audit.jsonl" ||
+    { echo "FAIL: [base-advanced] fsm init --base main did not resolve to the merge-base $fork"; exit 1; }
+  mkfsmrun fsm-adv "$fork"
+  eval "$rec --verdict PASS --mode subagent-adjudicated --from-run fsm-adv" >/dev/null 2>&1 ||
+    { echo "FAIL: [base-advanced] record-lenses --base main did not match the run's merge-base"; exit 1; }
+  got="$(verdict "$(run_gate)")"
+  if [ "$got" != "PASS" ]; then echo "FAIL: [base-advanced] verdict=$got, want PASS"; exit 1; fi
+  # Each records the base as typed beside the SHA it resolved to.
+  grep -q '"requested_base":"main"' ".metareview/runs/$run/audit.jsonl" || { echo "FAIL: [base-advanced] fsm init did not record the requested base"; exit 1; }
+  grep -q '"kind":"review-evidence".*"requestedBase":"main"' .metareview/runs.jsonl || { echo "FAIL: [base-advanced] the marker did not record the requested base"; exit 1; }
+  grep -q '"scope":"epic-ready".*"requestedBase":"main"' .metareview/runs.jsonl || { echo "FAIL: [base-advanced] the epic-ready run did not record the requested base"; exit 1; }
+  echo "ok: base-advanced -> $got"
+)
+rm -rf "$repo"
+
 echo "test-epic-ready-adjudicated-review: ok"

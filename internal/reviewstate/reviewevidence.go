@@ -37,8 +37,9 @@ type ReviewEvidence struct {
 	ReviewedScope       string   `json:"reviewedScope"` // the gate this satisfies: "pr-ready" | "task-done" | "epic-ready"
 	HeadSHA             string   `json:"headSha"`       // the diff head the review covered
 	BaseSHA             string   `json:"baseSha,omitempty"`
-	LensSet             []string `json:"lensSet"`            // the lenses that ran
-	AdjudicatedVerdict  string   `json:"adjudicatedVerdict"` // the reviewer set's verdict
+	RequestedBase       string   `json:"requestedBase,omitempty"` // --base as typed, beside the SHA (#175); never matched on
+	LensSet             []string `json:"lensSet"`                 // the lenses that ran
+	AdjudicatedVerdict  string   `json:"adjudicatedVerdict"`      // the reviewer set's verdict
 	ConfirmedFindingIDs []string `json:"confirmedFindingIds,omitempty"`
 	ExecutionMode       string   `json:"executionMode"` // ReviewModeSubagentAdjudicated | ReviewModeInSessionEmulated
 	FromFSMRunID        string   `json:"fromFsmRunId,omitempty"`

@@ -34,9 +34,8 @@ advisory-flagged. `METAREVIEW_ALLOW_MECHANICAL_PASS=1` opts a run out to a struc
 
 epic-ready reviews the **integration diff** (base..HEAD, the union of the children's changes) with the roll-up
 as context; drive it with `fsm --workflow epic-review-loop` (lenses apply `rubrics/epic-ready-review-rubric.md`,
-independent of the pr-ready/task-done set). Pass the **identical explicit `--base`** to the gate, the workflow,
-and the recorder — epic-ready's default base is `merge-base(HEAD,main)` while `--base main` is the tip, so a
-mismatch silently wedges the marker. A dirty tree blocks on `working-tree-unattested`; commit first.
+independent of the pr-ready/task-done set). `--base <branch>` resolves to `merge-base(HEAD, <branch>)` and
+`--base <sha|HEAD~n>` to that exact commit, identically in the gate, the workflow and the recorder (#175). A dirty tree blocks on `working-tree-unattested`; commit first.
 
 Use `go run ./cmd/metareview ...` when running from a source checkout without a built `bin/metareview`.
 

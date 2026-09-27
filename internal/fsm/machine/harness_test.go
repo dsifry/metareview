@@ -187,6 +187,12 @@ func (f *failingGit) RevParse(ctx context.Context, r string) (string, error) {
 	}
 	return f.Git.RevParse(ctx, r)
 }
+func (f *failingGit) ResolveBase(ctx context.Context, r string) (string, error) {
+	if f.at == "ResolveBase" {
+		return "", f.err
+	}
+	return f.Git.ResolveBase(ctx, r)
+}
 func (f *failingGit) Status(ctx context.Context) (bool, string, error) {
 	if f.at == "Status" {
 		return false, "", f.err

@@ -1248,3 +1248,36 @@ func TestReviewTaskDoneRejectsFlagShapedTargets(t *testing.T) {
 		t.Fatalf("a refused task-done must not write a review log, found %d", len(entries))
 	}
 }
+
+// review prompt classifies against the same base the scope uses (#175): once main advances, `--base main` is the
+// fork point, so a file the branch added reads as added even though main has since added its own copy.
+func TestReviewPromptClassifiesAgainstTheResolvedBase(t *testing.T) {
+	root := gitRepo(t)
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("checkout", "-q", "main")
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "a.go"), []byte("package src\n\nvar A = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-q", "-m", "main adds its own a.go")
+	git("checkout", "-q", "feature")
+	code, out, _ := runCLI(t, root, nil, "review", "prompt", "--base", "main")
+	if code != 0 || !strings.Contains(out, "added] src/a.go") {
+		t.Fatalf("code=%d; src/a.go must be classified against the fork point (added):\n%s", code, out)
+	}
+	// The range a reviewer is told to read is the resolved fork point, not `main..HEAD` (main's tip).
+	if strings.Contains(out, "main..HEAD") {
+		t.Fatalf("the prompt must name the resolved base, not main's tip:\n%s", out)
+	}
+}
