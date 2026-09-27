@@ -181,9 +181,7 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 	// never clear. The latest same-head/same-base run supersedes the earlier ones (a fix loop reviews a
 	// DIFFERENT commit, and two runs at the same head but a DIFFERENT base — different diffs — are not
 	// collapsed, issue #99). Shared with the projector so the gate and pr-ready agree.
-	for id := range reviewstate.StaleSameHeadRunIDs(logs) {
-		superseded[id] = true
-	}
+	retireRuns(superseded, logs)
 	resolved := reconcileLogsAgainstLedger(root, logs, &r.Warnings)
 	for _, s := range logs {
 		if !reviewstate.LogBlocks(s) { // unresolved blockers OR an ESCALATED verdict — one shared predicate
@@ -549,9 +547,7 @@ func buildForBranch(root, base string, run RunGit, committedOnly bool) (Report, 
 	// the earlier ones, so re-running `review pr-ready` over one commit renders the branch as a single blocker
 	// rather than one per run. Computed over the FULL log set (all), like supersededRuns, so lineage is
 	// complete. Shared with Build and the projector.
-	for id := range reviewstate.StaleSameHeadRunIDs(all) {
-		superseded[id] = true
-	}
+	retireRuns(superseded, all)
 	resolved2 := reconcileLogsAgainstLedger(root, all, &r.Warnings)
 	for _, s := range scoped {
 		if !reviewstate.LogBlocks(s) || superseded[s.RunID] { // unresolved blockers OR ESCALATED — shared predicate
@@ -703,4 +699,16 @@ func covers(s reviewlog.Summary, target string, current map[string]bool) bool {
 		}
 	}
 	return false
+}
+
+// retireRuns marks the reviews no later gate can clear by re-running: the earlier same-head re-runs (#97) and the
+// reviews recorded against the target --help/-h (#187). The same predicates pr-ready's projection applies, so the
+// gate and status agree.
+func retireRuns(superseded map[string]bool, logs []reviewlog.Summary) {
+	for id := range reviewstate.StaleSameHeadRunIDs(logs) {
+		superseded[id] = true
+	}
+	for _, id := range reviewstate.FlagTargetRunIDs(logs) {
+		superseded[id] = true
+	}
 }

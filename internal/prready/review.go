@@ -292,7 +292,7 @@ func Create(root string, options Options) (Result, error) {
 		Scope:            "pr-ready",
 		Target:           targetRecord,
 		PreviousRunIDs:   previousRunIDs,
-		HistoricalRunIDs: append(historicalPRReadyRunIDsForCurrentTarget(root, logs, targetRecord, git), flagTargetTaskReviewRunIDs(logs)...),
+		HistoricalRunIDs: append(historicalPRReadyRunIDsForCurrentTarget(root, logs, targetRecord, git), reviewstate.FlagTargetRunIDs(logs)...),
 		ChangedPaths:     reviewedPaths(analysisGit),
 		CurrentTarget:    targetRecord,
 		LinkedTargets:    linkedTargets,
@@ -724,30 +724,6 @@ func historicalPRReadyRunIDsForCurrentTarget(root string, logs []reviewlog.Summa
 		}
 		matches, known := legacyPRReadyTargetMatch(root, log, targetRecord, git)
 		if known && !matches {
-			ids = append(ids, log.RunID)
-		}
-	}
-	return ids
-}
-
-// flagTargetTaskReviewRunIDs (#187) returns the task-done reviews whose target is exactly --help or -h. Such a log
-// was never a review of work: before #164 made `review task-done --help` print usage, the flag was taken as the
-// task target and a real gate run was recorded against it. Its blockers can never be resolved — a run for that
-// target cannot be made again — yet its covered paths made it block every later PR touching them. Only these two
-// are matched: any other dash target (`--verbose`, an omitted target before `--base`) is now refused by the CLI,
-// and a log recorded under one before that was a real review of current work, so it keeps blocking.
-//
-// This is deliberately the only automatic retirement. Inferring from heads and branches that a review covered
-// someone else's, landed work fails open: task-done also reviews uncommitted changes and records only HEAD, and
-// rebases, renames, detached checkouts and a moving base all defeat the inference. Any other stale blocker is
-// cleared through a human-granted process override, which records who decided and why; making that work for
-// blockers that exist only in committed review logs is tracked in #188.
-func flagTargetTaskReviewRunIDs(logs []reviewlog.Summary) []string {
-	var ids []string
-	for _, log := range logs {
-		// Exact, untrimmed: the artifacts parse as exactly "--help"/"-h". A padded variant (" --help") was typed on
-		// purpose and may be a real review of current work, so it keeps blocking.
-		if log.RunID != "" && log.Kind == "task-done" && (log.Target == "--help" || log.Target == "-h") {
 			ids = append(ids, log.RunID)
 		}
 	}

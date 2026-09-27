@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/dsifry/metareview/internal/contextprofile"
@@ -67,13 +66,21 @@ type Header struct {
 func rerunCommand(h Header) string {
 	cmd := "metareview review " + h.Scope
 	if h.Target != "" {
-		target := h.Target
-		if strings.ContainsAny(target, " \t\"'$`\\") {
-			target = strconv.Quote(target)
-		}
-		cmd += " " + target
+		cmd += " " + shellQuote(h.Target)
 	}
 	return cmd + " --base " + h.Base
+}
+
+// shellQuote returns s as one POSIX shell word. Anything outside a plain path alphabet is single-quoted — the only
+// quoting in which the shell expands nothing ($, backticks, globs, ;, & stay literal) — with a quote inside written
+// as '\”.
+func shellQuote(s string) string {
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_./:@%+=,-", r)) {
+			return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+		}
+	}
+	return s
 }
 
 // Found is the outcome of one discovery pass over a target's result directory.
@@ -544,7 +551,8 @@ func shardPack(plan contextprofile.ShardPlan, shard contextprofile.Shard, header
 	b.WriteString("Report findings with file:line evidence.\n\n")
 	b.WriteString("## Result contract\n\n" + resultContractFor(false) + "\n\n")
 	b.WriteString("## Re-run\n\n" +
-		markdown.InlineCode(rerunCommand(header)) + ", adding `--previous-run <run-id>` with the run id this gate printed.\n\n")
+		markdown.InlineCode(rerunCommand(header)) + ", adding `--previous-run <run-id>` with the run id this gate printed, and the same `--evidence` (and any " +
+		"mutation) options the gate was run with.\n\n")
 	for _, c := range shard.Chunks {
 		text := files[c.Path].Diff[c.ByteStart:c.ByteEnd]
 		fmt.Fprintf(&b, "### %s (part %d/%d)\n\n", markdown.InlineCode(c.Path), c.Part, c.Parts)

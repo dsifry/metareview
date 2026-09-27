@@ -1174,6 +1174,21 @@ func TestCrossShardPackStatesItsOwnContract(t *testing.T) {
 	}
 }
 
+// TestShellQuoteExpandsNothing: a backtick can't sit inside the pack's inline code span, so command substitution
+// is pinned on the quoting directly.
+func TestShellQuoteExpandsNothing(t *testing.T) {
+	for in, want := range map[string]string{
+		"docs/tasks/t-1.md": "docs/tasks/t-1.md",
+		"a`id`b":            "'a`id`b'",
+		"$(id)":             "'$(id)'",
+		"x\ny":              "'x\ny'",
+	} {
+		if got := shellQuote(in); got != want {
+			t.Errorf("shellQuote(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // TestRerunCommandIsRunnable (#187): the '## Re-run' line an agent copies must be a command the CLI accepts. For
 // task-done it names the target (without it the CLI took '--base' as the target, and now refuses it). The run id is
 // left to the agent, because packs must stay byte-reproducible across runs.
@@ -1185,7 +1200,13 @@ func TestRerunCommandIsRunnable(t *testing.T) {
 		{Header{Scope: "task-done", TargetID: "t", Target: "docs/tasks/t.md", Base: "base-sha", Head: "head-sha", Budget: 400},
 			"metareview review task-done docs/tasks/t.md --base base-sha"},
 		{Header{Scope: "task-done", TargetID: "t", Target: "my task", Base: "base-sha", Head: "head-sha", Budget: 400},
-			`metareview review task-done "my task" --base base-sha`},
+			`metareview review task-done 'my task' --base base-sha`},
+		// Single quotes are the only POSIX quoting that expands nothing: $ and backticks stay literal, and a
+		// quote inside is written as '\''.
+		{Header{Scope: "task-done", TargetID: "t", Target: "a$HOME;b&c*", Base: "base-sha", Head: "head-sha", Budget: 400},
+			"metareview review task-done 'a$HOME;b&c*' --base base-sha"},
+		{Header{Scope: "task-done", TargetID: "t", Target: "it's", Base: "base-sha", Head: "head-sha", Budget: 400},
+			`metareview review task-done 'it'\''s' --base base-sha`},
 		{Header{Scope: "pr-ready", TargetID: "feature", Base: "base-sha", Head: "head-sha", Budget: 400},
 			"metareview review pr-ready --base base-sha"},
 	} {
@@ -1199,6 +1220,11 @@ func TestRerunCommandIsRunnable(t *testing.T) {
 		}
 		if !strings.Contains(string(body), "## Re-run\n\n`"+tc.want+"`, adding `--previous-run <run-id>`") {
 			t.Errorf("%s: Re-run line missing %q", tc.h.Scope, tc.want)
+		}
+		// The pack cannot know the gate's other options, so it must tell the agent to repeat them: a pr-ready
+		// re-run without --evidence raises a new blocker.
+		if !strings.Contains(string(body), "the same `--evidence`") {
+			t.Errorf("%s: Re-run line does not tell the agent to repeat the gate's options", tc.h.Scope)
 		}
 	}
 }

@@ -172,13 +172,14 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   checkout the two coincide. Tripwires, not proofs (they match literal path forms only):
   `TestFSMRootsAreDeclared` (a `root: store|work` declaration at each such site in `internal/fsm`) and
   `TestRunStoreReadersAreDeclared` (run-store readers outside the FSM). Still per-directory and planned in #171: `status`' abandoned-run scan and findings.
-- **Stale task reviews (#187):** pr-ready automatically retires only task-done reviews whose target is exactly
-  `--help` or `-h` (artifacts of the bug #164 fixed, never reviews of work), and the task-done CLI now refuses any
-  target starting with `-`, so no new such logs can be written. pr-ready does *not* infer from heads or branches
-  that a review covered someone else's landed work: task-done also reviews uncommitted changes and records only
-  HEAD, so any such inference fails open under rebases, renames, detached checkouts or a moving base. Any other
-  stale blocker is meant to be cleared by a human-granted process override; making that reach blockers that exist
-  only in committed review logs is tracked in #188.
+- **Stale task reviews (#187):** pr-ready and `status` automatically retire only task-done and epic-ready reviews
+  whose target is exactly `--help` or `-h` (artifacts of the bug #164 fixed, never reviews of work), through one
+  shared predicate, `reviewstate.FlagTargetRunIDs`. The task-done and epic-ready CLIs now refuse any target starting
+  with `-`, so no new such logs can be written. pr-ready does *not* infer from heads or branches that a review
+  covered someone else's landed work: task-done also reviews uncommitted changes and records only HEAD, so any such
+  inference fails open under rebases, renames, detached checkouts or a moving base. Any other stale blocker is
+  meant to be cleared by a human-granted process override; making that reach blockers that exist only in
+  committed review logs is tracked in #188.
 - **Run lineage:** a NEEDS_REVISION parent is retired when a clean same-target+same-kind child links via
   `previousRunId` (supersede). Repair via `--previous-run <run-id>`; never `git add -A` failed-run artifacts.
 - **Evidence receipts:** `evidence run -- <cmd>` records a validation receipt (kind + exitCode + hashes);

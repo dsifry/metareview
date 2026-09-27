@@ -157,6 +157,10 @@ func TestTaskDonePlanIsWrittenAndPrunedWithMatchingHash(t *testing.T) {
 	if writer.lastHdr.Scope != "task-done" {
 		t.Fatalf("header scope = %q, want task-done", writer.lastHdr.Scope)
 	}
+	// The pack's Re-run command repeats this target (#187); without it the CLI would take '--base' as the target.
+	if writer.lastHdr.Target != "docs/tasks/big-task.md" {
+		t.Fatalf("header target = %q, want the CLI target docs/tasks/big-task.md", writer.lastHdr.Target)
+	}
 	if writer.lastHdr.Budget != contextprofile.DefaultMaxBytesPerShard {
 		t.Fatalf("header budget = %d, want %d", writer.lastHdr.Budget, contextprofile.DefaultMaxBytesPerShard)
 	}

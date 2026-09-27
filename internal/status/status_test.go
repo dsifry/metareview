@@ -501,3 +501,19 @@ func TestCoversUsesTheFilesAReviewActuallyRead(t *testing.T) {
 		t.Error("a legacy review still answers for its own target")
 	}
 }
+
+// TestFlagTargetReviewsDoNotBlockStatus (#187): a review recorded against the target --help or -h (the pre-#164 bug)
+// is retired by status exactly as pr-ready retires it, so the two surfaces agree. A real target keeps blocking.
+func TestFlagTargetReviewsDoNotBlockStatus(t *testing.T) {
+	root := t.TempDir()
+	writeLog(t, root, "mrv-1-task-done-help.md", "# metareview: task-done review\n\nRun ID: `mrv-1`\nTarget: `--help`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	writeLog(t, root, "mrv-2-epic-ready-h.md", "# metareview: epic-ready review\n\nRun ID: `mrv-2`\nTarget: `-h`\n\n## Verdict\n\nESCALATED\n")
+	writeLog(t, root, "mrv-3-task-done-a.md", "# metareview: task-done review\n\nRun ID: `mrv-3`\nTarget: `task-a`\n\n## Verdict\n\nNEEDS_REVISION\n")
+	r, err := Build(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.MustClear) != 1 || r.MustClear[0].RunID != "mrv-3" {
+		t.Fatalf("must_clear = %+v, want only the real task-a review", r.MustClear)
+	}
+}

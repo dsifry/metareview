@@ -649,3 +649,33 @@ func ResolverPhrase(record findings.Record) string {
 		return "resolved"
 	}
 }
+
+// FlagTargetRunIDs (#187) returns the task-done and epic-ready reviews whose target is exactly --help or -h. Such a
+// log was never a review of work: before #164 made `review task-done --help` print usage, the flag was taken as the
+// target and a real gate run was recorded against it (epic-ready resolved it as an advisory epic id the same way).
+// Its blockers can never be resolved — a run for that target cannot be made again — yet its covered paths made it
+// block every later PR touching them. Only these two are matched: any other dash target (`--verbose`, an omitted
+// target before `--base`) is now refused by the CLI, and a log recorded under one before that was a real review of
+// current work, so it keeps blocking. The verdict is not consulted: an ESCALATED --help run is no more a review.
+// Nor is the local run record: it exists only in the clone that ran the review, so requiring it would leave the
+// artifact blocking everywhere else. The committed log is already the trust surface for every blocker — LogBlocks
+// reads its findings and verdict from the same markdown — so hand-editing its Target is no stronger than editing
+// its findings, and either edit shows in the diff under review.
+// Shared by pr-ready's projection and status so the gate and status agree.
+//
+// This is deliberately the only automatic retirement. Inferring from heads and branches that a review covered
+// someone else's, landed work fails open: task-done also reviews uncommitted changes and records only HEAD, and
+// rebases, renames, detached checkouts and a moving base all defeat the inference. Any other stale blocker is
+// cleared through a human-granted process override, which records who decided and why; making that work for
+// blockers that exist only in committed review logs is tracked in #188.
+func FlagTargetRunIDs(logs []reviewlog.Summary) []string {
+	var ids []string
+	for _, log := range logs {
+		// Exact, untrimmed: the artifacts parse as exactly "--help"/"-h". A padded variant (" --help") was typed on
+		// purpose and may be a real review of current work, so it keeps blocking.
+		if log.RunID != "" && (log.Kind == "task-done" || log.Kind == "epic-ready") && (log.Target == "--help" || log.Target == "-h") {
+			ids = append(ids, log.RunID)
+		}
+	}
+	return ids
+}
