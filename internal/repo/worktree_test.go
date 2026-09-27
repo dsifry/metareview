@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -43,10 +44,13 @@ func TestRunStoreRootResolvesMainWorktreeAndFallsBack(t *testing.T) {
 }
 
 // TestRunStoreReadersAreDeclared keeps #169 from recurring on a new surface: outside the FSM
-// (which owns the store), every Go file that builds a `.metareview/runs` path must either resolve
-// it through RunStoreRoot or carry a `run-store: current-worktree` comment explaining why not.
+// (which owns the store), every line that builds a `.metareview/runs` path must have RunStoreRoot or
+// a `run-store:` declaration on it or within the three lines above. Checked per site, not per file,
+// so a second, undeclared reader in a file that already has a declared one still fails.
 func TestRunStoreReadersAreDeclared(t *testing.T) {
+	const window = 3
 	repoRoot := filepath.Join("..", "..")
+	sites := 0
 	for _, top := range []string{"cmd", "internal"} {
 		err := filepath.WalkDir(filepath.Join(repoRoot, top), func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -65,17 +69,72 @@ func TestRunStoreReadersAreDeclared(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			text := string(src)
-			if !strings.Contains(text, `".metareview", "runs"`) {
-				return nil
-			}
-			if !strings.Contains(text, "RunStoreRoot(") && !strings.Contains(text, "run-store: current-worktree") {
-				t.Errorf("%s builds a .metareview/runs path without repo.RunStoreRoot or a `run-store: current-worktree` justification", path)
+			lines := strings.Split(string(src), "\n")
+			for i, line := range lines {
+				if !strings.Contains(line, `".metareview", "runs"`) {
+					continue
+				}
+				sites++
+				declared := false
+				for j := max(0, i-window); j <= i; j++ {
+					if strings.Contains(lines[j], "RunStoreRoot(") || strings.Contains(lines[j], "run-store:") {
+						declared = true
+					}
+				}
+				if !declared {
+					t.Errorf("%s:%d builds a .metareview/runs path without RunStoreRoot or a `run-store:` declaration within %d lines above", path, i+1, window)
+				}
 			}
 			return nil
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+	if sites == 0 {
+		t.Fatal("found no .metareview/runs sites at all; the walk is not looking at this repository's sources")
+	}
+}
+
+// TestRunStoreRootIgnoresExportedGitDir: the FSM writer runs git with GIT_* scrubbed, so the reader
+// must too. With GIT_DIR exported to an unrelated repository (as inside a git hook or a wrapper),
+// RunStoreRoot from a linked worktree must still name that worktree's own main checkout.
+func TestRunStoreRootIgnoresExportedGitDir(t *testing.T) {
+	gitIn := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		var env []string
+		for _, kv := range os.Environ() {
+			if !strings.HasPrefix(kv, "GIT_") {
+				env = append(env, kv)
+			}
+		}
+		cmd.Env = append(env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	newRepo := func() string {
+		dir, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		gitIn(dir, "init", "-q", "-b", "main")
+		gitIn(dir, "-c", "user.email=a@b.c", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "seed")
+		return dir
+	}
+	main, other := newRepo(), newRepo()
+	linked := filepath.Join(t.TempDir(), "linked")
+	gitIn(main, "worktree", "add", "-q", "--detach", linked)
+
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_WORK_TREE", other)
+	got, err := filepath.EvalSymlinks(RunStoreRoot(linked))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != main {
+		t.Fatalf("RunStoreRoot with GIT_DIR exported: got %q, want the linked worktree's main checkout %q", got, main)
 	}
 }

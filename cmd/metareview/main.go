@@ -751,6 +751,7 @@ func bundleExitCode(bundle evidence.Bundle) int {
 // audit, a run over a different diff, or a run that reviewed the diff and did NOT come out clean. It scans
 // events leniently (in the spirit of the FSM's own peek) rather than folding the full chain.
 func validateFromRunDiff(root, runID, wantBase, wantHead, wantWorkflow string) error {
+	// run-store: shared — root is repo.RunStoreRoot(workdir), the store the FSM wrote the run to (#169).
 	path := filepath.Join(root, ".metareview", "runs", runID, "audit.jsonl")
 	raw, err := os.ReadFile(path) // #nosec G304 -- runID is validated to a single path segment by the caller
 	if err != nil {
