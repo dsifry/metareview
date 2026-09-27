@@ -59,8 +59,10 @@ const (
 	StatusEscalated      = "escalated"
 )
 
-// root: store — the terminal row is store-level: run ids are unique across the store, and Exists checks it.
-func path(root string) string { return filepath.Join(root, ".metareview", "runs.jsonl") }
+// root: store — the terminal row is store-level: run ids are unique across the store, and Exists checks it. root is
+// git's common directory (#173): the ledger sits beside the runs, at <common>/metareview/runs.jsonl, not in any
+// checkout's per-worktree .metareview/runs.jsonl.
+func path(root string) string { return filepath.Join(root, "metareview", "runs.jsonl") }
 
 // RowFor maps a terminal view to its row (spec 3 §6).
 func RowFor(v machine.View, now run.Time) Row {
@@ -86,8 +88,8 @@ func RowFor(v machine.View, now run.Time) Row {
 		SchemaVersion: 1, ID: v.RunID, Scope: "fsm-" + s.Workflow, Target: map[string]string{"type": "fsm", "id": s.Workflow + "@" + base},
 		Status: status, Verdict: verdict, ExecutionMode: "fsm", PreviousRunID: s.ParentRunID, AttemptNumber: attempt, MaxAttempts: machine.MaxAttempts,
 		BaseSHA: s.BaseSHA, HeadSHA: s.Head, CreatedAt: s.CreatedAt.UTC().Format(rfc3339Nano), UpdatedAt: now.UTC().Format(rfc3339Nano),
-		// root: store — FSMRunDir is relative to RepoRoot, the store root the run lives under.
-		RepoRoot: s.RepoRoot, Mock: s.Mock != "" || s.MockTainted, Outcome: string(s.Outcome), FSMRunDir: ".metareview/runs/" + v.RunID + "/",
+		// root: store — FSMRunDir is relative to git's common directory, where the store keeps the run (#173).
+		RepoRoot: s.RepoRoot, Mock: s.Mock != "" || s.MockTainted, Outcome: string(s.Outcome), FSMRunDir: "metareview/runs/" + v.RunID + "/",
 		WorkflowHash: s.WorkflowHash, WorkflowSource: source, EscalationReason: reason,
 	}
 }
@@ -131,7 +133,12 @@ type tail struct {
 // trailing newline that decodes is a row, an undecodable unterminated fragment is reported as the tail, any other
 // undecodable line is ERR_RUNS_JSONL{malformed}.
 func readRows(root string) ([]Row, tail, error) {
-	raw, err := os.ReadFile(path(root))
+	return readRowsFile(path(root))
+}
+
+// readRowsFile is readRows over any runs.jsonl file (the legacy checkout ledger, for migration).
+func readRowsFile(p string) ([]Row, tail, error) {
+	raw, err := os.ReadFile(p)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, tail{}, nil
 	}
@@ -217,7 +224,7 @@ func appendRow(root string, row Row) error {
 	}
 	var steps []func() error
 	if t.fragment != nil {
-		torn := filepath.Join(root, ".metareview", "runs", ".torn") // root: store
+		torn := filepath.Join(root, "metareview", "runs", ".torn") // root: store (git's common directory)
 		steps = append(steps,
 			func() error { return os.MkdirAll(torn, 0o700) },
 			func() error {
@@ -242,3 +249,35 @@ var flock = syscall.Flock
 
 // nanos is the torn-fragment name clock; tests may override it.
 var nanos = nowNanos
+
+// MigrateLegacyRows copies the FSM's terminal rows (scope fsm-*) from a 0.13.x store's ledger — the main checkout's
+// .metareview/runs.jsonl, which also holds that checkout's own review rows — into the common-dir ledger (#173), so
+// run ids stay unique across the store. Review rows are left alone. It is idempotent (a row already present is
+// skipped); a legacy row whose id the ledger holds for a different head or workflow is a conflict, reported and not
+// merged. The legacy file is never modified.
+func MigrateLegacyRows(checkout, common string) (copied, conflicts []string, err error) {
+	copied, conflicts = []string{}, []string{}
+	rows, _, err := readRowsFile(filepath.Join(checkout, ".metareview", "runs.jsonl")) // root: store (the 0.13.x ledger)
+	if err != nil {
+		return copied, conflicts, err
+	}
+	for _, row := range rows {
+		if !strings.HasPrefix(row.Scope, "fsm-") {
+			continue
+		}
+		present, err := Exists(common, row.ID)
+		if err != nil {
+			return copied, conflicts, err
+		}
+		err = appendRow(common, row)
+		switch {
+		case errs.Is(err, CodeRunsJSONL):
+			conflicts = append(conflicts, row.ID)
+		case err != nil:
+			return copied, conflicts, err
+		case !present:
+			copied = append(copied, row.ID)
+		}
+	}
+	return copied, conflicts, nil
+}

@@ -993,3 +993,32 @@ func TestReadRawSurfacesAMidFileReadFailure(t *testing.T) {
 		t.Fatal("Events must not report a healthy log when the read failed")
 	}
 }
+
+// #173: the shared store lives in git's common directory — <common>/metareview/runs/<id>/ — with the same modes and
+// the same refusal of a symlinked path component as the checkout layout.
+func TestCommonDirLayout(t *testing.T) {
+	common := t.TempDir()
+	s := NewCommonDirStore(common, Options{})
+	seed(t, s, happyLog().Events()[:1])
+	runs := filepath.Join(common, "metareview", "runs")
+	for _, p := range []struct {
+		path string
+		mode os.FileMode
+	}{{runs, 0o700}, {filepath.Join(runs, runA), 0o700}, {filepath.Join(runs, runA, "audit.jsonl"), 0o600}} {
+		fi, err := os.Stat(p.path)
+		if err != nil || fi.Mode().Perm() != p.mode {
+			t.Fatalf("%s: %v %v", p.path, fi, err)
+		}
+	}
+	if got, _ := s.List(); len(got) != 1 {
+		t.Fatalf("List = %v", got)
+	}
+	// A symlinked metareview/ component is refused, as .metareview/ is in a checkout.
+	other := t.TempDir()
+	linked := t.TempDir()
+	if err := os.Symlink(other, filepath.Join(linked, "metareview")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewCommonDirStore(linked, Options{}).Create(runA, happyLog().Events()[0])
+	storeErr(t, err, CodeStorePath)
+}

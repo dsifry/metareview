@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -66,4 +67,28 @@ func RunStoreRoot(start string) string {
 		return RootOr(start)
 	}
 	return path
+}
+
+// commonDirGit is the seam over `git rev-parse --git-common-dir`, run exactly as the FSM runs git (gate.RealExec:
+// GIT_* scrubbed), so an exported GIT_DIR cannot point a reader at a different store than the writer used.
+var commonDirGit = func(dir string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	out, _, code, err := gate.RealExec(ctx, dir, nil, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil || code != 0 {
+		return "", errNotARepo
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// StoreDir is metareview's shared store for the repository containing start (#173): <git-common-dir>/metareview.
+// The main checkout and every linked worktree resolve the same directory, it exists in a bare repository, and it
+// does not depend on any one checkout: moving or deleting the main checkout, or `git clean -fdX` in it, leaves it
+// alone. FSM runs live in its runs/ (alongside the session bindings in sessions/, #166).
+func StoreDir(start string) (string, error) {
+	common, err := commonDirGit(start)
+	if err != nil || common == "" {
+		return "", errNotARepo
+	}
+	return filepath.Join(common, "metareview"), nil
 }

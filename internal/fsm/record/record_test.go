@@ -36,7 +36,7 @@ func fixedClock() run.Time { return run.Time{Time: time.Date(2026, 8, 27, 4, 5, 
 
 func lines(t *testing.T, root string) []string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(root, ".metareview", "runs.jsonl"))
+	raw, err := os.ReadFile(filepath.Join(root, "metareview", "runs.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestF9GoldenRows(t *testing.T) {
 	if err := term(ctx, view("mrv-root-000000001", run.OutcomeFixed, []string{})); err != nil {
 		t.Fatal(err)
 	}
-	want := `{"schemaVersion":1,"id":"mrv-root-000000001","scope":"fsm-sdlc-loop","target":{"id":"sdlc-loop@bbbbbbbbbbbb","type":"fsm"},"status":"passed","verdict":"PASS","executionMode":"fsm","attemptNumber":1,"maxAttempts":3,"baseSha":"` + base + `","headSha":"` + head + `","createdAt":"2026-08-27T01:02:03Z","updatedAt":"2026-08-27T04:05:06.000000007Z","repoRoot":"/repo","contextPackPath":"","reviewLogPath":"","mock":false,"outcome":"fixed","fsmRunDir":".metareview/runs/mrv-root-000000001/","workflowHash":"wh","workflowSource":"embedded","escalationReason":""}`
+	want := `{"schemaVersion":1,"id":"mrv-root-000000001","scope":"fsm-sdlc-loop","target":{"id":"sdlc-loop@bbbbbbbbbbbb","type":"fsm"},"status":"passed","verdict":"PASS","executionMode":"fsm","attemptNumber":1,"maxAttempts":3,"baseSha":"` + base + `","headSha":"` + head + `","createdAt":"2026-08-27T01:02:03Z","updatedAt":"2026-08-27T04:05:06.000000007Z","repoRoot":"/repo","contextPackPath":"","reviewLogPath":"","mock":false,"outcome":"fixed","fsmRunDir":"metareview/runs/mrv-root-000000001/","workflowHash":"wh","workflowSource":"embedded","escalationReason":""}`
 	got := lines(t, root)
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("golden root:\n%s\n%s", got[0], want)
@@ -91,7 +91,7 @@ func TestF9GoldenRows(t *testing.T) {
 	}
 	assertKeys(t, got[1], true)
 	// the existing decoder reads both
-	recs, err := runchain.ReadRuns(root)
+	recs, err := runchain.ReadRuns(asCheckoutLedger(t, root))
 	if err != nil || len(recs) != 2 || recs[1].AttemptNumber != 3 || recs[1].Verdict != "ESCALATED" || recs[0].Scope != "fsm-sdlc-loop" {
 		t.Fatalf("runchain decode: %v %+v", err, recs)
 	}
@@ -152,7 +152,7 @@ func TestVerdictMap(t *testing.T) {
 
 func TestTornTailWritePath(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, ".metareview")
+	dir := filepath.Join(root, "metareview")
 	_ = os.MkdirAll(dir, 0o755)
 	p := filepath.Join(dir, "runs.jsonl")
 	// a legacy review row (complete) + a torn fragment
@@ -167,14 +167,14 @@ func TestTornTailWritePath(t *testing.T) {
 	if len(got) != 2 || got[0] != legacy || !strings.Contains(got[1], `"id":"mrv-root-000000001"`) {
 		t.Fatalf("after torn: %v", got)
 	}
-	frag, err := os.ReadFile(filepath.Join(root, ".metareview", "runs", ".torn", "runs.jsonl-42"))
+	frag, err := os.ReadFile(filepath.Join(root, "metareview", "runs", ".torn", "runs.jsonl-42"))
 	if err != nil || string(frag) != "{\"schemaVersion\":1,\"id\":\"mrv-torn" {
 		t.Fatalf("fragment preserved: %q %v", frag, err)
 	}
 	if ok, err := Exists(root, "mrv-root-000000001"); err != nil || !ok {
 		t.Fatal("exists after repair")
 	}
-	if recs, err := runchain.ReadRuns(root); err != nil || len(recs) != 2 || recs[0].Verdict != "ESCALATED" {
+	if recs, err := runchain.ReadRuns(asCheckoutLedger(t, root)); err != nil || len(recs) != 2 || recs[0].Verdict != "ESCALATED" {
 		t.Fatalf("runchain after repair: %v %+v", err, recs)
 	}
 	// Exists tolerates a torn tail without repairing it
@@ -187,7 +187,7 @@ func TestTornTailWritePath(t *testing.T) {
 	}
 	// a newline-less but decodable final row is a row: "\n" is written first, nothing moved
 	_ = os.WriteFile(p, []byte(legacy), 0o644)
-	_ = os.RemoveAll(filepath.Join(root, ".metareview", "runs"))
+	_ = os.RemoveAll(filepath.Join(root, "metareview", "runs"))
 	if err := term(context.Background(), view("mrv-root-000000002", run.OutcomeFixed, nil)); err != nil {
 		t.Fatal(err)
 	}
@@ -195,10 +195,10 @@ func TestTornTailWritePath(t *testing.T) {
 	if len(got) != 2 || got[0] != legacy {
 		t.Fatalf("newline-less legacy row kept: %v", got)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".metareview", "runs", ".torn")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(root, "metareview", "runs", ".torn")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("nothing must be moved for a decodable tail")
 	}
-	if recs, err := runchain.ReadRuns(root); err != nil || len(recs) != 2 || recs[0].Verdict != "ESCALATED" {
+	if recs, err := runchain.ReadRuns(asCheckoutLedger(t, root)); err != nil || len(recs) != 2 || recs[0].Verdict != "ESCALATED" {
 		t.Fatalf("legacy escalation still visible: %v", err)
 	}
 	// blank lines are skipped
@@ -241,9 +241,9 @@ func TestTornTailWritePath(t *testing.T) {
 
 func TestWriteErrors(t *testing.T) {
 	ctx := context.Background()
-	// .metareview as a regular file → MkdirAll ENOTDIR
+	// metareview as a regular file → MkdirAll ENOTDIR
 	root := t.TempDir()
-	_ = os.WriteFile(filepath.Join(root, ".metareview"), []byte("x"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "metareview"), []byte("x"), 0o644)
 	if err := Terminal(root, fixedClock)(ctx, view("mrv-x-000000000001", run.OutcomeFixed, nil)); err == nil {
 		t.Fatal("ENOTDIR")
 	}
@@ -252,26 +252,26 @@ func TestWriteErrors(t *testing.T) {
 	}
 	// runs.jsonl as a directory → open fails
 	root = t.TempDir()
-	_ = os.MkdirAll(filepath.Join(root, ".metareview", "runs.jsonl"), 0o755)
+	_ = os.MkdirAll(filepath.Join(root, "metareview", "runs.jsonl"), 0o755)
 	if err := Terminal(root, fixedClock)(ctx, view("mrv-x-000000000001", run.OutcomeFixed, nil)); err == nil {
 		t.Fatal("directory as file")
 	}
 	// the torn directory cannot be created (runs is a file)
 	root = t.TempDir()
-	_ = os.MkdirAll(filepath.Join(root, ".metareview"), 0o755)
-	_ = os.WriteFile(filepath.Join(root, ".metareview", "runs"), []byte("x"), 0o644)
-	_ = os.WriteFile(filepath.Join(root, ".metareview", "runs.jsonl"), []byte("{\"torn"), 0o644)
+	_ = os.MkdirAll(filepath.Join(root, "metareview"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "metareview", "runs"), []byte("x"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "metareview", "runs.jsonl"), []byte("{\"torn"), 0o644)
 	if err := Terminal(root, fixedClock)(ctx, view("mrv-x-000000000001", run.OutcomeFixed, nil)); err == nil {
 		t.Fatal("torn dir")
 	}
 	// the torn fragment cannot be written (unwritable .torn dir)
 	if os.Getuid() != 0 {
 		root = t.TempDir()
-		_ = os.MkdirAll(filepath.Join(root, ".metareview", "runs", ".torn"), 0o700)
-		_ = os.WriteFile(filepath.Join(root, ".metareview", "runs.jsonl"), []byte("{\"torn"), 0o644)
-		_ = os.Chmod(filepath.Join(root, ".metareview", "runs", ".torn"), 0)
+		_ = os.MkdirAll(filepath.Join(root, "metareview", "runs", ".torn"), 0o700)
+		_ = os.WriteFile(filepath.Join(root, "metareview", "runs.jsonl"), []byte("{\"torn"), 0o644)
+		_ = os.Chmod(filepath.Join(root, "metareview", "runs", ".torn"), 0)
 		err := Terminal(root, fixedClock)(ctx, view("mrv-x-000000000001", run.OutcomeFixed, nil))
-		_ = os.Chmod(filepath.Join(root, ".metareview", "runs", ".torn"), 0o700)
+		_ = os.Chmod(filepath.Join(root, "metareview", "runs", ".torn"), 0o700)
 		if err == nil {
 			t.Fatal("unwritable torn dir")
 		}
@@ -285,8 +285,8 @@ func TestWriteErrors(t *testing.T) {
 	flock = orig
 	// a line longer than the scanner buffer
 	root = t.TempDir()
-	_ = os.MkdirAll(filepath.Join(root, ".metareview"), 0o755)
-	_ = os.WriteFile(filepath.Join(root, ".metareview", "runs.jsonl"), append([]byte(`{"id":"`+strings.Repeat("x", 1<<20)+`"}`), '\n'), 0o644)
+	_ = os.MkdirAll(filepath.Join(root, "metareview"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "metareview", "runs.jsonl"), append([]byte(`{"id":"`+strings.Repeat("x", 1<<20)+`"}`), '\n'), 0o644)
 	if _, err := Exists(root, "x"); err == nil {
 		t.Fatal("oversized line")
 	}
@@ -352,7 +352,7 @@ func TestRunsJSONLSurvivesInterleavedWriters(t *testing.T) {
 // "token too long" - and it fails for the WHOLE file, so one long row hid every other run.
 func TestExistsReadsAnExactlyMaxLengthRow(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".metareview"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "metareview"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	row := Row{SchemaVersion: 1, ID: "mrv-long-row", Scope: "fsm", Status: "passed", Target: map[string]string{"pad": ""}}
@@ -373,7 +373,7 @@ func TestExistsReadsAnExactlyMaxLengthRow(t *testing.T) {
 	// a second row after it: a cap failure takes down the whole file, not just the long line
 	second := append(encode(Row{SchemaVersion: 1, ID: "mrv-short-row", Scope: "fsm", Status: "passed"}), '\n')
 	body := append(append(line, '\n'), second...)
-	if err := os.WriteFile(filepath.Join(root, ".metareview", "runs.jsonl"), body, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "metareview", "runs.jsonl"), body, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	for _, id := range []string{"mrv-long-row", "mrv-short-row"} {
@@ -383,6 +383,86 @@ func TestExistsReadsAnExactlyMaxLengthRow(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("Exists(%s) = false, want true", id)
+		}
+	}
+}
+
+// asCheckoutLedger copies the common-dir ledger into a scratch checkout's .metareview/runs.jsonl, where the existing
+// runchain decoder reads, so the tests keep proving a terminal row is a runs.jsonl row every reader understands.
+func asCheckoutLedger(t *testing.T, common string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(common, "metareview", "runs.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkout := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(checkout, ".metareview"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, ".metareview", "runs.jsonl"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return checkout
+}
+
+// #173: a 0.13.x store kept the FSM's terminal rows in the main checkout's .metareview/runs.jsonl, among that
+// checkout's own review rows. Migration copies the FSM rows (scope fsm-*) into the common-dir ledger so run ids stay
+// unique across it; it leaves the review rows alone, is idempotent, and reports an id whose row differs.
+func TestMigrateLegacyRows(t *testing.T) {
+	ctx := context.Background()
+	checkout, common := t.TempDir(), t.TempDir()
+	// A legacy ledger: one FSM row written the 0.13.x way, one review row, one conflicting FSM row.
+	old := t.TempDir()
+	if err := Terminal(old, fixedClock)(ctx, view("mrv-root-000000001", run.OutcomeFixed, []string{})); err != nil {
+		t.Fatal(err)
+	}
+	fsmRow, _ := os.ReadFile(filepath.Join(old, "metareview", "runs.jsonl"))
+	legacy := string(fsmRow) + `{"schemaVersion":1,"id":"mrv-review-1","scope":"pr-ready","verdict":"PASS"}` + "\n"
+	_ = os.MkdirAll(filepath.Join(checkout, ".metareview"), 0o755)
+	if err := os.WriteFile(filepath.Join(checkout, ".metareview", "runs.jsonl"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	copied, conflicts, err := MigrateLegacyRows(checkout, common)
+	if err != nil || len(copied) != 1 || copied[0] != "mrv-root-000000001" || len(conflicts) != 0 {
+		t.Fatalf("migrate: %v %v %v", copied, conflicts, err)
+	}
+	if ok, _ := Exists(common, "mrv-root-000000001"); !ok {
+		t.Fatal("the FSM row must be in the common-dir ledger")
+	}
+	if ok, _ := Exists(common, "mrv-review-1"); ok {
+		t.Fatal("a review row belongs to its checkout and must not be copied")
+	}
+	if copied, _, err := MigrateLegacyRows(checkout, common); err != nil || len(copied) != 0 {
+		t.Fatalf("re-running must be a no-op: %v %v", copied, err)
+	}
+	// A legacy FSM row whose id the ledger holds for a different head is a conflict, reported, not merged.
+	conflicting := strings.Replace(string(fsmRow), `"headSha":"`, `"headSha":"f`, 1)
+	_ = os.WriteFile(filepath.Join(checkout, ".metareview", "runs.jsonl"), []byte(conflicting), 0o644)
+	if _, conflicts, err := MigrateLegacyRows(checkout, common); err != nil || len(conflicts) != 1 {
+		t.Fatalf("conflict: %v %v", conflicts, err)
+	}
+	// No legacy ledger, or an unreadable one.
+	if copied, conflicts, err := MigrateLegacyRows(t.TempDir(), common); err != nil || len(copied)+len(conflicts) != 0 {
+		t.Fatalf("no legacy ledger: %v %v %v", copied, conflicts, err)
+	}
+	bad := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(bad, ".metareview", "runs.jsonl"), 0o755)
+	if _, _, err := MigrateLegacyRows(bad, common); err == nil {
+		t.Fatal("an unreadable legacy ledger must surface")
+	}
+	// The common ledger cannot be written.
+	blocked := t.TempDir()
+	_ = os.WriteFile(filepath.Join(blocked, "metareview"), []byte("x"), 0o644)
+	_ = os.WriteFile(filepath.Join(checkout, ".metareview", "runs.jsonl"), fsmRow, 0o644)
+	if _, _, err := MigrateLegacyRows(checkout, blocked); err == nil {
+		t.Fatal("an unreadable ledger must surface")
+	}
+	if os.Getuid() != 0 {
+		readOnly := t.TempDir()
+		_ = os.MkdirAll(filepath.Join(readOnly, "metareview"), 0o500)
+		t.Cleanup(func() { _ = os.Chmod(filepath.Join(readOnly, "metareview"), 0o700) })
+		if _, _, err := MigrateLegacyRows(checkout, readOnly); err == nil {
+			t.Fatal("an unwritable ledger must surface")
 		}
 	}
 }

@@ -37,14 +37,19 @@ func checkSidecarArgs(runID, name string) error {
 	return nil
 }
 
-// FSSidecar stores sidecars under <root>/.metareview/runs/<id>/. Open is
-// the file seam (nil → os.OpenFile); tests inject failing files.
+// FSSidecar stores sidecars beside a run's audit: under <root>/.metareview/runs/<id>/ in a checkout, or — with
+// CommonDir, Root being git's common directory — under <root>/metareview/runs/<id>/ (#173). Open is the file seam
+// (nil → os.OpenFile); tests inject failing files.
 type FSSidecar struct {
-	Root string
-	Open func(path string, flag int, perm os.FileMode) (io.ReadWriteCloser, error)
+	Root      string
+	CommonDir bool
+	Open      func(path string, flag int, perm os.FileMode) (io.ReadWriteCloser, error)
 }
 
 func (f FSSidecar) path(runID, name string) string {
+	if f.CommonDir {
+		return filepath.Join(f.Root, "metareview", "runs", runID, name) // root: store (git's common directory)
+	}
 	return filepath.Join(f.Root, ".metareview", "runs", runID, name) // root: store
 }
 
