@@ -246,3 +246,14 @@ func TestSetupStopGateToggles(t *testing.T) {
 		t.Fatal("enable outside a repository must fail")
 	}
 }
+
+// With another tool's core.hooksPath, --install-hooks refuses; its output must name the standalone Stop-gate opt-in
+// rather than only --force, which would override that tool (#194).
+func TestInstallHooksConflictNamesTheStopGateOptIn(t *testing.T) {
+	root := gitRepo(t)
+	gitIn(t, root, "config", "--local", "core.hooksPath", ".husky")
+	_, out, errOut := runCLI(t, root, nil, "setup", "--install-hooks", "--yes")
+	if !strings.Contains(out+errOut, "--enable-stop-gate") {
+		t.Fatalf("the conflict must name --enable-stop-gate:\n%s%s", out, errOut)
+	}
+}

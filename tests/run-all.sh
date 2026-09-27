@@ -58,6 +58,8 @@ if [ -f tests/go/test-fsm.sh ]; then bash tests/go/test-fsm.sh; fi
 # what let this one be absent from the list without anything noticing. A required suite that
 # silently skips when missing reproduces the exact failure it was added to close.
 bash tests/go/test-stop-hook.sh
+# The SessionStart notice for a missing Stop-gate opt-in (#194) — unguarded for the same reason.
+bash tests/go/test-session-start-check.sh
 
 # CI runs shellcheck over every *.sh (.github/workflows/test.yml) but run-all.sh did not, so a
 # shell defect could pass the whole local suite and fail CI - which is exactly what happened on

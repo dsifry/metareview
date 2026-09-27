@@ -36,6 +36,11 @@ if [ -n "$CURABS" ] && [ "$(norm "$CURABS")" = "$(norm "$WANT")" ] && [ -x "$WAN
   MSG="metareview: the git-native push gate is installed, but this repository has not opted into the Stop gate, so session completion is not gated here. Run \`metareview setup --enable-stop-gate\` to opt in."
 else
   MSG="metareview: the git-native review gate is NOT installed (or its hook scripts are missing) on this repo — an unreviewed 'git push' will NOT be blocked. To install it (non-destructive; refuses on conflict): run \`metareview setup --install-hooks\` interactively, or \`metareview setup --install-hooks --yes\` headlessly, or \`--dry-run\` to preview."
+  # Another tool owns core.hooksPath (husky, lefthook, beads): --install-hooks refuses there, and --force would
+  # override that tool. The Stop gate does not need core.hooksPath, so name the opt-in that works (#194).
+  if [ -n "$CUR" ] && [ "$(git -C "$ROOT" config --local --get metareview.stopGate 2>/dev/null || true)" != "true" ]; then
+    MSG="$MSG core.hooksPath is set to $CUR by another tool, so install will refuse; to gate session completion here without changing it, run \`metareview setup --enable-stop-gate\`."
+  fi
 fi
 CTX="$(printf '%s' "$MSG" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))' 2>/dev/null)"
 [ -n "$CTX" ] || CTX='"metareview: run `metareview setup --install-hooks` to enable the review gate (an unreviewed push is not blocked until you do)."'

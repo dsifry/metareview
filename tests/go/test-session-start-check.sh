@@ -27,4 +27,14 @@ out="$(CLAUDE_PROJECT_DIR="$repo" bash "$HOOK")"
 printf '%s' "$out" | python3 -c 'import json,sys; json.load(sys.stdin)' || { echo "FAIL: the notice must be valid JSON: $out"; exit 1; }
 printf '%s' "$out" | grep -q "enable-stop-gate" || { echo "FAIL: a missing Stop-gate opt-in must be announced, got: $out"; exit 1; }
 
+# A repository whose own hook manager owns core.hooksPath: --install-hooks refuses there, so the notice must name
+# the standalone opt-in rather than only a command that will fail.
+husky="$TMP/husky"
+mkdir -p "$husky/.husky"
+cd "$husky"
+git init -q -b main
+git config core.hooksPath .husky
+out="$(CLAUDE_PROJECT_DIR="$husky" bash "$HOOK")"
+printf '%s' "$out" | grep -q "enable-stop-gate" || { echo "FAIL: a repo with its own hook manager must be told about --enable-stop-gate, got: $out"; exit 1; }
+
 echo "test-session-start-check: ok"

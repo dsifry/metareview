@@ -1081,6 +1081,8 @@ func handleHookInstall(uninstall, yes, force, dryRun bool) {
 			_, _ = fmt.Fprintln(stdout, "  - "+c)
 		}
 		_, _ = fmt.Fprintln(stdout, "Resolve it, or re-run with --force to override.")
+		// --force would override the other tool's hooks. The Stop gate does not need core.hooksPath (#194).
+		_, _ = fmt.Fprintln(stdout, "To keep that tool's hooks and still gate session completion here, opt into the Stop gate alone: metareview setup --enable-stop-gate")
 		exit(1)
 	}
 	if dryRun {
