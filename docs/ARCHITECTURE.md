@@ -177,9 +177,14 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   branch name (`main`, `origin/main`, `refs/heads/…`, `refs/remotes/…`) is `merge-base(HEAD, <branch>)` — the fork
   point, so an advancing base never folds its new commits into the reviewed diff; a SHA, tag or revision
   expression (`HEAD~2`) is that exact commit. A short name that is both a branch and a SHA prefix is the branch
-  (git's precedence); a full 40/64-hex string is always the commit. No `--base` keeps each command's default.
+  (git's precedence), a branch that shares a tag's name is the branch, and a full 40/64-hex string is always the
+  commit. With no merge-base in a shallow clone the error says to fetch full history. No `--base` keeps each
+  command's default.
   Records store the SHA (`baseSha`/`base_sha`, which every match compares) and the base as typed
-  (`requestedBase`/`requested_base`, never matched on), so pre-#175 markers keep matching on their SHA.
+  (`requestedBase`/`requested_base`, never matched on). A pre-#175 marker keeps matching whenever its recorded
+  SHA equals what the base resolves to now — a SHA `--base`, or a branch that has not moved past the fork point.
+  One recorded with `--base main` after main advanced holds main's tip, a different diff, so it no longer matches
+  and the review is re-recorded.
 - **Stale task reviews (#187):** pr-ready and `status` automatically retire only task-done and epic-ready reviews
   whose target is exactly `--help` or `-h` (artifacts of the bug #164 fixed, never reviews of work), through one
   shared predicate, `reviewstate.FlagTargetRunIDs`. The task-done and epic-ready CLIs now refuse any target starting

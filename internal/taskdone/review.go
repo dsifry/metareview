@@ -534,6 +534,7 @@ func contextMarkdown(runID string, task tasksource.Source, git gitcontext.Contex
 		"## Task\n\n" + task.Body + "\n\n" +
 		"## Git\n\n" +
 		"- Base: " + markdown.InlineCode(git.BaseSHA) + "\n" +
+		markdown.OptionalListItem("Requested base", git.RequestedBase) +
 		"- Head: " + markdown.InlineCode(git.HeadSHA) + "\n" +
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +

@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/dsifry/metareview/internal/baseref"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +14,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/dsifry/metareview/internal/baseref"
 )
 
 const maxDiffBytes = 120000

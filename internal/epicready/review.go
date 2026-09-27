@@ -567,6 +567,7 @@ func contextMarkdown(runID string, epic epicsource.Source, children []tasksource
 		"## Children\n\n" + childrenMarkdown(children) + "\n\n" +
 		"## Git\n\n" +
 		"- Base: " + markdown.InlineCode(git.BaseSHA) + "\n" +
+		markdown.OptionalListItem("Requested base", git.RequestedBase) +
 		"- Head: " + markdown.InlineCode(git.HeadSHA) + "\n" +
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
 		"- Gate effect: " + markdown.InlineCode(gateEffect) + "\n\n" +

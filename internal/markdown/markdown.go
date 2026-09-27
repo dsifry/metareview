@@ -55,3 +55,11 @@ func FencedCodeBlock(language, content string) string {
 	fence := strings.Repeat("`", size)
 	return fence + language + "\n" + content + "\n" + fence
 }
+
+// OptionalListItem renders "- label: `value`" as a list line, or nothing when value is empty.
+func OptionalListItem(label, value string) string {
+	if value == "" {
+		return ""
+	}
+	return "- " + label + ": " + InlineCode(value) + "\n"
+}

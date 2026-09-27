@@ -45,3 +45,12 @@ func TestFencedCodeBlock(t *testing.T) {
 		})
 	}
 }
+
+func TestOptionalListItem(t *testing.T) {
+	if got := OptionalListItem("Requested base", "main"); got != "- Requested base: `main`\n" {
+		t.Errorf("got %q", got)
+	}
+	if got := OptionalListItem("Requested base", ""); got != "" {
+		t.Errorf("an empty value must render nothing, got %q", got)
+	}
+}

@@ -1312,6 +1312,7 @@ func contextMarkdown(runID string, git gitcontext.Context, profile contextprofil
 		"Run ID: " + markdown.InlineCode(runID) + "\n\n" +
 		"## Git\n\n" +
 		"- Base: " + markdown.InlineCode(git.BaseSHA) + "\n" +
+		markdown.OptionalListItem("Requested base", git.RequestedBase) +
 		"- Head: " + markdown.InlineCode(git.HeadSHA) + "\n" +
 		"- Branch: " + markdown.InlineCode(git.Branch) + "\n" +
 		"- " + reviewlog.ReviewerInputDigestLabel + " " + markdown.InlineCode(reviewInputDigest) + "\n" +

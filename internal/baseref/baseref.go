@@ -4,8 +4,9 @@
 // once that branch advances, its tip would fold the branch's new commits, inverted, into the reviewed diff. Anything
 // else — a SHA, a tag, `HEAD`, `HEAD~2` — names an exact commit and resolves to it.
 //
-// Ambiguity follows git's precedence for a short name: a branch whose name is also a SHA prefix resolves as the
-// branch. A full 40- or 64-hex string is always the commit.
+// A short name that is both a branch and a SHA prefix resolves as the branch (git's precedence), and a branch that
+// shares its name with a tag resolves as the branch — its own ref is merge-based, never the tag. A full 40- or
+// 64-hex string is always the commit.
 package baseref
 
 import (
@@ -22,31 +23,47 @@ var fullSHA = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // Resolve returns the commit ref names as a review base. The caller validates ref first.
 func Resolve(run Runner, ref string) (string, error) {
-	tip, ok, err := run("rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+	branch, err := branchRef(run, ref)
 	if err != nil {
 		return "", err
 	}
-	if !ok || tip == "" {
-		return "", fmt.Errorf("invalid git base: %s", ref)
+	if branch == "" {
+		return commit(run, ref)
 	}
-	branch, err := isBranch(run, ref)
-	if err != nil || !branch {
-		return tip, err
+	// The branch's own ref, not the short name: a tag of the same name would win rev-parse's lookup.
+	tip, err := commit(run, branch)
+	if err != nil {
+		return "", err
 	}
 	base, ok, err := run("merge-base", "HEAD", tip)
 	if err != nil {
 		return "", err
 	}
-	if !ok || base == "" {
-		return "", fmt.Errorf("invalid git base: %s has no merge base with HEAD", ref)
+	if ok && base != "" {
+		return base, nil
 	}
-	return base, nil
+	if shallow, _, err := run("rev-parse", "--is-shallow-repository"); err == nil && shallow == "true" {
+		return "", fmt.Errorf("invalid git base: %s has no merge base with HEAD in this shallow clone; fetch full history (e.g. actions/checkout fetch-depth: 0)", ref)
+	}
+	return "", fmt.Errorf("invalid git base: %s has no merge base with HEAD", ref)
 }
 
-// isBranch reports whether ref names a local or remote-tracking branch.
-func isBranch(run Runner, ref string) (bool, error) {
+// commit resolves ref to exactly the commit it names.
+func commit(run Runner, ref string) (string, error) {
+	sha, ok, err := run("rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	if !ok || sha == "" {
+		return "", fmt.Errorf("invalid git base: %s", ref)
+	}
+	return sha, nil
+}
+
+// branchRef returns the full ref of the local or remote-tracking branch ref names, or "" if it names none.
+func branchRef(run Runner, ref string) (string, error) {
 	if fullSHA.MatchString(ref) {
-		return false, nil
+		return "", nil
 	}
 	candidates := []string{"refs/heads/" + ref, "refs/remotes/" + ref}
 	if strings.HasPrefix(ref, "refs/heads/") || strings.HasPrefix(ref, "refs/remotes/") {
@@ -55,11 +72,11 @@ func isBranch(run Runner, ref string) (bool, error) {
 	for _, candidate := range candidates {
 		_, ok, err := run("show-ref", "--verify", "--quiet", candidate)
 		if err != nil {
-			return false, err
+			return "", err
 		}
 		if ok {
-			return true, nil
+			return candidate, nil
 		}
 	}
-	return false, nil
+	return "", nil
 }

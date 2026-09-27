@@ -37,6 +37,7 @@ type learningRunRecord struct {
 	Scope              string   `json:"scope"`
 	PostMergePR        string   `json:"postMergePr"`
 	BaseSHA            string   `json:"baseSha"`
+	RequestedBase      string   `json:"requestedBase,omitempty"`
 	HeadSHA            string   `json:"headSha"`
 	AcceptedPath       string   `json:"acceptedPath"`
 	DiscardPath        string   `json:"discardPath"`
@@ -130,6 +131,7 @@ func RunPostMerge(root string, options ReviewOptions) (ReviewResult, error) {
 			Scope:            "post-merge-learning",
 			PostMergePR:      options.PostMergePR,
 			BaseSHA:          source.Git.BaseSHA,
+			RequestedBase:    source.Git.RequestedBase,
 			HeadSHA:          source.Git.HeadSHA,
 			AcceptedPath:     acceptedRel,
 			DiscardPath:      discardRel,

@@ -162,3 +162,29 @@ func TestRunnerErrorsPropagate(t *testing.T) {
 		}
 	}
 }
+
+// A tag that shares a branch's name must not bend the branch rule: rev-parse prefers refs/tags, so resolving the
+// short name and then merge-basing would use the TAG's commit. The branch ref itself is resolved.
+func TestABranchNamedLikeATagUsesTheBranch(t *testing.T) {
+	r, fork, _ := feature(t)
+	r.git("tag", "main", "feat") // a tag named main, pointing somewhere else entirely
+	if got, err := Resolve(r.run, "main"); err != nil || got != fork {
+		t.Errorf("Resolve(main) = %s, %v; want the branch's fork point %s", got, err, fork)
+	}
+}
+
+// In a shallow clone the fork point is outside the fetched history; the error must say so and how to fix it.
+func TestAShallowCloneNamesTheCause(t *testing.T) {
+	origin, _, _ := feature(t)
+	dir := filepath.Join(t.TempDir(), "clone")
+	clone := exec.Command("git", "clone", "-q", "--depth", "1", "--branch", "feat", "file://"+origin.root, dir)
+	if out, err := clone.CombinedOutput(); err != nil {
+		t.Fatalf("clone: %v\n%s", err, out)
+	}
+	r := &repo{t: t, root: dir}
+	r.git("fetch", "-q", "--depth", "1", "origin", "main:refs/remotes/origin/main")
+	_, err := Resolve(r.run, "origin/main")
+	if err == nil || !strings.Contains(err.Error(), "shallow") || !strings.Contains(err.Error(), "fetch-depth") {
+		t.Fatalf("err = %v, want a shallow-clone hint", err)
+	}
+}

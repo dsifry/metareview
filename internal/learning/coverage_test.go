@@ -488,3 +488,15 @@ func newLearningRepo(t *testing.T) string {
 	run("commit", "-q", "-m", "base")
 	return root
 }
+
+// #175: the learning run record names the --base as typed beside the SHA it resolved to.
+func TestRunPostMergeRecordsTheRequestedBase(t *testing.T) {
+	root := newLearningRepo(t)
+	if _, err := RunPostMerge(root, ReviewOptions{PostMergePR: "1", Base: "HEAD", HomeDir: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := os.ReadFile(filepath.Join(root, ".metareview", "learning-runs.jsonl"))
+	if err != nil || !strings.Contains(string(runs), `"requestedBase":"HEAD"`) {
+		t.Fatalf("the learning run record must carry requestedBase (%v):\n%s", err, runs)
+	}
+}
