@@ -280,6 +280,12 @@ func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 		"the risk-proj-abcdefghijklmnop-assessment",
 		"laughs_12345678 and neighs_abcdefgh",
 		"see mygithub_pat_abcdefghijklmnop for the naming scheme",
+		// Word-interior matches near the start of the text (keyIsWordInterior's index bounds), after 'z' (the top
+		// of the lowercase range), and with uppercase text right after the match, outside it.
+		"xsk-abcdefghijklmnopqrstu",
+		"xyghp_abcdefghijkl",
+		"zsk-abcdefghijklmnopqrstu",
+		"docs/metareview/reviews/mrv-20260831-183207933768000-task-done-mechanical-precision-lens-c79c1389.md PASS",
 	} {
 		if got := Redact(keep); got != keep {
 			t.Errorf("Redact(%q) = %q, want it unchanged", keep, got)
@@ -317,6 +323,9 @@ func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 		// A lowercase-only key still redacts in a context that is not a word interior.
 		"KEYghp_abcdefghijklmnopqrstuvwxyz",
 		"0sk-abcdefghijklmnopqrstuvwxyz",
+		// A key whose only uppercase letter is its last byte, at both ends of the uppercase range.
+		"xghp_abcdefghijklmnopA",
+		"xghp_abcdefghijklmnopZ",
 	} {
 		if got := Redact(secret); !strings.Contains(got, redactionMarker) || strings.Contains(got, "abcdefghijklmnop") {
 			t.Errorf("Redact(%q) = %q, want the key redacted", secret, got)
@@ -324,8 +333,8 @@ func TestRedactLeavesWordsThatContainKeyPrefixes(t *testing.T) {
 	}
 }
 
-// TestRedactKeepsTheCharacterBeforeAKey pins the exact output: only the key is replaced, so the character in front
-// of it (the guard the pattern consumes) survives, and a bearer token is redacted whole, tail and all (#184).
+// TestRedactKeepsTheCharacterBeforeAKey pins the exact output: only the key-prefix match is replaced, so the text
+// in front of it survives, and a bearer token is redacted whole, tail and all (#184).
 func TestRedactKeepsTheCharacterBeforeAKey(t *testing.T) {
 	for in, want := range map[string]string{
 		"key=sk-abcdefghijklmnopqrstuvwxyz":                          "key=" + redactionMarker,
