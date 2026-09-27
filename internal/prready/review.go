@@ -292,7 +292,7 @@ func Create(root string, options Options) (Result, error) {
 		Scope:            "pr-ready",
 		Target:           targetRecord,
 		PreviousRunIDs:   previousRunIDs,
-		HistoricalRunIDs: historicalPRReadyRunIDsForCurrentTarget(root, logs, targetRecord, git),
+		HistoricalRunIDs: append(historicalPRReadyRunIDsForCurrentTarget(root, logs, targetRecord, git), landedTaskReviewRunIDs(root, logs, git)...),
 		ChangedPaths:     reviewedPaths(analysisGit),
 		CurrentTarget:    targetRecord,
 		LinkedTargets:    linkedTargets,
@@ -729,6 +729,39 @@ func historicalPRReadyRunIDsForCurrentTarget(root string, logs []reviewlog.Summa
 	}
 	return ids
 }
+
+// landedTaskReviewRunIDs (#187) returns the task-done reviews whose reviewed commit is already on the PR's base.
+// Such a review covered work that has landed, so it is history for this PR even when its covered paths overlap
+// the branch diff. Without this, a stale NEEDS_REVISION review — one tied to a head weeks old, which can never be
+// re-run — blocked every later PR that touched the files it once covered.
+//
+// The reviewed head comes from the local run record, else from the log's committed context pack (a log from
+// another clone has no run record). Fail closed: an unknown or invalid head, or a head git cannot place, keeps
+// the review in the current set.
+func landedTaskReviewRunIDs(root string, logs []reviewlog.Summary, git gitcontext.Context) []string {
+	if !validGitObjectID(git.BaseSHA) {
+		return nil
+	}
+	var ids []string
+	for _, log := range logs {
+		if log.RunID == "" || log.Kind != "task-done" {
+			continue
+		}
+		head := log.HeadSHA
+		if head == "" {
+			identity, err := readLegacyPRReadyContextIdentity(root, log.ContextRel)
+			if err != nil {
+				continue
+			}
+			head = identity.Head
+		}
+		if validGitObjectID(head) && gitCommitIsAncestor(root, head, git.BaseSHA) {
+			ids = append(ids, log.RunID)
+		}
+	}
+	return ids
+}
+
 func legacyEscalatedPRReadyForTarget(root string, logs []reviewlog.Summary, targetRecord map[string]string, git gitcontext.Context) (string, bool) {
 	for _, log := range logs {
 		if log.RunID == "" || log.Kind != "pr-ready" || !strings.EqualFold(log.Verdict, "ESCALATED") {

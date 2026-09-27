@@ -172,6 +172,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   checkout the two coincide. Tripwires, not proofs (they match literal path forms only):
   `TestFSMRootsAreDeclared` (a `root: store|work` declaration at each such site in `internal/fsm`) and
   `TestRunStoreReadersAreDeclared` (run-store readers outside the FSM). Still per-directory and planned in #171: `status`' abandoned-run scan and findings.
+- **Landed task reviews are history (#187):** pr-ready considers a task-done review only while the commit it
+  reviewed is not yet on the PR's base. A review of a commit already on the base (head from the local run record,
+  else the log's committed context pack) covered work that has landed, so it no longer blocks later PRs that touch
+  the files it once covered. Unknown or unplaceable heads fail closed (the review stays current).
 - **Run lineage:** a NEEDS_REVISION parent is retired when a clean same-target+same-kind child links via
   `previousRunId` (supersede). Repair via `--previous-run <run-id>`; never `git add -A` failed-run artifacts.
 - **Evidence receipts:** `evidence run -- <cmd>` records a validation receipt (kind + exitCode + hashes);
