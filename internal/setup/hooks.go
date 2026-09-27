@@ -172,7 +172,7 @@ func DisableStopGate(root string, git GitRunner) (bool, error) {
 	if !stopGateOptedIn(root, git) {
 		return false, nil
 	}
-	_, err := git(root, "config", "--local", "--unset", StopGateKey)
+	_, err := git(root, "config", "--local", "--unset-all", StopGateKey)
 	return err == nil, err
 }
 
@@ -384,7 +384,7 @@ func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 	// #194), which is not a failure; anything else stops here with nothing taken apart, so the same command can
 	// finish the job once the failure clears. (Removing core.hooksPath first left a retry that found nothing to
 	// uninstall while metareview.stopGate kept pre-finish.sh gating the repository.)
-	if _, err := git(root, "config", "--local", "--unset", StopGateKey); err != nil && !isExitCode(err, 5) {
+	if _, err := git(root, "config", "--local", "--unset-all", StopGateKey); err != nil && !isExitCode(err, 5) {
 		return false, fmt.Errorf("removing the Stop-gate opt-in (%s): %w", StopGateKey, err)
 	}
 	if _, err := git(root, "config", "--local", "--unset", "core.hooksPath"); err != nil {

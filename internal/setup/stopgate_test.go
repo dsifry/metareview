@@ -205,7 +205,7 @@ func TestUninstallSurfacesAFailedOptInRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	failing := func(r string, args ...string) ([]byte, error) {
-		if len(args) == 4 && args[2] == "--unset" && args[3] == StopGateKey {
+		if len(args) == 4 && args[2] == "--unset-all" && args[3] == StopGateKey {
 			return nil, errors.New("could not lock config file")
 		}
 		return g(r, args...)
@@ -255,5 +255,29 @@ func TestUninstallSurfacesAFailedHooksPathRemoval(t *testing.T) {
 	}
 	if changed, err := UninstallHookInstall(root, g); err != nil || !changed {
 		t.Fatalf("the retry must complete the uninstall: %v %v", changed, err)
+	}
+}
+
+// Duplicate opt-in lines (a hand-edited config): plain --unset exits 5 and changes nothing — the same code as a
+// missing key — so uninstall and --disable-stop-gate must remove EVERY value (CodeRabbit on #195).
+func TestOptInRemovalClearsDuplicateValues(t *testing.T) {
+	for _, remove := range []func(string, GitRunner) error{
+		func(root string, g GitRunner) error { _, err := UninstallHookInstall(root, g); return err },
+		func(root string, g GitRunner) error { _, err := DisableStopGate(root, g); return err },
+	} {
+		root, g := tempRepo(t)
+		plan, _ := PlanHookInstall(root, g)
+		if err := ApplyHookInstall(root, plan, false, g); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := g(root, "config", "--local", "--add", StopGateKey, "true"); err != nil {
+			t.Fatal(err)
+		}
+		if err := remove(root, g); err != nil {
+			t.Fatal(err)
+		}
+		if got := stopGate(t, root, g); got != "" {
+			t.Fatalf("every opt-in value must be removed, got %q", got)
+		}
 	}
 }
