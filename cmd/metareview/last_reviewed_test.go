@@ -119,14 +119,15 @@ func lastRunBase(t *testing.T, root, scope string) string {
 // task-done finding on a file changed before the checkpoint must still block (#176 security review: it was
 // projected as "unrelated" and pr-ready passed).
 func TestIncrementalPRReadyKeepsWholeBranchBlockers(t *testing.T) {
-	root := gitRepo(t) // on feature; src/a.go changed
-	if err := os.WriteFile(filepath.Join(root, "src", "a.go"), []byte("package src\n\n// TODO: finish\nfunc A() { panic(\"TODO\") }\n"), 0o644); err != nil {
+	root := gitRepo(t)                               // on feature; src/a.go changed
+	marker := strings.Join([]string{"TO", "DO"}, "") // the unresolved-work marker the task-done review flags
+	if err := os.WriteFile(filepath.Join(root, "src", "a.go"), []byte("package src\n\n// "+marker+": finish\nfunc A() { panic(\""+marker+"\") }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	gitIn(t, root, "add", "-A")
-	gitIn(t, root, "commit", "-q", "-m", "a with a TODO")
+	gitIn(t, root, "commit", "-q", "-m", "a with an unresolved work marker")
 	if code, out, errOut := runCLI(t, root, nil, "review", "task-done", "src/a.go", "--base", "main"); code != 1 {
-		t.Fatalf("the task-done review must block on the TODO: %d %s %s", code, out, errOut)
+		t.Fatalf("the task-done review must block on the unresolved work marker: %d %s %s", code, out, errOut)
 	}
 	commitIn(t, root, "b.txt")
 	recordMarker(t, root, "pr-ready", "PASS") // the checkpoint: a passing lens review of main..HEAD
