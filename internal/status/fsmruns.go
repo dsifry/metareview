@@ -69,6 +69,9 @@ func DiscoverAbandonedRuns(root string) []AbandonedRun {
 // disagrees with the judge type, and the caller above supplies neither — and an untestable
 // branch in a gate is the shape this repository keeps finding defects in.
 func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
+	// run-store: current-worktree. Deliberately NOT repo.RunStoreRoot yet: the shared store holds
+	// every worktree's runs, and blocking this checkout's Stop hook on another branch's abandoned run
+	// would be a false block. Branch-scoping comes first (#169 work plan, Phase 4).
 	dir := filepath.Join(root, ".metareview", "runs")
 	entries, err := os.ReadDir(dir)
 	if err != nil {

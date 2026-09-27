@@ -2,6 +2,10 @@ package repo
 
 import (
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,6 +38,44 @@ func TestRunStoreRootResolvesMainWorktreeAndFallsBack(t *testing.T) {
 		runStoreGit = stub
 		if got := RunStoreRoot(start); got != RootOr(start) {
 			t.Errorf("%s: got %q, want the RootOr fallback %q", name, got, RootOr(start))
+		}
+	}
+}
+
+// TestRunStoreReadersAreDeclared keeps #169 from recurring on a new surface: outside the FSM
+// (which owns the store), every Go file that builds a `.metareview/runs` path must either resolve
+// it through RunStoreRoot or carry a `run-store: current-worktree` comment explaining why not.
+func TestRunStoreReadersAreDeclared(t *testing.T) {
+	repoRoot := filepath.Join("..", "..")
+	for _, top := range []string{"cmd", "internal"} {
+		err := filepath.WalkDir(filepath.Join(repoRoot, top), func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				if strings.HasPrefix(d.Name(), ".") || path == filepath.Join(repoRoot, "internal", "fsm") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			src, err := os.ReadFile(path) // #nosec G304 -- walking this repository's own sources
+			if err != nil {
+				return err
+			}
+			text := string(src)
+			if !strings.Contains(text, `".metareview", "runs"`) {
+				return nil
+			}
+			if !strings.Contains(text, "RunStoreRoot(") && !strings.Contains(text, "run-store: current-worktree") {
+				t.Errorf("%s builds a .metareview/runs path without repo.RunStoreRoot or a `run-store: current-worktree` justification", path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 }

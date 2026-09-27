@@ -11,11 +11,13 @@ import (
 // first block, whose first line is `worktree <path>`. bare reports a bare main worktree, which has
 // no checkout to hold a run store.
 //
-// It is the ONE definition of "where FSM runs live". The FSM stores every run under the main
-// worktree, so a run started from a linked worktree lands in the main checkout's
-// .metareview/runs/. record-lenses used to resolve the CURRENT worktree instead, and from a linked
-// worktree it reported "no such FSM run" for a run the FSM had just created (#169). Both sides
-// now parse the same output with this function so they cannot disagree again.
+// It is the definition of "where FSM runs live" that the FSM (the writer) and record-lenses (a
+// reader) share. The FSM stores every run under the main worktree, so a run started from a linked
+// worktree lands in the main checkout's .metareview/runs/. record-lenses used to resolve the
+// CURRENT worktree instead, and from a linked worktree it reported "no such FSM run" for a run the
+// FSM had just created (#169). Any other reader of .metareview/runs/ must use RunStoreRoot or say,
+// with a `run-store: current-worktree` comment, why it does not; TestRunStoreReadersAreDeclared
+// enforces that.
 func MainWorktreeFromPorcelain(out string) (path string, bare bool) {
 	block, _, _ := strings.Cut(out, "\n\n")
 	lines := strings.Split(block, "\n")
