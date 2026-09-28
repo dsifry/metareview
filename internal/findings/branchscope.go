@@ -5,10 +5,6 @@ import "github.com/dsifry/metareview/internal/scope"
 // loadScope is the seam over reading the branch in hand (scope.Load with the real git runner).
 var loadScope = func(root string) scope.Scope { return scope.Load(root, nil) }
 
-// currentBranch is the branch a finding recorded now belongs to: the checked-out branch as git lists it (mid-rebase,
-// the branch being rebased), empty on a detached HEAD or outside a repository.
-func currentBranch(root string) string { return loadScope(root).Current }
-
 // ScopedBlocking splits the unresolved blockers in the checkout's ledger into this branch's and the rest (#178). The
 // ledger is per checkout, not per branch, so without this a finding raised on branch A blocks branch B after a
 // `git switch`. Each finding is placed by the one rule the abandoned-run scan uses (internal/scope): in scope when it

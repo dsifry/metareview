@@ -325,6 +325,14 @@ func (s Scope) Classify(branch, head string) Class {
 	}
 }
 
+// Owns reports whether an item recorded on branch is the branch in hand's by name alone: the current branch, or one of
+// its former names that no live branch holds (Classify's name leg). A writer that keeps one row per branch uses it to
+// tell its own rows from another branch's without the range leg, which also takes in a stacked lower branch's items.
+// An unknown scope owns nothing but the current branch.
+func (s Scope) Owns(branch string) bool {
+	return branch != "" && (branch == s.Current || s.known && s.former[branch] && !s.branches[branch])
+}
+
 // reachable reports whether head is an ancestor of HEAD: one git call per distinct legacy head, and a second when
 // that one fails. Only git's own "no" (exit 1), or a commit git no longer has, is unreachable: a malformed head or a
 // failed call proves nothing, so it stays in scope.

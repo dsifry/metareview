@@ -71,6 +71,14 @@ func TestClassify(t *testing.T) {
 	if asked != 6 {
 		t.Errorf("each distinct well-formed legacy head is asked about once, asked %d", asked)
 	}
+	for branch, want := range map[string]bool{"feat": true, "feat-old": true, "other": false, "": false, "gone": false} {
+		if s.Owns(branch) != want {
+			t.Errorf("Owns(%q) = %v, want %v", branch, !want, want)
+		}
+	}
+	if (Scope{Current: "feat", former: map[string]bool{"feat-old": true}}).Owns("feat-old") {
+		t.Error("an unknown scope owns no former name")
+	}
 	// An unreadable repository proves nothing belongs elsewhere: everything is in scope.
 	if (Scope{}).Classify("anything", "x") != InScope {
 		t.Error("an unknown scope must keep every item in scope")

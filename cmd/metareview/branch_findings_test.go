@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -61,12 +62,21 @@ func prReadyLog(t *testing.T, root, evidence string) string {
 	return log
 }
 
-// prReadyBlocksTA reports whether pr-ready on the checked-out branch lists the target t-a among its blocked targets.
+// prReadyBlocksTA reports whether pr-ready on the checked-out branch lists exactly the target t-a among its blocked
+// targets.
 func prReadyBlocksTA(t *testing.T, root, evidence string) bool {
 	t.Helper()
-	log := prReadyLog(t, root, evidence)
-	i := strings.Index(log, "Blocked targets: ")
-	return i >= 0 && strings.Contains(log[i:], "t-a")
+	return slices.Contains(blockedTargets(prReadyLog(t, root, evidence)), "t-a")
+}
+
+// blockedTargets is the target list of a log's "Blocked targets: " line — that line only, split as the reviewer joins it.
+func blockedTargets(log string) []string {
+	_, rest, ok := strings.Cut(log, "Blocked targets: ")
+	if !ok {
+		return nil
+	}
+	line, _, _ := strings.Cut(rest, "\n")
+	return strings.Split(strings.TrimSpace(line), ", ")
 }
 
 func untracked(t *testing.T, root string) map[string]bool {

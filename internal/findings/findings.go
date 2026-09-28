@@ -126,8 +126,16 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	if err != nil {
 		return Result{}, err
 	}
+	sc := loadScope(root)
 	if run.Branch == "" {
-		run.Branch = currentBranch(root)
+		run.Branch = sc.Current
+	}
+	// One row per branch (#178): a finding raised again on another branch is that branch's own obligation, never a
+	// transfer of this one — the branch that raised it first still has the defect until its own chain fixes it. So only
+	// the rows this run's branch owns are refreshed, deduplicated or fixed here: its own name, a former name after a
+	// rename, and rows that name no branch (from before #178, or a detached HEAD); a run on no branch owns every row.
+	owns := func(record Record) bool {
+		return record.Branch == "" || run.Branch == "" || record.Branch == run.Branch || run.Branch == sc.Current && sc.Owns(record.Branch)
 	}
 	previousRuns := previousRunSet(options)
 	resetRuns := resetRunSet(options)
@@ -143,11 +151,12 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		if record.Status == "open" &&
 			record.Fingerprint != "" &&
 			currentFingerprints[record.Fingerprint] &&
-			sameRunTarget(record, run) {
+			sameRunTarget(record, run) &&
+			owns(record) {
 			record.Scope = firstNonEmpty(record.Scope, run.Scope)
 			record.GitHead = firstNonEmpty(run.GitHead, record.GitHead)
-			// The obligation moves with its head: raised again on this branch, it is this branch's, so a later rebase or
-			// amend here cannot hand it back to the branch that raised it first.
+			// This branch's own row (or a legacy one): it takes the branch's current name, so a rename then a rewrite
+			// keeps it.
 			record.Branch = firstNonEmpty(run.Branch, record.Branch)
 			record.UpdatedAt = now
 		}
@@ -169,6 +178,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		// post-merge learning can tell the two apart.
 		if (previousRuns[record.RunID] || resetFinding(record, run, resetRuns)) &&
 			sameRunTarget(record, run) &&
+			owns(record) &&
 			(record.Status == "open" || record.Status == StatusOverridePending) &&
 			record.Fingerprint != "" &&
 			!IsFreshnessFingerprint(record.Fingerprint) &&
@@ -188,7 +198,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 
 	activeExisting := map[string]bool{}
 	for _, record := range updated {
-		if record.Status != "fixed" && record.Status != StatusSuperseded && record.Fingerprint != "" && sameRunTarget(record, run) {
+		if record.Status != "fixed" && record.Status != StatusSuperseded && record.Fingerprint != "" && sameRunTarget(record, run) && owns(record) {
 			activeExisting[record.Fingerprint] = true
 		}
 	}

@@ -155,21 +155,22 @@ func TestReconcileRecordsTheBranch(t *testing.T) {
 	if got := loadOne(t, root); got.Branch != "named" {
 		t.Fatalf("a re-seen legacy row adopts the run's branch, got %q", got.Branch)
 	}
-	run.ID, run.Branch = "mrv-3", "other"
-	if _, err := Reconcile(root, run, []Input{input}, Options{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := loadOne(t, root); got.Branch != "other" {
-		t.Fatalf("a re-seen row moves to the branch that raised it again, got %q", got.Branch)
-	}
-	run.ID, run.Branch = "mrv-4", ""
+	run.ID, run.Branch = "mrv-3", ""
+	orig := loadScope
 	loadScope = func(string) scope.Scope { return scope.Scope{} }
-	t.Cleanup(func() { loadScope = func(root string) scope.Scope { return scope.Load(root, nil) } })
+	t.Cleanup(func() { loadScope = orig })
 	if _, err := Reconcile(root, run, []Input{input}, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := loadOne(t, root); got.Branch != "other" {
-		t.Fatalf("a run on no branch (detached) leaves the row's branch alone, got %q", got.Branch)
+	if got := loadOne(t, root); got.Branch != "named" {
+		t.Fatalf("a run on no branch (detached) refreshes the row and leaves its branch alone, got %q", got.Branch)
+	}
+	run.ID, run.Branch = "mrv-4", "other"
+	if _, err := Reconcile(root, run, []Input{input}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if records := readRecords(t, root); len(records) != 2 || records[0].Branch != "named" || records[1].Branch != "other" {
+		t.Fatalf("raised again on another branch, the finding gets a row of that branch's own: %+v", records)
 	}
 }
 
@@ -182,10 +183,10 @@ func reconcileOn(t *testing.T, root, runID, head string, input Input) {
 	}
 }
 
-// TestReraisedFindingFollowsTheBranch is the lens finding on #178's first cut: task t's finding, raised on branch-a and
-// then raised again on branch-b (branch-a still live), is one row. It must stay branch-b's after branch-b rewrites the
-// head it was recorded at — before, the row kept branch-a's name with branch-b's head, and an amend on branch-b handed
-// it back to branch-a, silently clearing branch-b's gate.
+// TestReraisedFindingFollowsTheBranch is a lens finding on #178's first cut: task t's finding, raised on branch-a and
+// then raised again on branch-b (branch-a still live), must stay branch-b's after branch-b rewrites the head it was
+// recorded at — the first cut kept one row with branch-a's name and branch-b's head, and an amend on branch-b handed it
+// back to branch-a, silently clearing branch-b's gate. Each branch now has a row of its own.
 func TestReraisedFindingFollowsTheBranch(t *testing.T) {
 	root, git := scopeRepo(t)
 	input := unsafeEval("eval")
@@ -196,8 +197,85 @@ func TestReraisedFindingFollowsTheBranch(t *testing.T) {
 	git("commit", "-q", "--allow-empty", "-m", "B")
 	reconcileOn(t, root, "mrv-b", git("rev-parse", "HEAD"), input)
 	git("commit", "-q", "--amend", "--allow-empty", "-m", "B, amended")
-	if in, elsewhere, err := ScopedBlocking(root); err != nil || len(in) != 1 || len(elsewhere) != 0 {
+	if in, elsewhere, err := ScopedBlocking(root); err != nil || ids(in) != "mrvf-b-001" || ids(elsewhere) != "mrvf-a-001" {
 		t.Fatalf("after an amend on branch-b its re-raised finding must still block it: in=%s elsewhere=%s err=%v", ids(in), ids(elsewhere), err)
+	}
+}
+
+// TestReraisedFindingKeepsTheFirstBranchsObligation is the recheck finding on the second cut, which moved the one row
+// to whichever branch raised the finding last: raising it again elsewhere — a stacked branch, or a throwaway branch
+// deleted afterwards — must never take it from the branch that raised it first, which still has the defect.
+func TestReraisedFindingKeepsTheFirstBranchsObligation(t *testing.T) {
+	root, git := scopeRepo(t)
+	input := unsafeEval("eval")
+	git("switch", "-q", "-c", "branch-a")
+	git("commit", "-q", "--allow-empty", "-m", "A")
+	reconcileOn(t, root, "mrv-a", git("rev-parse", "HEAD"), input)
+
+	git("switch", "-q", "-c", "branch-b") // stacked on branch-a
+	git("commit", "-q", "--allow-empty", "-m", "B")
+	reconcileOn(t, root, "mrv-b", git("rev-parse", "HEAD"), input)
+	git("switch", "-q", "branch-a")
+	if in, _, err := ScopedBlocking(root); err != nil || !strings.Contains(ids(in), "mrvf-a-001") {
+		t.Fatalf("a stacked branch raising it again must not take branch-a's finding: in=%s err=%v", ids(in), err)
+	}
+
+	git("switch", "-q", "-c", "tmp")
+	reconcileOn(t, root, "mrv-tmp", git("rev-parse", "HEAD"), input)
+	git("switch", "-q", "branch-a")
+	git("branch", "-q", "-D", "tmp")
+	git("commit", "-q", "--amend", "--allow-empty", "-m", "A, amended")
+	if in, _, err := ScopedBlocking(root); err != nil || !strings.Contains(ids(in), "mrvf-a-001") {
+		t.Fatalf("a throwaway branch raising it again must not orphan branch-a's finding: in=%s err=%v", ids(in), err)
+	}
+
+	// A chained fix on another branch closes that branch's row only.
+	git("switch", "-q", "branch-b")
+	run := Run{ID: "mrv-b2", Scope: "task-done", Target: map[string]string{"type": "advisory", "id": "t"}, RepoRoot: root, GitHead: git("rev-parse", "HEAD")}
+	if _, err := Reconcile(root, run, nil, Options{PreviousRunIDs: []string{"mrv-a", "mrv-b"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range readRecords(t, root) {
+		if want := map[string]string{"branch-a": "open", "branch-b": "fixed", "tmp": "open"}[r.Branch]; r.Status != want {
+			t.Errorf("row %s on %s: status %s, want %s", r.ID, r.Branch, r.Status, want)
+		}
+	}
+}
+
+// TestReraisedOverridePendingFindingBlocksTheNewBranch: a finding whose override is only requested still blocks. Raised
+// again on an unrelated branch, it must block there too — the first cut wrote no row for the new branch.
+func TestReraisedOverridePendingFindingBlocksTheNewBranch(t *testing.T) {
+	root, git := scopeRepo(t)
+	input := unsafeEval("eval")
+	git("switch", "-q", "-c", "branch-a")
+	git("commit", "-q", "--allow-empty", "-m", "A")
+	reconcileOn(t, root, "mrv-a", git("rev-parse", "HEAD"), input)
+	pending := loadOne(t, root)
+	pending.Status = StatusOverridePending
+	seedRecords(t, root, pending)
+
+	git("switch", "-q", "-c", "branch-b", "main")
+	git("commit", "-q", "--allow-empty", "-m", "B")
+	reconcileOn(t, root, "mrv-b", git("rev-parse", "HEAD"), input)
+	if in, _, err := ScopedBlocking(root); err != nil || ids(in) != "mrvf-b-001" {
+		t.Fatalf("raised again on branch-b, the finding must block branch-b: in=%s err=%v", ids(in), err)
+	}
+}
+
+// TestNameLegAloneKeepsARecordedBranchsFinding: a finding whose recorded head git no longer has (pruned after a rewrite)
+// blocks its branch by name alone, and nowhere else; a legacy row at the same head blocks nothing. This is the case the
+// legacy rule cannot cover, so it fails if findings stop recording their branch.
+func TestNameLegAloneKeepsARecordedBranchsFinding(t *testing.T) {
+	root, git := scopeRepo(t)
+	git("switch", "-q", "-c", "feat")
+	gone := strings.Repeat("f", 40)
+	seedRecords(t, root, blockerOn("named", "feat", gone), blockerOn("legacy", "", gone))
+	if in, elsewhere, _ := ScopedBlocking(root); ids(in) != "named" || ids(elsewhere) != "legacy" {
+		t.Fatalf("on feat: in=%s elsewhere=%s", ids(in), ids(elsewhere))
+	}
+	git("switch", "-q", "main")
+	if in, _, _ := ScopedBlocking(root); len(in) != 0 {
+		t.Fatalf("on main: in=%s", ids(in))
 	}
 }
 
@@ -223,6 +301,11 @@ func TestScopedBlockingSurvivesRewrites(t *testing.T) {
 	blocks("git commit --amend")
 	git("branch", "-m", "feat-renamed")
 	blocks("git branch -m")
+	// Raised again after the rename, it is still the same branch's one row, now under the new name.
+	reconcileOn(t, root, "mrv-f2", git("rev-parse", "HEAD"), unsafeEval("eval"))
+	if records := readRecords(t, root); len(records) != 1 || records[0].Branch != "feat-renamed" {
+		t.Fatalf("a renamed branch refreshes its own row: %+v", records)
+	}
 	git("switch", "-q", "main")
 	if in, _, _ := ScopedBlocking(root); len(in) != 0 {
 		t.Fatalf("on main, feat's finding must not block: in=%s", ids(in))
