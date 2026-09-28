@@ -113,6 +113,15 @@ func TestAbandonedRunsAreAttributedToTheirContainingWorktree(t *testing.T) {
 	if !LegacyRunsPending(wt) || LegacyRunsPending(t.TempDir()) {
 		t.Error("LegacyRunsPending must report the main checkout's unmigrated 0.13.x store")
 	}
+	// status names the legacy store — the main checkout's, even when asked from the linked worktree.
+	r, err := Build(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "0.13.x FSM runs are still in " + filepath.Join(main, ".metareview", "runs") + "; any `metareview fsm` command migrates them"
+	if got := strings.Join(r.Warnings, "\n"); !strings.Contains(got, want) {
+		t.Errorf("status warnings = %q, want one containing %q", got, want)
+	}
 }
 
 func TestCanonicalAndLegacyBookkeeping(t *testing.T) {
