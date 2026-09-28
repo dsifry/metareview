@@ -171,7 +171,7 @@ func (c *ctxDeps) roots() (root, common string, warns []string, err error) {
 	if err != nil {
 		return "", "", nil, err
 	}
-	copied, conflicts, err := record.MigrateLegacyRows(root, common)
+	copied, conflicts, err := record.MigrateLegacyRows(root, common, moved.Collisions...)
 	if err != nil {
 		return "", "", nil, err
 	}

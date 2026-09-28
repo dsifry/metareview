@@ -95,6 +95,17 @@ func TestAbandonedRunsAreAttributedToTheirContainingWorktree(t *testing.T) {
 	writeStoreRun(t, common, "mrv-wt-000000001", wt)
 	// A run started in a linked worktree's subdirectory that was later deleted still belongs to that worktree.
 	writeStoreRun(t, common, "mrv-wt-gonesub01", filepath.Join(wt, "deleted", "sub"))
+	// ...and one whose work dir cannot be entered: git cannot run there, so ownership comes from the nearest
+	// ancestor it can enter, still the linked worktree.
+	locked := filepath.Join(wt, "locked")
+	if err := os.MkdirAll(filepath.Join(locked, "inner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeStoreRun(t, common, "mrv-wt-locked001", filepath.Join(locked, "inner"))
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
 	// A 0.13.x run from the linked worktree, still in the main checkout's legacy store.
 	legacy := filepath.Join(main, ".metareview", "runs", "mrv-legacy-wt-01")
 	if err := os.MkdirAll(legacy, 0o700); err != nil {
@@ -114,7 +125,7 @@ func TestAbandonedRunsAreAttributedToTheirContainingWorktree(t *testing.T) {
 	if got := strings.Join(ids(DiscoverAbandonedRuns(filepath.Join(main, "sub"))), ","); got != "mrv-gone-0000001,mrv-gone-other01,mrv-sub-00000001" {
 		t.Errorf("subdirectory of the main checkout: got %s", got)
 	}
-	if got := strings.Join(ids(DiscoverAbandonedRuns(wt)), ","); got != "mrv-legacy-wt-01,mrv-wt-000000001,mrv-wt-gonesub01" {
+	if got := strings.Join(ids(DiscoverAbandonedRuns(wt)), ","); got != "mrv-legacy-wt-01,mrv-wt-000000001,mrv-wt-gonesub01,mrv-wt-locked001" {
 		t.Errorf("linked worktree: got %s", got)
 	}
 	if !LegacyRunsPending(wt) || LegacyRunsPending(t.TempDir()) {

@@ -73,8 +73,10 @@ func TestFSMStoreMigrationCollisions(t *testing.T) {
 	if err := os.CopyFS(filepath.Join(legacy, "runs", id), os.DirFS(filepath.Join(common, "runs", id))); err != nil {
 		t.Fatal(err)
 	}
-	row := `{"schemaVersion":1,"id":"` + id + `","scope":"fsm-sdlc-loop","headSha":"different","workflowHash":"x"}` + "\n"
-	_ = os.WriteFile(filepath.Join(common, "runs.jsonl"), []byte(`{"schemaVersion":1,"id":"`+id+`","scope":"fsm-sdlc-loop","headSha":"h","workflowHash":"x"}`+"\n"), 0o644)
+	// A row conflict on another id (a collided run's own row stays behind with it, so it cannot conflict).
+	other := "mrv-row-conflict-000001"
+	row := `{"schemaVersion":1,"id":"` + other + `","scope":"fsm-sdlc-loop","headSha":"different","workflowHash":"x"}` + "\n"
+	_ = os.WriteFile(filepath.Join(common, "runs.jsonl"), []byte(`{"schemaVersion":1,"id":"`+other+`","scope":"fsm-sdlc-loop","headSha":"h","workflowHash":"x"}`+"\n"), 0o644)
 	_ = os.WriteFile(filepath.Join(legacy, "runs.jsonl"), []byte(row), 0o644)
 	env := h.must(StatusOK, 0, "state", "--run", id)
 	codes := strings.Join(warningCodes(env), ",")

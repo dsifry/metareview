@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/dsifry/metareview/internal/fsm/kind"
 	"github.com/dsifry/metareview/internal/fsm/run"
@@ -101,12 +102,10 @@ func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
 		}
 		// The nearest surviving ancestor names the owner only when it is a checkout of THIS repository: a removed
 		// worktree's parent may sit inside an unrelated repository, whose toplevel matches no worktree here.
-		dir := existingAncestor(r.workDir)
-		if s, err := repo.StoreDir(dir); err != nil || canonical(s) != canonical(store) {
-			return here == main
-		}
-		owner, err := repo.Toplevel(dir)
-		if err != nil {
+		dir := enterableAncestor(r.workDir)
+		s, errStore := repo.StoreDir(dir)
+		owner, errTop := repo.Toplevel(dir)
+		if errStore != nil || errTop != nil || canonical(s) != canonical(store) {
 			return here == main
 		}
 		return canonical(owner) == here
@@ -168,11 +167,12 @@ func abandonedIn(dir string, kinds map[string]workflow.KindInfo) ([]AbandonedRun
 	return out, true
 }
 
-// existingAncestor is dir, or its nearest ancestor that still exists: a run whose work dir (a subdirectory of its
-// worktree) was deleted still belongs to that worktree, and git cannot run in a directory that is gone.
-func existingAncestor(dir string) string {
+// enterableAncestor is dir, or its nearest ancestor that exists and can be entered: a run whose work dir (a
+// subdirectory of its worktree) was deleted or locked still belongs to that worktree, and git can only run in a
+// directory it can enter.
+func enterableAncestor(dir string) string {
 	for d := filepath.Clean(dir); ; d = filepath.Dir(d) {
-		if _, err := os.Stat(d); err == nil || d == filepath.Dir(d) {
+		if syscall.Access(d, 0x1) == nil || d == filepath.Dir(d) { // X_OK: exists, and search permission
 			return d
 		}
 	}

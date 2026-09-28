@@ -11,6 +11,7 @@ import (
 	"github.com/dsifry/metareview/internal/jsonl"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -259,7 +260,9 @@ var nanos = nowNanos
 // every fsm command; the common ledger is read once; and a stamp of the legacy file's size
 // (<common>/metareview/legacy-ledger.size) skips it entirely until it changes — an older binary appending more rows.
 // A legacy row whose id the ledger holds for a different head or workflow is a conflict, reported and not merged.
-func MigrateLegacyRows(checkout, common string) (copied, conflicts []string, err error) {
+// The rows of collided runs (ids MigrateLegacyRuns left in the legacy store because the store already holds a
+// different run of that id) stay behind with their runs: copying one would claim the id for the wrong run.
+func MigrateLegacyRows(checkout, common string, collided ...string) (copied, conflicts []string, err error) {
 	copied, conflicts = []string{}, []string{}
 	legacy := filepath.Join(checkout, ".metareview", "runs.jsonl") // root: store (the 0.13.x ledger)
 	info, err := os.Stat(legacy)
@@ -290,6 +293,9 @@ func MigrateLegacyRows(checkout, common string) (copied, conflicts []string, err
 		var row Row
 		if json.Unmarshal([]byte(strings.TrimSpace(line)), &row) != nil || !strings.HasPrefix(row.Scope, "fsm-") {
 			continue // a review row, or a line a lock-free writer tore: not this migration's business
+		}
+		if slices.Contains(collided, row.ID) {
+			continue
 		}
 		if prev, ok := have[row.ID]; ok {
 			if prev.HeadSHA != row.HeadSHA || prev.WorkflowHash != row.WorkflowHash {

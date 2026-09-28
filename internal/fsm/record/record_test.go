@@ -484,6 +484,28 @@ func TestMigrateLegacyRows(t *testing.T) {
 // The legacy ledger is the main checkout's live review ledger (lock-free writers), so a malformed line in it must not
 // stop migration — its FSM rows are copied, the rest skipped — and once migrated it is not re-read on every fsm
 // command: a stamp of its size skips it until an older binary appends more (#173 review).
+// A run MigrateLegacyRuns left behind as a collision keeps its row behind too: the store's run of that id is a
+// different one, whose own terminal row must not be pre-empted by the legacy row.
+func TestMigrateLegacyRowsSkipsCollidedRuns(t *testing.T) {
+	ctx := context.Background()
+	checkout, common, old := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := Terminal(old, fixedClock)(ctx, view("mrv-collide-00000001", run.OutcomeFixed, []string{})); err != nil {
+		t.Fatal(err)
+	}
+	row, _ := os.ReadFile(filepath.Join(old, "metareview", "runs.jsonl"))
+	_ = os.MkdirAll(filepath.Join(checkout, ".metareview"), 0o755)
+	if err := os.WriteFile(filepath.Join(checkout, ".metareview", "runs.jsonl"), row, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	copied, conflicts, err := MigrateLegacyRows(checkout, common, "mrv-collide-00000001")
+	if err != nil || len(copied)+len(conflicts) != 0 {
+		t.Fatalf("a collided run's row must be skipped: %v %v %v", copied, conflicts, err)
+	}
+	if ok, _ := Exists(common, "mrv-collide-00000001"); ok {
+		t.Fatal("the collided id must stay free for the store's own run")
+	}
+}
+
 func TestMigrateLegacyRowsIsLenientAndRunsOnce(t *testing.T) {
 	ctx := context.Background()
 	checkout, common := t.TempDir(), t.TempDir()
