@@ -347,6 +347,7 @@ func TestAStaleLocalMainDoesNotPullInMergedBranchesRuns(t *testing.T) {
 	writeStoreRun(t, common, "mrv-merged-up-01", "feat", f)
 	gitRun(t, root, "checkout", "-q", "--detach", "main")
 	gitRun(t, root, "merge", "-q", "--no-ff", "-m", "merge feat upstream", "feat")
+	gitRun(t, root, "remote", "add", "origin", root)
 	gitRun(t, root, "update-ref", "refs/remotes/origin/main", "HEAD") // origin/main has feat; local main does not
 	gitRun(t, root, "branch", "-q", "-D", "feat")
 	gitRun(t, root, "switch", "-q", "-c", "next", "origin/main")
@@ -364,6 +365,7 @@ func TestOnlyARemotesDefaultBranchIsLeftOutOfTheRange(t *testing.T) {
 	gitRun(t, root, "checkout", "-q", "-b", "feat-a")
 	a := commit(t, root, "a")
 	writeStoreRun(t, common, "mrv-alicemain-01", "feat-a", a)
+	gitRun(t, root, "remote", "add", "origin", root)
 	gitRun(t, root, "update-ref", "refs/remotes/origin/alice/main", a)
 	gitRun(t, root, "checkout", "-q", "-b", "feat-b")
 	commit(t, root, "b")
