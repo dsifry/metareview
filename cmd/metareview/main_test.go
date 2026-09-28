@@ -431,37 +431,37 @@ func TestValidateFromRunDiff(t *testing.T) {
 	}
 
 	// Missing run dir.
-	if err := validateFromRunDiff(root, "ghost", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "no such FSM run") {
+	if err := validateFromRunDiff(filepath.Join(root, ".metareview", "runs"), "ghost", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "no such FSM run in the store") {
 		t.Errorf("missing run: %v", err)
 	}
 	// Malformed event line.
 	writeAudit("bad", "{not json")
-	if err := validateFromRunDiff(root, "bad", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "malformed event") {
+	if err := validateFromRunDiff(filepath.Join(root, ".metareview", "runs"), "bad", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "malformed event") {
 		t.Errorf("malformed: %v", err)
 	}
 	// First event not init.
 	writeAudit("noinit", transition(fsmrun.OutcomeReviewed))
-	if err := validateFromRunDiff(root, "noinit", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "does not start with a valid init") {
+	if err := validateFromRunDiff(filepath.Join(root, ".metareview", "runs"), "noinit", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "does not start with a valid init") {
 		t.Errorf("no init: %v", err)
 	}
 	// Diff mismatch.
 	writeAudit("mismatch", initEvent("other", "head2", ""), transition(fsmrun.OutcomeReviewed))
-	if err := validateFromRunDiff(root, "mismatch", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "different diff") {
+	if err := validateFromRunDiff(filepath.Join(root, ".metareview", "runs"), "mismatch", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "different diff") {
 		t.Errorf("mismatch: %v", err)
 	}
 	// Wrong workflow.
 	writeAudit("wf", initEvent("b", "h", "review-loop"), transition(fsmrun.OutcomeReviewed))
-	if err := validateFromRunDiff(root, "wf", "b", "h", "epic-review-loop"); err == nil || !strings.Contains(err.Error(), "requires") {
+	if err := validateFromRunDiff(filepath.Join(root, ".metareview", "runs"), "wf", "b", "h", "epic-review-loop"); err == nil || !strings.Contains(err.Error(), "requires") {
 		t.Errorf("workflow: %v", err)
 	}
 	// Non-passing final outcome.
 	writeAudit("failed", initEvent("b", "h", ""), transition(fsmrun.OutcomeReviewed), transition(fsmrun.Outcome("failed")))
-	if err := validateFromRunDiff(root, "failed", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "not a passing review") {
+	if err := validateFromRunDiff(filepath.Join(root, ".metareview", "runs"), "failed", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "not a passing review") {
 		t.Errorf("failed: %v", err)
 	}
 	// Passing.
 	writeAudit("ok", initEvent("b", "h", ""), transition(fsmrun.OutcomeReviewed))
-	if err := validateFromRunDiff(root, "ok", "b", "h", ""); err != nil {
+	if err := validateFromRunDiff(filepath.Join(root, ".metareview", "runs"), "ok", "b", "h", ""); err != nil {
 		t.Errorf("passing: %v", err)
 	}
 }
@@ -976,7 +976,7 @@ func TestValidateFromRunDiffUnreadableTransition(t *testing.T) {
 	p := filepath.Join(root, ".metareview", "runs", "badtr", "audit.jsonl")
 	must(t, os.MkdirAll(filepath.Dir(p), 0o755))
 	must(t, os.WriteFile(p, []byte(string(initE)+"\n"+string(badTr)+"\n"), 0o644))
-	if err := validateFromRunDiff(root, "badtr", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "unreadable transition") {
+	if err := validateFromRunDiff(filepath.Join(root, ".metareview", "runs"), "badtr", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "unreadable transition") {
 		t.Fatalf("expected unreadable-transition error, got %v", err)
 	}
 }
@@ -1120,7 +1120,7 @@ func TestValidateFromRunDiffUnreadableInit(t *testing.T) {
 	p := filepath.Join(root, ".metareview", "runs", "badinit", "audit.jsonl")
 	must(t, os.MkdirAll(filepath.Dir(p), 0o755))
 	must(t, os.WriteFile(p, []byte(string(badInit)+"\n"), 0o644))
-	if err := validateFromRunDiff(root, "badinit", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "init event is unreadable") {
+	if err := validateFromRunDiff(filepath.Join(root, ".metareview", "runs"), "badinit", "b", "h", ""); err == nil || !strings.Contains(err.Error(), "init event is unreadable") {
 		t.Fatalf("expected unreadable-init error, got %v", err)
 	}
 }

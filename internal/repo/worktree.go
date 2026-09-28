@@ -51,9 +51,10 @@ var runStoreGit = func(dir string) (string, error) {
 
 var errNotARepo = errors.New("git worktree list failed")
 
-// RunStoreRoot is the directory whose .metareview/runs/ holds the FSM runs visible from start: the
-// main worktree, exactly as the FSM resolves it when it writes them. Only the run STORE is shared
-// — diff identity (base..head) must still come from start's own worktree.
+// RunStoreRoot is the main worktree, as the FSM resolves it: a run's anchor (RepoRoot) and the 0.13.x run-store
+// location (.metareview/runs/), which the FSM migrates into StoreDir on first use (#173) and which readers consult
+// for one release as a fallback. Current runs live in StoreDir. Diff identity (base..head) must still come from
+// start's own worktree.
 //
 // Outside a git repository, or with a bare main worktree (where the FSM refuses to create runs),
 // it falls back to RootOr(start); a lookup there finds no run and says so.

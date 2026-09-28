@@ -24,7 +24,8 @@ const (
 	CodeInterrupted      = "ERR_INTERRUPTED"
 	CodeInternal         = "ERR_INTERNAL"
 	WarnRunIDFromEnv     = "RUN_ID_FROM_ENV"
-	WarnRunsNotIgnored   = "RUNS_JSONL_NOT_IGNORED"
+	WarnStoreMigrated    = "STORE_MIGRATED"
+	WarnStoreCollision   = "STORE_COLLISION"
 )
 
 // Statuses.

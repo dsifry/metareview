@@ -43,20 +43,30 @@ func TestLinkedWorktreeStoreAndWorkRoots(t *testing.T) {
 		t.Fatalf("done: %v", env)
 	}
 
-	// Store root: the run directory and its terminal row, exactly once, under the main worktree.
-	if _, err := os.Stat(filepath.Join(h.root, ".metareview", "runs", id, "audit.jsonl")); err != nil {
-		t.Fatalf("run not in the store root: %v", err)
+	// AC-2.2 (#173): the run directory and its terminal row, exactly once, in git's common directory — neither
+	// checkout's .metareview/ holds either.
+	common := filepath.Join(h.root, ".git", "metareview")
+	if _, err := os.Stat(filepath.Join(common, "runs", id, "audit.jsonl")); err != nil {
+		t.Fatalf("run not in the common-dir store: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(wt, ".metareview", "runs", id)); err == nil {
-		t.Fatal("run duplicated into the linked worktree")
-	}
-	rows, _ := os.ReadFile(filepath.Join(h.root, ".metareview", "runs.jsonl"))
+	rows, _ := os.ReadFile(filepath.Join(common, "runs.jsonl"))
 	if !strings.Contains(string(rows), `"id":"`+id+`"`) {
-		t.Fatalf("terminal row not in the store root's runs.jsonl: %s", rows)
+		t.Fatalf("terminal row not in the common-dir ledger: %s", rows)
 	}
-	if _, err := os.Stat(filepath.Join(wt, ".metareview", "runs.jsonl")); err == nil {
-		t.Fatal("terminal row written into the linked worktree")
+	for _, checkout := range []string{h.root, wt} {
+		if _, err := os.Stat(filepath.Join(checkout, ".metareview", "runs", id)); err == nil {
+			t.Fatalf("run duplicated into %s", checkout)
+		}
+		if _, err := os.Stat(filepath.Join(checkout, ".metareview", "runs.jsonl")); err == nil {
+			t.Fatalf("terminal row written into %s", checkout)
+		}
 	}
+	// The same run is visible from the main checkout.
+	h.cwd = h.root
+	if env := h.must(StatusOK, 0, "state", "--run", id); env["outcome"] != "clean" {
+		t.Fatalf("state from the main checkout: %v", env)
+	}
+	h.cwd = wt
 
 	// Work root: a default export lands in the worktree that ran the command, never in the main checkout.
 	env := h.must(StatusOK, 0, "export", "--run", id)
@@ -162,28 +172,20 @@ func TestExportWithoutACheckoutFallsBackToTheStoreRoot(t *testing.T) {
 	}
 }
 
-// TestRunsIgnoredChecksTheStoreRoot: the terminal runs.jsonl row is written under the store root, so the
-// not-ignored warning must ask the store root, not the worktree the run was started from. Here the main
-// checkout ignores runs.jsonl in a commit the linked worktree does not have.
-func TestRunsIgnoredChecksTheStoreRoot(t *testing.T) {
+// TestTerminalRowNeverDirtiesACheckout (#173): the terminal ledger lives in git's common directory, so no checkout —
+// main or linked, ignoring runs.jsonl or not — gains an untracked file or a not-ignored warning from a run.
+func TestTerminalRowNeverDirtiesACheckout(t *testing.T) {
 	h := newHarness(t)
-	wt := h.linkedWorktree() // at a commit whose .gitignore does not cover runs.jsonl
-	h.file("../.gitignore", "mock/\nfixtures/\nexp/\nsmall/\ndocs/\n.metareview/runs.jsonl\n")
-	git(t, h.root, "add", ".gitignore")
-	git(t, h.root, "commit", "-q", "-m", "ignore runs.jsonl in the main checkout only")
-	h.cwd = wt
-	env := h.must(StatusOK, 0, h.mockInit()...)
-	if w := env["warnings"].([]any); len(w) != 0 {
-		t.Fatalf("runs.jsonl is ignored where it is written (the store root); no warning expected, got %v", w)
-	}
-	// And the other direction: a store root that does not ignore it warns, naming the store root.
-	h.file("../.gitignore", "mock/\nfixtures/\nexp/\nsmall/\ndocs/\n")
-	git(t, h.root, "add", ".gitignore")
-	git(t, h.root, "commit", "-q", "-m", "stop ignoring runs.jsonl")
-	env = h.must(StatusOK, 0, h.mockInit()...)
-	w := env["warnings"].([]any)
-	if len(w) != 1 || w[0].(map[string]any)["code"] != WarnRunsNotIgnored || !strings.Contains(w[0].(map[string]any)["detail"].(string), h.root) {
-		t.Fatalf("want one runs-not-ignored warning naming the store root %s, got %v", h.root, w)
+	wt := h.linkedWorktree()
+	for _, cwd := range []string{h.root, wt} {
+		h.cwd = cwd
+		env := h.must(StatusOK, 0, h.mockInit()...)
+		if w := env["warnings"].([]any); len(w) != 0 {
+			t.Fatalf("init from %s: want no warnings, got %v", cwd, w)
+		}
+		if _, err := os.Stat(filepath.Join(cwd, ".metareview", "runs.jsonl")); err == nil {
+			t.Fatalf("init from %s wrote a checkout ledger", cwd)
+		}
 	}
 }
 

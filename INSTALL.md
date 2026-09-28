@@ -200,7 +200,7 @@ Commit durable Markdown artifacts under `docs/metareview/`, including the shard 
 .metareview/runs.jsonl
 ```
 
-Do not ignore `docs/metareview/` or the whole `.metareview/` directory. FSM runs (`.metareview/runs/`) ignore themselves; `docs/metareview/fsm/` export bundles are durable. `metareview fsm` needs git ≥ 2.31 (`metareview setup --check` reports it).
+Do not ignore `docs/metareview/` or the whole `.metareview/` directory. FSM runs live in git's common directory (`.git/metareview/runs/`), never tracked; `docs/metareview/fsm/` export bundles are durable. `metareview fsm` needs git ≥ 2.31 (`metareview setup --check` reports it).
 
 ## Judge models and providers
 

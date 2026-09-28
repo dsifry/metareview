@@ -180,7 +180,7 @@ repo="$(mktemp -d)"
   init="$(OPENAI_API_KEY=unused "$BIN" fsm init --workflow epic-review-loop --base main --var JUDGE=gpt-5.2 --var JUDGE_EFFORT=medium 2>/dev/null || true)"
   run="$(printf '%s' "$init" | sed -n 's/.*"run_id":"\([^"]*\)".*/\1/p')"
   [ -n "$run" ] || { echo "FAIL: [base-advanced] fsm init produced no run: $init"; exit 1; }
-  grep -q "\"base_sha\":\"$fork\"" ".metareview/runs/$run/audit.jsonl" ||
+  grep -q "\"base_sha\":\"$fork\"" ".git/metareview/runs/$run/audit.jsonl" ||
     { echo "FAIL: [base-advanced] fsm init --base main did not resolve to the merge-base $fork"; exit 1; }
   mkfsmrun fsm-adv "$fork"
   eval "$rec --verdict PASS --mode subagent-adjudicated --from-run fsm-adv" >/dev/null 2>&1 ||
@@ -188,7 +188,7 @@ repo="$(mktemp -d)"
   got="$(verdict "$(run_gate)")"
   if [ "$got" != "PASS" ]; then echo "FAIL: [base-advanced] verdict=$got, want PASS"; exit 1; fi
   # Each records the base as typed beside the SHA it resolved to.
-  grep -q '"requested_base":"main"' ".metareview/runs/$run/audit.jsonl" || { echo "FAIL: [base-advanced] fsm init did not record the requested base"; exit 1; }
+  grep -q '"requested_base":"main"' ".git/metareview/runs/$run/audit.jsonl" || { echo "FAIL: [base-advanced] fsm init did not record the requested base"; exit 1; }
   grep -q '"kind":"review-evidence".*"requestedBase":"main"' .metareview/runs.jsonl || { echo "FAIL: [base-advanced] the marker did not record the requested base"; exit 1; }
   grep -q '"scope":"epic-ready".*"requestedBase":"main"' .metareview/runs.jsonl || { echo "FAIL: [base-advanced] the epic-ready run did not record the requested base"; exit 1; }
   grep -qF -- '- Requested base: `main`' docs/metareview/context/*epic-ready*-context.md ||

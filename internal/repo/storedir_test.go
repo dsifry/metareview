@@ -59,3 +59,68 @@ func TestStoreDirIgnoresExportedGitDir(t *testing.T) {
 		t.Fatalf("StoreDir(a) with GIT_DIR=b = %q, %v", got, err)
 	}
 }
+
+// AC-2.8 (#173, run-store half): git is unaffected by a populated <common>/metareview/. Worktree remove/prune,
+// gc --prune=now --aggressive, repack -ad, reflog expire --all and clean -fdx leave every store file byte-identical;
+// fsck --full --strict passes; status is clean; clone and clone --bare copy none of it.
+func TestGitIsUnaffectedByTheStore(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	main := filepath.Join(root, "main")
+	gitT(t, root, "init", "-q", "-b", "main", main)
+	if err := os.WriteFile(filepath.Join(main, "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, main, "add", "a.txt")
+	gitT(t, main, "commit", "-q", "-m", "a")
+	wt := filepath.Join(root, "wt")
+	gitT(t, main, "worktree", "add", "-q", "-b", "feat", wt)
+	gone := filepath.Join(root, "gone")
+	gitT(t, main, "worktree", "add", "-q", "-b", "gone", gone)
+
+	store, err := StoreDir(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"runs/mrv-a-000000001/audit.jsonl":   "{\"type\":\"init\"}\n",
+		"runs/mrv-a-000000001/workflow.yaml": "workflow: x\n",
+		"runs.jsonl":                         "{\"id\":\"mrv-a-000000001\"}\n",
+		"sessions/s.json":                    "{}\n",
+		"migrate.lock":                       "",
+	}
+	for rel, body := range files {
+		p := filepath.Join(store, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitT(t, main, "worktree", "remove", "--force", gone)
+	gitT(t, main, "worktree", "prune")
+	gitT(t, main, "gc", "-q", "--prune=now", "--aggressive")
+	gitT(t, main, "repack", "-q", "-ad")
+	gitT(t, main, "reflog", "expire", "--all", "--expire=now")
+	gitT(t, main, "clean", "-fdx")
+	for rel, body := range files {
+		got, err := os.ReadFile(filepath.Join(store, rel))
+		if err != nil || string(got) != body {
+			t.Errorf("%s changed under git maintenance: %q %v", rel, got, err)
+		}
+	}
+	gitT(t, main, "fsck", "--full", "--strict")
+	for _, dir := range []string{main, wt} {
+		if out := gitT(t, dir, "status", "--porcelain"); out != "" {
+			t.Errorf("git status in %s is not clean: %q", dir, out)
+		}
+	}
+	clone, bareClone := filepath.Join(root, "clone"), filepath.Join(root, "clone.git")
+	gitT(t, root, "clone", "-q", main, clone)
+	gitT(t, root, "clone", "-q", "--bare", main, bareClone)
+	for _, p := range []string{filepath.Join(clone, ".git", "metareview"), filepath.Join(bareClone, "metareview")} {
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("a clone copied the store: %s", p)
+		}
+	}
+}

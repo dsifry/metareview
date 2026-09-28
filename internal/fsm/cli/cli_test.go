@@ -213,8 +213,8 @@ func TestHappySdlcLoop(t *testing.T) {
 	if env["mock"] != true || env["workflow_source"] != "embedded" || env["state"] != "discover" || env["iteration"] != float64(0) || env["outcome"] != nil || env["schema_version"] != float64(1) {
 		t.Fatalf("init: %v", env)
 	}
-	if w := env["warnings"].([]any); len(w) != 1 || w[0].(map[string]any)["code"] != WarnRunsNotIgnored || strs(env["untrusted"])[0] != "warnings[].detail" {
-		t.Fatalf("not-ignored warning: %v", env)
+	if w := env["warnings"].([]any); len(w) != 0 {
+		t.Fatalf("the terminal ledger lives in git's common directory; no not-ignored warning expected: %v", env)
 	}
 	// the flow run starts after the ignore rule is committed (the parent's terminal row must not dirty the tree)
 	h.file("../.gitignore", "mock/\nfixtures/\nexp/\nsmall/\ndocs/\n.metareview/runs.jsonl\n")
@@ -299,7 +299,7 @@ func TestHappySdlcLoop(t *testing.T) {
 	h.mustErr("ERR_RUN_TERMINAL", 1, "advance", "--run", child)
 	h.mustErr("ERR_RUN_TERMINAL", 2, "judge", "--kind", "adjudicate", "--model", "gpt-5.2", "--effort", "medium", "--input", h.file("cand.json", `{"candidate":{"issue_text":"x"}}`), "--context", h.file("d.diff", "x"), "--run", child)
 	// runs.jsonl rows: the child passed, the parent failed
-	rows, _ := os.ReadFile(filepath.Join(h.root, ".metareview", "runs.jsonl"))
+	rows, _ := os.ReadFile(filepath.Join(h.root, ".git", "metareview", "runs.jsonl"))
 	if !strings.Contains(string(rows), `"id":"`+child+`"`) || !strings.Contains(string(rows), `"verdict":"PASS"`) || !strings.Contains(string(rows), `"mock":true`) {
 		t.Fatalf("rows: %s", rows)
 	}
@@ -603,8 +603,8 @@ func TestRunResolutionAndRecords(t *testing.T) {
 	h.mustErr("ERR_RUN_NOT_FOUND", 2, "state", "--run", "../x")
 	h.mustErr("ERR_RUN_NOT_FOUND", 2, "state", "--run", "mrv-doesnotexist00")
 	// a corrupt valid-shaped newest run is skipped by the default
-	_ = os.MkdirAll(filepath.Join(h.root, ".metareview", "runs", "mrv-zzzzzzzzzzzz"), 0o700)
-	_ = os.WriteFile(filepath.Join(h.root, ".metareview", "runs", "mrv-zzzzzzzzzzzz", "audit.jsonl"), []byte("garbage\n"), 0o600)
+	_ = os.MkdirAll(filepath.Join(h.root, ".git", "metareview", "runs", "mrv-zzzzzzzzzzzz"), 0o700)
+	_ = os.WriteFile(filepath.Join(h.root, ".git", "metareview", "runs", "mrv-zzzzzzzzzzzz", "audit.jsonl"), []byte("garbage\n"), 0o600)
 	if env := h.must(StatusOK, 0, "state"); env["run_id"] != id {
 		t.Fatalf("newest skip: %v", env["run_id"])
 	}
@@ -682,13 +682,13 @@ func TestInitVariants(t *testing.T) {
 	if e := h.mustErr("ERR_RUN_EXISTS", 2, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--run-id", "mrv-explicit-000001"); e["error"].(map[string]any)["fields"].(map[string]any)["reason"] != "dir" {
 		t.Fatalf("dir collision: %v", e)
 	}
-	_ = os.WriteFile(filepath.Join(h.root, ".metareview", "runs.jsonl"), []byte(`{"id":"mrv-rowonly-000001","scope":"task-done","status":"passed","verdict":"PASS"}`+"\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(h.root, ".git", "metareview", "runs.jsonl"), []byte(`{"id":"mrv-rowonly-000001","scope":"task-done","status":"passed","verdict":"PASS"}`+"\n"), 0o644)
 	if e := h.mustErr("ERR_RUN_EXISTS", 2, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--run-id", "mrv-rowonly-000001"); e["error"].(map[string]any)["fields"].(map[string]any)["reason"] != "row" {
 		t.Fatalf("row collision: %v", e)
 	}
-	_ = os.WriteFile(filepath.Join(h.root, ".metareview", "runs.jsonl"), []byte("not json\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(h.root, ".git", "metareview", "runs.jsonl"), []byte("not json\n"), 0o644)
 	h.mustErr("ERR_RUNS_JSONL", 2, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--run-id", "mrv-rowonly-000002")
-	_ = os.Remove(filepath.Join(h.root, ".metareview", "runs.jsonl"))
+	_ = os.Remove(filepath.Join(h.root, ".git", "metareview", "runs.jsonl"))
 	delete(h.env, EnvMockAI)
 	// goldens cap and missing file; work-dir relative; bad repo mode
 	h.mustErr(CodeInputTooLarge, 2, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium", "--mock-ai", "mock", "--goldens", h.file("g.json", strings.Repeat("x", GoldensMaxBytes+1)))
@@ -721,7 +721,7 @@ func TestInitVariants(t *testing.T) {
 	// a moved checkout: the stored repo_root differs
 	other, _ := filepath.EvalSymlinks(t.TempDir())
 	git(t, other, "init", "-q", "-b", "main")
-	_ = os.CopyFS(filepath.Join(other, ".metareview"), os.DirFS(filepath.Join(h.root, ".metareview")))
+	_ = os.CopyFS(filepath.Join(other, ".git", "metareview"), os.DirFS(filepath.Join(h.root, ".git", "metareview")))
 	_ = os.CopyFS(filepath.Join(other, "mock"), os.DirFS(filepath.Join(h.root, "mock")))
 	h.cwd = other
 	h.mustErr(CodeRepoRootMismatch, 2, "state", "--run", env["run_id"].(string))
@@ -732,7 +732,7 @@ func TestProductRunAndJudge(t *testing.T) {
 	h := newHarness(t)
 	// no key → pre-flight refuses init before anything is created
 	h.mustErr("ERR_JUDGE_KEY", 2, "init", "--workflow", "sdlc-loop", "--var", "JUDGE=gpt-5.2", "--var", "JUDGE_EFFORT=medium")
-	if _, err := os.Stat(filepath.Join(h.root, ".metareview", "runs")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(h.root, ".git", "metareview", "runs")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("nothing created")
 	}
 	h.env[EnvOpenAIKey] = "sekret"
@@ -823,7 +823,7 @@ func TestTornRepairAndForkErrors(t *testing.T) {
 	env := h.must(StatusOK, 0, h.mockInit()...)
 	id := env["run_id"].(string)
 	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
-	audit := filepath.Join(h.root, ".metareview", "runs", id, "audit.jsonl")
+	audit := filepath.Join(h.root, ".git", "metareview", "runs", id, "audit.jsonl")
 	f, _ := os.OpenFile(audit, os.O_APPEND|os.O_WRONLY, 0o600)
 	_, _ = f.WriteString(`{"torn`)
 	_ = f.Close()
@@ -923,7 +923,7 @@ func TestContextErrorGuardOnJudgeCall(t *testing.T) {
 	h.must(machine.StatusAdvanced, 0, "advance", "--run", id)
 
 	// Get the initial event count
-	store := h.deps.Store(h.root)
+	store := h.deps.Store(filepath.Join(h.root, ".git"))
 	log, _ := store.Events(id)
 	eventsBefore := len(log.Events)
 
@@ -1087,17 +1087,17 @@ func TestOverflowHandlerForkConsentAndStatus(t *testing.T) {
 	}
 	env = h3.must(StatusOK, 0, h3.mockInit()...)
 	tid := env["run_id"].(string)
-	f, _ := os.OpenFile(filepath.Join(h3.root, ".metareview", "runs", tid, "audit.jsonl"), os.O_APPEND|os.O_WRONLY, 0o600)
+	f, _ := os.OpenFile(filepath.Join(h3.root, ".git", "metareview", "runs", tid, "audit.jsonl"), os.O_APPEND|os.O_WRONLY, 0o600)
 	_, _ = f.WriteString(`{"torn`)
 	_ = f.Close()
-	_ = os.MkdirAll(filepath.Join(h3.root, ".metareview", "runs", "mrv-corrupt-000001"), 0o700)
-	_ = os.WriteFile(filepath.Join(h3.root, ".metareview", "runs", "mrv-corrupt-000001", "audit.jsonl"), []byte("garbage\n"), 0o600)
+	_ = os.MkdirAll(filepath.Join(h3.root, ".git", "metareview", "runs", "mrv-corrupt-000001"), 0o700)
+	_ = os.WriteFile(filepath.Join(h3.root, ".git", "metareview", "runs", "mrv-corrupt-000001", "audit.jsonl"), []byte("garbage\n"), 0o600)
 	l := strings.Join(StatusLines(context.Background(), h3.deps, h3.root), "\n")
 	if !strings.Contains(l, tid+"  (unreadable: torn tail)") || !strings.Contains(l, "mrv-corrupt-000001  (unreadable:") {
 		t.Fatalf("status with damage: %s", l)
 	}
-	_ = os.RemoveAll(filepath.Join(h3.root, ".metareview", "runs"))
-	_ = os.WriteFile(filepath.Join(h3.root, ".metareview", "runs"), []byte("x"), 0o644)
+	_ = os.RemoveAll(filepath.Join(h3.root, ".git", "metareview", "runs"))
+	_ = os.WriteFile(filepath.Join(h3.root, ".git", "metareview", "runs"), []byte("x"), 0o644)
 	if l := StatusLines(context.Background(), h3.deps, h3.root); len(l) != 1 || !strings.HasPrefix(l[0], "fsm runs: ERR_") {
 		t.Fatalf("list error: %v", l)
 	}
@@ -1138,7 +1138,7 @@ func TestOpenFailuresAndCraftedRuns(t *testing.T) {
 	h.mustErr("ERR_WORKFLOW_INVALID", 2, "workflows")
 	h.deps.Workflows = good
 	// crafted run directories: peek tolerates garbage, a non-init first line, and an undecodable init; Open reports the damage
-	runs := filepath.Join(h.root, ".metareview", "runs")
+	runs := filepath.Join(h.root, ".git", "metareview", "runs")
 	for name, first := range map[string]string{"mrv-garbage-0000001": strings.Repeat("x", run.MaxLine+10), "mrv-notinit-0000001": `{"schemaVersion":1,"seq":1,"type":"tree","data":{}}`, "mrv-badinit-0000001": `{"schemaVersion":1,"seq":1,"type":"init","data":"str"}`} {
 		_ = os.MkdirAll(filepath.Join(runs, name), 0o700)
 		_ = os.WriteFile(filepath.Join(runs, name, "audit.jsonl"), []byte(first+"\n"), 0o600)
@@ -1165,7 +1165,7 @@ func TestOpenFailuresAndCraftedRuns(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(h.root, "mock", "judge.yaml"), []byte(sdlcScenario), 0o644)
 	// machineDeps' MockLoad closure surfaces load errors (unreachable through the CLI: the peek loads the same file)
 	c := &ctxDeps{ctx: context.Background(), deps: h.deps}
-	md, _ := c.machineDeps(h.root, nil, judgeNone)
+	md, _ := c.machineDeps(h.root, filepath.Join(h.root, ".git"), nil, judgeNone)
 	if _, err := md.MockLoad("/nope"); err == nil {
 		t.Fatal("MockLoad closure")
 	}
@@ -1190,7 +1190,7 @@ func TestOpenFailuresAndCraftedRuns(t *testing.T) {
 	h.doer.onDo = nil
 	h.env = map[string]string{}
 	// state on a run with a gate failure but no transition yet (last_error) — crafted through the store
-	store := h.deps.Store(h.root)
+	store := h.deps.Store(filepath.Join(h.root, ".git"))
 	log, _ := store.Events(id)
 	st, _ := run.FoldFull(log.Events)
 	st.ChainHead = log.Head

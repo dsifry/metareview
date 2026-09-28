@@ -105,7 +105,7 @@ Keep local:
 
 - `.metareview/findings.jsonl`
 - `.metareview/runs.jsonl`
-- `.metareview/runs/` (FSM runs; the directory ignores itself)
+- `.git/metareview/runs/` (FSM runs; inside `.git`, shared by every worktree — nothing to ignore)
 - `.metareview/shards/` — the prompt packs, which are regenerated per plan and ignore themselves
 - other transient `.metareview/` state
 

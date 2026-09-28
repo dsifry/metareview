@@ -528,7 +528,11 @@ func dispatch(args []string) {
 			}
 			// The run is read from the store the FSM wrote it to — the main worktree — while base..head
 			// above stays this worktree's diff. From a linked worktree the two roots differ (#169).
-			if err := validateFromRunDiff(repo.RunStoreRoot(workdir), fromRun, gc.BaseSHA, gc.HeadSHA, wantWorkflow); err != nil {
+			runsDir, warn := fromRunRunsDir(workdir, fromRun)
+			if warn != "" {
+				_, _ = fmt.Fprintln(stderr, "record-lenses: "+warn)
+			}
+			if err := validateFromRunDiff(runsDir, fromRun, gc.BaseSHA, gc.HeadSHA, wantWorkflow); err != nil {
 				_, _ = fmt.Fprintf(stderr, "record-lenses: --from-run %q: %v\n", fromRun, err)
 				exit(2)
 			}
@@ -787,12 +791,32 @@ func bundleExitCode(bundle evidence.Bundle) int {
 // (outcome clean|reviewed|fixed). This keeps a subagent-adjudicated marker from being pointed at an empty
 // audit, a run over a different diff, or a run that reviewed the diff and did NOT come out clean. It scans
 // events leniently (in the spirit of the FSM's own peek) rather than folding the full chain.
-func validateFromRunDiff(root, runID, wantBase, wantHead, wantWorkflow string) error {
-	// run-store: shared — root is repo.RunStoreRoot(workdir), the store the FSM wrote the run to (#169).
-	path := filepath.Join(root, ".metareview", "runs", runID, "audit.jsonl")
+// fromRunRunsDir names the runs directory to read an FSM run from (#173): the shared store in git's common directory
+// (repo.StoreDir), where the FSM writes every run. For one release a run still in the 0.13.x location — the main
+// checkout's .metareview/runs/, not yet migrated because no fsm command has run since the upgrade — is read there,
+// with a warning naming how to migrate it. Nothing else is searched: no other worktree, no other checkout.
+func fromRunRunsDir(start, runID string) (dir, warn string) {
+	store, err := repo.StoreDir(start)
+	if err != nil {
+		store = filepath.Join(repo.RootOr(start), ".git", "metareview") // no repository: a path that holds nothing
+	}
+	dir = filepath.Join(store, "runs")
+	if _, err := os.Stat(filepath.Join(dir, runID)); err == nil {
+		return dir, ""
+	}
+	// run-store: shared — the 0.13.x store lived in the main worktree (repo.RunStoreRoot).
+	legacy := filepath.Join(repo.RunStoreRoot(start), ".metareview", "runs")
+	if _, err := os.Stat(filepath.Join(legacy, runID)); err == nil {
+		return legacy, "run " + runID + " is still in the 0.13.x store (" + legacy + "); any `metareview fsm` command migrates it into " + dir
+	}
+	return dir, ""
+}
+
+func validateFromRunDiff(runsDir, runID, wantBase, wantHead, wantWorkflow string) error {
+	path := filepath.Join(runsDir, runID, "audit.jsonl")
 	raw, err := os.ReadFile(path) // #nosec G304 -- runID is validated to a single path segment by the caller
 	if err != nil {
-		return errors.New("no such FSM run under .metareview/runs/")
+		return errors.New("no such FSM run in the store")
 	}
 	var events []fsmrun.Event
 	for _, line := range strings.Split(string(raw), "\n") {

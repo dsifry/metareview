@@ -376,7 +376,7 @@ Coding agents should treat metareview as a completion gate, not an optional comm
 
 Agents must not say work is done while a blocking finding remains unresolved or while a gate is `NEEDS_REVISION` or `ESCALATED`. They should commit durable review/context artifacts when the repository's artifact policy says to do so, and keep transient `.metareview/findings.jsonl` and `.metareview/runs.jsonl` local.
 
-When configuring `.gitignore` in ordinary project repositories, ignore those transient files with exact file entries. Do not ignore `docs/metareview/` or the whole `.metareview/` directory, because durable learning, calibration, and fallback knowledge can live there (FSM runs under `.metareview/runs/` ignore themselves — nothing to add; `metareview fsm init` warns when `.metareview/runs.jsonl` is not ignored; `docs/metareview/fsm/` export bundles are durable):
+When configuring `.gitignore` in ordinary project repositories, ignore those transient files with exact file entries. Do not ignore `docs/metareview/` or the whole `.metareview/` directory, because durable learning, calibration, and fallback knowledge can live there (FSM runs live in git's common directory, `.git/metareview/runs/`, so there is nothing to add; `docs/metareview/fsm/` export bundles are durable):
 
 ```gitignore
 .metareview/findings.jsonl

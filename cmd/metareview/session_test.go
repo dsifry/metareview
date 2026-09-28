@@ -175,3 +175,34 @@ func TestRecordLensesFindsFSMRunCreatedFromLinkedWorktree(t *testing.T) {
 		t.Fatalf("mismatched head from linked worktree: code=%d err=%q", code, errOut)
 	}
 }
+
+// #173: record-lenses --from-run reads the common-dir store; a run still in the 0.13.x location (not yet migrated
+// by an fsm command) is found there for one release, with a warning.
+func TestFromRunRunsDirPrefersTheCommonStore(t *testing.T) {
+	root, err := filepath.EvalSymlinks(gitRepo(t)) // git reports resolved paths (/private/var on macOS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	common := filepath.Join(root, ".git", "metareview", "runs")
+	legacy := filepath.Join(root, ".metareview", "runs")
+	for _, d := range []string{filepath.Join(common, "mrv-new"), filepath.Join(legacy, "mrv-old")} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "audit.jsonl"), []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if dir, warn := fromRunRunsDir(root, "mrv-new"); dir != common || warn != "" {
+		t.Fatalf("a common-dir run: %q %q", dir, warn)
+	}
+	if dir, warn := fromRunRunsDir(root, "mrv-old"); dir != legacy || !strings.Contains(warn, "0.13") {
+		t.Fatalf("a legacy run: %q %q", dir, warn)
+	}
+	if dir, warn := fromRunRunsDir(root, "mrv-none"); dir != common || warn != "" {
+		t.Fatalf("an unknown run is looked up in the common store: %q %q", dir, warn)
+	}
+	if dir, _ := fromRunRunsDir(t.TempDir(), "mrv-new"); dir == "" {
+		t.Fatal("outside a repository the lookup still names a directory, so the caller reports no such run")
+	}
+}

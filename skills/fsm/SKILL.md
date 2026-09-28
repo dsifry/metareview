@@ -98,9 +98,9 @@ ratio. A candidate whose file is not in the diff is never judged: it is kept as
 
 ## Files
 
-- `.metareview/runs/<id>/` — the run (audit.jsonl, workflow.yaml, sidecars); local-FS only, self-ignoring, retained
+- `<git-common-dir>/metareview/runs/<id>/` (e.g. `.git/metareview/runs/<id>/`) — the run (audit.jsonl, workflow.yaml, sidecars); shared by every worktree, inside `.git` so never tracked, retained
   until you delete it; `MaxEvents` (`ERR_AUDIT_FULL`) caps a run; a torn tail is repaired by `advance --repair` and the
-  dropped bytes kept as `audit.torn-*.bin` in the run directory (`.metareview/runs/.torn/` holds fragments of runs
+  dropped bytes kept as `audit.torn-*.bin` in the run directory (`.git/metareview/runs/.torn/` holds fragments of runs
   that never became durable and of `runs.jsonl`); delete a run without its sidecar, an incomplete fork
   (`ERR_FORK_INCOMPLETE`) or a directory left by `ERR_RUN_LOCKED` at `init` by hand.
 - `.metareview/runs.jsonl` — one row per terminal run (transient; the existing exact `.gitignore` entry covers it).

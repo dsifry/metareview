@@ -57,7 +57,7 @@ There are **two** engines that produce a review, joined by a **review-evidence m
 2. **FSM review-lenses** (`metareview fsm --workflow …`) — the `review-lenses` node runs the adversarial
    lenses as **subagents with a real `$REVIEWER` model**, then `match-then-adjudicate` judges them. This is
    the genuine AI adversarial review. Its findings live in the **FSM run store**
-   (`.metareview/runs/<id>/audit.jsonl`, carried as `FoldState.Findings`) — **not** in the
+   (`<git-common-dir>/metareview/runs/<id>/audit.jsonl`, carried as `FoldState.Findings`) — **not** in the
    `.metareview/findings.jsonl` that the deterministic gate reconciles and reads. Lens output emitted in
    the typed 0.12 contract (`internal/lensoutput`: tag/file/lines/issue/consequence/confidence/severity)
    is validated deterministically before it can become a candidate: malformed entries are rejected and
@@ -169,19 +169,28 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   shard results (`shards/`), FSM export bundles (`fsm/`), findings render (`FINDINGS.md`). ⚠️ Context packs
   can leak an absolute `cwd` (issue #80) — do not commit a leaking context artifact; the review `.md` is
   clean.
-- **Transient, local (git-ignored)** under `.metareview/`: `findings.jsonl`, `runs.jsonl`, `runs/`,
+- **Transient, local (git-ignored)** under `.metareview/`: `findings.jsonl`, `runs.jsonl` (review records),
   `shards/`, `git-hooks/`. A `mock: true` FSM run never satisfies a gate.
-- **Two roots — store vs work (#169, #172; plan in #171).** Every `.metareview`/`docs` path names which root it
-  means. **Store root** = the main worktree (`git worktree list --porcelain`, shared parser
-  `repo.MainWorktreeFromPorcelain`): the FSM run store `.metareview/runs/<id>/`, the FSM's terminal row in
-  `runs.jsonl` (run ids are store-unique; `record.Exists` checks it), run listing, escalation lineage, and the
-  run a `record-lenses --from-run` reads (`repo.RunStoreRoot`). **Work root** = the checkout the command runs in
-  (`rev-parse --show-toplevel`): a run's default work dir, the diff base..head, and work output meant to be
-  committed on that branch — a default `fsm export` bundle lands in the *requesting* worktree's
-  `docs/metareview/fsm/`; the runs-not-ignored warning asks the store root, where the row is written. In a single
-  checkout the two coincide. Tripwires, not proofs (they match literal path forms only):
-  `TestFSMRootsAreDeclared` (a `root: store|work` declaration at each such site in `internal/fsm`) and
-  `TestRunStoreReadersAreDeclared` (run-store readers outside the FSM). Still per-directory and planned in #171: `status`' abandoned-run scan and findings.
+- **The shared store is in git's common directory (#173).** `repo.StoreDir` = `<git rev-parse --git-common-dir>/
+  metareview/`: FSM runs (`runs/<id>/`), their terminal ledger (`runs.jsonl`; run ids are store-unique,
+  `record.Exists` checks it; `FSMRunDir` is relative to the common dir), the migration lock, and the session
+  bindings (`sessions/`, #166). One store for the main checkout and every linked worktree; it exists in a bare
+  repository and survives `git clean -fdX`, a moved or deleted main checkout, and every git maintenance command
+  (AC-2.8 pins it); clones do not copy it. **Migration:** the first `fsm` command after upgrading moves a 0.13.x
+  store (`<main>/.metareview/runs/<id>/`) in under an exclusive lock — byte-identical, idempotent, never
+  overwriting (an id in both places is a `STORE_COLLISION` warning, both copies kept) — and copies the legacy
+  `fsm-*` ledger rows. For one release `record-lenses --from-run` and the `status` abandoned-run scan also read
+  the legacy location. The scan reads the shared store but reports only runs whose init `work_dir` is this
+  worktree.
+- **Store vs anchor vs work (#169, #172, #173).** Every `.metareview`/`docs` path in `internal/fsm` names which it
+  means. **Common dir** = the shared store above. **Store root (anchor)** = the main worktree (`git worktree list
+  --porcelain`, `repo.MainWorktreeFromPorcelain`): a run's `RepoRoot` — mock scenarios, escalation evidence and
+  export paths resolve against a real checkout — and the 0.13.x store location. **Work root** = the checkout the
+  command runs in (`rev-parse --show-toplevel`): a run's default work dir, the diff base..head, and work output
+  meant to be committed on that branch — a default `fsm export` bundle lands in the *requesting* worktree's
+  `docs/metareview/fsm/`. In a single checkout anchor and work root coincide. Tripwires, not proofs (they match
+  literal path forms only): `TestFSMRootsAreDeclared` (a `root: store|work` declaration at each such site in
+  `internal/fsm`) and `TestRunStoreReadersAreDeclared` (run-store readers outside the FSM).
 - **One base resolver (#175):** `internal/baseref` decides what an explicit `--base` means for every gate,
   `record-lenses`, `context diff` (via `gitcontext.resolveBase`) and `fsm init` (via `gate.Git.ResolveBase`). A
   branch name (`main`, `origin/main`, `refs/heads/…`, `refs/remotes/…`) is `merge-base(HEAD, <branch>)` — the fork

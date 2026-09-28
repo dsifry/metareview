@@ -194,11 +194,12 @@ type opened struct {
 func (in *invocation) openRun(mode judgeMode, readOnly, repair bool) (*opened, envelope, int, bool) {
 	c := in.c
 	base := envelope{}
-	root, err := c.storeRoot()
+	root, common, warns, err := c.roots()
 	if err != nil {
 		return nil, base, in.fail(base, err, phaseOpen, false), false
 	}
-	store := c.deps.Store(root)
+	in.warns = append(in.warns, warns...)
+	store := c.deps.Store(common)
 	id, fromEnv, err := c.resolveRun(store, in.p.flags["run"])
 	if err != nil {
 		return nil, base, in.fail(base, err, phaseOpen, false), false
@@ -210,12 +211,12 @@ func (in *invocation) openRun(mode judgeMode, readOnly, repair bool) (*opened, e
 	if in.p.has("mock-ai") {
 		return nil, base, in.usage("--mock-ai is an init flag; later commands read the scenario from the run"), false
 	}
-	init, _ := c.peek(root, id)
+	init, _ := c.peek(common, id)
 	scenario, err := c.scenarioFor(root, init)
 	if err != nil {
 		return nil, base, in.fail(base, err, phaseOpen, false), false
 	}
-	md, err := c.machineDeps(root, scenario, mode)
+	md, err := c.machineDeps(root, common, scenario, mode)
 	if err != nil {
 		return nil, base, in.fail(base, err, phaseOpen, false), false
 	}
@@ -253,10 +254,11 @@ func (in *invocation) init() int {
 	if !p.has("workflow") {
 		return in.usage("--workflow is required")
 	}
-	root, err := c.storeRoot()
+	root, common, warns, err := c.roots()
 	if err != nil {
 		return in.fail(base, err, phaseInit, false)
 	}
+	in.warns = append(in.warns, warns...)
 	workDir := in.abs(p.flags["work-dir"])
 	if workDir == "" {
 		if workDir, err = c.workRoot(); err != nil {
@@ -280,12 +282,12 @@ func (in *invocation) init() int {
 			return in.fail(base, err, phaseInit, false)
 		}
 	}
-	md, err := c.machineDeps(root, scenario, judgeReal)
+	md, err := c.machineDeps(root, common, scenario, judgeReal)
 	if err != nil {
 		return in.fail(base, err, phaseInit, false)
 	}
 	if id := p.flags["run-id"]; id != "" {
-		exists, err := c.deps.Exists(root, id)
+		exists, err := c.deps.Exists(common, id)
 		if err != nil {
 			return in.fail(base, err, phaseInit, false)
 		}
@@ -330,10 +332,6 @@ func (in *invocation) init() int {
 	env := envelope{}
 	viewKeys(env, v)
 	in.warns = append(in.warns, in.warnEvents(md.Store, v.RunID)...)
-	// root: store — the terminal row is appended at the store root (record.path), so ask there, not the work dir.
-	if !c.runsIgnored(root) {
-		in.warns = append(in.warns, WarnRunsNotIgnored+": .metareview/runs.jsonl is not ignored in "+root)
-	}
 	names := []string{}
 	for _, a := range v.Snapshot.AllowedCmds {
 		names = append(names, a.Name)
@@ -892,11 +890,12 @@ func (in *invocation) diff() int {
 		return in.usage("diff needs --a <run> --b <run>")
 	}
 	c := in.c
-	root, err := c.storeRoot()
+	_, common, warns, err := c.roots()
 	if err != nil {
 		return in.fail(envelope{}, err, phaseNone, false)
 	}
-	store := c.deps.Store(root)
+	in.warns = append(in.warns, warns...)
+	store := c.deps.Store(common)
 	logs := [2]run.Log{}
 	for i, id := range []string{p.flags["a"], p.flags["b"]} {
 		if err := run.ValidateRunID(id); err != nil {
@@ -964,11 +963,11 @@ func (in *invocation) export() int {
 // StatusLines renders the `metareview status` FSM section (spec 5 §6): read-only over Store.List() at the main root.
 func StatusLines(ctx context.Context, deps Deps, cwd string) []string {
 	c := &ctxDeps{ctx: ctx, deps: deps, cwd: cwd}
-	root, err := c.storeRoot()
+	common, err := c.commonDir()
 	if err != nil {
 		return nil
 	}
-	list, err := deps.Store(root).List()
+	list, err := deps.Store(common).List()
 	if err != nil {
 		code, _, _ := failure(err)
 		return []string{"fsm runs: " + code}

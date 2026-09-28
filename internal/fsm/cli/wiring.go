@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/kind"
 	"github.com/dsifry/metareview/internal/fsm/machine"
 	"github.com/dsifry/metareview/internal/fsm/mockai"
+	"github.com/dsifry/metareview/internal/fsm/record"
 	"github.com/dsifry/metareview/internal/fsm/run"
 	"github.com/dsifry/metareview/internal/fsm/workflow"
 	"github.com/dsifry/metareview/internal/repo"
@@ -99,11 +101,15 @@ func (c *ctxDeps) removeSandboxes() {
 	c.sandboxRoots = nil
 }
 
-// The FSM resolves two roots, and every path it builds must say which one it means (#169, #172):
+// The FSM resolves three places, and every path it builds must say which one it means (#169, #172, #173):
 //
-//   - storeRoot — shared state: the run store (.metareview/runs/<id>/), the terminal runs.jsonl row (run ids are
-//     unique across the store; record.Exists checks that row), run listing, and escalation lineage. It is the main
-//     worktree, whichever worktree the command runs in.
+//   - commonDir — git's common directory, which holds the shared store (#173): the runs
+//     (<common>/metareview/runs/<id>/), their terminal ledger (<common>/metareview/runs.jsonl; run ids are unique
+//     across it and record.Exists checks it), run listing, and escalation lineage — one store for the main checkout
+//     and every linked worktree, independent of any one checkout.
+//   - storeRoot — the repository anchor: the main worktree, whichever worktree the command runs in. It is a run's
+//     RepoRoot (mock scenarios, escalation evidence and export paths resolve against a real checkout), and the
+//     0.13.x store it held (.metareview/runs/) is migrated into commonDir on first use.
 //   - workRoot — the checkout the command runs in: the default work dir a run reviews, and work output meant to be
 //     committed on that checkout's branch, such as a default export bundle.
 //
@@ -142,16 +148,50 @@ func (c *ctxDeps) outsideWorkTree() bool {
 	return err == nil && code == 0 && out == "false"
 }
 
-// runsIgnored reports whether .metareview/runs.jsonl is ignored in dir (git check-ignore exits 0). Callers pass
-// the store root: that is where the FSM appends its terminal row.
-func (c *ctxDeps) runsIgnored(dir string) bool {
-	_, code, err := c.git(dir, "check-ignore", "-q", ".metareview/runs.jsonl") // root: store (dir is the store root)
-	return err == nil && code == 0
+// commonDir resolves git's common directory for cwd (the shared store's home, #173).
+func (c *ctxDeps) commonDir() (string, error) {
+	out, code, err := c.git(c.cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil || code != 0 || out == "" {
+		return "", errs.E(CodeNotARepo, "not inside a git repository", "cwd", c.cwd)
+	}
+	return out, nil
+}
+
+// roots resolves the anchor (storeRoot) and the shared store (commonDir), migrating a 0.13.x store from the anchor's
+// .metareview/runs/ into the common directory on the way (#173). The migration is locked and idempotent; what it
+// did is returned as warnings for the envelope — a collision (an id in both places) is reported, never merged.
+func (c *ctxDeps) roots() (root, common string, warns []string, err error) {
+	if root, err = c.storeRoot(); err != nil {
+		return "", "", nil, err
+	}
+	if common, err = c.commonDir(); err != nil {
+		return "", "", nil, err
+	}
+	moved, err := run.MigrateLegacyRuns(root, common)
+	if err != nil {
+		return "", "", nil, err
+	}
+	copied, conflicts, err := record.MigrateLegacyRows(root, common)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if len(moved.Moved) > 0 || len(copied) > 0 {
+		warns = append(warns, fmt.Sprintf("%s: moved %d run(s) and %d ledger row(s) from %s into %s", WarnStoreMigrated,
+			len(moved.Moved), len(copied), filepath.Join(root, ".metareview"), filepath.Join(common, "metareview"))) // root: store (legacy and common)
+	}
+	for _, id := range moved.Collisions {
+		warns = append(warns, fmt.Sprintf("%s: run %s exists in both stores; the 0.13.x copy was left in %s", WarnStoreCollision,
+			id, filepath.Join(root, ".metareview", "runs", id))) // root: store (legacy)
+	}
+	for _, id := range conflicts {
+		warns = append(warns, fmt.Sprintf("%s: the 0.13.x ledger row for %s differs from the store's; it was not copied", WarnStoreCollision, id))
+	}
+	return root, common, warns, nil
 }
 
 // peek reads the first line of a run's audit.jsonl leniently (spec 5 §8: advisory; Open re-verifies everything).
-func (c *ctxDeps) peek(root, runID string) (run.InitData, bool) {
-	raw, err := c.deps.ReadFile(filepath.Join(root, ".metareview", "runs", runID, "audit.jsonl")) // root: store
+func (c *ctxDeps) peek(common, runID string) (run.InitData, bool) {
+	raw, err := c.deps.ReadFile(filepath.Join(common, "metareview", "runs", runID, "audit.jsonl")) // root: store (git's common directory)
 	if err != nil {
 		return run.InitData{}, false
 	}
@@ -270,7 +310,7 @@ func (c *ctxDeps) escalation(root string, scenario *mockai.Scenario, mode judgeM
 }
 
 // machineDeps builds the per-run machine wiring (spec 5 §8).
-func (c *ctxDeps) machineDeps(root string, scenario *mockai.Scenario, mode judgeMode) (machine.Deps, error) {
+func (c *ctxDeps) machineDeps(root, common string, scenario *mockai.Scenario, mode judgeMode) (machine.Deps, error) {
 	var j judge.Judge
 	real := cmdexec.NewExecRunner()
 	switch {
@@ -291,7 +331,7 @@ func (c *ctxDeps) machineDeps(root string, scenario *mockai.Scenario, mode judge
 	// whose pre-fix failure is not the finding's own symptom.
 	kinds, _ := kind.New(kind.Deps{Judge: j, Mock: scenario != nil, Escalate: c.escalation(root, scenario, mode), RepoSearch: c.repoSearch(root, scenario, mode), Prove: kind.Provers{Mutation: kind.MutationProver{}, Reproduction: kind.ReproductionProver{Exec: d.Exec}}, Symptom: j}) // consistent by construction: a mock judge iff a scenario
 	md := machine.Deps{
-		Store: d.Store(root), Sidecar: d.Sidecar(root), Kinds: kinds,
+		Store: d.Store(common), Sidecar: d.Sidecar(common), Kinds: kinds,
 		Git:      func(dir string) gate.Git { return gate.NewExec(dir, d.Exec) },
 		Runner:   func(r machine.RunnerDeps) converge.Caller { return d.Runner(r, d.Environ, d.FileHash, d.Now, real) },
 		Clock:    func() run.Time { return run.Time{Time: d.Now()} },
@@ -303,7 +343,7 @@ func (c *ctxDeps) machineDeps(root string, scenario *mockai.Scenario, mode judge
 			}
 			return s.Hash(), nil
 		},
-		Terminal: d.Terminal(root, func() run.Time { return run.Time{Time: d.Now()} }),
+		Terminal: d.Terminal(common, func() run.Time { return run.Time{Time: d.Now()} }),
 	}
 	if scenario == nil && mode == judgeReal {
 		keys := c.keys()

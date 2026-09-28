@@ -96,7 +96,7 @@ assert_eq "$(field untrusted)" '["input.diff","input.findings_so_far","instructi
 assert_eq "$(field input.base_sha)" "$BASE" "base sha"; assert_eq "$(field input.head_sha)" "$(git rev-parse HEAD)" "head sha"
 assert_eq "$(field node)" discover "node"; assert_eq "$(field exec)" subagent "exec"
 fsm advance --run "$ID"; expect NEEDS_INPUT 3   # idempotent
-grep -c '"type":"needs_input"' .metareview/runs/"$ID"/audit.jsonl | grep -q '^1$'
+grep -c '"type":"needs_input"' .git/metareview/runs/"$ID"/audit.jsonl | grep -q '^1$'
 printf '%s' "$FINDINGS" > fixtures/findings.json
 fsm record node-output --node discover --data fixtures/findings.json --run "$ID"; expect OK 0
 fsm advance --run "$ID"; expect ADVANCED 0; assert_eq "$(field to)" adjudicate "→adjudicate"
@@ -136,7 +136,7 @@ assert_eq "$(field index)" 0 "judge index"; assert_eq "$(field verdict.decision)
 fsm judge --kind adjudicate --model gpt-5.2 --effort medium --input fixtures/cand.json --context fixtures/d.diff --run "$CHILD"; expect_err ERR_RUN_TERMINAL 2
 # runs.jsonl rows: parent needs-revision, child passed, mock:true, decoded strictly against the §6 key set
 node -e '
-const rows=require("fs").readFileSync(".metareview/runs.jsonl","utf8").trim().split("\n").map(JSON.parse);
+const rows=require("fs").readFileSync(".git/metareview/runs.jsonl","utf8").trim().split("\n").map(JSON.parse);
 const keys=["schemaVersion","id","scope","target","status","verdict","executionMode","attemptNumber","maxAttempts","baseSha","headSha","createdAt","updatedAt","repoRoot","contextPackPath","reviewLogPath","mock","outcome","fsmRunDir","workflowHash","workflowSource","escalationReason"];
 if(rows.length!==2) throw new Error("rows "+rows.length); // the live run has no row yet
 for(const r of rows){ for(const k of keys) if(!(k in r)) throw new Error("missing "+k); for(const k of Object.keys(r)) if(!keys.includes(k)&&k!=="previousRunId") throw new Error("extra "+k); if(r.mock!==true) throw new Error("mock"); }
@@ -159,7 +159,7 @@ MRV_RUN_ID="$ID" fsm state --run "$CHILD"; expect OK 0; assert_eq "$(field run_i
 MRV_RUN_ID=../x fsm state; expect_err ERR_RUN_NOT_FOUND 2
 fsm state --run ../x; expect_err ERR_RUN_NOT_FOUND 2
 fsm state --run mrv-doesnotexist00; expect_err ERR_RUN_NOT_FOUND 2
-mkdir -p .metareview/runs/mrv-zzzzzzzzzzzz; : > .metareview/runs/mrv-zzzzzzzzzzzz/audit.jsonl
+mkdir -p .git/metareview/runs/mrv-zzzzzzzzzzzz; : > .git/metareview/runs/mrv-zzzzzzzzzzzz/audit.jsonl
 fsm state; expect OK 0; [ "$(field run_id)" != "mrv-zzzzzzzzzzzz" ]
 # mock rules: env ignored after init, flag on advance is usage
 MOCK_AI=scenarios/review-loop/clean fsm state --run "$ID"; expect OK 0
@@ -186,13 +186,13 @@ printf 'any: [{cmd: notify}]\n' > fixtures/cmd.yaml
 fsm converge --check fixtures/cmd.yaml; expect_err ERR_CMD_NOT_ALLOWED 2
 printf 'any: [\n' > fixtures/bad.yaml; fsm converge --check fixtures/bad.yaml; expect_err ERR_BAD_CONVERGENCE 2
 # torn tail → ERR_AUDIT_TORN (1) → --repair, then --repair on a clean log refuses
-printf '{"torn' >> ".metareview/runs/$LIVE/audit.jsonl"
+printf '{"torn' >> ".git/metareview/runs/$LIVE/audit.jsonl"
 fsm advance --run "$LIVE"; expect_err ERR_AUDIT_TORN 1
 fsm state --run "$LIVE"; expect OK 0; assert_eq "$(field torn)" true "torn"
 fsm advance --run "$LIVE" --repair; expect ADVANCED 0; assert_eq "$(field warnings.0.code)" AUDIT_TORN_LINE_DROPPED "repair warning"
 printf '%s' "$(field warnings.0.detail)" | grep -Eq '^[0-9]+ bytes dropped after seq [0-9]+ from audit.jsonl$'
-ls .metareview/runs/"$LIVE"/audit.torn-*.bin >/dev/null
-[ "$(cat .metareview/runs/"$LIVE"/audit.torn-*.bin)" = '{"torn' ]
+ls .git/metareview/runs/"$LIVE"/audit.torn-*.bin >/dev/null
+[ "$(cat .git/metareview/runs/"$LIVE"/audit.torn-*.bin)" = '{"torn' ]
 fsm advance --run "$LIVE" --repair; expect_err ERR_AUDIT_NOT_TORN 2
 # workflow change: refused without the flag, accepted with it (source path); impersonation refused at init
 sed 's/effort: \$REV_EFFORT/effort: high/' "$ROOT/workflows/sdlc-loop.yaml" > fixtures/changed.yaml
@@ -230,7 +230,7 @@ fsm record node-output --node fix --data fixtures/fix.json --run "$O"; expect OK
 fsm advance --run "$O"; expect ADVANCED 0
 fsm advance --run "$O"; expect STOPPED 1
 assert_eq "$(field handler.name)" notify "handler"; assert_eq "$(field untrusted)" '["handler.name","stop_reason"]' "stopped untrusted"
-grep -q '"outcome":"overflow"' .metareview/runs.jsonl
+grep -q '"outcome":"overflow"' .git/metareview/runs.jsonl
 
 # ---- injection: fenced values never appear raw in instructions ------------------------------------------
 new_repo inject
@@ -243,7 +243,7 @@ fsm record node-output --node discover --data fixtures/inj.json --run "$I"; expe
 fsm advance --run "$I"; expect ADVANCED 0
 fsm advance --run "$I"; expect DONE 0    # rejected → nothing confirmed → clean
 node -e '
-const lines=require("fs").readFileSync(".metareview/runs/"+process.argv[1]+"/audit.jsonl","utf8").trim().split("\n").map(JSON.parse);
+const lines=require("fs").readFileSync(".git/metareview/runs/"+process.argv[1]+"/audit.jsonl","utf8").trim().split("\n").map(JSON.parse);
 const call=lines.find(e=>e.type==="llm_call"); if(!call) throw new Error("no llm_call");
 ' "$I"
 fsm state --run "$I"; expect OK 0

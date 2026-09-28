@@ -10,6 +10,7 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/kind"
 	"github.com/dsifry/metareview/internal/fsm/run"
 	"github.com/dsifry/metareview/internal/fsm/workflow"
+	"github.com/dsifry/metareview/internal/repo"
 )
 
 // AbandonedRun is an FSM run that stopped somewhere that is not an ending.
@@ -53,6 +54,8 @@ type AbandonedRun struct {
 	// StopReason is what an operator recorded about why the run was left here, empty when they
 	// recorded nothing. It explains the entry; it never removes it.
 	StopReason string `json:"stopReason,omitempty"`
+	// workDir is the work dir the run's init recorded: which worktree started it (#173 scoping; not reported).
+	workDir string
 }
 
 // DiscoverAbandonedRuns reports FSM runs left in a non-terminal state.
@@ -69,14 +72,6 @@ func DiscoverAbandonedRuns(root string) []AbandonedRun {
 // disagrees with the judge type, and the caller above supplies neither — and an untestable
 // branch in a gate is the shape this repository keeps finding defects in.
 func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
-	// run-store: current-worktree. Deliberately NOT repo.RunStoreRoot yet: the shared store holds
-	// every worktree's runs, and blocking this checkout's Stop hook on another branch's abandoned run
-	// would be a false block. Branch-scoping comes first (#169 work plan, Phase 4).
-	dir := filepath.Join(root, ".metareview", "runs")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
 	reg, err := kind.New(deps)
 	if err != nil {
 		// A registry that will not build cannot say what a workflow's ending is, so nothing is
@@ -84,17 +79,65 @@ func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
 		// blockers: the report is narrower, never falsely clean about the reviews themselves.
 		return nil
 	}
-	out := []AbandonedRun{}
+	var out []AbandonedRun
+	readable := false // no runs directory anywhere reports nil, as it always has; an empty one reports []
+	seen := map[string]bool{}
+	// The shared store (#173): every worktree's runs, so only the ones THIS worktree started — the work dir their
+	// init recorded — are reported. Blocking this checkout's Stop hook on another branch's abandoned run would be a
+	// false block.
+	if store, err := repo.StoreDir(root); err == nil {
+		here := canonical(root)
+		runs, ok := abandonedIn(filepath.Join(store, "runs"), reg.Info())
+		readable = readable || ok
+		for _, r := range runs {
+			if canonical(r.workDir) == here {
+				out, seen[r.RunID] = append(out, r), true
+			}
+		}
+	}
+	// run-store: current-worktree — a 0.13.x run not yet migrated into the shared store still sits in this
+	// worktree's own .metareview/runs (read for one release; any fsm command migrates it).
+	runs, ok := abandonedIn(filepath.Join(root, ".metareview", "runs"), reg.Info())
+	readable = readable || ok
+	for _, r := range runs {
+		if !seen[r.RunID] {
+			out = append(out, r)
+		}
+	}
+	if !readable {
+		return nil
+	}
+	if out == nil {
+		out = []AbandonedRun{}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].RunID < out[j].RunID })
+	return out
+}
+
+// abandonedIn lists the abandoned runs directly under dir, and whether dir could be read at all.
+func abandonedIn(dir string, kinds map[string]workflow.KindInfo) ([]AbandonedRun, bool) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, false
+	}
+	var out []AbandonedRun
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		if r, ok := abandonedRun(filepath.Join(dir, e.Name()), reg.Info()); ok {
+		if r, ok := abandonedRun(filepath.Join(dir, e.Name()), kinds); ok {
 			out = append(out, r)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].RunID < out[j].RunID })
-	return out
+	return out, true
+}
+
+// canonical resolves symlinks so /var and /private/var, or a symlinked checkout, compare equal.
+func canonical(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
 }
 
 func abandonedRun(dir string, kinds map[string]workflow.KindInfo) (AbandonedRun, bool) {
@@ -126,6 +169,7 @@ func abandonedRun(dir string, kinds map[string]workflow.KindInfo) (AbandonedRun,
 				// may legally declare a command called "stopped" — so reading `name` without
 				// checking the type let a guarded command annotate every run of its workflow.
 				Name     string          `json:"name"`
+				WorkDir  string          `json:"work_dir"`
 				Note     json.RawMessage `json:"data"`
 				Workflow string          `json:"workflow"`
 				Mock     string          `json:"mock"`
@@ -135,6 +179,9 @@ func abandonedRun(dir string, kinds map[string]workflow.KindInfo) (AbandonedRun,
 		}
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			continue
+		}
+		if ev.Type == run.TypeInit {
+			got.workDir = ev.Data.WorkDir
 		}
 		if ev.Type == run.TypeRecord && ev.Data.Name == StopNote {
 			// Last note wins: an operator may record a stop, resume the run, and record another.

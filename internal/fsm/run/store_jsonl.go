@@ -25,6 +25,7 @@ type jsonlStore struct {
 
 // NewJSONLStore returns the on-disk store rooted at the repository root.
 func NewJSONLStore(root string, opts Options) RunStore {
+	// root: store — a checkout's .metareview/runs (the 0.13.x layout; production uses NewCommonDirStore).
 	return &jsonlStore{root: root, layout: []string{".metareview", "runs"}, opts: opts, held: map[string]*os.File{}}
 }
 
