@@ -585,3 +585,45 @@ func TestPartlyReadScopeDedupesAsBeforeBranches(t *testing.T) {
 		t.Fatalf("an unknown scope must deduplicate the re-raise: %+v", records)
 	}
 }
+
+// TestPartlyReadScopeNeverCarriesAnotherBranchsRow is a recheck finding on the eighth cut: when git read the branch name
+// and then failed (the scope is unknown), the refresh re-stamped another live branch's row with this branch's name and
+// head, so once git recovered that branch's own finding read as another branch's and its gate cleared.
+func TestPartlyReadScopeNeverCarriesAnotherBranchsRow(t *testing.T) {
+	root, git := scopeRepo(t)
+	input := unsafeEval("eval")
+	git("switch", "-q", "-c", "branch-a")
+	git("commit", "-q", "--allow-empty", "-m", "A")
+	reconcileOn(t, root, "mrv-a", git("rev-parse", "HEAD"), input)
+	git("switch", "-q", "-c", "branch-b", "main")
+	git("commit", "-q", "--allow-empty", "-m", "B")
+	orig := loadScope
+	loadScope = func(string) scope.Scope { return scope.Scope{Current: "branch-b"} }
+	reconcileOn(t, root, "mrv-b", git("rev-parse", "HEAD"), input)
+	loadScope = orig
+	git("switch", "-q", "branch-a")
+	if in, _, _ := ScopedBlocking(root); !strings.Contains(ids(in), "mrvf-a-001") {
+		t.Fatalf("a partly read scope on branch-b must not take branch-a's row: in=%s rows=%+v", ids(in), readRecords(t, root))
+	}
+}
+
+// TestSquashMergedAndDeletedBranchBlocksNothing is #178 AC-4.6 for a squash merge (this repository's own merge
+// style): the recorded head never reaches main, the branch is gone, and its finding blocks nothing afterwards.
+func TestSquashMergedAndDeletedBranchBlocksNothing(t *testing.T) {
+	root, git := scopeRepo(t)
+	git("switch", "-q", "-c", "feat")
+	git("commit", "-q", "--allow-empty", "-m", "F")
+	reconcileOn(t, root, "mrv-f", git("rev-parse", "HEAD"), unsafeEval("eval"))
+	git("switch", "-q", "main")
+	git("merge", "-q", "--squash", "feat")
+	git("commit", "-q", "--allow-empty", "-m", "squash feat")
+	git("branch", "-q", "-D", "feat")
+	if in, _, _ := ScopedBlocking(root); len(in) != 0 {
+		t.Fatalf("on main after the squash merge: in=%s", ids(in))
+	}
+	git("switch", "-q", "-c", "next")
+	git("commit", "-q", "--allow-empty", "-m", "N")
+	if in, _, _ := ScopedBlocking(root); len(in) != 0 {
+		t.Fatalf("on a branch cut after the squash merge: in=%s", ids(in))
+	}
+}
