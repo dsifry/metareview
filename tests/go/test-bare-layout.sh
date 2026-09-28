@@ -64,8 +64,9 @@ git -C "$TMP/repo.git" worktree remove --force "$TMP/gone"
 for wt in "$TMP/main" "$TMP/other"; do
   (cd "$wt" && "$MR" status --json > "$TMP/st.json") || { echo "FAIL: $wt must not be blocked by a gone worktree's run:"; cat "$TMP/st.json"; exit 1; }
   (cd "$wt" && "$MR" status --json --all > "$TMP/st.json") || { echo "FAIL: --all must not change the exit in $wt:"; cat "$TMP/st.json"; exit 1; }
-  grep -Eq "\"runId\": ?\"$GONE\"" "$TMP/st.json" && grep -Eq '"branch": ?"gone"' "$TMP/st.json" ||
-    { echo "FAIL: $wt: status --all must list $GONE under branch gone"; cat "$TMP/st.json"; exit 1; }
+  if ! grep -Eq "\"runId\": ?\"$GONE\"" "$TMP/st.json" || ! grep -Eq '"branch": ?"gone"' "$TMP/st.json"; then
+    echo "FAIL: $wt: status --all must list $GONE under branch gone"; cat "$TMP/st.json"; exit 1
+  fi
 done
 
 # From the bare directory itself there is no checkout at all: fsm still refuses, with the reason.

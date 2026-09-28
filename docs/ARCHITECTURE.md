@@ -205,10 +205,13 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   one rule in one package: a run recorded on branch N at head H is **in scope** when N is the current branch or one
   of its former names — the `git branch -m` / `-c` entries its reflog carries, while no live branch holds that name —
   (the name leg: survives rebase, amend and rename; mid-rebase the branch being rebased is current; a rebase begun detached is no branch), or when H lies in
-  `merge-base(HEAD, main|master)..HEAD` (the range leg: detached snapshots, stacked branches). Otherwise it is
+  `merge-base(HEAD, main|master)..HEAD`, less anything a remote `*/main` or `*/master` already has (the range leg:
+  detached snapshots, stacked branches; the exclusion keeps a stale local main from pulling merged branches' runs
+  into a branch cut from a fresh origin/main). Otherwise it is
   **other-branch** while N exists, else **orphaned**; neither blocks, and `status --all` lists both, each with the
   run directory to delete, without changing the exit code. Branch names are compared as full refnames, so a
-  same-named tag cannot unmatch them. `fsm init` records `branch` in its init event: the checked-out branch; on a
+  same-named tag cannot unmatch them, and spelled as git lists them (`scope.Canonical`: on a case-insensitive
+  filesystem `git checkout Feat` lands on `feat` with HEAD spelled `Feat`; init records, and status compares, `feat`). `fsm init` records `branch` in its init event: the checked-out branch; on a
   detached HEAD `--for-branch` is required and must name a local branch exactly as git lists it; on an attached one
   it may only restate it. **Fail closed:** any git call `Load` makes that fails (other than git's own "detached")
   leaves the scope unknown, and an unknown scope puts everything in scope. **Legacy runs** (before #177, no branch)
@@ -223,7 +226,11 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   bare one's default), or whose reflogs were expired, has no former names, so a rewrite then a rename orphans a run
   there; from other checkouts a renamed branch's run reads as orphaned (only the renamed branch reads its own
   reflog); a stack rebased as a whole keeps its base branch's runs on the base branch only; the range leg needs a
-  local `main` or `master`. Clearing a stale run is the closing operation's job.
+  local `main` or `master`. a squash-merged (then deleted) lower branch of a stack keeps blocking the upper branch through the range leg until
+  it is rebased `--onto` main (the blocker names the lower branch); a detached HEAD other than a rebase (bisect, an
+  inspection checkout) has no name leg; "orphaned" means the recorded branch is gone, even when a live stacked branch
+  still holds its commits. Clearing a stale run is the closing operation's job. Findings are not yet branch-scoped
+  (#178 routes them through `internal/scope`).
 - **Store vs anchor vs work (#169, #172, #173).** Every `.metareview`/`docs` path in `internal/fsm` names which it
   means. **Common dir** = the shared store above. **Store root (anchor)** = the main worktree (`git worktree list
   --porcelain`, `repo.MainWorktreeFromPorcelain`), or with a bare main the linked worktree the command runs in (#174):

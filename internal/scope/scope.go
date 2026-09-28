@@ -138,7 +138,9 @@ func Load(root string, git Runner) Scope {
 		return s
 	}
 	if ok {
-		out, err := git(root, "rev-list", base+"..HEAD")
+		// Never what a remote default branch already has: a branch cut from a fresh origin/main while local main lags
+		// would otherwise take in every merged branch's commits — and their runs.
+		out, err := git(root, "rev-list", base+"..HEAD", "--not", "--remotes=*/main", "--remotes=*/master", "--")
 		if err != nil {
 			return s
 		}
@@ -153,6 +155,7 @@ func Load(root string, git Runner) Scope {
 	for _, ref := range strings.Fields(out) {
 		s.branches[branchName(ref)] = true
 	}
+	s.Current = Canonical(s.Current, s.branches)
 	if s.Current != "" && s.branches[s.Current] {
 		// The branch's reflog: its former names, so a rewrite followed by `git branch -m` (or `-c` then deleting the
 		// original — both carry the reflog along) still owns the runs of the name it had; and its past heads, for
@@ -189,6 +192,29 @@ func (s Scope) readReflog(root string, git Runner) error {
 		}
 	}
 	return nil
+}
+
+// Canonical is name as git lists the branch. On a case-insensitive filesystem `git checkout Feat` resolves the loose
+// ref refs/heads/feat yet leaves HEAD spelled refs/heads/Feat; recording or comparing that spelling would never match
+// the branch again. A name with exactly one case-insensitive match among branches takes its spelling; anything else is
+// returned as is.
+func Canonical(name string, branches map[string]bool) string {
+	if name == "" || branches[name] {
+		return name
+	}
+	match := ""
+	for b := range branches {
+		if strings.EqualFold(b, name) {
+			if match != "" {
+				return name
+			}
+			match = b
+		}
+	}
+	if match == "" {
+		return name
+	}
+	return match
 }
 
 // formerName is the branch a rename or copy entry names: git writes refs/heads/<name>; JGit-based tools write the

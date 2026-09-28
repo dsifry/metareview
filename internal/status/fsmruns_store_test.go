@@ -338,6 +338,25 @@ func TestAnUnbornBranchIsNotAnUnknownScope(t *testing.T) {
 	}
 }
 
+// A branch cut from a fresh origin/main while local main lags must not take in the commits merged upstream since —
+// nor the abandoned runs of the branches they came from (AC-4.6 with merge commits).
+func TestAStaleLocalMainDoesNotPullInMergedBranchesRuns(t *testing.T) {
+	root, common := newRepo(t)
+	gitRun(t, root, "checkout", "-q", "-b", "feat")
+	f := commit(t, root, "feat work")
+	writeStoreRun(t, common, "mrv-merged-up-01", "feat", f)
+	gitRun(t, root, "checkout", "-q", "--detach", "main")
+	gitRun(t, root, "merge", "-q", "--no-ff", "-m", "merge feat upstream", "feat")
+	gitRun(t, root, "update-ref", "refs/remotes/origin/main", "HEAD") // origin/main has feat; local main does not
+	gitRun(t, root, "branch", "-q", "-D", "feat")
+	gitRun(t, root, "switch", "-q", "-c", "next", "origin/main")
+	commit(t, root, "next work")
+	mine, elsewhere := ScanAbandonedRuns(root)
+	if len(mine) != 0 || len(elsewhere) != 1 || elsewhere[0].Scope != "orphaned" {
+		t.Fatalf("feat merged upstream and deleted: its run is orphaned, not next's: mine %v, elsewhere %+v", ids(mine), elsewhere)
+	}
+}
+
 // AC-4.4: a run created detached with --for-branch feat blocks feat, including after feat is rebased.
 func TestADetachedRunForABranchBlocksThatBranch(t *testing.T) {
 	root, common := newRepo(t)

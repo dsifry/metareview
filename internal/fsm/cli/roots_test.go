@@ -370,3 +370,14 @@ func TestInitForBranchCheckTellsGitFailingFromNo(t *testing.T) {
 		t.Fatalf("a git that did not run says why: %v", e)
 	}
 }
+
+// On a case-insensitive filesystem `git checkout MAIN` lands on main with HEAD spelled MAIN; init records the branch
+// as git lists it, or status — comparing exactly — would never match the run again.
+func TestInitRecordsTheBranchAsGitListsIt(t *testing.T) {
+	h := newHarness(t)
+	git(t, h.root, "symbolic-ref", "HEAD", "refs/heads/MAIN")
+	id := h.must(StatusOK, 0, h.mockInit()...)["run_id"].(string)
+	if got := initBranch(t, h, id); got != "main" {
+		t.Fatalf("a mis-cased HEAD must be recorded as the listed branch, got %q", got)
+	}
+}

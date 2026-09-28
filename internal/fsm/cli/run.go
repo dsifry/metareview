@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -288,17 +287,21 @@ func (in *invocation) init() int {
 	case err != nil || code != 1: // 1 is git's "detached"; anything else is git failing, not a detached HEAD
 		return gitFailed("symbolic-ref", code, err)
 	}
-	if branch != "" && current == "" {
-		// A name no local branch has would never match the name leg: after a rebase the run would be orphaned and
-		// block nothing, so the branch must exist — spelled exactly as git lists it (a case-insensitive filesystem
-		// resolves refs/heads/FEAT to feat, which status, comparing exactly, would never match).
-		out, code, err := c.git(workDir, "for-each-ref", "--format=%(refname)", "refs/heads")
-		if err != nil || code != 0 {
-			return gitFailed("for-each-ref", code, err)
-		}
-		if !slices.Contains(strings.Fields(out), "refs/heads/"+branch) {
-			return in.usage("--for-branch " + strconv.Quote(branch) + " is not a local branch in " + workDir)
-		}
+	// The branches exactly as git lists them: a name no local branch has would never match the name leg, so after a
+	// rebase the run would be orphaned and block nothing. A case-insensitive filesystem lets `git checkout Feat` land
+	// on feat with HEAD spelled Feat, and resolves refs/heads/FEAT to feat — status compares exactly, so the checked-out
+	// name is recorded as git lists it, and --for-branch must be spelled that way.
+	refs, code, err := c.git(workDir, "for-each-ref", "--format=%(refname)", "refs/heads")
+	if err != nil || code != 0 {
+		return gitFailed("for-each-ref", code, err)
+	}
+	branches := map[string]bool{}
+	for _, ref := range strings.Fields(refs) {
+		branches[scope.BranchName(ref)] = true
+	}
+	current = scope.Canonical(current, branches)
+	if branch != "" && current == "" && !branches[branch] {
+		return in.usage("--for-branch " + strconv.Quote(branch) + " is not a local branch in " + workDir)
 	}
 	if current != "" && branch != "" && branch != current {
 		return in.usage("--for-branch " + branch + " names another branch than the one checked out in " + workDir + " (" + current + "); it is for a detached HEAD")

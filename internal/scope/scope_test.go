@@ -80,6 +80,30 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+// A mis-cased checkout (`git checkout Feat` for feat on a case-insensitive filesystem) is the branch git lists.
+func TestCanonical(t *testing.T) {
+	branches := map[string]bool{"feat": true, "Dup": true, "dup": true}
+	for in, want := range map[string]string{"": "", "feat": "feat", "Feat": "feat", "FEAT": "feat", "DUP": "DUP", "gone": "gone"} {
+		if got := Canonical(in, branches); got != want {
+			t.Errorf("Canonical(%q) = %q, want %q", in, got, want)
+		}
+	}
+	calls := 0
+	git := func(dir string, args ...string) (string, error) {
+		if args[0] == "symbolic-ref" {
+			calls++
+			return "refs/heads/Feat", nil
+		}
+		return fakeGit(&calls, "", 0)(dir, args...)
+	}
+	orig := forkPoint
+	t.Cleanup(func() { forkPoint = orig })
+	forkPoint = func(string) (string, bool, error) { return "", false, nil }
+	if s := Load("/repo", git); s.Current != "feat" || !s.former["first"] {
+		t.Fatalf("a mis-cased HEAD is the listed branch, with its reflog: %+v", s)
+	}
+}
+
 // fakeGit answers Load's calls; fail names the subcommand that errors (with its exit code, -1 for no exit).
 func fakeGit(calls *int, fail string, failCode int) Runner {
 	return func(_ string, args ...string) (string, error) {
