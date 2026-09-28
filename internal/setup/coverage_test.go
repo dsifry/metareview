@@ -132,7 +132,7 @@ func TestApplyHookInstallRevalidationError(t *testing.T) {
 
 func TestApplyHookInstallFreshAlreadyDone(t *testing.T) {
 	root, g := tempRepo(t)
-	target := hookTarget(t)
+	target := hookTarget(t, root, g)
 	// Install for real so the repo's core.hooksPath already points at target (fresh AlreadyDone),
 	// then Apply a stale non-AlreadyDone plan without force.
 	plan, err := PlanHookInstall(root, g)
@@ -150,18 +150,23 @@ func TestApplyHookInstallFreshAlreadyDone(t *testing.T) {
 
 func TestApplyHookInstallConfigSetError(t *testing.T) {
 	root, g := tempRepo(t)
-	target := hookTarget(t)
+	target := hookTarget(t, root, g)
 	// force=true skips revalidation; fail the config write that sets core.hooksPath.
 	g2 := failGitOn(g, errors.New("set boom"), "core.hooksPath", target)
 	if err := ApplyHookInstall(root, HookInstallPlan{Target: target}, true, g2); err == nil || !strings.Contains(err.Error(), "setting core.hooksPath") {
 		t.Fatalf("expected a config-set error, got %v", err)
+	}
+	// ...and the id write before it (#173): core.hooksPath is never set without the id that keeps it stable.
+	g3 := failGitOn(g, errors.New("id boom"), HooksIDKey, filepath.Base(target))
+	if err := ApplyHookInstall(root, HookInstallPlan{Target: target}, true, g3); err == nil || !strings.Contains(err.Error(), HooksIDKey) {
+		t.Fatalf("expected a hook-dir-id error, got %v", err)
 	}
 }
 
 func TestApplyHookInstallNotMaterializedAfterWrite(t *testing.T) {
 	isolateHooksHome(t)
 	root, g := tempRepo(t)
-	target := hookTarget(t)
+	target := hookTarget(t, root, g)
 	orig := applyMaterialize
 	t.Cleanup(func() { applyMaterialize = orig })
 	// materialize "succeeds" but writes nothing, so the post-write verify fails.

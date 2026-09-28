@@ -250,7 +250,7 @@ printf '%s' "$inst" | grep -q 'Installed' \
   || { echo "FAIL: --install-hooks --yes must install: $inst"; exit 1; }
 test -n "$( (cd "$hookrepo" && git config --local --get core.hooksPath) )" \
   || { echo "FAIL: --yes must set core.hooksPath"; exit 1; }
-# ...and it MATERIALIZES executable hook scripts into the user-level, content-addressed location
+# ...and it MATERIALIZES executable hook scripts into the user-level, per-repository location
 # ($XDG_DATA_HOME/metareview/git-hooks/<16 hex>, #173) — never inside the checkout, whose move would strand it.
 # Compare the RESOLVED real parent (through pwd -P) so the check is exact yet robust when mktemp hands back a
 # symlinked dir (e.g. /var -> /private/var).

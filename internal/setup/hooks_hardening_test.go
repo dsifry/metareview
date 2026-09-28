@@ -37,7 +37,7 @@ func TestReinstallRefreshesStaleHookContent(t *testing.T) {
 	if err := ApplyHookInstall(root, plan, false, g); err != nil {
 		t.Fatal(err)
 	}
-	dir := hookTarget(t)
+	dir := hookTarget(t, root, g)
 	prePush := filepath.Join(dir, "pre-push")
 	// Simulate an OLDER materialized hook (present + executable, but different content than the current embed).
 	if err := os.WriteFile(prePush, []byte("#!/usr/bin/env bash\n# STALE OLD VERSION — no per-ref gate\nexit 0\n"), 0o755); err != nil {
@@ -82,7 +82,7 @@ func TestForceReinstallRematerializesEvenWhenAlreadyDone(t *testing.T) {
 	if !done.AlreadyDone {
 		t.Fatal("precondition: a current install should report AlreadyDone")
 	}
-	prePush := filepath.Join(hookTarget(t), "pre-push")
+	prePush := filepath.Join(hookTarget(t, root, g), "pre-push")
 	if err := os.WriteFile(prePush, []byte("tampered\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -19,10 +19,10 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// hookTarget is where this binary materializes the hook scripts, the value core.hooksPath should hold.
-func hookTarget(t *testing.T) string {
+// hookTarget is where this repository's hook scripts are materialized, the value core.hooksPath should hold.
+func hookTarget(t *testing.T, root string, g GitRunner) string {
 	t.Helper()
-	dir, err := hookTargetDir("")
+	dir, err := hookTargetDir(root, g)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -121,17 +121,16 @@ A repository whose own hook manager owns `core.hooksPath` (husky, lefthook, bead
 refuses rather than override it — opts into the Stop gate alone with `metareview setup --enable-stop-gate`
 (`--disable-stop-gate` reverses it).
 
-`--uninstall-hooks` unsets `core.hooksPath` and the Stop-gate opt-in (the user-level hook scripts stay: other repositories may use them; a pre-#173 checkout-local copy is removed), but
+`--uninstall-hooks` unsets `core.hooksPath` and the Stop-gate opt-in (and removes metareview's scripts from the repository's hook dir, leaving any hook it does not own), but
 **leaves the `.gitignore` block in place** — editing a user's `.gitignore` on uninstall is riskier than
 leaving inert ignore lines. To remove it, delete the block marked `# metareview: keep ephemeral review state
 local …` from `.gitignore` by hand. Re-running install (or `learn --post-merge`) re-adds it.
 
 With no TTY and no `--yes` (an agent or CI), it prints the plan and the flags and **changes nothing** rather
-than hanging on a prompt. Install **materializes** the hook scripts into `${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<content-id>/` (embedded in
+than hanging on a prompt. Install **materializes** the hook scripts into `${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<repo-id>/` (embedded in
 the binary, so this works in *any* repo — not just metareview's own checkout), points `core.hooksPath` there,
-and adds metareview's **ephemeral-state ignore block** to the repo's `.gitignore` (idempotently) so the
-per-clone scripts *and the rest of metareview's ephemeral state* (`runs.jsonl`, `findings.jsonl`, `runs/`,
-`shards/`) are never committed, while the **durable** learning state (`knowledge/metareview.jsonl`,
+and adds metareview's **ephemeral-state ignore block** to the repo's `.gitignore` (idempotently) so
+metareview's ephemeral state (`runs.jsonl`, `findings.jsonl`, `shards/`) is never committed, while the **durable** learning state (`knowledge/metareview.jsonl`,
 `calibration.jsonl`, `learning-runs.jsonl`) stays committable. Re-running install **refreshes materialized
 hooks whose content has drifted** from the current binary (an upgrade), and `--force` always re-materializes —
 so a hook fix reaches an already-installed repo. Git hooks are per-clone and never auto-install (git's security

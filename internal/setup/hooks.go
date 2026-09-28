@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -62,53 +63,70 @@ func hooksHome() (string, error) {
 	return filepath.Join(base, "metareview", "git-hooks"), nil
 }
 
-// hookContentID names the materialized scripts by their content, so a given directory is never rewritten: an upgrade
-// for one repository materializes a NEW directory and re-points that repository, instead of swapping the scripts
-// under another repository that still points at the old ones.
-func hookContentID() (string, error) {
-	names := make([]string, 0, len(gitHookScripts))
-	for name := range gitHookScripts {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	h := sha256.New()
-	for _, name := range names {
-		body, err := readHookAsset(gitHookScripts[name])
-		if err != nil {
-			return "", fmt.Errorf("reading embedded hook %s: %w", gitHookScripts[name], err)
+// HooksIDKey is the repository-local git config key naming this repository's hook dir under hooksHome (#173). It is
+// in the repository's own config, so it moves with the repository; a path never could.
+const HooksIDKey = "metareview.hooksId"
+
+var hookIDPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// repoHooksID is this repository's hook-dir id: the recorded metareview.hooksId, or — before the first install
+// records one — an id derived from git's common directory. Deriving keeps a read-only plan stable across calls; once
+// install records it, the id no longer depends on where the repository lives.
+func repoHooksID(root string, git GitRunner) (string, error) {
+	if out, err := git(root, "config", "--local", "--get", HooksIDKey); err == nil {
+		if id := strings.TrimSpace(string(out)); hookIDPattern.MatchString(id) {
+			return id, nil
 		}
-		_, _ = fmt.Fprintf(h, "%s\x00%d\x00", name, len(body)) // a hash.Hash never fails a write
-		h.Write(body)
 	}
-	return hex.EncodeToString(h.Sum(nil))[:16], nil
+	out, err := git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("locating git's common directory: %w", err)
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(strings.TrimSpace(string(out)))))
+	return hex.EncodeToString(sum[:])[:16], nil
 }
 
-// hookTargetDir is where the gate's hook scripts are MATERIALIZED: <hooksHome>/<content id>. Absolute, because a
-// relative core.hooksPath is resolved against each worktree's root. root is unused since #173 — the location no
-// longer depends on the checkout — and kept so every caller asks the same question.
-func hookTargetDir(root string) (string, error) {
-	_ = root
+// hookTargetDir is where this repository's hook scripts are MATERIALIZED: <hooksHome>/<metareview.hooksId>. One dir
+// per repository, so a hook a user or another tool adds to git's hooks dir (which core.hooksPath now names) stays in
+// that repository. Absolute, because a relative core.hooksPath is resolved against each worktree's root.
+func hookTargetDir(root string, git GitRunner) (string, error) {
 	home, err := hooksHome()
 	if err != nil {
 		return "", err
 	}
-	id, err := hookContentID()
+	id, err := repoHooksID(root, git)
 	if err != nil {
 		return "", err
 	}
 	return filepathAbs(filepath.Join(home, id))
 }
 
-// isPreviousHookDir reports whether p is a hook dir an earlier metareview materialized, so an upgrade replaces it
-// rather than refusing it as foreign: another content id under hooksHome, or the pre-#173 per-checkout
-// <checkout>/.metareview/git-hooks (named by path, since the install that wrote it may have run in any checkout).
-// Either is claimed only when it is gone or its pre-push is metareview's gate — the legacy rule.
+// isPreviousHookDir reports whether p is a hook dir metareview materialized, so install re-points it rather than
+// refusing it as foreign: any <data home>/metareview/git-hooks/<id> (matched by shape, not by the CURRENT data home:
+// XDG_DATA_HOME can differ between the shell that installed and the one running now), or the pre-#173 per-checkout
+// <checkout>/.metareview/git-hooks. Either is claimed only when it is gone or its pre-push is metareview's gate.
 func isPreviousHookDir(p string) bool {
 	p = filepath.Clean(p)
-	home, err := hooksHome()
-	underHome := err == nil && filepath.Dir(p) == filepath.Clean(home)
+	userLevel := hookIDPattern.MatchString(filepath.Base(p)) && filepath.Base(filepath.Dir(p)) == "git-hooks" &&
+		filepath.Base(filepath.Dir(filepath.Dir(p))) == "metareview"
 	perCheckout := filepath.Base(p) == "git-hooks" && filepath.Base(filepath.Dir(p)) == ".metareview"
-	return (underHome || perCheckout) && legacyHooksAreOurs(p)
+	return (userLevel || perCheckout) && legacyHooksAreOurs(p)
+}
+
+// foreignHooksIn lists the files in a metareview hook dir that are not its own scripts: hooks a user or another tool
+// put there. Re-pointing core.hooksPath away from that dir would silently stop them running.
+func foreignHooksIn(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var extra []string
+	for _, e := range entries {
+		if _, ours := gitHookScripts[e.Name()]; !ours && !strings.Contains(e.Name(), ".tmp-") {
+			extra = append(extra, e.Name())
+		}
+	}
+	return extra
 }
 
 // legacyHookTargetDir is the pre-0.11 install target: the committed hooks/git of metareview's OWN checkout.
@@ -118,9 +136,9 @@ func legacyHookTargetDir(root string) (string, error) {
 }
 
 // materializeHooks writes the embedded hook scripts into dir, each executable. This is what lets the gate
-// reach a CONSUMER repo: the scripts are compiled into the binary, not assumed to already exist on disk. dir is
-// shared by every repository on this content id, so each script is written to a temporary name and renamed into
-// place: a hook git starts while another install is writing sees the old script or the new one, never half of one.
+// reach a CONSUMER repo: the scripts are compiled into the binary, not assumed to already exist on disk. An upgrade
+// rewrites them in place, so each script is written to a temporary name and renamed into place: a hook git starts
+// while an install is writing sees the old script or the new one, never half of one. Other files are left alone.
 func materializeHooks(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -164,7 +182,7 @@ func hooksMaterialized(dir string) bool {
 }
 
 // hooksCurrent is stricter than hooksMaterialized: every gate hook must be present, executable, AND
-// byte-identical to the CURRENT embed. The materialized scripts live in git-ignored .metareview/git-hooks, so
+// byte-identical to the CURRENT embed. The materialized scripts live outside the repository, so
 // an UPGRADED binary carries a newer hook body while the on-disk script predates the upgrade — present-but-
 // stale. Treating that as "installed" (hooksMaterialized alone) leaves the consumer running the old hook
 // forever, so a hook fix (e.g. the #82 per-ref gate) never reaches an already-installed repo. Content drift ⇒
@@ -192,9 +210,8 @@ func hooksCurrent(dir string) bool {
 // Conflicts blocks the install unless the caller forces it — metareview never silently overrides a user's
 // git config or disables hooks they already have.
 type HookInstallPlan struct {
-	// Target is the absolute path core.hooksPath should point at: this clone's committed hooks/git. Absolute,
-	// not relative — a relative core.hooksPath is resolved inconsistently by git (a known footgun), and
-	// core.hooksPath is per-clone local config anyway, so an absolute per-clone value is correct.
+	// Target is the absolute path core.hooksPath should point at: this repository's user-level hook dir (#173).
+	// Absolute, not relative — a relative core.hooksPath is resolved against each worktree's own root.
 	Target string
 	// Current is this repo's LOCAL core.hooksPath, empty when unset (git then uses the default .git/hooks).
 	Current string
@@ -254,16 +271,16 @@ func PlanHookInstall(root string, git GitRunner) (HookInstallPlan, error) {
 	if git == nil {
 		git = realGitRunner
 	}
-	target, err := hookTargetDir(root)
-	if err != nil {
-		return HookInstallPlan{}, err
-	}
 	// Confirm this is a usable git repo BEFORE reading config. `git config --get` exits 1 (empty) when a key
 	// is merely unset, which is not an error — but it also fails on a broken/absent repo, and treating THAT as
 	// "unset" would produce a conflict-free plan and let an install shadow hooks it never inspected. Gating on
 	// rev-parse first means a later config-read error can be read as "key unset", not masked repo breakage.
 	if _, err := git(root, "rev-parse", "--git-dir"); err != nil {
 		return HookInstallPlan{}, fmt.Errorf("cannot inspect hooks: %s is not a usable git repository: %w", root, err)
+	}
+	target, err := hookTargetDir(root, git)
+	if err != nil {
+		return HookInstallPlan{}, err
 	}
 	plan := HookInstallPlan{Target: target}
 	// Two reads: the LOCAL value (what we would own) and the EFFECTIVE value (local > global > system, what
@@ -276,7 +293,7 @@ func PlanHookInstall(root string, git GitRunner) (HookInstallPlan, error) {
 	plan.Current = strings.TrimSpace(string(effOut))
 
 	// Ours, set locally → already installed ONLY if the scripts are present AND byte-current with the embed AND
-	// the ephemeral-state .gitignore block is in place. .metareview/git-hooks is git-ignored, so the scripts can
+	// the ephemeral-state .gitignore block is in place. The scripts live outside the repository, so they can
 	// be deleted (missing) or predate a binary upgrade (present-but-stale) while core.hooksPath still points at
 	// them; treating either as "done" leaves the gate inert or running an old hook. And an EARLIER install (before
 	// the gitignore block existed) has current hooks but no block — short-circuiting there would never write it,
@@ -301,6 +318,15 @@ func PlanHookInstall(root string, git GitRunner) (HookInstallPlan, error) {
 		plan.Conflicts = append(plan.Conflicts,
 			scope+" is already set to "+plan.Current+" — metareview will not override it")
 		return plan, nil
+	}
+	// Moving off an earlier metareview location stops every hook in it running, and only metareview's own are
+	// rewritten at the target: anything else there (a hand-added commit-msg) would be dropped silently.
+	if prev := resolveHookPath(root, plan.Current); plan.Current != "" && !sameHookPath(root, prev, target) {
+		if extra := foreignHooksIn(prev); len(extra) > 0 {
+			plan.Conflicts = append(plan.Conflicts,
+				"hooks in "+prev+" that are not metareview's would stop running when core.hooksPath moves to "+target+": "+strings.Join(extra, ", ")+" — move them to "+target+" first")
+			return plan, nil
+		}
 	}
 	// Effective value is unset → git uses the default .git/hooks. Redirecting away from it would bypass
 	// anything active there. (When it already resolves to our target via a global value, there is nothing to
@@ -360,13 +386,21 @@ func ApplyHookInstall(root string, plan HookInstallPlan, force bool, git GitRunn
 	// Best-effort: keep metareview's ephemeral per-clone state out of the consumer's commits (the shared
 	// gitpolicy block — one source with the learning post-merge writer). Never fatal.
 	_ = gitpolicy.Ensure(root)
+	// Record the id first: once core.hooksPath names <hooksHome>/<id>, the id must no longer be derived from where
+	// the repository lives.
+	if _, err := git(root, "config", "--local", HooksIDKey, filepath.Base(plan.Target)); err != nil {
+		return fmt.Errorf("recording the hook dir id (%s): %w", HooksIDKey, err)
+	}
 	if _, err := git(root, "config", "--local", "core.hooksPath", plan.Target); err != nil {
 		return fmt.Errorf("setting core.hooksPath: %w", err)
 	}
-	// Migrated from the pre-#173 per-checkout location: that copy is this repository's alone and is no longer used.
-	if prev := resolveHookPath(root, plan.Current); plan.Current != "" && !sameHookPath(root, prev, plan.Target) &&
-		filepath.Base(filepath.Dir(prev)) == ".metareview" && isPreviousHookDir(prev) {
-		_ = os.RemoveAll(prev)
+	// Migrated from an earlier location: its scripts are no longer used. Remove metareview's own (the plan refused
+	// if anything else was there), and the dir once it is empty.
+	if prev := resolveHookPath(root, plan.Current); plan.Current != "" && !sameHookPath(root, prev, plan.Target) && isPreviousHookDir(prev) {
+		for name := range gitHookScripts {
+			_ = os.Remove(filepath.Join(prev, name))
+		}
+		_ = os.Remove(prev)
 	}
 	if _, err := git(root, "config", "--local", StopGateKey, "true"); err != nil {
 		return fmt.Errorf("recording the Stop-gate opt-in: %w", err)
@@ -425,12 +459,12 @@ func UninstallPreview(root string, git GitRunner) (UninstallStatus, error) {
 	if git == nil {
 		git = realGitRunner
 	}
-	target, err := hookTargetDir(root)
-	if err != nil {
-		return UninstallStatus{}, err
-	}
 	if _, err := git(root, "rev-parse", "--git-dir"); err != nil {
 		return UninstallStatus{}, fmt.Errorf("cannot inspect hooks: %s is not a usable git repository: %w", root, err)
+	}
+	target, err := hookTargetDir(root, git)
+	if err != nil {
+		return UninstallStatus{}, err
 	}
 	out, _ := git(root, "config", "--local", "--get", "core.hooksPath")
 	current := strings.TrimSpace(string(out))
@@ -443,7 +477,7 @@ func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 	if git == nil {
 		git = realGitRunner
 	}
-	target, err := hookTargetDir(root)
+	target, err := hookTargetDir(root, git)
 	if err != nil {
 		return false, err
 	}
@@ -465,11 +499,15 @@ func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 	if _, err := git(root, "config", "--local", "--unset", "core.hooksPath"); err != nil {
 		return false, err
 	}
-	// The materialized dir is user-level and shared by every repository on that content id (#173), so it stays. A
-	// pre-#173 per-checkout copy this repository was using is its own, and goes.
-	if p := resolveHookPath(root, current); filepath.Base(filepath.Dir(p)) == ".metareview" && isPreviousHookDir(p) {
-		_ = os.RemoveAll(p)
+	// The hook dir is this repository's alone (#173): take metareview's scripts out of it, and the dir too once
+	// nothing else is left — never a hook someone else put there. Then forget the id.
+	if p := resolveHookPath(root, current); isPreviousHookDir(p) {
+		for name := range gitHookScripts {
+			_ = os.Remove(filepath.Join(p, name))
+		}
+		_ = os.Remove(p) // only succeeds when empty
 	}
+	_, _ = git(root, "config", "--local", "--unset-all", HooksIDKey)
 	return true, nil
 }
 

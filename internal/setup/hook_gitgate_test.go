@@ -40,7 +40,7 @@ func TestGitGateStatusReportsInstallState(t *testing.T) {
 
 	// Stale scripts (byte-drift from the embed) must read as NOT installed — the same currency PlanHookInstall
 	// enforces, surfaced in the report so a reader isn't told an out-of-date gate is fine.
-	stalePrePush := filepath.Join(hookTarget(t), "pre-push")
+	stalePrePush := filepath.Join(hookTarget(t, root, g), "pre-push")
 	if err := os.WriteFile(stalePrePush, []byte("#!/usr/bin/env bash\n# STALE\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

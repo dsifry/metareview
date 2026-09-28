@@ -54,7 +54,7 @@ type GitGateStatus struct {
 	// HooksPath is this clone's effective core.hooksPath, empty when unset.
 	HooksPath string `json:"hooksPath,omitempty"`
 	// Location is where this binary materializes the hook scripts, the value core.hooksPath should hold (#173):
-	// ${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<content id>.
+	// ${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<metareview.hooksId>.
 	Location string `json:"location,omitempty"`
 	// Stale is true when core.hooksPath is metareview's but not Location: a pre-#173 per-checkout location, or
 	// scripts from another metareview version. `setup --install-hooks` migrates it.

@@ -148,15 +148,18 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
 - **Commit-always, enforce-at-push:** saving work must never be held hostage to the reviewer being down;
   the enforcement lives at push, where not-pushing loses nothing.
 - **Install materializes** (`setup --install-hooks`): the scripts are `go:embed`ded (root `githookassets.go`)
-  and written into `${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<content-id>/` (executable, user-level, named
-  by the scripts' content), with `core.hooksPath` pointed there (absolute) and verified before "active" is reported.
+  and written into `${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<repo-id>/` (executable, user-level, one dir per
+  repository, named by `metareview.hooksId` in the repository's own config, which moves with it), with
+  `core.hooksPath` pointed there (absolute) and verified before "active" is reported.
   This is what makes the gate work in **any** repo, not just metareview's own checkout. It lives outside every
   repository on purpose (#173): an absolute `core.hooksPath` into a checkout or its `.git` goes stale when that
   checkout moves, and git then runs **no** hook, silently; a relative one resolves against each worktree's own
-  root. A content id is never rewritten, so an upgrade materializes a new dir and re-points each repository as it
-  is re-installed; uninstall leaves the shared dir. Earlier locations — another content id, a pre-#173
-  `<checkout>/.metareview/git-hooks`, legacy `hooks/git` — are reclaimed only when gone or when their `pre-push`
-  carries metareview's content marker; `setup --check` reports one as `stale` and `--install-hooks` migrates it.
+  root. One dir per repository, because `core.hooksPath` makes it git's hooks dir: a hook a user or another tool
+  adds there must not run in other repositories. An upgrade rewrites the scripts in place (atomically per file);
+  uninstall removes only metareview's own. Earlier locations — any `<data home>/metareview/git-hooks/<id>` (matched
+  by shape, since `XDG_DATA_HOME` can differ between shells), a pre-#173 `<checkout>/.metareview/git-hooks`, legacy
+  `hooks/git` — are reclaimed only when gone or when their `pre-push` carries metareview's content marker;
+  `setup --check` reports one as `stale`, and `--install-hooks` migrates it (refusing if it holds other hooks).
 - **The Stop gate is opt-in per repository (#194).** The plugin's `hooks/hooks.json` registers
   `hooks/pre-finish.sh` in every host session on the machine, so the script is inert — exit 0, no output,
   before it even looks for the binary — unless the repository it stands in has `metareview.stopGate=true` in its

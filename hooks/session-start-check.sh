@@ -11,9 +11,9 @@ ROOT="${CLAUDE_PROJECT_DIR:-}"
 [ -n "$ROOT" ] || ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "$ROOT" ] || exit 0 # not a git repo / unknown root — nothing to check
 
-# The installer materializes the hooks under the user's data home, named by their content
-# (${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<id>, #173), and points core.hooksPath there. This script
-# cannot compute that id, so it asks the question that matters: are core.hooksPath's scripts metareview's gate?
+# The installer materializes the hooks under the user's data home, one dir per repository
+# (${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<metareview.hooksId>, #173), and points core.hooksPath there.
+# This script does not recompute that location, so it asks the question that matters: are core.hooksPath's scripts metareview's gate?
 # The effective value (local > global > system), matching what the installer treats as "in effect".
 CUR="$(git -C "$ROOT" config --get core.hooksPath 2>/dev/null || true)"
 case "$CUR" in
@@ -27,7 +27,7 @@ esac
 norm() { python3 -c 'import os,sys; print(os.path.normpath(sys.argv[1]))' "$1" 2>/dev/null || printf '%s' "${1%/}"; }
 # metareview's gate lives in $1: both scripts executable, and pre-push is the gate (its marker).
 gate_in() { [ -x "$1/pre-push" ] && [ -x "$1/post-commit" ] && grep -q "review gate --push" "$1/pre-push" 2>/dev/null; }
-# $1 is a location metareview materializes into, now or before #173: the user-level content-addressed dirs, a
+# $1 is a location metareview materializes into, now or before #173: the user-level per-repository dirs, a
 # checkout's .metareview/git-hooks, or this clone's committed hooks/git.
 metareview_path() {
   case "$(norm "$1")" in

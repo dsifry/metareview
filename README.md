@@ -254,7 +254,7 @@ To enforce the review gate with git-native hooks (block an unreviewed `git push`
 metareview setup --install-hooks        # interactive; --yes headless, --dry-run preview, --uninstall-hooks to reverse
 ```
 
-It materializes the hook scripts under your data home (`${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<content-id>/`, so moving a checkout never
+It materializes the hook scripts under your data home (`${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<repo-id>/`, so moving a checkout never
 strands them), sets `core.hooksPath` for this clone (non-destructive — it refuses rather than override an existing one) and
 opts this repository into the plugin's Stop-hook gate (`metareview.stopGate=true`). The plugin's Stop hook does
 nothing in a repository that has not opted in, so installing or upgrading the plugin never gates your other
