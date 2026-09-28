@@ -407,12 +407,10 @@ func TestApplyHookInstallOwnerFailures(t *testing.T) {
 }
 
 // A NEW repository at a moved repository's old path (`mv repo repo.bak && git clone … repo`) derives from the same
-// common-dir path. Once the moved repository has re-installed (its config records the id, and the dir's owner names
-// its new path), the new one must not adopt that live dir, and nothing done in it may empty it. Without that
-// re-install nothing on disk tells the moved repository apart from a deleted one (the re-clone case below), so the
-// dir reads as orphaned: that narrow case is documented, not handled.
+// common-dir path. Whether or not the moved repository re-installed, the new one must not adopt the dir the moved one
+// still runs from, and nothing done in it may empty that dir.
 func TestANewRepositoryAtAMovedOnesPathGetsItsOwnHookDir(t *testing.T) {
-	for _, reinstalledAfterMove := range []bool{true} {
+	for _, reinstalledAfterMove := range []bool{true, false} {
 		t.Run(fmt.Sprintf("reinstalled=%v", reinstalledAfterMove), func(t *testing.T) {
 			isolateHooksHome(t)
 			base, _ := filepath.EvalSymlinks(t.TempDir())
@@ -454,16 +452,19 @@ func TestANewRepositoryAtAMovedOnesPathGetsItsOwnHookDir(t *testing.T) {
 			if hp := hooksPath(t, moved, g); hp != plan.Target {
 				t.Fatalf("the moved repository's core.hooksPath must be untouched: %q", hp)
 			}
-			if st := gitGateStatus(moved, g); !st.Installed {
-				t.Fatalf("the moved repository stays installed: %+v", st)
+			// Its gate still runs (above). Re-installed, the dir is recorded as its own; if not, its owner file names
+			// the path the new repository occupies, so it reads stale until a re-install gives it a dir of its own.
+			if st := gitGateStatus(moved, g); st.Installed != reinstalledAfterMove {
+				t.Fatalf("moved repository status: %+v", st)
 			}
 		})
 	}
 }
 
-// A repository deleted and re-cloned in place, never uninstalled, reuses its old dir: the dir's owner no longer
-// records the id, so it is orphaned. No dir is left behind per cycle.
-func TestARecloneInPlaceReusesItsHookDir(t *testing.T) {
+// A repository deleted and re-cloned in place, never uninstalled, cannot be told from a moved one whose old path was
+// re-used (the case above), so its old dir — which still holds the gate — is never adopted: each cycle gets a fresh
+// dir and never fails. Safety over tidiness: a leaked dir costs a few KB; adopting a live one ungates a repository.
+func TestARecloneInPlaceGetsAFreshHookDir(t *testing.T) {
 	isolateHooksHome(t)
 	base, _ := filepath.EvalSymlinks(t.TempDir())
 	g := isolatedGit(base)
@@ -483,12 +484,12 @@ func TestARecloneInPlaceReusesItsHookDir(t *testing.T) {
 		}
 		if i == 0 {
 			first = plan.Target
-		} else if plan.Target != first {
-			t.Fatalf("cycle %d: a re-clone in place must reuse %q, got %q", i, first, plan.Target)
+		} else if plan.Target == first {
+			t.Fatalf("cycle %d: a dir that still holds the gate must not be adopted", i)
 		}
 	}
-	if entries, _ := os.ReadDir(filepath.Dir(first)); len(entries) != 1 {
-		t.Fatalf("re-clones must not leave dirs behind: %d", len(entries))
+	if !hooksCurrent(first) {
+		t.Fatal("the first cycle's dir must be left intact")
 	}
 }
 
@@ -520,15 +521,7 @@ func TestDerivedIDSearchIsBounded(t *testing.T) {
 	isolateHooksHome(t)
 	root, g := tempRepo(t)
 	first := hookTarget(t, root, g)
-	// Taken: another live repository records this id and owns the dir.
-	other, og := tempRepo(t)
-	if _, err := og(other, "config", "--local", HooksIDKey, filepath.Base(first)); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(first, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	_ = os.WriteFile(filepath.Join(first, hookOwnerFile), []byte(filepath.Join(other, ".git")+"\n"), 0o644)
+	writeGateDir(t, first) // taken: it still holds the gate
 	orig := maxDerivedIDs
 	t.Cleanup(func() { maxDerivedIDs = orig })
 	maxDerivedIDs = 1
@@ -541,25 +534,18 @@ func TestDerivedIDSearchIsBounded(t *testing.T) {
 	}
 }
 
-// orphaned, one case each: no owner, an owner that is gone, an owner that no longer records the id, and a live owner.
-func TestOrphaned(t *testing.T) {
-	root, g := tempRepo(t)
+// released: a dir is free only once metareview's scripts are out of it — whatever its owner file says.
+func TestReleased(t *testing.T) {
 	dir := t.TempDir()
-	const id = "0123456789abcdef"
-	if !orphaned(dir, id, g) {
-		t.Fatal("no owner file: orphaned")
+	if !released(dir) {
+		t.Fatal("an empty dir is released")
 	}
-	write := func(owner string) { _ = os.WriteFile(filepath.Join(dir, hookOwnerFile), []byte(owner+"\n"), 0o644) }
-	write(filepath.Join(t.TempDir(), "gone", ".git"))
-	if !orphaned(dir, id, g) {
-		t.Fatal("an owner that is gone: orphaned")
+	_ = os.WriteFile(filepath.Join(dir, "commit-msg"), []byte("#!/bin/sh\n"), 0o755)
+	if !released(dir) {
+		t.Fatal("a dir holding only a user's hook is released")
 	}
-	write(filepath.Join(root, ".git"))
-	if !orphaned(dir, id, g) {
-		t.Fatal("an owner that does not record the id: orphaned")
-	}
-	_, _ = g(root, "config", "--local", HooksIDKey, id)
-	if orphaned(dir, id, g) {
-		t.Fatal("a live owner recording the id: not orphaned")
+	_ = os.WriteFile(filepath.Join(dir, "post-commit"), []byte("#!/bin/sh\n"), 0o755)
+	if released(dir) {
+		t.Fatal("a dir holding any of metareview's scripts is live")
 	}
 }

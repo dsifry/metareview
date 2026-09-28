@@ -100,16 +100,16 @@ func ownedBy(dir, common string) bool {
 	return errors.Is(err, fs.ErrNotExist)
 }
 
-// maxDerivedIDs bounds the search for a free derived id; each step is one os.Lstat. A var so a test can exhaust it.
-var maxDerivedIDs = 64
+// maxDerivedIDs bounds the search for a free derived id; each step is a few os.Lstat calls. A repository deleted and
+// re-cloned in place without uninstalling leaves its old dir (see released), so the bound is far above any realistic
+// churn at one path. A var so a test can exhaust it.
+var maxDerivedIDs = 4096
 
 // repoHooksID is this repository's hook-dir id: the recorded metareview.hooksId when its dir is this repository's
 // (ownedBy), otherwise a derived one. A derived id is the first of sha256(common dir, n), n = 0, 1, …, whose dir is
-// free: absent, or orphaned — no live repository's config records it. A dir another repository still records (a
-// copy's original, a moved repository that re-installed) is never adopted; an orphan (this path deleted and re-cloned,
-// or uninstalled here) is reused, so it neither leaks nor strands a hook the user kept in it. A moved repository that
-// never re-installed cannot be told from a deleted one: re-install after moving a repository. Deterministic for a
-// given filesystem, so a read-only plan is stable.
+// free: absent, or released (see released) — so uninstall + reinstall reuses the dir and a hook the user kept there
+// resumes, while a dir some repository may still run from is never adopted. Deterministic for a given filesystem, so
+// a read-only plan is stable.
 func repoHooksID(root string, git GitRunner, home string) (string, error) {
 	common, err := commonDir(root, git)
 	if err != nil {
@@ -127,7 +127,7 @@ func repoHooksID(root string, git GitRunner, home string) (string, error) {
 		}
 		sum := sha256.Sum256([]byte(seed))
 		id := hex.EncodeToString(sum[:])[:16]
-		if dir := filepath.Join(home, id); !exists(dir) || orphaned(dir, id, git) {
+		if dir := filepath.Join(home, id); !exists(dir) || released(dir) {
 			return id, nil
 		}
 	}
@@ -166,19 +166,18 @@ func exists(p string) bool {
 	return err == nil
 }
 
-// orphaned reports whether no live repository claims dir: it has no owner, its owner is gone, or its owner's config
-// no longer records id (deleted and re-cloned in place, or uninstalled).
-func orphaned(dir, id string, git GitRunner) bool {
-	raw, err := os.ReadFile(filepath.Join(dir, hookOwnerFile)) // #nosec G304 -- a metareview hook dir
-	if err != nil {
-		return true
+// released reports whether dir no longer holds any of metareview's scripts — an uninstall took them out — so it can be
+// reused. A dir that still holds the gate is never adopted by a repository with no recorded id, whatever its owner
+// file says: from inside a fresh clone, `mv repo repo.bak && git clone … repo` (repo.bak still runs from that dir) and
+// `rm -rf repo && git clone … repo` (nothing does) look identical, and adopting a live dir can silently ungate a
+// repository, while leaving an orphan behind costs a few KB.
+func released(dir string) bool {
+	for name := range gitHookScripts {
+		if exists(filepath.Join(dir, name)) {
+			return false
+		}
 	}
-	owner := filepath.Clean(strings.TrimSpace(string(raw)))
-	if !exists(owner) {
-		return true
-	}
-	out, err := git(owner, "config", "--file", filepath.Join(owner, "config"), "--get", HooksIDKey)
-	return err != nil || strings.TrimSpace(string(out)) != id
+	return true
 }
 
 // ownerIs reports whether dir's owner file names exactly this repository.
