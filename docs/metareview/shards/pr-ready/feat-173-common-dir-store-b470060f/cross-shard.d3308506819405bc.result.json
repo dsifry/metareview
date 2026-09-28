@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-d3308506819405bc-claude-subagent",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "d3308506819405bc",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-cross-shard",
+  "reviewedAt": "2026-09-28T04:18:19Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/wiring.go", "line": 163, "note": "writer: roots() resolves git-common-dir via deps.Exec (gate.RealExec, GIT_* scrubbed), migrates runs then rows (passing collisions), and hands common to Store/Sidecar/Terminal/peek/Exists"},
+    {"path": "internal/repo/worktree.go", "line": 1, "note": "readers: StoreDir/commonDirGit use the same scrubbed gate.RealExec and the same --path-format=absolute --git-common-dir, so writer and readers agree on <common>/metareview"},
+    {"path": "cmd/metareview/main.go", "line": 798, "note": "record-lenses --from-run reads repo.StoreDir(...)/runs, with a single legacy fallback to RunStoreRoot/.metareview/runs"},
+    {"path": "internal/status/fsmruns.go", "line": 117, "note": "status abandoned scan reads legacy then common store, dedupes by id, and attributes per worktree via StoreDir/Toplevel"},
+    {"path": "internal/fsm/record/record.go", "line": 265, "note": "MigrateLegacyRows: fsm-* rows copied with FSMRunDir rewritten to metareview/runs/<id>/, collided ids deferred, no stamp while a collision or conflict remains"},
+    {"path": "tests/go/test-fsm.sh", "line": 1, "note": "shell suites moved from .metareview/runs to .git/metareview/runs and .git/metareview/runs.jsonl consistently with record.path and NewCommonDirStore"},
+    {"path": "docs/ARCHITECTURE.md", "line": 174, "note": "docs describe common-dir store, migration lock, size stamp, STORE_COLLISION and the one-release legacy fallbacks; matches code. Only historical specs still name .metareview/runs"},
+    {"note": "Targeted go test over record, run, status, repo and fsm/cli (-run Migrat|Legacy|Stamp|Collid|Conflict|Roots|StoreDir|Abandon|Pending|RunStore) passed at head b584313; no non-FSM gate consumes fsm-* ledger rows (git grep), so separating the FSM ledger from the checkout review ledger breaks no reader."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Collision resolution order: if an operator resolves a STORE_COLLISION by deleting the 0.13.x copy (the natural reading of 'the 0.13.x copy was left in X'), the next pass no longer lists that id as collided, so the legacy fsm-* ledger row for the deleted run is copied into the common ledger when the store's same-id run has no row yet (non-terminal). That row then claims the id for the wrong run; when the store run terminates appendRow either returns id_conflict or silently treats it as idempotent. Requires a same-id run in both stores (only via user-chosen --run-id / MRV_RUN_ID), so rare; a follow-up could drop legacy rows whose run dir is absent from the legacy store but present (different run) in the common store, or have the warning say to remove the legacy row too.",
+      "evidence": [
+        {"path": "internal/fsm/record/record.go", "line": 298},
+        {"path": "internal/fsm/cli/wiring.go", "line": 183}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stale comment: appendRow still says runs.jsonl has a second lock-free writer (state.AppendJSONL). Since #173 the common-dir ledger is written only by record (Terminal and MigrateLegacyRows); the review gates' AppendJSONL writes the checkout's .metareview/runs.jsonl. Harmless (O_APPEND stays correct) but misdescribes the file.",
+      "evidence": [
+        {"path": "internal/fsm/record/record.go", "line": 191}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "A collided legacy run that is abandoned is surfaced by the status scan (legacy source is read first and wins the id dedupe) and blocks the Stop hook, but no fsm command can act on it because the store resolves that id to the other run. The operator must clear it by hand from the path named in the STORE_COLLISION warning; not documented beyond 'both copies kept'. Rare (same id in both stores).",
+      "evidence": [
+        {"path": "internal/status/fsmruns.go", "line": 117}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

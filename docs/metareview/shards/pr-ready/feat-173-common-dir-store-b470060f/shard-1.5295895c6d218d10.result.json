@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1.5295895c6d218d10",
+  "kind": "shard",
+  "shardId": "shard-1",
+  "shardHash": "5295895c6d218d10",
+  "planHash": "d3308506819405bc",
+  "verdict": "PASS",
+  "reviewer": "claude-subagent-shard-1",
+  "reviewedAt": "2026-09-28T04:17:21Z",
+  "evidence": [
+    {"path": "internal/status/fsmruns.go", "line": 99, "note": "mine(): a run is attributed to a worktree only when its enterable work-dir ancestor resolves to the same common-dir store; otherwise it is reported from the main checkout, never dropped"},
+    {"path": "internal/status/fsmruns.go", "line": 117, "note": "legacy location scanned before the common store with id dedupe, so a run renamed mid-scan is seen in one or the other"},
+    {"path": "internal/status/fsmruns.go", "line": 173, "note": "enterableAncestor terminates at the filesystem root; work_dir is enforced absolute at init and fork (machine.go:108, fork.go:173) so the relative-path '.' fixpoint cannot occur"},
+    {"path": "internal/fsm/run/store_jsonl.go", "line": 34, "note": "NewCommonDirStore uses layout metareview/runs; runsDir, validate and List all derive from the same layout slice"},
+    {"path": "internal/fsm/machine/sidecar.go", "line": 50, "note": "FSSidecar CommonDir path mirrors the store layout"},
+    {"path": "internal/fsm/record/record_test.go", "line": 543, "note": "doc comment for TestMigrateLegacyRowsIsLenientAndRunsOnce now sits above its own test (prior-round nit fixed)"},
+    {"note": "Targeted go test ./internal/status ./internal/repo ./internal/fsm/record pass at this head"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "mine() spawns two git subprocesses (StoreDir, Toplevel) per abandoned run with a recorded work dir on the Stop-hook path; fine for typical counts, could memoise by ancestor if abandoned runs accumulate.",
+      "evidence": [{"path": "internal/status/fsmruns.go", "line": 105}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "enterableAncestor passes the magic number 0x1 to syscall.Access; a named X_OK constant would read better (the comment explains it).",
+      "evidence": [{"path": "internal/status/fsmruns.go", "line": 176}]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0-b99eaded0444751f-claude-subagent-shard-0",
+  "kind": "shard",
+  "shardId": "shard-0",
+  "shardHash": "b99eaded0444751f",
+  "planHash": "d3308506819405bc",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-0",
+  "reviewedAt": "2026-09-28T04:16:40Z",
+  "evidence": [
+    {"path": "internal/fsm/run/migrate.go", "line": 28, "note": "MigrateLegacyRuns: lock under common dir, re-read under lock, no-overwrite collision handling, bookkeeping skipped; targeted tests pass"},
+    {"path": "internal/fsm/record/record.go", "line": 265, "note": "MigrateLegacyRows: lenient legacy decode, fsm-* only, collided rows deferred, conflicts not stamped; appendRow re-checks id under flock so a concurrent pass is idempotent"},
+    {"path": "internal/fsm/cli/wiring.go", "line": 163, "note": "roots(): anchor + common dir resolved, runs migrated before rows with collisions passed through; Store/Sidecar/Terminal now wired to common dir"},
+    {"path": "cmd/metareview/main.go", "line": 798, "note": "fromRunRunsDir reads the common store first, then only the single main-checkout legacy location with a warning; covered by session_test.go"},
+    {"note": "Ran go test -run Migrate|Pending|Sidecar|ValidateFromRun|FromRun on internal/fsm/run, internal/fsm/record, internal/fsm/machine, cmd/metareview: all ok"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "MigrateLegacyRuns moves each run with os.Rename; if the common dir sits on a different filesystem from the main checkout (e.g. git init --separate-git-dir onto another volume) the rename fails with EXDEV and, since roots() propagates the error, every fsm command fails with ERR_STORE_PATH until the legacy runs are moved by hand. Rare configuration; a copy-then-remove fallback or a clearer hint would harden it.",
+      "evidence": [
+        {"path": "internal/fsm/run/migrate.go", "line": 63},
+        {"path": "internal/fsm/cli/wiring.go", "line": 170}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

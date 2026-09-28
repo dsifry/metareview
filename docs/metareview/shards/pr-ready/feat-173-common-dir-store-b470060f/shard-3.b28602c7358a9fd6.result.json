@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3.b28602c7358a9fd6",
+  "kind": "shard",
+  "shardId": "shard-3",
+  "shardHash": "b28602c7358a9fd6",
+  "planHash": "d3308506819405bc",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-3",
+  "reviewedAt": "2026-09-27T21:40:00-07:00",
+  "evidence": [
+    {"path": "internal/fsm/cli/run.go", "line": 201, "note": "openRun/init/diff resolve roots() and open the store at the common dir; warnings from migration are threaded into the envelope"},
+    {"path": "internal/fsm/cli/run.go", "line": 964, "note": "StatusLines stays read-only: lists the common-dir store and only names pending 0.13.x runs via run.PendingLegacyRuns, never migrates"},
+    {"path": "internal/fsm/cli/wiring.go", "line": 163, "note": "roots(): storeRoot + commonDir + locked migration of runs and ledger rows; collisions reported as STORE_COLLISION"},
+    {"path": "internal/repo/worktree.go", "line": 75, "note": "commonDirGit uses gate.RealExec (GIT_* scrubbed) with --path-format=absolute, same form already used pre-branch in gate/git.go and session.go"},
+    {"path": "internal/repo/worktree_test.go", "line": 77, "note": "tripwire extended to common-dir spellings; StoreDir( does not falsely match StoreDirIn("},
+    {"path": "cmd/metareview/main.go", "line": 252, "note": "plain `metareview status` prints only StatusLines, so the status.Build legacy warning and the StatusLines pending line are not duplicated"},
+    {"note": "Targeted tests pass: TestCommonDirLayout, TestRunStoreReadersAreDeclared, TestRunStoreRoot*, TestAbandonedRuns*, TestCanonicalAndLegacyBookkeeping, fsm/cli Status*"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Test failure message is stale: it says 'want the store run and the legacy run' but asserts len==3 (two store runs plus the legacy run). Cosmetic only.",
+      "evidence": [{"path": "internal/status/fsmruns_store_test.go", "line": 50}]
+    }
+  ],
+  "blockingCount": 0
+}
