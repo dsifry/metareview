@@ -202,10 +202,13 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   a size stamp, `legacy-ledger.size`). For one release `record-lenses --from-run` and the `status` abandoned-run scan
   also read that single legacy location (never another worktree's), and `status` warns while it holds runs. The scan
   attributes a run to the worktree that *contains* its init `work_dir` (`--work-dir` may be a subdirectory) and
-  reports only this worktree's; a run whose worktree is gone is reported from the main checkout, never dropped.
+  reports only this worktree's; a run whose worktree is gone is reported from the main checkout, never dropped —
+  with a bare main worktree (#174) there is none, so every worktree shows it as a warning naming the run dir to
+  delete, not a blocker.
 - **Store vs anchor vs work (#169, #172, #173).** Every `.metareview`/`docs` path in `internal/fsm` names which it
   means. **Common dir** = the shared store above. **Store root (anchor)** = the main worktree (`git worktree list
-  --porcelain`, `repo.MainWorktreeFromPorcelain`): a run's `RepoRoot` — mock scenarios, escalation evidence and
+  --porcelain`, `repo.MainWorktreeFromPorcelain`), or with a bare main the linked worktree the command runs in (#174):
+  a run's `RepoRoot` — mock scenarios, escalation evidence and
   export paths resolve against a real checkout — and the 0.13.x store location. **Work root** = the checkout the
   command runs in (`rev-parse --show-toplevel`): a run's default work dir, the diff base..head, and work output
   meant to be committed on that branch — a default `fsm export` bundle lands in the *requesting* worktree's

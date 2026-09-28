@@ -51,6 +51,21 @@ tail -1 "$TMP/ev.out" > "$TMP/ev.json"
 "$MR" status --json > "$TMP/status.json" || { echo "FAIL: status in a bare layout:"; cat "$TMP/status.json"; exit 1; }
 "$MR" status > /dev/null || { echo "FAIL: plain status in a bare layout"; exit 1; }
 
+# A second worktree shares the store: it reads the run the first one made.
+git -C "$TMP/repo.git" worktree add -q -b other "$TMP/other" main
+(cd "$TMP/other" && "$MR" fsm state --run "$ID" >/dev/null) || { echo "FAIL: a sibling worktree must read the shared run"; exit 1; }
+
+# A worktree that leaves a run mid-flight and is then removed: there is no main checkout to own that run, so every
+# remaining worktree warns about it — and none is blocked over a run it cannot advance.
+git -C "$TMP/repo.git" worktree add -q -b gone "$TMP/gone" main
+GONE="$(cd "$TMP/gone" && "$MR" fsm init --workflow review-loop --base HEAD~1 --var JUDGE=gpt-5.2 --var JUDGE_EFFORT=medium | field run_id)"
+(cd "$TMP/gone" && "$MR" fsm advance --run "$GONE" >/dev/null) || [ $? -eq 3 ] # left at discover
+git -C "$TMP/repo.git" worktree remove --force "$TMP/gone"
+for wt in "$TMP/main" "$TMP/other"; do
+  (cd "$wt" && "$MR" status --json > "$TMP/st.json") || { echo "FAIL: $wt must not be blocked by a gone worktree's run:"; cat "$TMP/st.json"; exit 1; }
+  grep -q "$GONE" "$TMP/st.json" || { echo "FAIL: $wt must warn about the orphaned run $GONE"; cat "$TMP/st.json"; exit 1; }
+done
+
 # From the bare directory itself there is no checkout at all: fsm still refuses, with the reason.
 out="$(cd "$TMP/repo.git" && "$MR" fsm state 2>&1)" && { echo "FAIL: fsm in the bare dir itself must refuse: $out"; exit 1; }
 printf '%s' "$out" | grep -q '"reason":"bare"' || { echo "FAIL: the refusal must name the bare reason: $out"; exit 1; }

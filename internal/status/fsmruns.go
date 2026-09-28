@@ -68,26 +68,39 @@ func DiscoverAbandonedRuns(root string) []AbandonedRun {
 	return discoverAbandonedRuns(root, kind.Deps{})
 }
 
+// ScanAbandonedRuns is DiscoverAbandonedRuns plus the runs no checkout can own: with a bare main worktree (#174)
+// there is no main checkout to report a run whose own worktree is gone, and reporting it from EVERY worktree would
+// block every session over a run none of them can advance. Those come back as orphaned — to surface as a warning
+// naming the run directory to delete — never as a blocker, and never dropped.
+func ScanAbandonedRuns(root string) (abandoned, orphaned []AbandonedRun) {
+	return scanAbandonedRuns(root, kind.Deps{})
+}
+
 // discoverAbandonedRuns takes the registry deps so the misconfigured case is reachable from a
 // test. Without the seam that branch could not be exercised — kind.New only errors when Mock
 // disagrees with the judge type, and the caller above supplies neither — and an untestable
 // branch in a gate is the shape this repository keeps finding defects in.
 func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
+	out, _ := scanAbandonedRuns(root, deps)
+	return out
+}
+
+func scanAbandonedRuns(root string, deps kind.Deps) (out, orphaned []AbandonedRun) {
 	reg, err := kind.New(deps)
 	if err != nil {
 		// A registry that will not build cannot say what a workflow's ending is, so nothing is
 		// claimed about any run. Reporting none is safe here because these are additional
 		// blockers: the report is narrower, never falsely clean about the reviews themselves.
-		return nil
+		return nil, nil
 	}
-	var out []AbandonedRun
 	readable := false // no runs directory anywhere reports nil, as it always has; an empty one reports []
 	seen := map[string]bool{}
 	// A run belongs to the worktree that CONTAINS its init work_dir (`fsm init --work-dir` takes any directory inside
 	// a worktree). The store is shared by every worktree (#173), so only this worktree's runs are reported — another
 	// branch's abandoned run must not block this checkout's Stop hook. A run whose work_dir cannot be attributed (its
 	// worktree was removed) is reported from the main checkout, never dropped: an unattributable run silently
-	// escaping every Stop gate would be the worse failure.
+	// escaping every Stop gate would be the worse failure. With a bare main worktree there is no main checkout, so it
+	// is returned as orphaned (see ScanAbandonedRuns).
 	// Compare toplevel to toplevel: root may be a subdirectory repo.Root stopped at (a monorepo package with its
 	// own docs/metareview), which no run's containing worktree ever equals.
 	here := canonical(root)
@@ -95,20 +108,23 @@ func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
 		here = canonical(top)
 	}
 	main := canonical(repo.RunStoreRoot(root))
+	bareMain := repo.MainWorktreeIsBare(root)
 	store, storeErr := repo.StoreDir(root)
-	mine := func(r AbandonedRun) bool {
+	// owner reports whether this worktree owns r, and whether r is unattributable — its worktree is gone. An
+	// unattributable run is the main checkout's; with a bare main there is none, and it is orphaned instead.
+	owner := func(r AbandonedRun) (mine, unattributable bool) {
 		if r.workDir == "" || storeErr != nil {
-			return here == main
+			return here == main, true
 		}
 		// The nearest surviving ancestor names the owner only when it is a checkout of THIS repository: a removed
 		// worktree's parent may sit inside an unrelated repository, whose toplevel matches no worktree here.
 		dir := enterableAncestor(r.workDir)
 		s, errStore := repo.StoreDir(dir)
-		owner, errTop := repo.Toplevel(dir)
+		top, errTop := repo.Toplevel(dir)
 		if errStore != nil || errTop != nil || canonical(s) != canonical(store) {
-			return here == main
+			return here == main, true
 		}
-		return canonical(owner) == here
+		return canonical(top) == here, false
 	}
 	// The 0.13.x location first, then the store: a migration renames a run from the first to the second, so a run
 	// moved mid-scan is seen in one or the other (and deduped by id), never missed by both.
@@ -122,19 +138,25 @@ func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
 		runs, ok := abandonedIn(dir, reg.Info())
 		readable = readable || ok
 		for _, r := range runs {
-			if !seen[r.RunID] && mine(r) {
+			mine, unattributable := owner(r)
+			switch {
+			case seen[r.RunID]: // already reported from the other source
+			case unattributable && bareMain:
+				orphaned, seen[r.RunID] = append(orphaned, r), true
+			case mine:
 				out, seen[r.RunID] = append(out, r), true
 			}
 		}
 	}
 	if !readable {
-		return nil
+		return nil, nil
 	}
 	if out == nil {
 		out = []AbandonedRun{}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].RunID < out[j].RunID })
-	return out
+	sort.Slice(orphaned, func(i, j int) bool { return orphaned[i].RunID < orphaned[j].RunID })
+	return out, orphaned
 }
 
 // LegacyRunsPending reports whether the main checkout still holds 0.13.x FSM runs that the next fsm command would

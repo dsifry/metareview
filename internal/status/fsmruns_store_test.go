@@ -169,3 +169,46 @@ func TestCanonicalAndLegacyBookkeeping(t *testing.T) {
 		t.Error("a legacy store holding only its own bookkeeping has nothing to migrate")
 	}
 }
+
+// #174: with a bare main worktree there is no main checkout to own a run whose worktree is gone. Reporting it from
+// every worktree would block every session over a run none can advance; it is a warning in each instead — never a
+// blocker, never dropped. A run in a live worktree is still that worktree's own blocker.
+func TestBareMainOrphansRunsWhoseWorktreeIsGone(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	bare := filepath.Join(base, "repo.git")
+	gitRun(t, base, "init", "-q", "--bare", "-b", "main", bare)
+	seed := filepath.Join(base, "seed")
+	gitRun(t, base, "clone", "-q", bare, seed)
+	gitRun(t, seed, "commit", "-q", "--allow-empty", "-m", "base")
+	gitRun(t, seed, "push", "-q", "origin", "main")
+	a, b := filepath.Join(base, "a"), filepath.Join(base, "b")
+	gitRun(t, bare, "worktree", "add", "-q", a, "main")
+	gitRun(t, bare, "worktree", "add", "-q", "-b", "feat", b)
+	writeStoreRun(t, bare, "mrv-a-live-00001", a)
+	writeStoreRun(t, bare, "mrv-gone-0000001", filepath.Join(base, "removed-worktree"))
+	writeStoreRun(t, bare, "mrv-gone-0000002", filepath.Join(base, "another-removed-worktree"))
+	for _, wt := range []string{a, b} {
+		abandoned, orphaned := ScanAbandonedRuns(wt)
+		if got := strings.Join(ids(orphaned), ","); got != "mrv-gone-0000001,mrv-gone-0000002" {
+			t.Fatalf("%s: the gone worktrees' runs are orphaned, in order: %s", wt, got)
+		}
+		for _, r := range abandoned {
+			if r.RunID == "mrv-gone-0000001" {
+				t.Fatalf("%s: an orphaned run must not be a blocker", wt)
+			}
+		}
+		r, err := Build(wt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.Join(r.Warnings, "\n"), "mrv-gone-0000001") {
+			t.Fatalf("%s: status must warn about the orphaned run: %v", wt, r.Warnings)
+		}
+	}
+	if got := strings.Join(ids(DiscoverAbandonedRuns(a)), ","); got != "mrv-a-live-00001" {
+		t.Fatalf("worktree a keeps its own live run as a blocker, got %s", got)
+	}
+	if got := DiscoverAbandonedRuns(b); len(got) != 0 {
+		t.Fatalf("worktree b owns nothing, got %v", ids(got))
+	}
+}

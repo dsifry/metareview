@@ -107,7 +107,8 @@ func (c *ctxDeps) removeSandboxes() {
 //     (<common>/metareview/runs/<id>/), their terminal ledger (<common>/metareview/runs.jsonl; run ids are unique
 //     across it and record.Exists checks it), run listing, and escalation lineage — one store for the main checkout
 //     and every linked worktree, independent of any one checkout.
-//   - storeRoot — the repository anchor: the main worktree, whichever worktree the command runs in. It is a run's
+//   - storeRoot — the repository anchor: the main worktree, whichever worktree the command runs in (with a bare main,
+//     which has no checkout, the linked worktree the command runs in, #174). It is a run's
 //     RepoRoot (mock scenarios, escalation evidence and export paths resolve against a real checkout), and the
 //     0.13.x store it held (.metareview/runs/) is migrated into commonDir on first use.
 //   - workRoot — the checkout the command runs in: the default work dir a run reviews, and work output meant to be
