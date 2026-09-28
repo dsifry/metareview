@@ -334,6 +334,9 @@ func (s Scope) Owns(branch string) bool {
 	return branch != "" && (branch == s.Current || s.known && s.former[branch] && !s.branches[branch])
 }
 
+// PastHead reports whether head is one the current branch has had (its reflog): proof the commit was this branch's.
+func (s Scope) PastHead(head string) bool { return s.pastHeads[head] }
+
 // reachable reports whether head is an ancestor of HEAD: one git call per distinct legacy head, and a second when
 // that one fails. Only git's own "no" (exit 1), or a commit git no longer has, is unreachable: a malformed head or a
 // failed call proves nothing, so it stays in scope.

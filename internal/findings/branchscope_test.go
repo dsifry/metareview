@@ -503,3 +503,46 @@ func TestFreshnessSupersedeOnlyForRowsThatGateTheRun(t *testing.T) {
 		t.Fatalf("branch-b's fresh evidence must not supersede branch-a's stale row: %v", got)
 	}
 }
+
+// TestBranchCutAfterADetachedReviewKeepsItsOwnRow is a recheck finding on the sixth cut: a finding recorded on a
+// detached HEAD (a branchless row), raised again on a branch cut later from a descendant commit, deduplicated onto
+// that row — which is not in the branch's reflog, so a routine rebase then orphaned it and the branch had no row of
+// its own. The branch now records its own row unless the branchless row's head is one of its past heads.
+func TestBranchCutAfterADetachedReviewKeepsItsOwnRow(t *testing.T) {
+	root, git := scopeRepo(t)
+	input := unsafeEval("eval")
+	git("switch", "-q", "--detach")
+	git("commit", "-q", "--allow-empty", "-m", "D1")
+	reconcileOn(t, root, "mrv-det", git("rev-parse", "HEAD"), input)
+	git("commit", "-q", "--allow-empty", "-m", "D2")
+	git("switch", "-q", "-c", "feat")
+	git("commit", "-q", "--allow-empty", "-m", "F")
+	reconcileOn(t, root, "mrv-feat", git("rev-parse", "HEAD"), input)
+	git("switch", "-q", "main")
+	git("commit", "-q", "--allow-empty", "-m", "main advances")
+	git("switch", "-q", "feat")
+	git("rebase", "-q", "main")
+	if in, _, _ := ScopedBlocking(root); !strings.Contains(ids(in), "mrvf-feat-001") {
+		t.Fatalf("after a rebase feat must still block on the finding it raised itself: in=%s", ids(in))
+	}
+}
+
+// TestGrantedOverrideOfALowerBranchAbsorbsTheReraise is a recheck finding on the sixth cut: a stacked branch raising a
+// finding again whose override a human already granted on the lower branch it inherits the code from must not get a
+// fresh open row demanding a second grant (before #178 the overridden row deduplicated the re-raise).
+func TestGrantedOverrideOfALowerBranchAbsorbsTheReraise(t *testing.T) {
+	root, git := scopeRepo(t)
+	input := unsafeEval("eval")
+	git("switch", "-q", "-c", "lower")
+	git("commit", "-q", "--allow-empty", "-m", "L")
+	reconcileOn(t, root, "mrv-lower", git("rev-parse", "HEAD"), input)
+	granted := loadOne(t, root)
+	granted.Status = StatusOverridden
+	seedRecords(t, root, granted)
+	git("switch", "-q", "-c", "upper")
+	git("commit", "-q", "--allow-empty", "-m", "U")
+	reconcileOn(t, root, "mrv-upper", git("rev-parse", "HEAD"), input)
+	if records := readRecords(t, root); len(records) != 1 {
+		t.Fatalf("the lower branch's granted override must absorb the stacked branch's re-raise: %+v", records)
+	}
+}

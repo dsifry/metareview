@@ -116,6 +116,8 @@ type Result struct {
 }
 
 func Reconcile(root string, run Run, current []Input, options Options) (Result, error) {
+	// The branch in hand first: its git calls then run before the ledger is read, not inside its read-modify-write.
+	sc := loadScope(root)
 	path := findingsPath(root)
 	existing, err := readJSONL(path)
 	if err != nil {
@@ -129,13 +131,15 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	// transfer: the branch that raised it first still has the defect until a fix reaches it. The branch in hand is the
 	// checkout's (scope.Load), and each rule below asks it one question:
 	//   - mine: the row is this branch's by name (its name, or a former one after a rename) — refreshed in place;
-	//   - blocksHere: the row gates this branch (scope.Classify) — counted in the verdict; a branchless row (from
-	//     before #178, or a detached HEAD) that blocks here is also this run's to deduplicate against, never re-stamped,
-	//     and a detached run (or one whose branch git could not read) deduplicates against every row that gates it;
+	//   - blocksHere: the row gates this branch (scope.Classify) — counted in the verdict. A named run deduplicates
+	//     against a branchless row (from before #178, or a detached HEAD) that gates it only when the row's head is one
+	//     of the branch's own past heads (its reflog) — otherwise that row could later fall out of the branch's history
+	//     and leave it with no row of its own — and never re-stamps it; a detached run (or one whose branch git could
+	//     not read) deduplicates against every row that gates it; and a granted override that gates this branch (a
+	//     lower branch's accepted exception) absorbs the re-raise rather than demanding a second grant;
 	//   - a --previous-run chain closes any row it names, whichever branch recorded it — the chain is the explicit
 	//     repair path, so a fix branch, a stacked branch or an epic can close what it inherited or merged, and a
 	//     deleted branch's row is never stranded.
-	sc := loadScope(root)
 	branch := sc.Current
 	mine := func(record Record) bool { return sc.Owns(record.Branch) }
 	blocksHere := func(record Record) bool { return sc.Classify(record.Branch, record.GitHead) == scope.InScope }
@@ -199,7 +203,8 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	activeExisting := map[string]bool{}
 	for _, record := range updated {
 		if record.Status != "fixed" && record.Status != StatusSuperseded && record.Fingerprint != "" && sameRunTarget(record, run) &&
-			(mine(record) || (record.Branch == "" || branch == "") && blocksHere(record)) {
+			(mine(record) || blocksHere(record) &&
+				(branch == "" || record.Branch == "" && sc.PastHead(record.GitHead) || record.Status == StatusOverridden)) {
 			activeExisting[record.Fingerprint] = true
 		}
 	}

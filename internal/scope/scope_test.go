@@ -76,6 +76,9 @@ func TestClassify(t *testing.T) {
 			t.Errorf("Owns(%q) = %v, want %v", branch, !want, want)
 		}
 	}
+	if !s.PastHead("h-past") || s.PastHead("h-in-range") {
+		t.Error("PastHead is the current branch's reflog heads only")
+	}
 	if (Scope{Current: "feat", former: map[string]bool{"feat-old": true}}).Owns("feat-old") {
 		t.Error("an unknown scope owns no former name")
 	}
