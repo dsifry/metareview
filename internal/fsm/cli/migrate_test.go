@@ -86,6 +86,13 @@ func TestFSMStoreMigrationCollisions(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(legacy, "runs", id, "audit.jsonl")); err != nil {
 		t.Fatal("the legacy copy must survive a collision")
 	}
+	// roots() passes the collision to the row migration: the collided run's own legacy row stays behind with it.
+	collidedRow := `{"schemaVersion":1,"id":"` + id + `","scope":"fsm-sdlc-loop","headSha":"legacy","workflowHash":"x"}` + "\n"
+	_ = os.WriteFile(filepath.Join(legacy, "runs.jsonl"), []byte(row+collidedRow), 0o644)
+	h.must(StatusOK, 0, "state", "--run", id)
+	if ledger, _ := os.ReadFile(filepath.Join(common, "runs.jsonl")); strings.Contains(string(ledger), `"id":"`+id+`"`) {
+		t.Fatalf("a collided run's legacy row must not be copied: %s", ledger)
+	}
 }
 
 // A migration that cannot run fails the command rather than proceeding against a half-moved store.

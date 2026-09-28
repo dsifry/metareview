@@ -481,9 +481,6 @@ func TestMigrateLegacyRows(t *testing.T) {
 	}
 }
 
-// The legacy ledger is the main checkout's live review ledger (lock-free writers), so a malformed line in it must not
-// stop migration — its FSM rows are copied, the rest skipped — and once migrated it is not re-read on every fsm
-// command: a stamp of its size skips it until an older binary appends more (#173 review).
 // A pass that found a row conflict does not stamp the legacy ledger either: once the conflicting common row is
 // resolved, the unchanged legacy file must be read again so the row can migrate.
 func TestMigrateLegacyRowsConflictDoesNotStamp(t *testing.T) {
@@ -540,6 +537,9 @@ func TestMigrateLegacyRowsSkipsCollidedRuns(t *testing.T) {
 	}
 }
 
+// The legacy ledger is the main checkout's live review ledger (lock-free writers), so a malformed line in it must not
+// stop migration — its FSM rows are copied, the rest skipped — and once migrated it is not re-read on every fsm
+// command: a stamp of its size skips it until an older binary appends more (#173 review).
 func TestMigrateLegacyRowsIsLenientAndRunsOnce(t *testing.T) {
 	ctx := context.Background()
 	checkout, common := t.TempDir(), t.TempDir()
