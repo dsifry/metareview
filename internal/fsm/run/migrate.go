@@ -35,6 +35,7 @@ func MigrateLegacyRuns(checkout, common string) (MigrationReport, error) {
 	if err := os.MkdirAll(store, 0o700); err != nil {
 		return rep, pathErr(0, err)
 	}
+	// root: store (git's common directory) — the migration lock beside the store.
 	lock, err := os.OpenFile(filepath.Join(common, "metareview", "migrate.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return rep, pathErr(0, err)

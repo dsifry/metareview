@@ -898,7 +898,8 @@ func writeFSMRun(t *testing.T, root, runID, base, head, workflow string) {
 	initE, _ := json.Marshal(fsmrun.Event{Type: fsmrun.TypeInit, Data: initD})
 	trD, _ := json.Marshal(fsmrun.TransitionData{Outcome: fsmrun.OutcomeReviewed})
 	trE, _ := json.Marshal(fsmrun.Event{Type: fsmrun.TypeTransition, Data: trD})
-	p := filepath.Join(root, ".metareview", "runs", runID, "audit.jsonl")
+	// The shared store the FSM writes runs to: git's common directory (#173). root is the repository's main checkout.
+	p := filepath.Join(root, ".git", "metareview", "runs", runID, "audit.jsonl")
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}

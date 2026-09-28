@@ -103,7 +103,7 @@ ratio. A candidate whose file is not in the diff is never judged: it is kept as
   dropped bytes kept as `audit.torn-*.bin` in the run directory (`.git/metareview/runs/.torn/` holds fragments of runs
   that never became durable and of `runs.jsonl`); delete a run without its sidecar, an incomplete fork
   (`ERR_FORK_INCOMPLETE`) or a directory left by `ERR_RUN_LOCKED` at `init` by hand.
-- `.metareview/runs.jsonl` — one row per terminal run (transient; the existing exact `.gitignore` entry covers it).
+- `.git/metareview/runs.jsonl` — one row per terminal run, beside the runs in git's common directory (the checkout's `.metareview/runs.jsonl` keeps only review/gate rows).
 - `docs/metareview/fsm/<id>/` — `fsm export` bundles (durable; commit them). Exports are one-way; `--include-vars` needs
   an explicit `--out` and that output is never committed; `record.data` events are exported unredacted.
 - `metareview status` lists the FSM runs of the main worktree.

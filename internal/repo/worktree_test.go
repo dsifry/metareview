@@ -73,13 +73,13 @@ func TestRunStoreReadersAreDeclared(t *testing.T) {
 			for i, line := range lines {
 				// Comments mention the path too; only code builds it, and only code may count toward
 				// the non-vacuity check below.
-				if strings.HasPrefix(strings.TrimSpace(line), "//") || !strings.Contains(line, `".metareview", "runs"`) {
+				if strings.HasPrefix(strings.TrimSpace(line), "//") || (!strings.Contains(line, `".metareview", "runs"`) && !strings.Contains(line, `"metareview", "runs"`) && !strings.Contains(line, `store, "runs"`)) {
 					continue
 				}
 				sites++
 				declared := false
 				for j := max(0, i-window); j <= i; j++ {
-					if strings.Contains(lines[j], "RunStoreRoot(") || strings.Contains(lines[j], "run-store:") {
+					if strings.Contains(lines[j], "RunStoreRoot(") || strings.Contains(lines[j], "StoreDir(") || strings.Contains(lines[j], "run-store:") {
 						declared = true
 					}
 				}

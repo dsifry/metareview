@@ -27,7 +27,7 @@ var isolatedDir = func() (string, func(), error) {
 	if err != nil {
 		return "", func() {}, err
 	}
-	base := filepath.Join(cache, "metareview", "judge")
+	base := filepath.Join(cache, "metareview", "judge") // root: none — the user's cache directory, not a repository path
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		return "", func() {}, err
 	}

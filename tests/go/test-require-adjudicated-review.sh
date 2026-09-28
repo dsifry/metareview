@@ -56,20 +56,20 @@ scenario() {
 # transition (clean|reviewed|fixed). mkfsmrun forges such a two-event audit; mkfsmrun_init writes only the
 # init (an incomplete run), and mkfsmrun_failed a run that reviewed the diff but came out non-clean.
 mkfsmrun_init() { # <run-id> : init line only (matching base..HEAD) — an incomplete run
-  mkdir -p ".metareview/runs/$1"
+  mkdir -p ".git/metareview/runs/$1"
   printf '{"type":"init","data":{"base_sha":"%s","head":"%s","workflow":"review-loop"}}\n' \
-    "$(git rev-parse main)" "$(git rev-parse HEAD)" > ".metareview/runs/$1/audit.jsonl"
+    "$(git rev-parse main)" "$(git rev-parse HEAD)" > ".git/metareview/runs/$1/audit.jsonl"
 }
 mkfsmrun() { # <run-id> : init + a PASSING terminal transition
   mkfsmrun_init "$1"
   printf '{"type":"transition","data":{"from":"adjudicate","to":"done","gate":"confirmed_nonempty","outcome":"reviewed","head":"%s"}}\n' \
-    "$(git rev-parse HEAD)" >> ".metareview/runs/$1/audit.jsonl"
+    "$(git rev-parse HEAD)" >> ".git/metareview/runs/$1/audit.jsonl"
 }
 mkfsmrun_failed() { # <run-id> : init + a PASSING transition FOLLOWED BY a failing one — the LAST verdict wins
   mkfsmrun_init "$1"
   { printf '{"type":"transition","data":{"from":"adjudicate","to":"done","gate":"confirmed_nonempty","outcome":"reviewed","head":"%s"}}\n' "$(git rev-parse HEAD)";
     printf '{"type":"transition","data":{"from":"verify","to":"done","gate":"stuck","outcome":"failed","head":"%s"}}\n' "$(git rev-parse HEAD)";
-  } >> ".metareview/runs/$1/audit.jsonl"
+  } >> ".git/metareview/runs/$1/audit.jsonl"
 }
 rec='"$BIN" review record-lenses --scope pr-ready --base main --lenses security'
 
@@ -140,12 +140,12 @@ repo="$(mktemp -d)"
   # shellcheck disable=SC2086
   reject reject-traversal   $base --mode subagent-adjudicated --from-run '../../etc'
   # A run whose audit.jsonl is empty (a bare directory, no real init) is rejected.
-  mkdir -p .metareview/runs/empty; : > .metareview/runs/empty/audit.jsonl
+  mkdir -p .git/metareview/runs/empty; : > .git/metareview/runs/empty/audit.jsonl
   # shellcheck disable=SC2086
   reject reject-empty-audit $base --mode subagent-adjudicated --from-run empty
   # A run that exists but reviewed a DIFFERENT diff (init head does not match) is rejected.
-  mkdir -p .metareview/runs/other
-  printf '{"type":"init","data":{"base_sha":"deadbeef","head":"cafef00d","workflow":"review-loop"}}\n' > .metareview/runs/other/audit.jsonl
+  mkdir -p .git/metareview/runs/other
+  printf '{"type":"init","data":{"base_sha":"deadbeef","head":"cafef00d","workflow":"review-loop"}}\n' > .git/metareview/runs/other/audit.jsonl
   # shellcheck disable=SC2086
   reject reject-wrong-diff  $base --mode subagent-adjudicated --from-run other
   # A run over the RIGHT diff that never reached a passing terminal transition (incomplete) is rejected.

@@ -133,9 +133,9 @@ func TestSessionUsage(t *testing.T) {
 	}
 }
 
-// Issue #169: `fsm init` from a linked worktree stores the run under the MAIN worktree's
-// .metareview/runs/, so record-lenses run from that same linked worktree must read the run from
-// there too — not report "no such FSM run" for a run the FSM just created.
+// Issue #169, #173: `fsm init` from a linked worktree stores the run in the shared store (git's common
+// directory), so record-lenses run from that same linked worktree must read the run from there too —
+// not report "no such FSM run" for a run the FSM just created.
 func TestRecordLensesFindsFSMRunCreatedFromLinkedWorktree(t *testing.T) {
 	root := gitRepo(t)
 	wt := sessionWorktree(t, root)
@@ -165,7 +165,7 @@ func TestRecordLensesFindsFSMRunCreatedFromLinkedWorktree(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Recorded task-done") {
 		t.Fatalf("passing run from linked worktree: code=%d out=%q err=%q", code, out, errOut)
 	}
-	if _, err := os.Stat(filepath.Join(wt, ".metareview", "runs", "passing-from-wt")); err == nil {
+	if _, err := os.Stat(filepath.Join(wt, ".metareview", "runs", "passing-from-wt")); err == nil { // run-store: current-worktree (asserting absence)
 		t.Fatal("the run must be read from the shared store, not copied into the linked worktree")
 	}
 

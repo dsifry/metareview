@@ -526,8 +526,8 @@ func dispatch(args []string) {
 			if scope == "epic-ready" {
 				wantWorkflow = "epic-review-loop"
 			}
-			// The run is read from the store the FSM wrote it to — the main worktree — while base..head
-			// above stays this worktree's diff. From a linked worktree the two roots differ (#169).
+			// The run is read from the store the FSM wrote it to — git's common directory, shared by every
+			// worktree (#169, #173) — while base..head above stays this worktree's diff.
 			runsDir, warn := fromRunRunsDir(workdir, fromRun)
 			if warn != "" {
 				_, _ = fmt.Fprintln(stderr, "record-lenses: "+warn)
@@ -800,7 +800,7 @@ func fromRunRunsDir(start, runID string) (dir, warn string) {
 	if err != nil {
 		store = filepath.Join(repo.RootOr(start), ".git", "metareview") // no repository: a path that holds nothing
 	}
-	dir = filepath.Join(store, "runs")
+	dir = filepath.Join(store, "runs") // run-store: shared — git's common directory (repo.StoreDir)
 	if _, err := os.Stat(filepath.Join(dir, runID)); err == nil {
 		return dir, ""
 	}

@@ -100,10 +100,19 @@ func TestLinkedWorktreeStoreAndWorkRoots(t *testing.T) {
 	}
 }
 
+// buildsCommonDirPath reports whether a line names a path in the shared store under git's common directory (#173):
+// the split form `"metareview", "<name>"` without the checkout's leading dot or a docs/ parent.
+func buildsCommonDirPath(code string) bool {
+	return strings.Contains(code, `"metareview", "`) && !strings.Contains(code, `"docs", "metareview"`) && !strings.Contains(code, `".metareview"`)
+}
+
 // buildsRootedPath reports whether a line of code names a .metareview or docs/metareview path, in either the
 // split form (filepath.Join(root, ".metareview", …), "docs", "metareview") or a slash-joined string literal
 // (".metareview/runs.jsonl", "docs/metareview/…").
 func buildsRootedPath(code string) bool {
+	if buildsCommonDirPath(code) {
+		return true
+	}
 	for _, lit := range []string{`".metareview"`, `"docs", "metareview"`, `".metareview/`, `"docs/metareview`} {
 		if strings.Contains(code, lit) {
 			return true
@@ -141,12 +150,25 @@ func TestFSMRootsAreDeclared(t *testing.T) {
 			sites++
 			declared := false
 			for j := max(0, i-window); j <= i; j++ {
-				if strings.Contains(lines[j], "root: store") || strings.Contains(lines[j], "root: work") {
+				if strings.Contains(lines[j], "root: store") || strings.Contains(lines[j], "root: work") || strings.Contains(lines[j], "root: none") {
 					declared = true
 				}
 			}
 			if !declared {
 				t.Errorf("%s:%d builds a .metareview/docs path without a `root: store` or `root: work` declaration", path, i+1)
+			}
+			// `root: store` alone is ambiguous since #173 (the anchor checkout or git's common directory): a
+			// common-dir site must say which.
+			if buildsCommonDirPath(code) {
+				store, common, none := false, false, false
+				for j := max(0, i-window); j <= i; j++ {
+					store = store || strings.Contains(lines[j], "root: store")
+					common = common || strings.Contains(lines[j], "common dir")
+					none = none || strings.Contains(lines[j], "root: none")
+				}
+				if !none && !(store && common) {
+					t.Errorf("%s:%d builds a common-dir store path without a `root: store (git's common directory)` declaration", path, i+1)
+				}
 			}
 		}
 		return nil

@@ -256,8 +256,8 @@ exceptions separately from resolutions.
 
 - **Durable, commit these:** Markdown reviews and context under `docs/metareview/` (including FSM export
   bundles under `docs/metareview/fsm/` and shard results under `docs/metareview/shards/`).
-- **Transient, keep local:** `.metareview/findings.jsonl`, `.metareview/runs.jsonl`, FSM runs under
-  FSM runs in git's common directory (`.git/metareview/runs/`, never tracked), and shard prompt packs under `.metareview/shards/` (self-ignoring).
+- **Transient, keep local:** `.metareview/findings.jsonl`, `.metareview/runs.jsonl`, FSM runs in git's
+  common directory (`.git/metareview/runs/`, never tracked), and shard prompt packs under `.metareview/shards/` (self-ignoring).
 
 Ignore only the two transient files by exact name — never the whole `docs/metareview/` or `.metareview/`
 directories:

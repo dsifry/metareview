@@ -120,9 +120,9 @@ set — the `review-lenses` node's rubric is a per-workflow param defaulting to 
 own freshness (child logs/evidence/intent, which live outside the diff) is guarded by the deterministic
 pre-checks in `RunEpicReady`, which re-read current state on every gate run.
 
-**Where a run lives (two roots, §6).** A run's audit, sidecars and terminal `runs.jsonl` row live under the
-**store root** — the main worktree, whichever worktree ran `fsm init` — so every worktree sees one store and run
-ids stay unique. The run *reviews* its **work dir** (default: the checkout `init` ran in; `--work-dir` overrides),
+**Where a run lives (§6).** A run's audit, sidecars and terminal ledger row live in the shared store in git's
+common directory (`<git-common-dir>/metareview/`, #173), whichever worktree ran `fsm init` — so every worktree sees
+one store and run ids stay unique; its `RepoRoot` anchor is the main worktree. The run *reviews* its **work dir** (default: the checkout `init` ran in; `--work-dir` overrides),
 and a default `fsm export` bundle is written under the checkout that ran `export`
 (`export.DefaultOut`), so it is committed on that branch.
 
@@ -179,9 +179,11 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   (AC-2.8 pins it); clones do not copy it. **Migration:** the first `fsm` command after upgrading moves a 0.13.x
   store (`<main>/.metareview/runs/<id>/`) in under an exclusive lock — byte-identical, idempotent, never
   overwriting (an id in both places is a `STORE_COLLISION` warning, both copies kept) — and copies the legacy
-  `fsm-*` ledger rows. For one release `record-lenses --from-run` and the `status` abandoned-run scan also read
-  the legacy location. The scan reads the shared store but reports only runs whose init `work_dir` is this
-  worktree.
+  `fsm-*` ledger rows (read leniently — it is the main checkout's live review ledger — and skipped once migrated via
+  a size stamp, `legacy-ledger.size`). For one release `record-lenses --from-run` and the `status` abandoned-run scan
+  also read that single legacy location (never another worktree's), and `status` warns while it holds runs. The scan
+  attributes a run to the worktree that *contains* its init `work_dir` (`--work-dir` may be a subdirectory) and
+  reports only this worktree's; a run whose worktree is gone is reported from the main checkout, never dropped.
 - **Store vs anchor vs work (#169, #172, #173).** Every `.metareview`/`docs` path in `internal/fsm` names which it
   means. **Common dir** = the shared store above. **Store root (anchor)** = the main worktree (`git worktree list
   --porcelain`, `repo.MainWorktreeFromPorcelain`): a run's `RepoRoot` — mock scenarios, escalation evidence and

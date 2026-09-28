@@ -82,26 +82,34 @@ func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
 	var out []AbandonedRun
 	readable := false // no runs directory anywhere reports nil, as it always has; an empty one reports []
 	seen := map[string]bool{}
-	// The shared store (#173): every worktree's runs, so only the ones THIS worktree started — the work dir their
-	// init recorded — are reported. Blocking this checkout's Stop hook on another branch's abandoned run would be a
-	// false block.
+	// A run belongs to the worktree that CONTAINS its init work_dir (`fsm init --work-dir` takes any directory inside
+	// a worktree). The store is shared by every worktree (#173), so only this worktree's runs are reported — another
+	// branch's abandoned run must not block this checkout's Stop hook. A run whose work_dir cannot be attributed (its
+	// worktree was removed) is reported from the main checkout, never dropped: an unattributable run silently
+	// escaping every Stop gate would be the worse failure.
+	here := canonical(root)
+	main := canonical(repo.RunStoreRoot(root))
+	mine := func(r AbandonedRun) bool {
+		owner, err := repo.Toplevel(r.workDir)
+		if err != nil || r.workDir == "" {
+			return here == main
+		}
+		return canonical(owner) == here
+	}
+	sources := []string{}
 	if store, err := repo.StoreDir(root); err == nil {
-		here := canonical(root)
-		runs, ok := abandonedIn(filepath.Join(store, "runs"), reg.Info())
+		sources = append(sources, filepath.Join(store, "runs"))
+	}
+	// run-store: shared — the single 0.13.x location (the main checkout's .metareview/runs), read for one release
+	// until an fsm command migrates it; never any other worktree's directory.
+	sources = append(sources, filepath.Join(repo.RunStoreRoot(root), ".metareview", "runs"))
+	for _, dir := range sources {
+		runs, ok := abandonedIn(dir, reg.Info())
 		readable = readable || ok
 		for _, r := range runs {
-			if canonical(r.workDir) == here {
+			if !seen[r.RunID] && mine(r) {
 				out, seen[r.RunID] = append(out, r), true
 			}
-		}
-	}
-	// run-store: current-worktree — a 0.13.x run not yet migrated into the shared store still sits in this
-	// worktree's own .metareview/runs (read for one release; any fsm command migrates it).
-	runs, ok := abandonedIn(filepath.Join(root, ".metareview", "runs"), reg.Info())
-	readable = readable || ok
-	for _, r := range runs {
-		if !seen[r.RunID] {
-			out = append(out, r)
 		}
 	}
 	if !readable {
@@ -112,6 +120,22 @@ func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].RunID < out[j].RunID })
 	return out
+}
+
+// LegacyRunsPending reports whether the main checkout still holds a 0.13.x FSM run store (.metareview/runs/ with a
+// run in it) that no fsm command has migrated into git's common directory yet (#173).
+func LegacyRunsPending(root string) bool {
+	// run-store: shared — the single 0.13.x location.
+	entries, err := os.ReadDir(filepath.Join(repo.RunStoreRoot(root), ".metareview", "runs"))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			return true
+		}
+	}
+	return false
 }
 
 // abandonedIn lists the abandoned runs directly under dir, and whether dir could be read at all.

@@ -124,3 +124,18 @@ func TestGitIsUnaffectedByTheStore(t *testing.T) {
 		}
 	}
 }
+
+func TestToplevel(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	gitT(t, root, "init", "-q", "-b", "main", root)
+	sub := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Toplevel(sub); err != nil || got != root {
+		t.Fatalf("Toplevel(%s) = %q, %v", sub, got, err)
+	}
+	if _, err := Toplevel(t.TempDir()); err == nil {
+		t.Fatal("outside a work tree there is no toplevel")
+	}
+}

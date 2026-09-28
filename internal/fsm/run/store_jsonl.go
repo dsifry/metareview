@@ -32,6 +32,7 @@ func NewJSONLStore(root string, opts Options) RunStore {
 // NewCommonDirStore returns the shared on-disk store under git's common directory: <common>/metareview/runs/<id>/
 // (#173) — one store for the main checkout and every linked worktree, independent of any one checkout.
 func NewCommonDirStore(common string, opts Options) RunStore {
+	// root: store (git's common directory)
 	return &jsonlStore{root: common, layout: []string{"metareview", "runs"}, opts: opts, held: map[string]*os.File{}}
 }
 

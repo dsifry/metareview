@@ -138,7 +138,7 @@ func listed(dir, top string) bool {
 }
 
 func bindingPath(common, sessionID string) string {
-	return filepath.Join(common, "metareview", "sessions", sessionID+".json")
+	return filepath.Join(repo.StoreDirIn(common), "sessions", sessionID+".json")
 }
 
 func validID(sessionID string) error {

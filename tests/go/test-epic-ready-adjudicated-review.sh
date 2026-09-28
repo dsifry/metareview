@@ -38,10 +38,10 @@ build_epic_repo() {
 
 # mkfsmrun <run-id> <base-sha> : forge an FSM audit whose init matches base..HEAD and reaches a passing outcome.
 mkfsmrun() {
-  mkdir -p ".metareview/runs/$1"
+  mkdir -p ".git/metareview/runs/$1"
   { printf '{"type":"init","data":{"base_sha":"%s","head":"%s","workflow":"epic-review-loop"}}\n' "$2" "$(git rev-parse HEAD)";
     printf '{"type":"transition","data":{"from":"adjudicate","to":"done","gate":"confirmed_nonempty","outcome":"reviewed","head":"%s"}}\n' "$(git rev-parse HEAD)";
-  } > ".metareview/runs/$1/audit.jsonl"
+  } > ".git/metareview/runs/$1/audit.jsonl"
 }
 
 # The gate exits 1 when it blocks; `|| true` keeps that from aborting the pipeline under `set -o pipefail`.
@@ -150,16 +150,16 @@ repo="$(mktemp -d)"
   # shellcheck disable=SC2086
   reject reject-no-fromrun  $ebase --mode subagent-adjudicated
   # A run that reviewed a DIFFERENT diff must not credit an epic-ready subagent marker.
-  mkdir -p .metareview/runs/other
-  printf '{"type":"init","data":{"base_sha":"deadbeef","head":"cafef00d","workflow":"epic-review-loop"}}\n' > .metareview/runs/other/audit.jsonl
+  mkdir -p .git/metareview/runs/other
+  printf '{"type":"init","data":{"base_sha":"deadbeef","head":"cafef00d","workflow":"epic-review-loop"}}\n' > .git/metareview/runs/other/audit.jsonl
   # shellcheck disable=SC2086
   reject reject-wrong-diff  $ebase --mode subagent-adjudicated --from-run other
   # A run over the RIGHT diff but produced by the generic review-loop (task-done rubric) must NOT credit the
   # epic-ready gate — else a non-epic review is laundered as epic evidence (bypassing the lens seam).
-  mkdir -p .metareview/runs/wrongwf
+  mkdir -p .git/metareview/runs/wrongwf
   { printf '{"type":"init","data":{"base_sha":"%s","head":"%s","workflow":"review-loop"}}\n' "$(git rev-parse main)" "$(git rev-parse HEAD)";
     printf '{"type":"transition","data":{"from":"adjudicate","to":"done","gate":"confirmed_nonempty","outcome":"reviewed","head":"%s"}}\n' "$(git rev-parse HEAD)";
-  } > .metareview/runs/wrongwf/audit.jsonl
+  } > .git/metareview/runs/wrongwf/audit.jsonl
   # shellcheck disable=SC2086
   reject reject-wrong-workflow $ebase --mode subagent-adjudicated --from-run wrongwf
   echo "ok: cli-epic-ready-scope-and-rejects"

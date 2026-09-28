@@ -62,7 +62,7 @@ const (
 // root: store — the terminal row is store-level: run ids are unique across the store, and Exists checks it. root is
 // git's common directory (#173): the ledger sits beside the runs, at <common>/metareview/runs.jsonl, not in any
 // checkout's per-worktree .metareview/runs.jsonl.
-func path(root string) string { return filepath.Join(root, "metareview", "runs.jsonl") }
+func path(root string) string { return filepath.Join(root, "metareview", "runs.jsonl") } // root: store (git's common directory)
 
 // RowFor maps a terminal view to its row (spec 3 §6).
 func RowFor(v machine.View, now run.Time) Row {
@@ -252,32 +252,58 @@ var nanos = nowNanos
 
 // MigrateLegacyRows copies the FSM's terminal rows (scope fsm-*) from a 0.13.x store's ledger — the main checkout's
 // .metareview/runs.jsonl, which also holds that checkout's own review rows — into the common-dir ledger (#173), so
-// run ids stay unique across the store. Review rows are left alone. It is idempotent (a row already present is
-// skipped); a legacy row whose id the ledger holds for a different head or workflow is a conflict, reported and not
-// merged. The legacy file is never modified.
+// run ids stay unique across the store. Review rows are left alone and the legacy file is never modified.
+//
+// It runs on every fsm command, so it must be cheap and must not trust that file: the legacy ledger is the checkout's
+// LIVE review ledger, appended by lock-free writers, so a line that does not decode is skipped rather than failing
+// every fsm command; the common ledger is read once; and a stamp of the legacy file's size
+// (<common>/metareview/legacy-ledger.size) skips it entirely until it changes — an older binary appending more rows.
+// A legacy row whose id the ledger holds for a different head or workflow is a conflict, reported and not merged.
 func MigrateLegacyRows(checkout, common string) (copied, conflicts []string, err error) {
 	copied, conflicts = []string{}, []string{}
-	rows, _, err := readRowsFile(filepath.Join(checkout, ".metareview", "runs.jsonl")) // root: store (the 0.13.x ledger)
+	legacy := filepath.Join(checkout, ".metareview", "runs.jsonl") // root: store (the 0.13.x ledger)
+	info, err := os.Stat(legacy)
+	if errors.Is(err, os.ErrNotExist) {
+		return copied, conflicts, nil
+	}
 	if err != nil {
 		return copied, conflicts, err
 	}
-	for _, row := range rows {
-		if !strings.HasPrefix(row.Scope, "fsm-") {
+	stamp := filepath.Join(common, "metareview", "legacy-ledger.size") // root: store (git's common directory)
+	size := fmt.Sprint(info.Size())
+	if prev, err := os.ReadFile(stamp); err == nil && string(prev) == size {
+		return copied, conflicts, nil
+	}
+	raw, err := os.ReadFile(legacy)
+	if err != nil {
+		return copied, conflicts, err
+	}
+	present, _, err := readRows(common)
+	if err != nil {
+		return copied, conflicts, err
+	}
+	have := map[string]Row{}
+	for _, r := range present {
+		have[r.ID] = r
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		var row Row
+		if json.Unmarshal([]byte(strings.TrimSpace(line)), &row) != nil || !strings.HasPrefix(row.Scope, "fsm-") {
+			continue // a review row, or a line a lock-free writer tore: not this migration's business
+		}
+		if prev, ok := have[row.ID]; ok {
+			if prev.HeadSHA != row.HeadSHA || prev.WorkflowHash != row.WorkflowHash {
+				conflicts = append(conflicts, row.ID)
+			}
 			continue
 		}
-		present, err := Exists(common, row.ID)
-		if err != nil {
+		if err := appendRow(common, row); err != nil {
 			return copied, conflicts, err
 		}
-		err = appendRow(common, row)
-		switch {
-		case errs.Is(err, CodeRunsJSONL):
-			conflicts = append(conflicts, row.ID)
-		case err != nil:
-			return copied, conflicts, err
-		case !present:
-			copied = append(copied, row.ID)
-		}
+		have[row.ID] = row
+		copied = append(copied, row.ID)
 	}
+	// Best-effort: without the stamp the next call simply migrates again, idempotently.
+	_ = os.WriteFile(stamp, []byte(size), 0o600)
 	return copied, conflicts, nil
 }

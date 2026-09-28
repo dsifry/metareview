@@ -16,6 +16,6 @@ can gate on the exit code alone.
 metareview status --json
 ```
 
-Use status before deciding which generated artifacts to commit. Review artifacts under `docs/metareview/` and git-visible learning state should be committed; transient `.metareview/findings.jsonl`, `.metareview/runs.jsonl` and `.metareview/shards/` stay local. Committed shard review results live in `docs/metareview/shards/`, and FSM export bundles in `docs/metareview/fsm/`; `.metareview/runs/` (FSM runs) stays local and ignores itself.
+Use status before deciding which generated artifacts to commit. Review artifacts under `docs/metareview/` and git-visible learning state should be committed; transient `.metareview/findings.jsonl`, `.metareview/runs.jsonl` and `.metareview/shards/` stay local. Committed shard review results live in `docs/metareview/shards/`, and FSM export bundles in `docs/metareview/fsm/`; FSM runs live in git's common directory (`.git/metareview/runs/`) and are never tracked.
 
 Arguments: `$ARGUMENTS`

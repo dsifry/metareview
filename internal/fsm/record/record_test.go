@@ -450,6 +450,11 @@ func TestMigrateLegacyRows(t *testing.T) {
 	if _, _, err := MigrateLegacyRows(bad, common); err == nil {
 		t.Fatal("an unreadable legacy ledger must surface")
 	}
+	notDir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(notDir, ".metareview"), []byte("x"), 0o644) // stat fails with ENOTDIR
+	if _, _, err := MigrateLegacyRows(notDir, common); err == nil {
+		t.Fatal("a legacy ledger that cannot be stat'd must surface")
+	}
 	// The common ledger cannot be written.
 	blocked := t.TempDir()
 	_ = os.WriteFile(filepath.Join(blocked, "metareview"), []byte("x"), 0o644)
@@ -464,5 +469,42 @@ func TestMigrateLegacyRows(t *testing.T) {
 		if _, _, err := MigrateLegacyRows(checkout, readOnly); err == nil {
 			t.Fatal("an unwritable ledger must surface")
 		}
+	}
+}
+
+// The legacy ledger is the main checkout's live review ledger (lock-free writers), so a malformed line in it must not
+// stop migration — its FSM rows are copied, the rest skipped — and once migrated it is not re-read on every fsm
+// command: a stamp of its size skips it until an older binary appends more (#173 review).
+func TestMigrateLegacyRowsIsLenientAndRunsOnce(t *testing.T) {
+	ctx := context.Background()
+	checkout, common := t.TempDir(), t.TempDir()
+	old := t.TempDir()
+	if err := Terminal(old, fixedClock)(ctx, view("mrv-root-000000001", run.OutcomeFixed, []string{})); err != nil {
+		t.Fatal(err)
+	}
+	fsmRow, _ := os.ReadFile(filepath.Join(old, "metareview", "runs.jsonl"))
+	legacy := filepath.Join(checkout, ".metareview", "runs.jsonl")
+	_ = os.MkdirAll(filepath.Dir(legacy), 0o755)
+	_ = os.WriteFile(legacy, []byte("not json\n"+string(fsmRow)+"{\"torn"), 0o644)
+	copied, _, err := MigrateLegacyRows(checkout, common)
+	if err != nil || len(copied) != 1 {
+		t.Fatalf("a malformed legacy line must not stop migration: %v %v", copied, err)
+	}
+	// Migrated: the next call does not read the legacy file at all (here: unreadable, and still no error).
+	if os.Getuid() != 0 {
+		_ = os.Chmod(legacy, 0)
+		t.Cleanup(func() { _ = os.Chmod(legacy, 0o644) })
+		if copied, _, err := MigrateLegacyRows(checkout, common); err != nil || len(copied) != 0 {
+			t.Fatalf("a migrated legacy ledger must be skipped: %v %v", copied, err)
+		}
+		_ = os.Chmod(legacy, 0o644)
+	}
+	// An older binary appends another FSM row: the size changed, so it is migrated too.
+	other := strings.Replace(string(fsmRow), "mrv-root-000000001", "mrv-root-000000002", 1)
+	f, _ := os.OpenFile(legacy, os.O_APPEND|os.O_WRONLY, 0o644)
+	_, _ = f.WriteString("\n" + other)
+	_ = f.Close()
+	if copied, _, err := MigrateLegacyRows(checkout, common); err != nil || len(copied) != 1 || copied[0] != "mrv-root-000000002" {
+		t.Fatalf("rows appended after migration must be picked up: %v %v", copied, err)
 	}
 }

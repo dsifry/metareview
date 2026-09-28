@@ -75,7 +75,7 @@ metareview fsm diff --a <id> --b <child>
 
 ## Escalation
 
-Three non-PASS attempts on one fork lineage make the third leaf `ESCALATED` in `.metareview/runs.jsonl`, and forking it
+Three non-PASS attempts on one fork lineage make the third leaf `ESCALATED` in the store's ledger (`<git-common-dir>/metareview/runs.jsonl`), and forking it
 is refused (`ERR_RUN_ESCALATED`). This is per-lineage: forking an ancestor or running `init` again on the same base is
 a deliberate human reset, not something the agent decides.
 
@@ -100,7 +100,7 @@ a deliberate human reset, not something the agent decides.
 ## Files and retention
 
 `<git-common-dir>/metareview/runs/<id>/` (local, inside `.git` so never tracked, kept until deleted; `MaxEvents` → `ERR_AUDIT_FULL`),
-`.metareview/runs.jsonl` (one row per terminal run; transient), `docs/metareview/fsm/<id>/` (`fsm export` bundles —
+`<git-common-dir>/metareview/runs.jsonl` (one row per terminal run, beside the runs), `docs/metareview/fsm/<id>/` (`fsm export` bundles —
 redacted, one-way, durable). Delete by hand: a run without its `workflow.yaml` sidecar, an incomplete fork
 (`ERR_FORK_INCOMPLETE`), or a directory left behind by `ERR_RUN_LOCKED` at `init`. `metareview status` lists the runs of
 the main worktree. Prerequisite: git ≥ 2.31.
