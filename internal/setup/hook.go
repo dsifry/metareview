@@ -48,8 +48,8 @@ type EnforcementStatus struct {
 // only the Stop hook, so a repo with the git gate fully installed still read "nothing stops a host... the
 // Completion Rule is advisory" — under-stating the posture. Reporting both is what makes the check honest.
 type GitGateStatus struct {
-	// Installed is true when core.hooksPath points at metareview's materialized, byte-current hook scripts —
-	// so `git push` is blocked until the branch is review-clean.
+	// Installed is true when `git push` is gated: core.hooksPath points at metareview's materialized, byte-current
+	// hook scripts, or (with Stale) at an earlier metareview location that still holds its executable gate scripts.
 	Installed bool `json:"installed"`
 	// HooksPath is this clone's effective core.hooksPath, empty when unset.
 	HooksPath string `json:"hooksPath,omitempty"`
@@ -62,9 +62,10 @@ type GitGateStatus struct {
 	Remediation string `json:"remediation,omitempty"`
 }
 
-// gitGateStatus reports the git-native gate's install state, read-only. It reuses PlanHookInstall, whose
-// AlreadyDone is true exactly when core.hooksPath is ours AND the materialized scripts are byte-current with
-// the embed. A repo that is not usable for git returns not-installed with a reason rather than an error.
+// gitGateStatus reports the git-native gate's install state, read-only. It reuses PlanHookInstall: installed when
+// HooksCurrent (core.hooksPath is ours and the scripts are byte-current), or — stale — when core.hooksPath is an
+// earlier metareview location whose gate scripts are still there. A repo that is not usable for git returns
+// not-installed with a reason rather than an error.
 func gitGateStatus(root string, git GitRunner) GitGateStatus {
 	plan, err := PlanHookInstall(root, git)
 	if err != nil {
