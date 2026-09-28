@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -1314,7 +1315,13 @@ func TestStatusAllNeverChangesTheExit(t *testing.T) {
 	writeAbandonedRun(t, root, "mrv-t-feature-001", "feature", "")
 	writeAbandonedRun(t, root, "mrv-t-main-00001", "main", gone)
 	writeAbandonedRun(t, root, "mrv-t-gone-00001", "gone", gone)
-	writeAbandonedRun(t, root, "mrv-t-legacy-001", "", gone)
+	// A legacy run is cleared only when git itself says its head is unreachable: a real commit reachable from nothing.
+	c := exec.Command("git", "commit-tree", "HEAD^{tree}", "-m", "unreachable")
+	c.Dir = root
+	c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	unreachable, err := c.Output()
+	must(t, err)
+	writeAbandonedRun(t, root, "mrv-t-legacy-001", "", strings.TrimSpace(string(unreachable)))
 	for _, args := range [][]string{
 		{"status", "--json"},
 		{"status", "--json", "--target", "docs/tasks/t.md"},
@@ -1329,6 +1336,29 @@ func TestStatusAllNeverChangesTheExit(t *testing.T) {
 		if strings.Contains(out, `"elsewhere"`) || !strings.Contains(outAll, "mrv-t-main-00001") {
 			t.Errorf("%v: only --all lists the runs elsewhere:\n%s\n---\n%s", args, out, outAll)
 		}
+		// The fixture also has unreviewed files, so the exit alone cannot show the run blocks: must_clear must name it
+		// in both forms, and never a run that belongs elsewhere.
+		for _, body := range []string{out, outAll} {
+			var r struct {
+				MustClear []struct {
+					RunID string `json:"run_id"`
+				} `json:"must_clear"`
+			}
+			must(t, json.Unmarshal([]byte(body), &r))
+			var runs []string
+			for _, b := range r.MustClear {
+				if b.RunID != "" {
+					runs = append(runs, b.RunID)
+				}
+			}
+			if strings.Join(runs, ",") != "mrv-t-feature-001" {
+				t.Errorf("%v: must_clear must hold exactly feature's run, got %v", args, runs)
+			}
+		}
+	}
+	// An --all that is the operand of --target is the value, not the flag.
+	if code, _, errOut := runCLI(t, root, nil, "status", "--json", "--target", "--all"); code == 2 {
+		t.Errorf("--target --all must target a path named --all, got a usage error: %s", errOut)
 	}
 	_, plain, _ := runCLI(t, root, nil, "status")
 	for _, want := range []string{"abandoned runs on this branch: 1", "mrv-t-feature-001  t @ fix", "abandoned runs elsewhere: 3 (metareview status --all lists them)"} {
@@ -1337,10 +1367,13 @@ func TestStatusAllNeverChangesTheExit(t *testing.T) {
 		}
 	}
 	code, all, _ := runCLI(t, root, nil, "status", "--all")
-	for _, want := range []string{"branch (no branch recorded):\n  mrv-t-legacy-001  t @ fix  [orphaned]", "branch gone:\n  mrv-t-gone-00001  t @ fix  [orphaned]",
-		"branch main:\n  mrv-t-main-00001  t @ fix  [other-branch]"} {
-		if !strings.Contains(all, want) {
-			t.Errorf("status --all missing %q:\n%s", want, all)
+	// Each line ends in the run's directory, the one to delete (matched by its tail: the root may be a symlink).
+	for _, want := range []string{
+		`branch \(no branch recorded\):\n  mrv-t-legacy-001  t @ fix  \[orphaned\]  \S+/\.git/metareview/runs/mrv-t-legacy-001\n`,
+		`branch gone:\n  mrv-t-gone-00001  t @ fix  \[orphaned\]  \S+/\.git/metareview/runs/mrv-t-gone-00001\n`,
+		`branch main:\n  mrv-t-main-00001  t @ fix  \[other-branch\]  \S+/\.git/metareview/runs/mrv-t-main-00001\n`} {
+		if !regexp.MustCompile(want).MatchString(all) {
+			t.Errorf("status --all missing %s:\n%s", want, all)
 		}
 	}
 	if code != 0 {

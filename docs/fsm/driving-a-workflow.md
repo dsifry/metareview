@@ -106,7 +106,7 @@ redacted, one-way, durable). Delete by hand: a run without its `workflow.yaml` s
 shared store (and any 0.13.x runs not yet migrated); `metareview status --json` — what the Stop hook reads — reports as
 abandoned only the runs of the branch in hand (#177): those `init` recorded for this branch, and those whose head is in
 `merge-base..HEAD` (a stacked branch inherits its base branch's). `init` records the checked-out branch; on a detached HEAD
-pass `--for-branch <branch>`. `metareview status --all` also lists the runs that belong to other branches or to none, without
+pass `--for-branch <branch>` (a local branch). `metareview status --all` also lists the runs that belong to other branches or to none, without
 changing the exit code. Prerequisite: git ≥ 2.31.
 
 ## Escalation

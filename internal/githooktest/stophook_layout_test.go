@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,15 @@ import (
 // The Stop hook (hooks/pre-finish.sh) against the real CLI, in every repository layout metareview supports (#177
 // AC-4.11): a run abandoned on one branch blocks that branch and nothing else — in a single checkout switching
 // branches, in a main checkout with a linked worktree, and in the bare-clone + worktrees layout.
+
+// TestMain removes the CLI realBin built, so a run leaves nothing behind in the system temp directory.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if builtBin != "" {
+		_ = os.RemoveAll(filepath.Dir(builtBin))
+	}
+	os.Exit(code)
+}
 
 var (
 	buildOnce sync.Once
@@ -128,13 +138,41 @@ func (l layout) hook(dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func (l layout) mustBlockOn(dir, runID string) {
+// mustBlockOn asserts the Stop hook in dir blocks on an abandoned run of branch, and that the branch-scoped status the
+// hook reads holds exactly the runs want — the hook's reason names only the first blocker, so the set is checked at
+// the source.
+func (l layout) mustBlockOn(dir, branch string, want ...string) {
 	l.t.Helper()
 	out := l.hook(dir)
 	var d struct{ Decision, Reason string }
-	if err := json.Unmarshal([]byte(out), &d); err != nil || d.Decision != "block" || !strings.Contains(d.Reason, "[ABANDONED]") {
-		l.t.Fatalf("the Stop hook in %s must block naming abandoned run %s, got %q", dir, runID, out)
+	if err := json.Unmarshal([]byte(out), &d); err != nil || d.Decision != "block" || !strings.Contains(d.Reason, "(branch "+branch+") [ABANDONED]") {
+		l.t.Fatalf("the Stop hook in %s must block on branch %s's abandoned run, got %q", dir, branch, out)
 	}
+	if got := l.mustClear(dir); strings.Join(got, ",") != strings.Join(want, ",") {
+		l.t.Fatalf("in %s must_clear holds runs %v, want exactly %v", dir, got, want)
+	}
+}
+
+// mustClear is the run ids `status --json --scope branch` — the hook's query — says must be cleared in dir.
+func (l layout) mustClear(dir string) []string {
+	l.t.Helper()
+	out, _ := l.run(dir, l.bin, "status", "--json", "--scope", "branch")
+	var r struct {
+		MustClear []struct {
+			RunID string `json:"run_id"`
+		} `json:"must_clear"`
+	}
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		l.t.Fatalf("status --json in %s: %v: %s", dir, err, out)
+	}
+	var ids []string
+	for _, b := range r.MustClear {
+		if b.RunID != "" {
+			ids = append(ids, b.RunID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func (l layout) mustPass(dir string) {
@@ -182,11 +220,11 @@ func TestStopHookScopesAbandonedRunsInASingleCheckout(t *testing.T) {
 	l.optIn(repo)
 	l.git(repo, "checkout", "-q", "-b", "feat")
 	id := l.abandon(repo)
-	l.mustBlockOn(repo, id)
+	l.mustBlockOn(repo, "feat", id)
 	l.git(repo, "checkout", "-q", "-b", "other", "main")
 	l.mustPass(repo)
 	l.git(repo, "checkout", "-q", "feat")
-	l.mustBlockOn(repo, id)
+	l.mustBlockOn(repo, "feat", id)
 }
 
 func TestStopHookScopesAbandonedRunsAcrossLinkedWorktrees(t *testing.T) {
@@ -202,14 +240,11 @@ func TestStopHookScopesAbandonedRunsAcrossLinkedWorktrees(t *testing.T) {
 	wt := filepath.Join(home, "wt")
 	l.git(repo, "worktree", "add", "-q", "-b", "feat", wt, "main")
 	id := l.abandon(wt)
-	l.mustBlockOn(wt, id)
+	l.mustBlockOn(wt, "feat", id)
 	l.mustPass(repo) // the main checkout is not on feat
 	otherID := l.abandon(repo)
-	l.mustBlockOn(repo, otherID)
-	l.mustBlockOn(wt, id)
-	if out := l.hook(wt); strings.Contains(out, otherID) {
-		t.Fatalf("feat must not be blocked by other's run %s: %s", otherID, out)
-	}
+	l.mustBlockOn(repo, "other", otherID)
+	l.mustBlockOn(wt, "feat", id) // exactly feat's: other's run never leaks into it
 }
 
 func TestStopHookScopesAbandonedRunsInABareLayout(t *testing.T) {
@@ -226,8 +261,9 @@ func TestStopHookScopesAbandonedRunsInABareLayout(t *testing.T) {
 	l.git(bare, "worktree", "add", "-q", "-b", "feat", featWT, "main")
 	l.optIn(mainWT)
 	id := l.abandon(featWT)
-	l.mustBlockOn(featWT, id)
+	l.mustBlockOn(featWT, "feat", id)
 	l.mustPass(mainWT)
 	otherID := l.abandon(mainWT)
-	l.mustBlockOn(mainWT, otherID)
+	l.mustBlockOn(mainWT, "other", otherID)
+	l.mustBlockOn(featWT, "feat", id)
 }

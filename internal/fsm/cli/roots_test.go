@@ -298,7 +298,16 @@ func TestInitRecordsTheBranchAndRequiresOneWhenDetached(t *testing.T) {
 	if got := initBranch(t, h, id); got != "main" {
 		t.Fatalf("restating the checked-out branch is fine, got %q", got)
 	}
+	git(t, h.root, "branch", "feat")
 	git(t, h.root, "checkout", "-q", "--detach")
+	// Detached, the name must be a local branch: a typo, a remote-tracking name or a full ref would never match the
+	// name leg, so the run would be orphaned — blocking nothing — as soon as the real branch is rebased.
+	for _, bad := range []string{"fea", "origin/feat", "refs/heads/feat"} {
+		e := h.mustErr(CodeUsage, 2, append(h.mockInit(), "--for-branch", bad)...)
+		if !strings.Contains(e["error"].(map[string]any)["detail"].(string), "not a local branch") {
+			t.Fatalf("--for-branch %s must be refused as not a local branch: %v", bad, e)
+		}
+	}
 	e = h.mustErr(CodeUsage, 2, h.mockInit()...)
 	if !strings.Contains(e["error"].(map[string]any)["detail"].(string), "--for-branch") {
 		t.Fatalf("the refusal must name --for-branch: %v", e)
@@ -306,5 +315,22 @@ func TestInitRecordsTheBranchAndRequiresOneWhenDetached(t *testing.T) {
 	id = h.must(StatusOK, 0, append(h.mockInit(), "--for-branch", "feat")...)["run_id"].(string)
 	if got := initBranch(t, h, id); got != "feat" {
 		t.Fatalf("--for-branch must be recorded, got %q", got)
+	}
+}
+
+// A symbolic-ref that fails for any reason other than git's "detached" (exit 1) is a git failure, never read as a
+// detached HEAD — which would tell the driver to pass --for-branch it does not need.
+func TestInitReportsASymbolicRefFailureAsGit(t *testing.T) {
+	h := newHarness(t)
+	realExec := h.deps.Exec
+	h.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
+		if len(args) > 0 && args[0] == "symbolic-ref" {
+			return []byte("fatal: broken"), nil, 128, nil
+		}
+		return realExec(ctx, dir, env, args...)
+	}
+	e := h.mustErr("ERR_GIT", 2, h.mockInit()...)
+	if strings.Contains(e["error"].(map[string]any)["detail"].(string), "detached") {
+		t.Fatalf("a git failure must not read as a detached HEAD: %v", e)
 	}
 }

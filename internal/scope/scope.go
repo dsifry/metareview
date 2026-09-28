@@ -1,18 +1,23 @@
 // Package scope decides which recorded obligations belong to the branch in hand (#177). One rule, shared by the
 // abandoned-run scan (and, next, findings): an item recorded at commit H on branch N is in scope when N is the
 // current branch — which survives rebase and amend — or when H lies in merge-base(HEAD, default base)..HEAD, which
-// covers detached snapshots and stacked branches. Items recorded on a branch that still exists elsewhere belong to
+// covers detached snapshots and stacked branches, or in the current branch's reflog, which survives a rewrite followed
+// by a rename. Items recorded on a branch that still exists elsewhere belong to
 // that branch; items whose branch is gone (merged and deleted, or never recorded) are orphaned.
 //
 // Why both legs: reachability alone lets `git rebase` silently clear a gate (the recorded head becomes unreachable),
 // so routine git use would switch it off; the branch name alone misses detached snapshots and stacked work.
 //
 // Load makes a fixed number of git calls however many items are classified (#177 AC-4.9): the current branch, the
-// fork point, one rev-list of the range into a set, and one listing of local branches.
+// fork point, one rev-list of the range into a set, the branch's reflog and the part of it that is the branch's own,
+// and one listing of local branches.
 package scope
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -85,31 +90,112 @@ func (e *exitError) Error() string { return "git exited " + strconv.Itoa(e.code)
 // forkPoint is the seam over gitcontext.ForkPoint (merge-base(HEAD, main|master), false on the default branch).
 var forkPoint = gitcontext.ForkPoint
 
-// Load reads the branch in hand for the repository at root. It never fails the caller over git: when the branches
-// cannot be listed at all (not a git repository) the Scope is unknown and Classify puts everything in scope; a
-// readable repository with no fork point simply has an empty range, and the name leg still applies.
+// readFile is the seam over reading an in-progress rebase's head-name.
+var readFile = os.ReadFile
+
+// code is a git failure's exit code, or -1 when git did not run to an exit (a timeout, a spawn failure).
+func code(err error) int {
+	var e *exitError
+	if errors.As(err, &e) {
+		return e.code
+	}
+	return -1
+}
+
+// Load reads the branch in hand for the repository at root. It never fails the caller over git, and it never fails
+// open: any git call that errors (other than git's own "no" — a detached HEAD) leaves the Scope unknown, and Classify
+// then puts everything in scope, so a stalled or broken git can block too much but never clear a gate. A readable
+// repository with no fork point simply has an empty range, and the other legs still apply.
 func Load(root string, git Runner) Scope {
 	if git == nil {
 		git = RealRunner
 	}
 	s := Scope{inRange: map[string]bool{}, branches: map[string]bool{}, root: root, git: git, ancestors: map[string]bool{}}
-	if cur, err := git(root, "symbolic-ref", "--short", "-q", "HEAD"); err == nil {
+	cur, err := git(root, "symbolic-ref", "--short", "-q", "HEAD")
+	switch {
+	case err == nil:
 		s.Current = cur
+	case code(err) == 1: // detached — or mid-rebase, which is still the branch being rebased
+		s.Current, err = rebasing(root, git)
+		if err != nil {
+			return s
+		}
+	default:
+		return s
 	}
-	if base, ok, err := forkPoint(root); err == nil && ok {
-		if out, err := git(root, "rev-list", base+"..HEAD"); err == nil {
-			for _, sha := range strings.Fields(out) {
-				s.inRange[sha] = true
+	base, ok, err := forkPoint(root)
+	if err != nil {
+		return s
+	}
+	if ok {
+		out, err := git(root, "rev-list", base+"..HEAD")
+		if err != nil {
+			return s
+		}
+		for _, sha := range strings.Fields(out) {
+			s.inRange[sha] = true
+		}
+		if s.Current != "" {
+			// The reflog leg: every head this branch has had, so a rebase or amend followed by `git branch -m` (which
+			// carries the reflog along) still finds the run the branch was reviewing. Only the heads the fork point
+			// cannot reach: the reflog starts where the branch was created, a commit its siblings share. A repository
+			// that keeps no branch reflogs (a bare one's default) simply has none to add; with no fork point (the
+			// default branch itself) there is no own work to tell apart, and the name leg stands alone.
+			if err := s.addReflog(root, git, base); err != nil {
+				return s
 			}
 		}
 	}
-	if out, err := git(root, "for-each-ref", "--format=%(refname:short)", "refs/heads"); err == nil {
-		s.known = true
-		for _, name := range strings.Fields(out) {
-			s.branches[name] = true
+	out, err := git(root, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if err != nil {
+		return s
+	}
+	for _, name := range strings.Fields(out) {
+		s.branches[name] = true
+	}
+	s.known = true
+	return s
+}
+
+// addReflog adds the current branch's past heads that base cannot reach: two calls, however long the reflog.
+func (s Scope) addReflog(root string, git Runner, base string) error {
+	out, err := git(root, "reflog", "show", "--format=%H", "refs/heads/"+s.Current, "--")
+	if err != nil {
+		return err
+	}
+	heads := strings.Fields(out)
+	if len(heads) == 0 {
+		return nil
+	}
+	own, err := git(root, append(append([]string{"rev-list"}, heads...), "--not", base, "--")...)
+	if err != nil {
+		return err
+	}
+	for _, sha := range strings.Fields(own) {
+		s.inRange[sha] = true
+	}
+	return nil
+}
+
+// rebasing names the branch an in-progress rebase is rewriting ("" when HEAD is simply detached): mid-rebase HEAD is
+// detached, and the branch's own runs must keep blocking while an agent sits on a conflict.
+func rebasing(root string, git Runner) (string, error) {
+	out, err := git(root, "rev-parse", "--git-path", "rebase-merge/head-name", "--git-path", "rebase-apply/head-name")
+	if err != nil {
+		return "", err
+	}
+	for _, p := range strings.Split(out, "\n") {
+		if p = strings.TrimSpace(p); p == "" {
+			continue
+		}
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(root, p)
+		}
+		if b, err := readFile(p); err == nil {
+			return strings.TrimPrefix(strings.TrimSpace(string(b)), "refs/heads/"), nil
 		}
 	}
-	return s
+	return "", nil
 }
 
 // Classify places an item recorded on branch (empty when none was recorded) at commit head. An item recorded before
@@ -133,12 +219,29 @@ func (s Scope) Classify(branch, head string) Class {
 	}
 }
 
-// reachable reports whether head is an ancestor of HEAD, one git call per distinct legacy head.
+// reachable reports whether head is an ancestor of HEAD, one git call per distinct legacy head. Only git's own "no"
+// (exit 1) is unreachable: a malformed head, a missing object or a failed call proves nothing, so it stays in scope.
 func (s Scope) reachable(head string) bool {
 	if got, ok := s.ancestors[head]; ok {
 		return got
 	}
-	_, err := s.git(s.root, "merge-base", "--is-ancestor", head, "HEAD")
-	s.ancestors[head] = err == nil
-	return err == nil
+	got := true
+	if isSHA(head) {
+		_, err := s.git(s.root, "merge-base", "--is-ancestor", head, "HEAD")
+		got = err == nil || code(err) != 1
+	}
+	s.ancestors[head] = got
+	return got
+}
+
+func isSHA(h string) bool {
+	if len(h) != 40 && len(h) != 64 {
+		return false
+	}
+	for _, c := range h {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }

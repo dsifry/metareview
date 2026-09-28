@@ -206,7 +206,8 @@ func dispatch(args []string) {
 	if len(args) >= 1 && args[0] == "status" {
 		kept := []string{"status"}
 		for _, a := range args[1:] {
-			if a == "--all" {
+			// An --all that is the operand of --target or --base is a value, not the flag.
+			if prev := kept[len(kept)-1]; a == "--all" && prev != "--target" && prev != "--base" {
 				statusAll = true
 				continue
 			}
@@ -1456,7 +1457,7 @@ func abandonedLines(root string, all bool) []string {
 			lines = append(lines, "branch "+name+":")
 			last = a.Branch
 		}
-		lines = append(lines, "  "+a.RunID+"  "+a.Workflow+" @ "+a.State+"  ["+a.Scope+"]")
+		lines = append(lines, "  "+a.RunID+"  "+a.Workflow+" @ "+a.State+"  ["+a.Scope+"]  "+a.Dir)
 	}
 	return lines
 }

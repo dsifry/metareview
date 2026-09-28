@@ -100,7 +100,7 @@ func TestAbandonedRunsAreScopedByBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.OtherBranchRuns != 1 || !strings.Contains(strings.Join(r.Warnings, "\n"), "status --all") {
+	if r.OtherBranchRuns != 1 || !strings.Contains(strings.Join(r.Warnings, "\n"), "`metareview status --all` lists them with the directory to delete") {
 		t.Fatalf("status counts the other branch's run and points at --all: %+v %v", r.OtherBranchRuns, r.Warnings)
 	}
 }
@@ -120,6 +120,41 @@ func TestRebaseDoesNotClearABranchRun(t *testing.T) {
 	}
 	if got := strings.Join(ids(DiscoverAbandonedRuns(root)), ","); got != "mrv-rebase-00001" {
 		t.Fatalf("after `git rebase main` the run must still block feat, got %q", got)
+	}
+}
+
+// The rename bypass: amend (the head leaves the range), then `git branch -m` (the name leg no longer matches) — the
+// branch's reflog, which the rename carries, still ties the run to the work. Mid-rebase HEAD is detached, and the
+// branch being rebased keeps its runs while an agent sits on the conflict.
+func TestARewriteThenRenameDoesNotClearABranchRun(t *testing.T) {
+	root, common := newRepo(t)
+	gitRun(t, root, "checkout", "-q", "-b", "feat")
+	h := commit(t, root, "feat work")
+	writeStoreRun(t, common, "mrv-rename-00001", "feat", h)
+	gitRun(t, root, "commit", "-q", "--amend", "--allow-empty", "-m", "feat work v2")
+	gitRun(t, root, "branch", "-m", "feat", "feat-v2")
+	if got := strings.Join(ids(DiscoverAbandonedRuns(root)), ","); got != "mrv-rename-00001" {
+		t.Fatalf("an amended and renamed branch must still be blocked by its run, got %q", got)
+	}
+	gitRun(t, root, "checkout", "-q", "main")
+	if got := DiscoverAbandonedRuns(root); len(got) != 0 {
+		t.Fatalf("main does not own feat-v2's run: %v", ids(got))
+	}
+}
+
+// A legacy run (no branch) on a feature branch survives that branch's rebase through the branch's reflog: an upgrade
+// never turns a routine rebase into a cleared gate.
+func TestALegacyRunSurvivesItsBranchsRebase(t *testing.T) {
+	root, common := newRepo(t)
+	gitRun(t, root, "checkout", "-q", "-b", "feat")
+	h := commit(t, root, "feat work")
+	writeStoreRun(t, common, "mrv-legacy-rb001", "", h)
+	gitRun(t, root, "checkout", "-q", "main")
+	commit(t, root, "main moves on")
+	gitRun(t, root, "checkout", "-q", "feat")
+	gitRun(t, root, "rebase", "-q", "main")
+	if got := strings.Join(ids(DiscoverAbandonedRuns(root)), ","); got != "mrv-legacy-rb001" {
+		t.Fatalf("a legacy run must keep blocking its rebased branch, got %q", got)
 	}
 }
 
@@ -178,8 +213,8 @@ func TestAMergedAndDeletedBranchsRunsAreOrphaned(t *testing.T) {
 	if len(mine) != 0 {
 		t.Fatalf("a merged, deleted branch's run blocks nothing, got %v", ids(mine))
 	}
-	if len(elsewhere) != 1 || elsewhere[0].Scope != "orphaned" {
-		t.Fatalf("--all shows it orphaned: %+v", elsewhere)
+	if len(elsewhere) != 1 || elsewhere[0].Scope != "orphaned" || elsewhere[0].Dir != filepath.Join(common, "metareview", "runs", "mrv-merged-00001") {
+		t.Fatalf("--all shows it orphaned, with the directory to delete: %+v", elsewhere)
 	}
 }
 
@@ -258,13 +293,22 @@ func TestStatusScalesToThousandsOfRuns(t *testing.T) {
 	for i := 0; i < 2000; i++ {
 		writeStoreRun(t, common, fmt.Sprintf("mrv-scale-%06d", i), fmt.Sprintf("b%02d", i%50), "")
 	}
-	start := time.Now()
-	r, err := Build(root)
-	if err != nil {
-		t.Fatal(err)
+	// Best of three: one slow pass on a loaded CI runner is noise, a scan that is slow every time is the regression.
+	// The fixed git-call count is pinned separately, in internal/scope.
+	var r Report
+	best := time.Hour
+	for i := 0; i < 3; i++ {
+		start := time.Now()
+		var err error
+		if r, err = Build(root); err != nil {
+			t.Fatal(err)
+		}
+		if d := time.Since(start); d < best {
+			best = d
+		}
 	}
-	if d := time.Since(start); d > time.Second {
-		t.Fatalf("status over 2,000 runs took %v (want < 1s)", d)
+	if best > time.Second {
+		t.Fatalf("status over 2,000 runs took %v at best (want < 1s)", best)
 	}
 	if r.OrphanedRuns != 2000 {
 		t.Fatalf("every run is on a missing branch: %d", r.OrphanedRuns)

@@ -203,15 +203,22 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   also read that single legacy location (never another worktree's), and `status` warns while it holds runs.
 - **Branch scope (#177, `internal/scope`).** The abandoned-run scan classifies each run against the branch in hand,
   one rule in one package: a run recorded on branch N at head H is **in scope** when N is the current branch (the
-  name leg — survives rebase and amend) or H lies in `merge-base(HEAD, main|master)..HEAD` (the range leg — detached
-  snapshots, stacked branches). Otherwise it is **other-branch** while N exists, else **orphaned**; neither blocks,
-  and `status --all` lists both without changing the exit code. `fsm init` records `branch` in its init event (the
-  checked-out branch; `--for-branch` is required on a detached HEAD and may only restate an attached one). A run from
-  before #177 (no branch) is in scope unless its head is known and unreachable from HEAD — an upgrade never silently
-  clears one, on the default branch included. `scope.Load` makes a fixed number of git calls however many runs there
-  are (AC-4.9); only legacy runs ask per head. Known trade-off: a deleted branch name recreated for unrelated work
-  inherits the old name's runs (the name leg); clearing a stale run is the closing operation's job. An unreadable
-  repository puts everything in scope.
+  name leg — survives rebase and amend; mid-rebase the branch being rebased is current), when H lies in
+  `merge-base(HEAD, main|master)..HEAD` (the range leg — detached snapshots, stacked branches), or when H is one of
+  the current branch's past heads the fork point cannot reach (the reflog leg — a rewrite followed by `git branch
+  -m`, which carries the reflog). Otherwise it is **other-branch** while N exists, else **orphaned**; neither blocks,
+  and `status --all` lists both, each with the run directory to delete, without changing the exit code. `fsm init`
+  records `branch` in its init event: the checked-out branch; on a detached HEAD `--for-branch` is required and must
+  name a local branch; on an attached one it may only restate it. **Fail closed:** any git call `Load` makes that
+  fails (other than git's own "detached") leaves the scope unknown, and an unknown scope puts everything in scope.
+  **Legacy runs** (before #177, no branch) are in scope unless git itself says their head is unreachable from HEAD
+  (`merge-base --is-ancestor` exit 1; one call per distinct legacy head) — so an upgrade never silently clears one,
+  but a pre-#177 run abandoned on main now blocks every branch forked after it until its directory is deleted.
+  `scope.Load` makes a fixed number of git calls however many runs there are (AC-4.9). **Known trade-offs:** a
+  deleted branch name recreated for unrelated work inherits the old name's runs (the name leg); `git checkout -b
+  new` after a rewrite leaves the run with the old branch, where it still blocks (and it is counted here); a
+  repository that keeps no branch reflogs (a bare one's default) has no reflog leg; the range and reflog legs need a
+  local `main` or `master`. Clearing a stale run is the closing operation's job.
 - **Store vs anchor vs work (#169, #172, #173).** Every `.metareview`/`docs` path in `internal/fsm` names which it
   means. **Common dir** = the shared store above. **Store root (anchor)** = the main worktree (`git worktree list
   --porcelain`, `repo.MainWorktreeFromPorcelain`), or with a bare main the linked worktree the command runs in (#174):

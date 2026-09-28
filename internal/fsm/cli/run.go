@@ -270,8 +270,19 @@ func (in *invocation) init() int {
 	// --for-branch may only restate it: naming another would file this branch's run under that one, and an abandoned
 	// run would stop blocking the branch it actually reviewed.
 	branch, current := p.flags["for-branch"], ""
-	if out, code, err := c.git(workDir, "symbolic-ref", "--short", "-q", "HEAD"); err == nil && code == 0 {
+	out, code, err := c.git(workDir, "symbolic-ref", "--short", "-q", "HEAD")
+	switch {
+	case err == nil && code == 0:
 		current = out
+	case err != nil || code != 1: // 1 is git's "detached"; anything else is git failing, not a detached HEAD
+		return in.fail(base, errs.E(gate.CodeGit, fmt.Sprintf("git symbolic-ref exited %d", code), "op", "symbolic-ref"), phaseInit, false)
+	}
+	if branch != "" && current == "" {
+		// A name no local branch has would never match the name leg: after a rebase the run would be orphaned and
+		// block nothing, so the branch must exist.
+		if _, code, err := c.git(workDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil || code != 0 {
+			return in.usage("--for-branch " + strconv.Quote(branch) + " is not a local branch in " + workDir)
+		}
 	}
 	if current != "" && branch != "" && branch != current {
 		return in.usage("--for-branch " + branch + " names another branch than the one checked out in " + workDir + " (" + current + "); it is for a detached HEAD")

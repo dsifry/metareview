@@ -16,6 +16,17 @@ can gate on the exit code alone.
 metareview status --json
 ```
 
+Abandoned FSM runs (left mid-loop) are scoped to the branch in hand (#177): a run blocks the branch `fsm init`
+recorded for it and any branch stacked on it, and survives rebase, amend and rename. Runs of other live branches
+(`otherBranchRuns`) and of deleted ones (`orphanedRuns`) never block and are only counted. `--all`, with or without
+`--json`, also lists them (`elsewhere`), grouped by branch with the run directory to delete — and never changes the
+exit code.
+
+```bash
+metareview status --all
+metareview status --json --all
+```
+
 Use status before deciding which generated artifacts to commit. Review artifacts under `docs/metareview/` and git-visible learning state should be committed; transient `.metareview/findings.jsonl`, `.metareview/runs.jsonl` and `.metareview/shards/` stay local. Committed shard review results live in `docs/metareview/shards/`, and FSM export bundles in `docs/metareview/fsm/`; FSM runs live in git's common directory (`<git-common-dir>/metareview/runs/` — the main checkout's `.git/metareview/runs/`) and are never tracked.
 
 Arguments: `$ARGUMENTS`

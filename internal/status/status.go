@@ -240,7 +240,7 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 	}
 	if n := r.OtherBranchRuns + r.OrphanedRuns; n > 0 {
 		r.Warnings = append(r.Warnings, fmt.Sprintf("%d abandoned FSM run(s) belong elsewhere (%d on other branches, %d orphaned); "+
-			"they do not block this branch — `metareview status --all` lists them", n, r.OtherBranchRuns, r.OrphanedRuns))
+			"they do not block this branch — `metareview status --all` lists them with the directory to delete once nobody will finish one", n, r.OtherBranchRuns, r.OrphanedRuns))
 	}
 	if LegacyRunsPending(root) {
 		r.Warnings = append(r.Warnings, "0.13.x FSM runs are still in "+filepath.Join(repo.RunStoreRoot(root), ".metareview", "runs")+

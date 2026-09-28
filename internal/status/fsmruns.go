@@ -60,9 +60,11 @@ type AbandonedRun struct {
 	Branch string `json:"branch,omitempty"`
 	// Scope is where the run belongs relative to the branch in hand (#177): in-scope, other-branch or orphaned.
 	Scope string `json:"scope,omitempty"`
-	// head is the commit the run's init recorded; dir is its directory (store or 0.13.x legacy). Not reported.
+	// Dir is the run's directory (the shared store, or the 0.13.x legacy one): what an operator deletes to clear a
+	// run nobody will finish.
+	Dir string `json:"dir,omitempty"`
+	// head is the commit the run's init recorded. Not reported.
 	head string
-	dir  string
 }
 
 // DiscoverAbandonedRuns reports this branch's FSM runs left in a non-terminal state: the ones that block.
@@ -174,7 +176,7 @@ func abandonedIn(dir string, kinds map[string]workflow.KindInfo) ([]AbandonedRun
 			continue
 		}
 		if r, ok := abandonedRun(filepath.Join(dir, e.Name()), kinds); ok {
-			r.dir = filepath.Join(dir, e.Name())
+			r.Dir = filepath.Join(dir, e.Name())
 			out = append(out, r)
 		}
 	}
