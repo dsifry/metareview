@@ -212,3 +212,46 @@ func TestBareMainOrphansRunsWhoseWorktreeIsGone(t *testing.T) {
 		t.Fatalf("worktree b owns nothing, got %v", ids(got))
 	}
 }
+
+// #174 review: only a run whose work dir is really gone is orphaned. One whose work dir still exists but cannot be
+// resolved to this repository (a git lookup failing, or a dir outside any repository) stays a blocker. And the
+// warning names the directory the run is in — the 0.13.x legacy location when it was found there.
+func TestBareMainOrphansOnlyConfirmedRemovalsAndNamesTheRunDir(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	bare := filepath.Join(base, "repo.git")
+	gitRun(t, base, "init", "-q", "--bare", "-b", "main", bare)
+	seed := filepath.Join(base, "seed")
+	gitRun(t, base, "clone", "-q", bare, seed)
+	gitRun(t, seed, "commit", "-q", "--allow-empty", "-m", "base")
+	gitRun(t, seed, "push", "-q", "origin", "main")
+	a := filepath.Join(base, "a")
+	gitRun(t, bare, "worktree", "add", "-q", a, "main")
+	live := filepath.Join(base, "exists-but-unresolvable") // exists, but no git lookup attributes it
+	if err := os.MkdirAll(live, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeStoreRun(t, bare, "mrv-unresolved01", live)
+	// A 0.13.x run in the legacy location (with a bare main: this worktree's .metareview/runs), worktree gone.
+	legacy := filepath.Join(a, ".metareview", "runs", "mrv-legacy-gone1")
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(legacy, "workflow.yaml"), []byte(testWorkflow), 0o600)
+	_ = os.WriteFile(filepath.Join(legacy, "audit.jsonl"), []byte(`{"type":"init","at":"t","state":"discover","data":{"workflow":"t","work_dir":"`+filepath.Join(base, "gone")+`"}}`+"\n"+
+		`{"type":"transition","at":"t","state":"discover","data":{"to":"fix","to_kind":"agent-edit"}}`+"\n"), 0o600)
+
+	abandoned, orphaned := ScanAbandonedRuns(a)
+	if got := strings.Join(ids(orphaned), ","); got != "mrv-legacy-gone1" {
+		t.Fatalf("only the run whose work dir is gone is orphaned, got %s", got)
+	}
+	if got := strings.Join(ids(abandoned), ","); !strings.Contains(got, "mrv-unresolved01") {
+		t.Fatalf("a run whose work dir still exists stays a blocker, got %s", got)
+	}
+	r, err := Build(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := strings.Join(r.Warnings, "\n"); !strings.Contains(w, legacy) {
+		t.Fatalf("the warning must name the dir the run is in (%s): %s", legacy, w)
+	}
+}

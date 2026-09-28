@@ -2,6 +2,8 @@ package status
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -57,6 +59,8 @@ type AbandonedRun struct {
 	StopReason string `json:"stopReason,omitempty"`
 	// workDir is the work dir the run's init recorded: which worktree started it (#173 scoping; not reported).
 	workDir string
+	// dir is the run's directory, in the store or the 0.13.x legacy location (not reported).
+	dir string
 }
 
 // DiscoverAbandonedRuns reports FSM runs left in a non-terminal state.
@@ -139,9 +143,13 @@ func scanAbandonedRuns(root string, deps kind.Deps) (out, orphaned []AbandonedRu
 		readable = readable || ok
 		for _, r := range runs {
 			mine, unattributable := owner(r)
+			// Orphaned only when the run's worktree is really gone: a work dir that still exists but did not resolve
+			// (a git lookup failing) stays a blocker, never a warning a live run could slip past.
+			_, statErr := os.Stat(r.workDir)
+			gone := r.workDir != "" && errors.Is(statErr, fs.ErrNotExist)
 			switch {
 			case seen[r.RunID]: // already reported from the other source
-			case unattributable && bareMain:
+			case unattributable && bareMain && gone:
 				orphaned, seen[r.RunID] = append(orphaned, r), true
 			case mine:
 				out, seen[r.RunID] = append(out, r), true
@@ -183,6 +191,7 @@ func abandonedIn(dir string, kinds map[string]workflow.KindInfo) ([]AbandonedRun
 			continue
 		}
 		if r, ok := abandonedRun(filepath.Join(dir, e.Name()), kinds); ok {
+			r.dir = filepath.Join(dir, e.Name())
 			out = append(out, r)
 		}
 	}
