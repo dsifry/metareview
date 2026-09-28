@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3.66dbfe5e4bb639d1",
+  "kind": "shard",
+  "shardId": "shard-3",
+  "shardHash": "66dbfe5e4bb639d1",
+  "planHash": "6611f603c1bdc4a0",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-3",
+  "reviewedAt": "2026-09-28T02:43:58Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/wiring.go", "line": 163, "note": "roots() resolves anchor + common dir and runs the locked, idempotent 0.13.x migration; openRun/init/diff now open the store at common while scenario/machine deps keep the anchor root"},
+    {"path": "internal/fsm/cli/run.go", "line": 964, "note": "StatusLines is read-only: lists the common-dir store and appends a pending-migration line via PendingLegacyRuns without migrating"},
+    {"path": "internal/repo/worktree.go", "line": 86, "note": "StoreDir resolves <git-common-dir>/metareview via scrubbed gate.RealExec, matching the writer's git invocation"},
+    {"path": "internal/status/fsmruns_store_test.go", "line": 49, "note": "targeted go test for TestAbandonedRuns*, TestCanonicalAndLegacyBookkeeping, TestCommonDirLayout, TestRunStoreReadersAreDeclared, TestRunStoreRoot* all pass"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Test failure message is stale: the assertion expects 3 runs (mine, other/unattributable, legacy) but the message says 'want the store run and the legacy run'. Cosmetic only.",
+      "evidence": [{"path": "internal/status/fsmruns_store_test.go", "line": 50}]
+    }
+  ],
+  "blockingCount": 0
+}

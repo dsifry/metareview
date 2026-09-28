@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0.ff1a2adc0e3d567a",
+  "kind": "shard",
+  "shardId": "shard-0",
+  "shardHash": "ff1a2adc0e3d567a",
+  "planHash": "6611f603c1bdc4a0",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-0",
+  "reviewedAt": "2026-09-28T02:44:07Z",
+  "evidence": [
+    {"path": "internal/fsm/run/migrate.go", "line": 28},
+    {"path": "internal/fsm/record/record.go", "line": 262},
+    {"path": "internal/fsm/cli/wiring.go", "line": 163},
+    {"path": "cmd/metareview/main.go", "line": 798},
+    {"note": "Targeted tests pass: go test -run 'TestMigrateLegacyRuns|TestPendingLegacyRuns' ./internal/fsm/run/ and -run TestFSSidecarCommonDirLayout ./internal/fsm/machine/. MigrateLegacyRows, fromRunRunsDir and the cli migration have tests in internal/fsm/record/record_test.go, cmd/metareview/session_test.go and internal/fsm/cli/migrate_test.go (outside this shard)."},
+    {"note": "Run migration is serialized by an exclusive flock and never overwrites (a collision is reported and both copies are kept). Ledger-row migration relies on appendRow, which re-reads under its own flock and is idempotent for an identical id, so concurrent migrations cannot duplicate rows. The --from-run id is still rejected for separators and traversal before fromRunRunsDir stats it."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "MigrateLegacyRows copies 0.13.x fsm-* rows verbatim, so a migrated row keeps FSMRunDir '.metareview/runs/<id>/' (relative to the old checkout), while new rows and the documented contract say FSMRunDir is relative to git's common directory ('metareview/runs/<id>/'). No code reads FSMRunDir today, so nothing breaks; a future consumer would resolve migrated rows to the wrong place. Consider rewriting FSMRunDir during the copy (this would not affect the id/head/workflow idempotence check).",
+      "evidence": [
+        {"path": "internal/fsm/record/record.go", "line": 92},
+        {"path": "internal/fsm/record/record.go", "line": 300}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "MigrateLegacyRows is not under migrate.lock: it builds its 'have' map from one read of the common ledger and then appends. If two fsm commands migrate at the same moment, the loser's appendRow sees the row under its flock and returns nil, but the row is still added to 'copied', so the STORE_MIGRATED warning can over-count. Only the warning text is affected; the data is correct.",
+      "evidence": [
+        {"path": "internal/fsm/record/record.go", "line": 304},
+        {"path": "internal/fsm/cli/wiring.go", "line": 174}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

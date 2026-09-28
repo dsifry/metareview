@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-6611f603c1bdc4a0-claude-subagent",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "6611f603c1bdc4a0",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-cross-shard",
+  "reviewedAt": "2026-09-27T12:00:00Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/wiring.go", "line": 151, "note": "FSM writer resolves the common dir via deps.Exec = gate.RealExec (GIT_* scrubbed), rev-parse --path-format=absolute --git-common-dir"},
+    {"path": "internal/repo/worktree.go", "line": 71, "note": "readers (record-lenses, status) resolve the same dir via the same scrubbed gate.RealExec call, so writer and reader agree"},
+    {"path": "internal/fsm/cli/deps.go", "line": 76, "note": "Store and Sidecar both built on the common dir with the metareview/runs layout"},
+    {"path": "internal/fsm/record/record.go", "line": 65, "note": "ledger path <common>/metareview/runs.jsonl matches docs (driving-a-workflow.md, ARCHITECTURE.md, SKILL.md) and test-fsm.sh"},
+    {"path": "internal/fsm/cli/wiring.go", "line": 164, "note": "roots(): runs are moved before ledger rows are copied; a crash between leaves the stamp unwritten so the next call re-copies idempotently"},
+    {"path": "cmd/metareview/main.go", "line": 798, "note": "record-lenses reads the common store and falls back only to the single 0.13.x location, consistent with status and ARCHITECTURE.md"},
+    {"path": "internal/status/fsmruns.go", "line": 110, "note": "status scans common store plus the single legacy location; LegacyRunsPending and StatusLines use the same run.PendingLegacyRuns"},
+    {"path": "tests/go/test-require-adjudicated-review.sh", "line": 1, "note": "shell tests seed runs under .git/metareview/runs, matching the new writer; targeted go tests for repo, status, fsm/run, fsm/record, fsm/cli pass"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stale comment: the --from-run validation comment still says a run id is a path segment under .metareview/runs/; the store is now <common>/metareview/runs/. Comment-only.",
+      "evidence": [{"path": "cmd/metareview/main.go", "line": 517}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Plain `metareview status` can print the unmigrated-0.13.x-runs notice twice: once from status.buildFor Warnings (LegacyRunsPending) and once from the FSM section (fsmcli.StatusLines pending line). Cosmetic duplication; both derive from run.PendingLegacyRuns so they never disagree.",
+      "evidence": [{"path": "internal/status/status.go", "line": 228}, {"path": "internal/fsm/cli/run.go", "line": 974}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "MigrateLegacyRows writes the legacy-ledger.size stamp even when it reported conflicts, so a STORE_COLLISION ledger-row warning appears once and is then silent until the legacy file changes. Run-directory collisions, by contrast, re-warn on every command. Minor asymmetry, not data loss (the conflicting row is never merged and the legacy file is untouched).",
+      "evidence": [{"path": "internal/fsm/record/record.go", "line": 307}]
+    }
+  ],
+  "blockingCount": 0
+}

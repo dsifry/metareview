@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1-d8df95b7a3c1e231",
+  "kind": "shard",
+  "shardId": "shard-1",
+  "shardHash": "d8df95b7a3c1e231",
+  "planHash": "6611f603c1bdc4a0",
+  "verdict": "PASS",
+  "reviewer": "claude-subagent-shard-1",
+  "reviewedAt": "2026-09-27T12:00:00Z",
+  "evidence": [
+    {"path": "internal/status/fsmruns.go", "line": 98},
+    {"path": "internal/status/fsmruns.go", "line": 133},
+    {"path": "internal/fsm/machine/sidecar.go", "line": 50},
+    {"path": "internal/fsm/cli/deps.go", "line": 77},
+    {"path": "internal/fsm/run/store_jsonl.go", "line": 34},
+    {"path": "cmd/metareview/session_test.go", "line": 181},
+    {"path": "internal/repo/storedir_test.go", "line": 66},
+    {"path": "internal/fsm/record/record_test.go", "line": 478},
+    {"note": "Targeted tests pass: go test ./internal/status ./internal/repo ./internal/fsm/record ./internal/fsm/machine, plus the #173 migration/status tests in ./internal/fsm/cli and the fromRunRunsDir/linked-worktree tests in ./cmd/metareview."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "discoverAbandonedRuns' mine() calls repo.Toplevel(r.workDir) before checking r.workDir == \"\"; with an empty workDir git runs in the process cwd for nothing (result discarded). It also spawns one git subprocess per abandoned run in the shared store on every Stop-hook evaluation. Correct as written; reorder the empty check first and consider caching per workDir.",
+      "evidence": [{"path": "internal/status/fsmruns.go", "line": 98}]
+    }
+  ],
+  "blockingCount": 0
+}
