@@ -87,6 +87,11 @@ func TestAbandonedRunsAreAttributedToTheirContainingWorktree(t *testing.T) {
 	common := filepath.Join(main, ".git")
 	writeStoreRun(t, common, "mrv-sub-00000001", filepath.Join(main, "sub"))
 	writeStoreRun(t, common, "mrv-gone-0000001", filepath.Join(base, "removed-worktree"))
+	// A removed worktree whose parent is inside an UNRELATED repository is still unattributable here, so the main
+	// checkout reports it; attributing it to that other repository would drop it from every Stop gate.
+	other := filepath.Join(base, "other")
+	gitRun(t, base, "init", "-q", other)
+	writeStoreRun(t, common, "mrv-gone-other01", filepath.Join(other, "removed-worktree"))
 	writeStoreRun(t, common, "mrv-wt-000000001", wt)
 	// A run started in a linked worktree's subdirectory that was later deleted still belongs to that worktree.
 	writeStoreRun(t, common, "mrv-wt-gonesub01", filepath.Join(wt, "deleted", "sub"))
@@ -99,14 +104,14 @@ func TestAbandonedRunsAreAttributedToTheirContainingWorktree(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(legacy, "audit.jsonl"), []byte(`{"type":"init","at":"t","state":"discover","data":{"workflow":"t","work_dir":"`+wt+`"}}`+"\n"+
 		`{"type":"transition","at":"t","state":"discover","data":{"to":"fix","to_kind":"agent-edit"}}`+"\n"), 0o600)
 
-	if got := strings.Join(ids(DiscoverAbandonedRuns(main)), ","); got != "mrv-gone-0000001,mrv-sub-00000001" {
+	if got := strings.Join(ids(DiscoverAbandonedRuns(main)), ","); got != "mrv-gone-0000001,mrv-gone-other01,mrv-sub-00000001" {
 		t.Errorf("main checkout: got %s", got)
 	}
 	// Status run from a subdirectory (a monorepo package with its own docs/metareview) is still the main checkout.
 	if err := os.MkdirAll(filepath.Join(main, "sub", "docs", "metareview"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(ids(DiscoverAbandonedRuns(filepath.Join(main, "sub"))), ","); got != "mrv-gone-0000001,mrv-sub-00000001" {
+	if got := strings.Join(ids(DiscoverAbandonedRuns(filepath.Join(main, "sub"))), ","); got != "mrv-gone-0000001,mrv-gone-other01,mrv-sub-00000001" {
 		t.Errorf("subdirectory of the main checkout: got %s", got)
 	}
 	if got := strings.Join(ids(DiscoverAbandonedRuns(wt)), ","); got != "mrv-legacy-wt-01,mrv-wt-000000001,mrv-wt-gonesub01" {

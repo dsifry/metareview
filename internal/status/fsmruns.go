@@ -94,11 +94,18 @@ func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
 		here = canonical(top)
 	}
 	main := canonical(repo.RunStoreRoot(root))
+	store, storeErr := repo.StoreDir(root)
 	mine := func(r AbandonedRun) bool {
-		if r.workDir == "" {
+		if r.workDir == "" || storeErr != nil {
 			return here == main
 		}
-		owner, err := repo.Toplevel(existingAncestor(r.workDir))
+		// The nearest surviving ancestor names the owner only when it is a checkout of THIS repository: a removed
+		// worktree's parent may sit inside an unrelated repository, whose toplevel matches no worktree here.
+		dir := existingAncestor(r.workDir)
+		if s, err := repo.StoreDir(dir); err != nil || canonical(s) != canonical(store) {
+			return here == main
+		}
+		owner, err := repo.Toplevel(dir)
 		if err != nil {
 			return here == main
 		}
@@ -109,7 +116,7 @@ func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
 	// run-store: shared — the single 0.13.x location (the main checkout's .metareview/runs), read for one release
 	// until an fsm command migrates it; never any other worktree's directory.
 	sources := []string{filepath.Join(repo.RunStoreRoot(root), ".metareview", "runs")}
-	if store, err := repo.StoreDir(root); err == nil {
+	if storeErr == nil {
 		sources = append(sources, filepath.Join(store, "runs"))
 	}
 	for _, dir := range sources {
