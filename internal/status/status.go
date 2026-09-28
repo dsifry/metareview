@@ -22,6 +22,7 @@ import (
 	"github.com/dsifry/metareview/internal/repo"
 	"github.com/dsifry/metareview/internal/reviewlog"
 	"github.com/dsifry/metareview/internal/reviewstate"
+	"github.com/dsifry/metareview/internal/scope"
 	"github.com/dsifry/metareview/internal/version"
 )
 
@@ -51,8 +52,14 @@ type Report struct {
 	// Target is the scope this report was built for, empty when it covers everything. A reader
 	// has to be able to tell a clean repository from a clean corner of a blocked one.
 	Target string `json:"target,omitempty"`
-	// Abandoned are FSM runs stopped somewhere that is not an ending.
+	// Abandoned are this branch's FSM runs stopped somewhere that is not an ending (#177: scoped by internal/scope).
 	Abandoned []AbandonedRun `json:"abandoned,omitempty"`
+	// OtherBranchRuns and OrphanedRuns count the abandoned runs that belong to another live branch, or to none. They
+	// never block here; `status --all` lists them in Elsewhere.
+	OtherBranchRuns int `json:"otherBranchRuns,omitempty"`
+	OrphanedRuns    int `json:"orphanedRuns,omitempty"`
+	// Elsewhere lists those runs, grouped by branch, when --all asked for them. It never changes the verdict.
+	Elsewhere []AbandonedRun `json:"elsewhere,omitempty"`
 	// Warnings say why an answer may be narrower or wider than asked for — a scope that could
 	// not be resolved reports unscoped rather than empty, and has to say so.
 	Warnings []string `json:"warnings,omitempty"`
@@ -223,13 +230,17 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 			Kind:    UnreviewedKind,
 		})
 	}
-	var orphaned []AbandonedRun
-	r.Abandoned, orphaned = ScanAbandonedRuns(root)
-	for _, o := range orphaned {
-		// A bare main worktree has no checkout to own a run whose worktree is gone (#174): say so in every worktree,
-		// without blocking any of them over a run none can advance.
-		r.Warnings = append(r.Warnings, "FSM run "+o.RunID+" ("+o.Workflow+" @ "+o.State+") was left mid-flight in a worktree that no "+
-			"longer exists; nothing can advance it — delete "+o.dir+" once you no longer need it")
+	r.Abandoned, r.Elsewhere = ScanAbandonedRuns(root)
+	for _, e := range r.Elsewhere {
+		if e.Scope == scope.OtherBranch.String() {
+			r.OtherBranchRuns++
+		} else {
+			r.OrphanedRuns++
+		}
+	}
+	if n := r.OtherBranchRuns + r.OrphanedRuns; n > 0 {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("%d abandoned FSM run(s) belong elsewhere (%d on other branches, %d orphaned); "+
+			"they do not block this branch — `metareview status --all` lists them", n, r.OtherBranchRuns, r.OrphanedRuns))
 	}
 	if LegacyRunsPending(root) {
 		r.Warnings = append(r.Warnings, "0.13.x FSM runs are still in "+filepath.Join(repo.RunStoreRoot(root), ".metareview", "runs")+
@@ -237,11 +248,20 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 	}
 	for _, a := range r.Abandoned {
 		r.MustClear = append(r.MustClear, Blocker{
-			Target: a.Workflow + " @ " + a.State, RunID: a.RunID, Verdict: VerdictAbandoned, Kind: AbandonedKind,
+			Target: abandonedTarget(a), RunID: a.RunID, Verdict: VerdictAbandoned, Kind: AbandonedKind,
 		})
 	}
 	r.Blocked = len(r.MustClear) > 0
 	return r, nil
+}
+
+// abandonedTarget names an abandoned run for a blocker: its workflow and state, and the branch it was started for
+// (#177 — a stacked branch's blocker must say it came from the branch below).
+func abandonedTarget(a AbandonedRun) string {
+	if a.Branch == "" {
+		return a.Workflow + " @ " + a.State
+	}
+	return a.Workflow + " @ " + a.State + " (branch " + a.Branch + ")"
 }
 
 // AbandonedKind is the Blocker.Kind for an FSM run left mid-flight; UnreviewedKind is the kind for a
@@ -598,7 +618,7 @@ func buildForBranch(root, base string, run RunGit, committedOnly bool) (Report, 
 	// told the loop finished.
 	for _, a := range r.Abandoned {
 		r.MustClear = append(r.MustClear, Blocker{
-			Target: a.Workflow + " @ " + a.State, RunID: a.RunID, Verdict: VerdictAbandoned, Kind: AbandonedKind,
+			Target: abandonedTarget(a), RunID: a.RunID, Verdict: VerdictAbandoned, Kind: AbandonedKind,
 		})
 	}
 	r.Blocked = len(r.MustClear) > 0
@@ -614,20 +634,38 @@ func shortSHA(s string) string {
 
 // EmitForBranch writes the branch-scoped report and returns the process exit code.
 func EmitForBranch(root, base string, run RunGit, w io.Writer) (int, error) {
+	return emitForBranch(root, base, run, w, false)
+}
+
+// EmitForBranchAll is EmitForBranch with every abandoned run listed (`--all`, #177): the exit code is the same.
+func EmitForBranchAll(root, base string, run RunGit, w io.Writer) (int, error) {
+	return emitForBranch(root, base, run, w, true)
+}
+
+func emitForBranch(root, base string, run RunGit, w io.Writer, all bool) (int, error) {
 	r, err := BuildForBranch(root, base, run)
 	if err != nil {
 		return 0, err
 	}
-	return emit(r, w)
+	return emit(r, w, all)
 }
 
 // EmitFor writes the report for one target and returns the process exit code.
 func EmitFor(root, target string, w io.Writer) (int, error) {
+	return emitFor(root, target, w, false)
+}
+
+// EmitForAll is EmitFor with every abandoned run listed (`--all`, #177): the exit code is the same.
+func EmitForAll(root, target string, w io.Writer) (int, error) {
+	return emitFor(root, target, w, true)
+}
+
+func emitFor(root, target string, w io.Writer, all bool) (int, error) {
 	r, err := BuildFor(root, target)
 	if err != nil {
 		return 0, err
 	}
-	return emit(r, w)
+	return emit(r, w, all)
 }
 
 // emit is the one place a Report becomes bytes and an exit code, so every scope answers in the
@@ -637,7 +675,10 @@ func EmitFor(root, target string, w io.Writer) (int, error) {
 // bottom out in the same kinds. What makes encoding/json fail is a channel, a func, a cyclic
 // pointer graph or a failing custom Marshaler, and the type graph contains none, so an error
 // branch here would be unreachable and untestable.
-func emit(r Report, w io.Writer) (int, error) {
+func emit(r Report, w io.Writer, all bool) (int, error) {
+	if !all {
+		r.Elsewhere = nil // the counts stay; the list is --all's
+	}
 	out, _ := json.MarshalIndent(r, "", "  ")
 	if _, err := fmt.Fprintln(w, string(out)); err != nil {
 		return 0, err

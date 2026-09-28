@@ -65,6 +65,7 @@ type InitData struct {
 	WorkDir        string            `json:"work_dir"`
 	BaseSHA        string            `json:"base_sha"`
 	RequestedBase  string            `json:"requested_base,omitempty"` // --base as typed ("" = default), beside the SHA it resolved to (#175)
+	Branch         string            `json:"branch,omitempty"`         // the branch the run is for (#177): checked out at init, or --for-branch; "" = legacy
 	Head           string            `json:"head"`
 	InitialState   State             `json:"initial_state"`
 	InitialKind    Kind              `json:"initial_kind,omitempty"`

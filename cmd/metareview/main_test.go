@@ -1282,3 +1282,71 @@ func TestReviewPromptClassifiesAgainstTheResolvedBase(t *testing.T) {
 		t.Fatalf("the prompt must name the resolved base, not main's tip:\n%s", out)
 	}
 }
+
+// writeAbandonedRun leaves a run at its fix node in the repository's shared store, recorded for branch at head.
+func writeAbandonedRun(t *testing.T, root, id, branch, head string) {
+	t.Helper()
+	dir := filepath.Join(root, ".git", "metareview", "runs", id)
+	must(t, os.MkdirAll(dir, 0o700))
+	must(t, os.WriteFile(filepath.Join(dir, "workflow.yaml"), []byte(`workflow: t
+version: 1
+vars: {}
+states: [discover, fix, done, failed]
+transitions:
+  - {from: discover, to: fix,  gate: findings_nonempty}
+  - {from: fix,      to: done, gate: commit_exists, outcome: fixed}
+nodes:
+  discover: {kind: review-lenses, exec: subagent, lenses: 2}
+  fix:      {kind: agent-edit}
+convergence:
+  any: [{max_iterations: 2}]
+`), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "audit.jsonl"), []byte(
+		`{"type":"init","at":"2026-09-28T00:00:00Z","state":"discover","data":{"workflow":"t","branch":"`+branch+`","head":"`+head+`"}}`+"\n"+
+			`{"type":"transition","at":"2026-09-28T00:00:01Z","state":"discover","data":{"to":"fix","to_kind":"agent-edit"}}`+"\n"), 0o600))
+}
+
+// #177 AC-4.8: --all widens what status lists and never its verdict — every form exits the same with and without it —
+// and plain status lists this branch's runs, then the rest by count or, with --all, by branch.
+func TestStatusAllNeverChangesTheExit(t *testing.T) {
+	root := gitRepo(t)
+	const gone = "0000000000000000000000000000000000000001"
+	writeAbandonedRun(t, root, "mrv-t-feature-001", "feature", "")
+	writeAbandonedRun(t, root, "mrv-t-main-00001", "main", gone)
+	writeAbandonedRun(t, root, "mrv-t-gone-00001", "gone", gone)
+	writeAbandonedRun(t, root, "mrv-t-legacy-001", "", gone)
+	for _, args := range [][]string{
+		{"status", "--json"},
+		{"status", "--json", "--target", "docs/tasks/t.md"},
+		{"status", "--json", "--scope", "branch"},
+		{"status", "--json", "--scope", "branch", "--base", "main"},
+	} {
+		code, out, _ := runCLI(t, root, nil, args...)
+		codeAll, outAll, _ := runCLI(t, root, nil, append(args, "--all")...)
+		if code != codeAll || code != 1 {
+			t.Errorf("%v: exit %d without --all, %d with (want both 1: feature's run blocks)", args, code, codeAll)
+		}
+		if strings.Contains(out, `"elsewhere"`) || !strings.Contains(outAll, "mrv-t-main-00001") {
+			t.Errorf("%v: only --all lists the runs elsewhere:\n%s\n---\n%s", args, out, outAll)
+		}
+	}
+	_, plain, _ := runCLI(t, root, nil, "status")
+	for _, want := range []string{"abandoned runs on this branch: 1", "mrv-t-feature-001  t @ fix", "abandoned runs elsewhere: 3 (metareview status --all lists them)"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("plain status missing %q:\n%s", want, plain)
+		}
+	}
+	code, all, _ := runCLI(t, root, nil, "status", "--all")
+	for _, want := range []string{"branch (no branch recorded):\n  mrv-t-legacy-001  t @ fix  [orphaned]", "branch gone:\n  mrv-t-gone-00001  t @ fix  [orphaned]",
+		"branch main:\n  mrv-t-main-00001  t @ fix  [other-branch]"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("status --all missing %q:\n%s", want, all)
+		}
+	}
+	if code != 0 {
+		t.Errorf("plain status is informational: exit %d", code)
+	}
+	if lines := abandonedLines(t.TempDir(), true); lines != nil {
+		t.Errorf("no runs, no lines: %q", lines)
+	}
+}

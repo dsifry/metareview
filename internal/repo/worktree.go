@@ -67,17 +67,6 @@ func RunStoreRoot(start string) string {
 	return path
 }
 
-// MainWorktreeIsBare reports whether start's repository has a bare main worktree (the bare-clone + worktrees layout,
-// #174): there is no main checkout, so nothing can own a run whose own worktree is gone.
-func MainWorktreeIsBare(start string) bool {
-	out, err := runStoreGit(start)
-	if err != nil {
-		return false
-	}
-	_, bare := MainWorktreeFromPorcelain(out)
-	return bare
-}
-
 // commonDirGit is the seam over `git rev-parse --git-common-dir`, run exactly as the FSM runs git (gate.RealExec:
 // GIT_* scrubbed), so an exported GIT_DIR cannot point a reader at a different store than the writer used.
 var commonDirGit = func(dir string) (string, error) {

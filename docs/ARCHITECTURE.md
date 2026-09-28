@@ -200,11 +200,18 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   overwriting (an id in both places is a `STORE_COLLISION` warning, both copies kept) — and copies the legacy
   `fsm-*` ledger rows (read leniently — it is the main checkout's live review ledger — and skipped once migrated via
   a size stamp, `legacy-ledger.size`). For one release `record-lenses --from-run` and the `status` abandoned-run scan
-  also read that single legacy location (never another worktree's), and `status` warns while it holds runs. The scan
-  attributes a run to the worktree that *contains* its init `work_dir` (`--work-dir` may be a subdirectory) and
-  reports only this worktree's; a run whose worktree is gone is reported from the main checkout, never dropped —
-  with a bare main worktree (#174) there is none, so every worktree shows it as a warning naming the run dir to
-  delete, not a blocker.
+  also read that single legacy location (never another worktree's), and `status` warns while it holds runs.
+- **Branch scope (#177, `internal/scope`).** The abandoned-run scan classifies each run against the branch in hand,
+  one rule in one package: a run recorded on branch N at head H is **in scope** when N is the current branch (the
+  name leg — survives rebase and amend) or H lies in `merge-base(HEAD, main|master)..HEAD` (the range leg — detached
+  snapshots, stacked branches). Otherwise it is **other-branch** while N exists, else **orphaned**; neither blocks,
+  and `status --all` lists both without changing the exit code. `fsm init` records `branch` in its init event (the
+  checked-out branch; `--for-branch` is required on a detached HEAD and may only restate an attached one). A run from
+  before #177 (no branch) is in scope unless its head is known and unreachable from HEAD — an upgrade never silently
+  clears one, on the default branch included. `scope.Load` makes a fixed number of git calls however many runs there
+  are (AC-4.9); only legacy runs ask per head. Known trade-off: a deleted branch name recreated for unrelated work
+  inherits the old name's runs (the name leg); clearing a stale run is the closing operation's job. An unreadable
+  repository puts everything in scope.
 - **Store vs anchor vs work (#169, #172, #173).** Every `.metareview`/`docs` path in `internal/fsm` names which it
   means. **Common dir** = the shared store above. **Store root (anchor)** = the main worktree (`git worktree list
   --porcelain`, `repo.MainWorktreeFromPorcelain`), or with a bare main the linked worktree the command runs in (#174):

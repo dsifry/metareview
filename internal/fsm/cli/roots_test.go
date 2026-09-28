@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,11 +11,12 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/machine"
 )
 
-// linkedWorktree adds a detached linked worktree of the harness repo at HEAD and returns its real path.
+// linkedWorktree adds a linked worktree of the harness repo at HEAD, on its own branch (a run records the branch it is
+// for, #177), and returns its real path.
 func (h *harness) linkedWorktree() string {
 	h.t.Helper()
 	wt := filepath.Join(h.t.TempDir(), "linked")
-	git(h.t, h.root, "worktree", "add", "-q", "--detach", wt)
+	git(h.t, h.root, "worktree", "add", "-q", "-b", "linked-"+filepath.Base(filepath.Dir(wt)), wt)
 	real, err := filepath.EvalSymlinks(wt)
 	if err != nil {
 		h.t.Fatal(err)
@@ -257,5 +259,52 @@ func TestBareMainWorktreeAnchorsOnTheLinkedWorktree(t *testing.T) {
 	c.cwd = bare
 	if _, err := c.storeRoot(); err == nil {
 		t.Fatal("the bare directory itself has no checkout to anchor on")
+	}
+}
+
+// initBranch reads the branch a run's init event recorded (#177).
+func initBranch(t *testing.T, h *harness, id string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(h.root, ".git", "metareview", "runs", id, "audit.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ev struct {
+		Data struct {
+			Branch string `json:"branch"`
+		} `json:"data"`
+	}
+	first, _, _ := strings.Cut(string(raw), "\n")
+	if err := json.Unmarshal([]byte(first), &ev); err != nil {
+		t.Fatal(err)
+	}
+	return ev.Data.Branch
+}
+
+// #177: a run records the branch it is for — the checked-out one, or --for-branch — and a detached HEAD must name it.
+func TestInitRecordsTheBranchAndRequiresOneWhenDetached(t *testing.T) {
+	h := newHarness(t)
+	id := h.must(StatusOK, 0, h.mockInit()...)["run_id"].(string)
+	if got := initBranch(t, h, id); got != "main" {
+		t.Fatalf("init on main must record branch main, got %q", got)
+	}
+	// On a branch, --for-branch may only restate it: naming another would file this branch's run under that one, and
+	// an abandoned run would stop blocking the branch it was actually reviewing.
+	e := h.mustErr(CodeUsage, 2, append(h.mockInit(), "--for-branch", "elsewhere")...)
+	if d := e["error"].(map[string]any)["detail"].(string); !strings.Contains(d, "main") || !strings.Contains(d, "elsewhere") {
+		t.Fatalf("the refusal must name both branches: %v", e)
+	}
+	id = h.must(StatusOK, 0, append(h.mockInit(), "--for-branch", "main")...)["run_id"].(string)
+	if got := initBranch(t, h, id); got != "main" {
+		t.Fatalf("restating the checked-out branch is fine, got %q", got)
+	}
+	git(t, h.root, "checkout", "-q", "--detach")
+	e = h.mustErr(CodeUsage, 2, h.mockInit()...)
+	if !strings.Contains(e["error"].(map[string]any)["detail"].(string), "--for-branch") {
+		t.Fatalf("the refusal must name --for-branch: %v", e)
+	}
+	id = h.must(StatusOK, 0, append(h.mockInit(), "--for-branch", "feat")...)["run_id"].(string)
+	if got := initBranch(t, h, id); got != "feat" {
+		t.Fatalf("--for-branch must be recorded, got %q", got)
 	}
 }

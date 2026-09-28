@@ -135,7 +135,7 @@ Commands:
   setup --install-hooks      Install the git-native push gate and opt this repository into the Stop gate
   setup --enable-stop-gate   Opt this repository into the Stop gate only (when another tool owns core.hooksPath)
   setup --bootstrap-prereqs  Print or execute prerequisite bootstrap actions
-  status [--json [--target <path> | --scope branch [--base <ref>]]]
+  status [--all] [--json [--target <path> | --scope branch [--base <ref>]]]
                              Print repository review capability status; --json emits the
                              machine-readable contract a host hook branches on (exit 1 when
                              something must be cleared). --target narrows it to one path, so a
@@ -200,6 +200,20 @@ func dispatch(args []string) {
 	// status --json is the contract a host hook branches on: one machine-readable answer to
 	// "may work proceed, and if not, what must be cleared". Exits 1 when something must be
 	// cleared, so a hook needs no parsing to make the common decision.
+	// --all (#177) widens what status shows — every abandoned run, grouped by branch — and never its verdict: it is
+	// taken out of the arguments here, so each form below parses exactly as without it.
+	statusAll := false
+	if len(args) >= 1 && args[0] == "status" {
+		kept := []string{"status"}
+		for _, a := range args[1:] {
+			if a == "--all" {
+				statusAll = true
+				continue
+			}
+			kept = append(kept, a)
+		}
+		args = kept
+	}
 	if len(args) >= 2 && args[0] == "status" && args[1] == "--json" {
 		// --target narrows the answer to the work in hand. Unscoped, `blocked` spans the whole
 		// review history, so a hook wired to it refuses an agent because of work it never
@@ -219,12 +233,16 @@ func dispatch(args []string) {
 		} else if len(args) == 6 && args[2] == "--scope" && args[3] == "branch" && args[4] == "--base" {
 			scopeBranch, base = true, args[5]
 		} else {
-			_, _ = fmt.Fprintln(stderr, "Usage: metareview status --json [--target <path> | --scope branch [--base <ref>]]")
+			_, _ = fmt.Fprintln(stderr, "Usage: metareview status --json [--all] [--target <path> | --scope branch [--base <ref>]]")
 			exit(2)
 		}
 		if scopeBranch {
 			// The scope a Stop hook wants: this branch's own commits and the files it changed.
-			code, err := status.EmitForBranch(repo.RootOr(workdir), base, nil, stdout)
+			emitBranch := status.EmitForBranch
+			if statusAll {
+				emitBranch = status.EmitForBranchAll
+			}
+			code, err := emitBranch(repo.RootOr(workdir), base, nil, stdout)
 			exitGateBroken(err)
 			if code != 0 {
 				exit(code)
@@ -234,7 +252,11 @@ func dispatch(args []string) {
 		// Resolved from the repository root, not the process cwd. A Stop hook inherits whatever
 		// directory the session is standing in, and resolving there found no review logs and
 		// reported nothing to clear — the gate was bypassed by working in a subdirectory.
-		code, err := status.EmitFor(repo.RootOr(workdir), target, stdout)
+		emitFor := status.EmitFor
+		if statusAll {
+			emitFor = status.EmitForAll
+		}
+		code, err := emitFor(repo.RootOr(workdir), target, stdout)
 		exitGateBroken(err)
 		if code != 0 {
 			exit(code)
@@ -250,6 +272,9 @@ func dispatch(args []string) {
 		_, _ = fmt.Fprintf(stdout, "beads: %s\n", present(report.Capabilities.Beads))
 		_, _ = fmt.Fprintf(stdout, "metaswarm: %s\n", present(report.Capabilities.Metaswarm))
 		for _, line := range fsmcli.StatusLines(context.Background(), fsmcli.RealDeps(), workdir) {
+			_, _ = fmt.Fprintln(stdout, line)
+		}
+		for _, line := range abandonedLines(repo.RootOr(workdir), statusAll) {
 			_, _ = fmt.Fprintln(stdout, line)
 		}
 		return
@@ -1402,4 +1427,36 @@ func mustMutationReport(path string) string {
 		reject(err.Error())
 	}
 	return path
+}
+
+// abandonedLines renders abandoned FSM runs for plain `status` (#177): this branch's (the ones that block), then a
+// count of the rest — or, with --all, the rest grouped by the branch they belong to, orphans labelled.
+func abandonedLines(root string, all bool) []string {
+	mine, elsewhere := status.ScanAbandonedRuns(root)
+	if len(mine)+len(elsewhere) == 0 {
+		return nil
+	}
+	lines := []string{fmt.Sprintf("abandoned runs on this branch: %d", len(mine))}
+	for _, a := range mine {
+		lines = append(lines, "  "+a.RunID+"  "+a.Workflow+" @ "+a.State)
+	}
+	if !all {
+		if len(elsewhere) > 0 {
+			lines = append(lines, fmt.Sprintf("abandoned runs elsewhere: %d (metareview status --all lists them)", len(elsewhere)))
+		}
+		return lines
+	}
+	last := "\x00"
+	for _, a := range elsewhere {
+		if a.Branch != last {
+			name := a.Branch
+			if name == "" {
+				name = "(no branch recorded)"
+			}
+			lines = append(lines, "branch "+name+":")
+			last = a.Branch
+		}
+		lines = append(lines, "  "+a.RunID+"  "+a.Workflow+" @ "+a.State+"  ["+a.Scope+"]")
+	}
+	return lines
 }

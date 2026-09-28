@@ -150,23 +150,3 @@ func TestRunStoreRootOutsideARepositoryFallsBack(t *testing.T) {
 		t.Fatalf("outside a repository: got %q, want the RootOr fallback %q", got, RootOr(start))
 	}
 }
-
-// MainWorktreeIsBare reads the same porcelain RunStoreRoot does (#174): bare main, a normal one, and git failing.
-func TestMainWorktreeIsBare(t *testing.T) {
-	orig := runStoreGit
-	t.Cleanup(func() { runStoreGit = orig })
-	for _, c := range []struct {
-		out  string
-		err  error
-		want bool
-	}{
-		{"worktree /r/repo.git\nbare\n\nworktree /r/main\nHEAD abc\nbranch refs/heads/main", nil, true},
-		{"worktree /r/main\nHEAD abc\nbranch refs/heads/main", nil, false},
-		{"", errNotARepo, false},
-	} {
-		runStoreGit = func(string) (string, error) { return c.out, c.err }
-		if got := MainWorktreeIsBare("/anywhere"); got != c.want {
-			t.Errorf("porcelain %q err %v: got %v want %v", c.out, c.err, got, c.want)
-		}
-	}
-}

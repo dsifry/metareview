@@ -150,6 +150,8 @@ type InitOptions struct {
 	GoldensPath     string
 	WorkDir         string
 	RepoRoot        string
+	// Branch is the branch the run is for (#177), recorded in its init event: status scopes abandoned runs by it.
+	Branch string
 }
 
 // OpenOptions parameterizes Open.

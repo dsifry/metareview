@@ -113,7 +113,7 @@ func parseArgs(args []string) (*parsed, error) {
 				return nil, fmt.Errorf("--var expects K=V, got %q", v)
 			}
 			p.vars[k] = val
-		case "--workflow", "--base", "--goldens", "--repo-mode", "--allow-custom-cmds", "--mock-ai", "--work-dir", "--run-id", "--run", "--from", "--at-iter", "--node", "--data", "--input", "--kind", "--model", "--effort", "--context", "--check", "--a", "--b", "--out", "--max-bytes", "--judge-model", "--judge-effort":
+		case "--workflow", "--base", "--for-branch", "--goldens", "--repo-mode", "--allow-custom-cmds", "--mock-ai", "--work-dir", "--run-id", "--run", "--from", "--at-iter", "--node", "--data", "--input", "--kind", "--model", "--effort", "--context", "--check", "--a", "--b", "--out", "--max-bytes", "--judge-model", "--judge-effort":
 			p.flags[strings.TrimPrefix(a, "--")] = v
 		default:
 			return nil, fmt.Errorf("unknown option %s", a)
@@ -265,6 +265,23 @@ func (in *invocation) init() int {
 			return in.fail(base, err, phaseInit, false)
 		}
 	}
+	// The branch the run is for (#177): status scopes abandoned runs by it. A detached HEAD (a review snapshot) must
+	// name it — every run has an owning branch, so a rebase can never silently clear a detached run's gate. On a branch,
+	// --for-branch may only restate it: naming another would file this branch's run under that one, and an abandoned
+	// run would stop blocking the branch it actually reviewed.
+	branch, current := p.flags["for-branch"], ""
+	if out, code, err := c.git(workDir, "symbolic-ref", "--short", "-q", "HEAD"); err == nil && code == 0 {
+		current = out
+	}
+	if current != "" && branch != "" && branch != current {
+		return in.usage("--for-branch " + branch + " names another branch than the one checked out in " + workDir + " (" + current + "); it is for a detached HEAD")
+	}
+	if branch == "" {
+		branch = current
+	}
+	if branch == "" {
+		return in.usage("HEAD is detached in " + workDir + ": pass --for-branch <branch> to name the branch this run reviews for")
+	}
 	mockDir := p.flags["mock-ai"]
 	if mockDir == "" {
 		mockDir = c.deps.Getenv(EnvMockAI)
@@ -310,7 +327,7 @@ func (in *invocation) init() int {
 	// call time, so the model that judged a run is visible in its snapshot and
 	// its export. An override the audit cannot see would be worse than none.
 	vars := c.applyJudgeOverrideFor(p.vars, p.flags["judge-model"], p.flags["judge-effort"], p.bools["calibration"])
-	opts := machine.InitOptions{Workflow: wf, RunID: p.flags["run-id"], Vars: vars, Base: p.flags["base"], RepoMode: p.flags["repo-mode"], AllowCustomCmds: p.flags["allow-custom-cmds"], Calibration: p.bools["calibration"], MockDir: mockDir, GoldensPath: goldens, WorkDir: workDir, RepoRoot: root}
+	opts := machine.InitOptions{Workflow: wf, RunID: p.flags["run-id"], Vars: vars, Base: p.flags["base"], RepoMode: p.flags["repo-mode"], AllowCustomCmds: p.flags["allow-custom-cmds"], Calibration: p.bools["calibration"], MockDir: mockDir, GoldensPath: goldens, WorkDir: workDir, RepoRoot: root, Branch: branch}
 	m, err := machine.Init(c.ctx, md, opts)
 	if err != nil {
 		if errs.Is(err, machine.CodeCmdsNotAllowed) {
