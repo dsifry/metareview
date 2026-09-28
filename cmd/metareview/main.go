@@ -1143,9 +1143,10 @@ func printHookPlan(plan setup.HookInstallPlan) {
 	}
 	_, _ = fmt.Fprintln(stdout, "metareview review gate — git-native hooks")
 	_, _ = fmt.Fprintln(stdout, "  Will write: the pre-push + post-commit hook scripts into "+plan.Target)
-	_, _ = fmt.Fprintln(stdout, "  Will set:   core.hooksPath = "+plan.Target+"   (this clone only)")
+	_, _ = fmt.Fprintln(stdout, "  Will set:   core.hooksPath = "+plan.Target+"   (this repository; its id is kept")
+	_, _ = fmt.Fprintln(stdout, "              in metareview.hooksId, and a pre-#173 .metareview/git-hooks is migrated)")
 	_, _ = fmt.Fprintln(stdout, "  Will add:   metareview's ephemeral-state block to .gitignore — ignore .metareview/* (runs,")
-	_, _ = fmt.Fprintln(stdout, "              findings, shards, the hook scripts) while keeping the durable learning files")
+	_, _ = fmt.Fprintln(stdout, "              findings, shards) while keeping the durable learning files")
 	_, _ = fmt.Fprintln(stdout, "              (knowledge/metareview.jsonl, calibration.jsonl, learning-runs.jsonl) committable")
 	_, _ = fmt.Fprintln(stdout, "  Currently:  core.hooksPath = "+current)
 	_, _ = fmt.Fprintln(stdout, "  Effect:     git runs the pre-push gate (BLOCKS an unreviewed push) and the")

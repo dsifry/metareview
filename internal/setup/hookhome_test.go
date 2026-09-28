@@ -153,9 +153,15 @@ func TestInstallMigratesThePerCheckoutLocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := gitGateStatus(root, g)
-	if st.Installed || !st.Stale || st.Location != hookTarget(t, root, g) || !strings.Contains(st.Remediation, "migrate") {
-		t.Fatalf("setup --check must report the earlier location as stale: %+v", st)
+	if !st.Installed || !st.Stale || st.Location != hookTarget(t, root, g) || !strings.Contains(st.Remediation, "still gates") || !strings.Contains(st.Remediation, "migrate") {
+		t.Fatalf("setup --check must report the earlier location as installed (it still gates) and stale: %+v", st)
 	}
+	// ...and one that is gone as stale and NOT installed.
+	_ = os.RemoveAll(old)
+	if st := gitGateStatus(root, g); st.Installed || !st.Stale || strings.Contains(st.Remediation, "still gates") {
+		t.Fatalf("an earlier location without its gate is not installed: %+v", st)
+	}
+	writeGateDir(t, old)
 	plan, err := PlanHookInstall(root, g)
 	if err != nil || len(plan.Conflicts) != 0 {
 		t.Fatalf("the per-checkout location is metareview's, not a conflict: %+v %v", plan, err)
@@ -331,8 +337,8 @@ func TestACopiedCheckoutGetsItsOwnHookDir(t *testing.T) {
 	if got := hookTarget(t, b, g); got == plan.Target {
 		t.Fatal("a copied checkout must not resolve its original's hook dir")
 	}
-	if st := gitGateStatus(b, g); st.Installed || !st.Stale {
-		t.Fatalf("the copy runs its original's hooks: stale, not installed: %+v", st)
+	if st := gitGateStatus(b, g); !st.Installed || !st.Stale {
+		t.Fatalf("the copy runs its original's hooks: gated, but stale: %+v", st)
 	}
 	if _, err := UninstallHookInstall(b, g); err != nil {
 		t.Fatal(err)
@@ -451,7 +457,7 @@ func TestANewRepositoryAtAMovedOnesPathGetsItsOwnHookDir(t *testing.T) {
 			}
 			// Its gate still runs (above). Re-installed, the dir is recorded as its own; if not, its owner file names
 			// the path the new repository occupies, so it reads stale until a re-install gives it a dir of its own.
-			if st := gitGateStatus(moved, g); st.Installed != reinstalledAfterMove {
+			if st := gitGateStatus(moved, g); !st.Installed || st.Stale == reinstalledAfterMove {
 				t.Fatalf("moved repository status: %+v", st)
 			}
 		})

@@ -76,9 +76,16 @@ func gitGateStatus(root string, git GitRunner) GitGateStatus {
 		return GitGateStatus{Installed: true, HooksPath: plan.Current, Location: plan.Target}
 	}
 	if plan.Current != "" && len(plan.Conflicts) == 0 && !sameHookPath(root, plan.Current, plan.Target) {
+		// An earlier location that still holds the gate still gates `git push` (every upgraded pre-#173 install):
+		// installed, and stale. Reporting it not installed would tell the reader pushes are ungated when they are not.
+		gated := hooksMaterialized(resolveHookPath(root, plan.Current))
+		msg := "core.hooksPath points at an earlier metareview hook location (" + plan.Current + ")"
+		if gated {
+			msg += ", which still gates `git push`"
+		}
 		return GitGateStatus{
-			HooksPath: plan.Current, Location: plan.Target, Stale: true,
-			Remediation: "core.hooksPath points at an earlier metareview hook location (" + plan.Current + "). Run `metareview setup --install-hooks` to migrate it to " + plan.Target + ".",
+			Installed: gated, HooksPath: plan.Current, Location: plan.Target, Stale: true,
+			Remediation: msg + ". Run `metareview setup --install-hooks` to migrate it to " + plan.Target + ".",
 		}
 	}
 	// A CONFLICT (a foreign core.hooksPath, or active .git/hooks a redirect would bypass) makes a plain

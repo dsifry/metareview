@@ -107,8 +107,8 @@ var maxDerivedIDs = 4096
 
 // repoHooksID is this repository's hook-dir id: the recorded metareview.hooksId when its dir is this repository's
 // (ownedBy), otherwise a derived one. A derived id is the first of sha256(common dir, n), n = 0, 1, …, whose dir is
-// free: absent, or released (see released) — so uninstall + reinstall reuses the dir and a hook the user kept there
-// resumes, while a dir some repository may still run from is never adopted. Deterministic for a given filesystem, so
+// free: absent, or released (see released) — a dir some repository may still run from is never adopted. (Uninstall
+// + reinstall reuses the dir through the recorded id, which uninstall keeps, so a hook the user kept there resumes.) Deterministic for a given filesystem, so
 // a read-only plan is stable.
 func repoHooksID(root string, git GitRunner, home string) (string, error) {
 	common, err := commonDir(root, git)
@@ -166,8 +166,8 @@ func exists(p string) bool {
 	return err == nil
 }
 
-// released reports whether dir no longer holds any of metareview's scripts — an uninstall took them out — so it can be
-// reused. A dir that still holds the gate is never adopted by a repository with no recorded id, whatever its owner
+// released reports whether dir no longer holds any of metareview's scripts, so it can be reused. Nothing in metareview
+// empties a user-level dir (uninstall keeps it, see releaseHookDir), so this is a dir someone emptied by hand. A dir that still holds the gate is never adopted by a repository with no recorded id, whatever its owner
 // file says: from inside a fresh clone, `mv repo repo.bak && git clone … repo` (repo.bak still runs from that dir) and
 // `rm -rf repo && git clone … repo` (nothing does) look identical, and adopting a live dir can silently ungate a
 // repository, while leaving an orphan behind costs a few KB.
