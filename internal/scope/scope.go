@@ -334,6 +334,9 @@ func (s Scope) Owns(branch string) bool {
 	return branch != "" && (branch == s.Current || s.known && s.former[branch] && !s.branches[branch])
 }
 
+// Known reports whether Load could read the branch in hand; an unknown scope keeps everything in scope.
+func (s Scope) Known() bool { return s.known }
+
 // PastHead reports whether head is one the current branch has had (its reflog): proof the commit was this branch's.
 func (s Scope) PastHead(head string) bool { return s.pastHeads[head] }
 

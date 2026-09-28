@@ -131,8 +131,8 @@ func TestScopedBlockingFailsClosedAndAsksGitOnlyWhenNeeded(t *testing.T) {
 }
 
 // TestReconcileRecordsTheBranch: a new finding records the checked-out branch, and a detached run none; a detached run
-// deduplicates against a named row that gates it without re-stamping it, and refreshes a branchless row that gates it;
-// raised on another branch, the finding gets that branch's own row.
+// deduplicates against a row that gates it — named or branchless — and never moves it; raised on another branch, the
+// finding gets that branch's own row.
 func TestReconcileRecordsTheBranch(t *testing.T) {
 	root, git := scopeRepo(t)
 	git("switch", "-q", "-c", "feat")
@@ -158,11 +158,11 @@ func TestReconcileRecordsTheBranch(t *testing.T) {
 	if len(records) != 2 || records[1].Branch != "" {
 		t.Fatalf("a detached run whose HEAD no row gates records its own branchless row: %+v", records)
 	}
+	first := records[1].GitHead
 	git("commit", "-q", "--allow-empty", "-m", "detached elsewhere, again")
-	head := git("rev-parse", "HEAD")
-	reconcileOn(t, root, "mrv-4", head, input)
-	if records = readRecords(t, root); len(records) != 2 || records[1].GitHead != head {
-		t.Fatalf("a detached run refreshes the branchless row that gates it: %+v", records)
+	reconcileOn(t, root, "mrv-4", git("rev-parse", "HEAD"), input)
+	if records = readRecords(t, root); len(records) != 2 || records[1].GitHead != first {
+		t.Fatalf("a detached run deduplicates against the branchless row that gates it and never moves it: %+v", records)
 	}
 
 	git("switch", "-q", "-c", "other", "main")
@@ -544,5 +544,44 @@ func TestGrantedOverrideOfALowerBranchAbsorbsTheReraise(t *testing.T) {
 	reconcileOn(t, root, "mrv-upper", git("rev-parse", "HEAD"), input)
 	if records := readRecords(t, root); len(records) != 1 {
 		t.Fatalf("the lower branch's granted override must absorb the stacked branch's re-raise: %+v", records)
+	}
+}
+
+// TestThrowawayDetachedReviewNeverMovesABranchsRow is a recheck finding on the seventh cut: a detached run refreshed a
+// branchless row that gated it, moving its head — so a review on a throwaway detached commit carried feat's only row
+// off feat's history, and feat's gate cleared with the defect still present. No run moves a branchless row now.
+func TestThrowawayDetachedReviewNeverMovesABranchsRow(t *testing.T) {
+	root, git := scopeRepo(t)
+	input := unsafeEval("eval")
+	git("switch", "-q", "-c", "feat")
+	git("commit", "-q", "--allow-empty", "-m", "F")
+	git("switch", "-q", "--detach")
+	reconcileOn(t, root, "mrv-det1", git("rev-parse", "HEAD"), input)
+	git("switch", "-q", "feat")
+	reconcileOn(t, root, "mrv-feat", git("rev-parse", "HEAD"), input)
+	git("switch", "-q", "--detach")
+	git("commit", "-q", "--allow-empty", "-m", "scratch")
+	reconcileOn(t, root, "mrv-det2", git("rev-parse", "HEAD"), input)
+	git("switch", "-q", "feat")
+	if in, _, _ := ScopedBlocking(root); len(in) == 0 {
+		t.Fatal("a review on a throwaway detached commit must not clear feat's blocker")
+	}
+}
+
+// TestPartlyReadScopeDedupesAsBeforeBranches: when git fails after the branch name is read (the scope is unknown), a
+// re-raise deduplicates against every row that gates it — which is every row — as before #178, rather than writing a
+// duplicate beside a renamed branch's row.
+func TestPartlyReadScopeDedupesAsBeforeBranches(t *testing.T) {
+	root, git := scopeRepo(t)
+	git("switch", "-q", "-c", "feat")
+	git("commit", "-q", "--allow-empty", "-m", "F")
+	input := unsafeEval("eval")
+	reconcileOn(t, root, "mrv-1", git("rev-parse", "HEAD"), input)
+	orig := loadScope
+	loadScope = func(string) scope.Scope { return scope.Scope{Current: "feat-renamed"} }
+	t.Cleanup(func() { loadScope = orig })
+	reconcileOn(t, root, "mrv-2", git("rev-parse", "HEAD"), input)
+	if records := readRecords(t, root); len(records) != 1 {
+		t.Fatalf("an unknown scope must deduplicate the re-raise: %+v", records)
 	}
 }

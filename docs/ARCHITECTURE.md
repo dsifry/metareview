@@ -236,7 +236,7 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   rule: the per-checkout ledger (`.metareview/findings.jsonl`) records each finding's `branch` (`scope.Load`'s current
   branch, stamped by `findings.Reconcile`) beside its `gitHead`, one row per branch. `Reconcile` refreshes only the rows
   the branch owns by name (`scope.Owns`: its name, or a former one after a rename) and never re-stamps a branchless row
-  (legacy, or a detached review — only a detached run refreshes those, and only the ones that gate it). A named run
+  (legacy, or a detached review — no run moves one: its head is what ties it to the branches that contain it). A named run
   deduplicates against a branchless row only when that row's head is one of its own reflog heads (`scope.PastHead`),
   else it records its own row; a granted override that gates the branch absorbs a re-raise. A finding raised
   again on a stacked or throwaway branch is that branch's own row and never takes the first branch's. Its verdict (the

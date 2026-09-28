@@ -76,6 +76,9 @@ func TestClassify(t *testing.T) {
 			t.Errorf("Owns(%q) = %v, want %v", branch, !want, want)
 		}
 	}
+	if !s.Known() || (Scope{}).Known() {
+		t.Error("Known reports whether the scope was read")
+	}
 	if !s.PastHead("h-past") || s.PastHead("h-in-range") {
 		t.Error("PastHead is the current branch's reflog heads only")
 	}

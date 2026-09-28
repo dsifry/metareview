@@ -130,7 +130,10 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	// One row per branch (#178). A finding raised again on another branch is that branch's own obligation, never a
 	// transfer: the branch that raised it first still has the defect until a fix reaches it. The branch in hand is the
 	// checkout's (scope.Load), and each rule below asks it one question:
-	//   - mine: the row is this branch's by name (its name, or a former one after a rename) — refreshed in place;
+	//   - mine: the row is this branch's by name (its name, or a former one after a rename) — refreshed in place. No
+	//     other row is ever moved: a branchless row's recorded head is what ties it to the branches that contain it, so
+	//     a review on a throwaway detached commit must not carry it off a branch's history. (With an unreadable scope —
+	//     not a repository — every row is refreshed as before #178: everything is in scope there anyway.)
 	//   - blocksHere: the row gates this branch (scope.Classify) — counted in the verdict. A named run deduplicates
 	//     against a branchless row (from before #178, or a detached HEAD) that gates it only when the row's head is one
 	//     of the branch's own past heads (its reflog) — otherwise that row could later fall out of the branch's history
@@ -158,7 +161,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			record.Fingerprint != "" &&
 			currentFingerprints[record.Fingerprint] &&
 			sameRunTarget(record, run) &&
-			(mine(record) || branch == "" && record.Branch == "" && blocksHere(record)) {
+			(mine(record) || !sc.Known()) {
 			record.Scope = firstNonEmpty(record.Scope, run.Scope)
 			record.GitHead = firstNonEmpty(run.GitHead, record.GitHead)
 			// It takes the branch's current name, so a rename then a rewrite keeps it.
@@ -204,7 +207,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	for _, record := range updated {
 		if record.Status != "fixed" && record.Status != StatusSuperseded && record.Fingerprint != "" && sameRunTarget(record, run) &&
 			(mine(record) || blocksHere(record) &&
-				(branch == "" || record.Branch == "" && sc.PastHead(record.GitHead) || record.Status == StatusOverridden)) {
+				(branch == "" || !sc.Known() || record.Branch == "" && sc.PastHead(record.GitHead) || record.Status == StatusOverridden)) {
 			activeExisting[record.Fingerprint] = true
 		}
 	}
