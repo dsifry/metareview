@@ -96,7 +96,14 @@ func TestHookTargetDirErrorPropagates(t *testing.T) {
 	if _, err := UninstallPreview(root, func(string, ...string) ([]byte, error) { return nil, nil }); err == nil {
 		t.Error("UninstallPreview should surface the hookTargetDir error")
 	}
-	if _, err := UninstallHookInstall(root, func(string, ...string) ([]byte, error) { return nil, nil }); err == nil {
+	// Uninstall looks for the target only once core.hooksPath is set: with nothing set there is nothing to do.
+	withHooksPath := func(_ string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[len(args)-1] == "core.hooksPath" {
+			return []byte("/somewhere\n"), nil
+		}
+		return nil, nil
+	}
+	if _, err := UninstallHookInstall(root, withHooksPath); err == nil {
 		t.Error("UninstallHookInstall should surface the hookTargetDir error")
 	}
 }

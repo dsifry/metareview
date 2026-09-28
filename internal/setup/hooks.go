@@ -104,10 +104,12 @@ func ownedBy(dir, common string) bool {
 var maxDerivedIDs = 64
 
 // repoHooksID is this repository's hook-dir id: the recorded metareview.hooksId when its dir is this repository's
-// (ownedBy), otherwise a derived one. A derived id is the first of sha256(common dir, n), n = 0, 1, …, whose dir does
-// not exist yet: a repository with no recorded id never adopts an existing dir, because an existing dir is one some
-// repository installed into and recorded — a copy's original, or a moved repository whose old path this new one now
-// occupies. Deterministic for a given filesystem, so a read-only plan is stable.
+// (ownedBy), otherwise a derived one. A derived id is the first of sha256(common dir, n), n = 0, 1, …, whose dir is
+// free: absent, or orphaned — no live repository's config records it. A dir another repository still records (a
+// copy's original, a moved repository that re-installed) is never adopted; an orphan (this path deleted and re-cloned,
+// or uninstalled here) is reused, so it neither leaks nor strands a hook the user kept in it. A moved repository that
+// never re-installed cannot be told from a deleted one: re-install after moving a repository. Deterministic for a
+// given filesystem, so a read-only plan is stable.
 func repoHooksID(root string, git GitRunner, home string) (string, error) {
 	common, err := commonDir(root, git)
 	if err != nil {
@@ -125,7 +127,7 @@ func repoHooksID(root string, git GitRunner, home string) (string, error) {
 		}
 		sum := sha256.Sum256([]byte(seed))
 		id := hex.EncodeToString(sum[:])[:16]
-		if _, err := os.Lstat(filepath.Join(home, id)); err != nil { // no dir there to adopt (absent, or no data home)
+		if dir := filepath.Join(home, id); !exists(dir) || orphaned(dir, id, git) {
 			return id, nil
 		}
 	}
@@ -157,6 +159,26 @@ func isPreviousHookDir(p string) bool {
 		filepath.Base(filepath.Dir(filepath.Dir(p))) == "metareview"
 	perCheckout := filepath.Base(p) == "git-hooks" && filepath.Base(filepath.Dir(p)) == ".metareview"
 	return (userLevel || perCheckout) && legacyHooksAreOurs(p)
+}
+
+func exists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
+}
+
+// orphaned reports whether no live repository claims dir: it has no owner, its owner is gone, or its owner's config
+// no longer records id (deleted and re-cloned in place, or uninstalled).
+func orphaned(dir, id string, git GitRunner) bool {
+	raw, err := os.ReadFile(filepath.Join(dir, hookOwnerFile)) // #nosec G304 -- a metareview hook dir
+	if err != nil {
+		return true
+	}
+	owner := filepath.Clean(strings.TrimSpace(string(raw)))
+	if !exists(owner) {
+		return true
+	}
+	out, err := git(owner, "config", "--file", filepath.Join(owner, "config"), "--get", HooksIDKey)
+	return err != nil || strings.TrimSpace(string(out)) != id
 }
 
 // ownerIs reports whether dir's owner file names exactly this repository.
@@ -551,14 +573,14 @@ func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 	if git == nil {
 		git = realGitRunner
 	}
-	target, err := hookTargetDir(root, git)
-	if err != nil {
-		return false, err
-	}
 	out, _ := git(root, "config", "--local", "--get", "core.hooksPath")
 	current := strings.TrimSpace(string(out))
 	if current == "" {
 		return false, nil
+	}
+	target, err := hookTargetDir(root, git)
+	if err != nil {
+		return false, err
 	}
 	if !isOurHookPath(root, current, target) {
 		return false, fmt.Errorf("core.hooksPath is %s, not metareview's — leaving it unchanged", current)

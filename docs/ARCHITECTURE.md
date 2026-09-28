@@ -159,9 +159,12 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   uninstall removes only metareview's own. The dir's `.metareview-owner` names the repository (git's common dir)
   that installed it: a copied checkout (`cp -r`, rsync, a restored backup) carries `metareview.hooksId`, so an id
   is reused only when its owner is this repository or no longer exists (this one, moved) — a copy gets its own dir,
-  and nothing done in it empties the dir its original still runs from. A repository with no recorded id never adopts
-  an existing dir: its id is the first `sha256(common dir, n)` whose dir is free, so a new repository at a moved
-  one's old path (`mv repo repo.bak && git clone … repo`) cannot take over the moved one's live hooks. Earlier locations — any `<data home>/metareview/git-hooks/<id>` (matched
+  and nothing done in it empties the dir its original still runs from. A repository with no recorded id takes the first
+  `sha256(common dir, n)` whose dir is free — absent, or orphaned (its owner is gone or no longer records that id).
+  A dir a live repository still records is never adopted, so a new repository at a moved one's old path
+  (`mv repo repo.bak && git clone … repo`) cannot take over the moved one's hooks; an orphan is reused, so a re-clone
+  in place leaks nothing and uninstall + reinstall keeps a user's own hook. Limitation: a moved repository that never
+  re-installed is indistinguishable from a deleted one — re-install after moving a repository. Earlier locations — any `<data home>/metareview/git-hooks/<id>` (matched
   by shape, since `XDG_DATA_HOME` can differ between shells), a pre-#173 `<checkout>/.metareview/git-hooks`, legacy
   `hooks/git` — are reclaimed only when gone or when their `pre-push` carries metareview's content marker;
   `setup --check` reports one as `stale`, and `--install-hooks` migrates it (refusing if it holds other hooks).
