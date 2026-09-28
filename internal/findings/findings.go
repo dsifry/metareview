@@ -116,7 +116,8 @@ type Result struct {
 }
 
 func Reconcile(root string, run Run, current []Input, options Options) (Result, error) {
-	// The branch in hand first: its git calls then run before the ledger is read, not inside its read-modify-write.
+	// The branch in hand first, so its fixed git calls run before the ledger is read (only a legacy row's reachability
+	// check can still ask git inside the read-modify-write, once per distinct head).
 	sc := loadScope(root)
 	path := findingsPath(root)
 	existing, err := readJSONL(path)
@@ -132,15 +133,16 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	// checkout's (scope.Load), and each rule below asks it one question:
 	//   - mine: the row is this branch's by name (its name, or a former one after a rename) — refreshed in place. No
 	//     other row is ever moved: a branchless row's recorded head is what ties it to the branches that contain it, so
-	//     a review on a throwaway detached commit must not carry it off a branch's history. (Where git cannot even name the
-	//     branch — not a repository — every row is refreshed as before #178, and none re-stamped; a scope whose branch
-	//     was read before a later git call failed refreshes only the rows it owns, so a transient failure never carries
-	//     another branch's row away.)
+	//     a review on a throwaway detached commit must not carry it off a branch's history. (Where the scope is unreadable and
+	//     no branch is checked out — outside a repository, or a detached HEAD whose scope git failed to read — every
+	//     row is refreshed as before #178, and none re-stamped; a scope whose branch was read before a later git call
+	//     failed refreshes only the rows it owns, so a transient failure never carries another branch's row away.)
 	//   - blocksHere: the row gates this branch (scope.Classify) — counted in the verdict. A named run deduplicates
 	//     against a branchless row (from before #178, or a detached HEAD) that gates it only when the row's head is one
 	//     of the branch's own past heads (its reflog) — otherwise that row could later fall out of the branch's history
-	//     and leave it with no row of its own — and never re-stamps it; a detached run (or one whose branch git could
-	//     not read) deduplicates against every row that gates it; and a granted override that gates this branch (a
+	//     and leave it with no row of its own — and never re-stamps it; a detached run deduplicates against every row
+	//     that gates it, but a named run whose scope git failed to read only against its own rows — a transient failure
+	//     can at worst add a duplicate, never fold this branch's re-raise into another branch's row; and a granted override that gates this branch (a
 	//     lower branch's accepted exception) absorbs the re-raise rather than demanding a second grant;
 	//   - a --previous-run chain closes any row it names, whichever branch recorded it — the chain is the explicit
 	//     repair path, so a fix branch, a stacked branch or an epic can close what it inherited or merged, and a
@@ -209,9 +211,11 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 
 	activeExisting := map[string]bool{}
 	for _, record := range updated {
-		if record.Status != "fixed" && record.Status != StatusSuperseded && record.Fingerprint != "" && sameRunTarget(record, run) &&
+		// Only fingerprints this run raised can be deduplicated; asking blocksHere first would spend git calls on the rest.
+		if record.Status != "fixed" && record.Status != StatusSuperseded && record.Fingerprint != "" &&
+			currentFingerprints[record.Fingerprint] && sameRunTarget(record, run) &&
 			(mine(record) || blocksHere(record) &&
-				(branch == "" || !sc.Known() || record.Branch == "" && sc.PastHead(record.GitHead) || record.Status == StatusOverridden)) {
+				(branch == "" || record.Branch == "" && sc.PastHead(record.GitHead) || record.Status == StatusOverridden)) {
 			activeExisting[record.Fingerprint] = true
 		}
 	}

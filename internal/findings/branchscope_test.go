@@ -568,21 +568,23 @@ func TestThrowawayDetachedReviewNeverMovesABranchsRow(t *testing.T) {
 	}
 }
 
-// TestPartlyReadScopeDedupesAsBeforeBranches: when git fails after the branch name is read (the scope is unknown), a
-// re-raise deduplicates against every row that gates it — which is every row — as before #178, rather than writing a
-// duplicate beside a renamed branch's row.
-func TestPartlyReadScopeDedupesAsBeforeBranches(t *testing.T) {
+// TestPartlyReadScopeKeepsItsOwnRow is a recheck finding on the ninth cut: with a partly read scope a named run folded
+// its re-raise into another branch's row, so once git recovered this branch had no row of its own and its gate was
+// open. It now deduplicates only against its own rows: at worst a duplicate, never a fold into another branch's row.
+func TestPartlyReadScopeKeepsItsOwnRow(t *testing.T) {
 	root, git := scopeRepo(t)
-	git("switch", "-q", "-c", "feat")
-	git("commit", "-q", "--allow-empty", "-m", "F")
 	input := unsafeEval("eval")
-	reconcileOn(t, root, "mrv-1", git("rev-parse", "HEAD"), input)
+	git("switch", "-q", "-c", "branch-a")
+	git("commit", "-q", "--allow-empty", "-m", "A")
+	reconcileOn(t, root, "mrv-a", git("rev-parse", "HEAD"), input)
+	git("switch", "-q", "-c", "branch-b", "main")
+	git("commit", "-q", "--allow-empty", "-m", "B")
 	orig := loadScope
-	loadScope = func(string) scope.Scope { return scope.Scope{Current: "feat-renamed"} }
-	t.Cleanup(func() { loadScope = orig })
-	reconcileOn(t, root, "mrv-2", git("rev-parse", "HEAD"), input)
-	if records := readRecords(t, root); len(records) != 1 {
-		t.Fatalf("an unknown scope must deduplicate the re-raise: %+v", records)
+	loadScope = func(string) scope.Scope { return scope.Scope{Current: "branch-b"} }
+	reconcileOn(t, root, "mrv-b", git("rev-parse", "HEAD"), input)
+	loadScope = orig
+	if in, _, _ := ScopedBlocking(root); ids(in) != "mrvf-b-001" {
+		t.Fatalf("once git recovers, branch-b must block on its own re-raised finding: in=%s rows=%+v", ids(in), readRecords(t, root))
 	}
 }
 
@@ -625,5 +627,28 @@ func TestSquashMergedAndDeletedBranchBlocksNothing(t *testing.T) {
 	git("commit", "-q", "--allow-empty", "-m", "N")
 	if in, _, _ := ScopedBlocking(root); len(in) != 0 {
 		t.Fatalf("on a branch cut after the squash merge: in=%s", ids(in))
+	}
+}
+
+// TestPartlyReadScopeNeverMovesABranchlessRow: a partly read scope on branch-b must not refresh (move) a branchless row
+// that gates branch-a — once git recovered, branch-a's gate would clear with the defect still present.
+func TestPartlyReadScopeNeverMovesABranchlessRow(t *testing.T) {
+	root, git := scopeRepo(t)
+	input := unsafeEval("eval")
+	git("switch", "-q", "-c", "branch-a")
+	git("commit", "-q", "--allow-empty", "-m", "A")
+	reconcileOn(t, root, "mrv-a", git("rev-parse", "HEAD"), input)
+	legacy := loadOne(t, root)
+	legacy.Branch = ""
+	seedRecords(t, root, legacy)
+	git("switch", "-q", "-c", "branch-b", "main")
+	git("commit", "-q", "--allow-empty", "-m", "B")
+	orig := loadScope
+	loadScope = func(string) scope.Scope { return scope.Scope{Current: "branch-b"} }
+	reconcileOn(t, root, "mrv-b", git("rev-parse", "HEAD"), input)
+	loadScope = orig
+	git("switch", "-q", "branch-a")
+	if in, _, _ := ScopedBlocking(root); !strings.Contains(ids(in), legacy.ID) {
+		t.Fatalf("branch-a's branchless blocker must still block it: in=%s", ids(in))
 	}
 }
