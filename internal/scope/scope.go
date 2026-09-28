@@ -1,16 +1,18 @@
 // Package scope decides which recorded obligations belong to the branch in hand (#177). One rule, shared by the
 // abandoned-run scan (and, next, findings): an item recorded at commit H on branch N is in scope when N is the
-// current branch — which survives rebase and amend — or when H lies in merge-base(HEAD, default base)..HEAD, which
-// covers detached snapshots and stacked branches, or in the current branch's reflog, which survives a rewrite followed
-// by a rename. Items recorded on a branch that still exists elsewhere belong to
-// that branch; items whose branch is gone (merged and deleted, or never recorded) are orphaned.
+// current branch or one of its former names (a `git branch -m` its reflog records) — which survives rebase, amend and
+// rename — or when H lies in merge-base(HEAD, default base)..HEAD, which covers detached snapshots and stacked
+// branches. An item recorded before branches were (no N) is in scope unless git shows its head belongs nowhere here:
+// not in the range, not one of the current branch's past heads, and unreachable from HEAD (or pruned). Items recorded
+// on a branch that still exists elsewhere belong to that branch; the rest are orphaned.
 //
 // Why both legs: reachability alone lets `git rebase` silently clear a gate (the recorded head becomes unreachable),
 // so routine git use would switch it off; the branch name alone misses detached snapshots and stacked work.
 //
-// Load makes a fixed number of git calls however many items are classified (#177 AC-4.9): the current branch, the
-// fork point, one rev-list of the range into a set, the branch's reflog and the part of it that is the branch's own
-// (one rev-list per 512 reflog heads), and one listing of local branches.
+// Load makes a fixed number of git calls however many items are classified (#177 AC-4.9): the current branch (and,
+// on a detached HEAD, where a rebase keeps its head-name), the fork point, one rev-list of the range into a set, the
+// current branch's reflog, and one listing of local branches. Only legacy items ask more: up to two calls per
+// distinct legacy head, cached.
 package scope
 
 import (
@@ -58,6 +60,10 @@ type Scope struct {
 	// known is false when the repository's branches could not be read (not a git repository): nothing can then be
 	// shown to belong elsewhere, so everything is in scope — never a gate cleared by an unreadable repository.
 	known bool
+	// former holds the current branch's earlier names, from the rename entries its reflog carries.
+	former map[string]bool
+	// pastHeads holds every head the current branch's reflog records: a legacy item at one of them was this branch's.
+	pastHeads map[string]bool
 	// root and git answer the legacy leg: an item recorded before branches were (no branch) whose head is outside the
 	// range is in scope when that head is reachable from HEAD. Asked per legacy item, cached; new items never ask.
 	root      string
@@ -110,7 +116,8 @@ func Load(root string, git Runner) Scope {
 	if git == nil {
 		git = RealRunner
 	}
-	s := Scope{inRange: map[string]bool{}, branches: map[string]bool{}, root: root, git: git, ancestors: map[string]bool{}}
+	s := Scope{inRange: map[string]bool{}, branches: map[string]bool{}, former: map[string]bool{}, pastHeads: map[string]bool{},
+		root: root, git: git, ancestors: map[string]bool{}}
 	// Full refnames throughout: git's --short form turns ambiguous ("heads/feat") the moment a tag shares a branch's
 	// name, which would unmatch the name leg.
 	cur, err := git(root, "symbolic-ref", "-q", "HEAD")
@@ -137,15 +144,13 @@ func Load(root string, git Runner) Scope {
 		for _, sha := range strings.Fields(out) {
 			s.inRange[sha] = true
 		}
-		if s.Current != "" {
-			// The reflog leg: every head this branch has had, so a rebase or amend followed by `git branch -m` (which
-			// carries the reflog along) still finds the run the branch was reviewing. Only the heads the fork point
-			// cannot reach: the reflog starts where the branch was created, a commit its siblings share. A repository
-			// that keeps no branch reflogs (a bare one's default) simply has none to add; with no fork point (the
-			// default branch itself) there is no own work to tell apart, and the name leg stands alone.
-			if err := s.addReflog(root, git, base); err != nil {
-				return s
-			}
+	}
+	if s.Current != "" {
+		// The branch's reflog: its former names, so a rewrite followed by `git branch -m` (which carries the reflog
+		// along) still owns the runs of the name it had; and its past heads, for legacy items. A repository that keeps
+		// no branch reflogs (a bare one's default) simply has none.
+		if err := s.readReflog(root, git); err != nil {
+			return s
 		}
 	}
 	out, err := git(root, "for-each-ref", "--format=%(refname)", "refs/heads")
@@ -159,46 +164,42 @@ func Load(root string, git Runner) Scope {
 	return s
 }
 
-// reflogBatch bounds one rev-list's argument list, so a long-lived branch's reflog never overruns ARG_MAX.
-const reflogBatch = 512
-
-// addReflog adds the current branch's past heads that base cannot reach. Heads only, never their ancestors, and never
-// the head the branch was created at: that is where it forked from — main, or another feature branch it was stacked
-// on — and it names that branch's work, not this one's. One reflog call and one rev-list per reflogBatch heads.
-func (s Scope) addReflog(root string, git Runner, base string) error {
+// readReflog reads the current branch's reflog: every head it has had, and every name it was renamed from.
+func (s Scope) readReflog(root string, git Runner) error {
 	out, err := git(root, "reflog", "show", "--format=%H %gs", "refs/heads/"+s.Current, "--")
 	if err != nil {
 		return err
 	}
-	seen := map[string]bool{}
-	var heads []string
 	for _, line := range strings.Split(out, "\n") {
 		sha, subject, _ := strings.Cut(strings.TrimSpace(line), " ")
-		if sha == "" || seen[sha] || strings.HasPrefix(subject, "branch: Created from") {
+		if sha == "" {
 			continue
 		}
-		seen[sha] = true
-		heads = append(heads, sha)
-	}
-	for len(heads) > 0 {
-		n := min(len(heads), reflogBatch)
-		batch := heads[:n]
-		heads = heads[n:]
-		own, err := git(root, append(append([]string{"rev-list"}, batch...), "--not", base, "--")...)
-		if err != nil {
-			return err
-		}
-		for _, sha := range strings.Fields(own) {
-			if seen[sha] {
-				s.inRange[sha] = true
+		s.pastHeads[sha] = true
+		// "Branch: renamed refs/heads/<old> to refs/heads/<new>" — git's own message; the case has varied.
+		if rest, ok := cutPrefixFold(subject, "branch: renamed "); ok {
+			from, _, _ := strings.Cut(rest, " to ")
+			if name := branchName(from); name != "" {
+				s.former[name] = true
 			}
 		}
 	}
 	return nil
 }
 
-// branchName is a full refname's branch; anything that is not a local branch ("detached HEAD", which git writes as
-// the head-name of a rebase begun detached) is no branch at all.
+func cutPrefixFold(s, prefix string) (string, bool) {
+	if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
+		return s[len(prefix):], true
+	}
+	return "", false
+}
+
+// BranchName is a full refname's branch; anything that is not a local branch ("detached HEAD", which git writes as
+// the head-name of a rebase begun detached) is no branch at all. fsm init records branches by the same rule.
+func BranchName(ref string) string {
+	return branchName(ref)
+}
+
 func branchName(ref string) string {
 	if name, ok := strings.CutPrefix(strings.TrimSpace(ref), "refs/heads/"); ok {
 		return name
@@ -236,11 +237,11 @@ func (s Scope) Classify(branch, head string) Class {
 	switch {
 	case !s.known:
 		return InScope
-	case branch != "" && branch == s.Current:
+	case branch != "" && (branch == s.Current || s.former[branch]):
 		return InScope
 	case head != "" && s.inRange[head]:
 		return InScope
-	case branch == "" && (head == "" || s.reachable(head)):
+	case branch == "" && (head == "" || s.pastHeads[head] || s.reachable(head)):
 		return InScope
 	case branch != "" && s.branches[branch]:
 		return OtherBranch
@@ -249,9 +250,9 @@ func (s Scope) Classify(branch, head string) Class {
 	}
 }
 
-// reachable reports whether head is an ancestor of HEAD, one git call per distinct legacy head. Only git's own "no"
-// (exit 1), or a commit git no longer has, is unreachable: a malformed head or a failed call proves nothing, so it
-// stays in scope.
+// reachable reports whether head is an ancestor of HEAD: one git call per distinct legacy head, and a second when
+// that one fails. Only git's own "no" (exit 1), or a commit git no longer has, is unreachable: a malformed head or a
+// failed call proves nothing, so it stays in scope.
 func (s Scope) reachable(head string) bool {
 	if got, ok := s.ancestors[head]; ok {
 		return got

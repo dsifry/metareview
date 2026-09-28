@@ -1439,7 +1439,11 @@ func abandonedLines(root string, all bool) []string {
 	}
 	lines := []string{fmt.Sprintf("abandoned runs on this branch: %d", len(mine))}
 	for _, a := range mine {
-		lines = append(lines, "  "+a.RunID+"  "+a.Workflow+" @ "+a.State)
+		line := "  " + a.RunID + "  " + a.Workflow + " @ " + a.State
+		if a.Branch != "" { // a stacked branch inherits its base's runs: say whose each one is
+			line += "  (branch " + a.Branch + ")"
+		}
+		lines = append(lines, line)
 	}
 	if !all {
 		if len(elsewhere) > 0 {

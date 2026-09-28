@@ -252,6 +252,46 @@ func TestALegacyRunWhoseHeadWasPrunedIsOrphaned(t *testing.T) {
 	}
 }
 
+// A stacked branch that fast-forwards to its parent's newer tip does not take the parent's runs as its own: once the
+// parent is merged and deleted and the child moved onto main, the parent's run is orphaned (AC-4.6).
+func TestAFastForwardedParentHeadStaysTheParents(t *testing.T) {
+	root, common := newRepo(t)
+	gitRun(t, root, "checkout", "-q", "-b", "feat-a")
+	commit(t, root, "a1")
+	gitRun(t, root, "checkout", "-q", "-b", "feat-b")
+	gitRun(t, root, "checkout", "-q", "feat-a")
+	a2 := commit(t, root, "a2")
+	writeStoreRun(t, common, "mrv-ffparent-001", "feat-a", a2)
+	gitRun(t, root, "checkout", "-q", "feat-b")
+	gitRun(t, root, "merge", "-q", "--ff-only", "feat-a") // a2 is now one of feat-b's own reflog heads
+	commit(t, root, "b1")
+	gitRun(t, root, "branch", "-q", "-D", "feat-a")
+	gitRun(t, root, "rebase", "-q", "--onto", "main", a2, "feat-b")
+	mine, elsewhere := ScanAbandonedRuns(root)
+	if len(mine) != 0 || len(elsewhere) != 1 || elsewhere[0].Scope != "orphaned" {
+		t.Fatalf("feat-a's run is orphaned, not feat-b's: mine %v, elsewhere %+v", ids(mine), elsewhere)
+	}
+}
+
+// The rename protection holds however the branch began: created on its own unpushed work (committed on main by
+// mistake, then `switch -c`), and with the run recorded at the creation head before any new commit.
+func TestARenameKeepsARunRecordedAtTheCreationHead(t *testing.T) {
+	root, common := newRepo(t)
+	w1 := commit(t, root, "w1 on main by mistake")
+	gitRun(t, root, "switch", "-q", "-c", "feat")
+	gitRun(t, root, "branch", "-q", "-f", "main", "HEAD~1")
+	writeStoreRun(t, common, "mrv-creation-001", "feat", w1)
+	gitRun(t, root, "commit", "-q", "--amend", "--allow-empty", "-m", "w1 amended")
+	gitRun(t, root, "branch", "-m", "feat", "feat2")
+	if got := strings.Join(ids(DiscoverAbandonedRuns(root)), ","); got != "mrv-creation-001" {
+		t.Fatalf("the renamed branch must still own the run recorded at its creation head, got %q", got)
+	}
+	gitRun(t, root, "branch", "-m", "feat2", "feat3") // a chain of renames
+	if got := strings.Join(ids(DiscoverAbandonedRuns(root)), ","); got != "mrv-creation-001" {
+		t.Fatalf("every former name is still the branch's own, got %q", got)
+	}
+}
+
 // AC-4.4: a run created detached with --for-branch feat blocks feat, including after feat is rebased.
 func TestADetachedRunForABranchBlocksThatBranch(t *testing.T) {
 	root, common := newRepo(t)

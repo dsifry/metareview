@@ -1369,7 +1369,7 @@ func TestStatusAllNeverChangesTheExit(t *testing.T) {
 		t.Errorf("--base --all must pass --all as the base, got a usage error: %s", errOut)
 	}
 	_, plain, _ := runCLI(t, root, nil, "status")
-	for _, want := range []string{"abandoned runs on this branch: 1", "mrv-t-feature-001  t @ fix", "abandoned runs elsewhere: 3 (metareview status --all lists them)"} {
+	for _, want := range []string{"abandoned runs on this branch: 1", "mrv-t-feature-001  t @ fix  (branch feature)", "abandoned runs elsewhere: 3 (metareview status --all lists them)"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("plain status missing %q:\n%s", want, plain)
 		}

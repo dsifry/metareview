@@ -36,12 +36,15 @@ func TestClassify(t *testing.T) {
 		return "", &exitError{code: 1}
 	}
 	s := Scope{Current: "feat", inRange: map[string]bool{"h-in-range": true}, branches: map[string]bool{"feat": true, "other": true}, known: true,
-		git: git, ancestors: map[string]bool{}}
+		former: map[string]bool{"feat-old": true}, pastHeads: map[string]bool{"h-past": true}, git: git, ancestors: map[string]bool{}}
 	for _, c := range []struct {
 		branch, head string
 		want         Class
 	}{
 		{"feat", "anything", InScope},         // the name leg survives rebase and amend
+		{"feat-old", "anything", InScope},     // ... and a rename: the branch's former name is still its own
+		{"", "h-past", InScope},               // a legacy item at one of the branch's past heads
+		{"other", "h-past", OtherBranch},      // a named item never takes the past-heads leg
 		{"", "h-in-range", InScope},           // detached snapshot / legacy run, by reachability
 		{"feat-a", "h-in-range", InScope},     // stacked: feat-a's commit is in feat's range
 		{"other", "h-elsewhere", OtherBranch}, // a live branch's own obligation
@@ -76,33 +79,29 @@ func TestClassify(t *testing.T) {
 	}
 }
 
-// fakeGit answers Load's calls; fail names the call that errors (with its exit code, -1 for no exit): a subcommand,
-// or "own" for the reflog's rev-list.
+// fakeGit answers Load's calls; fail names the subcommand that errors (with its exit code, -1 for no exit).
 func fakeGit(calls *int, fail string, failCode int) Runner {
 	return func(_ string, args ...string) (string, error) {
 		*calls++
-		name := args[0]
-		if name == "rev-list" && args[1] != "base..HEAD" {
-			name = "own"
-		}
-		if name == fail {
+		if args[0] == fail {
 			if failCode < 0 {
 				return "", errors.New("timed out")
 			}
 			return "", &exitError{code: failCode}
 		}
-		switch name {
+		switch args[0] {
 		case "symbolic-ref":
 			return "refs/heads/feat", nil
 		case "rev-list":
 			return "c1\nc2", nil
-		case "reflog": // newest first; the creation entry names the branch it forked from, never its own work
-			return "r2 rebase (finish): refs/heads/feat onto base\nr1 commit: work\nr1 reset: moving to r1\nshared commit: older\nparent branch: Created from HEAD", nil
-		case "own": // the commits the fork point cannot reach, ancestors included
-			if strings.Join(args, " ") != "rev-list r2 r1 shared --not base --" {
-				return "", errors.New("unexpected " + strings.Join(args, " "))
-			}
-			return "r2\nr1\nancestor", nil
+		case "reflog": // newest first
+			return "r2 Branch: renamed refs/heads/feat-old to refs/heads/feat\n" +
+				"r2 branch: renamed refs/heads/first to refs/heads/feat-old\n" +
+				"r2 rebase (finish): refs/heads/first onto base\n" +
+				"r1 commit: work\n" +
+				"\n" + // a blank line is skipped
+				"r1 Branch: renamed nonsense to refs/heads/x\n" + // not a local branch: no former name
+				"parent branch: Created from HEAD", nil
 		case "rev-parse":
 			return "rebase-merge/head-name\nrebase-apply/head-name", nil
 		default:
@@ -121,61 +120,17 @@ func TestLoadMakesAFixedNumberOfGitCalls(t *testing.T) {
 	for i := 0; i < 2000; i++ { // 2,000 runs over 50 branches
 		s.Classify("b"+strconv.Itoa(i%50), "h"+strconv.Itoa(i))
 	}
-	if calls != 5 {
-		t.Fatalf("Load must make exactly 5 git calls (plus the fork point), made %d", calls)
+	if calls != 4 {
+		t.Fatalf("Load must make exactly 4 git calls (plus the fork point), made %d", calls)
 	}
-	if s.Current != "feat" || !s.inRange["c2"] || !s.inRange["r1"] || !s.inRange["r2"] || s.inRange["shared"] || s.inRange["parent"] ||
-		s.inRange["ancestor"] || !s.branches["main"] || !s.known {
+	if s.Current != "feat" || !s.inRange["c2"] || s.inRange["r1"] || !s.pastHeads["r1"] || !s.pastHeads["parent"] ||
+		!s.former["feat-old"] || !s.former["first"] || len(s.former) != 2 || !s.branches["main"] || !s.known {
 		t.Fatalf("Load parsed %+v", s)
 	}
-	// No fork point (the default branch) is not a failure: an empty range and no reflog leg, the scope still known.
+	// No fork point (the default branch) is not a failure: an empty range, the reflog still read, the scope known.
 	forkPoint = func(string) (string, bool, error) { return "", false, nil }
-	if s := Load("/repo", fakeGit(&calls, "", 0)); !s.known || s.inRange["c1"] || s.inRange["r1"] {
+	if s := Load("/repo", fakeGit(&calls, "", 0)); !s.known || s.inRange["c1"] || !s.former["first"] {
 		t.Fatalf("no fork point leaves the range empty and the scope known: %+v", s)
-	}
-	// A branch with no reflog (a bare repository's default) adds nothing and asks nothing more.
-	forkPoint = func(string) (string, bool, error) { return "base", true, nil }
-	calls = 0
-	noReflog := func(dir string, args ...string) (string, error) {
-		if args[0] == "reflog" {
-			calls++
-			return "", nil
-		}
-		return fakeGit(&calls, "", 0)(dir, args...)
-	}
-	if s := Load("/repo", noReflog); !s.known || s.inRange["r1"] || calls != 4 {
-		t.Fatalf("no reflog: %d calls, %+v", calls, s)
-	}
-}
-
-// A long reflog is checked in batches, so no single rev-list overruns the argument limit.
-func TestLoadBatchesALongReflog(t *testing.T) {
-	orig := forkPoint
-	t.Cleanup(func() { forkPoint = orig })
-	forkPoint = func(string) (string, bool, error) { return "base", true, nil }
-	var lines []string
-	for i := 0; i < reflogBatch+10; i++ {
-		lines = append(lines, "h"+strconv.Itoa(i)+" commit: x")
-	}
-	var batches []int
-	git := func(_ string, args ...string) (string, error) {
-		switch args[0] {
-		case "symbolic-ref":
-			return "refs/heads/feat", nil
-		case "reflog":
-			return strings.Join(lines, "\n"), nil
-		case "rev-list":
-			if args[1] == "base..HEAD" {
-				return "", nil
-			}
-			batches = append(batches, len(args)-4) // rev-list <heads...> --not base --
-			return strings.Join(args[1:len(args)-3], "\n"), nil
-		}
-		return "refs/heads/feat", nil
-	}
-	s := Load("/repo", git)
-	if len(batches) != 2 || batches[0] != reflogBatch || batches[1] != 10 || !s.inRange["h0"] || !s.inRange["h"+strconv.Itoa(reflogBatch+9)] {
-		t.Fatalf("batches %v, scope %+v", batches, s.known)
 	}
 }
 
@@ -187,7 +142,7 @@ func TestLoadFailsClosed(t *testing.T) {
 	for _, c := range []struct {
 		fail string
 		code int
-	}{{"symbolic-ref", 128}, {"symbolic-ref", -1}, {"rev-list", 128}, {"reflog", -1}, {"own", 128}, {"for-each-ref", 128}} {
+	}{{"symbolic-ref", 128}, {"symbolic-ref", -1}, {"rev-list", 128}, {"reflog", -1}, {"for-each-ref", 128}} {
 		calls := 0
 		if s := Load("/repo", fakeGit(&calls, c.fail, c.code)); s.known || s.Classify("other", "x") != InScope {
 			t.Errorf("%s failing (%d) must leave the scope unknown, got %+v", c.fail, c.code, s)
@@ -212,16 +167,15 @@ func TestLoadDetachedAndMidRebase(t *testing.T) {
 		}
 		return nil, os.ErrNotExist
 	}
-	if branchName("detached HEAD") != "" || branchName("refs/tags/feat") != "" || branchName("refs/heads/a/b\n") != "a/b" {
+	if BranchName("detached HEAD") != "" || BranchName("refs/tags/feat") != "" || BranchName("refs/heads/a/b\n") != "a/b" {
 		t.Fatal("branchName keeps only local branches")
 	}
 	calls := 0
-	forkPoint = func(string) (string, bool, error) { return "base", true, nil }
-	if s := Load("/repo", fakeGit(&calls, "symbolic-ref", 1)); !s.known || s.Current != "feat" || !s.inRange["r1"] {
+	if s := Load("/repo", fakeGit(&calls, "symbolic-ref", 1)); !s.known || s.Current != "feat" || !s.pastHeads["r1"] {
 		t.Fatalf("mid-rebase the branch being rebased is current, with its reflog: %+v", s)
 	}
 	readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
-	if s := Load("/repo", fakeGit(&calls, "symbolic-ref", 1)); !s.known || s.Current != "" || s.inRange["r1"] {
+	if s := Load("/repo", fakeGit(&calls, "symbolic-ref", 1)); !s.known || s.Current != "" || s.pastHeads["r1"] {
 		t.Fatalf("a plain detached HEAD has no current branch and no reflog leg: %+v", s)
 	}
 	// rev-parse --git-path failing while detached leaves the scope unknown.

@@ -302,7 +302,7 @@ func TestInitRecordsTheBranchAndRequiresOneWhenDetached(t *testing.T) {
 	git(t, h.root, "checkout", "-q", "--detach")
 	// Detached, the name must be a local branch: a typo, a remote-tracking name or a full ref would never match the
 	// name leg, so the run would be orphaned — blocking nothing — as soon as the real branch is rebased.
-	for _, bad := range []string{"fea", "origin/feat", "refs/heads/feat"} {
+	for _, bad := range []string{"fea", "origin/feat", "refs/heads/feat", "FEAT"} { // FEAT: a case-insensitive FS resolves it
 		e := h.mustErr(CodeUsage, 2, append(h.mockInit(), "--for-branch", bad)...)
 		if !strings.Contains(e["error"].(map[string]any)["detail"].(string), "not a local branch") {
 			t.Fatalf("--for-branch %s must be refused as not a local branch: %v", bad, e)
@@ -353,7 +353,7 @@ func TestInitForBranchCheckTellsGitFailingFromNo(t *testing.T) {
 	realExec := h.deps.Exec
 	fail := func(stdout []byte, code int, err error) {
 		h.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
-			if len(args) > 1 && args[0] == "rev-parse" && args[1] == "--verify" {
+			if len(args) > 0 && args[0] == "for-each-ref" {
 				return stdout, nil, code, err
 			}
 			return realExec(ctx, dir, env, args...)
@@ -361,7 +361,7 @@ func TestInitForBranchCheckTellsGitFailingFromNo(t *testing.T) {
 	}
 	fail(nil, 128, nil)
 	e := h.mustErr("ERR_GIT", 2, append(h.mockInit(), "--for-branch", "feat")...)
-	if d := e["error"].(map[string]any)["detail"].(string); !strings.Contains(d, "rev-parse exited 128") {
+	if d := e["error"].(map[string]any)["detail"].(string); !strings.Contains(d, "for-each-ref exited 128") {
 		t.Fatalf("a failing check is git's failure, not a missing branch: %v", e)
 	}
 	fail(nil, -1, context.DeadlineExceeded)

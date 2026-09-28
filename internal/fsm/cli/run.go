@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/dsifry/metareview/internal/fsm/mockai"
 	"github.com/dsifry/metareview/internal/fsm/run"
 	"github.com/dsifry/metareview/internal/fsm/workflow"
+	"github.com/dsifry/metareview/internal/scope"
 	"github.com/dsifry/metareview/workflows"
 )
 
@@ -282,17 +284,19 @@ func (in *invocation) init() int {
 	out, code, err := c.git(workDir, "symbolic-ref", "-q", "HEAD")
 	switch {
 	case err == nil && code == 0:
-		current = strings.TrimPrefix(out, "refs/heads/")
+		current = scope.BranchName(out)
 	case err != nil || code != 1: // 1 is git's "detached"; anything else is git failing, not a detached HEAD
 		return gitFailed("symbolic-ref", code, err)
 	}
 	if branch != "" && current == "" {
 		// A name no local branch has would never match the name leg: after a rebase the run would be orphaned and
-		// block nothing, so the branch must exist. git's "no" is exit 1; anything else is git failing.
-		switch _, code, err := c.git(workDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); {
-		case err != nil || (code != 0 && code != 1):
-			return gitFailed("rev-parse", code, err)
-		case code == 1:
+		// block nothing, so the branch must exist — spelled exactly as git lists it (a case-insensitive filesystem
+		// resolves refs/heads/FEAT to feat, which status, comparing exactly, would never match).
+		out, code, err := c.git(workDir, "for-each-ref", "--format=%(refname)", "refs/heads")
+		if err != nil || code != 0 {
+			return gitFailed("for-each-ref", code, err)
+		}
+		if !slices.Contains(strings.Fields(out), "refs/heads/"+branch) {
 			return in.usage("--for-branch " + strconv.Quote(branch) + " is not a local branch in " + workDir)
 		}
 	}
