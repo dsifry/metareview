@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2-618d44572b40064c-claude-subagent",
+  "kind": "shard",
+  "shardId": "shard-2",
+  "shardHash": "618d44572b40064c",
+  "planHash": "f910695337c9e671",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-2",
+  "reviewedAt": "2026-09-28T16:34:45Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/roots_test.go", "line": 396, "note": "only change in this shard since the previous plan (ce80bb4..25eb567): TestInitFoldsAMisSpelledHEADOnlyWhenGitResolvesIt injects Exec to make symbolic-ref report refs/heads/MAIN and rev-parse --verify exit 0/1/128, asserting fold to main, record MAIN, and ERR_GIT 'rev-parse exited 128' respectively; filesystem-independent"},
+    {"path": "internal/fsm/cli/run.go", "line": 305, "note": "the injected argv matches the writer exactly (rev-parse --verify --quiet refs/heads/<current>, args[3]); c.git passes args straight to deps.Exec (wiring.go:46) and gitFailed formats 'git %s exited %d' (run.go:277), so the test pins the fail-closed branch added in bc41860"},
+    {"path": "internal/status/status.go", "line": 233, "note": "buildFor/buildForBranch/emit unchanged since the previous plan: Abandoned (blocking) vs Elsewhere (counted, listed only with --all)"},
+    {"path": "internal/githooktest/stophook_layout_test.go", "line": 445, "note": "Stop hook layout tests unchanged; exercised against the real CLI in single, linked-worktree and bare layouts"},
+    {"note": "go test ./internal/fsm/cli ./internal/status ./internal/githooktest ./internal/fsm/run ./internal/fsm/machine pass at head 25eb567; the new test and TestInitRecordsTheBranchAsGitListsIt pass with -count=1"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "Carried from the previous plan: the buildForBranch comment 'It is not filtered by scope because it is not a claim about files' reads as if abandoned runs are unscoped, but since #177 r.Abandoned is already branch-scoped by ScanAbandonedRuns (only the file scope is not applied). Documentation-only; behaviour correct.",
+      "evidence": [
+        {"path": "internal/status/status.go", "line": 616}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "The new test's Exec stub answers every symbolic-ref call with refs/heads/MAIN, not only the HEAD query in init; harmless today (init issues the single symbolic-ref -q HEAD before the fold) but would silently mask a future second symbolic-ref call. Test-hygiene only.",
+      "evidence": [
+        {"path": "internal/fsm/cli/roots_test.go", "line": 406}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

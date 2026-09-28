@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3-2-b18eb2dc02ea66c5-claude-subagent",
+  "kind": "shard",
+  "shardId": "shard-3-2",
+  "shardHash": "b18eb2dc02ea66c5",
+  "planHash": "f910695337c9e671",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-3-2",
+  "reviewedAt": "2026-09-28T16:35:04Z",
+  "evidence": [
+    {"path": "internal/status/fsmruns_store_test.go", "line": 350, "note": "remote-exclusion fixtures now configure origin (git remote add), matching scope.go:138 which derives default refs only from configured remote names; without it the stale-main test would be vacuous"},
+    {"path": "internal/status/fsmruns_store_test.go", "line": 368, "note": "with origin configured, refs/remotes/origin/alice/main is correctly not a default branch (scope.go:222 remoteDefaultRefs), so the test still discriminates the namespaced-branch case"},
+    {"path": "internal/status/fsmruns_store_test.go", "line": 37, "note": "gitEnv scrubs inherited GIT_* and global/system config for fixture git, so hook-invoked test runs cannot touch the outer repository"},
+    {"path": "skills/fsm/SKILL.md", "line": 109, "note": "the 'never block' wording is qualified: other-branch and merged runs block only when their head lies in this branch's merge-base..HEAD range, matching scope.go range leg"},
+    {"note": "go test -count=1 ./internal/status/ passes at head 25eb567 (31.5s); only change since the prior plan's review of this shard is the two remote add lines and the SKILL.md qualification."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "No status-level fixture for a bare-main repository with linked worktrees (the #174 layout) or for a remote whose name itself contains a slash (e.g. team/alice, remoteDefaultRefs comment); both are covered only by scope-package reasoning. Test-coverage gap, not a behaviour defect.",
+      "evidence": [
+        {"path": "internal/status/fsmruns_store_test.go", "line": 363}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "gitOut uses c.Output(), so a failing fixture git reports only the exit status without stderr (gitRun uses CombinedOutput). Diagnosability only.",
+      "evidence": [
+        {"path": "internal/status/fsmruns_store_test.go", "line": 62}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

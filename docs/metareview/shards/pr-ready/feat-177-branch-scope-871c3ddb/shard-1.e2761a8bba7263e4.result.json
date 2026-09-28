@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1-e2761a8bba7263e4-claude-subagent",
+  "kind": "shard",
+  "shardId": "shard-1",
+  "shardHash": "e2761a8bba7263e4",
+  "planHash": "f910695337c9e671",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-1",
+  "reviewedAt": "2026-09-28T16:34:33Z",
+  "evidence": [
+    {"path": "internal/fsm/machine/machine.go", "line": 196, "note": "Init records o.Branch into run.InitData.Branch; unchanged since the previous plan's review"},
+    {"path": "internal/scope/scope_test.go", "line": 108, "note": "TestRemoteDefaultRefs covers slash-named remotes (team/alice), rejects origin/alice/main namespaced branch and an unconfigured team remote; range args assert both configured defaults excluded, origin/alice/main and origin/HEAD kept in range"},
+    {"path": "internal/scope/scope_test.go", "line": 233, "note": "TestLoadFailsClosed adds the new 'git remote' call failing (128) -> scope unknown, matching scope.go Load returning early on that error"},
+    {"path": "internal/status/fsmruns.go", "line": 124, "note": "scanAbandonedRuns: InScope blocks, other/orphaned go to elsewhere with id dedupe; file unchanged since ce80bb4"},
+    {"note": "Only change in this shard since the previous plan (head ce80bb4) is scope_test.go following the remoteDefaultRefs refactor; go test ./internal/scope/ ./internal/status/ ./internal/fsm/machine/ pass at 25eb567"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "Known (final-review list): TestClassify's legacy past-heads case uses the non-SHA 'h-past', so it exercises the pastHeads leg via a head reachable() would never ask git about; coverage gap only, behaviour verified by the real-repository test.",
+      "evidence": [
+        {"path": "internal/scope/scope_test.go", "line": 47}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

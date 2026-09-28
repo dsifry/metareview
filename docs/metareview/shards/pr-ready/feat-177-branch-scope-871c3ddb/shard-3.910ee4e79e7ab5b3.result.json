@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3-910ee4e79e7ab5b3-claude-subagent",
+  "kind": "shard",
+  "shardId": "shard-3",
+  "shardHash": "910ee4e79e7ab5b3",
+  "planHash": "f910695337c9e671",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-3",
+  "reviewedAt": "2026-09-28T16:34:51Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/run.go", "line": 269, "note": "init branch resolution: symbolic-ref exit 1 only is detached; other failures ERR_GIT; case fold now fails closed on rev-parse errors (prior low finding fixed)"},
+    {"path": "internal/scope/scope.go", "line": 120, "note": "Load never fails open: every git error returns an unknown Scope and Classify puts everything in scope"},
+    {"path": "internal/repo/worktree.go", "line": 67, "note": "MainWorktreeIsBare removed; grep over *.go finds no remaining callers; go build ./... succeeds"},
+    {"note": "go build ./..., go vet and go test on internal/scope, internal/repo, internal/fsm/cli all pass at 25eb567"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "readReflog uses a value receiver to fill maps (works because maps are reference types); listed as accepted style in the fourth-round known list.",
+      "evidence": [{"path": "internal/scope/scope.go", "line": 196}]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "fsm init on a mid-rebase (detached) HEAD still requires --for-branch while status reads rebase head-name; known and accepted in the second round.",
+      "evidence": [{"path": "internal/fsm/cli/run.go", "line": 321}]
+    }
+  ],
+  "blockingCount": 0
+}

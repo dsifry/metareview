@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-f910695337c9e671-claude-subagent",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "f910695337c9e671",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-cross-shard",
+  "reviewedAt": "2026-09-28T16:35:43Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/run.go", "line": 305, "note": "writer: fsm init now fails closed (ERR_GIT via gitFailed) when rev-parse --verify exits other than 0/1, matching scope.Load which leaves the scope unknown on the same condition; the previous plan's open low writer/reader asymmetry is resolved"},
+    {"path": "internal/scope/scope.go", "line": 150, "note": "reader: Load's fold guard (0 folds, 1 keeps, other returns unknown) now mirrors init exactly; both list refs/heads and compare full refnames through BranchName/branchName, so recorded and compared spellings agree"},
+    {"path": "internal/scope/scope.go", "line": 138, "note": "range leg: remote defaults are now refs/remotes/<configured remote>/main|master from `git remote`; a `git remote` failure leaves the scope unknown (fail closed); no remotes means nothing is excluded, i.e. a wider range (over-block direction)"},
+    {"path": "internal/status/fsmruns_store_test.go", "line": 350, "note": "status-level tests now configure origin before faking refs/remotes/origin/*, consistent with the configured-remote rule; origin/alice/main still not treated as a default"},
+    {"path": "internal/fsm/cli/roots_test.go", "line": 396, "note": "init fold decision covered for exit 0 (fold), 1 (keep), 128 (ERR_GIT with rev-parse detail) via an Exec stub"},
+    {"note": "Docs vs code: commands/status.md and skills/fsm/SKILL.md now qualify 'never block' with the in-range exception, matching Classify (range leg applies to runs of other/deleted branches); ARCHITECTURE.md line 208 describes refs/remotes/<remote>/main exclusion consistently; status.go OtherBranchRuns comment ('never block here') is accurate since in-range runs are counted as Abandoned, not OtherBranchRuns."},
+    {"note": "go test ./internal/scope ./internal/status ./internal/fsm/cli ./internal/fsm/machine ./internal/fsm/run ./internal/repo ./internal/githooktest ./cmd/metareview all pass at head 25eb567; all five shard results for plan f910695337c9e671 are PASS_ADVISORY with blockingCount 0."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "Fork seam (known: no test for fork keeping Branch): a child forked on another checkout keeps the parent's Branch but records its own head; over-blocks rather than clears, so fail-closed holds.",
+      "evidence": [{"path": "internal/fsm/machine/fork.go", "line": 219}]
+    },
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "Configured-remote exclusion assumes the default fetch refspec (refs/remotes/<name>/*). A remote whose fetch refspec maps elsewhere has its default branch left in the range, widening scope (over-block only, never clears a gate). Edge configuration; no action needed beyond noting it with mr-as8.",
+      "evidence": [{"path": "internal/scope/scope.go", "line": 220}]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "Cosmetic doc defect carried from shard-0: a sentence in ARCHITECTURE.md's Known trade-offs list begins lowercase. No behavioural effect.",
+      "evidence": [{"path": "docs/ARCHITECTURE.md", "line": 230}]
+    }
+  ],
+  "blockingCount": 0
+}

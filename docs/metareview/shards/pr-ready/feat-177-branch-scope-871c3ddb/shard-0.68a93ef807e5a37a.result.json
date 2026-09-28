@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0-68a93ef807e5a37a-claude-subagent",
+  "kind": "shard",
+  "shardId": "shard-0",
+  "shardHash": "68a93ef807e5a37a",
+  "planHash": "f910695337c9e671",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-0",
+  "reviewedAt": "2026-09-28T16:34:39Z",
+  "evidence": [
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 205,
+      "note": "--all is stripped before form parsing except as the operand of --target/--base; each status --json form dispatches to EmitFor/EmitForBranch or its All twin, which differ only in listing elsewhere, so the exit code cannot change."
+    },
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 1435,
+      "note": "abandonedLines prints this branch's runs, then a count or (with --all) branch-grouped runs using a NUL sentinel so the empty legacy branch gets its own header; ScanAbandonedRuns sorts elsewhere by branch."
+    },
+    {
+      "path": "cmd/metareview/main_test.go",
+      "line": 1311,
+      "note": "TestStatusAllNeverChangesTheExit covers the four --json forms with and without --all, operand cases, plain and --all output; go test ./cmd/metareview -run TestStatusAll passes at 25eb567."
+    },
+    {
+      "path": "commands/status.md",
+      "line": 23,
+      "note": "Qualification that other-branch/orphaned runs block when their head lies in this branch's range matches the range leg in internal/scope/scope.go (rev-list base..HEAD --not configured remotes' main/master)."
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "line": 208,
+      "note": "Range-leg description (refs/remotes/<remote>/main|master excluded) matches remoteDefaultRefs over git remote output in internal/scope/scope.go:222."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "Cosmetic: a sentence in the Known trade-offs list begins lowercase after a full stop (\"local main or master. a squash-merged ...\"). Documentation only.",
+      "evidence": [
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "line": 230,
+          "note": "sentence starts with lowercase 'a squash-merged' after a full stop"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}
