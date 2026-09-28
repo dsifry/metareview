@@ -226,7 +226,7 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 	r.Abandoned = DiscoverAbandonedRuns(root)
 	if LegacyRunsPending(root) {
 		r.Warnings = append(r.Warnings, "0.13.x FSM runs are still in "+filepath.Join(repo.RunStoreRoot(root), ".metareview", "runs")+
-			" (run-store: shared); any `metareview fsm` command migrates them into git's common directory")
+			"; any `metareview fsm` command migrates them into git's common directory")
 	}
 	for _, a := range r.Abandoned {
 		r.MustClear = append(r.MustClear, Blocker{

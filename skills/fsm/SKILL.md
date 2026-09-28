@@ -106,7 +106,7 @@ ratio. A candidate whose file is not in the diff is never judged: it is kept as
 - `.git/metareview/runs.jsonl` — one row per terminal run, beside the runs in git's common directory (the checkout's `.metareview/runs.jsonl` keeps only review/gate rows).
 - `docs/metareview/fsm/<id>/` — `fsm export` bundles (durable; commit them). Exports are one-way; `--include-vars` needs
   an explicit `--out` and that output is never committed; `record.data` events are exported unredacted.
-- `metareview status` lists the FSM runs of the main worktree.
+- `metareview status` lists the abandoned FSM runs of the worktree it runs in (a run belongs to the worktree containing its init work dir; one whose worktree is gone is reported from the main checkout).
 
 metaswarm repositories: metareview deepens the existing review framework; Beads task state, Superpowers workflows and
 PR shepherding stay where they are. Keep the loop warm: the same session that discovered the bugs fixes them.

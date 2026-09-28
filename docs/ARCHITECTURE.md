@@ -192,7 +192,9 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   meant to be committed on that branch — a default `fsm export` bundle lands in the *requesting* worktree's
   `docs/metareview/fsm/`. In a single checkout anchor and work root coincide. Tripwires, not proofs (they match
   literal path forms only): `TestFSMRootsAreDeclared` (a `root: store|work` declaration at each such site in
-  `internal/fsm`) and `TestRunStoreReadersAreDeclared` (run-store readers outside the FSM).
+  `internal/fsm`; a common-dir site must say `root: store (git's common directory)`, and a site that is no store
+  path at all may say `root: none`) and `TestRunStoreReadersAreDeclared` (run-store readers outside the FSM, declared
+  by `RunStoreRoot`, `StoreDir` or a `run-store:` comment).
 - **One base resolver (#175):** `internal/baseref` decides what an explicit `--base` means for every gate,
   `record-lenses`, `context diff` (via `gitcontext.resolveBase`) and `fsm init` (via `gate.Git.ResolveBase`). A
   branch name (`main`, `origin/main`, `refs/heads/…`, `refs/remotes/…`) is `merge-base(HEAD, <branch>)` — the fork

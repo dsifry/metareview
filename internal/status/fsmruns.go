@@ -87,7 +87,12 @@ func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
 	// branch's abandoned run must not block this checkout's Stop hook. A run whose work_dir cannot be attributed (its
 	// worktree was removed) is reported from the main checkout, never dropped: an unattributable run silently
 	// escaping every Stop gate would be the worse failure.
+	// Compare toplevel to toplevel: root may be a subdirectory repo.Root stopped at (a monorepo package with its
+	// own docs/metareview), which no run's containing worktree ever equals.
 	here := canonical(root)
+	if top, err := repo.Toplevel(root); err == nil {
+		here = canonical(top)
+	}
 	main := canonical(repo.RunStoreRoot(root))
 	mine := func(r AbandonedRun) bool {
 		owner, err := repo.Toplevel(r.workDir)

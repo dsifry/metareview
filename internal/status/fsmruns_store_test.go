@@ -100,6 +100,13 @@ func TestAbandonedRunsAreAttributedToTheirContainingWorktree(t *testing.T) {
 	if got := strings.Join(ids(DiscoverAbandonedRuns(main)), ","); got != "mrv-gone-0000001,mrv-sub-00000001" {
 		t.Errorf("main checkout: got %s", got)
 	}
+	// Status run from a subdirectory (a monorepo package with its own docs/metareview) is still the main checkout.
+	if err := os.MkdirAll(filepath.Join(main, "sub", "docs", "metareview"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(ids(DiscoverAbandonedRuns(filepath.Join(main, "sub"))), ","); got != "mrv-gone-0000001,mrv-sub-00000001" {
+		t.Errorf("subdirectory of the main checkout: got %s", got)
+	}
 	if got := strings.Join(ids(DiscoverAbandonedRuns(wt)), ","); got != "mrv-legacy-wt-01,mrv-wt-000000001" {
 		t.Errorf("linked worktree: got %s", got)
 	}

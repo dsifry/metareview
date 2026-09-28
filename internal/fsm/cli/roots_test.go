@@ -122,9 +122,10 @@ func buildsRootedPath(code string) bool {
 }
 
 // TestFSMRootsAreDeclared keeps #169/#172 from recurring inside the FSM: every line in internal/fsm that
-// names a .metareview or docs/metareview path must say which root it means — `root: store` (shared state,
-// the main worktree) or `root: work` (the checkout the command runs in) — on that line or within the three
-// lines above. It is a tripwire over those literal path forms (split elements and slash-joined strings), not
+// names a .metareview, docs/metareview or git-common-dir metareview path must say which root it means — `root: store`
+// (shared state) or `root: work` (the checkout the command runs in) — on that line or within the three lines above.
+// Since #173 `root: store` has two homes, so a common-dir site (buildsCommonDirPath) must also name "common dir"
+// (e.g. `root: store (git's common directory)`); a site that is not a store path at all may say `root: none`. It is a tripwire over those literal path forms (split elements and slash-joined strings), not
 // proof: a path assembled any other way is not seen. Comment lines are skipped.
 func TestFSMRootsAreDeclared(t *testing.T) {
 	const window = 3
@@ -155,7 +156,7 @@ func TestFSMRootsAreDeclared(t *testing.T) {
 				}
 			}
 			if !declared {
-				t.Errorf("%s:%d builds a .metareview/docs path without a `root: store` or `root: work` declaration", path, i+1)
+				t.Errorf("%s:%d builds a .metareview/docs/common-dir path without a `root: store`, `root: work` or `root: none` declaration", path, i+1)
 			}
 			// `root: store` alone is ambiguous since #173 (the anchor checkout or git's common directory): a
 			// common-dir site must say which.
