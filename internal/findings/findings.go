@@ -142,8 +142,10 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	//     of the branch's own past heads (its reflog) — otherwise that row could later fall out of the branch's history
 	//     and leave it with no row of its own — and never re-stamps it; a detached run deduplicates against every row
 	//     that gates it, but a named run whose scope git failed to read only against its own rows — a transient failure
-	//     can at worst add a duplicate, never fold this branch's re-raise into another branch's row; and a granted override that gates this branch (a
-	//     lower branch's accepted exception) absorbs the re-raise rather than demanding a second grant;
+	//     can at worst add a duplicate, never fold this branch's re-raise into another branch's row (when git cannot
+	//     even read which branch is checked out, the run is taken as detached; every row then still gates it); and a granted override that gates this branch (a
+	//     lower branch's accepted exception) absorbs the re-raise rather than demanding a second grant — only with a
+	//     readable scope, where "gates" means something;
 	//   - a --previous-run chain closes any row it names, whichever branch recorded it — the chain is the explicit
 	//     repair path, so a fix branch, a stacked branch or an epic can close what it inherited or merged, and a
 	//     deleted branch's row is never stranded.
@@ -215,7 +217,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		if record.Status != "fixed" && record.Status != StatusSuperseded && record.Fingerprint != "" &&
 			currentFingerprints[record.Fingerprint] && sameRunTarget(record, run) &&
 			(mine(record) || blocksHere(record) &&
-				(branch == "" || record.Branch == "" && sc.PastHead(record.GitHead) || record.Status == StatusOverridden)) {
+				(branch == "" || record.Branch == "" && sc.PastHead(record.GitHead) || sc.Known() && record.Status == StatusOverridden)) {
 			activeExisting[record.Fingerprint] = true
 		}
 	}

@@ -579,10 +579,9 @@ func TestPartlyReadScopeKeepsItsOwnRow(t *testing.T) {
 	reconcileOn(t, root, "mrv-a", git("rev-parse", "HEAD"), input)
 	git("switch", "-q", "-c", "branch-b", "main")
 	git("commit", "-q", "--allow-empty", "-m", "B")
-	orig := loadScope
-	loadScope = func(string) scope.Scope { return scope.Scope{Current: "branch-b"} }
+	restore := stubScope(t, scope.Scope{Current: "branch-b"})
 	reconcileOn(t, root, "mrv-b", git("rev-parse", "HEAD"), input)
-	loadScope = orig
+	restore()
 	if in, _, _ := ScopedBlocking(root); ids(in) != "mrvf-b-001" {
 		t.Fatalf("once git recovers, branch-b must block on its own re-raised finding: in=%s rows=%+v", ids(in), readRecords(t, root))
 	}
@@ -599,10 +598,9 @@ func TestPartlyReadScopeNeverCarriesAnotherBranchsRow(t *testing.T) {
 	reconcileOn(t, root, "mrv-a", git("rev-parse", "HEAD"), input)
 	git("switch", "-q", "-c", "branch-b", "main")
 	git("commit", "-q", "--allow-empty", "-m", "B")
-	orig := loadScope
-	loadScope = func(string) scope.Scope { return scope.Scope{Current: "branch-b"} }
+	restore := stubScope(t, scope.Scope{Current: "branch-b"})
 	reconcileOn(t, root, "mrv-b", git("rev-parse", "HEAD"), input)
-	loadScope = orig
+	restore()
 	git("switch", "-q", "branch-a")
 	if in, _, _ := ScopedBlocking(root); !strings.Contains(ids(in), "mrvf-a-001") {
 		t.Fatalf("a partly read scope on branch-b must not take branch-a's row: in=%s rows=%+v", ids(in), readRecords(t, root))
@@ -643,12 +641,43 @@ func TestPartlyReadScopeNeverMovesABranchlessRow(t *testing.T) {
 	seedRecords(t, root, legacy)
 	git("switch", "-q", "-c", "branch-b", "main")
 	git("commit", "-q", "--allow-empty", "-m", "B")
-	orig := loadScope
-	loadScope = func(string) scope.Scope { return scope.Scope{Current: "branch-b"} }
+	restore := stubScope(t, scope.Scope{Current: "branch-b"})
 	reconcileOn(t, root, "mrv-b", git("rev-parse", "HEAD"), input)
-	loadScope = orig
+	restore()
 	git("switch", "-q", "branch-a")
 	if in, _, _ := ScopedBlocking(root); !strings.Contains(ids(in), legacy.ID) {
 		t.Fatalf("branch-a's branchless blocker must still block it: in=%s", ids(in))
+	}
+}
+
+// stubScope installs a fixed scope for Reconcile until restore is called or the test ends, whichever comes first.
+func stubScope(t *testing.T, sc scope.Scope) (restore func()) {
+	t.Helper()
+	orig := loadScope
+	loadScope = func(string) scope.Scope { return sc }
+	restore = func() { loadScope = orig }
+	t.Cleanup(restore)
+	return restore
+}
+
+// TestPartlyReadScopeIgnoresAnotherBranchsGrantedOverride is the final review's finding on the tenth cut: with a partly
+// read scope every row "gates" the run, so another branch's granted override absorbed this branch's re-raise and a
+// transient git failure let task-done pass. The override leg now needs a readable scope.
+func TestPartlyReadScopeIgnoresAnotherBranchsGrantedOverride(t *testing.T) {
+	root, git := scopeRepo(t)
+	input := unsafeEval("eval")
+	git("switch", "-q", "-c", "branch-a")
+	git("commit", "-q", "--allow-empty", "-m", "A")
+	reconcileOn(t, root, "mrv-a", git("rev-parse", "HEAD"), input)
+	granted := loadOne(t, root)
+	granted.Status = StatusOverridden
+	seedRecords(t, root, granted)
+	git("switch", "-q", "-c", "branch-b", "main")
+	git("commit", "-q", "--allow-empty", "-m", "B")
+	restore := stubScope(t, scope.Scope{Current: "branch-b"})
+	reconcileOn(t, root, "mrv-b", git("rev-parse", "HEAD"), input)
+	restore()
+	if in, _, _ := ScopedBlocking(root); ids(in) != "mrvf-b-001" {
+		t.Fatalf("branch-b's re-raise must get its own row despite branch-a's granted override: in=%s", ids(in))
 	}
 }
