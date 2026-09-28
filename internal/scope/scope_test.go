@@ -104,14 +104,15 @@ func TestCanonical(t *testing.T) {
 	}
 }
 
-// Only refs/remotes/<remote>/main|master count as a remote default branch, the remote one path segment.
-func TestIsRemoteDefault(t *testing.T) {
+// Only a configured remote's own main/master is a remote default branch — the remote name may contain a slash.
+func TestRemoteDefaultRefs(t *testing.T) {
+	refs := remoteDefaultRefs([]string{"origin", "team/alice"})
 	for ref, want := range map[string]bool{
-		"refs/remotes/origin/main": true, "refs/remotes/up/master": true, "refs/remotes/origin/alice/main": false,
-		"refs/remotes/origin/feat": false, "refs/remotes//main": false, "refs/remotes/origin": false, "refs/heads/main": false,
+		"refs/remotes/origin/main": true, "refs/remotes/origin/master": true, "refs/remotes/team/alice/main": true,
+		"refs/remotes/origin/alice/main": false, "refs/remotes/team/main": false, "refs/heads/main": false,
 	} {
-		if got := isRemoteDefault(ref); got != want {
-			t.Errorf("isRemoteDefault(%q) = %v", ref, got)
+		if refs[ref] != want {
+			t.Errorf("remote default %q = %v", ref, refs[ref])
 		}
 	}
 	// The range leaves out exactly those refs.
@@ -123,14 +124,14 @@ func TestIsRemoteDefault(t *testing.T) {
 	git := func(dir string, args ...string) (string, error) {
 		switch args[0] {
 		case "for-each-ref":
-			return "refs/heads/feat\nrefs/remotes/origin/main\nrefs/remotes/origin/alice/main\nrefs/remotes/origin/HEAD", nil
+			return "refs/heads/feat\nrefs/remotes/origin/main\nrefs/remotes/origin/alice/main\nrefs/remotes/origin/HEAD\nrefs/remotes/team/alice/master", nil
 		case "rev-list":
 			rangeArgs = strings.Join(args, " ")
 		}
 		return fakeGit(&calls, "", 0)(dir, args...)
 	}
 	Load("/repo", git)
-	if rangeArgs != "rev-list base..HEAD --not refs/remotes/origin/main --" {
+	if rangeArgs != "rev-list base..HEAD --not refs/remotes/origin/main refs/remotes/team/alice/master --" {
 		t.Fatalf("range args: %q", rangeArgs)
 	}
 }
@@ -175,6 +176,8 @@ func fakeGit(calls *int, fail string, failCode int) Runner {
 		switch args[0] {
 		case "symbolic-ref":
 			return "refs/heads/feat", nil
+		case "remote":
+			return "origin\nteam/alice", nil
 		case "rev-list":
 			return "c1\nc2", nil
 		case "reflog": // newest first
@@ -205,8 +208,8 @@ func TestLoadMakesAFixedNumberOfGitCalls(t *testing.T) {
 	for i := 0; i < 2000; i++ { // 2,000 runs over 50 branches
 		s.Classify("b"+strconv.Itoa(i%50), "h"+strconv.Itoa(i))
 	}
-	if calls != 4 {
-		t.Fatalf("Load must make exactly 4 git calls (plus the fork point), made %d", calls)
+	if calls != 5 {
+		t.Fatalf("Load must make exactly 5 git calls (plus the fork point), made %d", calls)
 	}
 	if s.Current != "feat" || !s.inRange["c2"] || s.inRange["r1"] || !s.pastHeads["r1"] || !s.pastHeads["parent"] ||
 		!s.former["feat-old"] || !s.former["first"] || !s.former["orig"] || !s.former["jgit-old"] || len(s.former) != 4 || !s.branches["main"] || !s.known {
@@ -227,7 +230,7 @@ func TestLoadFailsClosed(t *testing.T) {
 	for _, c := range []struct {
 		fail string
 		code int
-	}{{"symbolic-ref", 128}, {"symbolic-ref", -1}, {"rev-list", 128}, {"reflog", -1}, {"for-each-ref", 128}} {
+	}{{"symbolic-ref", 128}, {"symbolic-ref", -1}, {"rev-list", 128}, {"reflog", -1}, {"remote", 128}, {"for-each-ref", 128}} {
 		calls := 0
 		if s := Load("/repo", fakeGit(&calls, c.fail, c.code)); s.known || s.Classify("other", "x") != InScope {
 			t.Errorf("%s failing (%d) must leave the scope unknown, got %+v", c.fail, c.code, s)

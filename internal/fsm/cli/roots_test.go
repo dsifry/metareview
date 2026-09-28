@@ -390,3 +390,35 @@ func TestInitRecordsTheBranchAsGitListsIt(t *testing.T) {
 		t.Fatalf("a mis-cased HEAD must be recorded as the listed branch, got %q", got)
 	}
 }
+
+// The fold decision, whatever the filesystem: a HEAD spelled MAIN is folded to main only when git resolves that
+// spelling; git's "no" leaves it (an unborn branch of its own on a case-sensitive filesystem); git failing is ERR_GIT.
+func TestInitFoldsAMisSpelledHEADOnlyWhenGitResolvesIt(t *testing.T) {
+	for _, c := range []struct {
+		code int
+		want string
+	}{{0, "main"}, {1, "MAIN"}, {128, ""}} {
+		h := newHarness(t)
+		realExec := h.deps.Exec
+		h.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
+			switch {
+			case len(args) > 0 && args[0] == "symbolic-ref":
+				return []byte("refs/heads/MAIN\n"), nil, 0, nil
+			case len(args) > 3 && args[0] == "rev-parse" && args[1] == "--verify" && args[3] == "refs/heads/MAIN":
+				return nil, nil, c.code, nil
+			}
+			return realExec(ctx, dir, env, args...)
+		}
+		if c.want == "" {
+			e := h.mustErr("ERR_GIT", 2, h.mockInit()...)
+			if d := e["error"].(map[string]any)["detail"].(string); !strings.Contains(d, "rev-parse exited 128") {
+				t.Fatalf("a failing check is git's failure: %v", e)
+			}
+			continue
+		}
+		id := h.must(StatusOK, 0, h.mockInit()...)["run_id"].(string)
+		if got := initBranch(t, h, id); got != c.want {
+			t.Fatalf("verify exit %d: recorded %q, want %q", c.code, got, c.want)
+		}
+	}
+}

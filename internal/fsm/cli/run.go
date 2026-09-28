@@ -302,8 +302,11 @@ func (in *invocation) init() int {
 	if current != "" && !branches[current] {
 		// Folded only when git resolves that spelling (a case-insensitive filesystem): on a case-sensitive one it is
 		// an unborn branch of its own.
-		if _, code, err := c.git(workDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+current); err == nil && code == 0 {
+		switch _, code, err := c.git(workDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+current); {
+		case err == nil && code == 0:
 			current = scope.Canonical(current, branches)
+		case err != nil || code != 1: // git's "no" is 1; anything else is git failing, as status treats it
+			return gitFailed("rev-parse", code, err)
 		}
 	}
 	if branch != "" && current == "" && !branches[branch] {

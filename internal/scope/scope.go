@@ -10,8 +10,8 @@
 // so routine git use would switch it off; the branch name alone misses detached snapshots and stacked work.
 //
 // Load makes a fixed number of git calls however many items are classified (#177 AC-4.9): the current branch (and,
-// on a detached HEAD, where a rebase keeps its head-name; on a mis-spelled HEAD, whether it resolves), one listing of
-// local and remote branches, the fork point, one rev-list of the range into a set, and the current branch's reflog. Only legacy items ask more: up to two calls per
+// on a detached HEAD, where a rebase keeps its head-name; on a mis-spelled HEAD, whether it resolves), the configured
+// remotes, one listing of local and remote branches, the fork point, one rev-list of the range into a set, and the current branch's reflog. Only legacy items ask more: up to two calls per
 // distinct legacy head, cached.
 package scope
 
@@ -133,17 +133,22 @@ func Load(root string, git Runner) Scope {
 	default:
 		return s
 	}
-	// Local branches, and the remote default branches (refs/remotes/<remote>/main|master, the remote one path
-	// segment) whose commits the range leaves out.
+	// Local branches, and the remote default branches (refs/remotes/<remote>/main|master for each configured remote —
+	// a remote name may itself contain a slash) whose commits the range leaves out.
+	remotes, err := git(root, "remote")
+	if err != nil {
+		return s
+	}
 	out, err := git(root, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
 	if err != nil {
 		return s
 	}
+	defaults := remoteDefaultRefs(strings.Fields(remotes))
 	var remoteDefaults []string
 	for _, ref := range strings.Fields(out) {
 		if name := branchName(ref); name != "" {
 			s.branches[name] = true
-		} else if isRemoteDefault(ref) {
+		} else if defaults[ref] {
 			remoteDefaults = append(remoteDefaults, ref)
 		}
 	}
@@ -212,15 +217,15 @@ func (s Scope) readReflog(root string, git Runner) error {
 	return nil
 }
 
-// isRemoteDefault reports whether ref is refs/remotes/<remote>/main or /master, the remote a single path segment
-// (git's own --remotes=*/main glob would also match origin/alice/main).
-func isRemoteDefault(ref string) bool {
-	rest, ok := strings.CutPrefix(ref, "refs/remotes/")
-	if !ok {
-		return false
+// remoteDefaultRefs is every configured remote's own main and master, spelled exactly: refs/remotes/origin/alice/main
+// is a namespaced branch on origin, not a default branch, while a remote named team/alice has refs/remotes/team/alice/main.
+func remoteDefaultRefs(remotes []string) map[string]bool {
+	refs := map[string]bool{}
+	for _, r := range remotes {
+		refs["refs/remotes/"+r+"/main"] = true
+		refs["refs/remotes/"+r+"/master"] = true
 	}
-	remote, branch, ok := strings.Cut(rest, "/")
-	return ok && remote != "" && (branch == "main" || branch == "master")
+	return refs
 }
 
 // Canonical is name as git lists the branch. On a case-insensitive filesystem `git checkout Feat` resolves the loose
