@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3.bcafce2938fd21f3",
+  "kind": "shard",
+  "shardId": "shard-3",
+  "shardHash": "bcafce2938fd21f3",
+  "planHash": "4495d9e664c542fe",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-3",
+  "reviewedAt": "2026-09-28T04:10:00Z",
+  "evidence": [
+    {
+      "path": "internal/fsm/cli/run.go",
+      "line": 197,
+      "note": "openRun resolves root (anchor) and common (store) via c.roots(); Store, peek and machineDeps are fed the common dir consistently"
+    },
+    {
+      "path": "internal/fsm/cli/run.go",
+      "line": 893,
+      "note": "diff opens both runs from the common-dir store; migration warnings surfaced"
+    },
+    {
+      "path": "internal/fsm/cli/wiring.go",
+      "line": 163,
+      "note": "roots() migrates the 0.13.x store, reports collisions as warnings, never merges"
+    },
+    {
+      "path": "internal/repo/worktree.go",
+      "line": 72,
+      "note": "commonDirGit uses gate.RealExec (GIT_* scrubbed) with --path-format=absolute, matching the FSM writer's resolution; git >= 2.31 is an existing prerequisite"
+    },
+    {
+      "path": "internal/repo/worktree_test.go",
+      "line": 77,
+      "note": "tripwire extended to the common-dir spelling (\"metareview\", \"runs\" and store, \"runs\") and to StoreDir( declarations"
+    },
+    {
+      "path": "internal/status/fsmruns_store_test.go",
+      "line": 72,
+      "note": "attribution test covers subdir work_dir, removed worktree, unrelated-repo parent, unenterable dir and a legacy linked-worktree run"
+    },
+    {
+      "path": "tests/go/test-fsm.sh",
+      "line": 99,
+      "note": "shell e2e paths moved to .git/metareview/runs and .git/metareview/runs.jsonl consistently"
+    },
+    {
+      "note": "Targeted go tests passed: TestCommonDirLayout, TestRunStoreReadersAreDeclared, TestAbandonedRuns*, TestCanonicalAndLegacyBookkeeping, TestStatusLines* across fsm/run, repo, status, fsm/cli"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stale doc comment: StatusLines still says it reads Store.List() 'at the main root', but it now lists the common-dir store.",
+      "evidence": [
+        {
+          "path": "internal/fsm/cli/run.go",
+          "line": 963
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

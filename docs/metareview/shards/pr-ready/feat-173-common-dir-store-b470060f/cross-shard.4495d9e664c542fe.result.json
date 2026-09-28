@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-4495d9e664c542fe-claude-subagent-cross-shard",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "4495d9e664c542fe",
+  "verdict": "PASS",
+  "reviewer": "claude-subagent-cross-shard",
+  "reviewedAt": "2026-09-28T03:46:24Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/wiring.go", "line": 153, "note": "Writer resolves the store with git rev-parse --path-format=absolute --git-common-dir through deps.Exec, which RealDeps wires to gate.RealExec (GIT_* scrubbed)"},
+    {"path": "internal/repo/worktree.go", "line": 75, "note": "Reader StoreDir runs the same rev-parse through the same scrubbed gate.RealExec; StoreDirIn is the single layout definition, also used by session bindings"},
+    {"path": "internal/fsm/cli/deps.go", "line": 76, "note": "Store, Sidecar (CommonDir: true) and Terminal all take the common dir, so audit, sidecars and ledger agree on <common>/metareview"},
+    {"path": "internal/fsm/cli/wiring.go", "line": 170, "note": "Migration ordering: roots() moves runs, then copies ledger rows passing the collision list, before any Store/Exists/peek call in init, openRun and diff"},
+    {"path": "internal/fsm/record/record.go", "line": 298, "note": "Rows of collided runs are skipped and set deferred, which suppresses the size stamp so the row follows once the collision is resolved; appendRow dedupes under flock so concurrent unlocked row migration cannot duplicate"},
+    {"path": "internal/fsm/record/record_test.go", "line": 489, "note": "TestMigrateLegacyRowsSkipsCollidedRuns pins both the skip and the no-stamp behaviour; targeted migrate/legacy/store/abandoned tests pass in record, run, cli, status, repo"},
+    {"path": "cmd/metareview/main.go", "line": 798, "note": "record-lenses --from-run reads the common-dir store first and falls back only to the single 0.13.x main-checkout location with a warning, matching writer and migration"},
+    {"path": "internal/status/fsmruns.go", "line": 118, "note": "Abandoned-run scan reads legacy then store (rename-safe ordering, dedup by id) and attributes via enterable-ancestor toplevel within the same common dir; docs (ARCHITECTURE, USAGE, skills/status) describe this scoping accurately"},
+    {"path": "internal/setup/setup.go", "line": 192, "note": "Docs claim git >= 2.31 for --path-format=absolute; MinGitVersion is 2.31, consistent"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "A ledger-row conflict (legacy fsm row whose id the common ledger holds for a different head/workflow) is reported as STORE_COLLISION only on the first pass: conflicts do not set deferred, so the size stamp is written and later fsm commands skip the legacy ledger and never repeat the warning, whereas run-directory collisions are re-reported on every command. Harmless (nothing is lost or merged), but the operator sees the row conflict once.",
+      "evidence": [
+        {"path": "internal/fsm/record/record.go", "line": 304, "note": "conflict appended without setting deferred"},
+        {"path": "internal/fsm/record/record.go", "line": 319, "note": "stamp written whenever no collided row was deferred"}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

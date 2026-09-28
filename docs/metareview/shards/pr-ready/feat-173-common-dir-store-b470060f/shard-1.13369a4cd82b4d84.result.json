@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1.13369a4cd82b4d84",
+  "kind": "shard",
+  "shardId": "shard-1",
+  "shardHash": "13369a4cd82b4d84",
+  "planHash": "4495d9e664c542fe",
+  "verdict": "PASS",
+  "reviewer": "claude-subagent-shard-1",
+  "reviewedAt": "2026-09-28T03:46:36Z",
+  "evidence": [
+    {"path": "internal/status/fsmruns.go", "line": 75, "note": "discoverAbandonedRuns: legacy-then-store scan with id dedupe; unattributable runs fall back to the main checkout, never dropped"},
+    {"path": "internal/status/fsmruns.go", "line": 99, "note": "mine(): owner attributed only when the enterable ancestor resolves to the same git common-dir store"},
+    {"path": "internal/fsm/run/store_jsonl.go", "line": 27, "note": "layout-parameterised store; NewCommonDirStore uses metareview/runs under the common dir; validate/List use the same layout"},
+    {"path": "internal/fsm/cli/deps.go", "line": 77, "note": "production sidecar sets CommonDir: true, matching NewCommonDirStore layout"},
+    {"path": "cmd/metareview/main.go", "line": 798, "note": "fromRunRunsDir: common store first, 0.13.x legacy fallback with warning; covered by TestFromRunRunsDirPrefersTheCommonStore"},
+    {"path": "internal/status/fsmruns_store_test.go", "line": 77, "note": "per-worktree attribution tests exist (outside this shard) for the new mine() logic"},
+    {"note": "Targeted tests pass: go test -run 'TestMigrate|TestTornTail|TestWriteErrors' ./internal/fsm/record; -run 'TestFSMMigrat|TestFSMStore|TestGitClean|TestNothingIsWritten|TestStatusLinesReports' ./internal/fsm/cli; ./internal/repo; ./internal/status all ok"},
+    {"note": "syscall.Access in enterableAncestor is unix-only, consistent with existing syscall.Flock/O_NOFOLLOW/Setpgid usage; no new portability regression"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Misplaced doc comment: the paragraph describing lenient, run-once legacy-ledger migration (malformed lines skipped, size stamp) sits above TestMigrateLegacyRowsSkipsCollidedRuns, merged with that test's own comment, while TestMigrateLegacyRowsIsLenientAndRunsOnce has none. Move the first paragraph down to the test it describes.",
+      "evidence": [
+        {"path": "internal/fsm/record/record_test.go", "line": 484},
+        {"path": "internal/fsm/record/record_test.go", "line": 515}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "mine() spawns two git subprocesses (StoreDir, Toplevel) per abandoned run with a recorded work dir, on the Stop-hook path. Fine for typical counts; could memoise by enterable ancestor if many abandoned runs accumulate.",
+      "evidence": [
+        {"path": "internal/status/fsmruns.go", "line": 105}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}
