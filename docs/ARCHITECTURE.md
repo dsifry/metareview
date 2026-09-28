@@ -230,15 +230,18 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   local `main` or `master`. a squash-merged (then deleted) lower branch of a stack keeps blocking the upper branch through the range leg until
   it is rebased `--onto` main (the blocker names the lower branch); a detached HEAD other than a rebase (bisect, an
   inspection checkout) has no name leg; "orphaned" means the recorded branch is gone, even when a live stacked branch
-  still holds its commits. Clearing a stale run is the closing operation's job. **Findings (#178)** go through the same
+  still holds its commits — so `git switch -c copy`, `git branch -D orig`, then a rewrite orphans orig's items on the
+  copy (git state cannot tell that copy from a stacked branch whose merged parent was deleted, which must not block;
+  use `git branch -m`, which the name leg follows). Clearing a stale run is the closing operation's job. **Findings (#178)** go through the same
   rule: the per-checkout ledger (`.metareview/findings.jsonl`) records each finding's `branch` (`scope.Load`'s current
   branch, stamped by `findings.Reconcile`) beside its `gitHead`, one row per branch. `Reconcile` refreshes only the rows
   the branch owns by name (`scope.Owns`: its name, or a former one after a rename) and never re-stamps a branchless row
-  (legacy, or a detached review — only a detached run refreshes those); a finding raised again on a stacked or throwaway
-  branch is that branch's own row and never takes the first branch's. Its verdict (the open findings task-done and
-  epic-ready count) holds only rows that gate this branch (`Classify`), and a `--previous-run` chain closes any row it
-  names unless another live branch owns it, so a fix or stacked branch can close what it inherits and a deleted
-  branch's row is never stranded — and `findings.ScopedBlocking` / `UnresolvedBlocking` classify every unresolved blocker, so after `git
+  (legacy, or a detached review — only a detached run refreshes those, and only the ones that gate it); a finding raised
+  again on a stacked or throwaway branch is that branch's own row and never takes the first branch's. Its verdict (the
+  open findings task-done and epic-ready count) holds only rows that gate this branch (`Classify`), and a
+  `--previous-run` chain closes any row it names, whichever branch recorded it (as before #178: the chain is the
+  explicit repair path, so a fix, stacked or epic branch can close what it inherits, and a deleted branch's row is
+  never stranded) — and `findings.ScopedBlocking` / `UnresolvedBlocking` classify every unresolved blocker, so after `git
   switch` branch B's pr-ready no longer blocks on branch A's open findings (it lists them as "Open on other branches: N"
   under Repository Health Advisory). Epic-ready names its child tasks explicitly and reads their blockers across
   branches (`UnresolvedBlockingAllBranches`): a child reviewed on its own branch and squash-merged into the epic's would

@@ -80,7 +80,8 @@ type Runner func(dir string, args ...string) (string, error)
 func RealRunner(dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	out, _, code, err := gate.RealExec(ctx, dir, nil, args...)
+	// No promisor fetches: a partial clone would otherwise go to the network for a pruned legacy head.
+	out, _, code, err := gate.RealExec(ctx, dir, []string{"GIT_NO_LAZY_FETCH=1"}, args...)
 	if err != nil {
 		return "", err
 	}

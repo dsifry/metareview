@@ -131,8 +131,9 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	//   - mine: the row is this branch's by name (its name, or a former one after a rename) — refreshed in place;
 	//   - blocksHere: the row gates this branch (scope.Classify) — counted in the verdict; a branchless row (from
 	//     before #178, or a detached HEAD) that blocks here is also this run's to deduplicate against, never re-stamped;
-	//   - a --previous-run chain closes any row it names unless another live branch owns it, so a fix branch or a
-	//     stacked branch can close what it inherited, and a deleted branch's row is not stranded.
+	//   - a --previous-run chain closes any row it names, whichever branch recorded it — the chain is the explicit
+	//     repair path, so a fix branch, a stacked branch or an epic can close what it inherited or merged, and a
+	//     deleted branch's row is never stranded.
 	sc := loadScope(root)
 	branch := sc.Current
 	mine := func(record Record) bool { return sc.Owns(record.Branch) }
@@ -152,7 +153,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			record.Fingerprint != "" &&
 			currentFingerprints[record.Fingerprint] &&
 			sameRunTarget(record, run) &&
-			(mine(record) || branch == "" && record.Branch == "") {
+			(mine(record) || branch == "" && record.Branch == "" && blocksHere(record)) {
 			record.Scope = firstNonEmpty(record.Scope, run.Scope)
 			record.GitHead = firstNonEmpty(run.GitHead, record.GitHead)
 			// It takes the branch's current name, so a rename then a rewrite keeps it.
@@ -177,7 +178,6 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		// post-merge learning can tell the two apart.
 		if (previousRuns[record.RunID] || resetFinding(record, run, resetRuns)) &&
 			sameRunTarget(record, run) &&
-			sc.Classify(record.Branch, record.GitHead) != scope.OtherBranch &&
 			(record.Status == "open" || record.Status == StatusOverridePending) &&
 			record.Fingerprint != "" &&
 			!IsFreshnessFingerprint(record.Fingerprint) &&
@@ -187,7 +187,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			record.UpdatedAt = now
 			record.GitHead = run.GitHead
 		}
-		if supersedesFreshness(record, run, options, currentFingerprints) {
+		if supersedesFreshness(record, run, options, currentFingerprints) && blocksHere(record) {
 			record.Status = StatusSuperseded
 			record.UpdatedAt = now
 			record.GitHead = run.GitHead

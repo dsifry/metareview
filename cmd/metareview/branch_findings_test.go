@@ -62,8 +62,8 @@ func prReadyLog(t *testing.T, root, evidence string) string {
 	return log
 }
 
-// prReadyBlocksTA reports whether pr-ready on the checked-out branch lists exactly the target t-a among its blocked
-// targets.
+// prReadyBlocksTA reports whether pr-ready on the checked-out branch lists the target t-a (as a whole entry, not a
+// substring) among its blocked targets.
 func prReadyBlocksTA(t *testing.T, root, evidence string) bool {
 	t.Helper()
 	return slices.Contains(blockedTargets(prReadyLog(t, root, evidence)), "t-a")

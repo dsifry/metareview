@@ -218,7 +218,7 @@ func TestReraisedFindingKeepsTheFirstBranchsObligation(t *testing.T) {
 		t.Fatalf("a throwaway branch raising it again must not orphan branch-a's finding: in=%s err=%v", ids(in), err)
 	}
 
-	// A chain closes what blocks it — never a row another live branch owns.
+	// A --previous-run chain closes every row it names, whichever branch recorded it.
 	chain := func(runID string, previous ...string) {
 		t.Helper()
 		run := Run{ID: runID, Scope: "task-done", Target: map[string]string{"type": "advisory", "id": "t"}, RepoRoot: root, GitHead: git("rev-parse", "HEAD")}
@@ -233,16 +233,17 @@ func TestReraisedFindingKeepsTheFirstBranchsObligation(t *testing.T) {
 		}
 		return got
 	}
+	// The deleted tmp's row is orphaned from an unrelated branch (not in its range, no live owner): the chain that
+	// names it still closes it, so it is never stranded.
 	git("switch", "-q", "-c", "unrelated", "main")
-	chain("mrv-u", "mrv-a")
-	if got := status(); got["mrv-a"] != "open" {
-		t.Fatalf("an unrelated branch's chain must not close branch-a's row: %v", got)
+	chain("mrv-u", "mrv-tmp")
+	if got := status(); got["mrv-tmp"] != "fixed" || got["mrv-a"] != "open" {
+		t.Fatalf("a chain closes the orphaned row it names, and only that row: %v", got)
 	}
 	git("switch", "-q", "branch-b")
-	chain("mrv-b2", "mrv-a", "mrv-b", "mrv-tmp")
-	if got := status(); got["mrv-a"] != "fixed" || got["mrv-b"] != "fixed" || got["mrv-tmp"] != "fixed" {
-		t.Fatalf("stacked branch-b's chain closes its own row, the lower branch's row that blocks it, and the deleted "+
-			"tmp's orphaned row: %v", got)
+	chain("mrv-b2", "mrv-a", "mrv-b")
+	if got := status(); got["mrv-a"] != "fixed" || got["mrv-b"] != "fixed" {
+		t.Fatalf("stacked branch-b's chain closes its own row and the lower branch's row it inherits: %v", got)
 	}
 }
 
@@ -412,5 +413,47 @@ func TestUnresolvedBlockingAllBranches(t *testing.T) {
 	}
 	if _, err := UnresolvedBlockingAllBranches(root); err == nil {
 		t.Fatal("an unreadable ledger must fail")
+	}
+}
+
+// TestDetachedRunRefreshesOnlyRowsThatGateIt is a recheck finding on the fourth cut: a detached run refreshed every
+// branchless row for the target, so a task-done on a detached HEAD from another lineage moved branch-a's legacy blocker
+// to its own head and branch-a's gate cleared without a fix.
+func TestDetachedRunRefreshesOnlyRowsThatGateIt(t *testing.T) {
+	root, git := scopeRepo(t)
+	git("switch", "-q", "-c", "branch-a")
+	git("commit", "-q", "--allow-empty", "-m", "A")
+	input := unsafeEval("eval")
+	reconcileOn(t, root, "mrv-legacy", git("rev-parse", "HEAD"), input)
+	legacy := loadOne(t, root)
+	legacy.Branch = ""
+	seedRecords(t, root, legacy)
+
+	git("switch", "-q", "--detach", "main")
+	git("commit", "-q", "--allow-empty", "-m", "elsewhere")
+	reconcileOn(t, root, "mrv-detached", git("rev-parse", "HEAD"), input)
+	if got := readRecords(t, root)[0]; got.GitHead != legacy.GitHead {
+		t.Fatalf("a detached run must not move a branchless row that does not gate it: %+v", got)
+	}
+	git("switch", "-q", "branch-a")
+	if in, _, _ := ScopedBlocking(root); !strings.Contains(ids(in), legacy.ID) {
+		t.Fatalf("branch-a's legacy blocker must still block it: in=%s", ids(in))
+	}
+}
+
+// TestNamedRunDedupesAgainstABranchlessRowThatGatesIt: raised again on the branch whose legacy row gates it, the finding
+// is that row — no duplicate named row beside it.
+func TestNamedRunDedupesAgainstABranchlessRowThatGatesIt(t *testing.T) {
+	root, git := scopeRepo(t)
+	git("switch", "-q", "-c", "feat")
+	git("commit", "-q", "--allow-empty", "-m", "F")
+	input := unsafeEval("eval")
+	reconcileOn(t, root, "mrv-legacy", git("rev-parse", "HEAD"), input)
+	legacy := loadOne(t, root)
+	legacy.Branch = ""
+	seedRecords(t, root, legacy)
+	reconcileOn(t, root, "mrv-again", git("rev-parse", "HEAD"), input)
+	if records := readRecords(t, root); len(records) != 1 || records[0].Branch != "" {
+		t.Fatalf("a named run must not write a duplicate beside the branchless row that gates it: %+v", records)
 	}
 }
