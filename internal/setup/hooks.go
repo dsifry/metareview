@@ -100,23 +100,36 @@ func ownedBy(dir, common string) bool {
 	return errors.Is(err, fs.ErrNotExist)
 }
 
+// maxDerivedIDs bounds the search for a free derived id; each step is one os.Lstat. A var so a test can exhaust it.
+var maxDerivedIDs = 64
+
 // repoHooksID is this repository's hook-dir id: the recorded metareview.hooksId when its dir is this repository's
-// (ownedBy), otherwise an id derived from git's common directory. Deriving keeps a read-only plan stable before the
-// first install records one, and gives a copied checkout its own dir instead of its original's.
-func repoHooksID(root string, git GitRunner) (string, error) {
+// (ownedBy), otherwise a derived one. A derived id is the first of sha256(common dir, n), n = 0, 1, …, whose dir does
+// not exist yet: a repository with no recorded id never adopts an existing dir, because an existing dir is one some
+// repository installed into and recorded — a copy's original, or a moved repository whose old path this new one now
+// occupies. Deterministic for a given filesystem, so a read-only plan is stable.
+func repoHooksID(root string, git GitRunner, home string) (string, error) {
 	common, err := commonDir(root, git)
 	if err != nil {
 		return "", err
 	}
 	if out, err := git(root, "config", "--local", "--get", HooksIDKey); err == nil {
-		if id := strings.TrimSpace(string(out)); hookIDPattern.MatchString(id) {
-			if home, err := hooksHome(); err == nil && ownedBy(filepath.Join(home, id), common) {
-				return id, nil
-			}
+		if id := strings.TrimSpace(string(out)); hookIDPattern.MatchString(id) && ownedBy(filepath.Join(home, id), common) {
+			return id, nil
 		}
 	}
-	sum := sha256.Sum256([]byte(common))
-	return hex.EncodeToString(sum[:])[:16], nil
+	for n := 0; n < maxDerivedIDs; n++ {
+		seed := common
+		if n > 0 {
+			seed = fmt.Sprintf("%s\x00%d", common, n)
+		}
+		sum := sha256.Sum256([]byte(seed))
+		id := hex.EncodeToString(sum[:])[:16]
+		if _, err := os.Lstat(filepath.Join(home, id)); err != nil { // no dir there to adopt (absent, or no data home)
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("no free hook dir id for %s under %s after %d tries", common, home, maxDerivedIDs)
 }
 
 // hookTargetDir is where this repository's hook scripts are MATERIALIZED: <hooksHome>/<metareview.hooksId>. One dir
@@ -127,7 +140,7 @@ func hookTargetDir(root string, git GitRunner) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	id, err := repoHooksID(root, git)
+	id, err := repoHooksID(root, git, home)
 	if err != nil {
 		return "", err
 	}

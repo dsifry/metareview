@@ -75,7 +75,7 @@ func TestRepoHooksIDIgnoresJunkAndSurfacesGitErrors(t *testing.T) {
 		}
 		return g(root, args...)
 	}
-	if _, err := repoHooksID(root, broken); err == nil {
+	if _, err := repoHooksID(root, broken, t.TempDir()); err == nil {
 		t.Fatal("an unresolvable common dir must be an error")
 	}
 	if _, err := PlanHookInstall(root, broken); err == nil {
@@ -402,5 +402,81 @@ func TestApplyHookInstallOwnerFailures(t *testing.T) {
 	}
 	if err := ApplyHookInstall(root, HookInstallPlan{Target: target}, true, g); err == nil || !strings.Contains(err.Error(), "owner") {
 		t.Fatalf("an unwritable owner file must fail install, got %v", err)
+	}
+}
+
+// A NEW repository at a moved repository's old path (`mv repo repo.bak && git clone … repo`) derives from the same
+// common-dir path. It must never adopt the moved repository's live dir — whether or not that one re-installed — and
+// nothing done in it may empty that dir.
+func TestANewRepositoryAtAMovedOnesPathGetsItsOwnHookDir(t *testing.T) {
+	for _, reinstalledAfterMove := range []bool{true, false} {
+		t.Run(fmt.Sprintf("reinstalled=%v", reinstalledAfterMove), func(t *testing.T) {
+			isolateHooksHome(t)
+			base, _ := filepath.EvalSymlinks(t.TempDir())
+			g := isolatedGit(base)
+			a := filepath.Join(base, "a")
+			if out, err := g(base, "init", "-q", "-b", "main", a); err != nil {
+				t.Fatalf("%v %s", err, out)
+			}
+			plan, _ := PlanHookInstall(a, g)
+			if err := ApplyHookInstall(a, plan, false, g); err != nil {
+				t.Fatal(err)
+			}
+			moved := filepath.Join(base, "a.old")
+			if err := os.Rename(a, moved); err != nil {
+				t.Fatal(err)
+			}
+			if reinstalledAfterMove {
+				mp, _ := PlanHookInstall(moved, g)
+				if err := ApplyHookInstall(moved, mp, false, g); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if out, err := g(base, "init", "-q", "-b", "main", a); err != nil {
+				t.Fatalf("%v %s", err, out)
+			}
+			np, _ := PlanHookInstall(a, g)
+			if np.Target == plan.Target {
+				t.Fatal("a new repository at the old path must not adopt the moved repository's hook dir")
+			}
+			if err := ApplyHookInstall(a, np, false, g); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := UninstallHookInstall(a, g); err != nil {
+				t.Fatal(err)
+			}
+			if !hooksCurrent(plan.Target) {
+				t.Fatal("nothing done in the new repository may empty the moved repository's hook dir")
+			}
+			// The moved repository is still gated from its dir. If it re-installed, that dir is recorded as its own;
+			// if not, its owner file names the path the new repository now occupies, so it reads stale until a
+			// re-install gives it a dir of its own — never installed-looking yet sharing.
+			if hp := hooksPath(t, moved, g); hp != plan.Target {
+				t.Fatalf("the moved repository's core.hooksPath must be untouched: %q", hp)
+			}
+			if st := gitGateStatus(moved, g); st.Installed != reinstalledAfterMove || st.Stale == reinstalledAfterMove {
+				t.Fatalf("moved repository status: %+v", st)
+			}
+		})
+	}
+}
+
+// The derived-id search is bounded: with every candidate taken, it is an error, never a reused dir.
+func TestDerivedIDSearchIsBounded(t *testing.T) {
+	isolateHooksHome(t)
+	root, g := tempRepo(t)
+	first := hookTarget(t, root, g)
+	if err := os.MkdirAll(first, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := maxDerivedIDs
+	t.Cleanup(func() { maxDerivedIDs = orig })
+	maxDerivedIDs = 1
+	if _, err := repoHooksID(root, g, filepath.Dir(first)); err == nil {
+		t.Fatal("with every candidate id taken, the search must fail")
+	}
+	maxDerivedIDs = orig
+	if next := hookTarget(t, root, g); next == first {
+		t.Fatal("an existing dir must never be adopted by a repository with no recorded id")
 	}
 }
