@@ -205,14 +205,15 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   one rule in one package: a run recorded on branch N at head H is **in scope** when N is the current branch (the
   name leg — survives rebase and amend; mid-rebase the branch being rebased is current), when H lies in
   `merge-base(HEAD, main|master)..HEAD` (the range leg — detached snapshots, stacked branches), or when H is one of
-  the current branch's past heads the fork point cannot reach (the reflog leg — a rewrite followed by `git branch
-  -m`, which carries the reflog). Otherwise it is **other-branch** while N exists, else **orphaned**; neither blocks,
+  the current branch's own past heads — not the one it was created at, which is its parent's — that the fork point
+  cannot reach (the reflog leg — a rewrite followed by `git branch -m`, which carries the reflog). Branch names are
+  compared as full refnames, so a same-named tag cannot unmatch them; a rebase begun detached is no branch. Otherwise it is **other-branch** while N exists, else **orphaned**; neither blocks,
   and `status --all` lists both, each with the run directory to delete, without changing the exit code. `fsm init`
   records `branch` in its init event: the checked-out branch; on a detached HEAD `--for-branch` is required and must
   name a local branch; on an attached one it may only restate it. **Fail closed:** any git call `Load` makes that
   fails (other than git's own "detached") leaves the scope unknown, and an unknown scope puts everything in scope.
   **Legacy runs** (before #177, no branch) are in scope unless git itself says their head is unreachable from HEAD
-  (`merge-base --is-ancestor` exit 1; one call per distinct legacy head) — so an upgrade never silently clears one,
+  (`merge-base --is-ancestor` exit 1, or a commit git has pruned; one call per distinct legacy head) — so an upgrade never silently clears one,
   but a pre-#177 run abandoned on main now blocks every branch forked after it until its directory is deleted.
   `scope.Load` makes a fixed number of git calls however many runs there are (AC-4.9). **Known trade-offs:** a
   deleted branch name recreated for unrelated work inherits the old name's runs (the name leg); `git checkout -b

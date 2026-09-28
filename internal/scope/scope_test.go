@@ -14,17 +14,24 @@ const (
 	shaAncestor = "1111111111111111111111111111111111111111"
 	shaElse     = "2222222222222222222222222222222222222222"
 	shaBroken   = "3333333333333333333333333333333333333333"
+	shaPruned   = "4444444444444444444444444444444444444444"
 )
 
 func TestClassify(t *testing.T) {
 	asked := 0
-	git := func(_ string, args ...string) (string, error) { // merge-base --is-ancestor <head> HEAD
+	git := func(_ string, args ...string) (string, error) { // merge-base --is-ancestor <head> HEAD; rev-parse --verify
 		asked++
+		if args[0] == "rev-parse" { // does git still have the commit?
+			if args[3] == shaPruned+"^{commit}" {
+				return "", &exitError{code: 1}
+			}
+			return "", &exitError{code: 128}
+		}
 		switch args[2] {
 		case shaAncestor:
 			return "", nil
-		case shaBroken:
-			return "", &exitError{code: 128} // a missing object proves nothing
+		case shaBroken, shaPruned:
+			return "", &exitError{code: 128}
 		}
 		return "", &exitError{code: 1}
 	}
@@ -43,6 +50,7 @@ func TestClassify(t *testing.T) {
 		{"", shaElse, Orphaned},               // asked once, then cached
 		{"", shaAncestor, InScope},            // legacy, reachable from HEAD (the default branch has no range)
 		{"", shaBroken, InScope},              // git could not answer: nothing shows it belongs elsewhere
+		{"", shaPruned, Orphaned},             // git no longer has the commit: nothing can reach it
 		{"", "-not-a-sha", InScope},           // never handed to git, never cleared
 		{"", "", InScope},                     // legacy with no head: nothing shows it belongs elsewhere
 		{"other", shaAncestor, OtherBranch},   // a recorded branch never takes the legacy leg
@@ -56,7 +64,7 @@ func TestClassify(t *testing.T) {
 			t.Errorf("%d.String() = %q", c, c.String())
 		}
 	}
-	if asked != 3 {
+	if asked != 6 {
 		t.Errorf("each distinct well-formed legacy head is asked about once, asked %d", asked)
 	}
 	// An unreadable repository proves nothing belongs elsewhere: everything is in scope.
@@ -85,20 +93,20 @@ func fakeGit(calls *int, fail string, failCode int) Runner {
 		}
 		switch name {
 		case "symbolic-ref":
-			return "feat", nil
+			return "refs/heads/feat", nil
 		case "rev-list":
 			return "c1\nc2", nil
-		case "reflog":
-			return "r1\nr2\nshared", nil
-		case "own": // the reflog heads the fork point cannot reach
-			if strings.Join(args, " ") != "rev-list r1 r2 shared --not base --" {
+		case "reflog": // newest first; the creation entry names the branch it forked from, never its own work
+			return "r2 rebase (finish): refs/heads/feat onto base\nr1 commit: work\nr1 reset: moving to r1\nshared commit: older\nparent branch: Created from HEAD", nil
+		case "own": // the commits the fork point cannot reach, ancestors included
+			if strings.Join(args, " ") != "rev-list r2 r1 shared --not base --" {
 				return "", errors.New("unexpected " + strings.Join(args, " "))
 			}
-			return "r1\nr2", nil
+			return "r2\nr1\nancestor", nil
 		case "rev-parse":
 			return "rebase-merge/head-name\nrebase-apply/head-name", nil
 		default:
-			return "feat\nmain", nil
+			return "refs/heads/feat\nrefs/heads/main", nil
 		}
 	}
 }
@@ -116,7 +124,8 @@ func TestLoadMakesAFixedNumberOfGitCalls(t *testing.T) {
 	if calls != 5 {
 		t.Fatalf("Load must make exactly 5 git calls (plus the fork point), made %d", calls)
 	}
-	if s.Current != "feat" || !s.inRange["c2"] || !s.inRange["r2"] || s.inRange["shared"] || !s.branches["main"] || !s.known {
+	if s.Current != "feat" || !s.inRange["c2"] || !s.inRange["r1"] || !s.inRange["r2"] || s.inRange["shared"] || s.inRange["parent"] ||
+		s.inRange["ancestor"] || !s.branches["main"] || !s.known {
 		t.Fatalf("Load parsed %+v", s)
 	}
 	// No fork point (the default branch) is not a failure: an empty range and no reflog leg, the scope still known.
@@ -136,6 +145,37 @@ func TestLoadMakesAFixedNumberOfGitCalls(t *testing.T) {
 	}
 	if s := Load("/repo", noReflog); !s.known || s.inRange["r1"] || calls != 4 {
 		t.Fatalf("no reflog: %d calls, %+v", calls, s)
+	}
+}
+
+// A long reflog is checked in batches, so no single rev-list overruns the argument limit.
+func TestLoadBatchesALongReflog(t *testing.T) {
+	orig := forkPoint
+	t.Cleanup(func() { forkPoint = orig })
+	forkPoint = func(string) (string, bool, error) { return "base", true, nil }
+	var lines []string
+	for i := 0; i < reflogBatch+10; i++ {
+		lines = append(lines, "h"+strconv.Itoa(i)+" commit: x")
+	}
+	var batches []int
+	git := func(_ string, args ...string) (string, error) {
+		switch args[0] {
+		case "symbolic-ref":
+			return "refs/heads/feat", nil
+		case "reflog":
+			return strings.Join(lines, "\n"), nil
+		case "rev-list":
+			if args[1] == "base..HEAD" {
+				return "", nil
+			}
+			batches = append(batches, len(args)-4) // rev-list <heads...> --not base --
+			return strings.Join(args[1:len(args)-3], "\n"), nil
+		}
+		return "refs/heads/feat", nil
+	}
+	s := Load("/repo", git)
+	if len(batches) != 2 || batches[0] != reflogBatch || batches[1] != 10 || !s.inRange["h0"] || !s.inRange["h"+strconv.Itoa(reflogBatch+9)] {
+		t.Fatalf("batches %v, scope %+v", batches, s.known)
 	}
 }
 
@@ -171,6 +211,9 @@ func TestLoadDetachedAndMidRebase(t *testing.T) {
 			return []byte("refs/heads/feat\n"), nil
 		}
 		return nil, os.ErrNotExist
+	}
+	if branchName("detached HEAD") != "" || branchName("refs/tags/feat") != "" || branchName("refs/heads/a/b\n") != "a/b" {
+		t.Fatal("branchName keeps only local branches")
 	}
 	calls := 0
 	forkPoint = func(string) (string, bool, error) { return "base", true, nil }
@@ -213,7 +256,13 @@ func TestLoadDetachedAndMidRebase(t *testing.T) {
 // HEAD, and a failing command's exit.
 func TestLoadAgainstARealRepository(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
-	env := append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+	var env []string // no inherited GIT_*: a hook's GIT_DIR would aim every call below at another repository
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			env = append(env, kv)
+		}
+	}
+	env = append(env, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
 		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_EDITOR=true")
 	gitIn := func(args ...string) error {
 		c := exec.Command("git", args...)

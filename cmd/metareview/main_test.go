@@ -1318,7 +1318,12 @@ func TestStatusAllNeverChangesTheExit(t *testing.T) {
 	// A legacy run is cleared only when git itself says its head is unreachable: a real commit reachable from nothing.
 	c := exec.Command("git", "commit-tree", "HEAD^{tree}", "-m", "unreachable")
 	c.Dir = root
-	c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") { // a hook's GIT_DIR must not aim this at another repository
+			c.Env = append(c.Env, kv)
+		}
+	}
+	c.Env = append(c.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
 	unreachable, err := c.Output()
 	must(t, err)
 	writeAbandonedRun(t, root, "mrv-t-legacy-001", "", strings.TrimSpace(string(unreachable)))
@@ -1356,9 +1361,12 @@ func TestStatusAllNeverChangesTheExit(t *testing.T) {
 			}
 		}
 	}
-	// An --all that is the operand of --target is the value, not the flag.
+	// An --all that is the operand of --target or --base is the value, not the flag.
 	if code, _, errOut := runCLI(t, root, nil, "status", "--json", "--target", "--all"); code == 2 {
 		t.Errorf("--target --all must target a path named --all, got a usage error: %s", errOut)
+	}
+	if _, _, errOut := runCLI(t, root, nil, "status", "--json", "--scope", "branch", "--base", "--all"); strings.Contains(errOut, "Usage:") {
+		t.Errorf("--base --all must pass --all as the base, got a usage error: %s", errOut)
 	}
 	_, plain, _ := runCLI(t, root, nil, "status")
 	for _, want := range []string{"abandoned runs on this branch: 1", "mrv-t-feature-001  t @ fix", "abandoned runs elsewhere: 3 (metareview status --all lists them)"} {

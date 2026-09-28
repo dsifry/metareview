@@ -334,3 +334,39 @@ func TestInitReportsASymbolicRefFailureAsGit(t *testing.T) {
 		t.Fatalf("a git failure must not read as a detached HEAD: %v", e)
 	}
 }
+
+// A tag named like the branch makes git's short name "heads/<branch>"; init records the branch itself.
+func TestInitRecordsTheBranchBesideASameNamedTag(t *testing.T) {
+	h := newHarness(t)
+	git(t, h.root, "tag", "main")
+	id := h.must(StatusOK, 0, h.mockInit()...)["run_id"].(string)
+	if got := initBranch(t, h, id); got != "main" {
+		t.Fatalf("a same-named tag must not change the recorded branch, got %q", got)
+	}
+}
+
+// Checking --for-branch: git's "no" is not a local branch; git failing is ERR_GIT, with the failure itself.
+func TestInitForBranchCheckTellsGitFailingFromNo(t *testing.T) {
+	h := newHarness(t)
+	git(t, h.root, "branch", "feat")
+	git(t, h.root, "checkout", "-q", "--detach")
+	realExec := h.deps.Exec
+	fail := func(stdout []byte, code int, err error) {
+		h.deps.Exec = func(ctx context.Context, dir string, env []string, args ...string) ([]byte, []byte, int, error) {
+			if len(args) > 1 && args[0] == "rev-parse" && args[1] == "--verify" {
+				return stdout, nil, code, err
+			}
+			return realExec(ctx, dir, env, args...)
+		}
+	}
+	fail(nil, 128, nil)
+	e := h.mustErr("ERR_GIT", 2, append(h.mockInit(), "--for-branch", "feat")...)
+	if d := e["error"].(map[string]any)["detail"].(string); !strings.Contains(d, "rev-parse exited 128") {
+		t.Fatalf("a failing check is git's failure, not a missing branch: %v", e)
+	}
+	fail(nil, -1, context.DeadlineExceeded)
+	e = h.mustErr("ERR_GIT", 2, append(h.mockInit(), "--for-branch", "feat")...)
+	if d := e["error"].(map[string]any)["detail"].(string); !strings.Contains(d, "deadline") {
+		t.Fatalf("a git that did not run says why: %v", e)
+	}
+}

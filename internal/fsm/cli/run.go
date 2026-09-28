@@ -270,17 +270,29 @@ func (in *invocation) init() int {
 	// --for-branch may only restate it: naming another would file this branch's run under that one, and an abandoned
 	// run would stop blocking the branch it actually reviewed.
 	branch, current := p.flags["for-branch"], ""
-	out, code, err := c.git(workDir, "symbolic-ref", "--short", "-q", "HEAD")
+	// The full refname: git's --short form reads "heads/feat" once a tag shares the name, which status would never
+	// match (internal/scope compares full refnames too).
+	gitFailed := func(op string, code int, err error) int {
+		detail := fmt.Sprintf("git %s exited %d", op, code)
+		if err != nil {
+			detail = fmt.Sprintf("git %s: %v", op, err)
+		}
+		return in.fail(base, errs.E(gate.CodeGit, detail, "op", op), phaseInit, false)
+	}
+	out, code, err := c.git(workDir, "symbolic-ref", "-q", "HEAD")
 	switch {
 	case err == nil && code == 0:
-		current = out
+		current = strings.TrimPrefix(out, "refs/heads/")
 	case err != nil || code != 1: // 1 is git's "detached"; anything else is git failing, not a detached HEAD
-		return in.fail(base, errs.E(gate.CodeGit, fmt.Sprintf("git symbolic-ref exited %d", code), "op", "symbolic-ref"), phaseInit, false)
+		return gitFailed("symbolic-ref", code, err)
 	}
 	if branch != "" && current == "" {
 		// A name no local branch has would never match the name leg: after a rebase the run would be orphaned and
-		// block nothing, so the branch must exist.
-		if _, code, err := c.git(workDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil || code != 0 {
+		// block nothing, so the branch must exist. git's "no" is exit 1; anything else is git failing.
+		switch _, code, err := c.git(workDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); {
+		case err != nil || (code != 0 && code != 1):
+			return gitFailed("rev-parse", code, err)
+		case code == 1:
 			return in.usage("--for-branch " + strconv.Quote(branch) + " is not a local branch in " + workDir)
 		}
 	}

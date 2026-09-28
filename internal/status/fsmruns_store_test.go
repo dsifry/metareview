@@ -32,12 +32,24 @@ func writeRunAt(t *testing.T, dir, branch, head string) {
 	}
 }
 
+// gitEnv is the environment every fixture git runs in: no inherited GIT_* (a hook's GIT_DIR would aim it at another
+// repository), no global or system config.
+func gitEnv() []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			env = append(env, kv)
+		}
+	}
+	return append(env, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_EDITOR=true")
+}
+
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	c := exec.Command("git", args...)
 	c.Dir = dir
-	c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
-		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	c.Env = gitEnv()
 	if out, err := c.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v %s", args, err, out)
 	}
@@ -45,7 +57,9 @@ func gitRun(t *testing.T, dir string, args ...string) {
 
 func gitOut(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	c := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	c.Env = gitEnv()
+	out, err := c.Output()
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)
 	}
@@ -155,6 +169,86 @@ func TestALegacyRunSurvivesItsBranchsRebase(t *testing.T) {
 	gitRun(t, root, "rebase", "-q", "main")
 	if got := strings.Join(ids(DiscoverAbandonedRuns(root)), ","); got != "mrv-legacy-rb001" {
 		t.Fatalf("a legacy run must keep blocking its rebased branch, got %q", got)
+	}
+}
+
+// A branch created on another feature branch and later moved onto main does not inherit that branch's runs through
+// its reflog: the head a branch was created at names the branch it forked from, not its own work.
+func TestAReRootedBranchDropsItsFormerParentsRuns(t *testing.T) {
+	root, common := newRepo(t)
+	gitRun(t, root, "checkout", "-q", "-b", "feat-a")
+	a := commit(t, root, "a")
+	writeStoreRun(t, common, "mrv-parent-a0001", "feat-a", a)
+	gitRun(t, root, "checkout", "-q", "-b", "feat-b") // stacked on feat-a
+	commit(t, root, "b")
+	if got := strings.Join(ids(DiscoverAbandonedRuns(root)), ","); got != "mrv-parent-a0001" {
+		t.Fatalf("while stacked, feat-a's run blocks feat-b (AC-4.5), got %q", got)
+	}
+	gitRun(t, root, "rebase", "-q", "--onto", "main", "feat-a", "feat-b")
+	if got := DiscoverAbandonedRuns(root); len(got) != 0 {
+		t.Fatalf("re-rooted onto main, feat-b no longer carries feat-a's work: %v", ids(got))
+	}
+}
+
+// A tag that shares the branch's name makes git's short names ambiguous ("heads/feat"); the name leg compares full
+// refnames, so it still matches — on the default-branch layout too, where there is no range to fall back on.
+func TestATagNamedLikeTheBranchDoesNotHideItsRun(t *testing.T) {
+	root, common := newRepo(t)
+	gitRun(t, root, "checkout", "-q", "-b", "feat")
+	h := commit(t, root, "feat work")
+	writeStoreRun(t, common, "mrv-tagged-00001", "feat", h)
+	gitRun(t, root, "tag", "feat")
+	gitRun(t, root, "branch", "-q", "-f", "main", "refs/heads/feat") // no fork point: only the name leg can hold it
+	if got := strings.Join(ids(DiscoverAbandonedRuns(root)), ","); got != "mrv-tagged-00001" {
+		t.Fatalf("a same-named tag must not unmatch the branch, got %q", got)
+	}
+}
+
+// A rebase begun on a detached HEAD writes "detached HEAD" as its head-name: that is no branch, and it must not break
+// the scope into blocking every run in the repository.
+func TestADetachedRebaseIsNoBranch(t *testing.T) {
+	root, common := newRepo(t)
+	gitRun(t, root, "checkout", "-q", "-b", "feat")
+	// The conflict comes at the second pick, so HEAD has moved past main and there is a fork point to scope by.
+	for _, f := range []string{"g.txt", "f.txt"} {
+		if err := os.WriteFile(filepath.Join(root, f), []byte("feat\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitRun(t, root, "add", f)
+		gitRun(t, root, "commit", "-q", "-m", f+" on feat")
+	}
+	gitRun(t, root, "checkout", "-q", "main")
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, root, "add", "f.txt")
+	gitRun(t, root, "commit", "-q", "-m", "f on main")
+	writeStoreRun(t, common, "mrv-othermain001", "main", gitOut(t, root, "rev-parse", "HEAD"))
+	gitRun(t, root, "checkout", "-q", "--detach", "feat")
+	c := exec.Command("git", "rebase", "main")
+	c.Dir = root
+	c.Env = gitEnv()
+	if err := c.Run(); err == nil {
+		t.Fatal("setup: the rebase must stop on a conflict")
+	}
+	if got := DiscoverAbandonedRuns(root); len(got) != 0 {
+		t.Fatalf("a detached rebase belongs to no branch: main's run must not block it, got %v", ids(got))
+	}
+}
+
+// A legacy run whose head git has pruned cannot be reachable from anything: it is orphaned, not in scope everywhere.
+func TestALegacyRunWhoseHeadWasPrunedIsOrphaned(t *testing.T) {
+	root, common := newRepo(t)
+	gitRun(t, root, "checkout", "-q", "-b", "gone")
+	h := commit(t, root, "squashed away")
+	writeStoreRun(t, common, "mrv-pruned-00001", "", h)
+	gitRun(t, root, "checkout", "-q", "main")
+	gitRun(t, root, "branch", "-q", "-D", "gone")
+	gitRun(t, root, "reflog", "expire", "--expire=now", "--all")
+	gitRun(t, root, "gc", "-q", "--prune=now")
+	mine, elsewhere := ScanAbandonedRuns(root)
+	if len(mine) != 0 || len(elsewhere) != 1 || elsewhere[0].Scope != "orphaned" {
+		t.Fatalf("a pruned head is unreachable: mine %v, elsewhere %+v", ids(mine), elsewhere)
 	}
 }
 

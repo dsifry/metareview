@@ -9,8 +9,8 @@
 // so routine git use would switch it off; the branch name alone misses detached snapshots and stacked work.
 //
 // Load makes a fixed number of git calls however many items are classified (#177 AC-4.9): the current branch, the
-// fork point, one rev-list of the range into a set, the branch's reflog and the part of it that is the branch's own,
-// and one listing of local branches.
+// fork point, one rev-list of the range into a set, the branch's reflog and the part of it that is the branch's own
+// (one rev-list per 512 reflog heads), and one listing of local branches.
 package scope
 
 import (
@@ -111,10 +111,12 @@ func Load(root string, git Runner) Scope {
 		git = RealRunner
 	}
 	s := Scope{inRange: map[string]bool{}, branches: map[string]bool{}, root: root, git: git, ancestors: map[string]bool{}}
-	cur, err := git(root, "symbolic-ref", "--short", "-q", "HEAD")
+	// Full refnames throughout: git's --short form turns ambiguous ("heads/feat") the moment a tag shares a branch's
+	// name, which would unmatch the name leg.
+	cur, err := git(root, "symbolic-ref", "-q", "HEAD")
 	switch {
 	case err == nil:
-		s.Current = cur
+		s.Current = branchName(cur)
 	case code(err) == 1: // detached — or mid-rebase, which is still the branch being rebased
 		s.Current, err = rebasing(root, git)
 		if err != nil {
@@ -146,39 +148,67 @@ func Load(root string, git Runner) Scope {
 			}
 		}
 	}
-	out, err := git(root, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	out, err := git(root, "for-each-ref", "--format=%(refname)", "refs/heads")
 	if err != nil {
 		return s
 	}
-	for _, name := range strings.Fields(out) {
-		s.branches[name] = true
+	for _, ref := range strings.Fields(out) {
+		s.branches[branchName(ref)] = true
 	}
 	s.known = true
 	return s
 }
 
-// addReflog adds the current branch's past heads that base cannot reach: two calls, however long the reflog.
+// reflogBatch bounds one rev-list's argument list, so a long-lived branch's reflog never overruns ARG_MAX.
+const reflogBatch = 512
+
+// addReflog adds the current branch's past heads that base cannot reach. Heads only, never their ancestors, and never
+// the head the branch was created at: that is where it forked from — main, or another feature branch it was stacked
+// on — and it names that branch's work, not this one's. One reflog call and one rev-list per reflogBatch heads.
 func (s Scope) addReflog(root string, git Runner, base string) error {
-	out, err := git(root, "reflog", "show", "--format=%H", "refs/heads/"+s.Current, "--")
+	out, err := git(root, "reflog", "show", "--format=%H %gs", "refs/heads/"+s.Current, "--")
 	if err != nil {
 		return err
 	}
-	heads := strings.Fields(out)
-	if len(heads) == 0 {
-		return nil
+	seen := map[string]bool{}
+	var heads []string
+	for _, line := range strings.Split(out, "\n") {
+		sha, subject, _ := strings.Cut(strings.TrimSpace(line), " ")
+		if sha == "" || seen[sha] || strings.HasPrefix(subject, "branch: Created from") {
+			continue
+		}
+		seen[sha] = true
+		heads = append(heads, sha)
 	}
-	own, err := git(root, append(append([]string{"rev-list"}, heads...), "--not", base, "--")...)
-	if err != nil {
-		return err
-	}
-	for _, sha := range strings.Fields(own) {
-		s.inRange[sha] = true
+	for len(heads) > 0 {
+		n := min(len(heads), reflogBatch)
+		batch := heads[:n]
+		heads = heads[n:]
+		own, err := git(root, append(append([]string{"rev-list"}, batch...), "--not", base, "--")...)
+		if err != nil {
+			return err
+		}
+		for _, sha := range strings.Fields(own) {
+			if seen[sha] {
+				s.inRange[sha] = true
+			}
+		}
 	}
 	return nil
 }
 
-// rebasing names the branch an in-progress rebase is rewriting ("" when HEAD is simply detached): mid-rebase HEAD is
-// detached, and the branch's own runs must keep blocking while an agent sits on a conflict.
+// branchName is a full refname's branch; anything that is not a local branch ("detached HEAD", which git writes as
+// the head-name of a rebase begun detached) is no branch at all.
+func branchName(ref string) string {
+	if name, ok := strings.CutPrefix(strings.TrimSpace(ref), "refs/heads/"); ok {
+		return name
+	}
+	return ""
+}
+
+// rebasing names the branch an in-progress rebase is rewriting ("" when HEAD is simply detached, or the rebase began
+// detached): mid-rebase HEAD is detached, and the branch's own runs must keep blocking while an agent sits on a
+// conflict.
 func rebasing(root string, git Runner) (string, error) {
 	out, err := git(root, "rev-parse", "--git-path", "rebase-merge/head-name", "--git-path", "rebase-apply/head-name")
 	if err != nil {
@@ -192,7 +222,7 @@ func rebasing(root string, git Runner) (string, error) {
 			p = filepath.Join(root, p)
 		}
 		if b, err := readFile(p); err == nil {
-			return strings.TrimPrefix(strings.TrimSpace(string(b)), "refs/heads/"), nil
+			return branchName(string(b)), nil
 		}
 	}
 	return "", nil
@@ -220,7 +250,8 @@ func (s Scope) Classify(branch, head string) Class {
 }
 
 // reachable reports whether head is an ancestor of HEAD, one git call per distinct legacy head. Only git's own "no"
-// (exit 1) is unreachable: a malformed head, a missing object or a failed call proves nothing, so it stays in scope.
+// (exit 1), or a commit git no longer has, is unreachable: a malformed head or a failed call proves nothing, so it
+// stays in scope.
 func (s Scope) reachable(head string) bool {
 	if got, ok := s.ancestors[head]; ok {
 		return got
@@ -229,6 +260,12 @@ func (s Scope) reachable(head string) bool {
 	if isSHA(head) {
 		_, err := s.git(s.root, "merge-base", "--is-ancestor", head, "HEAD")
 		got = err == nil || code(err) != 1
+		if got && err != nil {
+			// A commit git no longer has (pruned once nothing reached it) cannot be reachable: the only failure that
+			// proves something. rev-parse's "no" is exit 1; any other failure still proves nothing.
+			_, verr := s.git(s.root, "rev-parse", "--verify", "--quiet", head+"^{commit}")
+			got = code(verr) != 1
+		}
 	}
 	s.ancestors[head] = got
 	return got
