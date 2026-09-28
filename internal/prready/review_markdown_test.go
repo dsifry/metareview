@@ -111,6 +111,12 @@ func TestCreateReusesAuthenticatedUnchangedVerdictWithoutReviewerInvocation(t *t
 		return original(ctx)
 	}
 	t.Cleanup(func() { runPRReadyReviewers = original })
+	// An open blocker of another branch (#178) is listed on the reused path too.
+	savedScoped := scopedBlocking
+	t.Cleanup(func() { scopedBlocking = savedScoped })
+	scopedBlocking = func(string) ([]findings.Record, []findings.Record, error) {
+		return nil, []findings.Record{{ID: "mrvf-other-001", Status: "open", Classification: "blocking", Severity: "high"}}, nil
+	}
 
 	first, err := Create(root, Options{Base: "main", EvidencePath: evidence, Now: time.Date(2026, 9, 3, 1, 0, 0, 0, time.UTC)})
 	if err != nil {
@@ -132,6 +138,9 @@ func TestCreateReusesAuthenticatedUnchangedVerdictWithoutReviewerInvocation(t *t
 	}
 	if !strings.Contains(string(body), "Reused verdict from: `"+first.RunID+"`") {
 		t.Fatalf("reused review does not name its source:\n%s", body)
+	}
+	if !strings.Contains(string(body), "Open on other branches: 1 ") {
+		t.Fatalf("reused review does not list the other branch's open blocker:\n%s", body)
 	}
 }
 

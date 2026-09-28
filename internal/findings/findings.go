@@ -12,6 +12,7 @@ import (
 
 	"github.com/dsifry/metareview/internal/jsonl"
 	"github.com/dsifry/metareview/internal/markdown"
+	"github.com/dsifry/metareview/internal/scope"
 	"github.com/dsifry/metareview/internal/state"
 )
 
@@ -25,8 +26,6 @@ type Run struct {
 	Target   any    `json:"target"`
 	RepoRoot string `json:"repoRoot"`
 	GitHead  string `json:"gitHead"`
-	// Branch is the branch the run reviewed, as git lists it (#178); Reconcile fills it from the checkout when empty.
-	Branch string `json:"branch,omitempty"`
 }
 
 type Options struct {
@@ -126,17 +125,18 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	if err != nil {
 		return Result{}, err
 	}
+	// One row per branch (#178). A finding raised again on another branch is that branch's own obligation, never a
+	// transfer: the branch that raised it first still has the defect until a fix reaches it. The branch in hand is the
+	// checkout's (scope.Load), and each rule below asks it one question:
+	//   - mine: the row is this branch's by name (its name, or a former one after a rename) — refreshed in place;
+	//   - blocksHere: the row gates this branch (scope.Classify) — counted in the verdict; a branchless row (from
+	//     before #178, or a detached HEAD) that blocks here is also this run's to deduplicate against, never re-stamped;
+	//   - a --previous-run chain closes any row it names unless another live branch owns it, so a fix branch or a
+	//     stacked branch can close what it inherited, and a deleted branch's row is not stranded.
 	sc := loadScope(root)
-	if run.Branch == "" {
-		run.Branch = sc.Current
-	}
-	// One row per branch (#178): a finding raised again on another branch is that branch's own obligation, never a
-	// transfer of this one — the branch that raised it first still has the defect until its own chain fixes it. So only
-	// the rows this run's branch owns are refreshed, deduplicated or fixed here: its own name, a former name after a
-	// rename, and rows that name no branch (from before #178, or a detached HEAD); a run on no branch owns every row.
-	owns := func(record Record) bool {
-		return record.Branch == "" || run.Branch == "" || record.Branch == run.Branch || run.Branch == sc.Current && sc.Owns(record.Branch)
-	}
+	branch := sc.Current
+	mine := func(record Record) bool { return sc.Owns(record.Branch) }
+	blocksHere := func(record Record) bool { return sc.Classify(record.Branch, record.GitHead) == scope.InScope }
 	previousRuns := previousRunSet(options)
 	resetRuns := resetRunSet(options)
 	currentFingerprints := map[string]bool{}
@@ -152,12 +152,11 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			record.Fingerprint != "" &&
 			currentFingerprints[record.Fingerprint] &&
 			sameRunTarget(record, run) &&
-			owns(record) {
+			(mine(record) || branch == "" && record.Branch == "") {
 			record.Scope = firstNonEmpty(record.Scope, run.Scope)
 			record.GitHead = firstNonEmpty(run.GitHead, record.GitHead)
-			// This branch's own row (or a legacy one): it takes the branch's current name, so a rename then a rewrite
-			// keeps it.
-			record.Branch = firstNonEmpty(run.Branch, record.Branch)
+			// It takes the branch's current name, so a rename then a rewrite keeps it.
+			record.Branch = firstNonEmpty(branch, record.Branch)
 			record.UpdatedAt = now
 		}
 		// Before the fix transition below: a summary is never "fixed", even from a chained run.
@@ -178,7 +177,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		// post-merge learning can tell the two apart.
 		if (previousRuns[record.RunID] || resetFinding(record, run, resetRuns)) &&
 			sameRunTarget(record, run) &&
-			owns(record) &&
+			sc.Classify(record.Branch, record.GitHead) != scope.OtherBranch &&
 			(record.Status == "open" || record.Status == StatusOverridePending) &&
 			record.Fingerprint != "" &&
 			!IsFreshnessFingerprint(record.Fingerprint) &&
@@ -198,7 +197,8 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 
 	activeExisting := map[string]bool{}
 	for _, record := range updated {
-		if record.Status != "fixed" && record.Status != StatusSuperseded && record.Fingerprint != "" && sameRunTarget(record, run) && owns(record) {
+		if record.Status != "fixed" && record.Status != StatusSuperseded && record.Fingerprint != "" && sameRunTarget(record, run) &&
+			(mine(record) || record.Branch == "" && blocksHere(record)) {
 			activeExisting[record.Fingerprint] = true
 		}
 	}
@@ -207,7 +207,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		if finding.Fingerprint != "" && activeExisting[finding.Fingerprint] {
 			continue
 		}
-		newRecords = append(newRecords, normalize(run, finding, len(newRecords)+1, now))
+		newRecords = append(newRecords, normalize(run, branch, finding, len(newRecords)+1, now))
 	}
 
 	all := append(updated, newRecords...)
@@ -218,12 +218,13 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		return Result{}, err
 	}
 	activeCurrent := make([]Record, 0, len(current))
-	openFindings := openForRun(all, run, options)
+	openFindings := slices.DeleteFunc(openForRun(all, run, options), func(r Record) bool { return !blocksHere(r) })
 	for _, record := range all {
 		if record.Status == "open" &&
 			record.Fingerprint != "" &&
 			currentFingerprints[record.Fingerprint] &&
-			sameRunTarget(record, run) {
+			sameRunTarget(record, run) &&
+			blocksHere(record) {
 			activeCurrent = append(activeCurrent, record)
 		}
 	}
@@ -830,7 +831,7 @@ func All(root string) ([]Record, error) {
 	return readJSONL(findingsPath(root))
 }
 
-func normalize(run Run, finding Input, index int, createdAt string) Record {
+func normalize(run Run, branch string, finding Input, index int, createdAt string) Record {
 	owner := finding.Owner
 	if owner == "" {
 		owner = "implementer"
@@ -860,7 +861,7 @@ func normalize(run Run, finding Input, index int, createdAt string) Record {
 		UpdatedAt:          createdAt,
 		RepoRoot:           run.RepoRoot,
 		GitHead:            run.GitHead,
-		Branch:             run.Branch,
+		Branch:             branch,
 	}
 }
 

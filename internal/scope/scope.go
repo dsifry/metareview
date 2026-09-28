@@ -312,7 +312,7 @@ func (s Scope) Classify(branch, head string) Class {
 		return InScope
 	// A former name is this branch's only while no live branch holds it: a new branch that reuses the name owns
 	// what is recorded under it.
-	case branch != "" && (branch == s.Current || s.former[branch] && !s.branches[branch]):
+	case s.Owns(branch):
 		return InScope
 	case head != "" && s.inRange[head]:
 		return InScope

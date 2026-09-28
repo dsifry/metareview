@@ -130,47 +130,36 @@ func TestScopedBlockingFailsClosedAndAsksGitOnlyWhenNeeded(t *testing.T) {
 	}
 }
 
-// TestReconcileRecordsTheBranch: a new finding records the checked-out branch, or the run's own when the caller names
-// one; a re-seen row takes the branch of the run that raised it again, as its head does.
+// TestReconcileRecordsTheBranch: a new finding records the checked-out branch; a detached run records none, refreshes
+// the branchless row it raised and never a named one; raised on another branch, the finding gets that branch's own row.
 func TestReconcileRecordsTheBranch(t *testing.T) {
 	root, git := scopeRepo(t)
 	git("switch", "-q", "-c", "feat")
-	head := git("rev-parse", "HEAD")
+	git("commit", "-q", "--allow-empty", "-m", "F")
 	input := unsafeEval("eval")
-	run := Run{ID: "mrv-1", Scope: "task-done", Target: map[string]string{"type": "path", "id": "t.md"}, RepoRoot: root, GitHead: head}
-	if _, err := Reconcile(root, run, []Input{input}, Options{}); err != nil {
-		t.Fatal(err)
-	}
+	reconcileOn(t, root, "mrv-1", git("rev-parse", "HEAD"), input)
 	if got := loadOne(t, root); got.Branch != "feat" {
 		t.Fatalf("a new finding records the checked-out branch, got %q", got.Branch)
 	}
 
-	legacy := loadOne(t, root)
-	legacy.Branch = ""
-	seedRecords(t, root, legacy)
-	run.ID, run.Branch = "mrv-2", "named"
-	if _, err := Reconcile(root, run, []Input{input}, Options{}); err != nil {
-		t.Fatal(err)
+	git("switch", "-q", "--detach")
+	git("commit", "-q", "--allow-empty", "-m", "detached")
+	reconcileOn(t, root, "mrv-2", git("rev-parse", "HEAD"), input)
+	records := readRecords(t, root)
+	if len(records) != 2 || records[0].RunID != "mrv-1" || records[0].Branch != "feat" || records[1].Branch != "" {
+		t.Fatalf("a detached run never refreshes a named row, and its own row names no branch: %+v", records)
 	}
-	if got := loadOne(t, root); got.Branch != "named" {
-		t.Fatalf("a re-seen legacy row adopts the run's branch, got %q", got.Branch)
+	git("commit", "-q", "--allow-empty", "-m", "detached, again")
+	head := git("rev-parse", "HEAD")
+	reconcileOn(t, root, "mrv-3", head, input)
+	if records = readRecords(t, root); len(records) != 2 || records[1].GitHead != head {
+		t.Fatalf("a detached run refreshes the branchless row: %+v", records)
 	}
-	run.ID, run.Branch = "mrv-3", ""
-	orig := loadScope
-	loadScope = func(string) scope.Scope { return scope.Scope{} }
-	t.Cleanup(func() { loadScope = orig })
-	if _, err := Reconcile(root, run, []Input{input}, Options{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := loadOne(t, root); got.Branch != "named" {
-		t.Fatalf("a run on no branch (detached) refreshes the row and leaves its branch alone, got %q", got.Branch)
-	}
-	run.ID, run.Branch = "mrv-4", "other"
-	if _, err := Reconcile(root, run, []Input{input}, Options{}); err != nil {
-		t.Fatal(err)
-	}
-	if records := readRecords(t, root); len(records) != 2 || records[0].Branch != "named" || records[1].Branch != "other" {
-		t.Fatalf("raised again on another branch, the finding gets a row of that branch's own: %+v", records)
+
+	git("switch", "-q", "-c", "other", "main")
+	reconcileOn(t, root, "mrv-4", git("rev-parse", "HEAD"), input)
+	if records = readRecords(t, root); len(records) != 3 || records[2].Branch != "other" {
+		t.Fatalf("raised on another branch, the finding gets that branch's own row: %+v", records)
 	}
 }
 
@@ -229,16 +218,105 @@ func TestReraisedFindingKeepsTheFirstBranchsObligation(t *testing.T) {
 		t.Fatalf("a throwaway branch raising it again must not orphan branch-a's finding: in=%s err=%v", ids(in), err)
 	}
 
-	// A chained fix on another branch closes that branch's row only.
+	// A chain closes what blocks it — never a row another live branch owns.
+	chain := func(runID string, previous ...string) {
+		t.Helper()
+		run := Run{ID: runID, Scope: "task-done", Target: map[string]string{"type": "advisory", "id": "t"}, RepoRoot: root, GitHead: git("rev-parse", "HEAD")}
+		if _, err := Reconcile(root, run, nil, Options{PreviousRunIDs: previous}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status := func() map[string]string {
+		got := map[string]string{}
+		for _, r := range readRecords(t, root) {
+			got[r.RunID] = r.Status
+		}
+		return got
+	}
+	git("switch", "-q", "-c", "unrelated", "main")
+	chain("mrv-u", "mrv-a")
+	if got := status(); got["mrv-a"] != "open" {
+		t.Fatalf("an unrelated branch's chain must not close branch-a's row: %v", got)
+	}
 	git("switch", "-q", "branch-b")
-	run := Run{ID: "mrv-b2", Scope: "task-done", Target: map[string]string{"type": "advisory", "id": "t"}, RepoRoot: root, GitHead: git("rev-parse", "HEAD")}
-	if _, err := Reconcile(root, run, nil, Options{PreviousRunIDs: []string{"mrv-a", "mrv-b"}}); err != nil {
+	chain("mrv-b2", "mrv-a", "mrv-b", "mrv-tmp")
+	if got := status(); got["mrv-a"] != "fixed" || got["mrv-b"] != "fixed" || got["mrv-tmp"] != "fixed" {
+		t.Fatalf("stacked branch-b's chain closes its own row, the lower branch's row that blocks it, and the deleted "+
+			"tmp's orphaned row: %v", got)
+	}
+}
+
+// TestFixBranchChainClosesTheFindingItInherits is a recheck finding on the third cut: a branch cut from the one that
+// raised a finding (a fix branch) is blocked by it through the range leg, so its --previous-run fix chain must be able
+// to close it — the third cut let only the owning branch's name close a row.
+func TestFixBranchChainClosesTheFindingItInherits(t *testing.T) {
+	root, git := scopeRepo(t)
+	git("switch", "-q", "-c", "feat")
+	git("commit", "-q", "--allow-empty", "-m", "F")
+	reconcileOn(t, root, "mrv-a", git("rev-parse", "HEAD"), unsafeEval("eval"))
+	git("switch", "-q", "-c", "feat-fix")
+	git("commit", "-q", "--allow-empty", "-m", "the fix")
+	run := Run{ID: "mrv-fix", Scope: "task-done", Target: map[string]string{"type": "advisory", "id": "t"}, RepoRoot: root, GitHead: git("rev-parse", "HEAD")}
+	if _, err := Reconcile(root, run, nil, Options{PreviousRunIDs: []string{"mrv-a"}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, r := range readRecords(t, root) {
-		if want := map[string]string{"branch-a": "open", "branch-b": "fixed", "tmp": "open"}[r.Branch]; r.Status != want {
-			t.Errorf("row %s on %s: status %s, want %s", r.ID, r.Branch, r.Status, want)
-		}
+	if in, _, _ := ScopedBlocking(root); len(in) != 0 {
+		t.Fatalf("the fix branch's chain must close the finding it inherited: in=%s", ids(in))
+	}
+}
+
+// TestReconcileVerdictCountsOnlyThisBranchsRows is a recheck finding on the third cut: the open findings Reconcile
+// returns (task-done's and epic-ready's verdict) are the ones that gate this branch, not every row for the target —
+// another live branch's row for the same task must never fail this branch's review, which cannot close it.
+func TestReconcileVerdictCountsOnlyThisBranchsRows(t *testing.T) {
+	root, git := scopeRepo(t)
+	git("switch", "-q", "-c", "branch-a")
+	git("commit", "-q", "--allow-empty", "-m", "A")
+	reconcileOn(t, root, "mrv-a", git("rev-parse", "HEAD"), unsafeEval("eval"))
+	git("switch", "-q", "-c", "branch-b", "main")
+	git("commit", "-q", "--allow-empty", "-m", "B")
+	target := map[string]string{"type": "advisory", "id": "t"}
+	head := git("rev-parse", "HEAD")
+	result, err := Reconcile(root, Run{ID: "mrv-b", Scope: "task-done", Target: target, RepoRoot: root, GitHead: head}, nil, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OpenBlockingCount != 0 || len(result.OpenFindings) != 0 {
+		t.Fatalf("branch-a's row must not count in branch-b's verdict: %s", ids(result.OpenFindings))
+	}
+	result, err = Reconcile(root, Run{ID: "mrv-b2", Scope: "task-done", Target: target, RepoRoot: root, GitHead: head}, []Input{unsafeEval("eval")}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids(result.OpenFindings) != "mrvf-b2-001" || ids(result.Findings) != "mrvf-b2-001" {
+		t.Fatalf("raised on branch-b, only branch-b's own row counts: open=%s findings=%s", ids(result.OpenFindings), ids(result.Findings))
+	}
+}
+
+// TestBranchlessRowIsNeverTakenByAnotherBranch is a recheck finding on the third cut: a row with no branch (from before
+// #178, or recorded on a detached HEAD) is never re-stamped by a named branch that raises the finding again, so a
+// throwaway branch cannot carry a legacy blocker away from the branch that still has the defect.
+func TestBranchlessRowIsNeverTakenByAnotherBranch(t *testing.T) {
+	root, git := scopeRepo(t)
+	git("switch", "-q", "-c", "branch-a")
+	git("commit", "-q", "--allow-empty", "-m", "A")
+	input := unsafeEval("eval")
+	reconcileOn(t, root, "mrv-legacy", git("rev-parse", "HEAD"), input)
+	legacy := loadOne(t, root)
+	legacy.Branch = ""
+	seedRecords(t, root, legacy)
+
+	git("switch", "-q", "-c", "tmp")
+	git("commit", "-q", "--allow-empty", "-m", "tmp")
+	reconcileOn(t, root, "mrv-tmp", git("rev-parse", "HEAD"), input)
+	if got := readRecords(t, root)[0]; got.Branch != "" || got.GitHead != legacy.GitHead {
+		t.Fatalf("a named branch must not re-stamp a branchless row: %+v", got)
+	}
+	git("switch", "-q", "branch-a")
+	git("branch", "-q", "-D", "tmp")
+	git("commit", "-q", "--amend", "--allow-empty", "-m", "A, amended")
+	if in, _, _ := ScopedBlocking(root); !strings.Contains(ids(in), legacy.ID) {
+		t.Fatalf("branch-a's legacy blocker must still block it: in=%s", ids(in))
 	}
 }
 
