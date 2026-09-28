@@ -297,6 +297,8 @@ func MigrateLegacyRows(checkout, common string) (copied, conflicts []string, err
 			}
 			continue
 		}
+		// The run moves with it (MigrateLegacyRuns), so name it where it now lives, as RowFor does.
+		row.FSMRunDir = "metareview/runs/" + row.ID + "/" // root: store (git's common directory)
 		if err := appendRow(common, row); err != nil {
 			return copied, conflicts, err
 		}

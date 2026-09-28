@@ -167,7 +167,7 @@ func TestFSMRootsAreDeclared(t *testing.T) {
 					common = common || strings.Contains(lines[j], "common dir")
 					none = none || strings.Contains(lines[j], "root: none")
 				}
-				if !none && !(store && common) {
+				if !none && (!store || !common) {
 					t.Errorf("%s:%d builds a common-dir store path without a `root: store (git's common directory)` declaration", path, i+1)
 				}
 			}

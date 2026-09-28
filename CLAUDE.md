@@ -124,7 +124,7 @@ metareview override list [--pending]
 
 ## Durable Output
 
-Commit Markdown review/context artifacts in `docs/metareview/` (incl. `docs/metareview/fsm/` export bundles and the shard review results in `docs/metareview/shards/`). Keep transient `.metareview/findings.jsonl`, `.metareview/runs.jsonl` and `.metareview/shards/` (self-ignoring prompt packs) local unless the repository explicitly changes that contract. FSM runs live in git's common directory (`.git/metareview/runs/`, #173), shared by every worktree and never tracked. A `mock: true` FSM row never satisfies a gate.
+Commit Markdown review/context artifacts in `docs/metareview/` (incl. `docs/metareview/fsm/` export bundles and the shard review results in `docs/metareview/shards/`). Keep transient `.metareview/findings.jsonl`, `.metareview/runs.jsonl` and `.metareview/shards/` (self-ignoring prompt packs) local unless the repository explicitly changes that contract. FSM runs live in git's common directory (`<git-common-dir>/metareview/runs/` — the main checkout's `.git/metareview/runs/`, #173), shared by every worktree and never tracked. A `mock: true` FSM row never satisfies a gate.
 
 In metaswarm repositories, use metareview to deepen metaswarm's existing review framework. Do not replace Beads task state, Superpowers workflows, or metaswarm PR shepherding.
 

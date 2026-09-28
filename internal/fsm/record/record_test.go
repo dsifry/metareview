@@ -417,6 +417,11 @@ func TestMigrateLegacyRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	fsmRow, _ := os.ReadFile(filepath.Join(old, "metareview", "runs.jsonl"))
+	// 0.13.x named the run dir relative to the main checkout.
+	fsmRow = []byte(strings.Replace(string(fsmRow), `"fsmRunDir":"metareview/runs/`, `"fsmRunDir":".metareview/runs/`, 1))
+	if !strings.Contains(string(fsmRow), `".metareview/runs/`) {
+		t.Fatalf("fixture must carry a 0.13.x fsmRunDir: %s", fsmRow)
+	}
 	legacy := string(fsmRow) + `{"schemaVersion":1,"id":"mrv-review-1","scope":"pr-ready","verdict":"PASS"}` + "\n"
 	_ = os.MkdirAll(filepath.Join(checkout, ".metareview"), 0o755)
 	if err := os.WriteFile(filepath.Join(checkout, ".metareview", "runs.jsonl"), []byte(legacy), 0o644); err != nil {
@@ -428,6 +433,10 @@ func TestMigrateLegacyRows(t *testing.T) {
 	}
 	if ok, _ := Exists(common, "mrv-root-000000001"); !ok {
 		t.Fatal("the FSM row must be in the common-dir ledger")
+	}
+	// A migrated row names its run where it now lives, like a row written after #173 (relative to the common dir).
+	if rows, _, err := readRowsFile(path(common)); err != nil || len(rows) != 1 || rows[0].FSMRunDir != "metareview/runs/mrv-root-000000001/" {
+		t.Fatalf("migrated row FSMRunDir: %+v %v", rows, err)
 	}
 	if ok, _ := Exists(common, "mrv-review-1"); ok {
 		t.Fatal("a review row belongs to its checkout and must not be copied")

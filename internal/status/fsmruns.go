@@ -95,19 +95,23 @@ func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
 	}
 	main := canonical(repo.RunStoreRoot(root))
 	mine := func(r AbandonedRun) bool {
-		owner, err := repo.Toplevel(r.workDir)
-		if err != nil || r.workDir == "" {
+		if r.workDir == "" {
+			return here == main
+		}
+		owner, err := repo.Toplevel(existingAncestor(r.workDir))
+		if err != nil {
 			return here == main
 		}
 		return canonical(owner) == here
 	}
-	sources := []string{}
+	// The 0.13.x location first, then the store: a migration renames a run from the first to the second, so a run
+	// moved mid-scan is seen in one or the other (and deduped by id), never missed by both.
+	// run-store: shared — the single 0.13.x location (the main checkout's .metareview/runs), read for one release
+	// until an fsm command migrates it; never any other worktree's directory.
+	sources := []string{filepath.Join(repo.RunStoreRoot(root), ".metareview", "runs")}
 	if store, err := repo.StoreDir(root); err == nil {
 		sources = append(sources, filepath.Join(store, "runs"))
 	}
-	// run-store: shared — the single 0.13.x location (the main checkout's .metareview/runs), read for one release
-	// until an fsm command migrates it; never any other worktree's directory.
-	sources = append(sources, filepath.Join(repo.RunStoreRoot(root), ".metareview", "runs"))
 	for _, dir := range sources {
 		runs, ok := abandonedIn(dir, reg.Info())
 		readable = readable || ok
@@ -155,6 +159,16 @@ func abandonedIn(dir string, kinds map[string]workflow.KindInfo) ([]AbandonedRun
 		}
 	}
 	return out, true
+}
+
+// existingAncestor is dir, or its nearest ancestor that still exists: a run whose work dir (a subdirectory of its
+// worktree) was deleted still belongs to that worktree, and git cannot run in a directory that is gone.
+func existingAncestor(dir string) string {
+	for d := filepath.Clean(dir); ; d = filepath.Dir(d) {
+		if _, err := os.Stat(d); err == nil || d == filepath.Dir(d) {
+			return d
+		}
+	}
 }
 
 // canonical resolves symlinks so /var and /private/var, or a symlinked checkout, compare equal.

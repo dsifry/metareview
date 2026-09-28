@@ -55,5 +55,5 @@ $ metareview fsm advance --run mrv-… --from fix --at-iter 0
 $ metareview fsm advance --run mrv-child…                                                             → exit 3 (fix again)
 ```
 
-The parent's row in the store's ledger (`.git/metareview/runs.jsonl`) stays `needs-revision`; the child's says `passed`, `mock: true`. A mock
+The parent's row in the store's ledger (`<git-common-dir>/metareview/runs.jsonl`) stays `needs-revision`; the child's says `passed`, `mock: true`. A mock
 row never satisfies a gate.

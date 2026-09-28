@@ -88,6 +88,8 @@ func TestAbandonedRunsAreAttributedToTheirContainingWorktree(t *testing.T) {
 	writeStoreRun(t, common, "mrv-sub-00000001", filepath.Join(main, "sub"))
 	writeStoreRun(t, common, "mrv-gone-0000001", filepath.Join(base, "removed-worktree"))
 	writeStoreRun(t, common, "mrv-wt-000000001", wt)
+	// A run started in a linked worktree's subdirectory that was later deleted still belongs to that worktree.
+	writeStoreRun(t, common, "mrv-wt-gonesub01", filepath.Join(wt, "deleted", "sub"))
 	// A 0.13.x run from the linked worktree, still in the main checkout's legacy store.
 	legacy := filepath.Join(main, ".metareview", "runs", "mrv-legacy-wt-01")
 	if err := os.MkdirAll(legacy, 0o700); err != nil {
@@ -107,7 +109,7 @@ func TestAbandonedRunsAreAttributedToTheirContainingWorktree(t *testing.T) {
 	if got := strings.Join(ids(DiscoverAbandonedRuns(filepath.Join(main, "sub"))), ","); got != "mrv-gone-0000001,mrv-sub-00000001" {
 		t.Errorf("subdirectory of the main checkout: got %s", got)
 	}
-	if got := strings.Join(ids(DiscoverAbandonedRuns(wt)), ","); got != "mrv-legacy-wt-01,mrv-wt-000000001" {
+	if got := strings.Join(ids(DiscoverAbandonedRuns(wt)), ","); got != "mrv-legacy-wt-01,mrv-wt-000000001,mrv-wt-gonesub01" {
 		t.Errorf("linked worktree: got %s", got)
 	}
 	if !LegacyRunsPending(wt) || LegacyRunsPending(t.TempDir()) {
@@ -128,10 +130,19 @@ func TestCanonicalAndLegacyBookkeeping(t *testing.T) {
 	if got := canonical("/no/such/dir/./x"); got != "/no/such/dir/x" {
 		t.Errorf("canonical of a missing path = %q, want the cleaned path", got)
 	}
-	root := t.TempDir()
+	// A real repository, so LegacyRunsPending reaches the legacy store instead of failing to find one.
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	gitRun(t, root, "init", "-q")
 	if err := os.MkdirAll(filepath.Join(root, ".metareview", "runs", ".torn"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(root, ".metareview", "runs", "mrv-pending-000001"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if !LegacyRunsPending(root) {
+		t.Fatal("a legacy run must be pending, or the bookkeeping check below proves nothing")
+	}
+	_ = os.Remove(filepath.Join(root, ".metareview", "runs", "mrv-pending-000001"))
 	if LegacyRunsPending(root) {
 		t.Error("a legacy store holding only its own bookkeeping has nothing to migrate")
 	}
