@@ -313,10 +313,10 @@ func MigrateLegacyRows(checkout, common string, collided ...string) (copied, con
 		have[row.ID] = row
 		copied = append(copied, row.ID)
 	}
-	// Best-effort: without the stamp the next call simply migrates again, idempotently. A pass that left a collided
-	// run's row behind does not stamp: the file will not change when the collision is resolved, and its row must
-	// then follow the run.
-	if !deferred {
+	// Best-effort: without the stamp the next call simply migrates again, idempotently. A pass that left a row behind
+	// — a collided run's, or one in conflict with the common ledger — does not stamp: the file will not change when
+	// that is resolved by hand, and the row must then migrate.
+	if !deferred && len(conflicts) == 0 {
 		_ = os.WriteFile(stamp, []byte(size), 0o600)
 	}
 	return copied, conflicts, nil

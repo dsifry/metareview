@@ -484,6 +484,34 @@ func TestMigrateLegacyRows(t *testing.T) {
 // The legacy ledger is the main checkout's live review ledger (lock-free writers), so a malformed line in it must not
 // stop migration — its FSM rows are copied, the rest skipped — and once migrated it is not re-read on every fsm
 // command: a stamp of its size skips it until an older binary appends more (#173 review).
+// A pass that found a row conflict does not stamp the legacy ledger either: once the conflicting common row is
+// resolved, the unchanged legacy file must be read again so the row can migrate.
+func TestMigrateLegacyRowsConflictDoesNotStamp(t *testing.T) {
+	ctx := context.Background()
+	checkout, common, old := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := Terminal(old, fixedClock)(ctx, view("mrv-conflict-0000001", run.OutcomeFixed, []string{})); err != nil {
+		t.Fatal(err)
+	}
+	row, _ := os.ReadFile(filepath.Join(old, "metareview", "runs.jsonl"))
+	_ = os.MkdirAll(filepath.Join(checkout, ".metareview"), 0o755)
+	if err := os.WriteFile(filepath.Join(checkout, ".metareview", "runs.jsonl"), row, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The common ledger holds the id for a different head: a conflict.
+	_ = os.MkdirAll(filepath.Join(common, "metareview"), 0o700)
+	other := strings.Replace(string(row), `"headSha":"`, `"headSha":"f`, 1)
+	if err := os.WriteFile(path(common), []byte(other), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, conflicts, err := MigrateLegacyRows(checkout, common); err != nil || len(conflicts) != 1 {
+		t.Fatalf("want one conflict: %v %v", conflicts, err)
+	}
+	_ = os.Remove(path(common)) // the conflict is resolved by hand
+	if copied, _, err := MigrateLegacyRows(checkout, common); err != nil || len(copied) != 1 {
+		t.Fatalf("the row must migrate once its conflict is resolved: %v %v", copied, err)
+	}
+}
+
 // A run MigrateLegacyRuns left behind as a collision keeps its row behind too: the store's run of that id is a
 // different one, whose own terminal row must not be pre-empted by the legacy row.
 func TestMigrateLegacyRowsSkipsCollidedRuns(t *testing.T) {

@@ -106,6 +106,12 @@ func TestAbandonedRunsAreAttributedToTheirContainingWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	// ...and one whose work dir path is now an executable FILE: X_OK holds, but git cannot run in a file.
+	exe := filepath.Join(wt, "was-a-dir")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeStoreRun(t, common, "mrv-wt-nowfile01", exe)
 	// A 0.13.x run from the linked worktree, still in the main checkout's legacy store.
 	legacy := filepath.Join(main, ".metareview", "runs", "mrv-legacy-wt-01")
 	if err := os.MkdirAll(legacy, 0o700); err != nil {
@@ -125,7 +131,7 @@ func TestAbandonedRunsAreAttributedToTheirContainingWorktree(t *testing.T) {
 	if got := strings.Join(ids(DiscoverAbandonedRuns(filepath.Join(main, "sub"))), ","); got != "mrv-gone-0000001,mrv-gone-other01,mrv-sub-00000001" {
 		t.Errorf("subdirectory of the main checkout: got %s", got)
 	}
-	if got := strings.Join(ids(DiscoverAbandonedRuns(wt)), ","); got != "mrv-legacy-wt-01,mrv-wt-000000001,mrv-wt-gonesub01,mrv-wt-locked001" {
+	if got := strings.Join(ids(DiscoverAbandonedRuns(wt)), ","); got != "mrv-legacy-wt-01,mrv-wt-000000001,mrv-wt-gonesub01,mrv-wt-locked001,mrv-wt-nowfile01" {
 		t.Errorf("linked worktree: got %s", got)
 	}
 	if !LegacyRunsPending(wt) || LegacyRunsPending(t.TempDir()) {

@@ -167,12 +167,13 @@ func abandonedIn(dir string, kinds map[string]workflow.KindInfo) ([]AbandonedRun
 	return out, true
 }
 
-// enterableAncestor is dir, or its nearest ancestor that exists and can be entered: a run whose work dir (a
+// enterableAncestor is dir, or its nearest ancestor that is a directory and can be entered: a run whose work dir (a
 // subdirectory of its worktree) was deleted or locked still belongs to that worktree, and git can only run in a
 // directory it can enter.
 func enterableAncestor(dir string) string {
 	for d := filepath.Clean(dir); ; d = filepath.Dir(d) {
-		if syscall.Access(d, 0x1) == nil || d == filepath.Dir(d) { // X_OK: exists, and search permission
+		// X_OK: search permission; it holds for an executable file too, so require a directory.
+		if fi, err := os.Stat(d); (err == nil && fi.IsDir() && syscall.Access(d, 0x1) == nil) || d == filepath.Dir(d) {
 			return d
 		}
 	}
