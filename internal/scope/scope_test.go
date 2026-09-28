@@ -104,6 +104,64 @@ func TestCanonical(t *testing.T) {
 	}
 }
 
+// Only refs/remotes/<remote>/main|master count as a remote default branch, the remote one path segment.
+func TestIsRemoteDefault(t *testing.T) {
+	for ref, want := range map[string]bool{
+		"refs/remotes/origin/main": true, "refs/remotes/up/master": true, "refs/remotes/origin/alice/main": false,
+		"refs/remotes/origin/feat": false, "refs/remotes//main": false, "refs/remotes/origin": false, "refs/heads/main": false,
+	} {
+		if got := isRemoteDefault(ref); got != want {
+			t.Errorf("isRemoteDefault(%q) = %v", ref, got)
+		}
+	}
+	// The range leaves out exactly those refs.
+	orig := forkPoint
+	t.Cleanup(func() { forkPoint = orig })
+	forkPoint = func(string) (string, bool, error) { return "base", true, nil }
+	var rangeArgs string
+	calls := 0
+	git := func(dir string, args ...string) (string, error) {
+		switch args[0] {
+		case "for-each-ref":
+			return "refs/heads/feat\nrefs/remotes/origin/main\nrefs/remotes/origin/alice/main\nrefs/remotes/origin/HEAD", nil
+		case "rev-list":
+			rangeArgs = strings.Join(args, " ")
+		}
+		return fakeGit(&calls, "", 0)(dir, args...)
+	}
+	Load("/repo", git)
+	if rangeArgs != "rev-list base..HEAD --not refs/remotes/origin/main --" {
+		t.Fatalf("range args: %q", rangeArgs)
+	}
+}
+
+// A HEAD spelled other than any listed branch is folded only when git resolves that spelling (a case-insensitive
+// filesystem); an unborn branch is left alone, and a failing check leaves the scope unknown.
+func TestLoadFoldsOnlyAResolvingSpelling(t *testing.T) {
+	orig := forkPoint
+	t.Cleanup(func() { forkPoint = orig })
+	forkPoint = func(string) (string, bool, error) { return "", false, nil }
+	for _, c := range []struct {
+		verify  error
+		current string
+		known   bool
+	}{{nil, "feat", true}, {&exitError{code: 1}, "Feat", true}, {&exitError{code: 128}, "Feat", false}} {
+		calls := 0
+		git := func(dir string, args ...string) (string, error) {
+			switch args[0] {
+			case "symbolic-ref":
+				return "refs/heads/Feat", nil
+			case "rev-parse":
+				return "", c.verify
+			}
+			return fakeGit(&calls, "", 0)(dir, args...)
+		}
+		if s := Load("/repo", git); s.Current != c.current || s.known != c.known {
+			t.Errorf("verify %v: Current %q known %v, want %q %v", c.verify, s.Current, s.known, c.current, c.known)
+		}
+	}
+}
+
 // fakeGit answers Load's calls; fail names the subcommand that errors (with its exit code, -1 for no exit).
 func fakeGit(calls *int, fail string, failCode int) Runner {
 	return func(_ string, args ...string) (string, error) {

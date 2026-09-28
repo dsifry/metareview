@@ -299,15 +299,21 @@ func (in *invocation) init() int {
 	for _, ref := range strings.Fields(refs) {
 		branches[scope.BranchName(ref)] = true
 	}
-	current = scope.Canonical(current, branches)
+	if current != "" && !branches[current] {
+		// Folded only when git resolves that spelling (a case-insensitive filesystem): on a case-sensitive one it is
+		// an unborn branch of its own.
+		if _, code, err := c.git(workDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+current); err == nil && code == 0 {
+			current = scope.Canonical(current, branches)
+		}
+	}
 	if branch != "" && current == "" && !branches[branch] {
 		return in.usage("--for-branch " + strconv.Quote(branch) + " is not a local branch in " + workDir)
 	}
-	if current != "" && branch != "" && branch != current {
+	if current != "" && branch != "" && scope.Canonical(branch, branches) != current {
 		return in.usage("--for-branch " + branch + " names another branch than the one checked out in " + workDir + " (" + current + "); it is for a detached HEAD")
 	}
-	if branch == "" {
-		branch = current
+	if current != "" {
+		branch = current // restated or not, the checked-out branch as git lists it
 	}
 	if branch == "" {
 		return in.usage("HEAD is detached in " + workDir + ": pass --for-branch <branch> to name the branch this run reviews for")

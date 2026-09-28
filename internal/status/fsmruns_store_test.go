@@ -357,6 +357,21 @@ func TestAStaleLocalMainDoesNotPullInMergedBranchesRuns(t *testing.T) {
 	}
 }
 
+// Only a remote's own main/master is left out of the range: a pushed personal or namespaced branch that merely ends
+// in /main (origin/alice/main) holding the lower branch of a stack does not hide its runs from the upper one.
+func TestOnlyARemotesDefaultBranchIsLeftOutOfTheRange(t *testing.T) {
+	root, common := newRepo(t)
+	gitRun(t, root, "checkout", "-q", "-b", "feat-a")
+	a := commit(t, root, "a")
+	writeStoreRun(t, common, "mrv-alicemain-01", "feat-a", a)
+	gitRun(t, root, "update-ref", "refs/remotes/origin/alice/main", a)
+	gitRun(t, root, "checkout", "-q", "-b", "feat-b")
+	commit(t, root, "b")
+	if got := strings.Join(ids(DiscoverAbandonedRuns(root)), ","); got != "mrv-alicemain-01" {
+		t.Fatalf("origin/alice/main is not a default branch: feat-a's run still blocks feat-b, got %q", got)
+	}
+}
+
 // AC-4.4: a run created detached with --for-branch feat blocks feat, including after feat is rebased.
 func TestADetachedRunForABranchBlocksThatBranch(t *testing.T) {
 	root, common := newRepo(t)

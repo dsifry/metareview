@@ -10,8 +10,8 @@
 // so routine git use would switch it off; the branch name alone misses detached snapshots and stacked work.
 //
 // Load makes a fixed number of git calls however many items are classified (#177 AC-4.9): the current branch (and,
-// on a detached HEAD, where a rebase keeps its head-name), the fork point, one rev-list of the range into a set, one
-// listing of local branches, and the current branch's reflog. Only legacy items ask more: up to two calls per
+// on a detached HEAD, where a rebase keeps its head-name; on a mis-spelled HEAD, whether it resolves), one listing of
+// local and remote branches, the fork point, one rev-list of the range into a set, and the current branch's reflog. Only legacy items ask more: up to two calls per
 // distinct legacy head, cached.
 package scope
 
@@ -133,6 +133,31 @@ func Load(root string, git Runner) Scope {
 	default:
 		return s
 	}
+	// Local branches, and the remote default branches (refs/remotes/<remote>/main|master, the remote one path
+	// segment) whose commits the range leaves out.
+	out, err := git(root, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
+	if err != nil {
+		return s
+	}
+	var remoteDefaults []string
+	for _, ref := range strings.Fields(out) {
+		if name := branchName(ref); name != "" {
+			s.branches[name] = true
+		} else if isRemoteDefault(ref) {
+			remoteDefaults = append(remoteDefaults, ref)
+		}
+	}
+	if s.Current != "" && !s.branches[s.Current] {
+		// HEAD spelled other than any listed branch: on a case-insensitive filesystem `git checkout Feat` lands on
+		// feat with HEAD spelled Feat, and the spelling resolves. Where it does not resolve (an unborn branch — on a
+		// case-sensitive filesystem Feat is its own branch) it is not folded.
+		switch _, err := git(root, "rev-parse", "--verify", "--quiet", "refs/heads/"+s.Current); {
+		case err == nil:
+			s.Current = Canonical(s.Current, s.branches)
+		case code(err) != 1:
+			return s
+		}
+	}
 	base, ok, err := forkPoint(root)
 	if err != nil {
 		return s
@@ -140,7 +165,8 @@ func Load(root string, git Runner) Scope {
 	if ok {
 		// Never what a remote default branch already has: a branch cut from a fresh origin/main while local main lags
 		// would otherwise take in every merged branch's commits — and their runs.
-		out, err := git(root, "rev-list", base+"..HEAD", "--not", "--remotes=*/main", "--remotes=*/master", "--")
+		args := append([]string{"rev-list", base + "..HEAD", "--not"}, remoteDefaults...)
+		out, err := git(root, append(args, "--")...)
 		if err != nil {
 			return s
 		}
@@ -148,14 +174,6 @@ func Load(root string, git Runner) Scope {
 			s.inRange[sha] = true
 		}
 	}
-	out, err := git(root, "for-each-ref", "--format=%(refname)", "refs/heads")
-	if err != nil {
-		return s
-	}
-	for _, ref := range strings.Fields(out) {
-		s.branches[branchName(ref)] = true
-	}
-	s.Current = Canonical(s.Current, s.branches)
 	if s.Current != "" && s.branches[s.Current] {
 		// The branch's reflog: its former names, so a rewrite followed by `git branch -m` (or `-c` then deleting the
 		// original — both carry the reflog along) still owns the runs of the name it had; and its past heads, for
@@ -192,6 +210,17 @@ func (s Scope) readReflog(root string, git Runner) error {
 		}
 	}
 	return nil
+}
+
+// isRemoteDefault reports whether ref is refs/remotes/<remote>/main or /master, the remote a single path segment
+// (git's own --remotes=*/main glob would also match origin/alice/main).
+func isRemoteDefault(ref string) bool {
+	rest, ok := strings.CutPrefix(ref, "refs/remotes/")
+	if !ok {
+		return false
+	}
+	remote, branch, ok := strings.Cut(rest, "/")
+	return ok && remote != "" && (branch == "main" || branch == "master")
 }
 
 // Canonical is name as git lists the branch. On a case-insensitive filesystem `git checkout Feat` resolves the loose

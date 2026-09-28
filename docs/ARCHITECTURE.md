@@ -205,13 +205,14 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   one rule in one package: a run recorded on branch N at head H is **in scope** when N is the current branch or one
   of its former names — the `git branch -m` / `-c` entries its reflog carries, while no live branch holds that name —
   (the name leg: survives rebase, amend and rename; mid-rebase the branch being rebased is current; a rebase begun detached is no branch), or when H lies in
-  `merge-base(HEAD, main|master)..HEAD`, less anything a remote `*/main` or `*/master` already has (the range leg:
+  `merge-base(HEAD, main|master)..HEAD`, less anything a remote's own `main` or `master` (`refs/remotes/<remote>/main`) already has (the range leg:
   detached snapshots, stacked branches; the exclusion keeps a stale local main from pulling merged branches' runs
   into a branch cut from a fresh origin/main). Otherwise it is
   **other-branch** while N exists, else **orphaned**; neither blocks, and `status --all` lists both, each with the
   run directory to delete, without changing the exit code. Branch names are compared as full refnames, so a
   same-named tag cannot unmatch them, and spelled as git lists them (`scope.Canonical`: on a case-insensitive
-  filesystem `git checkout Feat` lands on `feat` with HEAD spelled `Feat`; init records, and status compares, `feat`). `fsm init` records `branch` in its init event: the checked-out branch; on a
+  filesystem `git checkout Feat` lands on `feat` with HEAD spelled `Feat`; init records, and status compares, `feat` —
+  folded only when git resolves that spelling, so on a case-sensitive one an unborn `Feat` stays its own branch). `fsm init` records `branch` in its init event: the checked-out branch; on a
   detached HEAD `--for-branch` is required and must name a local branch exactly as git lists it; on an attached one
   it may only restate it. **Fail closed:** any git call `Load` makes that fails (other than git's own "detached")
   leaves the scope unknown, and an unknown scope puts everything in scope. **Legacy runs** (before #177, no branch)

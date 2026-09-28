@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -376,7 +377,15 @@ func TestInitForBranchCheckTellsGitFailingFromNo(t *testing.T) {
 func TestInitRecordsTheBranchAsGitListsIt(t *testing.T) {
 	h := newHarness(t)
 	git(t, h.root, "symbolic-ref", "HEAD", "refs/heads/MAIN")
+	if exec.Command("git", "-C", h.root, "rev-parse", "--verify", "--quiet", "refs/heads/MAIN").Run() != nil {
+		t.Skip("case-sensitive filesystem: MAIN is an unborn branch of its own, not main")
+	}
 	id := h.must(StatusOK, 0, h.mockInit()...)["run_id"].(string)
+	if got := initBranch(t, h, id); got != "main" {
+		t.Fatalf("a mis-cased HEAD must be recorded as the listed branch, got %q", got)
+	}
+	// Restating the checked-out branch in its HEAD spelling is still restating it.
+	id = h.must(StatusOK, 0, append(h.mockInit(), "--for-branch", "MAIN")...)["run_id"].(string)
 	if got := initBranch(t, h, id); got != "main" {
 		t.Fatalf("a mis-cased HEAD must be recorded as the listed branch, got %q", got)
 	}
