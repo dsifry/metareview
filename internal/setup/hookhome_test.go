@@ -374,7 +374,7 @@ func TestOwnedBy(t *testing.T) {
 	if ownedBy(dir, here) {
 		t.Fatal("a dir another existing repository owns is not ours")
 	}
-	releaseHookDir(dir) // not a per-checkout dir: never emptied
+	releaseHookDir(dir, here, nil) // not a per-checkout dir: never emptied
 	if _, err := os.Stat(filepath.Join(dir, hookOwnerFile)); err != nil {
 		t.Fatal("releaseHookDir must leave a user-level dir alone")
 	}
@@ -595,6 +595,44 @@ func TestUninstallNeverEmptiesAUserLevelDirAnotherRepositoryRunsFrom(t *testing.
 			}
 			if hp := hooksPath(t, victim, g); hp != plan.Target {
 				t.Fatalf("the victim's core.hooksPath must be untouched: %q", hp)
+			}
+		})
+	}
+}
+
+// Before #173 core.hooksPath was an ABSOLUTE path into the installing checkout, so a copy of such an install (cp -r, a
+// restored backup) still points at the ORIGINAL's .metareview/git-hooks. Installing or uninstalling in the copy must
+// never delete that dir: only a per-checkout dir of this same repository is released.
+func TestACopyNeverReleasesItsOriginalsPerCheckoutDir(t *testing.T) {
+	for _, op := range []string{"install", "uninstall"} {
+		t.Run(op, func(t *testing.T) {
+			isolateHooksHome(t)
+			base, _ := filepath.EvalSymlinks(t.TempDir())
+			g := isolatedGit(base)
+			orig := filepath.Join(base, "orig")
+			if out, err := g(base, "init", "-q", "-b", "main", orig); err != nil {
+				t.Fatalf("%v %s", err, out)
+			}
+			old := filepath.Join(orig, ".metareview", "git-hooks") // a pre-#173 install
+			writeGateDir(t, old)
+			_, _ = g(orig, "config", "--local", "core.hooksPath", old)
+			cp := filepath.Join(base, "copy")
+			if err := os.CopyFS(cp, os.DirFS(orig)); err != nil {
+				t.Fatal(err)
+			}
+			if op == "install" {
+				plan, err := PlanHookInstall(cp, g)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := ApplyHookInstall(cp, plan, false, g); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, err := UninstallHookInstall(cp, g); err != nil {
+				t.Fatal(err)
+			}
+			if !hooksMaterialized(old) {
+				t.Fatalf("%s in the copy must not delete the original's per-checkout hooks", op)
 			}
 		})
 	}
