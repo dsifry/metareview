@@ -101,7 +101,8 @@ func fakeGit(calls *int, fail string, failCode int) Runner {
 				"r2 rebase (finish): refs/heads/first onto base\n" +
 				"r1 commit: work\n" +
 				"\n" + // a blank line is skipped
-				"r1 Branch: renamed nonsense to refs/heads/x\n" + // not a local branch: no former name
+				"r1 Branch: renamed refs/tags/v1 to refs/heads/x\n" + // not a local branch: no former name
+				"r1 Branch: renamed jgit-old to jgit-new\n" + // JGit writes short names
 				"r1 Branch: copied refs/heads/orig to refs/heads/first\n" +
 				"parent branch: Created from HEAD", nil
 		case "rev-parse":
@@ -126,7 +127,7 @@ func TestLoadMakesAFixedNumberOfGitCalls(t *testing.T) {
 		t.Fatalf("Load must make exactly 4 git calls (plus the fork point), made %d", calls)
 	}
 	if s.Current != "feat" || !s.inRange["c2"] || s.inRange["r1"] || !s.pastHeads["r1"] || !s.pastHeads["parent"] ||
-		!s.former["feat-old"] || !s.former["first"] || !s.former["orig"] || len(s.former) != 3 || !s.branches["main"] || !s.known {
+		!s.former["feat-old"] || !s.former["first"] || !s.former["orig"] || !s.former["jgit-old"] || len(s.former) != 4 || !s.branches["main"] || !s.known {
 		t.Fatalf("Load parsed %+v", s)
 	}
 	// No fork point (the default branch) is not a failure: an empty range, the reflog still read, the scope known.

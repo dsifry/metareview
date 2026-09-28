@@ -57,10 +57,11 @@ type Scope struct {
 	Current  string
 	inRange  map[string]bool
 	branches map[string]bool
-	// known is false when the repository's branches could not be read (not a git repository): nothing can then be
-	// shown to belong elsewhere, so everything is in scope — never a gate cleared by an unreadable repository.
+	// known is false when any git call Load makes failed (not a git repository, a timeout, a broken ref): nothing can
+	// then be shown to belong elsewhere, so everything is in scope — never a gate cleared by an unreadable repository.
 	known bool
-	// former holds the current branch's earlier names, from the rename entries its reflog carries.
+	// former holds the current branch's earlier names, from the rename and copy entries its reflog carries; Classify
+	// counts one only while no live branch holds it.
 	former map[string]bool
 	// pastHeads holds every head the current branch's reflog records: a legacy item at one of them was this branch's.
 	pastHeads map[string]bool
@@ -165,7 +166,7 @@ func Load(root string, git Runner) Scope {
 	return s
 }
 
-// readReflog reads the current branch's reflog: every head it has had, and every name it was renamed from.
+// readReflog reads the current branch's reflog: every head it has had, and every name it was renamed or copied from.
 func (s Scope) readReflog(root string, git Runner) error {
 	out, err := git(root, "reflog", "show", "--format=%H %gs", "refs/heads/"+s.Current, "--")
 	if err != nil {
@@ -181,13 +182,22 @@ func (s Scope) readReflog(root string, git Runner) error {
 		for _, verb := range []string{"branch: renamed ", "branch: copied "} {
 			if rest, ok := cutPrefixFold(subject, verb); ok {
 				from, _, _ := strings.Cut(rest, " to ")
-				if name := branchName(from); name != "" {
+				if name := formerName(from); name != "" {
 					s.former[name] = true
 				}
 			}
 		}
 	}
 	return nil
+}
+
+// formerName is the branch a rename or copy entry names: git writes refs/heads/<name>; JGit-based tools write the
+// short name. Any other ref (refs/remotes/..., refs/tags/...) is no branch.
+func formerName(ref string) string {
+	if name := branchName(ref); name != "" || strings.HasPrefix(ref, "refs/") {
+		return name
+	}
+	return strings.TrimSpace(ref)
 }
 
 func cutPrefixFold(s, prefix string) (string, bool) {

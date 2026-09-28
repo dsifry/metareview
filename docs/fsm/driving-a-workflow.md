@@ -105,7 +105,7 @@ redacted, one-way, durable). Delete by hand: a run without its `workflow.yaml` s
 (`ERR_FORK_INCOMPLETE`), or a directory left behind by `ERR_RUN_LOCKED` at `init`. `metareview status` lists every run in the
 shared store (and any 0.13.x runs not yet migrated); `metareview status --json` — what the Stop hook reads — reports as
 abandoned only the runs of the branch in hand (#177): those `init` recorded for this branch or a name it was renamed
-from, and those whose head is in `merge-base..HEAD` (a stacked branch inherits its base branch's). A run from before
+or copied from (while no live branch holds that name), and those whose head is in `merge-base..HEAD` (a stacked branch inherits its base branch's). A run from before
 #177 (no branch) blocks unless git shows its head belongs nowhere here (out of range, not one of the branch's past
 heads, and unreachable from HEAD or pruned); an empty or unreadable head, or a git failure, keeps it blocking. `init` records the checked-out branch; on a detached HEAD
 pass `--for-branch <branch>` (a local branch). `metareview status --all` also lists the runs that belong to other branches or to none, without

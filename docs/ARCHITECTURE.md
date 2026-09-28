@@ -217,7 +217,8 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   silently clears one, but a pre-#177 run abandoned on main now blocks every branch forked after it until its
   directory is deleted. `scope.Load` makes a fixed number of git calls however many runs there are (AC-4.9); only
   legacy runs ask more, up to two calls per distinct head. **Known trade-offs:** a deleted branch name recreated for
-  unrelated work inherits the old name's runs (the name leg); `git checkout -b new` after a rewrite leaves the run
+  unrelated work inherits the old name's runs (the name leg), and after a rename, recreating the old name hands the
+  runs recorded under it to the new branch, where they still block; `git checkout -b new` after a rewrite leaves the run
   with the old branch, where it still blocks (and it is counted here); a repository that keeps no branch reflogs (a
   bare one's default), or whose reflogs were expired, has no former names, so a rewrite then a rename orphans a run
   there; from other checkouts a renamed branch's run reads as orphaned (only the renamed branch reads its own
