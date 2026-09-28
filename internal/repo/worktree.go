@@ -80,8 +80,8 @@ var commonDirGit = func(dir string) (string, error) {
 }
 
 // StoreDir is metareview's shared store for the repository containing start (#173): <git-common-dir>/metareview.
-// The main checkout and every linked worktree resolve the same directory, it exists in a bare repository, and it
-// does not depend on any one checkout: moving or deleting the main checkout, or `git clean -fdX` in it, leaves it
+// The main checkout and every linked worktree resolve the same directory, it resolves in a bare repository too (the
+// FSM still refuses a bare main worktree, #174), and it does not depend on any one checkout: moving or deleting the main checkout, or `git clean -fdX` in it, leaves it
 // alone. FSM runs live in its runs/ (alongside the session bindings in sessions/, #166).
 func StoreDir(start string) (string, error) {
 	common, err := commonDirGit(start)

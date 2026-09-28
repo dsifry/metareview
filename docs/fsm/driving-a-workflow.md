@@ -102,8 +102,8 @@ a deliberate human reset, not something the agent decides.
 `<git-common-dir>/metareview/runs/<id>/` (local, inside `.git` so never tracked, kept until deleted; `MaxEvents` → `ERR_AUDIT_FULL`),
 `<git-common-dir>/metareview/runs.jsonl` (one row per terminal run, beside the runs), `docs/metareview/fsm/<id>/` (`fsm export` bundles —
 redacted, one-way, durable). Delete by hand: a run without its `workflow.yaml` sidecar, an incomplete fork
-(`ERR_FORK_INCOMPLETE`), or a directory left behind by `ERR_RUN_LOCKED` at `init`. `metareview status` lists the runs of
-the main worktree. Prerequisite: git ≥ 2.31.
+(`ERR_FORK_INCOMPLETE`), or a directory left behind by `ERR_RUN_LOCKED` at `init`. `metareview status` lists the abandoned runs
+of the worktree it runs in (a run belongs to the worktree containing its init work dir). Prerequisite: git ≥ 2.31.
 
 ## Escalation
 

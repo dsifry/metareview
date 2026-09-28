@@ -95,8 +95,9 @@ func TestFSMStoreMigrationFailures(t *testing.T) {
 	h.mustErr("ERR_STORE_PATH", 2, "state")
 	_ = os.Remove(filepath.Join(legacy, "runs"))
 	_ = os.MkdirAll(filepath.Join(legacy, "runs.jsonl"), 0o700) // the legacy ledger is a directory
-	if _, code := h.run("state"); code == 0 {
-		t.Fatal("an unreadable legacy ledger must fail the command")
+	// ERR_NO_RUNS would also exit nonzero here, so pin the code: the failure must be the migration's own.
+	if env, code := h.run("state"); code == 0 || env["code"] == "ERR_NO_RUNS" {
+		t.Fatalf("an unreadable legacy ledger must fail the command with its own error, got %v (exit %d)", env["code"], code)
 	}
 	_ = os.RemoveAll(filepath.Join(legacy, "runs.jsonl"))
 
@@ -156,5 +157,22 @@ func TestNothingIsWrittenIntoGitsWorktreeDirs(t *testing.T) {
 			!strings.HasSuffix(f, "index") && !strings.HasSuffix(f, "logs/HEAD") && !strings.HasSuffix(f, "ORIG_HEAD") {
 			t.Errorf("new file among git's per-worktree files, outside a metareview/ directory: %s", f)
 		}
+	}
+}
+
+// Plain `metareview status` is read-only, so it never migrates; after an upgrade it must still say that 0.13.x runs
+// are waiting in the legacy store rather than report none.
+func TestStatusLinesReportsUnmigratedLegacyRuns(t *testing.T) {
+	h := newHarness(t)
+	id := h.must(StatusOK, 0, h.mockInit()...)["run_id"].(string)
+	toLegacy(t, h, id)
+	_ = os.MkdirAll(filepath.Join(h.root, ".metareview", "runs", "not a run id"), 0o700) // never migrated: not counted
+	lines := strings.Join(StatusLines(context.Background(), h.deps, h.root), "\n")
+	if !strings.Contains(lines, "fsm runs: none") || !strings.Contains(lines, "1 0.13.x run(s) not yet migrated") {
+		t.Fatalf("status must report the unmigrated legacy run: %s", lines)
+	}
+	h.must(StatusOK, 0, "state", "--run", id) // migrates
+	if lines := strings.Join(StatusLines(context.Background(), h.deps, h.root), "\n"); strings.Contains(lines, "not yet migrated") {
+		t.Fatalf("a migrated store has nothing pending: %s", lines)
 	}
 }

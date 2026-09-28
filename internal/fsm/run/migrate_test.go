@@ -184,3 +184,27 @@ func TestMigrateLegacyRunsFailures(t *testing.T) {
 		storeErr(t, err, CodeStorePath)
 	})
 }
+
+// PendingLegacyRuns is exactly what the next migration would move: not bookkeeping, not a non-run directory, and not
+// a collision (which the migration leaves in place, so reporting it as pending would never clear).
+func TestPendingLegacyRuns(t *testing.T) {
+	checkout, common := t.TempDir(), t.TempDir()
+	if got := PendingLegacyRuns(checkout, common); got != nil {
+		t.Fatalf("no legacy store: got %v", got)
+	}
+	legacyRun(t, checkout, "mrv-pending-000001", map[string]string{"audit.jsonl": "x\n"})
+	legacyRun(t, checkout, "mrv-collide-000002", map[string]string{"audit.jsonl": "x\n"})
+	for _, d := range []string{".torn", "not a run id"} {
+		_ = os.MkdirAll(filepath.Join(checkout, ".metareview", "runs", d), 0o700)
+	}
+	_ = os.MkdirAll(filepath.Join(common, "metareview", "runs", "mrv-collide-000002"), 0o700)
+	if got := PendingLegacyRuns(checkout, common); len(got) != 1 || got[0] != "mrv-pending-000001" {
+		t.Fatalf("got %v, want only the movable run", got)
+	}
+	if _, err := MigrateLegacyRuns(checkout, common); err != nil {
+		t.Fatal(err)
+	}
+	if got := PendingLegacyRuns(checkout, common); len(got) != 0 {
+		t.Fatalf("after migration nothing is pending, got %v", got)
+	}
+}

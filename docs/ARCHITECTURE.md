@@ -174,8 +174,8 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
 - **The shared store is in git's common directory (#173).** `repo.StoreDir` = `<git rev-parse --git-common-dir>/
   metareview/`: FSM runs (`runs/<id>/`), their terminal ledger (`runs.jsonl`; run ids are store-unique,
   `record.Exists` checks it; `FSMRunDir` is relative to the common dir), the migration lock, and the session
-  bindings (`sessions/`, #166). One store for the main checkout and every linked worktree; it exists in a bare
-  repository and survives `git clean -fdX`, a moved or deleted main checkout, and every git maintenance command
+  bindings (`sessions/`, #166). One store for the main checkout and every linked worktree; the path resolves in a bare
+  repository too (though `fsm` still refuses a bare main worktree until #174), and it survives `git clean -fdX`, a moved or deleted main checkout, and every git maintenance command
   (AC-2.8 pins it); clones do not copy it. **Migration:** the first `fsm` command after upgrading moves a 0.13.x
   store (`<main>/.metareview/runs/<id>/`) in under an exclusive lock — byte-identical, idempotent, never
   overwriting (an id in both places is a `STORE_COLLISION` warning, both copies kept) — and copies the legacy

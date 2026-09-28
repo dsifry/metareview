@@ -52,8 +52,8 @@ func MigrateLegacyRuns(checkout, common string) (MigrationReport, error) {
 	}
 	for _, e := range entries {
 		id := e.Name()
-		if !e.IsDir() || strings.HasPrefix(id, ".") || ValidateRunID(id) != nil {
-			continue // the legacy store's own bookkeeping (.gitignore, .torn), or not a run
+		if !isLegacyRun(e) {
+			continue
 		}
 		dest := filepath.Join(store, id)
 		if _, err := os.Lstat(dest); err == nil {
@@ -68,4 +68,30 @@ func MigrateLegacyRuns(checkout, common string) (MigrationReport, error) {
 	sort.Strings(rep.Moved)
 	sort.Strings(rep.Collisions)
 	return rep, nil
+}
+
+// isLegacyRun is what the migration moves: a run directory, not the legacy store's own bookkeeping (.gitignore,
+// .torn) or anything that is not a valid run id.
+func isLegacyRun(e fs.DirEntry) bool {
+	return e.IsDir() && !strings.HasPrefix(e.Name(), ".") && ValidateRunID(e.Name()) == nil
+}
+
+// PendingLegacyRuns lists, read-only, the 0.13.x runs the next MigrateLegacyRuns(checkout, common) would move: the
+// ones it would not skip as bookkeeping or leave behind as collisions. For callers that must not migrate (status).
+func PendingLegacyRuns(checkout, common string) []string {
+	entries, err := os.ReadDir(filepath.Join(checkout, ".metareview", "runs")) // root: store (the 0.13.x location)
+	if err != nil {
+		return nil
+	}
+	var ids []string
+	for _, e := range entries {
+		if !isLegacyRun(e) {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(common, "metareview", "runs", e.Name())); err == nil { // root: store (git's common directory)
+			continue // a collision: the migration leaves it, so it is not pending
+		}
+		ids = append(ids, e.Name())
+	}
+	return ids
 }

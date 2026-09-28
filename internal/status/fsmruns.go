@@ -127,20 +127,16 @@ func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
 	return out
 }
 
-// LegacyRunsPending reports whether the main checkout still holds a 0.13.x FSM run store (.metareview/runs/ with a
-// run in it) that no fsm command has migrated into git's common directory yet (#173).
+// LegacyRunsPending reports whether the main checkout still holds 0.13.x FSM runs that the next fsm command would
+// migrate into git's common directory (#173) — never bookkeeping, a non-run directory or a collision, which no
+// migration moves, so the warning it drives always clears once a command runs.
 func LegacyRunsPending(root string) bool {
-	// run-store: shared — the single 0.13.x location.
-	entries, err := os.ReadDir(filepath.Join(repo.RunStoreRoot(root), ".metareview", "runs"))
+	store, err := repo.StoreDir(root)
 	if err != nil {
 		return false
 	}
-	for _, e := range entries {
-		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-			return true
-		}
-	}
-	return false
+	// run-store: shared — the single 0.13.x location; store is <common>/metareview, so its parent is the common dir.
+	return len(run.PendingLegacyRuns(repo.RunStoreRoot(root), filepath.Dir(store))) > 0
 }
 
 // abandonedIn lists the abandoned runs directly under dir, and whether dir could be read at all.

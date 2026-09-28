@@ -967,13 +967,21 @@ func StatusLines(ctx context.Context, deps Deps, cwd string) []string {
 	if err != nil {
 		return nil
 	}
+	// status is read-only, so it never migrates: after an upgrade it names the 0.13.x runs still waiting instead.
+	var pending []string
+	if root, err := c.storeRoot(); err == nil {
+		if ids := run.PendingLegacyRuns(root, common); len(ids) > 0 {
+			pending = []string{fmt.Sprintf("fsm runs: %d 0.13.x run(s) not yet migrated in %s; any `metareview fsm` command migrates them",
+				len(ids), filepath.Join(root, ".metareview", "runs"))} // root: store (the 0.13.x location)
+		}
+	}
 	list, err := deps.Store(common).List()
 	if err != nil {
 		code, _, _ := failure(err)
-		return []string{"fsm runs: " + code}
+		return append([]string{"fsm runs: " + code}, pending...)
 	}
 	if len(list) == 0 {
-		return []string{"fsm runs: none"}
+		return append([]string{"fsm runs: none"}, pending...)
 	}
 	var good, bad []string
 	for _, s := range list {
@@ -997,5 +1005,5 @@ func StatusLines(ctx context.Context, deps Deps, cwd string) []string {
 		good = append(good, fmt.Sprintf("%s  %s  %s%s", s.RunID, s.State, outcome, mock))
 	}
 	sort.Strings(bad)
-	return append(append([]string{"fsm runs:"}, good...), bad...)
+	return append(append(append([]string{"fsm runs:"}, good...), bad...), pending...)
 }
