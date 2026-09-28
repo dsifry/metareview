@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3-d26af81c06dbb20d-claude-subagent",
+  "kind": "shard",
+  "shardId": "shard-3",
+  "shardHash": "d26af81c06dbb20d",
+  "planHash": "230b1fa86fda92c9",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-3",
+  "reviewedAt": "2026-09-28T16:06:58Z",
+  "evidence": [
+    {"path": "internal/scope/scope.go", "line": 118, "note": "Load: symbolic-ref exit 1 -> rebasing head-name; any other git failure leaves known=false so Classify puts everything in scope (fails closed)"},
+    {"path": "internal/scope/scope.go", "line": 154, "note": "case fold only when refs/heads/<spelling> resolves; non-1 failure leaves scope unknown"},
+    {"path": "internal/scope/scope.go", "line": 217, "note": "isRemoteDefault anchors refs/remotes/<one-segment>/main|master; rev-list base..HEAD --not <remoteDefaults> -- is valid with an empty list"},
+    {"path": "internal/scope/scope.go", "line": 304, "note": "Classify: unknown -> InScope; name/former-name leg, range leg, legacy leg (pastHeads or reachable), then OtherBranch/Orphaned"},
+    {"path": "internal/scope/scope.go", "line": 326, "note": "reachable: only merge-base exit 1, or rev-parse --verify exit 1 on a pruned commit, proves unreachable; cached per head"},
+    {"path": "internal/fsm/cli/run.go", "line": 283, "note": "fsm init: symbolic-ref exit 1 = detached, other failures ERR_GIT; --for-branch validated against for-each-ref exact names and canonically against the checked-out branch; Branch passed to machine.InitOptions"},
+    {"path": "internal/repo/worktree.go", "line": 70, "note": "MainWorktreeIsBare removed along with its test; its only base caller (internal/status/fsmruns.go bareMain, #174) was replaced by scope classification in this branch (git grep at ce80bb4 finds no Go callers); go build ./... and go vet pass"},
+    {"note": "go test ./internal/scope ./internal/repo passes at head ce80bb4; prompt.go driver contract documents --for-branch consistently with run.go parseArgs"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Inconsistent fail-open in fsm init's case fold: run.go treats ANY rev-parse --verify failure (timeout, spawn error, exit 128) as 'do not fold' and records HEAD's spelling as-is, whereas scope.Load treats a non-1 failure as unknown. On a case-insensitive FS with a mis-cased checkout AND a transient git failure, the run is recorded under a spelling status never lists, so once its head leaves the range it reads as orphaned instead of blocking. Requires two unusual conditions at once; a follow-up could return gitFailed for code != 1 as the other git calls in init do.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 305},
+        {"path": "internal/scope/scope.go", "line": 154}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "readReflog uses a value receiver to fill maps (works because maps are reference types); already listed as accepted style in the fourth-round known list.",
+      "evidence": [
+        {"path": "internal/scope/scope.go", "line": 191}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

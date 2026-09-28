@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-3-2-7a456a81552b133f-claude-subagent",
+  "kind": "shard",
+  "shardId": "shard-3-2",
+  "shardHash": "7a456a81552b133f",
+  "planHash": "230b1fa86fda92c9",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-3-2",
+  "reviewedAt": "2026-09-28T16:07:11Z",
+  "evidence": [
+    {"path": "internal/status/fsmruns_store_test.go", "line": 114, "note": "gitEnv scrubs inherited GIT_* and global/system config for every fixture git, so hook-invoked test runs cannot target the outer repository"},
+    {"path": "internal/status/fsmruns_store_test.go", "line": 97, "note": "AC-4.2..4.9 each have a fixture test: branch scoping across worktrees, rebase, rewrite+rename, stacked inheritance, merged-and-deleted orphaning, name reuse, legacy reachability, --for-branch detached runs, 2,000-run timing, --all emitters never change the exit"},
+    {"path": "internal/status/fsmruns_store_test.go", "line": 333, "note": "regressions for earlier review rounds are pinned: detached-begun rebase, same-named tag, pruned legacy head, ff'd parent head, reused former name, copy-then-delete, unborn branch, stale local main vs origin/main, origin/alice/main not a default branch"},
+    {"path": "skills/fsm/SKILL.md", "line": 109, "note": "doc matches code: branch recorded by fsm init, --for-branch on detached HEAD, merge-base..HEAD range leg, reflog rename leg with the bare-repo caveat, fail-closed git, status --all never changes exit (cmd/metareview/main.go:594, main_test.go:1337)"},
+    {"note": "go test ./internal/status/ passes at head ce80bb4; setup assertions (rebase must rewrite head, rebase must conflict) guard the fixtures against vacuous passes."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "The rewrite drops the only status-level fixtures for a bare-main repository with linked worktrees (the #174 layout). Branch scoping there relies on the documented no-reflog caveat (known, accepted) and scope-package tests, but no status test exercises DiscoverAbandonedRuns/Build from a worktree of a bare repo, so a regression in common-dir resolution for that layout would only surface in cmd tests if at all. Test-coverage gap, not a behaviour defect.",
+      "evidence": [
+        {"path": "internal/status/fsmruns_store_test.go", "line": 168}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "gitOut uses c.Output(), so a failing fixture git reports only the exit status without stderr (gitRun uses CombinedOutput and prints it). Diagnosability only.",
+      "evidence": [
+        {"path": "internal/status/fsmruns_store_test.go", "line": 141}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

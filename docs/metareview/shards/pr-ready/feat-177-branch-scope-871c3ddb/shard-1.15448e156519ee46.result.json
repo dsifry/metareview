@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1-15448e156519ee46-claude-subagent",
+  "kind": "shard",
+  "shardId": "shard-1",
+  "shardHash": "15448e156519ee46",
+  "planHash": "230b1fa86fda92c9",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-1",
+  "reviewedAt": "2026-09-28T16:07:15Z",
+  "evidence": [
+    {"path": "internal/fsm/machine/machine.go", "line": 196, "note": "Init records o.Branch into run.InitData.Branch (json 'branch,omitempty'), so legacy runs read as empty branch"},
+    {"path": "internal/status/fsmruns.go", "line": 226, "note": "abandonedRun takes branch and head from the init event only; later events reuse 'head' (all string-typed in event.go) so unmarshal never fails on them and cannot overwrite the init head"},
+    {"path": "internal/status/fsmruns.go", "line": 107, "note": "scanAbandonedRuns: InScope blocks, other-branch/orphaned go to elsewhere; dedupe keeps a blocking copy from being hidden by a same-id copy elsewhere and removes blocking ids from elsewhere"},
+    {"path": "internal/scope/scope.go", "line": 304, "note": "Classify fails closed on unknown scope; legacy runs cleared only on git's exit-1 'no' or a pruned commit, matching TestClassify cases"},
+    {"path": "internal/scope/scope.go", "line": 281, "note": "rebasing joins a relative --git-path to root, which is git's cwd, so a subdirectory root resolves correctly (checked: ../../.git/rebase-merge/head-name from internal/scope)"},
+    {"note": "go test ./internal/scope/ ./internal/status/ passes at head ce80bb4; removed worktree-ownership helpers (enterableAncestor, canonical, bareMain) have no remaining callers in the shard's file"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "Known (final-review list): TestClassify's legacy past-heads case uses the non-SHA 'h-past', so it exercises the pastHeads leg via a head reachable() would never ask git about; coverage gap only, behaviour verified by the real-repository test.",
+      "evidence": [
+        {"path": "internal/scope/scope_test.go", "line": 47}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-230b1fa86fda92c9-claude-subagent",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "230b1fa86fda92c9",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-cross-shard",
+  "reviewedAt": "2026-09-28T16:08:26Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/run.go", "line": 283, "note": "writer: fsm init resolves the branch from symbolic-ref (full refname via scope.BranchName), lists refs/heads, folds case only when refs/heads/<spelling> resolves (scope.Canonical), requires --for-branch on a detached HEAD naming an exact local branch, and passes Branch into machine.InitOptions"},
+    {"path": "internal/fsm/machine/machine.go", "line": 196, "note": "machine.Init writes o.Branch into run.InitData.Branch (json \"branch\", omitempty) beside Head in the init event"},
+    {"path": "internal/fsm/machine/fork.go", "line": 219, "note": "fork copies the parent's InitData (cd := pd), so a child keeps the parent's Branch and records its own fork-time Head; both legs of Classify still apply to the child"},
+    {"path": "internal/status/fsmruns.go", "line": 227, "note": "reader: abandonedRun decodes branch and head from the init event only (the same json tags event.go writes), and scanAbandonedRuns classifies with scope.Load(root) / Classify(branch, head); legacy and store sources deduped by id with in-scope winning"},
+    {"path": "internal/scope/scope.go", "line": 116, "note": "Load uses the same full-refname rule and the same rev-parse --verify guard before Canonical as init, so the recorded spelling and the compared spelling agree; rebasing() joins --git-path output with root, correct from a subdirectory root (verified: git prints ../.git/... relative to cwd)"},
+    {"path": "internal/status/status.go", "line": 233, "note": "unscoped/--target and --scope branch reports both take r.Abandoned from ScanAbandonedRuns and render the branch in the blocker target; counts for other-branch/orphaned always present, Elsewhere list only with --all; CommitBlockers still excludes fsm-run blockers"},
+    {"path": "cmd/metareview/main.go", "line": 1435, "note": "plain status renders the same scan via abandonedLines; --all stripped before argument parsing so it never changes the exit code, matching commands/status.md and docs/fsm/driving-a-workflow.md"},
+    {"note": "Docs vs code: ARCHITECTURE.md branch-scope section, driving-a-workflow.md, skills/fsm/SKILL.md, commands/status.md and the agent-prompt golden all describe the implemented rule (name leg with former names, range leg less remote defaults, fail closed, legacy reachability, --for-branch semantics). tests/go/test-bare-layout.sh updated from the removed bare-main orphan warning to status --all listing under branch gone; repo.MainWorktreeIsBare removal leaves no caller (git grep)."},
+    {"note": "go test ./internal/scope ./internal/status ./internal/fsm/cli ./internal/fsm/machine ./internal/fsm/run ./internal/repo ./internal/githooktest ./cmd/metareview all pass at head ce80bb4."}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "Fork seam (already on the known list: no test for fork keeping Branch): a child forked from a checkout on another branch keeps the parent's recorded Branch but records that checkout's head, so it blocks the parent's branch by name and the forking branch by range. Over-blocks rather than clears, so the fail-closed direction holds; a regression test that a fork preserves Branch would pin it.",
+      "evidence": [
+        {"path": "internal/fsm/machine/fork.go", "line": 219}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Writer/reader asymmetry on the case-fold guard (also raised in shard-3): init treats any rev-parse --verify failure as 'do not fold' and records HEAD's spelling, while scope.Load leaves the scope unknown (everything in scope) on a non-1 exit. Only reachable on a case-insensitive filesystem with a git failure at init; the resulting mis-spelled branch still matches via the range leg on its own branch, and an unmatched name reads as orphaned, so impact is limited to a stacked/detached corner. Could fail init with ERR_GIT on code != 1 for symmetry.",
+      "evidence": [
+        {"path": "internal/fsm/cli/run.go", "line": 305},
+        {"path": "internal/scope/scope.go", "line": 154}
+      ]
+    },
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "Cosmetic doc defect (also shard-0): the Known trade-offs list in ARCHITECTURE.md has a sentence starting lowercase ('local `main` or `master`. a squash-merged ...'). No behavioural effect.",
+      "evidence": [
+        {"path": "docs/ARCHITECTURE.md", "line": 230}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2-430da3848ed02fb7-claude-subagent",
+  "kind": "shard",
+  "shardId": "shard-2",
+  "shardHash": "430da3848ed02fb7",
+  "planHash": "230b1fa86fda92c9",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-2",
+  "reviewedAt": "2026-09-28T16:07:10Z",
+  "evidence": [
+    {"path": "internal/status/status.go", "line": 233, "note": "buildFor splits ScanAbandonedRuns into Abandoned (blocking) and Elsewhere (counted as other-branch/orphaned, warning only); emit drops the Elsewhere list unless --all, counts kept"},
+    {"path": "internal/status/status.go", "line": 619, "note": "buildForBranch (the Stop hook's scope) still re-adds in-scope abandoned runs to must_clear with the branch named via abandonedTarget"},
+    {"path": "internal/status/fsmruns.go", "line": 119, "note": "Classify per run; blockers and elsewhere deduped apart so an elsewhere copy of a colliding id never hides a blocker; elsewhere sorted"},
+    {"path": "internal/githooktest/stophook_layout_test.go", "line": 445, "note": "Stop hook exercised against the real CLI in single-checkout, linked-worktree and bare layouts; checks exact must_clear sets"},
+    {"path": "internal/fsm/cli/roots_test.go", "line": 71, "note": "init records branch, rejects --for-branch mismatch on a branch, requires a local branch when detached, ERR_GIT on git failure, case-folding skip on case-sensitive FS"},
+    {"note": "go test ./internal/status/ ./internal/fsm/cli/ ./internal/githooktest/ passes at head ce80bb4; InitData.Branch is omitempty so legacy runs read as branchless; agent-prompt golden and driving-a-workflow docs match the --for-branch behaviour"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "deferred",
+      "note": "Stale comment in buildForBranch: 'It is not filtered by scope because it is not a claim about files' now reads as if abandoned runs are unscoped, but since #177 r.Abandoned is already branch-scoped by ScanAbandonedRuns (only the file scope is not applied). Documentation-only; behaviour is correct.",
+      "evidence": [
+        {"path": "internal/status/status.go", "line": 616}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

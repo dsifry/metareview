@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0-4fe7f7db8210445d-claude-subagent",
+  "kind": "shard",
+  "shardId": "shard-0",
+  "shardHash": "4fe7f7db8210445d",
+  "planHash": "230b1fa86fda92c9",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-0",
+  "reviewedAt": "2026-09-28T16:07:01Z",
+  "evidence": [
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 205,
+      "note": "--all is stripped before form parsing, except as the operand of --target/--base; every status --json form maps to EmitFor/EmitForBranch or its All twin, and both share emit(), which only drops Elsewhere when !all, so the exit code cannot differ."
+    },
+    {
+      "path": "cmd/metareview/main.go",
+      "line": 1435,
+      "note": "abandonedLines groups elsewhere by Branch using a NUL sentinel; ScanAbandonedRuns sorts elsewhere by (Branch, RunID) in internal/status/fsmruns.go, so each branch header is emitted once and the empty (legacy) branch gets its own header."
+    },
+    {
+      "path": "cmd/metareview/main_test.go",
+      "line": 1311,
+      "note": "TestStatusAllNeverChangesTheExit covers all four --json forms with and without --all, the operand cases, plain status and status --all output; go test ./cmd/metareview -run TestStatusAll passes at ce80bb4."
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "line": 204,
+      "note": "Removed worktree-attribution paragraph is consistent with internal/status/fsmruns.go, which no longer attributes runs by init work_dir; branch-scope section matches known, documented trade-offs."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "accepted-risk",
+      "note": "Cosmetic: a sentence in the Known trade-offs list begins lowercase after a period (\"local `main` or `master`. a squash-merged ...\"). Documentation-only, no behavioural effect.",
+      "evidence": [
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "line": 230,
+          "note": "sentence starts with lowercase 'a squash-merged' after a full stop"
+        }
+      ]
+    }
+  ],
+  "blockingCount": 0
+}
