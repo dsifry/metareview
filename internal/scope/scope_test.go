@@ -36,13 +36,14 @@ func TestClassify(t *testing.T) {
 		return "", &exitError{code: 1}
 	}
 	s := Scope{Current: "feat", inRange: map[string]bool{"h-in-range": true}, branches: map[string]bool{"feat": true, "other": true}, known: true,
-		former: map[string]bool{"feat-old": true}, pastHeads: map[string]bool{"h-past": true}, git: git, ancestors: map[string]bool{}}
+		former: map[string]bool{"feat-old": true, "other": true}, pastHeads: map[string]bool{"h-past": true}, git: git, ancestors: map[string]bool{}}
 	for _, c := range []struct {
 		branch, head string
 		want         Class
 	}{
 		{"feat", "anything", InScope},         // the name leg survives rebase and amend
 		{"feat-old", "anything", InScope},     // ... and a rename: the branch's former name is still its own
+		{"other", "anything", OtherBranch},    // ... unless a live branch has taken the name since
 		{"", "h-past", InScope},               // a legacy item at one of the branch's past heads
 		{"other", "h-past", OtherBranch},      // a named item never takes the past-heads leg
 		{"", "h-in-range", InScope},           // detached snapshot / legacy run, by reachability
@@ -101,6 +102,7 @@ func fakeGit(calls *int, fail string, failCode int) Runner {
 				"r1 commit: work\n" +
 				"\n" + // a blank line is skipped
 				"r1 Branch: renamed nonsense to refs/heads/x\n" + // not a local branch: no former name
+				"r1 Branch: copied refs/heads/orig to refs/heads/first\n" +
 				"parent branch: Created from HEAD", nil
 		case "rev-parse":
 			return "rebase-merge/head-name\nrebase-apply/head-name", nil
@@ -124,7 +126,7 @@ func TestLoadMakesAFixedNumberOfGitCalls(t *testing.T) {
 		t.Fatalf("Load must make exactly 4 git calls (plus the fork point), made %d", calls)
 	}
 	if s.Current != "feat" || !s.inRange["c2"] || s.inRange["r1"] || !s.pastHeads["r1"] || !s.pastHeads["parent"] ||
-		!s.former["feat-old"] || !s.former["first"] || len(s.former) != 2 || !s.branches["main"] || !s.known {
+		!s.former["feat-old"] || !s.former["first"] || !s.former["orig"] || len(s.former) != 3 || !s.branches["main"] || !s.known {
 		t.Fatalf("Load parsed %+v", s)
 	}
 	// No fork point (the default branch) is not a failure: an empty range, the reflog still read, the scope known.
@@ -176,7 +178,7 @@ func TestLoadDetachedAndMidRebase(t *testing.T) {
 	}
 	readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
 	if s := Load("/repo", fakeGit(&calls, "symbolic-ref", 1)); !s.known || s.Current != "" || s.pastHeads["r1"] {
-		t.Fatalf("a plain detached HEAD has no current branch and no reflog leg: %+v", s)
+		t.Fatalf("a plain detached HEAD has no current branch and no reflog read: %+v", s)
 	}
 	// rev-parse --git-path failing while detached leaves the scope unknown.
 	broken := func(_ string, args ...string) (string, error) {
@@ -206,7 +208,7 @@ func TestLoadDetachedAndMidRebase(t *testing.T) {
 	}
 }
 
-// RealRunner against a real repository: the calls Load makes, the reflog leg surviving amend + rename, a mid-rebase
+// RealRunner against a real repository: the calls Load makes, a former name surviving amend + rename, a mid-rebase
 // HEAD, and a failing command's exit.
 func TestLoadAgainstARealRepository(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
@@ -250,7 +252,7 @@ func TestLoadAgainstARealRepository(t *testing.T) {
 	if s.Current != "feat" || !s.inRange[head] || !s.branches["main"] || !s.branches["feat"] || !s.known {
 		t.Fatalf("Load(real repo) = %+v", s)
 	}
-	// Amend, then rename: the name and range legs both lose the run; the reflog carried by the rename keeps it.
+	// Amend, then rename: the range loses the run; the rename entry its reflog carries keeps the old name its own.
 	run("commit", "-q", "--amend", "--allow-empty", "-m", "work v2")
 	run("branch", "-m", "feat", "feat-v2")
 	if got := Load(root, nil).Classify("feat", head); got != InScope {

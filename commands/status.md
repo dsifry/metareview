@@ -17,7 +17,9 @@ metareview status --json
 ```
 
 Abandoned FSM runs (left mid-loop) are scoped to the branch in hand (#177): a run blocks the branch `fsm init`
-recorded for it and any branch stacked on it, and survives rebase, amend and rename. Runs of other live branches
+recorded for it and any branch stacked on it, and survives rebase, amend and rename (a rename is read from the
+branch's reflog, so not where none is kept, as in a bare repository by default). Plain `status` names each blocking
+run's branch, which for a stacked branch may be its base. Runs of other live branches
 (`otherBranchRuns`) and of deleted ones (`orphanedRuns`) never block and are only counted. `--all`, with or without
 `--json`, also lists them (`elsewhere`), grouped by branch with the run directory to delete — and never changes the
 exit code.

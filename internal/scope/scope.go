@@ -1,7 +1,7 @@
 // Package scope decides which recorded obligations belong to the branch in hand (#177). One rule, shared by the
 // abandoned-run scan (and, next, findings): an item recorded at commit H on branch N is in scope when N is the
-// current branch or one of its former names (a `git branch -m` its reflog records) — which survives rebase, amend and
-// rename — or when H lies in merge-base(HEAD, default base)..HEAD, which covers detached snapshots and stacked
+// current branch or one of its former names (a `git branch -m`, or `-c`, its reflog records, while no live branch
+// holds that name) — which survives rebase, amend and rename — or when H lies in merge-base(HEAD, default base)..HEAD, which covers detached snapshots and stacked
 // branches. An item recorded before branches were (no N) is in scope unless git shows its head belongs nowhere here:
 // not in the range, not one of the current branch's past heads, and unreachable from HEAD (or pruned). Items recorded
 // on a branch that still exists elsewhere belong to that branch; the rest are orphaned.
@@ -10,8 +10,8 @@
 // so routine git use would switch it off; the branch name alone misses detached snapshots and stacked work.
 //
 // Load makes a fixed number of git calls however many items are classified (#177 AC-4.9): the current branch (and,
-// on a detached HEAD, where a rebase keeps its head-name), the fork point, one rev-list of the range into a set, the
-// current branch's reflog, and one listing of local branches. Only legacy items ask more: up to two calls per
+// on a detached HEAD, where a rebase keeps its head-name), the fork point, one rev-list of the range into a set, one
+// listing of local branches, and the current branch's reflog. Only legacy items ask more: up to two calls per
 // distinct legacy head, cached.
 package scope
 
@@ -145,20 +145,21 @@ func Load(root string, git Runner) Scope {
 			s.inRange[sha] = true
 		}
 	}
-	if s.Current != "" {
-		// The branch's reflog: its former names, so a rewrite followed by `git branch -m` (which carries the reflog
-		// along) still owns the runs of the name it had; and its past heads, for legacy items. A repository that keeps
-		// no branch reflogs (a bare one's default) simply has none.
-		if err := s.readReflog(root, git); err != nil {
-			return s
-		}
-	}
 	out, err := git(root, "for-each-ref", "--format=%(refname)", "refs/heads")
 	if err != nil {
 		return s
 	}
 	for _, ref := range strings.Fields(out) {
 		s.branches[branchName(ref)] = true
+	}
+	if s.Current != "" && s.branches[s.Current] {
+		// The branch's reflog: its former names, so a rewrite followed by `git branch -m` (or `-c` then deleting the
+		// original — both carry the reflog along) still owns the runs of the name it had; and its past heads, for
+		// legacy items. A repository that keeps no branch reflogs (a bare one's default) simply has none; an unborn
+		// branch (`checkout --orphan`, before its first commit) has no ref to read.
+		if err := s.readReflog(root, git); err != nil {
+			return s
+		}
 	}
 	s.known = true
 	return s
@@ -176,11 +177,13 @@ func (s Scope) readReflog(root string, git Runner) error {
 			continue
 		}
 		s.pastHeads[sha] = true
-		// "Branch: renamed refs/heads/<old> to refs/heads/<new>" — git's own message; the case has varied.
-		if rest, ok := cutPrefixFold(subject, "branch: renamed "); ok {
-			from, _, _ := strings.Cut(rest, " to ")
-			if name := branchName(from); name != "" {
-				s.former[name] = true
+		// "Branch: renamed refs/heads/<old> to refs/heads/<new>", or "copied" — git's own messages; the case has varied.
+		for _, verb := range []string{"branch: renamed ", "branch: copied "} {
+			if rest, ok := cutPrefixFold(subject, verb); ok {
+				from, _, _ := strings.Cut(rest, " to ")
+				if name := branchName(from); name != "" {
+					s.former[name] = true
+				}
 			}
 		}
 	}
@@ -237,7 +240,9 @@ func (s Scope) Classify(branch, head string) Class {
 	switch {
 	case !s.known:
 		return InScope
-	case branch != "" && (branch == s.Current || s.former[branch]):
+	// A former name is this branch's only while no live branch holds it: a new branch that reuses the name owns
+	// what is recorded under it.
+	case branch != "" && (branch == s.Current || s.former[branch] && !s.branches[branch]):
 		return InScope
 	case head != "" && s.inRange[head]:
 		return InScope

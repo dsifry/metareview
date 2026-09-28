@@ -203,8 +203,8 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   also read that single legacy location (never another worktree's), and `status` warns while it holds runs.
 - **Branch scope (#177, `internal/scope`).** The abandoned-run scan classifies each run against the branch in hand,
   one rule in one package: a run recorded on branch N at head H is **in scope** when N is the current branch or one
-  of its former names — the `git branch -m` entries its reflog carries — (the name leg: survives rebase, amend and
-  rename; mid-rebase the branch being rebased is current; a rebase begun detached is no branch), or when H lies in
+  of its former names — the `git branch -m` / `-c` entries its reflog carries, while no live branch holds that name —
+  (the name leg: survives rebase, amend and rename; mid-rebase the branch being rebased is current; a rebase begun detached is no branch), or when H lies in
   `merge-base(HEAD, main|master)..HEAD` (the range leg: detached snapshots, stacked branches). Otherwise it is
   **other-branch** while N exists, else **orphaned**; neither blocks, and `status --all` lists both, each with the
   run directory to delete, without changing the exit code. Branch names are compared as full refnames, so a
@@ -220,7 +220,9 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   unrelated work inherits the old name's runs (the name leg); `git checkout -b new` after a rewrite leaves the run
   with the old branch, where it still blocks (and it is counted here); a repository that keeps no branch reflogs (a
   bare one's default), or whose reflogs were expired, has no former names, so a rewrite then a rename orphans a run
-  there; the range leg needs a local `main` or `master`. Clearing a stale run is the closing operation's job.
+  there; from other checkouts a renamed branch's run reads as orphaned (only the renamed branch reads its own
+  reflog); a stack rebased as a whole keeps its base branch's runs on the base branch only; the range leg needs a
+  local `main` or `master`. Clearing a stale run is the closing operation's job.
 - **Store vs anchor vs work (#169, #172, #173).** Every `.metareview`/`docs` path in `internal/fsm` names which it
   means. **Common dir** = the shared store above. **Store root (anchor)** = the main worktree (`git worktree list
   --porcelain`, `repo.MainWorktreeFromPorcelain`), or with a bare main the linked worktree the command runs in (#174):

@@ -137,8 +137,8 @@ func TestRebaseDoesNotClearABranchRun(t *testing.T) {
 	}
 }
 
-// The rename bypass: amend (the head leaves the range), then `git branch -m` (the name leg no longer matches) — the
-// branch's reflog, which the rename carries, still ties the run to the work. Mid-rebase HEAD is detached, and the
+// The rename bypass: amend (the head leaves the range), then `git branch -m` — the rename entry the branch's reflog
+// carries makes the old name one of its former names, so the name leg still holds. Mid-rebase HEAD is detached, and the
 // branch being rebased keeps its runs while an agent sits on the conflict.
 func TestARewriteThenRenameDoesNotClearABranchRun(t *testing.T) {
 	root, common := newRepo(t)
@@ -172,8 +172,8 @@ func TestALegacyRunSurvivesItsBranchsRebase(t *testing.T) {
 	}
 }
 
-// A branch created on another feature branch and later moved onto main does not inherit that branch's runs through
-// its reflog: the head a branch was created at names the branch it forked from, not its own work.
+// A branch created on another feature branch and later moved onto main no longer inherits that branch's runs: once its
+// history no longer holds the parent's commits, the parent's runs are the parent's.
 func TestAReRootedBranchDropsItsFormerParentsRuns(t *testing.T) {
 	root, common := newRepo(t)
 	gitRun(t, root, "checkout", "-q", "-b", "feat-a")
@@ -289,6 +289,52 @@ func TestARenameKeepsARunRecordedAtTheCreationHead(t *testing.T) {
 	gitRun(t, root, "branch", "-m", "feat2", "feat3") // a chain of renames
 	if got := strings.Join(ids(DiscoverAbandonedRuns(root)), ","); got != "mrv-creation-001" {
 		t.Fatalf("every former name is still the branch's own, got %q", got)
+	}
+}
+
+// A former name belongs to the renamed branch only while no live branch holds it: a new branch that reuses the name
+// owns what is recorded under it, and the renamed branch is not blocked by it.
+func TestAReusedFormerNameBelongsToTheNewBranch(t *testing.T) {
+	root, common := newRepo(t)
+	gitRun(t, root, "checkout", "-q", "-b", "feat")
+	commit(t, root, "old feat")
+	gitRun(t, root, "branch", "-m", "feat", "feat-backup")
+	gitRun(t, root, "checkout", "-q", "-b", "feat", "main")
+	h := commit(t, root, "new feat")
+	writeStoreRun(t, common, "mrv-newfeat-0001", "feat", h)
+	gitRun(t, root, "checkout", "-q", "feat-backup")
+	mine, elsewhere := ScanAbandonedRuns(root)
+	if len(mine) != 0 || len(elsewhere) != 1 || elsewhere[0].Scope != "other-branch" {
+		t.Fatalf("the new feat's run is feat's, not feat-backup's: mine %v, elsewhere %+v", ids(mine), elsewhere)
+	}
+}
+
+// `git branch -c` then deleting the original is a rename in two steps; the copy's reflog records where it came from.
+func TestACopyThenDeleteKeepsTheRun(t *testing.T) {
+	root, common := newRepo(t)
+	gitRun(t, root, "checkout", "-q", "-b", "feat")
+	h := commit(t, root, "feat work")
+	writeStoreRun(t, common, "mrv-copied-00001", "feat", h)
+	gitRun(t, root, "commit", "-q", "--amend", "--allow-empty", "-m", "feat work v2")
+	gitRun(t, root, "branch", "-c", "feat", "feat2")
+	gitRun(t, root, "checkout", "-q", "feat2")
+	gitRun(t, root, "branch", "-q", "-D", "feat")
+	if got := strings.Join(ids(DiscoverAbandonedRuns(root)), ","); got != "mrv-copied-00001" {
+		t.Fatalf("the copy must still own the deleted original's run, got %q", got)
+	}
+}
+
+// An unborn branch (`checkout --orphan`, before its first commit) has no reflog to read: that is not a git failure
+// that blocks every run in the repository.
+func TestAnUnbornBranchIsNotAnUnknownScope(t *testing.T) {
+	root, common := newRepo(t)
+	gitRun(t, root, "checkout", "-q", "-b", "feat")
+	h := commit(t, root, "feat work")
+	writeStoreRun(t, common, "mrv-unborn-00001", "feat", h)
+	gitRun(t, root, "checkout", "-q", "--orphan", "gh-pages")
+	mine, elsewhere := ScanAbandonedRuns(root)
+	if len(mine) != 0 || len(elsewhere) != 1 || elsewhere[0].Scope != "other-branch" {
+		t.Fatalf("feat's run is feat's, not the orphan branch's: mine %v, elsewhere %+v", ids(mine), elsewhere)
 	}
 }
 
