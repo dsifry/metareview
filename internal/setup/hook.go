@@ -76,18 +76,21 @@ func gitGateStatus(root string, git GitRunner) GitGateStatus {
 	if plan.HooksCurrent {
 		return GitGateStatus{Installed: true, HooksPath: plan.Current, Location: plan.Target}
 	}
-	if plan.Current != "" && len(plan.Conflicts) == 0 && !sameHookPath(root, plan.Current, plan.Target) {
+	if plan.Current != "" && !sameHookPath(root, plan.Current, plan.Target) && isOurHookPath(root, plan.Current, plan.Target) {
 		// An earlier location that still holds the gate still gates `git push` (every upgraded pre-#173 install):
 		// installed, and stale. Reporting it not installed would tell the reader pushes are ungated when they are not.
+		// A migration conflict (other hooks kept there) is what to resolve before migrating — never --force, which
+		// would silently stop those hooks running.
 		gated := hooksMaterialized(resolveHookPath(root, plan.Current))
 		msg := "core.hooksPath points at an earlier metareview hook location (" + plan.Current + ")"
 		if gated {
 			msg += ", which still gates `git push`"
 		}
-		return GitGateStatus{
-			Installed: gated, HooksPath: plan.Current, Location: plan.Target, Stale: true,
-			Remediation: msg + ". Run `metareview setup --install-hooks` to migrate it to " + plan.Target + ".",
+		next := ". Run `metareview setup --install-hooks` to migrate it to " + plan.Target + "."
+		if len(plan.Conflicts) > 0 {
+			next = ". Before migrating it to " + plan.Target + ": " + strings.Join(plan.Conflicts, "; ") + "."
 		}
+		return GitGateStatus{Installed: gated, HooksPath: plan.Current, Location: plan.Target, Stale: true, Remediation: msg + next}
 	}
 	// A CONFLICT (a foreign core.hooksPath, or active .git/hooks a redirect would bypass) makes a plain
 	// `setup --install-hooks` REFUSE. Surface the reasons so the remediation is actionable, not misleading.

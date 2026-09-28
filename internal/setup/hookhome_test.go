@@ -197,6 +197,11 @@ func TestMigrationRefusesToDropOtherHooks(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(old, "commit-msg")); err != nil {
 		t.Fatal("the other hook must survive the refusal")
 	}
+	// The old location still gates `git push`: setup --check must say so (installed, stale), with the conflict to
+	// resolve before migrating — not "not installed".
+	if st := gitGateStatus(root, g); !st.Installed || !st.Stale || !strings.Contains(st.Remediation, "commit-msg") || !strings.Contains(st.Remediation, "still gates") {
+		t.Fatalf("a gated earlier location with other hooks is installed and stale: %+v", st)
+	}
 }
 
 // A user-level dir materialized under ANOTHER data home (XDG_DATA_HOME differs between shells) is still ours, by
@@ -279,6 +284,8 @@ func TestMovingTheMainCheckoutKeepsLinkedWorktreesGated(t *testing.T) {
 		t.Fatal(err)
 	}
 	run(main, "init", "-q", "-b", "main")
+	run(main, "config", "user.name", "t") // isolatedGit has no global identity (CI cannot infer one)
+	run(main, "config", "user.email", "t@example.com")
 	run(main, "commit", "-q", "--allow-empty", "-m", "base")
 	wt := filepath.Join(base, "wt")
 	run(main, "worktree", "add", "-q", "-b", "feat", wt)
