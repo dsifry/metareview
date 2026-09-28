@@ -232,10 +232,13 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   inspection checkout) has no name leg; "orphaned" means the recorded branch is gone, even when a live stacked branch
   still holds its commits. Clearing a stale run is the closing operation's job. **Findings (#178)** go through the same
   rule: the per-checkout ledger (`.metareview/findings.jsonl`) records each finding's `branch` (`scope.Load`'s current
-  branch, stamped by `findings.Reconcile`) beside its `gitHead`, and `findings.ScopedBlocking` / `UnresolvedBlocking`
-  classify every unresolved blocker, so after `git switch` branch B's pr-ready and epic-ready no longer block on branch
-  A's open findings (pr-ready lists them as "Open on other branches: N" under Repository Health Advisory). Rows from
-  before #178 carry no branch and take the legacy rule. A NEEDS_REVISION review *log* merged into main is committed
+  branch, stamped by `findings.Reconcile`) beside its `gitHead` — a finding raised again on another branch moves there
+  with its head — and `findings.ScopedBlocking` / `UnresolvedBlocking` classify every unresolved blocker, so after `git
+  switch` branch B's pr-ready no longer blocks on branch A's open findings (it lists them as "Open on other branches: N"
+  under Repository Health Advisory). Epic-ready names its child tasks explicitly and reads their blockers across
+  branches (`UnresolvedBlockingAllBranches`): a child reviewed on its own branch and squash-merged into the epic's would
+  otherwise be dropped. Rows from before #178 carry no branch and take the legacy rule; so does a row an older binary
+  rewrote (it drops the field it does not know — version skew is #180). A NEEDS_REVISION review *log* merged into main is committed
   evidence, not the ledger, and still blocks a later branch whose diff overlaps it — the stale committed-log blocker
   an override clears (#188).
 - **Store vs anchor vs work (#169, #172, #173).** Every `.metareview`/`docs` path in `internal/fsm` names which it

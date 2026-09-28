@@ -146,8 +146,9 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			sameRunTarget(record, run) {
 			record.Scope = firstNonEmpty(record.Scope, run.Scope)
 			record.GitHead = firstNonEmpty(run.GitHead, record.GitHead)
-			// A finding stays with the branch it was raised on; a row from before branches were recorded takes this one.
-			record.Branch = firstNonEmpty(record.Branch, run.Branch)
+			// The obligation moves with its head: raised again on this branch, it is this branch's, so a later rebase or
+			// amend here cannot hand it back to the branch that raised it first.
+			record.Branch = firstNonEmpty(run.Branch, record.Branch)
 			record.UpdatedAt = now
 		}
 		// Before the fix transition below: a summary is never "fixed", even from a chained run.

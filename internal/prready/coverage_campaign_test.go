@@ -242,7 +242,8 @@ func TestRepositoryHealthMarkdownDefaultsEmptyTitle(t *testing.T) {
 		t.Fatal("no records must render nothing")
 	}
 	// #178: blockers that belong to other branches are counted, alone or beside historical ones.
-	if got := repositoryHealthMarkdown(nil, 2); !strings.Contains(got, "## Repository Health Advisory") || !strings.Contains(got, "Open on other branches: 2 ") {
+	if got := repositoryHealthMarkdown(nil, 2); !strings.Contains(got, "## Repository Health Advisory") || !strings.Contains(got, "Open on other branches: 2 ") ||
+		!strings.Contains(got, "where they block nothing") {
 		t.Fatalf("other-branch blockers must be listed as an advisory: %q", got)
 	}
 }

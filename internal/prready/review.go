@@ -296,6 +296,7 @@ func Create(root string, options Options) (Result, error) {
 		return Result{}, err
 	}
 	blockers = slices.DeleteFunc(blockers, func(r findings.Record) bool { return !findings.InViewScope(r, options.MutationViews) })
+	elsewhere = slices.DeleteFunc(elsewhere, func(r findings.Record) bool { return !findings.InViewScope(r, options.MutationViews) })
 	// The full ledger (every status) lets the evidence renderer reconcile a
 	// historical review against how its findings were actually cleared (#40). Read
 	// before this run reconciles: the overrides/fixes that clear a historical
@@ -1445,7 +1446,7 @@ func repositoryHealthMarkdown(records []findings.Record, elsewhere int) string {
 	}
 	lines := make([]string, 0, len(records)+1)
 	if elsewhere > 0 {
-		lines = append(lines, fmt.Sprintf("- Open on other branches: %d unresolved blocker(s) in this checkout's findings ledger belong to another branch, or to none; they block that branch, not this one.", elsewhere))
+		lines = append(lines, fmt.Sprintf("- Open on other branches: %d unresolved blocker(s) in this checkout's findings ledger belong to another live branch, which they still block, or to none (merged and deleted, or outside this history), where they block nothing; none blocks this branch.", elsewhere))
 	}
 	for _, record := range records {
 		title := strings.TrimSpace(strings.NewReplacer("\n", " ", "\r", " ").Replace(record.Title))

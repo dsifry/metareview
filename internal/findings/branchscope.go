@@ -36,3 +36,15 @@ func ScopedBlocking(root string) (inScope, elsewhere []Record, err error) {
 	}
 	return inScope, elsewhere, nil
 }
+
+// UnresolvedBlockingAllBranches is every unresolved blocker in the checkout's ledger, whichever branch raised it: for a
+// caller that selects blockers by an explicit target rather than by the branch in hand. Epic-ready surfaces its child
+// tasks' blockers this way, since a child is usually reviewed on a branch of its own that is later squash- or
+// rebase-merged into the epic's, which the branch scope would place elsewhere.
+func UnresolvedBlockingAllBranches(root string) ([]Record, error) {
+	records, err := readJSONL(findingsPath(root))
+	if err != nil {
+		return nil, err
+	}
+	return unresolvedBlockingFrom(records), nil
+}

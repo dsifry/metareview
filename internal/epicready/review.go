@@ -89,7 +89,7 @@ var reviewerNames = []string{"epic-integration-reviewer", "acceptance-reviewer",
 var (
 	collectKnowledge   = knowledge.Collect
 	discoverLogs       = reviewlog.Discover
-	unresolvedBlocking = findings.UnresolvedBlocking
+	unresolvedBlocking = findings.UnresolvedBlockingAllBranches // child tasks are named explicitly: across branches (#178)
 	resolveChain       = runchain.Resolve
 	reconcileFindings  = findings.Reconcile
 	appendJSONL        = state.AppendJSONL
