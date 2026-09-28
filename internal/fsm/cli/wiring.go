@@ -117,8 +117,9 @@ func (c *ctxDeps) removeSandboxes() {
 // `root: work` declaration. TestFSMRootsAreDeclared is a tripwire for that over the literal path forms (split
 // elements and slash-joined strings), not proof: a path assembled any other way is not seen.
 
-// storeRoot resolves the main worktree of cwd (spec 5 §2): the first `worktree` line of `git worktree list --porcelain`;
-// a bare main or a non-repository is ERR_NOT_A_REPO.
+// storeRoot resolves the main worktree of cwd (spec 5 §2): the first `worktree` line of `git worktree list --porcelain`.
+// A bare main anchors on the worktree cwd is in (#174); a bare main with no checkout, or a non-repository, is
+// ERR_NOT_A_REPO.
 func (c *ctxDeps) storeRoot() (string, error) {
 	out, code, err := c.git(c.cwd, "worktree", "list", "--porcelain")
 	if err != nil || code != 0 {
@@ -127,6 +128,12 @@ func (c *ctxDeps) storeRoot() (string, error) {
 	// Shared with record-lenses' run lookup (repo.RunStoreRoot), so the writer and reader agree (#169).
 	path, bare := repo.MainWorktreeFromPorcelain(out)
 	if bare {
+		// A bare main worktree has no checkout to anchor on (#174). The store itself is in git's common directory
+		// (#173), so a command run from a linked worktree anchors on that worktree; from the bare directory itself
+		// there is no checkout at all.
+		if work, err := c.workRoot(); err == nil {
+			return work, nil
+		}
 		return "", errs.E(CodeNotARepo, "the main worktree is bare", "reason", "bare")
 	}
 	return path, nil

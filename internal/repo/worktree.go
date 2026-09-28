@@ -12,7 +12,7 @@ import (
 
 // MainWorktreeFromPorcelain reads the main worktree out of `git worktree list --porcelain`: the
 // first block, whose first line is `worktree <path>`. bare reports a bare main worktree, which has
-// no checkout to hold a run store.
+// no checkout: callers that need one anchor on the worktree they run in (#174).
 //
 // The main worktree is a run's anchor (RepoRoot) and the 0.13.x run-store location. Since #173 the runs themselves
 // live in StoreDir (git's common directory), shared by every worktree; the FSM migrates a 0.13.x store out of the
@@ -53,7 +53,7 @@ var errNotARepo = errors.New("git worktree list failed")
 // for one release as a fallback. Current runs live in StoreDir. Diff identity (base..head) must still come from
 // start's own worktree.
 //
-// Outside a git repository, or with a bare main worktree (where the FSM refuses to create runs),
+// Outside a git repository, or with a bare main worktree (no checkout to hold a pre-#173 store),
 // it falls back to RootOr(start); a lookup there finds no run and says so.
 func RunStoreRoot(start string) string {
 	out, err := runStoreGit(start)
@@ -81,7 +81,7 @@ var commonDirGit = func(dir string) (string, error) {
 
 // StoreDir is metareview's shared store for the repository containing start (#173): <git-common-dir>/metareview.
 // The main checkout and every linked worktree resolve the same directory, it resolves in a bare repository too (the
-// FSM still refuses a bare main worktree, #174), and it does not depend on any one checkout: moving or deleting the main checkout, or `git clean -fdX` in it, leaves it
+// FSM anchors on the linked worktree it runs in, #174), and it does not depend on any one checkout: moving or deleting the main checkout, or `git clean -fdX` in it, leaves it
 // alone. FSM runs live in its runs/ (alongside the session bindings in sessions/, #166).
 func StoreDir(start string) (string, error) {
 	common, err := commonDirGit(start)

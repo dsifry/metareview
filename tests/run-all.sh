@@ -66,6 +66,7 @@ if [ -f tests/go/test-fsm.sh ]; then bash tests/go/test-fsm.sh; fi
 bash tests/go/test-stop-hook.sh
 # The SessionStart notice for a missing Stop-gate opt-in (#194) — unguarded for the same reason.
 bash tests/go/test-session-start-check.sh
+bash tests/go/test-bare-layout.sh
 
 # CI runs shellcheck over every *.sh (.github/workflows/test.yml) but run-all.sh did not, so a
 # shell defect could pass the whole local suite and fail CI - which is exactly what happened on

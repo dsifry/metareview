@@ -236,3 +236,26 @@ func TestExportDoesNotFallBackOnAGitFailureInsideAWorktree(t *testing.T) {
 		t.Fatal("bundle written into the main checkout")
 	}
 }
+
+// #174: with a bare main worktree the store is still git's common directory (#173); a command run from a linked
+// worktree anchors on that worktree, which is the checkout it has. From the bare directory itself there is none.
+func TestBareMainWorktreeAnchorsOnTheLinkedWorktree(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	bare := filepath.Join(base, "repo.git")
+	git(t, base, "init", "-q", "--bare", "-b", "main", bare)
+	seed := filepath.Join(base, "seed")
+	git(t, base, "clone", "-q", bare, seed)
+	git(t, seed, "commit", "-q", "--allow-empty", "-m", "base")
+	git(t, seed, "push", "-q", "origin", "main")
+	wt := filepath.Join(base, "main")
+	git(t, bare, "worktree", "add", "-q", wt, "main")
+	c := &ctxDeps{ctx: context.Background(), deps: RealDeps(), cwd: wt}
+	root, err := c.storeRoot()
+	if err != nil || root != wt {
+		t.Fatalf("a linked worktree of a bare repository anchors on itself: %q %v", root, err)
+	}
+	c.cwd = bare
+	if _, err := c.storeRoot(); err == nil {
+		t.Fatal("the bare directory itself has no checkout to anchor on")
+	}
+}
