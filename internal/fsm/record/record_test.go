@@ -497,12 +497,18 @@ func TestMigrateLegacyRowsSkipsCollidedRuns(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, ".metareview", "runs.jsonl"), row, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	_ = os.MkdirAll(filepath.Join(common, "metareview"), 0o700) // a real store exists, so a stamp could be written
 	copied, conflicts, err := MigrateLegacyRows(checkout, common, "mrv-collide-00000001")
 	if err != nil || len(copied)+len(conflicts) != 0 {
 		t.Fatalf("a collided run's row must be skipped: %v %v %v", copied, conflicts, err)
 	}
 	if ok, _ := Exists(common, "mrv-collide-00000001"); ok {
 		t.Fatal("the collided id must stay free for the store's own run")
+	}
+	// Once the collision is resolved and the run migrates, its row follows: a pass that skipped a row must not stamp
+	// the legacy ledger as done, or the unchanged file would be skipped for good.
+	if copied, _, err := MigrateLegacyRows(checkout, common); err != nil || len(copied) != 1 {
+		t.Fatalf("the row of a formerly collided run must migrate: %v %v", copied, err)
 	}
 }
 

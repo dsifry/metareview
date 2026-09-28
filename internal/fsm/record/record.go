@@ -289,12 +289,14 @@ func MigrateLegacyRows(checkout, common string, collided ...string) (copied, con
 	for _, r := range present {
 		have[r.ID] = r
 	}
+	deferred := false // a collided run's row was left behind for a later pass
 	for _, line := range strings.Split(string(raw), "\n") {
 		var row Row
 		if json.Unmarshal([]byte(strings.TrimSpace(line)), &row) != nil || !strings.HasPrefix(row.Scope, "fsm-") {
 			continue // a review row, or a line a lock-free writer tore: not this migration's business
 		}
 		if slices.Contains(collided, row.ID) {
+			deferred = true
 			continue
 		}
 		if prev, ok := have[row.ID]; ok {
@@ -311,7 +313,11 @@ func MigrateLegacyRows(checkout, common string, collided ...string) (copied, con
 		have[row.ID] = row
 		copied = append(copied, row.ID)
 	}
-	// Best-effort: without the stamp the next call simply migrates again, idempotently.
-	_ = os.WriteFile(stamp, []byte(size), 0o600)
+	// Best-effort: without the stamp the next call simply migrates again, idempotently. A pass that left a collided
+	// run's row behind does not stamp: the file will not change when the collision is resolved, and its row must
+	// then follow the run.
+	if !deferred {
+		_ = os.WriteFile(stamp, []byte(size), 0o600)
+	}
 	return copied, conflicts, nil
 }
