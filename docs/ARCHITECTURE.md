@@ -156,7 +156,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   checkout moves, and git then runs **no** hook, silently; a relative one resolves against each worktree's own
   root. One dir per repository, because `core.hooksPath` makes it git's hooks dir: a hook a user or another tool
   adds there must not run in other repositories. An upgrade rewrites the scripts in place (atomically per file);
-  uninstall removes only metareview's own. Earlier locations — any `<data home>/metareview/git-hooks/<id>` (matched
+  uninstall removes only metareview's own. The dir's `.metareview-owner` names the repository (git's common dir)
+  that installed it: a copied checkout (`cp -r`, rsync, a restored backup) carries `metareview.hooksId`, so an id
+  is reused only when its owner is this repository or no longer exists (this one, moved) — a copy gets its own dir,
+  and nothing done in it empties the dir its original still runs from. Earlier locations — any `<data home>/metareview/git-hooks/<id>` (matched
   by shape, since `XDG_DATA_HOME` can differ between shells), a pre-#173 `<checkout>/.metareview/git-hooks`, legacy
   `hooks/git` — are reclaimed only when gone or when their `pre-push` carries metareview's content marker;
   `setup --check` reports one as `stale`, and `--install-hooks` migrates it (refusing if it holds other hooks).

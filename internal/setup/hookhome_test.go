@@ -304,4 +304,103 @@ func TestMovingTheMainCheckoutKeepsLinkedWorktreesGated(t *testing.T) {
 	if again, _ := hookTargetDir(moved, g); again != plan.Target {
 		t.Fatalf("the recorded id must survive the move: %q vs %q", again, plan.Target)
 	}
+	// The dir still names the old location as its owner: gated, but not done until a re-install records the move.
+	after, err := PlanHookInstall(moved, g)
+	if err != nil || !after.HooksCurrent || after.AlreadyDone {
+		t.Fatalf("after a move: gate current, re-install owed: %+v %v", after, err)
+	}
+	if err := ApplyHookInstall(moved, after, false, g); err != nil {
+		t.Fatal(err)
+	}
+	if done, _ := PlanHookInstall(moved, g); !done.AlreadyDone || done.Target != plan.Target {
+		t.Fatalf("re-install keeps the dir and records the new owner: %+v", done)
+	}
+}
+
+// A checkout copied with its .git (cp -r, rsync, a restored backup) carries metareview.hooksId and core.hooksPath. It
+// must get its own hook dir, and nothing done in the copy may empty the dir its original still runs from.
+func TestACopiedCheckoutGetsItsOwnHookDir(t *testing.T) {
+	isolateHooksHome(t)
+	a, g := tempRepo(t)
+	plan, _ := PlanHookInstall(a, g)
+	if err := ApplyHookInstall(a, plan, false, g); err != nil {
+		t.Fatal(err)
+	}
+	b := filepath.Join(t.TempDir(), "copy")
+	if err := os.CopyFS(b, os.DirFS(a)); err != nil {
+		t.Fatal(err)
+	}
+	if got := hookTarget(t, b, g); got == plan.Target {
+		t.Fatal("a copied checkout must not resolve its original's hook dir")
+	}
+	if st := gitGateStatus(b, g); st.Installed || !st.Stale {
+		t.Fatalf("the copy runs its original's hooks: stale, not installed: %+v", st)
+	}
+	if _, err := UninstallHookInstall(b, g); err != nil {
+		t.Fatal(err)
+	}
+	if !hooksCurrent(plan.Target) {
+		t.Fatal("uninstalling in the copy must not empty the original's hook dir")
+	}
+	_, _ = g(b, "config", "--local", "core.hooksPath", plan.Target) // as copied again
+	bp, _ := PlanHookInstall(b, g)
+	if err := ApplyHookInstall(b, bp, false, g); err != nil {
+		t.Fatal(err)
+	}
+	if bp.Target == plan.Target || !hooksCurrent(plan.Target) || !hooksCurrent(bp.Target) {
+		t.Fatalf("the copy must move to its own dir and leave the original's: %q vs %q", bp.Target, plan.Target)
+	}
+	if again, _ := PlanHookInstall(a, g); !again.AlreadyDone {
+		t.Fatal("the original stays installed")
+	}
+}
+
+// The ownership rules, one case each: no owner file (an unrecorded install) or this repository's own is ours; the
+// owner of a moved repository (its path gone) is ours; a repository that still exists elsewhere is not.
+func TestOwnedBy(t *testing.T) {
+	dir := t.TempDir()
+	here := t.TempDir()
+	if !ownedBy(dir, here) {
+		t.Fatal("a dir with no owner file is ours")
+	}
+	write := func(owner string) { _ = os.WriteFile(filepath.Join(dir, hookOwnerFile), []byte(owner+"\n"), 0o644) }
+	write(here)
+	if !ownedBy(dir, here) || !ownerIs(dir, here) {
+		t.Fatal("our own dir is ours")
+	}
+	write(filepath.Join(here, "gone"))
+	if !ownedBy(dir, here) || ownerIs(dir, here) {
+		t.Fatal("a moved repository's dir is ours, but not yet recorded as ours")
+	}
+	write(t.TempDir())
+	if ownedBy(dir, here) {
+		t.Fatal("a dir another existing repository owns is not ours")
+	}
+	releaseHookDir(dir, here) // not ours: untouched
+	if _, err := os.Stat(filepath.Join(dir, hookOwnerFile)); err != nil {
+		t.Fatal("releaseHookDir must leave a dir it does not own")
+	}
+}
+
+// Install fails, rather than claiming ownership it did not record, when git cannot name the common directory at
+// apply time or the owner file cannot be written.
+func TestApplyHookInstallOwnerFailures(t *testing.T) {
+	isolateHooksHome(t)
+	root, g := tempRepo(t)
+	target := hookTarget(t, root, g)
+	broken := func(r string, args ...string) ([]byte, error) {
+		if strings.Contains(strings.Join(args, " "), "git-common-dir") {
+			return nil, errors.New("no common dir")
+		}
+		return g(r, args...)
+	}
+	if err := ApplyHookInstall(root, HookInstallPlan{Target: target}, true, broken); err == nil {
+		t.Fatal("an unresolvable common dir must fail install")
+	}
+	if err := os.MkdirAll(filepath.Join(target, hookOwnerFile), 0o755); err != nil { // a dir where the file goes
+		t.Fatal(err)
+	}
+	if err := ApplyHookInstall(root, HookInstallPlan{Target: target}, true, g); err == nil || !strings.Contains(err.Error(), "owner") {
+		t.Fatalf("an unwritable owner file must fail install, got %v", err)
+	}
 }

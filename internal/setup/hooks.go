@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,20 +70,52 @@ const HooksIDKey = "metareview.hooksId"
 
 var hookIDPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
 
-// repoHooksID is this repository's hook-dir id: the recorded metareview.hooksId, or — before the first install
-// records one — an id derived from git's common directory. Deriving keeps a read-only plan stable across calls; once
-// install records it, the id no longer depends on where the repository lives.
-func repoHooksID(root string, git GitRunner) (string, error) {
-	if out, err := git(root, "config", "--local", "--get", HooksIDKey); err == nil {
-		if id := strings.TrimSpace(string(out)); hookIDPattern.MatchString(id) {
-			return id, nil
-		}
-	}
+// hookOwnerFile, inside a hook dir, names the repository (git's common directory) that installed into it. A copied
+// checkout (cp -r, rsync, a restored backup) carries .git/config — metareview.hooksId and core.hooksPath included — so
+// the id alone cannot tell two repositories apart; the owner can.
+const hookOwnerFile = ".metareview-owner"
+
+// commonDir is git's common directory for root: the repository's identity, shared by every worktree.
+func commonDir(root string, git GitRunner) (string, error) {
 	out, err := git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return "", fmt.Errorf("locating git's common directory: %w", err)
 	}
-	sum := sha256.Sum256([]byte(filepath.Clean(strings.TrimSpace(string(out)))))
+	return filepath.Clean(strings.TrimSpace(string(out))), nil
+}
+
+// ownedBy reports whether this repository (common) may treat dir as its own: its owner file names common, or names a
+// repository that is no longer there (this one, moved), or is absent. A dir whose owner still exists elsewhere
+// belongs to that repository — this checkout is a copy of it — and must be neither reused nor emptied from here.
+func ownedBy(dir, common string) bool {
+	raw, err := os.ReadFile(filepath.Join(dir, hookOwnerFile)) // #nosec G304 -- a metareview hook dir
+	if err != nil {
+		return true
+	}
+	owner := filepath.Clean(strings.TrimSpace(string(raw)))
+	if owner == common {
+		return true
+	}
+	_, err = os.Stat(owner)
+	return errors.Is(err, fs.ErrNotExist)
+}
+
+// repoHooksID is this repository's hook-dir id: the recorded metareview.hooksId when its dir is this repository's
+// (ownedBy), otherwise an id derived from git's common directory. Deriving keeps a read-only plan stable before the
+// first install records one, and gives a copied checkout its own dir instead of its original's.
+func repoHooksID(root string, git GitRunner) (string, error) {
+	common, err := commonDir(root, git)
+	if err != nil {
+		return "", err
+	}
+	if out, err := git(root, "config", "--local", "--get", HooksIDKey); err == nil {
+		if id := strings.TrimSpace(string(out)); hookIDPattern.MatchString(id) {
+			if home, err := hooksHome(); err == nil && ownedBy(filepath.Join(home, id), common) {
+				return id, nil
+			}
+		}
+	}
+	sum := sha256.Sum256([]byte(common))
 	return hex.EncodeToString(sum[:])[:16], nil
 }
 
@@ -113,6 +146,26 @@ func isPreviousHookDir(p string) bool {
 	return (userLevel || perCheckout) && legacyHooksAreOurs(p)
 }
 
+// ownerIs reports whether dir's owner file names exactly this repository.
+func ownerIs(dir, common string) bool {
+	raw, err := os.ReadFile(filepath.Join(dir, hookOwnerFile)) // #nosec G304 -- a metareview hook dir
+	return err == nil && filepath.Clean(strings.TrimSpace(string(raw))) == common
+}
+
+// releaseHookDir takes metareview's scripts (and owner file) out of a hook dir this repository no longer uses, and
+// the dir once nothing else is left — only when it is metareview's and this repository's (ownedBy): a copied
+// checkout must never empty the dir its original still runs from.
+func releaseHookDir(dir, common string) {
+	if !isPreviousHookDir(dir) || !ownedBy(dir, common) {
+		return
+	}
+	for name := range gitHookScripts {
+		_ = os.Remove(filepath.Join(dir, name))
+	}
+	_ = os.Remove(filepath.Join(dir, hookOwnerFile))
+	_ = os.Remove(dir) // only succeeds when empty
+}
+
 // foreignHooksIn lists the files in a metareview hook dir that are not its own scripts: hooks a user or another tool
 // put there. Re-pointing core.hooksPath away from that dir would silently stop them running.
 func foreignHooksIn(dir string) []string {
@@ -122,7 +175,7 @@ func foreignHooksIn(dir string) []string {
 	}
 	var extra []string
 	for _, e := range entries {
-		if _, ours := gitHookScripts[e.Name()]; !ours && !strings.Contains(e.Name(), ".tmp-") {
+		if _, ours := gitHookScripts[e.Name()]; !ours && e.Name() != hookOwnerFile && !strings.Contains(e.Name(), ".tmp-") {
 			extra = append(extra, e.Name())
 		}
 	}
@@ -303,7 +356,10 @@ func PlanHookInstall(root string, git GitRunner) (HookInstallPlan, error) {
 	// An install from before the Stop-gate opt-in (#194) has current hooks but no opt-in: not done, so a
 	// re-install records it and the Stop gate keeps working after the upgrade.
 	optIn, _ := git(root, "config", "--local", "--get", StopGateKey)
-	if plan.HooksCurrent && gitpolicy.Present(root) && strings.TrimSpace(string(optIn)) == "true" {
+	// ...and one whose hook dir still names another location as its owner (this repository was moved) is not done
+	// either: a re-install records the new owner, so a later repository at the old path cannot claim the dir.
+	common, _ := commonDir(root, git)
+	if plan.HooksCurrent && gitpolicy.Present(root) && strings.TrimSpace(string(optIn)) == "true" && ownerIs(target, common) {
 		plan.AlreadyDone = true
 		return plan, nil
 	}
@@ -383,6 +439,10 @@ func ApplyHookInstall(root string, plan HookInstallPlan, force bool, git GitRunn
 	if err := applyMaterialize(plan.Target); err != nil {
 		return fmt.Errorf("writing hook scripts to %s: %w", plan.Target, err)
 	}
+	common, err := commonDir(root, git)
+	if err != nil {
+		return err
+	}
 	// Best-effort: keep metareview's ephemeral per-clone state out of the consumer's commits (the shared
 	// gitpolicy block — one source with the learning post-merge writer). Never fatal.
 	_ = gitpolicy.Ensure(root)
@@ -396,11 +456,8 @@ func ApplyHookInstall(root string, plan HookInstallPlan, force bool, git GitRunn
 	}
 	// Migrated from an earlier location: its scripts are no longer used. Remove metareview's own (the plan refused
 	// if anything else was there), and the dir once it is empty.
-	if prev := resolveHookPath(root, plan.Current); plan.Current != "" && !sameHookPath(root, prev, plan.Target) && isPreviousHookDir(prev) {
-		for name := range gitHookScripts {
-			_ = os.Remove(filepath.Join(prev, name))
-		}
-		_ = os.Remove(prev)
+	if prev := resolveHookPath(root, plan.Current); plan.Current != "" && !sameHookPath(root, prev, plan.Target) {
+		releaseHookDir(prev, common)
 	}
 	if _, err := git(root, "config", "--local", StopGateKey, "true"); err != nil {
 		return fmt.Errorf("recording the Stop-gate opt-in: %w", err)
@@ -408,6 +465,10 @@ func ApplyHookInstall(root string, plan HookInstallPlan, force bool, git GitRunn
 	// Verify the gate is genuinely in place before the caller says so.
 	if !hooksMaterialized(plan.Target) {
 		return fmt.Errorf("hook scripts were not written to %s; the gate is NOT active", plan.Target)
+	}
+	// Record whose dir this is, once the gate is in place: a copied checkout carrying this config must get its own.
+	if err := os.WriteFile(filepath.Join(plan.Target, hookOwnerFile), []byte(common+"\n"), 0o644); err != nil { //nolint:gosec // not secret
+		return fmt.Errorf("recording the hook dir's owner: %w", err)
 	}
 	return nil
 }
@@ -501,11 +562,8 @@ func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 	}
 	// The hook dir is this repository's alone (#173): take metareview's scripts out of it, and the dir too once
 	// nothing else is left — never a hook someone else put there. Then forget the id.
-	if p := resolveHookPath(root, current); isPreviousHookDir(p) {
-		for name := range gitHookScripts {
-			_ = os.Remove(filepath.Join(p, name))
-		}
-		_ = os.Remove(p) // only succeeds when empty
+	if common, err := commonDir(root, git); err == nil {
+		releaseHookDir(resolveHookPath(root, current), common)
 	}
 	_, _ = git(root, "config", "--local", "--unset-all", HooksIDKey)
 	return true, nil
