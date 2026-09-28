@@ -1,5 +1,5 @@
 // Package scope decides which recorded obligations belong to the branch in hand (#177). One rule, shared by the
-// abandoned-run scan (and, next, findings): an item recorded at commit H on branch N is in scope when N is the
+// abandoned-run scan and the findings ledger (#178, findings.ScopedBlocking): an item recorded at commit H on branch N is in scope when N is the
 // current branch or one of its former names (a `git branch -m`, or `-c`, its reflog records, while no live branch
 // holds that name) — which survives rebase, amend and rename — or when H lies in merge-base(HEAD, default base)..HEAD, which covers detached snapshots and stacked
 // branches. An item recorded before branches were (no N) is in scope unless git shows its head belongs nowhere here:

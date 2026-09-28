@@ -234,12 +234,16 @@ func TestUniquePathsAdvancesPastCollision(t *testing.T) {
 func TestRepositoryHealthMarkdownDefaultsEmptyTitle(t *testing.T) {
 	got := repositoryHealthMarkdown([]findings.Record{
 		{Title: "   ", Target: map[string]string{"id": "TASK-7"}},
-	})
+	}, 0)
 	if !strings.Contains(got, "Unresolved historical finding (TASK-7)") {
 		t.Fatalf("a blank title must default and keep the target: %q", got)
 	}
-	if repositoryHealthMarkdown(nil) != "" {
+	if repositoryHealthMarkdown(nil, 0) != "" {
 		t.Fatal("no records must render nothing")
+	}
+	// #178: blockers that belong to other branches are counted, alone or beside historical ones.
+	if got := repositoryHealthMarkdown(nil, 2); !strings.Contains(got, "## Repository Health Advisory") || !strings.Contains(got, "Open on other branches: 2 ") {
+		t.Fatalf("other-branch blockers must be listed as an advisory: %q", got)
 	}
 }
 
@@ -687,10 +691,10 @@ func TestCreateCollaboratorSeamErrors(t *testing.T) {
 			resolveChainFn = func(string, runchain.Options) (runchain.Decision, error) { return runchain.Decision{}, errSeam }
 			t.Cleanup(func() { resolveChainFn = orig })
 		}},
-		{"unresolvedBlocking", func(t *testing.T) {
-			orig := unresolvedBlocking
-			unresolvedBlocking = func(string) ([]findings.Record, error) { return nil, errSeam }
-			t.Cleanup(func() { unresolvedBlocking = orig })
+		{"scopedBlocking", func(t *testing.T) {
+			orig := scopedBlocking
+			scopedBlocking = func(string) ([]findings.Record, []findings.Record, error) { return nil, nil, errSeam }
+			t.Cleanup(func() { scopedBlocking = orig })
 		}},
 		{"allFindings", func(t *testing.T) {
 			orig := allFindingsFn

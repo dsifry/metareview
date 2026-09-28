@@ -25,6 +25,8 @@ type Run struct {
 	Target   any    `json:"target"`
 	RepoRoot string `json:"repoRoot"`
 	GitHead  string `json:"gitHead"`
+	// Branch is the branch the run reviewed, as git lists it (#178); Reconcile fills it from the checkout when empty.
+	Branch string `json:"branch,omitempty"`
 }
 
 type Options struct {
@@ -102,6 +104,9 @@ type Record struct {
 	UpdatedAt             string `json:"updatedAt"`
 	RepoRoot              string `json:"repoRoot"`
 	GitHead               string `json:"gitHead"`
+	// Branch is the branch the finding was recorded on (#178), empty on a detached HEAD and on rows from before
+	// branches were recorded. With GitHead it scopes the finding to its branch (see ScopedBlocking).
+	Branch string `json:"branch,omitempty"`
 }
 
 type Result struct {
@@ -121,6 +126,9 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	if err != nil {
 		return Result{}, err
 	}
+	if run.Branch == "" {
+		run.Branch = currentBranch(root)
+	}
 	previousRuns := previousRunSet(options)
 	resetRuns := resetRunSet(options)
 	currentFingerprints := map[string]bool{}
@@ -138,6 +146,8 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			sameRunTarget(record, run) {
 			record.Scope = firstNonEmpty(record.Scope, run.Scope)
 			record.GitHead = firstNonEmpty(run.GitHead, record.GitHead)
+			// A finding stays with the branch it was raised on; a row from before branches were recorded takes this one.
+			record.Branch = firstNonEmpty(record.Branch, run.Branch)
 			record.UpdatedAt = now
 		}
 		// Before the fix transition below: a summary is never "fixed", even from a chained run.
@@ -795,12 +805,10 @@ var (
 	seamChmod       = func(name string, mode os.FileMode) error { return os.Chmod(name, mode) }
 )
 
+// UnresolvedBlocking is the unresolved blockers that belong to the branch in hand (#178): see ScopedBlocking.
 func UnresolvedBlocking(root string) ([]Record, error) {
-	records, err := readJSONL(findingsPath(root))
-	if err != nil {
-		return nil, err
-	}
-	return unresolvedBlockingFrom(records), nil
+	blockers, _, err := ScopedBlocking(root)
+	return blockers, err
 }
 
 // All returns every recorded finding regardless of status. The report
@@ -841,6 +849,7 @@ func normalize(run Run, finding Input, index int, createdAt string) Record {
 		UpdatedAt:          createdAt,
 		RepoRoot:           run.RepoRoot,
 		GitHead:            run.GitHead,
+		Branch:             run.Branch,
 	}
 }
 

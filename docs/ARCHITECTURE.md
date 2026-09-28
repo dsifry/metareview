@@ -230,8 +230,14 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   local `main` or `master`. a squash-merged (then deleted) lower branch of a stack keeps blocking the upper branch through the range leg until
   it is rebased `--onto` main (the blocker names the lower branch); a detached HEAD other than a rebase (bisect, an
   inspection checkout) has no name leg; "orphaned" means the recorded branch is gone, even when a live stacked branch
-  still holds its commits. Clearing a stale run is the closing operation's job. Findings are not yet branch-scoped
-  (#178 routes them through `internal/scope`).
+  still holds its commits. Clearing a stale run is the closing operation's job. **Findings (#178)** go through the same
+  rule: the per-checkout ledger (`.metareview/findings.jsonl`) records each finding's `branch` (`scope.Load`'s current
+  branch, stamped by `findings.Reconcile`) beside its `gitHead`, and `findings.ScopedBlocking` / `UnresolvedBlocking`
+  classify every unresolved blocker, so after `git switch` branch B's pr-ready and epic-ready no longer block on branch
+  A's open findings (pr-ready lists them as "Open on other branches: N" under Repository Health Advisory). Rows from
+  before #178 carry no branch and take the legacy rule. A NEEDS_REVISION review *log* merged into main is committed
+  evidence, not the ledger, and still blocks a later branch whose diff overlaps it — the stale committed-log blocker
+  an override clears (#188).
 - **Store vs anchor vs work (#169, #172, #173).** Every `.metareview`/`docs` path in `internal/fsm` names which it
   means. **Common dir** = the shared store above. **Store root (anchor)** = the main worktree (`git worktree list
   --porcelain`, `repo.MainWorktreeFromPorcelain`), or with a bare main the linked worktree the command runs in (#174):
