@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-2.da536384c09cfa06",
+  "kind": "shard",
+  "shardId": "shard-2",
+  "shardHash": "da536384c09cfa06",
+  "planHash": "ef49a8dd74f9f1e4",
+  "verdict": "PASS",
+  "reviewer": "claude-subagent-shard-2",
+  "reviewedAt": "2026-09-28T03:11:09Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/deps.go", "line": 76, "note": "Store/Sidecar take the git common dir and build NewCommonDirStore / FSSidecar{CommonDir: true}; tests pass filepath.Join(root, \".git\") consistently"},
+    {"path": "internal/fsm/cli/roots_test.go", "line": 46, "note": "AC-2.2 asserts run + terminal row exist once in <common>/metareview and in neither checkout's .metareview; state readable from the main checkout"},
+    {"path": "internal/fsm/cli/roots_test.go", "line": 160, "note": "tripwire extended: common-dir path sites must declare `root: store` plus `common dir`, or `root: none`"},
+    {"path": "internal/session/session.go", "line": 141, "note": "bindingPath uses repo.StoreDirIn(common) == filepath.Join(common, \"metareview\"): behaviour-identical, single layout definition"},
+    {"path": "internal/status/status.go", "line": 227, "note": "LegacyRunsPending warning names the 0.13.x location; LegacyRunsPending counts only runs migration would move, so the warning clears after any fsm command"},
+    {"path": "tests/go/test-epic-ready-adjudicated-review.sh", "line": 41, "note": "forged FSM runs moved to .git/metareview/runs; review-evidence rows correctly remain in .metareview/runs.jsonl (the gate ledger did not move)"},
+    {"note": "Targeted tests run and passing at head 58e2308: go test ./internal/fsm/cli -run TestLinkedWorktreeStoreAndWorkRoots|TestFSMRootsAreDeclared|TestTerminalRowNeverDirtiesACheckout|TestHappySdlcLoop|TestOverflowHandlerForkConsentAndStatus; go test ./internal/status ./internal/session"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stale test comment: TestHappySdlcLoop still commits a `.metareview/runs.jsonl` ignore rule with the rationale 'the parent's terminal row must not dirty the tree', but the FSM terminal row now lives in git's common directory and cannot dirty the tree. Harmless (the ignore rule is still valid for the gate ledger); consider rewording.",
+      "evidence": [
+        {"path": "internal/fsm/cli/cli_test.go", "line": 219}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

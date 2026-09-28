@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-1.0e7ed5d473025f2a",
+  "kind": "shard",
+  "shardId": "shard-1",
+  "shardHash": "0e7ed5d473025f2a",
+  "planHash": "ef49a8dd74f9f1e4",
+  "verdict": "PASS",
+  "reviewer": "claude-subagent-shard-1",
+  "reviewedAt": "2026-09-28T03:10:46Z",
+  "evidence": [
+    {"path": "internal/status/fsmruns.go", "line": 98, "note": "per-worktree attribution of abandoned runs: falls back to the main checkout when work_dir is missing, unattributable, or its nearest ancestor belongs to another repository; never drops a run"},
+    {"path": "internal/status/fsmruns.go", "line": 118, "note": "scans legacy location before common store and dedupes by id, so a run renamed mid-scan is not missed"},
+    {"path": "internal/fsm/run/store_jsonl.go", "line": 1, "note": "layout slice parametrises runsDir/validate/List; NewJSONLStore keeps the 0.13.x layout, NewCommonDirStore uses metareview/runs"},
+    {"path": "internal/fsm/cli/migrate_test.go", "line": 1, "note": "end-to-end migration, collision, failure, git clean, worktree-admin-dir and status-pending tests cover the migration surface"},
+    {"path": "internal/repo/storedir_test.go", "line": 1, "note": "StoreDir shared across worktrees, ignores exported GIT_DIR, unaffected by git maintenance and not copied by clone"},
+    {"path": "cmd/metareview/session_test.go", "line": 1, "note": "fromRunRunsDir prefers the common store and falls back to the legacy store with a 0.13 warning"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stale comment: ensureRuns still says it creates .metareview/runs, but with the layout slice it creates <root>/metareview/runs for the common-dir store.",
+      "evidence": [{"path": "internal/fsm/run/store_jsonl.go", "line": 115}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "TestFSMStoreMigrationFailures restores h.deps.Exec to gate.RealExec rather than the saved `real` value; harmless today because the harness default is the real exec, but it would silently drop a customised seam.",
+      "evidence": [{"path": "internal/fsm/cli/migrate_test.go", "line": 115}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "mine() spawns two git processes (StoreDir, Toplevel) per abandoned run found in the shared store, on the Stop-hook path; fine for normal run counts but scales linearly with every worktree's abandoned runs. Could cache by existing-ancestor dir.",
+      "evidence": [{"path": "internal/status/fsmruns.go", "line": 104}]
+    }
+  ],
+  "blockingCount": 0
+}

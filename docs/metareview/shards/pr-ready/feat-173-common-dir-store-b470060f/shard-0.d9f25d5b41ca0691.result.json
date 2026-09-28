@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "shard-0.d9f25d5b41ca0691",
+  "kind": "shard",
+  "shardId": "shard-0",
+  "shardHash": "d9f25d5b41ca0691",
+  "planHash": "ef49a8dd74f9f1e4",
+  "verdict": "PASS_ADVISORY",
+  "reviewer": "claude-subagent-shard-0",
+  "reviewedAt": "2026-09-28T03:10:52Z",
+  "evidence": [
+    {"path": "internal/fsm/run/migrate.go", "line": 28, "note": "MigrateLegacyRuns: flock-serialized, re-reads legacy dir under lock, never overwrites (Lstat dest -> collision), sorted report"},
+    {"path": "internal/fsm/record/record.go", "line": 262, "note": "MigrateLegacyRows: skips non-fsm and torn lines, dedups via appendRow's flocked id check so concurrent migrations cannot duplicate rows; size stamp is written with the pre-read size so a concurrent legacy append only causes an idempotent re-scan"},
+    {"path": "internal/fsm/cli/wiring.go", "line": 163, "note": "roots() resolves anchor + common dir and runs both migrations before machine deps use the common-dir Store/Sidecar/Terminal"},
+    {"path": "cmd/metareview/main.go", "line": 798, "note": "fromRunRunsDir: common-dir store first, single legacy main-checkout fallback with a warning; runID validated to one path segment by caller"},
+    {"note": "Targeted tests pass: go test -run 'Migrate|Pending|SidecarCommon' over internal/fsm/run, internal/fsm/record, internal/fsm/machine; and -run 'ValidateFromRun|FromRunRunsDir|Session' over cmd/metareview (fromRunRunsDir covered in cmd/metareview/session_test.go)"},
+    {"note": "Doc changes (INSTALL.md, commands/status.md, docs/ARCHITECTURE.md, docs/README.codex.md, docs/fsm/sdlc-loop-example.md, skills/status/SKILL.md) consistently describe the common-dir store and match the code"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "MigrateLegacyRuns uses os.Rename from <main>/.metareview/runs into <git-common-dir>/metareview/runs. If the git dir is on a different filesystem than the main checkout (e.g. --separate-git-dir on another volume), Rename returns EXDEV and roots() fails every fsm command with ERR_STORE_PATH until the legacy runs are moved by hand. Uncommon setup; a copy+remove fallback or a clearer message would close it.",
+      "evidence": [
+        {"path": "internal/fsm/run/migrate.go", "line": 63},
+        {"path": "internal/fsm/cli/wiring.go", "line": 170}
+      ]
+    }
+  ],
+  "blockingCount": 0
+}

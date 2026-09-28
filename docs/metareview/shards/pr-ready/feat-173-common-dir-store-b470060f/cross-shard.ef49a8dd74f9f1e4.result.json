@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-shard-ef49a8dd74f9f1e4-claude-subagent-cross-shard",
+  "kind": "cross-shard",
+  "shardId": "",
+  "shardHash": "",
+  "planHash": "ef49a8dd74f9f1e4",
+  "verdict": "PASS",
+  "reviewer": "claude-subagent-cross-shard",
+  "reviewedAt": "2026-09-28T03:11:38Z",
+  "evidence": [
+    {"path": "internal/fsm/cli/wiring.go", "line": 152, "note": "Writer resolves the store via git rev-parse --path-format=absolute --git-common-dir through deps.Exec (gate.RealExec, GIT_* scrubbed)"},
+    {"path": "internal/repo/worktree.go", "line": 86, "note": "Reader StoreDir uses the same scrubbed gate.RealExec and the same rev-parse flags; StoreDirIn is the one layout definition, also used by session bindings"},
+    {"path": "internal/fsm/cli/deps.go", "line": 72, "note": "RealDeps wires Exec to gate.RealExec, and Store/Sidecar/Terminal all take the common dir, so runs, sidecars and ledger agree on <common>/metareview"},
+    {"path": "cmd/metareview/main.go", "line": 798, "note": "record-lenses --from-run reads <common>/metareview/runs first and falls back to the 0.13.x main-checkout location with a warning, matching where the FSM writes and what it migrates"},
+    {"path": "internal/fsm/cli/wiring.go", "line": 163, "note": "Migration ordering: roots() migrates runs, then ledger rows, before any Store/Exists/peek call in init, openRun and diff; status paths are read-only and report pending legacy runs instead"},
+    {"path": "internal/status/fsmruns.go", "line": 118, "note": "Abandoned-run discovery scans the legacy location then the store (dedup by id), so a rename mid-scan is never missed; per-worktree attribution by init work_dir"},
+    {"path": "internal/fsm/record/record.go", "line": 92, "note": "FSMRunDir is now relative to the common dir in both RowFor and MigrateLegacyRows, matching docs/ARCHITECTURE.md"},
+    {"path": "docs/ARCHITECTURE.md", "line": 174, "note": "Docs describe the common-dir store, the ledger, the migration lock and legacy fallback consistently with the code"},
+    {"note": "Targeted go test over internal/fsm/run, record, status, repo, session, machine, and -run Migrat|Root|Store over internal/fsm/cli and cmd/metareview: all ok at 58e2308"}
+  ],
+  "findings": [
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "Stale comment: appendRow still says runs.jsonl has a second, lock-free writer (state.AppendJSONL). Since #173 the FSM ledger is <common>/metareview/runs.jsonl, which only record writes; the review gates keep appending to the checkout's .metareview/runs.jsonl. O_APPEND is harmless, but the rationale is now wrong.",
+      "evidence": [{"path": "internal/fsm/record/record.go", "line": 190}]
+    },
+    {
+      "severity": "low",
+      "disposition": "open",
+      "note": "MigrateLegacyRuns moves each run with os.Rename. If git's common dir is on a different filesystem from the main checkout (for example --separate-git-dir on another volume), rename returns EXDEV and roots() fails every fsm command until the user moves the runs by hand. This setup is uncommon. A copy fallback, or an error that tells the user what to do, would make it recoverable.",
+      "evidence": [{"path": "internal/fsm/run/migrate.go", "line": 63}]
+    }
+  ],
+  "blockingCount": 0
+}
