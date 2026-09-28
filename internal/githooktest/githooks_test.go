@@ -267,17 +267,22 @@ func TestSessionStartCheckNormalizesEquivalentHooksPath(t *testing.T) {
 		}
 	}
 	git("init", "-q", "-b", "main")
-	// The installer's materialized target with EXECUTABLE hook scripts — what session-start-check.sh must
-	// recognize as "installed" (config match AND scripts present).
-	target := filepath.Join(root, ".metareview", "git-hooks")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"pre-push", "post-commit"} {
-		if err := os.WriteFile(filepath.Join(target, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+	// The installer's materialized target (user-level, content-addressed since #173) with EXECUTABLE hook
+	// scripts whose pre-push is metareview's gate — what session-start-check.sh must recognize as "installed".
+	data := t.TempDir()
+	target := filepath.Join(data, "metareview", "git-hooks", "0123456789abcdef")
+	writeGate := func(dir string) {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
+		for _, name := range []string{"pre-push", "post-commit"} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexec metareview review gate --push\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
+	writeGate(target)
 	run := func() string {
 		c := exec.Command("bash", repoHook(t, "session-start-check.sh"))
 		c.Env = append(os.Environ(), "CLAUDE_PROJECT_DIR="+root)
@@ -292,10 +297,18 @@ func TestSessionStartCheckNormalizesEquivalentHooksPath(t *testing.T) {
 	// installed → no reminder. (With the Stop-gate opt-in recorded too: without it the notice now names the
 	// missing opt-in, #194.)
 	git("config", "metareview.stopGate", "true")
-	git("config", "core.hooksPath", root+"/./.metareview/git-hooks")
+	git("config", "core.hooksPath", data+"/./metareview/git-hooks/0123456789abcdef")
 	if out := run(); out != "" {
-		t.Fatalf("$ROOT/./.metareview/git-hooks with scripts present must read as installed; got %q", out)
+		t.Fatalf("an equivalent spelling of the materialized target with scripts present must read as installed; got %q", out)
 	}
+	// A pre-#173 checkout-local install is installed, and nudged to migrate: moving that checkout would ungate it.
+	legacy := filepath.Join(root, ".metareview", "git-hooks")
+	writeGate(legacy)
+	git("config", "core.hooksPath", legacy)
+	if out := run(); !strings.Contains(out, "checkout-local location") || strings.Contains(out, "NOT installed") {
+		t.Fatalf("a checkout-local install must be reported installed and nudged to migrate; got %q", out)
+	}
+	git("config", "core.hooksPath", data+"/./metareview/git-hooks/0123456789abcdef")
 	// Config still points at the target but the git-ignored scripts have vanished → the reminder MUST fire
 	// (an inert gate), never stay silent on a config match alone.
 	if err := os.Remove(filepath.Join(target, "pre-push")); err != nil {

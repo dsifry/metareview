@@ -26,6 +26,8 @@ printf '%s\n' "$help" | grep -q 'metareview review pr-ready'
 # Exercised here rather than in a Go test because the exit decision lives in main's dispatch.
 clean="$(mktemp -d)"
 trap 'rm -rf "$clean"' EXIT
+# The hook scripts are materialized under the user's data home (#173): keep them out of the real one.
+export XDG_DATA_HOME="$clean/xdg"
 go build -o "$clean/mrv" ./cmd/metareview
 
 out="$(cd "$clean" && ./mrv status --json)" || { echo "FAIL: status --json on a clean tree exited nonzero"; exit 1; }
@@ -248,15 +250,15 @@ printf '%s' "$inst" | grep -q 'Installed' \
   || { echo "FAIL: --install-hooks --yes must install: $inst"; exit 1; }
 test -n "$( (cd "$hookrepo" && git config --local --get core.hooksPath) )" \
   || { echo "FAIL: --yes must set core.hooksPath"; exit 1; }
-# ...and it MATERIALIZES executable hook scripts into THIS repo's .metareview/git-hooks (the consumer-repo
-# gate must actually fire, not point at a non-existent hooks dir). $hookrepo is a fresh `git init` with no
-# committed hooks/git of its own. Compare the RESOLVED real paths (both sides through pwd -P) so the check is
-# exact — not a loose suffix — yet robust when mktemp hands back a symlinked dir (e.g. /var -> /private/var).
+# ...and it MATERIALIZES executable hook scripts into the user-level, content-addressed location
+# ($XDG_DATA_HOME/metareview/git-hooks/<16 hex>, #173) — never inside the checkout, whose move would strand it.
+# Compare the RESOLVED real parent (through pwd -P) so the check is exact yet robust when mktemp hands back a
+# symlinked dir (e.g. /var -> /private/var).
 hp="$( (cd "$hookrepo" && git config --local --get core.hooksPath) )"
-hp_real="$( (cd "$hp" 2>/dev/null && pwd -P) )"
-want_real="$( (cd "$hookrepo" && pwd -P) )/.metareview/git-hooks"
-if [ "$hp_real" != "$want_real" ]; then
-  echo "FAIL: hooks must materialize at \$hookrepo/.metareview/git-hooks; got $hp_real want $want_real"; exit 1
+hp_parent_real="$( (cd "$(dirname "$hp")" 2>/dev/null && pwd -P) )"
+want_parent_real="$( (cd "$XDG_DATA_HOME" && pwd -P) )/metareview/git-hooks"
+if [ "$hp_parent_real" != "$want_parent_real" ] || ! printf '%s' "$(basename "$hp")" | grep -Eq '^[0-9a-f]{16}$'; then
+  echo "FAIL: hooks must materialize at \$XDG_DATA_HOME/metareview/git-hooks/<id>; got $hp"; exit 1
 fi
 if [ ! -x "$hp/pre-push" ] || [ ! -x "$hp/post-commit" ]; then
   echo "FAIL: install must materialize executable pre-push and post-commit into $hp"; exit 1
@@ -276,7 +278,7 @@ forced="$( (cd "$hookrepo" && "$clean/mrv" setup --install-hooks --yes --force) 
 printf '%s' "$forced" | grep -q 'Installed' \
   || { echo "FAIL: --force must override a conflict: $forced"; exit 1; }
 
-# After the forced install above, core.hooksPath is our materialized .metareview/git-hooks. Uninstall honors
+# After the forced install above, core.hooksPath is our materialized hook dir. Uninstall honors
 # --dry-run (previews, changes nothing) — it must NOT unset core.hooksPath.
 un_dry="$( (cd "$hookrepo" && "$clean/mrv" setup --uninstall-hooks --dry-run) )"
 printf '%s' "$un_dry" | grep -q 'dry run' \

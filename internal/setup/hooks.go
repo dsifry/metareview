@@ -2,6 +2,8 @@ package setup
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -32,6 +34,7 @@ var (
 	filepathAbs      = filepath.Abs
 	osChmod          = os.Chmod
 	applyMaterialize = materializeHooks
+	userHomeDir      = os.UserHomeDir
 )
 
 // gitHookScripts maps each materialized hook filename to the embedded source it is written from. Only the
@@ -42,11 +45,70 @@ var gitHookScripts = map[string]string{
 	"post-commit": "hooks/git/post-commit",
 }
 
-// hookTargetDir is where the gate's hook scripts are MATERIALIZED: a metareview-owned dir inside .metareview
-// (already git-ignored, so the per-clone install artifacts are never committed). Absolute, because a relative
-// core.hooksPath is resolved inconsistently by git.
+// hooksHome is the user-level directory the gate's hook scripts are materialized under (#173):
+// ${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks. It lives outside every repository on purpose. An absolute
+// core.hooksPath into a checkout (or into its .git) goes stale the moment that checkout is moved, and git then
+// runs NO hook, silently; a relative one is resolved against each worktree's own root, so it only works in the
+// main checkout. A path under the user's data home survives moving or deleting any checkout, in every layout.
+func hooksHome() (string, error) {
+	base := os.Getenv("XDG_DATA_HOME")
+	if !filepath.IsAbs(base) { // unset, or relative (which the XDG spec says to ignore)
+		home, err := userHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("locating the user's data directory for the hook scripts: %w", err)
+		}
+		base = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(base, "metareview", "git-hooks"), nil
+}
+
+// hookContentID names the materialized scripts by their content, so a given directory is never rewritten: an upgrade
+// for one repository materializes a NEW directory and re-points that repository, instead of swapping the scripts
+// under another repository that still points at the old ones.
+func hookContentID() (string, error) {
+	names := make([]string, 0, len(gitHookScripts))
+	for name := range gitHookScripts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	h := sha256.New()
+	for _, name := range names {
+		body, err := readHookAsset(gitHookScripts[name])
+		if err != nil {
+			return "", fmt.Errorf("reading embedded hook %s: %w", gitHookScripts[name], err)
+		}
+		_, _ = fmt.Fprintf(h, "%s\x00%d\x00", name, len(body)) // a hash.Hash never fails a write
+		h.Write(body)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
+}
+
+// hookTargetDir is where the gate's hook scripts are MATERIALIZED: <hooksHome>/<content id>. Absolute, because a
+// relative core.hooksPath is resolved against each worktree's root. root is unused since #173 — the location no
+// longer depends on the checkout — and kept so every caller asks the same question.
 func hookTargetDir(root string) (string, error) {
-	return filepathAbs(filepath.Join(root, ".metareview", "git-hooks"))
+	_ = root
+	home, err := hooksHome()
+	if err != nil {
+		return "", err
+	}
+	id, err := hookContentID()
+	if err != nil {
+		return "", err
+	}
+	return filepathAbs(filepath.Join(home, id))
+}
+
+// isPreviousHookDir reports whether p is a hook dir an earlier metareview materialized, so an upgrade replaces it
+// rather than refusing it as foreign: another content id under hooksHome, or the pre-#173 per-checkout
+// <checkout>/.metareview/git-hooks (named by path, since the install that wrote it may have run in any checkout).
+// Either is claimed only when it is gone or its pre-push is metareview's gate — the legacy rule.
+func isPreviousHookDir(p string) bool {
+	p = filepath.Clean(p)
+	home, err := hooksHome()
+	underHome := err == nil && filepath.Dir(p) == filepath.Clean(home)
+	perCheckout := filepath.Base(p) == "git-hooks" && filepath.Base(filepath.Dir(p)) == ".metareview"
+	return (underHome || perCheckout) && legacyHooksAreOurs(p)
 }
 
 // legacyHookTargetDir is the pre-0.11 install target: the committed hooks/git of metareview's OWN checkout.
@@ -56,7 +118,9 @@ func legacyHookTargetDir(root string) (string, error) {
 }
 
 // materializeHooks writes the embedded hook scripts into dir, each executable. This is what lets the gate
-// reach a CONSUMER repo: the scripts are compiled into the binary, not assumed to already exist on disk.
+// reach a CONSUMER repo: the scripts are compiled into the binary, not assumed to already exist on disk. dir is
+// shared by every repository on this content id, so each script is written to a temporary name and renamed into
+// place: a hook git starts while another install is writing sees the old script or the new one, never half of one.
 func materializeHooks(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -67,10 +131,16 @@ func materializeHooks(dir string) error {
 			return fmt.Errorf("reading embedded hook %s: %w", src, err)
 		}
 		p := filepath.Join(dir, name)
-		if err := os.WriteFile(p, body, 0o755); err != nil { //nolint:gosec // a git hook must be executable
+		tmp := fmt.Sprintf("%s.tmp-%d", p, os.Getpid())
+		if err := os.WriteFile(tmp, body, 0o755); err != nil { //nolint:gosec // a git hook must be executable
 			return err
 		}
-		if err := osChmod(p, 0o755); err != nil { // WriteFile perms are umask-masked; force the exec bit
+		if err := osChmod(tmp, 0o755); err != nil { // WriteFile perms are umask-masked; force the exec bit
+			_ = os.Remove(tmp)
+			return err
+		}
+		if err := os.Rename(tmp, p); err != nil {
+			_ = os.Remove(tmp)
 			return err
 		}
 	}
@@ -293,6 +363,11 @@ func ApplyHookInstall(root string, plan HookInstallPlan, force bool, git GitRunn
 	if _, err := git(root, "config", "--local", "core.hooksPath", plan.Target); err != nil {
 		return fmt.Errorf("setting core.hooksPath: %w", err)
 	}
+	// Migrated from the pre-#173 per-checkout location: that copy is this repository's alone and is no longer used.
+	if prev := resolveHookPath(root, plan.Current); plan.Current != "" && !sameHookPath(root, prev, plan.Target) &&
+		filepath.Base(filepath.Dir(prev)) == ".metareview" && isPreviousHookDir(prev) {
+		_ = os.RemoveAll(prev)
+	}
 	if _, err := git(root, "config", "--local", StopGateKey, "true"); err != nil {
 		return fmt.Errorf("recording the Stop-gate opt-in: %w", err)
 	}
@@ -314,7 +389,7 @@ func isOurHookPath(root, current, target string) bool {
 	if legacy, err := legacyHookTargetDir(root); err == nil && sameHookPath(root, current, legacy) {
 		return legacyHooksAreOurs(legacy)
 	}
-	return false
+	return isPreviousHookDir(resolveHookPath(root, current))
 }
 
 // legacyHooksAreOurs reports whether dir/pre-push is metareview's own gate script, by a distinctive marker
@@ -341,7 +416,7 @@ func legacyHooksAreOurs(dir string) bool {
 type UninstallStatus struct {
 	// Current is this repo's LOCAL core.hooksPath, empty when unset.
 	Current string
-	// WouldChange is true iff Current points at metareview's hooks/git — the only case uninstall unsets it.
+	// WouldChange is true iff Current points at a metareview hook location — the only case uninstall unsets it.
 	WouldChange bool
 }
 
@@ -362,7 +437,7 @@ func UninstallPreview(root string, git GitRunner) (UninstallStatus, error) {
 	return UninstallStatus{Current: current, WouldChange: current != "" && isOurHookPath(root, current, target)}, nil
 }
 
-// UninstallHookInstall unsets core.hooksPath, but ONLY when it currently points at metareview's hooks/git —
+// UninstallHookInstall unsets core.hooksPath, but ONLY when it currently points at a metareview hook location —
 // it never touches a value it did not set. Returns whether it changed anything.
 func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 	if git == nil {
@@ -390,10 +465,10 @@ func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 	if _, err := git(root, "config", "--local", "--unset", "core.hooksPath"); err != nil {
 		return false, err
 	}
-	// Remove the materialized hook dir we own, so uninstall leaves no dangling scripts. A non-existent or
-	// legacy (committed) dir is left alone: RemoveAll on the materialized target only.
-	if mine, e := hookTargetDir(root); e == nil {
-		_ = os.RemoveAll(mine)
+	// The materialized dir is user-level and shared by every repository on that content id (#173), so it stays. A
+	// pre-#173 per-checkout copy this repository was using is its own, and goes.
+	if p := resolveHookPath(root, current); filepath.Base(filepath.Dir(p)) == ".metareview" && isPreviousHookDir(p) {
+		_ = os.RemoveAll(p)
 	}
 	return true, nil
 }

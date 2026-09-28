@@ -7,6 +7,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+# The hook scripts are materialized under the user's data home (#173): keep them out of the real one.
+export XDG_DATA_HOME="$TMP/xdg"
 HOOK="$ROOT/hooks/session-start-check.sh"
 (cd "$ROOT" && go build -o "$TMP/mrv" ./cmd/metareview)
 
@@ -44,9 +46,11 @@ own="$TMP/own"
 mkdir -p "$own"
 cd "$own"
 git init -q -b main
-git config core.hooksPath "$own/.metareview/git-hooks"
-out="$(CLAUDE_PROJECT_DIR="$own" bash "$HOOK")"
-if printf '%s' "$out" | grep -q "another tool"; then echo "FAIL: metareview's own vanished hook dir is not another tool's: $out"; exit 1; fi
+for gone in "$XDG_DATA_HOME/metareview/git-hooks/0000000000000000" "$own/.metareview/git-hooks"; do
+  git config core.hooksPath "$gone"
+  out="$(CLAUDE_PROJECT_DIR="$own" bash "$HOOK")"
+  if printf '%s' "$out" | grep -q "another tool"; then echo "FAIL: metareview's own vanished hook dir $gone is not another tool's: $out"; exit 1; fi
+done
 mkdir -p hooks/git
 printf '#!/bin/sh\nexec metareview review gate --push\n' > hooks/git/pre-push
 git config core.hooksPath hooks/git

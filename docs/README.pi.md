@@ -74,7 +74,7 @@ metareview setup --install-hooks        # interactive; --yes for headless
 ```
 
 It materializes a `pre-push` gate (blocks an unreviewed push; `git push --no-verify` escapes) and a
-`post-commit` review-owed nudge into `.metareview/git-hooks/`. See [INSTALL.md](../INSTALL.md).
+`post-commit` review-owed nudge into `${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<content-id>/`. See [INSTALL.md](../INSTALL.md).
 
 ## Agent Contract
 

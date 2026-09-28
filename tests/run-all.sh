@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# `setup --install-hooks` materializes hook scripts under the user's data home (#173). No suite may write into the
+# real one: every script below inherits a throwaway XDG_DATA_HOME unless it sets its own.
+XDG_DATA_HOME="$(mktemp -d)"
+export XDG_DATA_HOME
+trap 'rm -rf "$XDG_DATA_HOME"' EXIT
+
 bash tests/manifest/test-manifests.sh
 bash tests/manifest/test-skills.sh
 

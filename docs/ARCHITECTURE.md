@@ -148,10 +148,15 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
 - **Commit-always, enforce-at-push:** saving work must never be held hostage to the reviewer being down;
   the enforcement lives at push, where not-pushing loses nothing.
 - **Install materializes** (`setup --install-hooks`): the scripts are `go:embed`ded (root `githookassets.go`)
-  and written into `<repo>/.metareview/git-hooks/` (executable, git-ignored, per-clone), with `core.hooksPath`
-  pointed there and verified before "active" is reported. This is what makes the gate work in **any** repo,
-  not just metareview's own checkout. Legacy `hooks/git` is reclaimed only when it carries metareview's
-  content marker (or is entirely absent = broken-install recovery).
+  and written into `${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<content-id>/` (executable, user-level, named
+  by the scripts' content), with `core.hooksPath` pointed there (absolute) and verified before "active" is reported.
+  This is what makes the gate work in **any** repo, not just metareview's own checkout. It lives outside every
+  repository on purpose (#173): an absolute `core.hooksPath` into a checkout or its `.git` goes stale when that
+  checkout moves, and git then runs **no** hook, silently; a relative one resolves against each worktree's own
+  root. A content id is never rewritten, so an upgrade materializes a new dir and re-points each repository as it
+  is re-installed; uninstall leaves the shared dir. Earlier locations — another content id, a pre-#173
+  `<checkout>/.metareview/git-hooks`, legacy `hooks/git` — are reclaimed only when gone or when their `pre-push`
+  carries metareview's content marker; `setup --check` reports one as `stale` and `--install-hooks` migrates it.
 - **The Stop gate is opt-in per repository (#194).** The plugin's `hooks/hooks.json` registers
   `hooks/pre-finish.sh` in every host session on the machine, so the script is inert — exit 0, no output,
   before it even looks for the binary — unless the repository it stands in has `metareview.stopGate=true` in its
@@ -170,7 +175,7 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   can leak an absolute `cwd` (issue #80) — do not commit a leaking context artifact; the review `.md` is
   clean.
 - **Transient, local (git-ignored)** under `.metareview/`: `findings.jsonl`, `runs.jsonl` (review records),
-  `shards/`, `git-hooks/`. A `mock: true` FSM run never satisfies a gate.
+  `shards/` (and `git-hooks/`, from before #173). A `mock: true` FSM run never satisfies a gate.
 - **The shared store is in git's common directory (#173).** `repo.StoreDir` = `<git rev-parse --git-common-dir>/
   metareview/`: FSM runs (`runs/<id>/`), their terminal ledger (`runs.jsonl`; run ids are store-unique,
   `record.Exists` checks it; `FSMRunDir` is relative to the common dir), the migration lock, and the session

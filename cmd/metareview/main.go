@@ -1051,7 +1051,7 @@ func handleHookInstall(uninstall, yes, force, dryRun bool) {
 		_, _ = fmt.Fprintln(stdout, "metareview review gate — uninstall (git-native hooks)")
 		_, _ = fmt.Fprintln(stdout, "  Currently: core.hooksPath = "+current)
 		if !status.WouldChange {
-			_, _ = fmt.Fprintln(stdout, "\nNothing to uninstall — core.hooksPath is not metareview's hooks/git. No changes made.")
+			_, _ = fmt.Fprintln(stdout, "\nNothing to uninstall — core.hooksPath is not metareview's hook location. No changes made.")
 			return
 		}
 		_, _ = fmt.Fprintln(stdout, "  Will UNSET core.hooksPath — the pre-push gate and post-commit nudge stop running on this repo.")
@@ -1083,7 +1083,7 @@ func handleHookInstall(uninstall, yes, force, dryRun bool) {
 		if changed {
 			_, _ = fmt.Fprintln(stdout, "metareview: uninstalled — core.hooksPath unset; the git-native review gate no longer runs.")
 		} else {
-			_, _ = fmt.Fprintln(stdout, "metareview: nothing to uninstall — core.hooksPath was not metareview's hooks/git.")
+			_, _ = fmt.Fprintln(stdout, "metareview: nothing to uninstall — core.hooksPath was not metareview's hook location.")
 		}
 		return
 	}

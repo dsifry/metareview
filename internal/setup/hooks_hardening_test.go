@@ -28,6 +28,7 @@ func embeddedHook(t *testing.T, name string) []byte {
 // on-disk hook) must NOT report AlreadyDone, and re-install must REFRESH it — otherwise a hook fix (e.g. the
 // #82 per-ref gate) never reaches an already-installed repo.
 func TestReinstallRefreshesStaleHookContent(t *testing.T) {
+	isolateHooksHome(t) // tampers with the materialized scripts
 	root, g := tempRepo(t)
 	plan, err := PlanHookInstall(root, g)
 	if err != nil {
@@ -36,7 +37,7 @@ func TestReinstallRefreshesStaleHookContent(t *testing.T) {
 	if err := ApplyHookInstall(root, plan, false, g); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(root, ".metareview", "git-hooks")
+	dir := hookTarget(t)
 	prePush := filepath.Join(dir, "pre-push")
 	// Simulate an OLDER materialized hook (present + executable, but different content than the current embed).
 	if err := os.WriteFile(prePush, []byte("#!/usr/bin/env bash\n# STALE OLD VERSION — no per-ref gate\nexit 0\n"), 0o755); err != nil {
@@ -64,6 +65,7 @@ func TestReinstallRefreshesStaleHookContent(t *testing.T) {
 // Gap A: --force must ALWAYS re-materialize, even when the plan reports AlreadyDone — the explicit override for
 // "rewrite the scripts now" (e.g. a hand-tampered or partially-updated hook).
 func TestForceReinstallRematerializesEvenWhenAlreadyDone(t *testing.T) {
+	isolateHooksHome(t) // tampers with the materialized scripts
 	root, g := tempRepo(t)
 	plan, err := PlanHookInstall(root, g)
 	if err != nil {
@@ -80,7 +82,7 @@ func TestForceReinstallRematerializesEvenWhenAlreadyDone(t *testing.T) {
 	if !done.AlreadyDone {
 		t.Fatal("precondition: a current install should report AlreadyDone")
 	}
-	prePush := filepath.Join(root, ".metareview", "git-hooks", "pre-push")
+	prePush := filepath.Join(hookTarget(t), "pre-push")
 	if err := os.WriteFile(prePush, []byte("tampered\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

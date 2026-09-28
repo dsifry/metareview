@@ -52,7 +52,13 @@ type GitGateStatus struct {
 	// so `git push` is blocked until the branch is review-clean.
 	Installed bool `json:"installed"`
 	// HooksPath is this clone's effective core.hooksPath, empty when unset.
-	HooksPath   string `json:"hooksPath,omitempty"`
+	HooksPath string `json:"hooksPath,omitempty"`
+	// Location is where this binary materializes the hook scripts, the value core.hooksPath should hold (#173):
+	// ${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<content id>.
+	Location string `json:"location,omitempty"`
+	// Stale is true when core.hooksPath is metareview's but not Location: a pre-#173 per-checkout location, or
+	// scripts from another metareview version. `setup --install-hooks` migrates it.
+	Stale       bool   `json:"stale,omitempty"`
 	Remediation string `json:"remediation,omitempty"`
 }
 
@@ -67,18 +73,26 @@ func gitGateStatus(root string, git GitRunner) GitGateStatus {
 	// The gate is ACTIVE when the hooks are ours and current — independent of the .gitignore block, which
 	// AlreadyDone also requires. `git push` is gated by the hook whether or not the ignore line exists.
 	if plan.HooksCurrent {
-		return GitGateStatus{Installed: true, HooksPath: plan.Current}
+		return GitGateStatus{Installed: true, HooksPath: plan.Current, Location: plan.Target}
+	}
+	if plan.Current != "" && len(plan.Conflicts) == 0 && !sameHookPath(root, plan.Current, plan.Target) {
+		return GitGateStatus{
+			HooksPath: plan.Current, Location: plan.Target, Stale: true,
+			Remediation: "core.hooksPath points at an earlier metareview hook location (" + plan.Current + "). Run `metareview setup --install-hooks` to migrate it to " + plan.Target + ".",
+		}
 	}
 	// A CONFLICT (a foreign core.hooksPath, or active .git/hooks a redirect would bypass) makes a plain
 	// `setup --install-hooks` REFUSE. Surface the reasons so the remediation is actionable, not misleading.
 	if len(plan.Conflicts) > 0 {
 		return GitGateStatus{
 			HooksPath:   plan.Current,
+			Location:    plan.Target,
 			Remediation: "The git-native review gate is not installed — " + strings.Join(plan.Conflicts, "; ") + ". Resolve that, or run `metareview setup --install-hooks --force` to override.",
 		}
 	}
 	return GitGateStatus{
 		HooksPath:   plan.Current,
+		Location:    plan.Target,
 		Remediation: "The git-native review gate is not installed (or its scripts are stale). Run `metareview setup --install-hooks` so `git push` is blocked until the branch is review-clean.",
 	}
 }

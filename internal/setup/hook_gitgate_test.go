@@ -11,6 +11,7 @@ import (
 // `--install-hooks` → installed and current. This is the push-time enforcement setup --check previously
 // omitted entirely.
 func TestGitGateStatusReportsInstallState(t *testing.T) {
+	isolateHooksHome(t) // tampers with the materialized scripts
 	root, g := tempRepo(t)
 
 	before := gitGateStatus(root, g)
@@ -39,7 +40,7 @@ func TestGitGateStatusReportsInstallState(t *testing.T) {
 
 	// Stale scripts (byte-drift from the embed) must read as NOT installed — the same currency PlanHookInstall
 	// enforces, surfaced in the report so a reader isn't told an out-of-date gate is fine.
-	stalePrePush := filepath.Join(root, ".metareview", "git-hooks", "pre-push")
+	stalePrePush := filepath.Join(hookTarget(t), "pre-push")
 	if err := os.WriteFile(stalePrePush, []byte("#!/usr/bin/env bash\n# STALE\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -132,7 +132,7 @@ func TestApplyHookInstallRevalidationError(t *testing.T) {
 
 func TestApplyHookInstallFreshAlreadyDone(t *testing.T) {
 	root, g := tempRepo(t)
-	target, _ := filepath.Abs(filepath.Join(root, ".metareview", "git-hooks"))
+	target := hookTarget(t)
 	// Install for real so the repo's core.hooksPath already points at target (fresh AlreadyDone),
 	// then Apply a stale non-AlreadyDone plan without force.
 	plan, err := PlanHookInstall(root, g)
@@ -150,7 +150,7 @@ func TestApplyHookInstallFreshAlreadyDone(t *testing.T) {
 
 func TestApplyHookInstallConfigSetError(t *testing.T) {
 	root, g := tempRepo(t)
-	target, _ := filepath.Abs(filepath.Join(root, ".metareview", "git-hooks"))
+	target := hookTarget(t)
 	// force=true skips revalidation; fail the config write that sets core.hooksPath.
 	g2 := failGitOn(g, errors.New("set boom"), "core.hooksPath", target)
 	if err := ApplyHookInstall(root, HookInstallPlan{Target: target}, true, g2); err == nil || !strings.Contains(err.Error(), "setting core.hooksPath") {
@@ -159,8 +159,9 @@ func TestApplyHookInstallConfigSetError(t *testing.T) {
 }
 
 func TestApplyHookInstallNotMaterializedAfterWrite(t *testing.T) {
+	isolateHooksHome(t)
 	root, g := tempRepo(t)
-	target, _ := filepath.Abs(filepath.Join(root, ".metareview", "git-hooks"))
+	target := hookTarget(t)
 	orig := applyMaterialize
 	t.Cleanup(func() { applyMaterialize = orig })
 	// materialize "succeeds" but writes nothing, so the post-write verify fails.

@@ -50,11 +50,13 @@ out="$(printf '{"cwd":"%s"}' "$nonrepo" | METAREVIEW_BIN=definitely-not-installe
 if [ -n "$out" ]; then echo "FAIL: a directory outside any repository must be left alone, got: $out"; exit 1; fi
 # A repository with metareview's git gate installed but no opt-in (an install from before #194, or an unset
 # from inside the session) still is not gated — but says so, on stderr, never silently.
-git config --local core.hooksPath "$repo/.metareview/git-hooks"
-err="$(METAREVIEW_BIN="$TMP/mrv" bash "$HOOK" 2>&1 >/dev/null)"
-out="$(METAREVIEW_BIN="$TMP/mrv" bash "$HOOK" 2>/dev/null)"
-if [ -n "$out" ]; then echo "FAIL: a lost opt-in must not block, got: $out"; exit 1; fi
-printf '%s' "$err" | grep -q "enable-stop-gate" || { echo "FAIL: a lost opt-in must be announced on stderr, got: $err"; exit 1; }
+for gate in "$TMP/xdg/metareview/git-hooks/0123456789abcdef" "$repo/.metareview/git-hooks"; do
+  git config --local core.hooksPath "$gate"
+  err="$(METAREVIEW_BIN="$TMP/mrv" bash "$HOOK" 2>&1 >/dev/null)"
+  out="$(METAREVIEW_BIN="$TMP/mrv" bash "$HOOK" 2>/dev/null)"
+  if [ -n "$out" ]; then echo "FAIL: a lost opt-in must not block, got: $out"; exit 1; fi
+  printf '%s' "$err" | grep -q "enable-stop-gate" || { echo "FAIL: a lost opt-in ($gate) must be announced on stderr, got: $err"; exit 1; }
+done
 git config --local --unset core.hooksPath
 # From here on the repository has opted in — through the CLI, so the hook and the installer must agree on the key.
 "$TMP/mrv" setup --enable-stop-gate >/dev/null
