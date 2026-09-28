@@ -255,3 +255,33 @@ func TestBareMainOrphansOnlyConfirmedRemovalsAndNamesTheRunDir(t *testing.T) {
 		t.Fatalf("the warning must name the dir the run is in (%s): %s", legacy, w)
 	}
 }
+
+// #174 review: on an id collision (the migration keeps both copies) an orphaned legacy copy must not suppress the live
+// store copy of the same id — the blocker wins, and the id is not also warned about.
+func TestAnOrphanedLegacyCopyNeverSuppressesALiveStoreRun(t *testing.T) {
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	bare := filepath.Join(base, "repo.git")
+	gitRun(t, base, "init", "-q", "--bare", "-b", "main", bare)
+	seed := filepath.Join(base, "seed")
+	gitRun(t, base, "clone", "-q", bare, seed)
+	gitRun(t, seed, "commit", "-q", "--allow-empty", "-m", "base")
+	gitRun(t, seed, "push", "-q", "origin", "main")
+	a := filepath.Join(base, "a")
+	gitRun(t, bare, "worktree", "add", "-q", a, "main")
+	const id = "mrv-collide-00001"
+	legacy := filepath.Join(a, ".metareview", "runs", id) // scanned first; its worktree is gone
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(legacy, "workflow.yaml"), []byte(testWorkflow), 0o600)
+	_ = os.WriteFile(filepath.Join(legacy, "audit.jsonl"), []byte(`{"type":"init","at":"t","state":"discover","data":{"workflow":"t","work_dir":"`+filepath.Join(base, "gone")+`"}}`+"\n"+
+		`{"type":"transition","at":"t","state":"discover","data":{"to":"fix","to_kind":"agent-edit"}}`+"\n"), 0o600)
+	writeStoreRun(t, bare, id, a) // the live copy: this worktree's
+	abandoned, orphaned := ScanAbandonedRuns(a)
+	if got := strings.Join(ids(abandoned), ","); got != id {
+		t.Fatalf("the live store copy must be this worktree's blocker, got %q", got)
+	}
+	if len(orphaned) != 0 {
+		t.Fatalf("an id that blocks must not also be warned about as orphaned: %v", ids(orphaned))
+	}
+}

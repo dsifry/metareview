@@ -97,8 +97,9 @@ func scanAbandonedRuns(root string, deps kind.Deps) (out, orphaned []AbandonedRu
 		// blockers: the report is narrower, never falsely clean about the reviews themselves.
 		return nil, nil
 	}
-	readable := false // no runs directory anywhere reports nil, as it always has; an empty one reports []
-	seen := map[string]bool{}
+	readable := false               // no runs directory anywhere reports nil, as it always has; an empty one reports []
+	seen := map[string]bool{}       // ids reported as this worktree's blockers
+	seenOrphan := map[string]bool{} // ids reported as orphaned
 	// A run belongs to the worktree that CONTAINS its init work_dir (`fsm init --work-dir` takes any directory inside
 	// a worktree). The store is shared by every worktree (#173), so only this worktree's runs are reported — another
 	// branch's abandoned run must not block this checkout's Stop hook. A run whose work_dir cannot be attributed (its
@@ -147,15 +148,26 @@ func scanAbandonedRuns(root string, deps kind.Deps) (out, orphaned []AbandonedRu
 			// (a git lookup failing) stays a blocker, never a warning a live run could slip past.
 			_, statErr := os.Stat(r.workDir)
 			gone := r.workDir != "" && errors.Is(statErr, fs.ErrNotExist)
+			// Blockers and orphans are deduped apart: on an id collision (the migration keeps both copies) an orphaned
+			// legacy copy must never hide a live store copy of the same id.
 			switch {
-			case seen[r.RunID]: // already reported from the other source
 			case unattributable && bareMain && gone:
-				orphaned, seen[r.RunID] = append(orphaned, r), true
-			case mine:
+				if !seenOrphan[r.RunID] {
+					orphaned, seenOrphan[r.RunID] = append(orphaned, r), true
+				}
+			case mine && !seen[r.RunID]:
 				out, seen[r.RunID] = append(out, r), true
 			}
 		}
 	}
+	// An id that blocks is not also warned about.
+	kept := orphaned[:0]
+	for _, o := range orphaned {
+		if !seen[o.RunID] {
+			kept = append(kept, o)
+		}
+	}
+	orphaned = kept
 	if !readable {
 		return nil, nil
 	}
