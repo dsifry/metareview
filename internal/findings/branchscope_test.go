@@ -130,14 +130,16 @@ func TestScopedBlockingFailsClosedAndAsksGitOnlyWhenNeeded(t *testing.T) {
 	}
 }
 
-// TestReconcileRecordsTheBranch: a new finding records the checked-out branch; a detached run records none, refreshes
-// the branchless row it raised and never a named one; raised on another branch, the finding gets that branch's own row.
+// TestReconcileRecordsTheBranch: a new finding records the checked-out branch, and a detached run none; a detached run
+// deduplicates against a named row that gates it without re-stamping it, and refreshes a branchless row that gates it;
+// raised on another branch, the finding gets that branch's own row.
 func TestReconcileRecordsTheBranch(t *testing.T) {
 	root, git := scopeRepo(t)
 	git("switch", "-q", "-c", "feat")
 	git("commit", "-q", "--allow-empty", "-m", "F")
+	featHead := git("rev-parse", "HEAD")
 	input := unsafeEval("eval")
-	reconcileOn(t, root, "mrv-1", git("rev-parse", "HEAD"), input)
+	reconcileOn(t, root, "mrv-1", featHead, input)
 	if got := loadOne(t, root); got.Branch != "feat" {
 		t.Fatalf("a new finding records the checked-out branch, got %q", got.Branch)
 	}
@@ -145,19 +147,26 @@ func TestReconcileRecordsTheBranch(t *testing.T) {
 	git("switch", "-q", "--detach")
 	git("commit", "-q", "--allow-empty", "-m", "detached")
 	reconcileOn(t, root, "mrv-2", git("rev-parse", "HEAD"), input)
-	records := readRecords(t, root)
-	if len(records) != 2 || records[0].RunID != "mrv-1" || records[0].Branch != "feat" || records[1].Branch != "" {
-		t.Fatalf("a detached run never refreshes a named row, and its own row names no branch: %+v", records)
+	if got := loadOne(t, root); got.Branch != "feat" || got.GitHead != featHead {
+		t.Fatalf("a detached run deduplicates against the named row that gates it and never re-stamps it: %+v", got)
 	}
-	git("commit", "-q", "--allow-empty", "-m", "detached, again")
+
+	git("switch", "-q", "--detach", "main")
+	git("commit", "-q", "--allow-empty", "-m", "detached elsewhere")
+	reconcileOn(t, root, "mrv-3", git("rev-parse", "HEAD"), input)
+	records := readRecords(t, root)
+	if len(records) != 2 || records[1].Branch != "" {
+		t.Fatalf("a detached run whose HEAD no row gates records its own branchless row: %+v", records)
+	}
+	git("commit", "-q", "--allow-empty", "-m", "detached elsewhere, again")
 	head := git("rev-parse", "HEAD")
-	reconcileOn(t, root, "mrv-3", head, input)
+	reconcileOn(t, root, "mrv-4", head, input)
 	if records = readRecords(t, root); len(records) != 2 || records[1].GitHead != head {
-		t.Fatalf("a detached run refreshes the branchless row: %+v", records)
+		t.Fatalf("a detached run refreshes the branchless row that gates it: %+v", records)
 	}
 
 	git("switch", "-q", "-c", "other", "main")
-	reconcileOn(t, root, "mrv-4", git("rev-parse", "HEAD"), input)
+	reconcileOn(t, root, "mrv-5", git("rev-parse", "HEAD"), input)
 	if records = readRecords(t, root); len(records) != 3 || records[2].Branch != "other" {
 		t.Fatalf("raised on another branch, the finding gets that branch's own row: %+v", records)
 	}
@@ -455,5 +464,42 @@ func TestNamedRunDedupesAgainstABranchlessRowThatGatesIt(t *testing.T) {
 	reconcileOn(t, root, "mrv-again", git("rev-parse", "HEAD"), input)
 	if records := readRecords(t, root); len(records) != 1 || records[0].Branch != "" {
 		t.Fatalf("a named run must not write a duplicate beside the branchless row that gates it: %+v", records)
+	}
+}
+
+// TestDetachedRunDedupesAgainstTheRowThatGatesIt is a recheck finding on the fifth cut: a detached review at a branch's
+// own head wrote a second, branchless row beside the branch's named row, so the branch's own fix chain closed its row
+// and the duplicate kept blocking. Before #178 the re-raise deduplicated.
+func TestDetachedRunDedupesAgainstTheRowThatGatesIt(t *testing.T) {
+	root, git := scopeRepo(t)
+	git("switch", "-q", "-c", "feat")
+	git("commit", "-q", "--allow-empty", "-m", "F")
+	input := unsafeEval("eval")
+	reconcileOn(t, root, "mrv-feat", git("rev-parse", "HEAD"), input)
+	git("switch", "-q", "--detach")
+	reconcileOn(t, root, "mrv-det", git("rev-parse", "HEAD"), input)
+	if records := readRecords(t, root); len(records) != 1 || records[0].Branch != "feat" {
+		t.Fatalf("a detached re-raise at the branch's head must not duplicate its row: %+v", records)
+	}
+}
+
+// TestFreshnessSupersedeOnlyForRowsThatGateTheRun: fresh mutation evidence on one branch never supersedes another live
+// branch's stale-mutation blocker for the same target — that branch never re-ran mutation testing.
+func TestFreshnessSupersedeOnlyForRowsThatGateTheRun(t *testing.T) {
+	root, git := scopeRepo(t)
+	engines := Options{MutationEngines: []string{"stryker"}}
+	target := map[string]string{"type": "advisory", "id": "t"}
+	git("switch", "-q", "-c", "branch-a")
+	git("commit", "-q", "--allow-empty", "-m", "A")
+	if _, err := Reconcile(root, Run{ID: "r-a", Scope: "task-done", Target: target, GitHead: git("rev-parse", "HEAD")}, []Input{staleInput()}, engines); err != nil {
+		t.Fatal(err)
+	}
+	git("switch", "-q", "-c", "branch-b", "main")
+	git("commit", "-q", "--allow-empty", "-m", "B")
+	if _, err := Reconcile(root, Run{ID: "r-b", Scope: "task-done", Target: target, GitHead: git("rev-parse", "HEAD")}, nil, engines); err != nil {
+		t.Fatal(err)
+	}
+	if got := statusOf(t, root, staleFP); len(got) != 1 || got[0] != "open/" {
+		t.Fatalf("branch-b's fresh evidence must not supersede branch-a's stale row: %v", got)
 	}
 }

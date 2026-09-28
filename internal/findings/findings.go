@@ -130,7 +130,8 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	// checkout's (scope.Load), and each rule below asks it one question:
 	//   - mine: the row is this branch's by name (its name, or a former one after a rename) — refreshed in place;
 	//   - blocksHere: the row gates this branch (scope.Classify) — counted in the verdict; a branchless row (from
-	//     before #178, or a detached HEAD) that blocks here is also this run's to deduplicate against, never re-stamped;
+	//     before #178, or a detached HEAD) that blocks here is also this run's to deduplicate against, never re-stamped,
+	//     and a detached run (or one whose branch git could not read) deduplicates against every row that gates it;
 	//   - a --previous-run chain closes any row it names, whichever branch recorded it — the chain is the explicit
 	//     repair path, so a fix branch, a stacked branch or an epic can close what it inherited or merged, and a
 	//     deleted branch's row is never stranded.
@@ -198,7 +199,7 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 	activeExisting := map[string]bool{}
 	for _, record := range updated {
 		if record.Status != "fixed" && record.Status != StatusSuperseded && record.Fingerprint != "" && sameRunTarget(record, run) &&
-			(mine(record) || record.Branch == "" && blocksHere(record)) {
+			(mine(record) || (record.Branch == "" || branch == "") && blocksHere(record)) {
 			activeExisting[record.Fingerprint] = true
 		}
 	}
