@@ -256,7 +256,7 @@ func TestUninstallPreviewStates(t *testing.T) {
 // The gate must reach a CONSUMER repo that has no committed hooks/git of its own: install MATERIALIZES the
 // embedded scripts into the repository's user-level hook dir (executable, #173) and points core.hooksPath there, so
 // the gate is genuinely active — not the old bug where core.hooksPath named a non-existent dir and the CLI still said
-// "active". Uninstall then removes the materialized dir.
+// "active". Uninstall then unsets core.hooksPath and leaves the user-level dir.
 func TestHookInstallMaterializesHooksInConsumerRepo(t *testing.T) {
 	root, g := tempRepo(t)
 	plan, err := PlanHookInstall(root, g)
@@ -282,9 +282,9 @@ func TestHookInstallMaterializesHooksInConsumerRepo(t *testing.T) {
 	if _, err := UninstallHookInstall(root, g); err != nil {
 		t.Fatal(err)
 	}
-	// The hook dir is this repository's own (#173): uninstall takes its scripts, and the emptied dir, with it.
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("uninstall must remove the repository's emptied hook dir; stat err = %v", err)
+	// The user-level dir stays (#173): another live repository may run from it; a reinstall here reuses it.
+	if _, err := os.Stat(filepath.Join(dir, "pre-push")); err != nil {
+		t.Fatalf("uninstall must leave the user-level hook scripts; stat err = %v", err)
 	}
 	if got := hooksPath(t, root, g); got != "" {
 		t.Fatalf("uninstall must unset core.hooksPath, got %q", got)

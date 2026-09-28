@@ -186,17 +186,19 @@ func ownerIs(dir, common string) bool {
 	return err == nil && filepath.Clean(strings.TrimSpace(string(raw))) == common
 }
 
-// releaseHookDir takes metareview's scripts (and owner file) out of a hook dir this repository no longer uses, and
-// the dir once nothing else is left — only when it is metareview's and this repository's (ownedBy): a copied
-// checkout must never empty the dir its original still runs from.
-func releaseHookDir(dir, common string) {
-	if !isPreviousHookDir(dir) || !ownedBy(dir, common) {
+// releaseHookDir takes metareview's scripts out of a pre-#173 per-checkout hook dir (<checkout>/.metareview/git-hooks)
+// this repository no longer uses, and the dir once nothing else is left. Only that location: it lives inside the
+// checkout, so a copy or a move carries its own. A user-level dir is never emptied from here — two live repositories
+// can carry the same metareview.hooksId (a copy whose original then moved, a backup restored over a moved one's old
+// path), nothing inside either tells them apart, and emptying the dir would ungate the other. An unused user-level
+// dir is left behind instead (a few KB).
+func releaseHookDir(dir string) {
+	if filepath.Base(filepath.Dir(dir)) != ".metareview" || !isPreviousHookDir(dir) {
 		return
 	}
 	for name := range gitHookScripts {
 		_ = os.Remove(filepath.Join(dir, name))
 	}
-	_ = os.Remove(filepath.Join(dir, hookOwnerFile))
 	_ = os.Remove(dir) // only succeeds when empty
 }
 
@@ -491,7 +493,7 @@ func ApplyHookInstall(root string, plan HookInstallPlan, force bool, git GitRunn
 	// Migrated from an earlier location: its scripts are no longer used. Remove metareview's own (the plan refused
 	// if anything else was there), and the dir once it is empty.
 	if prev := resolveHookPath(root, plan.Current); plan.Current != "" && !sameHookPath(root, prev, plan.Target) {
-		releaseHookDir(prev, common)
+		releaseHookDir(prev)
 	}
 	if _, err := git(root, "config", "--local", StopGateKey, "true"); err != nil {
 		return fmt.Errorf("recording the Stop-gate opt-in: %w", err)
@@ -594,12 +596,10 @@ func UninstallHookInstall(root string, git GitRunner) (bool, error) {
 	if _, err := git(root, "config", "--local", "--unset", "core.hooksPath"); err != nil {
 		return false, err
 	}
-	// The hook dir is this repository's alone (#173): take metareview's scripts out of it, and the dir too once
-	// nothing else is left — never a hook someone else put there. Then forget the id.
-	if common, err := commonDir(root, git); err == nil {
-		releaseHookDir(resolveHookPath(root, current), common)
-	}
-	_, _ = git(root, "config", "--local", "--unset-all", HooksIDKey)
+	// A pre-#173 per-checkout dir goes. A user-level dir stays, and so does metareview.hooksId: another live repository
+	// may run from the same dir (see releaseHookDir), and a reinstall here reuses it — a hook the user keeps there
+	// resumes.
+	releaseHookDir(resolveHookPath(root, current))
 	return true, nil
 }
 

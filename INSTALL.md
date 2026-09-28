@@ -121,7 +121,7 @@ A repository whose own hook manager owns `core.hooksPath` (husky, lefthook, bead
 refuses rather than override it — opts into the Stop gate alone with `metareview setup --enable-stop-gate`
 (`--disable-stop-gate` reverses it).
 
-`--uninstall-hooks` unsets `core.hooksPath` and the Stop-gate opt-in (and removes metareview's scripts from the repository's hook dir, leaving any hook it does not own), but
+`--uninstall-hooks` unsets `core.hooksPath` and the Stop-gate opt-in (the user-level hook dir and `metareview.hooksId` stay, so a reinstall reuses them and nothing another repository may run from is removed), but
 **leaves the `.gitignore` block in place** — editing a user's `.gitignore` on uninstall is riskier than
 leaving inert ignore lines. To remove it, delete the block marked `# metareview: keep ephemeral review state
 local …` from `.gitignore` by hand. Re-running install (or `learn --post-merge`) re-adds it.

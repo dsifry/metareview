@@ -147,27 +147,29 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
 - **post-commit** = NEVER blocks (a commit saves work). Names the files it wrote + a review-owed nudge.
 - **Commit-always, enforce-at-push:** saving work must never be held hostage to the reviewer being down;
   the enforcement lives at push, where not-pushing loses nothing.
-- **Install materializes** (`setup --install-hooks`): the scripts are `go:embed`ded (root `githookassets.go`)
-  and written into `${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<repo-id>/` (executable, user-level, one dir per
+- **Install materializes** (`setup --install-hooks`): the scripts are `go:embed`ded (root `githookassets.go`) and
+  written into `${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<repo-id>/` (executable, user-level, one dir per
   repository, named by `metareview.hooksId` in the repository's own config, which moves with it), with
-  `core.hooksPath` pointed there (absolute) and verified before "active" is reported.
-  This is what makes the gate work in **any** repo, not just metareview's own checkout. It lives outside every
-  repository on purpose (#173): an absolute `core.hooksPath` into a checkout or its `.git` goes stale when that
-  checkout moves, and git then runs **no** hook, silently; a relative one resolves against each worktree's own
-  root. One dir per repository, because `core.hooksPath` makes it git's hooks dir: a hook a user or another tool
-  adds there must not run in other repositories. An upgrade rewrites the scripts in place (atomically per file);
-  uninstall removes only metareview's own. The dir's `.metareview-owner` names the repository (git's common dir)
-  that installed it: a copied checkout (`cp -r`, rsync, a restored backup) carries `metareview.hooksId`, so an id
-  is reused only when its owner is this repository or no longer exists (this one, moved) — a copy gets its own dir,
-  and nothing done in it empties the dir its original still runs from. A repository with no recorded id takes the first
-  `sha256(common dir, n)` whose dir is absent or **released** (uninstall took metareview's scripts out). A dir that
-  still holds the gate is never adopted, whatever its owner file says: from a fresh clone, `mv repo repo.bak && git
-  clone … repo` (repo.bak still runs from it) and `rm -rf repo && git clone … repo` (nothing does) look identical, and
-  adopting a live dir can silently ungate a repository. The cost: a re-clone in place without uninstalling leaves its
-  old dir behind (a few KB); uninstall + reinstall reuses the dir, so a user's own hook there resumes.
-  Earlier locations — any `<data home>/metareview/git-hooks/<id>` (matched by shape, since `XDG_DATA_HOME` can differ between shells), a pre-#173 `<checkout>/.metareview/git-hooks`, legacy
-  `hooks/git` — are reclaimed only when gone or when their `pre-push` carries metareview's content marker;
-  `setup --check` reports one as `stale`, and `--install-hooks` migrates it (refusing if it holds other hooks).
+  `core.hooksPath` pointed there (absolute) and verified before "active" is reported. This is what makes the gate work
+  in **any** repo, not just metareview's own checkout. It lives outside every repository on purpose (#173): an
+  absolute `core.hooksPath` into a checkout or its `.git` goes stale when that checkout moves, and git then runs
+  **no** hook, silently; a relative one resolves against each worktree's own root. One dir per repository, because
+  `core.hooksPath` makes it git's hooks dir: a hook a user or another tool adds there must not run in other
+  repositories. An upgrade rewrites the scripts in place (atomically per file); uninstall only unsets `core.hooksPath`
+  and keeps the dir and the id, so a reinstall reuses them. **Ownership.** The dir's `.metareview-owner` names the
+  repository (git's common dir) that installed it. A copied checkout (`cp -r`, rsync, a restored backup) carries
+  `metareview.hooksId`, so a recorded id is reused only when its owner is this repository or no longer exists (this
+  one, moved) — a copy gets its own dir. A repository with no recorded id takes the first `sha256(common dir, n)`
+  whose dir is absent or holds none of metareview's scripts: a dir that still holds the gate is never adopted, because
+  from a fresh clone `mv repo repo.bak && git clone … repo` (repo.bak still runs from it) and `rm -rf repo && git
+  clone … repo` (nothing does) look identical. And nothing ever empties a user-level dir: two live repositories can
+  carry one id (a copy whose original then moved, a backup restored over a moved one's old path) and nothing inside
+  either tells them apart. The cost is an unused dir left behind (a few KB) after a re-clone in place, an uninstall or
+  a migration; `mr-ap2` tracks a prune command. Earlier locations — any `<data home>/metareview/git-hooks/<id>`
+  (matched by shape, since `XDG_DATA_HOME` can differ between shells), a pre-#173 `<checkout>/.metareview/git-hooks`
+  (removed on migration: it lives inside the checkout), legacy `hooks/git` — are reclaimed only when gone or when
+  their `pre-push` carries metareview's content marker; `setup --check` reports one as `stale`, and `--install-hooks`
+  migrates it (refusing if it holds other hooks).
 - **The Stop gate is opt-in per repository (#194).** The plugin's `hooks/hooks.json` registers
   `hooks/pre-finish.sh` in every host session on the machine, so the script is inert — exit 0, no output,
   before it even looks for the binary — unless the repository it stands in has `metareview.stopGate=true` in its

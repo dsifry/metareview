@@ -217,42 +217,39 @@ func TestAHookDirFromAnotherDataHomeIsOurs(t *testing.T) {
 	}
 }
 
-// Uninstall takes metareview's scripts out of the repository's hook dir and forgets the id, but never removes a hook
-// someone else put there; an otherwise empty dir goes.
-func TestUninstallKeepsOtherHooksAndForgetsTheID(t *testing.T) {
+// Uninstall unsets core.hooksPath and leaves the user-level dir — scripts, a hook the user keeps there, and the id —
+// so another repository that may run from it keeps its gate, and a reinstall here reuses it.
+func TestUninstallLeavesTheUserLevelDirAndReinstallReusesIt(t *testing.T) {
 	isolateHooksHome(t)
 	root, g := tempRepo(t)
 	plan, _ := PlanHookInstall(root, g)
 	if err := ApplyHookInstall(root, plan, false, g); err != nil {
 		t.Fatal(err)
 	}
-	target := plan.Target
-	if err := os.WriteFile(filepath.Join(target, "commit-msg"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(plan.Target, "commit-msg"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if changed, err := UninstallHookInstall(root, g); err != nil || !changed {
 		t.Fatalf("uninstall: %v %v", changed, err)
 	}
-	if _, err := os.Stat(filepath.Join(target, "pre-push")); !os.IsNotExist(err) {
-		t.Fatal("uninstall must remove metareview's scripts")
+	if hooksPath(t, root, g) != "" {
+		t.Fatal("uninstall must unset core.hooksPath")
 	}
-	if _, err := os.Stat(filepath.Join(target, "commit-msg")); err != nil {
-		t.Fatal("uninstall must keep a hook it does not own")
+	if !hooksCurrent(plan.Target) {
+		t.Fatal("uninstall must leave the user-level scripts in place")
 	}
-	if out, _ := g(root, "config", "--local", "--get", HooksIDKey); strings.TrimSpace(string(out)) != "" {
-		t.Fatalf("uninstall must forget %s, got %q", HooksIDKey, out)
+	if out, _ := g(root, "config", "--local", "--get", HooksIDKey); strings.TrimSpace(string(out)) != filepath.Base(plan.Target) {
+		t.Fatalf("uninstall must keep %s, got %q", HooksIDKey, out)
 	}
-	// Reinstall and uninstall with nothing else there: the dir goes too.
-	_ = os.Remove(filepath.Join(target, "commit-msg"))
-	plan, _ = PlanHookInstall(root, g)
-	if err := ApplyHookInstall(root, plan, false, g); err != nil {
+	again, _ := PlanHookInstall(root, g)
+	if err := ApplyHookInstall(root, again, false, g); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UninstallHookInstall(root, g); err != nil {
-		t.Fatal(err)
+	if again.Target != plan.Target {
+		t.Fatal("reinstall must reuse the dir")
 	}
-	if _, err := os.Stat(plan.Target); !os.IsNotExist(err) {
-		t.Fatal("an emptied hook dir must be removed")
+	if _, err := os.Stat(filepath.Join(plan.Target, "commit-msg")); err != nil {
+		t.Fatal("the user's hook resumes with the reused dir")
 	}
 }
 
@@ -377,9 +374,9 @@ func TestOwnedBy(t *testing.T) {
 	if ownedBy(dir, here) {
 		t.Fatal("a dir another existing repository owns is not ours")
 	}
-	releaseHookDir(dir, here) // not ours: untouched
+	releaseHookDir(dir) // not a per-checkout dir: never emptied
 	if _, err := os.Stat(filepath.Join(dir, hookOwnerFile)); err != nil {
-		t.Fatal("releaseHookDir must leave a dir it does not own")
+		t.Fatal("releaseHookDir must leave a user-level dir alone")
 	}
 }
 
@@ -547,5 +544,58 @@ func TestReleased(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "post-commit"), []byte("#!/bin/sh\n"), 0o755)
 	if released(dir) {
 		t.Fatal("a dir holding any of metareview's scripts is live")
+	}
+}
+
+// Two live repositories can carry the same hooksId — a copy whose original then moved, or a backup restored over a
+// moved repository's old path — and nothing inside either tells them apart. So nothing done in one may delete the
+// gate from a user-level dir: uninstall leaves the dir (and the id) alone.
+func TestUninstallNeverEmptiesAUserLevelDirAnotherRepositoryRunsFrom(t *testing.T) {
+	for _, scenario := range []string{"copy-then-move-original", "restore-backup-over-moved-path"} {
+		t.Run(scenario, func(t *testing.T) {
+			isolateHooksHome(t)
+			base, _ := filepath.EvalSymlinks(t.TempDir())
+			g := isolatedGit(base)
+			a := filepath.Join(base, "a")
+			if out, err := g(base, "init", "-q", "-b", "main", a); err != nil {
+				t.Fatalf("%v %s", err, out)
+			}
+			plan, _ := PlanHookInstall(a, g)
+			if err := ApplyHookInstall(a, plan, false, g); err != nil {
+				t.Fatal(err)
+			}
+			var victim, actor string
+			switch scenario {
+			case "copy-then-move-original": // cp -r a b; mv a c; uninstall in b
+				actor, victim = filepath.Join(base, "b"), filepath.Join(base, "c")
+				if err := os.CopyFS(actor, os.DirFS(a)); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(a, victim); err != nil {
+					t.Fatal(err)
+				}
+			default: // backup a; mv a b; restore a; uninstall in the restored a
+				backup := filepath.Join(base, "backup")
+				if err := os.CopyFS(backup, os.DirFS(a)); err != nil {
+					t.Fatal(err)
+				}
+				victim, actor = filepath.Join(base, "b"), a
+				if err := os.Rename(a, victim); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(backup, a); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := UninstallHookInstall(actor, g); err != nil {
+				t.Fatal(err)
+			}
+			if !hooksCurrent(plan.Target) {
+				t.Fatal("uninstalling in one repository must not delete the gate another runs from")
+			}
+			if hp := hooksPath(t, victim, g); hp != plan.Target {
+				t.Fatalf("the victim's core.hooksPath must be untouched: %q", hp)
+			}
+		})
 	}
 }
