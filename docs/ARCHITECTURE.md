@@ -205,7 +205,7 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   one rule in one package: a run recorded on branch N at head H is **in scope** when N is the current branch or one
   of its former names — the `git branch -m` / `-c` entries its reflog carries, while no live branch holds that name —
   (the name leg: survives rebase, amend and rename; mid-rebase the branch being rebased is current; a rebase begun detached is no branch), or when H lies in
-  `merge-base(HEAD, main|master)..HEAD`, less anything a remote's default branch already has — the branch its `refs/remotes/<remote>/HEAD` names, else
+  `merge-base(HEAD, main|master)..HEAD`, less anything a remote's default branch already has — the branch its `refs/remotes/<remote>/HEAD` names, and
   its `main` and `master` (the range leg:
   detached snapshots, stacked branches; the exclusion keeps a stale local main from pulling merged branches' runs
   into a branch cut from a fresh origin/main). Otherwise it is

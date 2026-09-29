@@ -134,8 +134,8 @@ func Load(root string, git Runner) Scope {
 	default:
 		return s
 	}
-	// Local branches, and the remote default branches (refs/remotes/<remote>/main|master for each configured remote —
-	// a remote name may itself contain a slash) whose commits the range leaves out.
+	// Local branches, and the remote default branches (for each configured remote — a remote name may itself contain a
+	// slash — the branch its HEAD names, and its main and master) whose commits the range leaves out.
 	remotes, err := git(root, "remote")
 	if err != nil {
 		return s
@@ -228,19 +228,20 @@ func (s Scope) readReflog(root string, git Runner) error {
 	return nil
 }
 
-// remoteDefaultRefs is every configured remote's own default branch: the branch its refs/remotes/<r>/HEAD points at
-// (what `git clone` and `git remote set-head` record), and, for a remote with no such HEAD, its main and master. Names
+// remoteDefaultRefs is every configured remote's own default branches: the branch its refs/remotes/<r>/HEAD points at
+// (what `git clone` and `git remote set-head` record), and always its main and master. Names
 // are spelled exactly: refs/remotes/origin/alice/main is a namespaced branch on origin, not a default branch, while a
 // remote named team/alice has refs/remotes/team/alice/main. A HEAD that points outside its own remote proves nothing and
-// falls back too. listed maps each listed ref to its symref target (empty for an ordinary ref).
+// is ignored. listed maps each listed ref to its symref target (empty for an ordinary ref).
 func remoteDefaultRefs(remotes []string, listed map[string]string) map[string]bool {
 	refs := map[string]bool{}
 	for _, r := range remotes {
 		own := "refs/remotes/" + r + "/"
 		if head := listed[own+"HEAD"]; strings.HasPrefix(head, own) && head != own+"HEAD" {
 			refs[head] = true
-			continue
 		}
+		// main and master stay excluded beside it: a HEAD recorded before a master-to-main rename, or naming develop in
+		// a gitflow repository, must not pull a fresh origin/main's merged work back into the range.
 		refs[own+"main"] = true
 		refs[own+"master"] = true
 	}

@@ -8,9 +8,10 @@ import (
 	"testing"
 )
 
-// TestRemoteHeadNamesTheDefault is mr-as8 (10): a remote's own default branch is what its refs/remotes/<r>/HEAD
-// points at, read from the one ref listing Load already makes; only a remote with no HEAD falls back to its main and
-// master. A HEAD aimed outside its own remote proves nothing and is ignored.
+// TestRemoteHeadNamesTheDefault is mr-as8 (10): a remote's default branch is also what its refs/remotes/<r>/HEAD
+// points at, read from the one ref listing Load already makes, beside its main and master (never fewer exclusions than
+// before: a stale HEAD after a master-to-main rename must not pull origin/main's merged work in). A HEAD aimed outside
+// its own remote proves nothing and is ignored.
 func TestRemoteHeadNamesTheDefault(t *testing.T) {
 	orig := forkPoint
 	t.Cleanup(func() { forkPoint = orig })
@@ -23,7 +24,7 @@ func TestRemoteHeadNamesTheDefault(t *testing.T) {
 			return "refs/heads/feat \n" +
 				"refs/remotes/origin/HEAD refs/remotes/origin/develop\n" +
 				"refs/remotes/origin/develop \n" +
-				"refs/remotes/origin/main \n" + // origin's HEAD says develop: its main is an ordinary branch
+				"refs/remotes/origin/main \n" + // still excluded beside the HEAD's develop
 				"refs/remotes/team/alice/HEAD refs/remotes/origin/main\n" + // points outside its remote: ignored
 				"refs/remotes/team/alice/master ", nil
 		case "rev-list":
@@ -35,7 +36,7 @@ func TestRemoteHeadNamesTheDefault(t *testing.T) {
 	if !s.known || !s.branches["feat"] || len(s.branches) != 1 {
 		t.Fatalf("Load = %+v", s)
 	}
-	if rangeArgs != "rev-list base..HEAD --not refs/remotes/origin/develop refs/remotes/team/alice/master --" {
+	if rangeArgs != "rev-list base..HEAD --not refs/remotes/origin/develop refs/remotes/origin/main refs/remotes/team/alice/master --" {
 		t.Fatalf("range args: %q", rangeArgs)
 	}
 }
