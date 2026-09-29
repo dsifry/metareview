@@ -192,7 +192,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   with metareview's git gate installed but no opt-in is never *silently* ungated: the Stop hook says so on stderr
   and the SessionStart notice names `--enable-stop-gate`. `setup --check` reports `optedIn`, and `active` is false
   for a registered hook that does not gate the repository. Unrelated projects, non-repositories and the FSM
-  judge's `codex exec` sessions are never gated (a gate there corrupted judge reasoning, #193).
+  judge's `codex exec` sessions are never gated (a gate there corrupted judge reasoning, #193). The judge also
+  runs with the user's hooks and plugins off (`-c features.hooks=false -c features.plugins=false`), a turn that
+  goes on past a complete verdict is retried and then failed closed, and a verdict with empty reasoning is a
+  parse error for every judge kind and provider: a judgment nobody can audit is not recorded.
 
 ## 6. State, evidence & storage
 
@@ -208,6 +211,21 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   symlinked output keeps its link — and removes what it created, the `FINDINGS.md` render included. A concurrent
   render removed in that window is re-derived from its writer's ledger at that writer's next render; a render
   left behind would outlive the restored ledger, and the carry-over would keep its unknown lines forever.
+- **`FINDINGS.md` merges as a union (#181).** Two branches that each regenerate it (a new blocker, a new
+  override) conflict on a plain merge — both append to the end of the same lists — and a hand-resolved conflict
+  in a generated file can silently drop a line. `.gitattributes` marks it `merge=union` (git's built-in driver,
+  no per-clone config) for a local `git merge`/`rebase`/`cherry-pick`: both sides' lines are kept, no conflict
+  marker. The trade is deliberate: a union never drops a line, but it can keep one a side removed — a blocker
+  fixed on one branch next to a line the other branch added comes back — and it keeps both versions of a line
+  two branches edited (`[pending]` beside `[granted]`, or a hand-maintained section's line). `FINDINGS.md` is
+  display only — no gate reads it; they read the ledger and the review logs — so the residue is a stale line
+  shown, never a live one lost, and the next render in a checkout whose ledger knows the finding retires it
+  (`TestFindingsIndexUnionResurrectionRetiresAtTheNextInformedRender`); a line no ledger knows stays until it is
+  edited out by hand, the carry-over's standing limit. Pinned by
+  `TestFindingsIndexMergesWithoutConflictUnderTheRepositoryAttributes` (and the plain-merge conflict by
+  `TestFindingsIndexConflictsOnAPlainMerge`). GitHub's web merge is not documented to honor merge drivers: if a
+  PR shows a `FINDINGS.md` conflict there, merge `main` into the branch locally, where the union applies. An
+  adopting repository gets the same by adding the line to its own `.gitattributes`.
 - **Transient, local (git-ignored)** under `.metareview/`: `findings.jsonl`, `runs.jsonl` (review records),
   `shards/` (and `git-hooks/`, from before #173). A `mock: true` FSM run never satisfies a gate.
 - **The shared store is in git's common directory (#173).** `repo.StoreDir` = `<git rev-parse --git-common-dir>/

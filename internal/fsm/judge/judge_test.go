@@ -249,7 +249,7 @@ func TestJ3Parse(t *testing.T) {
 		t.Fatal("still-present over MaxDetail")
 	}
 	// adjudicate threshold rows are the kind's; confidence passthrough here
-	if _, _, c, _ := Parse(KindAdjudicate, `{"is_real":true,"confidence":0.6999}`); c != 0.6999 {
+	if _, _, c, _ := Parse(KindAdjudicate, `{"reasoning":"r","is_real":true,"confidence":0.6999}`); c != 0.6999 {
 		t.Fatal("confidence passthrough")
 	}
 }
@@ -669,7 +669,7 @@ func TestJ7Mock(t *testing.T) {
 	ctx := context.Background()
 	hash := InputHash(fixedInputs[KindMatch])
 	m := NewMock(Script{Calls: map[ScriptKey]ScriptRow{
-		{KindMatch, "adjudicate", 2, 5}:    {Raw: `{"match":true,"confidence":0.4}`, Tokens: run.TokenTotals{Input: 3}, ExpectModel: "gpt-5.2", ExpectInputHash: hash},
+		{KindMatch, "adjudicate", 2, 5}:    {Raw: `{"reasoning":"r","match":true,"confidence":0.4}`, Tokens: run.TokenTotals{Input: 3}, ExpectModel: "gpt-5.2", ExpectInputHash: hash},
 		{KindMatch, "adjudicate", 2, 6}:    {Error: CodeJudgeHTTP},
 		{KindStillPresent, "verify", 0, 0}: {Raw: `garbage`},
 	}})

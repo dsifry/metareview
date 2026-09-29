@@ -1,2 +1,7 @@
 internal/fsm/judge/testdata/prompts/* -text
 testdata/fsm/** -text
+# The rendered findings index merges as a union of both sides in a local merge: two long-lived branches that
+# each add a blocker or an override do not conflict, and no line is dropped by a hand-resolved conflict (#181).
+# A union can keep a line one side removed; the index is display only, and the next render from a ledger that
+# knows the finding retires it (docs/ARCHITECTURE.md).
+docs/metareview/FINDINGS.md merge=union
