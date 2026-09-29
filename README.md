@@ -28,7 +28,8 @@ standalone or as a deeper review engine inside metaswarm, Superpowers, and Beads
   (tag/file/lines/issue/consequence/confidence/severity) validated deterministically before they can
   become candidates: malformed entries are rejected and counted (never crash the run), and an
   **anchor-in-diff gate** (±10 context lines) rejects findings that cite files or lines the diff never
-  touched. Benchmarked in the lab (dsifry/metareview#159): the typed schema cut output tokens 27%, and
+  touched. An output with nothing kept and anything rejected fails the node instead of ending the loop clean
+  (mr-0vk); only entries suppressed below the confidence floor read as "nothing to raise". Benchmarked in the lab (dsifry/metareview#159): the typed schema cut output tokens 27%, and
   the anchor gate is a real fabricated-finding catcher at F1-neutral. Judge transports also retry a
   gateway's `400` output-limit answer once at 4× the cap — transport headroom only, calibration frozen.
 - **📚 Learns locally.** Post-merge learning extracts durable, git-native, human-readable lessons — no

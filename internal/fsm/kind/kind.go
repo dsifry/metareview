@@ -419,6 +419,14 @@ func (reviewLenses) Decode(raw json.RawMessage) (any, error) {
 	return findingsOut{Findings: []run.Finding{}}, nil
 }
 
+// allRejected is the error for a lens output none of whose entries survived the typed contract for a structural
+// reason (mr-0vk). A malformed-but-nonempty output must not read as a clean review.
+func allRejected(stats lensoutput.Stats) error {
+	return invalid("lens_all_rejected", fmt.Sprintf("no lens finding survived validation (rejected schema=%d enum=%d anchor=%d suppressed=%d): "+
+		"fix the entries to the typed contract (integer confidence 0-100, tag bug|advisory, severity P0-P3, a file and lines from this diff) and record a corrected output on the fork the resume_hint starts",
+		stats.Schema, stats.Enum, stats.Anchor, stats.Suppression))
+}
+
 // DecodeWithDiff is the production decode: the typed contract enforced against the diff the
 // lenses reviewed (machine.DiffDecoder). Malformed and out-of-diff entries are rejected and
 // counted (the buckets mirror the lab's [lens-validate] accounting); only kept findings
@@ -437,6 +445,12 @@ func (reviewLenses) DecodeWithDiff(raw json.RawMessage, d machine.Diff) (any, er
 		return nil, invalid("lens_legacy", detail)
 	}
 	kept, stats := lensoutput.ValidatePayload(raw, d.Text)
+	// mr-0vk: nothing kept while entries were rejected for their shape, their values or their anchor — the output is
+	// broken, not clean, so the node fails closed rather than routing the loop to a clean ending. Entries only
+	// suppressed below the confidence floor are a genuine "nothing worth raising" and still decode.
+	if stats.Kept == 0 && stats.Schema+stats.Enum+stats.Anchor > 0 {
+		return nil, allRejected(stats)
+	}
 	fs := make([]run.Finding, 0, len(kept))
 	for _, f := range kept {
 		fs = append(fs, f.ToCandidate("lens"))

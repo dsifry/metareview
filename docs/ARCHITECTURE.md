@@ -62,7 +62,11 @@ There are **two** engines that produce a review, joined by a **review-evidence m
    the typed 0.12 contract (`internal/lensoutput`: tag/file/lines/issue/consequence/confidence/severity)
    is validated deterministically before it can become a candidate: malformed entries are rejected and
    counted, and the **anchor-in-diff gate** (±10 context lines) rejects findings citing files or lines the
-   diff never touched — fabricated findings by contract definition. The judge transports themselves carry
+   diff never touched — fabricated findings by contract definition. An output with nothing kept and anything
+   rejected for its shape, values or anchor fails the node at apply (`lens_all_rejected`, GATE_FAILED → fork and
+   re-record) instead of routing the loop to a clean ending, so a malformed review never reads as a clean one — nor
+   backs a `record-lenses --from-run` marker (mr-0vk); entries only suppressed below the confidence floor still
+   decode. The judge transports themselves carry
    an output-cap retry (a gateway `400` output-limit answer is retried once at 4× the cap — transport
    headroom; prompts and calibration are frozen).
 

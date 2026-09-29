@@ -52,33 +52,35 @@ func TestK1DecodeWithDiff(t *testing.T) {
 		t.Fatalf("clean run warnings: %v", w)
 	}
 
+	// Each rejected bucket rides beside one kept entry: an output with nothing kept and anything rejected fails closed
+	// (mr-0vk, TestK1DecodeWithDiffAllRejectedFailsClosed).
 	// schema: missing field
-	out, err = dec(`{"findings":[` + entry(`{"tag":"bug","file":"f.go","start_line":2,"end_line":2,"issue":"i","confidence":75,"severity":"P2"}`) + `]}`)
-	if err != nil || out.stats.Schema != 1 || len(out.Findings) != 0 {
+	out, err = dec(`{"findings":[` + entry("") + `,` + entry(`{"tag":"bug","file":"f.go","start_line":2,"end_line":2,"issue":"i","confidence":75,"severity":"P2"}`) + `]}`)
+	if err != nil || out.stats.Schema != 1 || len(out.Findings) != 1 {
 		t.Fatalf("schema bucket: %+v err=%v", out.stats, err)
 	}
 	// schema: wrong type (string where int belongs)
-	out, err = dec(`{"findings":[` + entry(`{"tag":"bug","file":"f.go","start_line":"2","end_line":2,"issue":"i","consequence":"c","confidence":75,"severity":"P2"}`) + `]}`)
+	out, err = dec(`{"findings":[` + entry("") + `,` + entry(`{"tag":"bug","file":"f.go","start_line":"2","end_line":2,"issue":"i","consequence":"c","confidence":75,"severity":"P2"}`) + `]}`)
 	if err != nil || out.stats.Schema != 1 {
 		t.Fatalf("schema type bucket: %+v err=%v", out.stats, err)
 	}
 	// enum: bad tag
-	out, err = dec(`{"findings":[` + entry(`{"tag":"smell","file":"f.go","start_line":2,"end_line":2,"issue":"i","consequence":"c","confidence":75,"severity":"P2"}`) + `]}`)
+	out, err = dec(`{"findings":[` + entry("") + `,` + entry(`{"tag":"smell","file":"f.go","start_line":2,"end_line":2,"issue":"i","consequence":"c","confidence":75,"severity":"P2"}`) + `]}`)
 	if err != nil || out.stats.Enum != 1 {
 		t.Fatalf("enum bucket: %+v err=%v", out.stats, err)
 	}
 	// enum: inverted range
-	out, err = dec(`{"findings":[` + entry(`{"tag":"bug","file":"f.go","start_line":5,"end_line":2,"issue":"i","consequence":"c","confidence":75,"severity":"P2"}`) + `]}`)
+	out, err = dec(`{"findings":[` + entry("") + `,` + entry(`{"tag":"bug","file":"f.go","start_line":5,"end_line":2,"issue":"i","consequence":"c","confidence":75,"severity":"P2"}`) + `]}`)
 	if err != nil || out.stats.Enum != 1 {
 		t.Fatalf("enum range bucket: %+v err=%v", out.stats, err)
 	}
 	// anchor: file not in the diff
-	out, err = dec(`{"findings":[` + entry(`{"tag":"bug","file":"elsewhere.go","start_line":2,"end_line":2,"issue":"i","consequence":"c","confidence":75,"severity":"P2"}`) + `]}`)
+	out, err = dec(`{"findings":[` + entry("") + `,` + entry(`{"tag":"bug","file":"elsewhere.go","start_line":2,"end_line":2,"issue":"i","consequence":"c","confidence":75,"severity":"P2"}`) + `]}`)
 	if err != nil || out.stats.Anchor != 1 {
 		t.Fatalf("anchor bucket: %+v err=%v", out.stats, err)
 	}
 	// anchor: in the diff's file but far outside every hunk's ±10 slack
-	out, err = dec(`{"findings":[` + entry(`{"tag":"bug","file":"f.go","start_line":900,"end_line":901,"issue":"i","consequence":"c","confidence":75,"severity":"P2"}`) + `]}`)
+	out, err = dec(`{"findings":[` + entry("") + `,` + entry(`{"tag":"bug","file":"f.go","start_line":900,"end_line":901,"issue":"i","consequence":"c","confidence":75,"severity":"P2"}`) + `]}`)
 	if err != nil || out.stats.Anchor != 1 {
 		t.Fatalf("anchor far bucket: %+v err=%v", out.stats, err)
 	}
@@ -132,11 +134,11 @@ func TestK1DecodeWithDiff(t *testing.T) {
 		t.Fatalf("trailing: %v", err)
 	}
 
-	// an empty diff anchor-rejects everything (nothing is in the diff) — kept=0, no hard error
-	outI, err := dd.DecodeWithDiff(json.RawMessage(`{"findings":[`+entry("")+`]}`), machine.Diff{Text: ""})
-	out = outI.(findingsOut)
-	if err != nil || out.stats.Anchor != 1 || len(out.Findings) != 0 {
-		t.Fatalf("empty diff: %+v err=%v", out.stats, err)
+	// an empty diff anchor-rejects everything (nothing is in the diff): findings against it are all fabricated, so
+	// the output fails closed (mr-0vk) rather than decoding to a clean zero
+	_, err = dd.DecodeWithDiff(json.RawMessage(`{"findings":[`+entry("")+`]}`), machine.Diff{Text: ""})
+	if !errs.Is(err, CodeNodeOutputInvalid) || errs.As(err).Field("reason") != "lens_all_rejected" {
+		t.Fatalf("empty diff: %v", err)
 	}
 }
 
@@ -223,5 +225,41 @@ func TestK1DecodeWithDiffLegacyProbeSkipsMalformed(t *testing.T) {
 	fo := out.(findingsOut)
 	if fo.stats.Schema != 1 || fo.stats.Kept != 1 {
 		t.Fatalf("buckets: %+v", fo.stats)
+	}
+}
+
+// TestK1DecodeWithDiffAllRejectedFailsClosed is mr-0vk: an output whose every entry is rejected for its shape, its values
+// or its anchor (the #173 run: confidence on a 0..1 scale, non-enum tags) is broken, not clean. It fails the decode with
+// reason lens_all_rejected instead of decoding to zero findings and routing the loop to a clean ending. An empty findings
+// array and an output only suppressed below the confidence floor are genuine "nothing to raise" and still decode.
+func TestK1DecodeWithDiffAllRejectedFailsClosed(t *testing.T) {
+	r := mustNew(t, judge.NewMock(judge.Script{}), true)
+	k, _ := r.Kind(ReviewLenses)
+	dd, _ := k.(machine.DiffDecoder)
+	diff := machine.Diff{Text: "--- a/f.go\n+++ b/f.go\n@@ -1,4 +1,5 @@\n a\n-b\n+c\n d\n+e\n"}
+	for name, payload := range map[string]string{
+		"the #173 shape": `{"findings":[{"tag":"bug","file":"f.go","start_line":2,"end_line":2,"issue":"i","consequence":"c","confidence":0.8,"severity":"P2"},` +
+			`{"tag":"BUG","file":"f.go","start_line":2,"end_line":2,"issue":"i","consequence":"c","confidence":80,"severity":"P2"}]}`,
+		"all out of the diff":  `{"findings":[{"tag":"bug","file":"other.go","start_line":2,"end_line":2,"issue":"i","consequence":"c","confidence":80,"severity":"P2"}]}`,
+		"a null findings list": `{"findings":null}`,
+		"rejected beside suppressed": `{"findings":[{"tag":"bug","file":"f.go"},` +
+			`{"tag":"advisory","file":"f.go","start_line":2,"end_line":2,"issue":"i","consequence":"c","confidence":30,"severity":"P3"}]}`,
+	} {
+		_, err := dd.DecodeWithDiff(json.RawMessage(payload), diff)
+		if !errs.Is(err, CodeNodeOutputInvalid) || errs.As(err).Field("reason") != "lens_all_rejected" {
+			t.Errorf("%s: want lens_all_rejected, got %v", name, err)
+			continue
+		}
+		if !strings.Contains(err.Error(), "no lens finding survived validation (rejected schema=") {
+			t.Errorf("%s: the error names the buckets: %v", name, err)
+		}
+	}
+	for name, payload := range map[string]string{
+		"empty":           `{"findings":[]}`,
+		"only suppressed": `{"findings":[{"tag":"advisory","file":"f.go","start_line":2,"end_line":2,"issue":"i","consequence":"c","confidence":30,"severity":"P3"}]}`,
+	} {
+		if _, err := dd.DecodeWithDiff(json.RawMessage(payload), diff); err != nil {
+			t.Errorf("%s must still decode: %v", name, err)
+		}
 	}
 }

@@ -132,8 +132,9 @@ func IsGateArtifact(path string) bool {
 	return false
 }
 
-// CurrentReviewEvidence is LatestReviewEvidence that also counts a marker recorded at an earlier head when every
-// commit since it only added gate artifacts (IsGateArtifact) — committing a passing gate's review log, shard results,
+// CurrentReviewEvidence is LatestReviewEvidence that also counts a marker recorded at an earlier head when nothing but
+// gate artifacts (IsGateArtifact) differs between that head and this one — the check compares the two endpoints'
+// content, not each commit in between — so committing a passing gate's review log, shard results,
 // FSM bundles or FINDINGS.md must not strand the review of the code, which is unchanged (#161). changed reports whether
 // a marker's head is an ancestor of head and which paths changed since; a failure there never counts the marker (fail
 // closed). Code, tests or any other document committed after the marker still invalidate it. As in the exact match,

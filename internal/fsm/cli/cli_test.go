@@ -1228,3 +1228,23 @@ func TestOpenFailuresAndCraftedRuns(t *testing.T) {
 type failStore struct{ run.RunStore }
 
 func (failStore) Events(string) (run.Log, error) { return run.Log{}, errors.New("unreadable") }
+
+// TestAnAllRejectedLensOutputFailsInsteadOfEndingClean is mr-0vk end to end: on #173 the host recorded findings whose
+// confidence was on a 0..1 scale and whose tags were outside the enum; every entry was rejected, findings_empty routed
+// discover → done, and the run ended clean — indistinguishable from a real review that found nothing. The apply now
+// fails the node (GATE_FAILED with a resume hint), so the output is re-recorded on a fork instead.
+func TestAnAllRejectedLensOutputFailsInsteadOfEndingClean(t *testing.T) {
+	h := newHarness(t)
+	h.file("../.gitignore", "mock/\nfixtures/\nexp/\nsmall/\ndocs/\n.metareview/runs.jsonl\n")
+	git(t, h.root, "add", ".gitignore")
+	git(t, h.root, "commit", "-q", "-m", "ignore runs.jsonl")
+	id := h.must(StatusOK, 0, h.mockInit()...)["run_id"].(string)
+	h.must(machine.StatusNeedsInput, 3, "advance", "--run", id)
+	h.stdin = `{"findings":[{"tag":"BUG","file":"x.go","start_line":1,"end_line":1,"issue":"i","consequence":"c","confidence":0.8,"severity":"high"}]}`
+	h.must(StatusOK, 0, "record", "node-output", "--node", "discover", "--data", "-", "--run", id)
+	h.stdin = ""
+	env := h.must(machine.StatusGateFailed, 1, "advance", "--run", id)
+	if env["state"] == "done" || env["outcome"] == "clean" || !strings.Contains(fmt.Sprint(env), "lens_all_rejected") || env["resume_hint"] == nil {
+		t.Fatalf("an all-rejected lens output must fail the node, not end the run clean: %v", env)
+	}
+}
