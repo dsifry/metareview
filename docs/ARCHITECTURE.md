@@ -328,6 +328,9 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   A run with no `--previous-run` adopts nothing — a fresh look at an unchanged diff is never a fix.
 - **Evidence receipts:** `evidence run -- <cmd>` records a validation receipt (kind + exitCode + hashes);
   `evidence import --github-checks <pr>` pulls CI. task-done/pr-ready require a passing validation receipt.
+  Freeform evidence text (no receipts) passes only with a success signal and no failure signal; a failure is read
+  from tool-output shapes (`FAIL`/`FAILED`, a nonzero `N failed` or `Failures: N`, a nonzero exit, `error:`) or a
+  stated failed check ("lint failed"), never from the word "fail" in prose (mr-r3y). Prefer receipts.
 - **Sharded review** (exclude-filtered diff > 120 KB): the gate writes prompt packs under
   `.metareview/shards/…/plan.json`; review one subagent per shard + a cross-shard pack, write results, re-run
   with `--previous-run`. Editing a file invalidates only its own shard.

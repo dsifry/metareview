@@ -63,10 +63,15 @@ var (
 		regexp.MustCompile(`(?i)\b(npm run build|build|tsc --noEmit|typecheck|coverage).*\b(pass|passed|ok|success|exited 0)\b`),
 		regexp.MustCompile(`(?i)\bexited 0\b`),
 	}
+	// failurePatterns read a failure from the shapes tools print and from a stated failed check — never from the word
+	// "fail" in prose (mr-r3y): evidence routinely says the new tests "fail against origin/main", meaning they catch
+	// the regression, or that a test "failed before the fix".
 	failurePatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\b(exit(ed)?|exit code)\s+[1-9][0-9]*\b`),
-		regexp.MustCompile(`(?i)\bFAIL\b`),
-		regexp.MustCompile(`(?i)\bfailed\b`),
+		regexp.MustCompile(`\bFAIL(ED)?\b`),                         // go test, jest, pytest markers (upper case)
+		regexp.MustCompile(`(?i)\b[1-9][0-9]*\s+(\w+\s+)?failed\b`), // a nonzero count: "2 failed", "1 test failed"
+		regexp.MustCompile(`(?i)\bfailures?:\s*[1-9]`),              // junit/maven "Failures: 1"
+		regexp.MustCompile(`(?i)\b(tests?|test suite|suite|build|lint|linter|typecheck|checks?|ci|coverage)\s+(has\s+|have\s+)?failed\b`), // a stated failed check
 		regexp.MustCompile(`(?i)\berror:`),
 	}
 )
