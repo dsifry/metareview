@@ -334,9 +334,11 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   (`findings.AbandonedRunRecord`: fingerprint `fsm:abandoned-run:<id>`, the run's own branch and init head, advisory —
   bookkeeping no review gate counts). A request alone leaves the run blocking `status` (it names who asked); once
   granted by another actor, `status` drops it for every branch and `--all` lists it with Scope `closed`, actor and
-  reason, and the closure renders under Process Overrides (carried over by the run's `mrv-` ID). The row records the
-  run's last event (`runUpdated`): a grant closes the run only as it stood, so a run resumed since blocks again and its
-  stale closure can be requested and granted afresh. `fsm record stopped` stays an annotation that never removes
+  reason, and the closure renders under Process Overrides (carried over by the run's `mrv-` ID). The row records when the
+  run last moved (`runUpdated`: its last event other than an `fsm record` note): a grant closes the run only as it
+  stood, so a run resumed since blocks again and its stale closure can be requested and granted afresh, while a
+  `stopped` note never reopens it. A request made before the run moved no longer describes it: status stops naming it,
+  and a grant then is a direct decision on the run as it stands. `fsm record stopped` stays an annotation that never removes
   a run. The ledger is per checkout, so a closure granted in one worktree does not close the run in another. An ID with
   no ledger row is looked up in the
   committed review logs (#188): every log listing it under `## Blocking Findings` supplies it **and all its other

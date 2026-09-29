@@ -72,6 +72,9 @@ type AbandonedRun struct {
 	Dir string `json:"dir,omitempty"`
 	// head is the commit the run's init recorded. Not reported.
 	head string
+	// moved is when the run last moved: its last event other than an operator's note (`fsm record`). A run closure
+	// (#179) snapshots it, so a `stopped` annotation never reopens a closed run, while a resumed run is open again.
+	moved string
 }
 
 // DiscoverAbandonedRuns reports this branch's FSM runs left in a non-terminal state: the ones that block.
@@ -116,11 +119,11 @@ func closeRuns(root string) func(inScope, elsewhere []AbandonedRun) ([]Abandoned
 		mark := func(r AbandonedRun) (AbandonedRun, bool) {
 			c, ok := closures[r.RunID]
 			switch {
-			case ok && c.Status == findings.StatusOverridden && c.RunUpdated != "" && c.RunUpdated == r.Updated:
+			case ok && c.Status == findings.StatusOverridden && c.RunUpdated != "" && c.RunUpdated == r.moved:
 				r.Scope, r.ClosedBy, r.ClosedAt, r.CloseReason = ClosedScope, c.OverrideGrantedBy, c.OverrideGrantedAt, c.OverrideGrantReason
 				r.CloseRequestedBy = c.OverrideRequestedBy
 				return r, true
-			case ok && c.Status == findings.StatusOverridePending && c.RunUpdated == r.Updated:
+			case ok && c.Status == findings.StatusOverridePending && c.RunUpdated == r.moved:
 				// A request names the run as it stood; one made before the run was resumed is not about this state.
 				r.CloseRequestedBy = c.OverrideRequestedBy
 			}
@@ -159,7 +162,7 @@ func RunClosureSubject(root, runID, now string) (*findings.Record, bool) {
 	inScope, elsewhere := scanAbandonedRuns(root, kind.Deps{}, scope.Load(root, nil))
 	for _, r := range append(inScope, elsewhere...) {
 		if r.RunID == runID {
-			record := findings.AbandonedRunRecord(r.RunID, "("+abandonedTarget(r)+")", r.Branch, r.head, r.Updated, now)
+			record := findings.AbandonedRunRecord(r.RunID, "("+abandonedTarget(r)+")", r.Branch, r.head, r.moved, now)
 			return &record, true
 		}
 	}
@@ -321,6 +324,9 @@ func abandonedRun(dir string, kinds map[string]workflow.KindInfo) (AbandonedRun,
 		}
 		if ev.At != "" {
 			got.Updated = ev.At
+			if ev.Type != run.TypeRecord {
+				got.moved = ev.At
+			}
 		}
 		if ev.Data.To != "" {
 			state, got.Node = ev.Data.To, ev.Data.ToKind

@@ -307,10 +307,11 @@ func IsRunClosure(record Record) bool {
 	return strings.HasPrefix(record.Fingerprint, AbandonedRunFingerprintPrefix) && record.ID == strings.TrimPrefix(record.Fingerprint, AbandonedRunFingerprintPrefix)
 }
 
-// staleClosure reports whether record is a granted run closure (#179) whose run has moved on since — resumed, and left
-// again — so it may be requested or granted afresh: the old grant no longer closes the run, and without this the row
-// could never be reopened.
+// staleClosure reports whether record is a run closure (#179), granted or requested, whose run has moved on since —
+// resumed, and left again — so it may be requested or granted afresh: the old grant no longer closes the run (without
+// this the row could never be reopened), and an old request no longer describes it, so a grant is taken as a fresh,
+// direct decision on the run as it now stands rather than as the acknowledgement of a request about another state.
 func staleClosure(record Record, subject *Record) bool {
-	return IsRunClosure(record) && record.Status == StatusOverridden && subject != nil && subject.ID == record.ID &&
-		subject.RunUpdated != record.RunUpdated
+	return IsRunClosure(record) && (record.Status == StatusOverridden || record.Status == StatusOverridePending) &&
+		subject != nil && subject.ID == record.ID && subject.RunUpdated != record.RunUpdated
 }

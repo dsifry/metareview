@@ -267,3 +267,32 @@ func TestAPendingRequestDoesNotOutliveTheRunStateItNamed(t *testing.T) {
 		t.Fatalf("a request made before the resume must not be reported against the new state: %+v", got)
 	}
 }
+
+// #179 review: `fsm record stopped` is an annotation — it never reopens a closed run, and never hides a pending request.
+func TestAStopNoteNeverReopensAClosedRun(t *testing.T) {
+	root, common := newRepo(t)
+	head := gitOut(t, root, "rev-parse", "HEAD")
+	const pending, closed = "mrv-main-0000001", "mrv-main-0000002"
+	writeStoreRun(t, common, pending, "main", head)
+	writeStoreRun(t, common, closed, "main", head)
+	if err := closeRequest(t, root, pending, "claude-agent"); err != nil {
+		t.Fatal(err)
+	}
+	if err := closeGrant(t, root, closed, "maintainer"); err != nil {
+		t.Fatal(err)
+	}
+	note, _ := json.Marshal(map[string]any{"type": "record", "at": "2026-09-29T11:00:00Z", "state": "fix",
+		"data": map[string]any{"name": StopNote, "data": map[string]string{"reason": "left for good"}}})
+	for _, id := range []string{pending, closed} {
+		f, err := os.OpenFile(filepath.Join(common, "metareview", "runs", id, "audit.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = f.WriteString(string(note) + "\n")
+		_ = f.Close()
+	}
+	got := DiscoverAbandonedRuns(root)
+	if len(got) != 1 || got[0].RunID != pending || got[0].CloseRequestedBy != "claude-agent" || got[0].StopReason != "left for good" {
+		t.Fatalf("a stop note must neither reopen the closed run nor hide the pending request: %+v", got)
+	}
+}
