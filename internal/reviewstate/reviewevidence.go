@@ -84,20 +84,14 @@ func DiscoverReviewEvidence(root string) ([]ReviewEvidence, error) {
 // (append order in runs.jsonl is record order): re-reviewing an unchanged head lets the newer verdict
 // supersede the older, and it avoids the string-compare tie-break trap where an RFC3339Nano stamp on an
 // exact-zero-nanosecond second sorts after a later fractional one.
+//
+// It is CurrentReviewEvidence with no carry-over: one selection loop, two rules.
 func LatestReviewEvidence(root, reviewedScope, baseSHA, headSHA string) (ReviewEvidence, bool, error) {
-	markers, err := DiscoverReviewEvidence(root)
-	if err != nil {
-		return ReviewEvidence{}, false, err
-	}
-	var best ReviewEvidence
-	found := false
-	for _, m := range markers {
-		if m.ReviewedScope == reviewedScope && m.BaseSHA == baseSHA && m.HeadSHA == headSHA {
-			best, found = m, true // last matching marker wins
-		}
-	}
-	return best, found, nil
+	return CurrentReviewEvidence(root, reviewedScope, baseSHA, headSHA, exactOnly)
 }
+
+// exactOnly reports every earlier head as unrelated, so only an exact-head marker counts.
+func exactOnly(string, string) ([]string, bool, error) { return nil, false, nil }
 
 // gateArtifactDirs are the folders under docs/metareview/ the gates write for committing (review logs, context packs,
 // shard results, FSM export bundles, post-merge learning), and gateArtifactExts the only kinds of file they write there

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	fsmcli "github.com/dsifry/metareview/internal/fsm/cli"
 	fsmrun "github.com/dsifry/metareview/internal/fsm/run"
+	"gopkg.in/yaml.v3"
 	"io"
 	"os"
 	"os/exec"
@@ -532,8 +533,9 @@ func dispatch(args []string) {
 		// A CLI seam cannot witness that independent subagents actually ran, so it must not let a hand-typed
 		// `--mode subagent-adjudicated` launder a self-attested review as independent, full-strength evidence
 		// (the gate would then trust it with no advisory trace). subagent-adjudicated is therefore admitted
-		// only when it mirrors a real FSM review run: --from-run must name a run whose init records the SAME
-		// base..head this marker claims. A self-attested review has no such run and must record the labeled,
+		// only when it mirrors a real FSM review run: --from-run must name a run that reviewed the SAME base..head
+		// this marker claims (its init, or the head its lenses last reviewed before a clean/reviewed ending —
+		// validateFromRunDiff). A self-attested review has no such run and must record the labeled,
 		// advisory in-session-emulated mode.
 		if mode == reviewstate.ReviewModeSubagentAdjudicated {
 			if fromRun == "" {
@@ -813,7 +815,8 @@ func bundleExitCode(bundle evidence.Bundle) int {
 // on — an unreadable review log became "you have work to do, and I cannot say what". A check that
 // did not run must never be reported as a check that found something.
 // validateFromRunDiff confirms that the FSM run named by --from-run is a real, non-mock review run that (a) reviewed
-// the SAME base..head the marker claims (its init event) and (b) reached a PASSING terminal transition
+// the SAME base..head the marker claims — its init event's, or (mr-1ad) the head at which its final clean/reviewed
+// transition passed when its last review-lenses node reviewed that very head — and (b) reached a PASSING terminal transition
 // (outcome clean|reviewed|fixed). This keeps a subagent-adjudicated marker from being pointed at an empty
 // audit, a run over a different diff, or a run that reviewed the diff and did NOT come out clean. It scans
 // events leniently (in the spirit of the FSM's own peek) rather than folding the full chain.
@@ -895,7 +898,8 @@ func validateFromRunDiff(runsDir, runID, wantBase, wantHead, wantWorkflow string
 	// head it committed reviewed that head too (mr-1ad). A `fixed` ending verified its fix without re-reviewing it, so
 	// only its init head counts. The base is the run's either way.
 	reviewedHead := d.Head == wantHead ||
-		lastOutcomeHead == wantHead && (lastOutcome == fsmrun.OutcomeClean || lastOutcome == fsmrun.OutcomeReviewed)
+		lastOutcomeHead == wantHead && (lastOutcome == fsmrun.OutcomeClean || lastOutcome == fsmrun.OutcomeReviewed) &&
+			lensesReviewedFinalHead(filepath.Join(runsDir, runID), events, wantHead)
 	if !reviewedHead || d.BaseSHA != wantBase {
 		return fmt.Errorf("it reviewed a different diff (run base..head %s..%s, marker %s..%s)", short(d.BaseSHA), short(d.Head), short(wantBase), short(wantHead))
 	}
@@ -910,6 +914,52 @@ func validateFromRunDiff(runsDir, runID, wantBase, wantHead, wantWorkflow string
 		return nil // the run's final verdict was a passing review over the right diff
 	}
 	return errors.New("its final outcome is not a passing review (clean|reviewed|fixed)")
+}
+
+// lensesReviewedFinalHead reports whether the run's lenses reviewed head itself: the last time a review-lenses node was
+// asked for its output (needs_input) it was at head, and no transition since moved away from it. The head a transition
+// stamps is only git's HEAD when it fired — a commit made after the last review (discover at H1, commit H2, adjudicate
+// to done) would otherwise launder unreviewed code into a marker for H2. The node kinds come from the workflow the run
+// stored at init; without it nothing shows which node reviewed what, so the final head is not accepted (fail closed).
+func lensesReviewedFinalHead(runDir string, events []fsmrun.Event, head string) bool {
+	raw, err := os.ReadFile(filepath.Join(runDir, "workflow.yaml")) // #nosec G304 -- runDir is the validated run's own directory
+	if err != nil {
+		return false
+	}
+	var wf struct {
+		Nodes map[string]struct {
+			Kind string `yaml:"kind"`
+		} `yaml:"nodes"`
+	}
+	if yaml.Unmarshal(raw, &wf) != nil {
+		return false
+	}
+	last := -1
+	for i, ev := range events {
+		if ev.Type == fsmrun.TypeNeedsInput && wf.Nodes[ev.Node].Kind == "review-lenses" {
+			last = i
+		}
+	}
+	if last < 0 {
+		return false
+	}
+	// An unreadable payload leaves the head empty, which matches nothing: fail closed.
+	var ni fsmrun.NeedsInputData
+	_ = json.Unmarshal(events[last].Data, &ni)
+	if ni.Head != head {
+		return false
+	}
+	for _, ev := range events[last+1:] {
+		if ev.Type != fsmrun.TypeTransition {
+			continue
+		}
+		var td fsmrun.TransitionData
+		_ = json.Unmarshal(ev.Data, &td)
+		if td.Head != head {
+			return false
+		}
+	}
+	return true
 }
 
 // isPassingReviewOutcome reports whether an FSM terminal outcome means the review passed — a clean review,

@@ -93,6 +93,30 @@ func TestTaskDoneMarkerCarriesOverGateArtifactCommits(t *testing.T) {
 	if strings.Contains(string(body), "adversarial-review-reviewer") {
 		t.Fatalf("a marker must carry over a review-log commit on task-done:\n%s", body)
 	}
+	// A code commit after it invalidates it.
+	code := filepath.Join(root, "src", "later.go")
+	if err := os.MkdirAll(filepath.Dir(code), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(code, []byte("package src\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "src/later.go"}, {"commit", "-q", "-m", "code"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	result, err = Create(root, "docs/tasks/big-task.md", Options{
+		Base: "main", ShardWriter: &fakeWriter{satisfy: true}, EvidencePath: writeEvidence(t, root),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body, _ = os.ReadFile(filepath.Join(root, filepath.FromSlash(result.ReviewRel))); !strings.Contains(string(body), "adversarial-review-reviewer") {
+		t.Fatal("a code commit after the marker must invalidate it on task-done")
+	}
 }
 
 // A marker whose verdict is not a pass must NOT satisfy the gate: the review still carries the

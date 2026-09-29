@@ -87,8 +87,10 @@ not `PASS`/`PASS_ADVISORY`, and emits an **advisory** finding (not a block) when
 The FSM stays scope-agnostic: the **agent** bridges its run into a marker with `--from-run`, rather than the
 FSM emitting scope-specific markers. Because a CLI seam cannot witness that independent subagents actually
 ran, `record-lenses --mode subagent-adjudicated` is admitted **only** when `--from-run` names an FSM run that
-reviewed the same `base..head` — its init, or the head at which its final `clean`/`reviewed` transition passed, so
-a fix loop whose last review was clean backs the commit it made clean (mr-1ad; a `fixed` ending was not
+reviewed the same `base..head` — its init, or the head at which its final `clean`/`reviewed` transition passed when its
+last review-lenses node reviewed that very head and nothing moved it since (a transition's head is only git's HEAD when
+it fired, so a commit made after the last review is never credited), so a fix loop whose last review was clean backs
+the commit it made clean (mr-1ad; a `fixed` ending was not
 re-reviewed and counts only for its init) — AND reached a passing terminal transition (`clean|reviewed|fixed`);
 an empty, wrong-diff, incomplete, failed, or **mock** run is rejected (a run initialised with `--mock-ai`, or one
 carrying a mock-stamped event, is test infrastructure and never evidence — #185), and a self-attested review has no such run and

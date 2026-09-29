@@ -474,7 +474,26 @@ func TestValidateFromRunDiff(t *testing.T) {
 		return string(e)
 	}
 	runs := filepath.Join(root, ".metareview", "runs")
-	writeAudit("loop-clean", initEvent("b", "h0", "sdlc-loop-clean"), transitionAt("", "h1"), transitionAt(fsmrun.OutcomeClean, "h2"))
+	needsInput := func(node, head string) string {
+		d, _ := json.Marshal(fsmrun.NeedsInputData{Head: head})
+		e, _ := json.Marshal(fsmrun.Event{Type: fsmrun.TypeNeedsInput, Node: node, Data: d})
+		return string(e)
+	}
+	nodeOutput := func(node string) string {
+		e, _ := json.Marshal(fsmrun.Event{Type: fsmrun.TypeNodeOutput, Node: node, Data: json.RawMessage(`{}`)})
+		return string(e)
+	}
+	writeWorkflow := func(runID string) {
+		t.Helper()
+		yml := "nodes:\n  discover: {kind: review-lenses}\n  adjudicate: {kind: match-then-adjudicate}\n  fix: {kind: agent-edit}\n  recheck: {kind: review-lenses}\n"
+		if err := os.WriteFile(filepath.Join(runs, runID, "workflow.yaml"), []byte(yml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeAudit("loop-clean", initEvent("b", "h0", "sdlc-loop-clean"), needsInput("discover", "h0"), transitionAt("", "h0"),
+		needsInput("fix", "h0"), transitionAt("", "h1"), needsInput("recheck", "h1"), transitionAt("", "h1"),
+		needsInput("discover", "h2"), nodeOutput("discover"), transitionAt("", "h2"), transitionAt(fsmrun.OutcomeClean, "h2"))
+	writeWorkflow("loop-clean")
 	if err := validateFromRunDiff(runs, "loop-clean", "b", "h2", ""); err != nil {
 		t.Errorf("a clean review at the final head must back it: %v", err)
 	}
@@ -487,6 +506,43 @@ func TestValidateFromRunDiff(t *testing.T) {
 	writeAudit("loop-fixed", initEvent("b", "h0", "sdlc-loop"), transitionAt(fsmrun.OutcomeFixed, "h3"))
 	if err := validateFromRunDiff(runs, "loop-fixed", "b", "h3", ""); err == nil || !strings.Contains(err.Error(), "different diff") {
 		t.Errorf("a fix verified but never re-reviewed must not back its head: %v", err)
+	}
+	writeAudit("loop-reviewed", initEvent("b", "h0", "sdlc-loop-clean"), needsInput("recheck", "h4"), transitionAt(fsmrun.OutcomeReviewed, "h4"))
+	writeWorkflow("loop-reviewed")
+	if err := validateFromRunDiff(runs, "loop-reviewed", "b", "h4", ""); err != nil {
+		t.Errorf("an adjudicated review at the final head backs it: %v", err)
+	}
+	if err := validateFromRunDiff(runs, "loop-reviewed", "b", "h4", "epic-review-loop"); err == nil || !strings.Contains(err.Error(), "requires") {
+		t.Errorf("the workflow constraint still applies to a final-head match: %v", err)
+	}
+	// The head a transition stamps is git's HEAD when it fires, not what the lenses saw: a commit made after the last
+	// review (discover at h5, commit h6, adjudicate -> done) must not be laundered into a marker for h6.
+	writeAudit("laundered", initEvent("b", "h0", "review-loop"), needsInput("discover", "h5"), transitionAt("", "h5"),
+		transitionAt(fsmrun.OutcomeClean, "h6"))
+	writeWorkflow("laundered")
+	if err := validateFromRunDiff(runs, "laundered", "b", "h6", ""); err == nil || !strings.Contains(err.Error(), "different diff") {
+		t.Errorf("a head the lenses never reviewed must not be accepted: %v", err)
+	}
+	writeAudit("moved-after", initEvent("b", "h0", "review-loop"), needsInput("discover", "h7"), transitionAt("", "h8"),
+		transitionAt(fsmrun.OutcomeClean, "h7"))
+	writeWorkflow("moved-after")
+	if err := validateFromRunDiff(runs, "moved-after", "b", "h7", ""); err == nil {
+		t.Error("a head that moved between the last review and the ending is not accepted")
+	}
+	writeAudit("no-workflow", initEvent("b", "h0", "review-loop"), needsInput("discover", "h9"), transitionAt(fsmrun.OutcomeClean, "h9"))
+	if err := validateFromRunDiff(runs, "no-workflow", "b", "h9", ""); err == nil {
+		t.Error("without its workflow a run cannot show which node reviewed the final head")
+	}
+	if err := os.WriteFile(filepath.Join(runs, "no-workflow", "workflow.yaml"), []byte("nodes: [unclosed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateFromRunDiff(runs, "no-workflow", "b", "h9", ""); err == nil {
+		t.Error("an unreadable workflow cannot show it either")
+	}
+	writeAudit("no-review", initEvent("b", "h0", "review-loop"), needsInput("fix", "h10"), transitionAt(fsmrun.OutcomeClean, "h10"))
+	writeWorkflow("no-review")
+	if err := validateFromRunDiff(runs, "no-review", "b", "h10", ""); err == nil {
+		t.Error("a run whose lenses never ran after init cannot back a later head")
 	}
 }
 
