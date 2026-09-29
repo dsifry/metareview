@@ -157,3 +157,58 @@ func TestFindingsIndexMergesWithoutConflictUnderTheRepositoryAttributes(t *testi
 		t.Errorf("Process Overrides rendered %d times:\n%s", n, rendered)
 	}
 }
+
+// The residue a union can leave, pinned: branch A fixes a blocker (its line leaves the index) while branch B
+// appends one right after it; the union keeps both sides, so the fixed line comes back. That is the fail-safe
+// direction — a stale line shown, never a live one lost — and FINDINGS.md is display only (no gate reads it).
+// It retires at the next render in any checkout whose ledger knows the finding was fixed.
+func TestFindingsIndexUnionResurrectionRetiresAtTheNextInformedRender(t *testing.T) {
+	attributes, err := os.ReadFile(filepath.Join("..", "..", ".gitattributes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, git := mergeRepo(t, string(attributes))
+	must := func(args ...string) {
+		t.Helper()
+		if out, err := git(args...); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	render := func(records ...Record) {
+		t.Helper()
+		if err := RenderIndexWithRecords(root, records); err != nil {
+			t.Fatal(err)
+		}
+	}
+	kept, fixed, added := mergeIDs[0], mergeIDs[2], mergeIDs[4]
+	render(mergeBlocker(kept), mergeBlocker(fixed))
+	must("add", "-A")
+	must("commit", "-q", "-m", "base")
+	must("switch", "-q", "-c", "branch-a")
+	resolved := mergeBlocker(fixed)
+	resolved.Status = "fixed"
+	render(mergeBlocker(kept), resolved)
+	must("commit", "-q", "-am", "a fixes one")
+	must("switch", "-q", "-c", "branch-b", "main")
+	render(mergeBlocker(kept), mergeBlocker(fixed), mergeBlocker(added))
+	must("commit", "-q", "-am", "b adds one")
+	if out, err := git("merge", "-q", "--no-edit", "branch-a"); err != nil {
+		t.Fatalf("merge: %v\n%s", err, out)
+	}
+	path := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
+	merged, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(merged), "- "+fixed+" [") {
+		t.Fatalf("expected the union to keep the fixed line (the documented residue):\n%s", merged)
+	}
+	render(mergeBlocker(kept), resolved, mergeBlocker(added))
+	rendered, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rendered), "- "+fixed+" [") || !strings.Contains(string(rendered), "- "+added+" [") {
+		t.Fatalf("a render whose ledger knows the fix must retire the line and keep the new one:\n%s", rendered)
+	}
+}
