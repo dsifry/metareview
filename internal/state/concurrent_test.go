@@ -1,7 +1,6 @@
 package state
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,17 +62,14 @@ func TestAppendJSONLFromConcurrentProcesses(t *testing.T) {
 	for err := range errs {
 		t.Fatal(err)
 	}
-	f, err := os.Open(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = f.Close() }()
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 	seen := map[int]bool{}
-	for scanner.Scan() {
+	for _, line := range strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n") {
 		var row bigRow
-		if err := json.Unmarshal(scanner.Bytes(), &row); err != nil {
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
 			t.Fatalf("a torn row: %v", err)
 		}
 		want := strings.Repeat(string(rune('a'+row.Writer%26)), 256<<10)
@@ -81,9 +77,6 @@ func TestAppendJSONLFromConcurrentProcesses(t *testing.T) {
 			t.Fatalf("row of writer %d is corrupt or repeated", row.Writer)
 		}
 		seen[row.Writer] = true
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if len(seen) != writers {
 		t.Fatalf("got %d intact rows, want %d", len(seen), writers)
