@@ -173,7 +173,7 @@ func TestInitTakesTheNextIDWhenOneIsTaken(t *testing.T) {
 	if a.runID == b.runID {
 		t.Fatalf("both runs got %s", a.runID)
 	}
-	if got := b.View().Snapshot.CreatedAt.Time.Sub(frozen.Time); got != time.Microsecond {
+	if got := b.View().Snapshot.CreatedAt.Sub(frozen.Time); got != time.Microsecond {
 		t.Fatalf("the second run is a microsecond later: %v", got)
 	}
 	if _, err := h.init(InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, RunID: a.runID}); err == nil {

@@ -214,7 +214,7 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 		if o.RunID != "" || attempt == maxIDAttempts-1 || !errors.As(err, &se) || se.Code != run.CodeRunExists {
 			break
 		}
-		now = run.Time{Time: now.Time.Add(time.Microsecond)}
+		now = run.Time{Time: now.Add(time.Microsecond)}
 	}
 	if err != nil {
 		return nil, err
