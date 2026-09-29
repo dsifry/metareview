@@ -4,6 +4,8 @@
 package rollback
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -12,6 +14,7 @@ import (
 // and target the file it resolves to: the restore puts the target's content back and the link itself.
 type snapshot struct {
 	existed bool
+	unknown bool // Take could not read the path: Restore leaves it alone
 	isDir   bool
 	content []byte
 	mode    os.FileMode
@@ -24,8 +27,9 @@ type Set struct {
 	files map[string]snapshot
 }
 
-// Take records each path's state before the run writes it. A path that cannot be read is recorded as
-// absent, as the gates always did: restoring it removes what the run left there.
+// Take records each path's state before the run writes it. A path whose state cannot be read (a permission or
+// I/O error, not its absence) is recorded as unknown and left alone by Restore: removing it would delete a file
+// that may well have existed — the gates' old copies did exactly that.
 func Take(paths ...string) *Set {
 	s := &Set{files: map[string]snapshot{}}
 	for _, path := range paths {
@@ -36,15 +40,18 @@ func Take(paths ...string) *Set {
 
 func take(path string) snapshot {
 	info, err := os.Stat(path)
-	if err != nil {
+	if errors.Is(err, fs.ErrNotExist) {
 		return snapshot{}
+	}
+	if err != nil {
+		return snapshot{unknown: true}
 	}
 	if info.IsDir() {
 		return snapshot{existed: true, isDir: true}
 	}
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return snapshot{}
+		return snapshot{unknown: true}
 	}
 	snap := snapshot{existed: true, content: content, mode: info.Mode().Perm(), target: path}
 	if link, err := os.Readlink(path); err == nil {
@@ -69,11 +76,12 @@ func GateOutputs(contextPack, reviewLog, runs, ledger, findingsIndex string) *Se
 // never half of either. A symlinked path the run wrote through gets its target's content back; one the run
 // replaced with a regular file (the gates' write-temp-then-rename writers do) gets the link back. Where the
 // directory refuses the temp file (read-only, full), the old in-place write is the fallback, so a restore the
-// truncating writer could make still happens. A path the run created is removed. Restore is best
+// truncating writer could make still happens. A path the run created is removed; one whose state Take could not read is left alone. Restore is best
 // effort: it runs on a path that is already failing, and each path is restored independently.
 func (s *Set) Restore() {
 	for path, snap := range s.files {
 		switch {
+		case snap.unknown:
 		case snap.isDir:
 			_ = os.MkdirAll(path, 0o755)
 		case snap.link != "" && !stillLinked(path, snap.link):

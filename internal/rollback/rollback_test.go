@@ -96,7 +96,7 @@ func TestRestorePutsEveryPathBack(t *testing.T) {
 	}
 }
 
-func TestTakeRecordsAnUnreadableFileAsAbsent(t *testing.T) {
+func TestRestoreLeavesAPathItCouldNotReadAlone(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads a mode-000 file")
 	}
@@ -108,8 +108,23 @@ func TestTakeRecordsAnUnreadableFileAsAbsent(t *testing.T) {
 		t.Fatal(err)
 	}
 	set.Restore()
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("a path Take could not read is restored as absent: %v", err)
+	if got := read(t, path); got != "secret" {
+		t.Fatalf("a path whose state was unknown must be left as it is, got %q", got)
+	}
+	// Likewise a path whose directory cannot be searched (Stat fails with a permission error, not absence).
+	sub := filepath.Join(dir, "sealed")
+	inner := filepath.Join(sub, "runs.jsonl")
+	write(t, inner, "rows", 0o644)
+	if err := os.Chmod(sub, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	set = Take(inner)
+	if err := os.Chmod(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	set.Restore()
+	if got := read(t, inner); got != "rows" {
+		t.Fatalf("got %q", got)
 	}
 }
 
