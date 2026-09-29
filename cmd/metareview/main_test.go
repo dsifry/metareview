@@ -330,7 +330,7 @@ func TestRunOverride(t *testing.T) {
 		t.Errorf("list unknown: code=%d e=%q", code, e)
 	}
 	// request missing id.
-	if code, _, e := runCLI(t, root, nil, "override", "request"); code != 2 || !strings.Contains(e, "override request <finding-id>") {
+	if code, _, e := runCLI(t, root, nil, "override", "request"); code != 2 || !strings.Contains(e, "override request <finding-id|run-id>") {
 		t.Errorf("request missing id: code=%d e=%q", code, e)
 	}
 	// unknown subcommand.

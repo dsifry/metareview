@@ -1334,7 +1334,7 @@ func handleOverride(args []string) {
 		}
 	case "request", "grant":
 		if len(args) < 2 {
-			_, _ = fmt.Fprintf(stderr, "Usage: metareview override %s <finding-id> --reason \"<text>\"\n", args[0])
+			_, _ = fmt.Fprintf(stderr, "Usage: metareview override %s <finding-id|run-id> --reason \"<text>\"\n", args[0])
 			exit(2)
 		}
 		id := args[1]
