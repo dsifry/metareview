@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dsifry/metareview/internal/fsm/converge"
 	"github.com/dsifry/metareview/internal/fsm/errs"
@@ -44,6 +45,9 @@ type session struct {
 	cmdCalls map[string]int // prior cmd_call count per command name (durable ordinal for mocks)
 	unlock   func()
 }
+
+// maxIDAttempts bounds how many generated run ids Init tries when the store already has one (#180).
+const maxIDAttempts = 16
 
 var recordName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
@@ -179,10 +183,6 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 	}
 	// 6. create, sidecar, first events
 	now := deps.Clock()
-	runID := o.RunID
-	if runID == "" {
-		runID = run.RunID(w.Name, now.Time)
-	}
 	var initialKind run.Kind
 	if n := w.NodeFor(w.Initial); n != nil {
 		initialKind = run.Kind(n.Kind)
@@ -190,18 +190,36 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 	if allowed == nil {
 		allowed = []run.AllowedCmd{}
 	}
-	initData := run.InitData{
-		RunID: runID, CreatedAt: now, Workflow: w.Name, WorkflowHash: w.Hash, Vars: vars, Calibration: o.Calibration,
-		Mock: mock, RepoMode: w.RepoMode, AllowedCmds: allowed, CmdsSHA256: sha, RepoRoot: o.RepoRoot, WorkDir: o.WorkDir,
-		BaseSHA: baseSHA, RequestedBase: o.Base, Branch: o.Branch, Head: head, InitialState: w.Initial, InitialKind: initialKind, Goldens: goldens, Lineage: []string{}, WorkflowSource: source,
-		Writer: run.ReaderVersion,
+	var (
+		runID string
+		st    run.FoldState
+	)
+	// A generated id is the init time to the nanosecond plus the workflow; runs started at once in several
+	// worktrees (#180) can land on one id on a clock with microsecond resolution. The store refuses the second,
+	// and it takes the next microsecond instead.
+	for attempt := 0; ; attempt++ {
+		runID = o.RunID
+		if runID == "" {
+			runID = run.RunID(w.Name, now.Time)
+		}
+		initData := run.InitData{
+			RunID: runID, CreatedAt: now, Workflow: w.Name, WorkflowHash: w.Hash, Vars: vars, Calibration: o.Calibration,
+			Mock: mock, RepoMode: w.RepoMode, AllowedCmds: allowed, CmdsSHA256: sha, RepoRoot: o.RepoRoot, WorkDir: o.WorkDir,
+			BaseSHA: baseSHA, RequestedBase: o.Base, Branch: o.Branch, Head: head, InitialState: w.Initial, InitialKind: initialKind, Goldens: goldens, Lineage: []string{}, WorkflowSource: source,
+			Writer: run.ReaderVersion,
+		}
+		first := run.Event{SchemaVersion: run.SchemaVersion, At: now, Type: run.TypeInit, Data: run.MarshalCanonical(initData)}
+		st, err = deps.Store.Create(runID, first)
+		var se *run.StoreError
+		if o.RunID != "" || attempt == maxIDAttempts-1 || !errors.As(err, &se) || se.Code != run.CodeRunExists {
+			break
+		}
+		now = run.Time{Time: now.Time.Add(time.Microsecond)}
 	}
-	m := &Machine{deps: deps, runID: runID}
-	first := run.Event{SchemaVersion: run.SchemaVersion, At: now, Type: run.TypeInit, Data: run.MarshalCanonical(initData)}
-	st, err := deps.Store.Create(runID, first)
 	if err != nil {
 		return nil, err
 	}
+	m := &Machine{deps: deps, runID: runID}
 	if err := deps.Sidecar.Write(runID, SidecarWorkflow, raw); err != nil {
 		return nil, err
 	}

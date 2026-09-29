@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/dsifry/metareview/internal/fsm/errs"
 	"github.com/dsifry/metareview/internal/fsm/run"
@@ -147,5 +148,40 @@ func TestNoEditLock(t *testing.T) {
 	h.record(a, "fix", `{"commit":"`+shaFix+`","summary":"fixed"}`)
 	if r := h.advance(a); r.To != "verify" {
 		t.Fatalf("got %+v", r)
+	}
+}
+
+// collidingStore refuses every Create as an existing id.
+type collidingStore struct {
+	run.RunStore
+	creates int
+}
+
+func (c *collidingStore) Create(id string, _ run.Event) (run.FoldState, error) {
+	c.creates++
+	return run.FoldState{}, &run.StoreError{Code: run.CodeRunExists, Detail: id}
+}
+
+// #180: runs started at once in several worktrees can generate one id (the init time on a microsecond clock).
+// The second takes the next microsecond; an id the caller chose is never changed; the retry is bounded.
+func TestInitTakesTheNextIDWhenOneIsTaken(t *testing.T) {
+	h := newHarness(t)
+	frozen := h.deps.Clock()
+	h.deps.Clock = func() run.Time { return frozen }
+	a := h.mustInit(InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars})
+	b := h.mustInit(InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars})
+	if a.runID == b.runID {
+		t.Fatalf("both runs got %s", a.runID)
+	}
+	if got := b.View().Snapshot.CreatedAt.Time.Sub(frozen.Time); got != time.Microsecond {
+		t.Fatalf("the second run is a microsecond later: %v", got)
+	}
+	if _, err := h.init(InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars, RunID: a.runID}); err == nil {
+		t.Fatal("an id the caller chose is never changed")
+	}
+	store := &collidingStore{RunStore: h.deps.Store}
+	h.deps.Store = store
+	if _, err := h.init(InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars}); err == nil || store.creates != maxIDAttempts {
+		t.Fatalf("the retry is bounded: %v after %d creates", err, store.creates)
 	}
 }
