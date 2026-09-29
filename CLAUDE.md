@@ -99,6 +99,8 @@ metareview override list [--pending]
   granting is enforced against the accidental case, not against an actor that misreports itself. Where that
   matters, gate `override grant` behind whatever authenticates actors in your environment (branch
   protection, a CI job with restricted credentials, a review approval).
+- A blocker that exists only in a committed review log (no row in the local ledger — say, a log from another clone)
+  can be overridden too: the command imports it from the log that raised it (#188). An ID found nowhere exits 1.
 - Both halves are recorded with actor, timestamp and reason, rendered under "Process Overrides" in
   `docs/metareview/FINDINGS.md`, and an override is never a fix (`fixedInRunId` stays empty), so post-merge
   learning can analyse exceptions separately from resolutions.

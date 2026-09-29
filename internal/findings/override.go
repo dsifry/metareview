@@ -66,7 +66,7 @@ func RequestOverride(root, findingID string, request OverrideRequest) error {
 	if now == "" {
 		return fmt.Errorf("override request needs a timestamp")
 	}
-	return mutateFinding(root, findingID, func(record *Record) error {
+	return mutateFinding(root, findingID, now, func(record *Record) error {
 		// A FIXED finding enters the two-phase flow only when the request references the
 		// escalation whose hard stop it asks to lift (request.Escalation — issue #147):
 		// the run-level stop can outlive the finding-level fix, and the recorded request
@@ -108,7 +108,7 @@ func GrantOverride(root, findingID string, grant OverrideGrant) error {
 	if now == "" {
 		return fmt.Errorf("override grant needs a timestamp")
 	}
-	return mutateFinding(root, findingID, func(record *Record) error {
+	return mutateFinding(root, findingID, now, func(record *Record) error {
 		// A FIXED finding enters the two-phase flow only when a REQUEST referencing the
 		// escalation was already filed (record.OverrideEscalation — issue #147): the
 		// run-level stop can outlive the finding-level fix, and lifting it is the human
@@ -161,7 +161,10 @@ func PendingOverrides(root string) ([]Record, error) {
 	return pending, nil
 }
 
-func mutateFinding(root, findingID string, apply func(*Record) error) error {
+// mutateFinding applies an override transition to one ledger row. A blocker that exists only in a committed review log
+// is imported first (#188), so the escalation path reaches every blocker the gates read; nothing is written unless the
+// transition applies.
+func mutateFinding(root, findingID, now string, apply func(*Record) error) error {
 	path := findingsPath(root)
 	records, err := loadRecords(path)
 	if err != nil {
@@ -175,7 +178,15 @@ func mutateFinding(root, findingID string, apply func(*Record) error) error {
 		}
 	}
 	if index < 0 {
-		return fmt.Errorf("finding %s not found", findingID)
+		record, ok, err := committedFinding(root, findingID, now)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("finding %s not found", findingID)
+		}
+		records = append(records, record)
+		index = len(records) - 1
 	}
 	if err := apply(&records[index]); err != nil {
 		return err

@@ -77,6 +77,9 @@ instead of working around it:
   local CLI cannot verify that. Enforce the boundary with whatever authenticates actors in your
   environment when it matters.
 
+A blocker that exists only in a committed review log (no local ledger row) can be overridden too: the command
+imports it from the log that raised it (#188). An ID found nowhere exits 1.
+
 Both halves record actor, timestamp and reason and are rendered under "Process Overrides" in
 `docs/metareview/FINDINGS.md`. An override is never a fix: `fixedInRunId` stays empty, so exceptions can be
 analysed separately from resolutions.

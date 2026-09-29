@@ -20,7 +20,7 @@ func writeTaskDoneLog(t *testing.T, root, runID, target, headSHA, branch string,
 		"Previous run: `none`\n\nCovered paths: `[\"" + covered + "\"]`\n\n## Verdict\n\nNEEDS_REVISION\n\n" +
 		"## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n" +
 		"| adversarial-review-reviewer | NEEDS_REVISION | 1 | No adjudicated lens review recorded |\n\n" +
-		"## Blocking Findings\n\n### " + runID + "-001: No adjudicated lens review recorded\n\n" +
+		"## Blocking Findings\n\n### mrvf-" + strings.TrimPrefix(runID, "mrv-") + "-001: No adjudicated lens review recorded\n\n" +
 		"- Reviewer: adversarial-review-reviewer\n- Severity: high\n- Classification: blocking\n" +
 		"- Finding: none is recorded for HEAD " + headSHA + ".\n\n\n## Advisory Findings\n\nNo findings in this class.\n"
 	pack := "# metareview Context Pack\n\nRun ID: `" + runID + "`\n\n## Git\n\n- Base: `" + headSHA + "`\n- Head: `" + headSHA + "`\n- Branch: `" + branch + "`\n"

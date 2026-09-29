@@ -1247,6 +1247,18 @@ func TestOverrideRequestUnknownOption(t *testing.T) {
 	}
 }
 
+// #188: an override on an ID nothing knows — no ledger row, no committed review log — fails loudly, so a script or CI
+// step that runs it never reads the refusal as success.
+func TestOverrideUnknownFindingExitsNonzero(t *testing.T) {
+	root := gitRepo(t)
+	for _, verb := range []string{"request", "grant"} {
+		code, _, e := runCLI(t, root, nil, "override", verb, "mrvf-nope-001", "--reason", "a reason long enough to record", "--by", "someone")
+		if code != 1 || !strings.Contains(e, "mrvf-nope-001 not found") {
+			t.Fatalf("override %s unknown id: code=%d e=%q", verb, code, e)
+		}
+	}
+}
+
 // After a passing pr-ready review over the branch, branch-scoped status --json has nothing to clear
 // and exits 0, covering the clean-return in the branch-scope path.
 func TestStatusJSONBranchClean(t *testing.T) {
