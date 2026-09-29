@@ -329,13 +329,15 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
 - **Evidence receipts:** `evidence run -- <cmd>` records a validation receipt (kind + exitCode + hashes);
   `evidence import --github-checks <pr>` pulls CI. task-done/pr-ready require a passing validation receipt.
   Freeform evidence text (no receipts) passes only with a success signal and no failure signal, and failure reading
-  fails closed: any "failed", the upper-case `FAIL`/`FAILURE`/`FAILURES` markers, `Failures:`/`Errors:` with a
-  nonzero count, `N failing`/`N failures`/`N errors`/`N fail`, `# fail N`, TAP `not ok`, make `Error N`, tsc/MSBuild
-  `error TS…`/`error CS…`, `npm ERR!`, a nonzero exit and `error:` all count. Two things do not (mr-r3y): the word
-  "fail" in prose (lower-case "fail" counts only beside a count), and a bounded one-line clause reporting that
-  nothing failed ("…, 0 failed", "no tests failed", "none of the checks failed", "0 of 10 failed") — a zero beside a
-  real count ("Passed: 0 Failed: 3", "0 passed 3 failed") still reads as a failure. Prose such as "TestX failed
-  before the fix" reads as a failure too — prefer receipts.
+  fails closed (`internal/evidence` failurePatterns): any "failed", upper-case `FAIL`/`FAILURE`/`FAILURES`, a "fail"
+  verdict ("Result: Fail", `"status":"fail"`, `# fail 1`), `Failures:`/`Errors:` with a nonzero count, `N failing`,
+  a clause-final `N errors`, TAP `not ok`, make `Error N`, `error TS…`/`error CS…`, `npm ERR!`, `error:`, and a
+  nonzero exit in any common shape (`exited 1`, `exit code: 2`, `exited with code 1`, `exit=1`, `return code: 1`).
+  Exempt (mr-r3y): only "fail" continuing a prose sentence ("the new tests fail against origin/main"), and a clause
+  reporting that nothing failed — clause-initial "0 failed" / "no tests failed" / "none of the checks failed" / "0 of
+  10 failed" (optionally "in 1.2s"), or a zero label (`Failed: 0`, `failed=0`). A zero that does not start a clause
+  ("shard 0 failed", "Passed: 0 Failed: 3", "0 passed 3 failed") is a failure. Prose such as "TestX failed before the
+  fix" or "Result: 0 tests failed" still reads as a failure — prefer receipts.
 - **Sharded review** (exclude-filtered diff > 120 KB): the gate writes prompt packs under
   `.metareview/shards/…/plan.json`; review one subagent per shard + a cross-shard pack, write results, re-run
   with `--previous-run`. Editing a file invalidates only its own shard.

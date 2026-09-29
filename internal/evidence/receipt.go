@@ -64,29 +64,33 @@ var (
 		regexp.MustCompile(`(?i)\bexited 0\b`),
 	}
 	// failurePatterns read a failure fail-closed: any "failed", and the shapes tools print, count. The one exemption is
-	// the word "fail" in prose (mr-r3y: "the new tests fail against origin/main" means they CATCH the regression): a
-	// lower-case "fail" counts only beside a count ("1 fail", "# fail 1", "fail: 2"). A clause reporting that nothing
-	// failed is neutralized first (zeroFailures).
+	// the word "fail" continuing a prose sentence (mr-r3y: "the new tests fail against origin/main" means they CATCH the
+	// regression); "fail" as a verdict — upper case, or followed by a line end, punctuation or a digit ("Result: Fail",
+	// "status":"fail", "# fail 1") — counts. A clause reporting that nothing failed is neutralized first (zeroFailures).
 	failurePatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\b(exit(ed)?|exit code|exit status)\s+[1-9][0-9]*\b`),
-		regexp.MustCompile(`\bFAIL(URES?)?\b`),                                                 // FAIL, BUILD FAILURE, FAILURES! (upper case)
-		regexp.MustCompile(`(?i)\bfailed\b`),                                                   // any form: "Failed: 1", "Command failed.", "go vet failed"
-		regexp.MustCompile(`(?i)\b(failures?|errors?)[ \t]*[:=][ \t]*[1-9]`),                   // junit/maven "Failures: 1", "Errors: 2"
-		regexp.MustCompile(`(?i)\b[1-9][0-9]*[ \t]+(\w+[ \t]+)?(failing|failures?|errors?)\b`), // mocha "1 failing", "2 tests failing", "1 error"
-		regexp.MustCompile(`(?i)\b[1-9][0-9]*[ \t]+fail\b`),                                    // bun "1 fail"
-		regexp.MustCompile(`(?i)\bfail[ \t]*[:=]?[ \t]*[1-9]`),                                 // node:test "# fail 1", "fail: 2"
-		regexp.MustCompile(`(?m)^not ok\b`),                                                    // TAP
-		regexp.MustCompile(`\bError[ \t]+[1-9][0-9]*\b`),                                       // make "*** [test] Error 2"
-		regexp.MustCompile(`\berror (TS|CS)[0-9]+`),                                            // tsc, MSBuild
+		regexp.MustCompile(`(?i)\b(exit(ed)?|exit[ _-]?code|exit[ _-]?status|return[ _-]?code|exited with (code|status))[ \t]*[:=]?[ \t]*[1-9][0-9]*\b`),
+		regexp.MustCompile(`\bFAIL(URES?)?\b`),                                         // FAIL, BUILD FAILURE, FAILURES! (upper case)
+		regexp.MustCompile(`\b[Ff]ail\b[ \t]*([^ \ta-zA-Z\r\n-]|\r?$)`),                // a "fail" verdict, not a sentence
+		regexp.MustCompile(`(?m)\b[Ff]ail[ \t]*\r?$`),                                  // "fail" ending a line
+		regexp.MustCompile(`(?i)\bfailed\b`),                                           // any form: "Failed: 1", "Command failed.", "go vet failed"
+		regexp.MustCompile(`(?i)\b(failures?|errors?)[ \t]*[:=][ \t]*[1-9]`),           // junit/maven "Failures: 1", "Errors: 2"
+		regexp.MustCompile(`(?i)\b[1-9][0-9]*[ \t]+(\w+[ \t]+)?(failing|failures?)\b`), // mocha "1 failing", "2 tests failing", "1 failure"
+		regexp.MustCompile(`(?im)\b[1-9][0-9]*[ \t]+errors?[ \t]*([.,;:)]|\r?$)`),      // "Found 2 errors." — a count, not "2 error paths"
+		regexp.MustCompile(`(?m)^not ok\b`),                                            // TAP
+		regexp.MustCompile(`\bError[ \t]+[1-9][0-9]*\b`),                               // make "*** [test] Error 2"
+		regexp.MustCompile(`\berror (TS|CS)[0-9]+`),                                    // tsc, MSBuild
 		regexp.MustCompile(`(?i)\bnpm (ERR!|error)`),
 		regexp.MustCompile(`(?i)\berror:`),
 	}
-	// zeroFailures is a clause reporting that nothing failed — "0 failed", "no tests failed", "none of the checks
-	// failed", "0 of 10 failed", "0/10 failed" — neutralized before failurePatterns run. It is deliberately narrow, so
-	// it can never swallow a real failure: the clause is bounded on both sides (line start or end, a comma, semicolon or
-	// bracket), stays on one line, and allows only one noun from a fixed list between the zero and the failure word.
-	// "Passed: 0 Failed: 3", "0 passed 3 failed" and "exited 0 build failed" are therefore left as failures.
-	zeroFailures = regexp.MustCompile(`(?im)(^|[,;(]|[ \t])(0|no|none)([ \t]+of([ \t]+the)?([ \t]+[0-9]+)?|/[0-9]+)?[ \t]+((tests?|checks?|specs?|examples?|cases?|suites?)[ \t]+)?(failed|failing|failures?|errors?)[ \t]*([,;.)!]|$)`)
+	// zeroFailures is a clause reporting that nothing failed, neutralized before failurePatterns run. It is narrow on
+	// purpose, so it can never swallow a real failure:
+	//   - a count clause — 0/no/none, optionally "of N" or "/N", one noun from a fixed list, then failed, failing,
+	//     failures or errors — that STARTS a clause (line start, comma, semicolon, bracket or pipe) and ends one (a
+	//     delimiter or line end, optionally after "in <duration>"): "…, 0 failed", "no tests failed", "none of the
+	//     checks failed", "0 of 10 failed in 1s". "shard 0 failed", "Passed: 0 Failed: 3" and "0 passed 3 failed" are
+	//     left as failures;
+	//   - a label with a zero count: "Failed: 0", "failed=0", "FAIL: 0", "Errors: 0".
+	zeroFailures = regexp.MustCompile(`(?im)(^|[,;(|])[ \t]*(0|no|none)([ \t]+of([ \t]+the)?([ \t]+[0-9]+)?|/[0-9]+)?[ \t]+((tests?|checks?|specs?|examples?|cases?|suites?)[ \t]+)?(failed|failing|failures?|errors?)([ \t]+in[ \t]+[0-9.]+[mµn]?s)?[ \t]*([,;.)(|!]|\r?$)|\b(failed|failures?|errors?|fail)[ \t]*[:=][ \t]*0\b`)
 )
 
 func Parse(data []byte) (Bundle, error) {
