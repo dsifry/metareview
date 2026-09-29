@@ -331,8 +331,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   Freeform evidence text (no receipts) passes only with a success signal and no failure signal, and failure reading
   fails closed (`internal/evidence` failurePatterns): any "failed", upper-case `FAIL`/`FAILURE`/`FAILURES`, a "fail"
   verdict ("Result: Fail", `"status":"fail"`, `# fail 1`), `Failures:`/`Errors:` with a nonzero count, `N failing`,
-  a clause-final `N errors`, TAP `not ok`, make `Error N`, `error TS…`/`error CS…`, `npm ERR!`, `error:`, and a
-  nonzero exit in any common shape (`exited 1`, `exit code: 2`, `exited with code 1`, `exit=1`, `return code: 1`).
+  `N errors` ending a clause or followed by in/during/generated/found ("1 error in 0.5s"), pytest `ERROR` lines,
+  `Traceback`, `Segmentation fault`, `Killed`, TAP `not ok`, make `Error N`, `error TS…`/`error CS…`/`error[E…]`,
+  `npm ERR!`, `error:`, and a nonzero (or negative) exit in any common shape (`exited 1`, `exit code: -1`, `exited
+  with code 1`, `exit=1`, `rc=1`, `return code: 1`). A test merely named "…fail (3 ms)" is not a verdict.
   Exempt (mr-r3y): only "fail" continuing a prose sentence ("the new tests fail against origin/main"), and a clause
   reporting that nothing failed — clause-initial "0 failed" / "no tests failed" / "none of the checks failed" / "0 of
   10 failed" (optionally "in 1.2s"), or a zero label (`Failed: 0`, `failed=0`). A zero that does not start a clause
