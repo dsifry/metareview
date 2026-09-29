@@ -21,14 +21,13 @@ type snapshot struct {
 
 // Set is the pre-run state of a gate run's output paths.
 type Set struct {
-	files  map[string]snapshot
-	shared map[string]bool
+	files map[string]snapshot
 }
 
 // Take records each path's state before the run writes it. A path that cannot be read is recorded as
 // absent, as the gates always did: restoring it removes what the run left there.
 func Take(paths ...string) *Set {
-	s := &Set{files: map[string]snapshot{}, shared: map[string]bool{}}
+	s := &Set{files: map[string]snapshot{}}
 	for _, path := range paths {
 		s.files[path] = take(path)
 	}
@@ -57,29 +56,20 @@ func take(path string) snapshot {
 }
 
 // GateOutputs is the rollback set of a review gate (task-done, pr-ready, epic-ready): its context pack and
-// review log, the run and findings ledgers, and the shared FINDINGS.md render.
+// review log, the run and findings ledgers, and the FINDINGS.md render. All five are removed if the run created
+// them — the render included, although a concurrent render may have replaced it in that window: a removed render
+// is re-derived from its writer's ledger at that writer's next render, while one left behind would outlive the
+// restored ledger, and its lines, unknown to every ledger, would be carried forward by every later render.
 func GateOutputs(contextPack, reviewLog, runs, ledger, findingsIndex string) *Set {
-	return Take(contextPack, reviewLog, runs, ledger, findingsIndex).Shared(findingsIndex)
-}
-
-// Shared marks paths other processes also write — the rendered docs/metareview/FINDINGS.md, which a
-// concurrent render replaces by rename. If the run created one, Restore leaves it where it is instead of
-// removing it: in that window the file may be the other render's, and the rendered index is derived from
-// the ledger (which the run does restore), so a leftover render heals at the next one.
-func (s *Set) Shared(paths ...string) *Set {
-	for _, path := range paths {
-		s.shared[path] = true
-	}
-	return s
+	return Take(contextPack, reviewLog, runs, ledger, findingsIndex)
 }
 
 // Restore puts every path back as Take found it. A file that existed is replaced write-temp-then-rename
 // with its own mode, never truncated in place, so a crash mid-restore leaves the old or the new content,
 // never half of either. A symlinked path the run wrote through gets its target's content back; one the run
 // replaced with a regular file (the gates' write-temp-then-rename writers do) gets the link back. Where the
-// directory refuses the
-// temp file (read-only, full), the old in-place write is the fallback, so a restore the truncating writer
-// could make still happens. A path the run created is removed, unless it is Shared. Restore is best
+// directory refuses the temp file (read-only, full), the old in-place write is the fallback, so a restore the
+// truncating writer could make still happens. A path the run created is removed. Restore is best
 // effort: it runs on a path that is already failing, and each path is restored independently.
 func (s *Set) Restore() {
 	for path, snap := range s.files {
@@ -95,7 +85,7 @@ func (s *Set) Restore() {
 			if replace(snap.target, snap.content, snap.mode) != nil {
 				_ = writeInPlace(snap.target, snap.content, snap.mode)
 			}
-		case !s.shared[path]:
+		default:
 			_ = os.Remove(path)
 		}
 	}

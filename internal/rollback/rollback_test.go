@@ -52,7 +52,7 @@ func TestRestorePutsEveryPathBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	set := Take(existing, private, created, createdShared, existingDir).Shared(createdShared)
+	set := Take(existing, private, created, createdShared, existingDir)
 
 	// The run writes over, creates, and removes.
 	write(t, existing, "after, half-written", 0o644)
@@ -85,8 +85,8 @@ func TestRestorePutsEveryPathBack(t *testing.T) {
 	if _, err := os.Stat(created); !os.IsNotExist(err) {
 		t.Errorf("a path the run created must be removed: %v", err)
 	}
-	if got := read(t, createdShared); got != "a concurrent render" {
-		t.Errorf("a shared path the run created is left in place: %q", got)
+	if _, err := os.Stat(createdShared); !os.IsNotExist(err) {
+		t.Errorf("every path the run created is removed, a render included: %v", err)
 	}
 	if info, err := os.Stat(existingDir); err != nil || !info.IsDir() {
 		t.Errorf("a directory that existed must exist again: %v", err)
@@ -278,7 +278,8 @@ func TestTakeFallsBackToThePathWhenTheLinkCannotBeResolved(t *testing.T) {
 	}
 }
 
-// A gate's rollback set: every output restored or removed, and a FINDINGS.md the run created left in place.
+// A gate's rollback set: every output restored, or removed if the run created it — FINDINGS.md included, so no
+// render outlives the ledger it was rendered from.
 func TestGateOutputs(t *testing.T) {
 	dir := t.TempDir()
 	p := func(name string) string { return filepath.Join(dir, name) }
@@ -289,12 +290,12 @@ func TestGateOutputs(t *testing.T) {
 		write(t, p(name), "run output", 0o644)
 	}
 	set.Restore()
-	for name, want := range map[string]string{"runs.jsonl": "runs\n", "findings.jsonl": "rows\n", "FINDINGS.md": "run output"} {
+	for name, want := range map[string]string{"runs.jsonl": "runs\n", "findings.jsonl": "rows\n"} {
 		if got := read(t, p(name)); got != want {
 			t.Errorf("%s: %q, want %q", name, got, want)
 		}
 	}
-	for _, name := range []string{"context.md", "review.md"} {
+	for _, name := range []string{"context.md", "review.md", "FINDINGS.md"} {
 		if _, err := os.Stat(p(name)); !os.IsNotExist(err) {
 			t.Errorf("%s must be removed: %v", name, err)
 		}

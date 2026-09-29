@@ -204,9 +204,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   from: <run>` under `## Blocking Findings` (#143) — both rendered by `findings.ReviewerTable` /
   `ClassifiedMarkdown`, shared by task-done, pr-ready and epic-ready.
 - **Gate rollback** (`internal/rollback`, #152): a failed task-done / pr-ready / epic-ready / learning run puts
-  back the files it touched — write-temp-then-rename with the file's own mode, never a truncating write — and
-  removes what it created, except the shared `FINDINGS.md` render, which it leaves (a concurrent render may own
-  it; it heals from the ledger at the next render).
+  back the files it touched — write-temp-then-rename with the file's own mode, never a truncating write; a
+  symlinked output keeps its link — and removes what it created, the `FINDINGS.md` render included. A concurrent
+  render removed in that window is re-derived from its writer's ledger at that writer's next render; a render
+  left behind would outlive the restored ledger, and the carry-over would keep its unknown lines forever.
 - **Transient, local (git-ignored)** under `.metareview/`: `findings.jsonl`, `runs.jsonl` (review records),
   `shards/` (and `git-hooks/`, from before #173). A `mock: true` FSM run never satisfies a gate.
 - **The shared store is in git's common directory (#173).** `repo.StoreDir` = `<git rev-parse --git-common-dir>/
