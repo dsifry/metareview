@@ -161,9 +161,9 @@ func PendingOverrides(root string) ([]Record, error) {
 	return pending, nil
 }
 
-// mutateFinding applies an override transition to one ledger row. A blocker that exists only in a committed review log
-// is imported first (#188), so the escalation path reaches every blocker the gates read; nothing is written unless the
-// transition applies.
+// mutateFinding applies an override transition to one ledger row. A blocker that exists only in committed review logs
+// is imported first, with the other blockers of the logs that list it (#188), so the escalation path reaches every
+// blocker the gates read; nothing is written unless the transition applies.
 func mutateFinding(root, findingID, now string, apply func(*Record) error) error {
 	path := findingsPath(root)
 	records, err := loadRecords(path)
@@ -178,15 +178,19 @@ func mutateFinding(root, findingID, now string, apply func(*Record) error) error
 		}
 	}
 	if index < 0 {
-		record, ok, err := committedFinding(root, findingID, now)
+		known := make(map[string]bool, len(records))
+		for _, record := range records {
+			known[record.ID] = true
+		}
+		imported, ok, err := committedFindings(root, findingID, now, known)
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return fmt.Errorf("finding %s not found", findingID)
 		}
-		records = append(records, record)
-		index = len(records) - 1
+		index = len(records)
+		records = append(records, imported...)
 	}
 	if err := apply(&records[index]); err != nil {
 		return err

@@ -330,10 +330,12 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
 - **Overrides** (`override request` / `grant`): requesting does NOT clear the gate; granting must come from
   **outside** the workflow (a human/authority) — the requester cannot grant. `--by` is audit metadata, not
   authentication. An override is never a fix (`fixedInRunId` stays empty). An ID with no ledger row is looked up in the
-  committed review logs (#188): a blocking finding under its own run's log (`## Blocking Findings`, the ID
-  `state.FindingID` gives that Run ID) is imported as this branch's open row at HEAD, with fingerprint
-  `imported-review-log:<id>` (never a live finding's) and the log as evidence, then takes the normal transition —
-  pr-ready reads the full ledger, so the grant clears the log. An ID found nowhere exits 1. Unscoped `status` still
+  committed review logs (#188): every log listing it under `## Blocking Findings` supplies it **and all its other
+  blockers** (pr-ready clears a log once every ID the ledger knows is resolved, so importing one alone would let its
+  grant retire the rest). Each is imported as this branch's open row at HEAD — its run is the one its ID names, taken
+  from that run's own log where committed, else from a log that carries it forward; header fields are read above the
+  first `## ` only — with fingerprint `imported-review-log:<id>` (never a live finding's) and the log as evidence. A
+  `--previous-run` chain naming its run closes it as fixed. An ID found nowhere exits 1. Unscoped `status` still
   lists a committed log with no local run record (#147: the ledger never clears an unauthenticated log).
 
 ## 7. Cross-agent integration

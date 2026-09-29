@@ -192,8 +192,10 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 		// StatusOverridden is deliberately not included: a granted override is an
 		// acknowledged exception, never a fix, and its fixedInRunId stays empty so
 		// post-merge learning can tell the two apart.
+		// A row imported from a committed log (#188) carries that log's target, which no run records the same way, so a
+		// chain naming its run is proof enough of the target.
 		if (previousRuns[record.RunID] || resetFinding(record, run, resetRuns)) &&
-			sameRunTarget(record, run) &&
+			(sameRunTarget(record, run) || previousRuns[record.RunID] && strings.HasPrefix(record.Fingerprint, ImportedFingerprintPrefix)) &&
 			(record.Status == "open" || record.Status == StatusOverridePending) &&
 			record.Fingerprint != "" &&
 			!IsFreshnessFingerprint(record.Fingerprint) &&
