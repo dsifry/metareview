@@ -252,8 +252,9 @@ exceptions separately from resolutions.
 
 The same commands close an **abandoned FSM run** that should no longer block: pass the run's ID in place of a
 finding ID (`metareview override request <run-id> …`, then another actor's `grant`). A request alone leaves the run
-blocking `status`; once granted, the run stops blocking every branch and `metareview status --all` lists it as
-closed, with who closed it and why. A run resumed after its grant blocks again. `fsm record stopped` only
+blocking `status`; once granted, the run stops blocking every branch of this checkout and `metareview status --all`
+lists it as closed, with who closed it and why. The closure lives in the checkout's findings ledger, so a run granted
+in one worktree still blocks in another until it is closed there too. A run resumed after its grant blocks again. `fsm record stopped` only
 annotates a run and never removes it.
 
 A blocker that exists only in a committed review log can be overridden too: the command imports it from the logs
