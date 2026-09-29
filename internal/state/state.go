@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -40,9 +41,18 @@ func AppendJSONL(path string, record any) (err error) {
 	if err != nil {
 		return err
 	}
+	// The advisory lock internal/fsm/record takes on the same files (#180): O_APPEND puts each write at the end,
+	// but a row larger than one atomic write could otherwise interleave with another process's.
+	if err := appendLock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer func() { _ = appendLock(int(file.Fd()), syscall.LOCK_UN) }()
 	_, err = file.Write(append(bytes, '\n'))
 	return err
 }
+
+// appendLock is the advisory-lock seam (a test injects a failing one).
+var appendLock = syscall.Flock
 
 // openFile is a seam (like closeFile) so ReadJSONL's non-NotExist os.Open error branch — otherwise
 // only reachable via a permission failure, which a root test runner does not hit — can be exercised.

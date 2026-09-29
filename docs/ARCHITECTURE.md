@@ -139,6 +139,22 @@ one store and run ids stay unique; its `RepoRoot` anchor is the main worktree. T
 and a default `fsm export` bundle is written under the checkout that ran `export`
 (`export.DefaultOut`), so it is committed on that branch.
 
+**Concurrency and version skew (#180).** Many agents may run metareview at once, safely by construction:
+- *One fix loop per worktree, enforced.* A fix node edits the tree its run then re-reviews, and it spans processes
+  (the host edits between `advance` and `record`), so the lock is a file naming its holder:
+  `<this worktree's git dir>/metareview/edit.lock` (`repo.WorktreeStoreDir`, `internal/fsm/editlock`). A run takes
+  it on the transition into an `agent-edit` state (or a fork into one) — before anything is appended, so a second
+  run in the same worktree fails fast with `ERR_EDIT_LOCKED` naming the holder and stays where it was — and drops
+  it when it leaves that state or ends. Every read-decide-write of the lock is under an flock on `edit.lock.guard`.
+  A hold is live while its run exists, is unfinished, sits in an agent-edit state and has no granted closure
+  (#179); a stale hold is taken over, a live one never, and an unreadable holder counts as live.
+- *Locked appends.* `state.AppendJSONL` takes the advisory flock `internal/fsm/record` takes on the same files.
+- *Version skew.* A run's init records its `writer` version. A reader older than the writer's major.minor refuses the
+  run with `ERR_AUDIT_VERSION` (`newer_writer`); a reader from before 0.14 refuses it already, its strict decoder
+  rejecting the unknown field (`tests/go/test-version-skew.sh` builds the previous release tag to prove it).
+- The shared store's first-use `.gitignore` is written through a unique temp file: five first runs at once used
+  to collide on one name (`tests/go/test-fsm-concurrency.sh`, AC-5.1–5.3).
+
 Exit contract (`metareview fsm`): `3` = the FSM needs the host to do a node's work; `1`+`GATE_FAILED` = run
 `resume_hint` (forks a child = new run id); `1`+`ERR_*` = read `code`; `2` = nothing recorded (fix input and
 retry unless it's a consent/escalation code); `STOPPED`/`DONE` terminal. Escalation is per fork lineage.

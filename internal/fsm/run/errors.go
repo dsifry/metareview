@@ -13,6 +13,7 @@ const (
 const (
 	ReasonEmpty              = "empty"
 	ReasonVersion            = "version"
+	ReasonNewerWriter        = "newer_writer"
 	ReasonFirstNotInit       = "first_not_init"
 	ReasonSecondInit         = "second_init"
 	ReasonSeqGap             = "seq_gap"
@@ -46,7 +47,7 @@ func CodeFor(reason string) string {
 	switch reason {
 	case ReasonEmpty:
 		return CodeAuditEmpty
-	case ReasonVersion:
+	case ReasonVersion, ReasonNewerWriter:
 		return CodeAuditVersion
 	default:
 		return CodeAuditInvalid

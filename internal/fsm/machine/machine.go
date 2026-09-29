@@ -194,6 +194,7 @@ func Init(ctx context.Context, deps Deps, o InitOptions) (*Machine, error) {
 		RunID: runID, CreatedAt: now, Workflow: w.Name, WorkflowHash: w.Hash, Vars: vars, Calibration: o.Calibration,
 		Mock: mock, RepoMode: w.RepoMode, AllowedCmds: allowed, CmdsSHA256: sha, RepoRoot: o.RepoRoot, WorkDir: o.WorkDir,
 		BaseSHA: baseSHA, RequestedBase: o.Base, Branch: o.Branch, Head: head, InitialState: w.Initial, InitialKind: initialKind, Goldens: goldens, Lineage: []string{}, WorkflowSource: source,
+		Writer: run.ReaderVersion,
 	}
 	m := &Machine{deps: deps, runID: runID}
 	first := run.Event{SchemaVersion: run.SchemaVersion, At: now, Type: run.TypeInit, Data: run.MarshalCanonical(initData)}
@@ -923,6 +924,13 @@ func (s *session) fail(first *run.GateError, head string) (AdvanceResult, error)
 func (s *session) finish(td run.TransitionData, stopReason ...string) (AdvanceResult, error) {
 	snap := s.st.Snapshot
 	resuming := snap.Outcome != ""
+	if !resuming && td.ToKind == run.KindAgentEdit {
+		// Before anything is appended: a second run fixing in this worktree fails fast here and stays where it
+		// was, so it can retry once the holder leaves its fix node (#180).
+		if err := s.editLock(func(l EditLocker) error { return l.Acquire(s.m.runID) }); err != nil {
+			return AdvanceResult{}, err
+		}
+	}
 	if !resuming {
 		ev := s.stamp(run.TypeTransition, td, "")
 		if td.Loop {
@@ -930,6 +938,9 @@ func (s *session) finish(td run.TransitionData, stopReason ...string) (AdvanceRe
 		}
 		if err := s.appendEvent(ev); err != nil {
 			return AdvanceResult{}, err
+		}
+		if td.ToKind != run.KindAgentEdit && snap.StateKind == run.KindAgentEdit {
+			s.releaseEditLock()
 		}
 	}
 	if td.Outcome == run.OutcomeOverflow && s.w.OnOverflow != "" && !s.st.OverflowHandled {
@@ -1005,10 +1016,25 @@ func (s *session) overflowHandler() error {
 }
 
 func (s *session) terminal() error {
+	s.releaseEditLock()
 	if s.m.deps.Terminal == nil {
 		return nil
 	}
 	return s.m.deps.Terminal(s.ctx, s.viewOf())
+}
+
+// editLock runs fn on the run's worktree edit lock, when the machine has one.
+func (s *session) editLock(fn func(EditLocker) error) error {
+	if s.m.deps.EditLock == nil {
+		return nil
+	}
+	return fn(s.m.deps.EditLock(s.st.WorkDir))
+}
+
+// releaseEditLock drops the run's hold on its worktree's edit lock. It is best effort: a hold left behind by a
+// failed release is stale once the run leaves its fix node, and the next run takes it over.
+func (s *session) releaseEditLock() {
+	_ = s.editLock(func(l EditLocker) error { return l.Release(s.m.runID) })
 }
 
 func untrusted(gd *run.GateData, warns []string, stop string) []string {

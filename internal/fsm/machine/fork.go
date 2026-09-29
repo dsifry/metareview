@@ -221,6 +221,7 @@ func (m *Machine) Fork(ctx context.Context, o ForkOptions) (*Machine, ForkResult
 	cd.Lineage = append(append([]string{}, pd.Lineage...), m.runID)
 	cd.ForkedAtSeq, cd.WorkDir, cd.Vars = seq, workDir, vars
 	cd.AllowedCmds, cd.CmdsSHA256, cd.WorkflowHash, cd.WorkflowSource, cd.Head = allowed, sha, w.Hash, source, ch
+	cd.Writer = run.ReaderVersion // the child is this binary's, whichever wrote its parent
 	events := []run.Event{{SchemaVersion: run.SchemaVersion, Seq: 1, At: now, Type: run.TypeInit, Data: run.MarshalCanonical(cd)}}
 	for _, ev := range copied {
 		c := ev
@@ -254,6 +255,14 @@ func (m *Machine) Fork(ctx context.Context, o ForkOptions) (*Machine, ForkResult
 	}
 	if err := validateChild(events, deps.Store.MaxEvents()); err != nil {
 		return nil, ForkResult{}, err
+	}
+	// A child forked into an agent-edit state starts fixing at once, so it takes its worktree's edit lock
+	// before it exists (#180). A fork that fails after this leaves a hold whose run never came to be: stale,
+	// and taken over by the next run.
+	if fromNode != nil && run.Kind(fromNode.Kind) == run.KindAgentEdit && deps.EditLock != nil {
+		if err := deps.EditLock(workDir).Acquire(childID); err != nil {
+			return nil, ForkResult{}, err
+		}
 	}
 	// 8. write the child
 	st, err := deps.Store.Create(childID, events[0])

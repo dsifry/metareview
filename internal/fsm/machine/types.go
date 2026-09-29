@@ -135,6 +135,16 @@ type Deps struct {
 	// such a node, before any append of that node's work (spec 5 §8: judge pre-flight). Both clauses
 	// gate on NeedsJudge, not on exec: a cmd node is exec: fork and is never pre-flighted.
 	Preflight func(node *workflow.Node, calibration bool) error
+	// EditLock (optional) is the per-worktree fix-loop lock for a run's work directory (#180): a run takes it
+	// before it enters an agent-edit state — failing fast, with nothing recorded, when another live run holds
+	// it — and drops it when it leaves that state or finishes.
+	EditLock func(workDir string) EditLocker
+}
+
+// EditLocker is one worktree's edit lock (internal/fsm/editlock).
+type EditLocker interface {
+	Acquire(runID string) error
+	Release(runID string) error
 }
 
 // InitOptions parameterizes Init.

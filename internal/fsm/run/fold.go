@@ -59,7 +59,11 @@ func Apply(st FoldState, ev Event) (FoldState, error) {
 		if ev.State != "" || ev.Iter != 0 || ev.At.IsZero() {
 			return FoldState{}, foldErr(ReasonInitStamp, ev)
 		}
-		next.applyInit(payload.(*InitData))
+		data := payload.(*InitData)
+		if newerWriter(data.Writer, ReaderVersion) {
+			return FoldState{}, foldErr(ReasonNewerWriter, ev)
+		}
+		next.applyInit(data)
 		next.Seq = ev.Seq
 		next.prevType = ev.Type
 		return next, nil

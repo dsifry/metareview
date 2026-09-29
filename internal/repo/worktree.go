@@ -105,3 +105,25 @@ func Toplevel(dir string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// gitDirGit is the seam over `git rev-parse --git-dir`, run as the FSM runs git.
+var gitDirGit = func(dir string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	out, _, code, err := gate.RealExec(ctx, dir, nil, "rev-parse", "--path-format=absolute", "--git-dir")
+	if err != nil || code != 0 {
+		return "", errNotARepo
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// WorktreeStoreDir is metareview's state for the ONE worktree containing start: <its git dir>/metareview — the
+// main checkout's .git/metareview, a linked worktree's .git/worktrees/<name>/metareview. Unlike StoreDir it is
+// not shared: it holds what must not cross worktrees, such as the fix-loop edit lock (#180).
+func WorktreeStoreDir(start string) (string, error) {
+	dir, err := gitDirGit(start)
+	if err != nil || dir == "" {
+		return "", errNotARepo
+	}
+	return filepath.Join(dir, "metareview"), nil
+}

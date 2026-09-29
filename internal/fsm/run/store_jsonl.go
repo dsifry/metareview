@@ -112,18 +112,28 @@ func (s *jsonlStore) validate(id string) error {
 	return s.checkComponents(append(append([]string{}, s.layout...), id)...) // root: store
 }
 
-// ensureRuns creates .metareview/runs (0700) and its self-ignoring .gitignore (temp + rename).
+// ensureRuns creates .metareview/runs (0700) and its self-ignoring .gitignore (temp + rename). The temp name is
+// unique to the writer: concurrent first runs in several worktrees all ensure it at once (#180), and with one
+// shared name one writer's rename took the other's temp file away ("no such file or directory"). A temp left by a
+// failed rename is inside runs/, which ignores everything.
 func (s *jsonlStore) ensureRuns() error {
 	err := os.MkdirAll(s.runsDir(), 0o700)
 	gi := filepath.Join(s.runsDir(), ".gitignore")
 	if cur, rerr := os.ReadFile(gi); err == nil && rerr == nil && string(cur) == "*\n" {
 		return nil
 	}
+	var f *os.File
 	if err == nil {
-		err = os.WriteFile(gi+".tmp", []byte("*\n"), 0o600)
+		f, err = os.CreateTemp(s.runsDir(), ".gitignore.tmp-*") // 0600, and a name no other writer has
 	}
 	if err == nil {
-		err = os.Rename(gi+".tmp", gi)
+		_, err = f.WriteString("*\n")
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), gi)
 	}
 	return pathErr(0, err)
 }

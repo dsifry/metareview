@@ -139,3 +139,31 @@ func TestToplevel(t *testing.T) {
 		t.Fatal("outside a work tree there is no toplevel")
 	}
 }
+
+// #180: each worktree has its own state directory — the main checkout's .git/metareview, a linked worktree's
+// .git/worktrees/<name>/metareview — never shared, unlike StoreDir.
+func TestWorktreeStoreDirIsPerWorktree(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	main := filepath.Join(root, "main")
+	gitT(t, root, "init", "-q", "-b", "main", main)
+	gitT(t, main, "commit", "-q", "--allow-empty", "-m", "base")
+	wt := filepath.Join(root, "wt")
+	gitT(t, main, "worktree", "add", "-q", "-b", "feat", wt)
+	for dir, want := range map[string]string{
+		main: filepath.Join(main, ".git", "metareview"),
+		wt:   filepath.Join(main, ".git", "worktrees", "wt", "metareview"),
+	} {
+		if got, err := WorktreeStoreDir(dir); err != nil || got != want {
+			t.Errorf("WorktreeStoreDir(%s) = %q, %v; want %q", dir, got, err, want)
+		}
+	}
+	if _, err := WorktreeStoreDir(t.TempDir()); err == nil {
+		t.Error("outside a repository there is no worktree store")
+	}
+	saved := gitDirGit
+	t.Cleanup(func() { gitDirGit = saved })
+	gitDirGit = func(string) (string, error) { return "", nil }
+	if _, err := WorktreeStoreDir(main); err == nil {
+		t.Error("an empty git dir is an error")
+	}
+}

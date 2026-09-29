@@ -353,6 +353,7 @@ func (c *ctxDeps) machineDeps(root, common string, scenario *mockai.Scenario, mo
 		},
 		Terminal: d.Terminal(common, func() run.Time { return run.Time{Time: d.Now()} }),
 	}
+	md.EditLock = editLocks(md.Store, d.Now)
 	if scenario == nil && mode == judgeReal {
 		keys := c.keys()
 		md.Preflight = func(n *workflow.Node, calibration bool) error {
