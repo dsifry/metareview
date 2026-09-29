@@ -75,8 +75,9 @@ func (s *Set) Shared(paths ...string) *Set {
 
 // Restore puts every path back as Take found it. A file that existed is replaced write-temp-then-rename
 // with its own mode, never truncated in place, so a crash mid-restore leaves the old or the new content,
-// never half of either. A symlinked path gets its target's content back and the link itself — the gates'
-// writers replace a link with a regular file (write-temp-then-rename). Where the directory refuses the
+// never half of either. A symlinked path the run wrote through gets its target's content back; one the run
+// replaced with a regular file (the gates' write-temp-then-rename writers do) gets the link back. Where the
+// directory refuses the
 // temp file (read-only, full), the old in-place write is the fallback, so a restore the truncating writer
 // could make still happens. A path the run created is removed, unless it is Shared. Restore is best
 // effort: it runs on a path that is already failing, and each path is restored independently.
@@ -85,13 +86,14 @@ func (s *Set) Restore() {
 		switch {
 		case snap.isDir:
 			_ = os.MkdirAll(path, 0o755)
+		case snap.link != "" && !stillLinked(path, snap.link):
+			// The run replaced the link with a file of its own: put the link back, and leave its target —
+			// which the run never wrote, and another writer may have — alone.
+			_ = relink(path, snap.link)
 		case snap.existed:
 			_ = os.MkdirAll(filepath.Dir(snap.target), 0o755)
 			if replace(snap.target, snap.content, snap.mode) != nil {
 				_ = writeInPlace(snap.target, snap.content, snap.mode)
-			}
-			if snap.link != "" {
-				_ = relink(path, snap.link)
 			}
 		case !s.shared[path]:
 			_ = os.Remove(path)
@@ -113,11 +115,14 @@ var (
 	symlink      = os.Symlink
 )
 
-// relink makes path the symlink to link again, unless it already is: a temp link beside it, renamed over it.
+// stillLinked reports whether path is still the symlink to link.
+func stillLinked(path, link string) bool {
+	current, err := os.Readlink(path)
+	return err == nil && current == link
+}
+
+// relink makes path the symlink to link again: a temp link beside it, renamed over it.
 func relink(path, link string) error {
-	if current, err := os.Readlink(path); err == nil && current == link {
-		return nil
-	}
 	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".link-tmp")
 	_ = os.Remove(tmp)
 	if err := symlink(link, tmp); err != nil {

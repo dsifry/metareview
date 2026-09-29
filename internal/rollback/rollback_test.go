@@ -182,19 +182,25 @@ func TestRestoreRecreatesAFilesParentDirectory(t *testing.T) {
 	}
 }
 
-// A symlinked output path gets its target's content back and stays a link, whether the run wrote through
-// the link or replaced it with a regular file (the gates' write-temp-then-rename writers do the latter).
+// A symlinked output path the run wrote through gets its target's content back; one the run replaced with a
+// regular file (the gates' write-temp-then-rename writers do) gets the link back, and its target — which the
+// run never wrote — is left as it is.
 func TestRestorePutsASymlinkedPathBack(t *testing.T) {
-	for name, runWrites := range map[string]func(t *testing.T, link, target string){
-		"through the link": func(t *testing.T, link, target string) { write(t, target, "run output", 0o644) },
-		"over the link": func(t *testing.T, link, target string) {
+	cases := map[string]struct {
+		run        func(t *testing.T, link, target string)
+		wantTarget string
+	}{
+		"through the link": {func(t *testing.T, link, target string) { write(t, target, "run output", 0o644) }, "before"},
+		"over the link": {func(t *testing.T, link, target string) {
+			write(t, target, "another writer", 0o644)
 			tmp := link + ".new"
 			write(t, tmp, "run output", 0o644)
 			if err := os.Rename(tmp, link); err != nil {
 				t.Fatal(err)
 			}
-		},
-	} {
+		}, "another writer"},
+	}
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			target := filepath.Join(dir, "elsewhere", "FINDINGS.md")
@@ -204,13 +210,13 @@ func TestRestorePutsASymlinkedPathBack(t *testing.T) {
 				t.Fatal(err)
 			}
 			set := Take(link)
-			runWrites(t, link, target)
+			c.run(t, link, target)
 			set.Restore()
 			if got, err := os.Readlink(link); err != nil || got != target {
 				t.Fatalf("the path must be the link again: %q %v", got, err)
 			}
-			if got := read(t, link); got != "before" {
-				t.Fatalf("got %q", got)
+			if got := read(t, target); got != c.wantTarget {
+				t.Fatalf("target: %q, want %q", got, c.wantTarget)
 			}
 		})
 	}

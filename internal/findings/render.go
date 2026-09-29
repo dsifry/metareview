@@ -54,9 +54,10 @@ func ReviewerTable(fixed []string, records []Record) string {
 	return strings.Join(lines, "\n")
 }
 
-// tableCell keeps free text inside one Markdown table cell: one physical line, and no bare "|".
+// tableCell keeps free text inside one Markdown table cell: one physical line, backslashes escaped, and no
+// bare "|".
 func tableCell(text string) string {
-	return strings.ReplaceAll(singleLine(text), "|", `\|`)
+	return strings.NewReplacer(`\`, `\\`, "|", `\|`).Replace(singleLine(text))
 }
 
 // ClassifiedMarkdown renders a gate log's four finding sections, each always present ("No findings in this
