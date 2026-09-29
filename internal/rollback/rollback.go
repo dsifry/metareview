@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 )
 
-// snapshot is one path's state before the run wrote it.
+// snapshot is one path's state before the run wrote it. target is the file a symlinked path resolves to:
+// the restore replaces that file and leaves the link itself in place.
 type snapshot struct {
 	existed bool
 	isDir   bool
 	content []byte
 	mode    os.FileMode
+	target  string
 }
 
 // Set is the pre-run state of a gate run's output paths.
@@ -44,7 +46,17 @@ func take(path string) snapshot {
 	if err != nil {
 		return snapshot{}
 	}
-	return snapshot{existed: true, content: content, mode: info.Mode().Perm()}
+	target, err := evalSymlinks(path)
+	if err != nil {
+		target = path
+	}
+	return snapshot{existed: true, content: content, mode: info.Mode().Perm(), target: target}
+}
+
+// GateOutputs is the rollback set of a review gate (task-done, pr-ready, epic-ready): its context pack and
+// review log, the run and findings ledgers, and the shared FINDINGS.md render.
+func GateOutputs(contextPack, reviewLog, runs, ledger, findingsIndex string) *Set {
+	return Take(contextPack, reviewLog, runs, ledger, findingsIndex).Shared(findingsIndex)
 }
 
 // Shared marks paths other processes also write — the rendered docs/metareview/FINDINGS.md, which a
@@ -60,16 +72,20 @@ func (s *Set) Shared(paths ...string) *Set {
 
 // Restore puts every path back as Take found it. A file that existed is replaced write-temp-then-rename
 // with its own mode, never truncated in place, so a crash mid-restore leaves the old or the new content,
-// never half of either. A path the run created is removed, unless it is Shared. Restore is best effort:
-// it runs on a path that is already failing, and each path is restored independently of the others.
+// never half of either; a symlinked path is restored through its link. Where the directory refuses the
+// temp file (read-only, full), the old in-place write is the fallback, so a restore the truncating writer
+// could make still happens. A path the run created is removed, unless it is Shared. Restore is best
+// effort: it runs on a path that is already failing, and each path is restored independently.
 func (s *Set) Restore() {
 	for path, snap := range s.files {
 		switch {
 		case snap.isDir:
 			_ = os.MkdirAll(path, 0o755)
 		case snap.existed:
-			_ = os.MkdirAll(filepath.Dir(path), 0o755)
-			_ = replace(path, snap.content, snap.mode)
+			_ = os.MkdirAll(filepath.Dir(snap.target), 0o755)
+			if replace(snap.target, snap.content, snap.mode) != nil {
+				_ = writeInPlace(snap.target, snap.content, snap.mode)
+			}
 		case !s.shared[path]:
 			_ = os.Remove(path)
 		}
@@ -79,12 +95,14 @@ func (s *Set) Restore() {
 // Seams over the fallible calls in replace, so each error branch — unreachable on a healthy filesystem —
 // is exercised by fault injection.
 var (
-	createTemp = os.CreateTemp
-	writeTemp  = func(f *os.File, b []byte) (int, error) { return f.Write(b) }
-	syncTemp   = func(f *os.File) error { return f.Sync() }
-	closeTemp  = func(f *os.File) error { return f.Close() }
-	chmod      = os.Chmod
-	rename     = os.Rename
+	createTemp   = os.CreateTemp
+	writeTemp    = func(f *os.File, b []byte) (int, error) { return f.Write(b) }
+	syncTemp     = func(f *os.File) error { return f.Sync() }
+	closeTemp    = func(f *os.File) error { return f.Close() }
+	chmod        = os.Chmod
+	rename       = os.Rename
+	writeInPlace = os.WriteFile
+	evalSymlinks = filepath.EvalSymlinks
 )
 
 // replace writes content to a uniquely named temp file beside path (one filesystem, so the rename is

@@ -147,7 +147,7 @@ func Create(root, target string, options Options) (Result, error) {
 	runsPath := filepath.Join(root, ".metareview", "runs.jsonl")
 	findingsPath := filepath.Join(root, ".metareview", "findings.jsonl")
 	findingsIndexPath := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
-	snapshots := rollback.Take(contextPath, reviewPath, runsPath, findingsPath, findingsIndexPath).Shared(findingsIndexPath)
+	snapshots := rollback.GateOutputs(contextPath, reviewPath, runsPath, findingsPath, findingsIndexPath)
 
 	gateEffect := "advisory"
 	if report.Capabilities.Beads || report.Capabilities.Metaswarm {

@@ -166,3 +166,93 @@ func TestReplaceNamesItsTempAfterTheFile(t *testing.T) {
 		t.Fatalf("temp %q", from)
 	}
 }
+
+// A file whose parent directory the run removed is restored with the directory.
+func TestRestoreRecreatesAFilesParentDirectory(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "deeper", "log.md")
+	write(t, path, "before", 0o644)
+	set := Take(path)
+	if err := os.RemoveAll(filepath.Join(dir, "nested")); err != nil {
+		t.Fatal(err)
+	}
+	set.Restore()
+	if got := read(t, path); got != "before" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// A symlinked output path is restored through the link: the link stays, and its target gets the content back.
+func TestRestoreWritesThroughASymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "elsewhere", "FINDINGS.md")
+	link := filepath.Join(dir, "FINDINGS.md")
+	write(t, target, "before", 0o644)
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	set := Take(link)
+	write(t, target, "run output", 0o644)
+	set.Restore()
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link must stay a link: %v %v", info, err)
+	}
+	if got := read(t, target); got != "before" {
+		t.Fatalf("the link's target must be restored, got %q", got)
+	}
+}
+
+// Where the atomic replace cannot run (a read-only or full directory), the in-place write still restores.
+func TestRestoreFallsBackToAnInPlaceWrite(t *testing.T) {
+	saved := createTemp
+	t.Cleanup(func() { createTemp = saved })
+	dir := t.TempDir()
+	path := filepath.Join(dir, "runs.jsonl")
+	write(t, path, "before", 0o644)
+	set := Take(path)
+	write(t, path, "run output", 0o644)
+	createTemp = func(string, string) (*os.File, error) { return nil, errors.New("read-only directory") }
+	set.Restore()
+	if got := read(t, path); got != "before" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// An unresolvable link target (a race after the read) falls back to the path itself.
+func TestTakeFallsBackToThePathWhenTheLinkCannotBeResolved(t *testing.T) {
+	saved := evalSymlinks
+	t.Cleanup(func() { evalSymlinks = saved })
+	evalSymlinks = func(string) (string, error) { return "", errors.New("gone") }
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.md")
+	write(t, path, "before", 0o644)
+	set := Take(path)
+	write(t, path, "run output", 0o644)
+	set.Restore()
+	if got := read(t, path); got != "before" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// A gate's rollback set: every output restored or removed, and a FINDINGS.md the run created left in place.
+func TestGateOutputs(t *testing.T) {
+	dir := t.TempDir()
+	p := func(name string) string { return filepath.Join(dir, name) }
+	write(t, p("runs.jsonl"), "runs\n", 0o644)
+	write(t, p("findings.jsonl"), "rows\n", 0o644)
+	set := GateOutputs(p("context.md"), p("review.md"), p("runs.jsonl"), p("findings.jsonl"), p("FINDINGS.md"))
+	for _, name := range []string{"context.md", "review.md", "runs.jsonl", "findings.jsonl", "FINDINGS.md"} {
+		write(t, p(name), "run output", 0o644)
+	}
+	set.Restore()
+	for name, want := range map[string]string{"runs.jsonl": "runs\n", "findings.jsonl": "rows\n", "FINDINGS.md": "run output"} {
+		if got := read(t, p(name)); got != want {
+			t.Errorf("%s: %q, want %q", name, got, want)
+		}
+	}
+	for _, name := range []string{"context.md", "review.md"} {
+		if _, err := os.Stat(p(name)); !os.IsNotExist(err) {
+			t.Errorf("%s must be removed: %v", name, err)
+		}
+	}
+}
