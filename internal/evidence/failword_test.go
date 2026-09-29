@@ -116,11 +116,13 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"FAIL under load":             {passing + "coverage FAIL under 80%", 1},
 		"FAIL without cache":          {passing + "lint FAIL without flags", 1},
 		"did fail to apply":           {"ok\nmigration did fail to apply", 1},
-		"Build failed 0":              {"ok\nBuild failed 0", 1},
-		"FAILED 0":                    {"ok\nFAILED 0", 1},
-		"jest FAIL before.test.js":    {passing + "FAIL  before.test.js", 1},
-		"will FAIL":                   {passing + "the build will FAIL", 1},
-		"FAIL against baseline":       {passing + "FAIL against baseline", 1},
+		"did fail against":            {"tests passed\nthe deploy did fail against staging", 1},
+
+		"Build failed 0":           {"ok\nBuild failed 0", 1},
+		"FAILED 0":                 {"ok\nFAILED 0", 1},
+		"jest FAIL before.test.js": {passing + "FAIL  before.test.js", 1},
+		"will FAIL":                {passing + "the build will FAIL", 1},
+		"FAIL against baseline":    {passing + "FAIL against baseline", 1},
 
 		"a counted fail":             {passing + "3 tests fail and 9 pass", 1},
 		"a counted fail in parens":   {passing + "Tests: 3 fail (of 10)", 1},
