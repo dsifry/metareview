@@ -290,6 +290,11 @@ func Create(root string, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// A chained run's lineage also holds every earlier pr-ready run of this target over the same base..head as a run
+	// already in the chain (mr-mrf): a standalone re-run at that diff was the same review, and its open findings must
+	// be closable by the chain that repairs it — otherwise only an override could clear them. A run with no
+	// --previous-run adopts nothing: a fresh look at an unchanged diff never counts as a fix.
+	previousRunIDs = append(previousRunIDs, sameDiffPRReadyRunIDs(logs, targetRecord, previousRunIDs)...)
 	// Only this branch's blockers gate it (#178); the rest are counted in the log as an advisory.
 	blockers, elsewhere, err := scopedBlocking(root)
 	if err != nil {
@@ -672,6 +677,35 @@ func resolveRunChain(root string, targetRecord map[string]string, options Option
 		fallback.MaxAttempts = rootMaxAttempts
 	}
 	return fallback, previousRunIDs, nil
+}
+
+// sameDiffPRReadyRunIDs are the pr-ready runs of targetRecord, outside chain, whose base..head is that of a run in
+// chain. A log's head and base come only from its authenticated local run record (reviewlog.Summary), so a committed or
+// hand-written log with no such record never qualifies, and an empty chain adopts nothing.
+func sameDiffPRReadyRunIDs(logs []reviewlog.Summary, targetRecord map[string]string, chain []string) []string {
+	have := map[string]bool{}
+	for _, id := range chain {
+		have[id] = true
+	}
+	want := reviewstate.TargetKey("pr-ready", targetRecord)
+	same := func(log reviewlog.Summary) bool {
+		return log.Kind == "pr-ready" && log.RunID != "" && log.HeadSHA != "" && log.BaseSHA != "" &&
+			reviewstate.TargetKey("pr-ready", log.TargetRecord) == want
+	}
+	diffs := map[[2]string]bool{}
+	for _, log := range logs {
+		if same(log) && have[log.RunID] {
+			diffs[[2]string{log.BaseSHA, log.HeadSHA}] = true
+		}
+	}
+	var ids []string
+	for _, log := range logs {
+		if same(log) && !have[log.RunID] && diffs[[2]string{log.BaseSHA, log.HeadSHA}] {
+			have[log.RunID] = true
+			ids = append(ids, log.RunID)
+		}
+	}
+	return ids
 }
 
 func authenticatedLegacyRootMaxAttempts(root string, logs []reviewlog.Summary, previousRunIDs []string, targetRecord map[string]string, git gitcontext.Context) int {

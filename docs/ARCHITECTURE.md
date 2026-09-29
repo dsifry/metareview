@@ -318,7 +318,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   meant to be cleared by a human-granted process override; making that reach blockers that exist only in
   committed review logs is tracked in #188.
 - **Run lineage:** a NEEDS_REVISION parent is retired when a clean same-target+same-kind child links via
-  `previousRunId` (supersede). Repair via `--previous-run <run-id>`; never `git add -A` failed-run artifacts.
+  `previousRunId` (supersede). Repair via `--previous-run <run-id>`; never `git add -A` failed-run artifacts. A chained
+  pr-ready run's lineage also holds every earlier pr-ready run of the same target over the same base..head as a run in
+  its chain (mr-mrf): a standalone re-run at that diff was the same review, so the repair chain can close its findings.
+  A run with no `--previous-run` adopts nothing — a fresh look at an unchanged diff is never a fix.
 - **Evidence receipts:** `evidence run -- <cmd>` records a validation receipt (kind + exitCode + hashes);
   `evidence import --github-checks <pr>` pulls CI. task-done/pr-ready require a passing validation receipt.
 - **Sharded review** (exclude-filtered diff > 120 KB): the gate writes prompt packs under
