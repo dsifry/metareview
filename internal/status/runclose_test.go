@@ -185,3 +185,61 @@ func TestAClosedRunIsReportedInJSON(t *testing.T) {
 		t.Fatalf("got %s", out.String())
 	}
 }
+
+// #179 review: a grant closes the run as it stood. A run resumed since (a later event) is open again and blocks, and a
+// fresh request and grant close it anew; a closure row with no snapshot (an older binary dropped it) closes nothing.
+func TestAResumedRunIsOpenAgainUntilClosedAnew(t *testing.T) {
+	root, common := newRepo(t)
+	head := gitOut(t, root, "rev-parse", "HEAD")
+	const id = "mrv-main-0000001"
+	writeStoreRun(t, common, id, "main", head)
+	if err := closeRequest(t, root, id, "claude-agent"); err != nil {
+		t.Fatal(err)
+	}
+	if err := closeGrant(t, root, id, "maintainer"); err != nil {
+		t.Fatal(err)
+	}
+	if got := DiscoverAbandonedRuns(root); len(got) != 0 {
+		t.Fatalf("closed: %+v", got)
+	}
+	audit := filepath.Join(common, "metareview", "runs", id, "audit.jsonl")
+	f, err := os.OpenFile(audit, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString(`{"type":"transition","at":"2026-09-29T10:00:00Z","state":"fix","data":{"to":"discover","to_kind":"review-lenses"}}` + "\n")
+	_ = f.Close()
+	if got := DiscoverAbandonedRuns(root); len(got) != 1 || got[0].State != "discover" {
+		t.Fatalf("a resumed run is open again: %+v", got)
+	}
+	if err := closeRequest(t, root, id, "claude-agent"); err != nil {
+		t.Fatalf("a stale closure can be requested afresh: %v", err)
+	}
+	if got := DiscoverAbandonedRuns(root); len(got) != 1 || got[0].CloseRequestedBy != "claude-agent" {
+		t.Fatalf("pending again: %+v", got)
+	}
+	if err := closeGrant(t, root, id, "maintainer"); err != nil {
+		t.Fatal(err)
+	}
+	if got := DiscoverAbandonedRuns(root); len(got) != 0 {
+		t.Fatalf("closed anew: %+v", got)
+	}
+	ledger, _ := findings.Load(root)
+	ledger[0].RunUpdated = ""
+	orig := loadFindings
+	loadFindings = func(string) ([]findings.Record, error) { return ledger, nil }
+	t.Cleanup(func() { loadFindings = orig })
+	if got := DiscoverAbandonedRuns(root); len(got) != 1 {
+		t.Fatalf("a closure with no snapshot closes nothing: %+v", got)
+	}
+}
+
+// A mock run is not work left undone, so it never takes a closure row.
+func TestAMockRunTakesNoClosureRow(t *testing.T) {
+	root := t.TempDir()
+	writeRun(t, root, "run-mock", `{"seq":1,"type":"init","at":"2026-08-28T01:00:00Z","data":{"workflow":"t","mock":"scenarios/happy#abc"}}`,
+		`{"seq":2,"type":"transition","at":"2026-08-28T01:05:00Z","state":"discover","data":{"from":"discover","to":"fix"}}`)
+	if _, ok := RunClosureSubject(root, "run-mock", "now"); ok {
+		t.Fatal("a mock run must not take a closure row")
+	}
+}

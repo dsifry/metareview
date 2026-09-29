@@ -94,9 +94,10 @@ func ScanAbandonedRuns(root string) (inScope, elsewhere []AbandonedRun) {
 // ClosedScope is the Scope of an abandoned run closed by a granted override (#179).
 const ClosedScope = "closed"
 
-// closeRuns applies the ledger's run closures (#179): a run whose closure row is granted leaves the blockers and is
-// listed elsewhere as closed; one with a pending request stays a blocker, naming who asked. An unreadable ledger closes
-// nothing — the runs keep blocking.
+// closeRuns applies the ledger's run closures (#179): a run whose closure row is granted — for the run as it stands,
+// its last event unchanged since the grant — leaves the blockers and is listed elsewhere as closed; one with a pending
+// request stays a blocker, naming who asked. A run resumed since its grant is open again, and an unreadable ledger
+// closes nothing — the runs keep blocking.
 func closeRuns(root string) func(inScope, elsewhere []AbandonedRun) ([]AbandonedRun, []AbandonedRun) {
 	closures := map[string]findings.Record{}
 	if ledger, err := loadFindings(root); err == nil {
@@ -115,7 +116,7 @@ func closeRuns(root string) func(inScope, elsewhere []AbandonedRun) ([]Abandoned
 		mark := func(r AbandonedRun) (AbandonedRun, bool) {
 			c, ok := closures[r.RunID]
 			switch {
-			case ok && c.Status == findings.StatusOverridden:
+			case ok && c.Status == findings.StatusOverridden && c.RunUpdated != "" && c.RunUpdated == r.Updated:
 				r.Scope, r.ClosedBy, r.ClosedAt, r.CloseReason = ClosedScope, c.OverrideGrantedBy, c.OverrideGrantedAt, c.OverrideGrantReason
 				r.CloseRequestedBy = c.OverrideRequestedBy
 				return r, true
@@ -157,7 +158,7 @@ func RunClosureSubject(root, runID, now string) (*findings.Record, bool) {
 	inScope, elsewhere := scanAbandonedRuns(root, kind.Deps{}, scope.Load(root, nil))
 	for _, r := range append(inScope, elsewhere...) {
 		if r.RunID == runID {
-			record := findings.AbandonedRunRecord(r.RunID, "("+abandonedTarget(r)+")", r.Branch, r.head, now)
+			record := findings.AbandonedRunRecord(r.RunID, "("+abandonedTarget(r)+")", r.Branch, r.head, r.Updated, now)
 			return &record, true
 		}
 	}

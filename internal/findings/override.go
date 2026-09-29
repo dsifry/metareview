@@ -77,8 +77,13 @@ func RequestOverride(root, findingID string, request OverrideRequest) error {
 		// the run-level stop can outlive the finding-level fix, and the recorded request
 		// is what makes the later grant two-phase (requester ≠ grantor).
 		fixedWithEscalation := (record.Status == "fixed" || supersededFreshness(*record)) && strings.TrimSpace(request.Escalation) != ""
-		if record.Status != "open" && !fixedWithEscalation {
+		reclose := staleClosure(*record, request.Subject)
+		if record.Status != "open" && !fixedWithEscalation && !reclose {
 			return fmt.Errorf("finding %s is %s, not open", findingID, record.Status)
+		}
+		if reclose || IsRunClosure(*record) && request.Subject != nil {
+			record.RunUpdated = request.Subject.RunUpdated
+			record.OverrideGrantedBy, record.OverrideGrantedAt, record.OverrideGrantReason = "", "", ""
 		}
 		record.Status = StatusOverridePending
 		record.OverrideRequestedBy = strings.TrimSpace(request.By)
@@ -119,11 +124,19 @@ func GrantOverride(root, findingID string, grant OverrideGrant) error {
 		// run-level stop can outlive the finding-level fix, and lifting it is the human
 		// decision the grant records — with requester ≠ grantor enforced below.
 		fixedWithEscalation := (record.Status == "fixed" || supersededFreshness(*record)) && strings.TrimSpace(record.OverrideEscalation) != ""
-		if record.Status != "open" && !fixedWithEscalation && record.Status != StatusOverridePending {
+		reclose := staleClosure(*record, grant.Subject)
+		if record.Status != "open" && !fixedWithEscalation && record.Status != StatusOverridePending && !reclose {
 			return fmt.Errorf("finding %s is %s and cannot be overridden", findingID, record.Status)
+		}
+		if reclose {
+			// The run moved on since its last closure: this grant is a new decision, not a second acknowledgement.
+			record.OverrideRequestedBy, record.OverrideRequestedAt, record.OverrideRequestReason = "", "", ""
 		}
 		if strings.EqualFold(by, record.OverrideRequestedBy) {
 			return fmt.Errorf("%s requested this override and cannot also grant it; acknowledgement comes from outside the workflow", by)
+		}
+		if IsRunClosure(*record) && grant.Subject != nil {
+			record.RunUpdated = grant.Subject.RunUpdated // the grant closes the run as it stands now
 		}
 		record.Status = StatusOverridden
 		record.OverrideGrantedBy = by
@@ -267,8 +280,8 @@ const AbandonedRunFingerprintPrefix = "fsm:abandoned-run:"
 // the ordinary override flow — a request does not close it, the requester cannot grant it, a grant needs a reason — and
 // rendered under Process Overrides. It is bookkeeping, not a finding: advisory, so no review gate counts it, while the
 // run itself keeps blocking `status` until the grant. Branch and head are the run's own (its init), so the row is
-// scoped with the run.
-func AbandonedRunRecord(runID, description, branch, head, now string) Record {
+// scoped with the run. updated is the run's last event: a grant closes the run only while it is still there.
+func AbandonedRunRecord(runID, description, branch, head, updated, now string) Record {
 	return Record{
 		SchemaVersion:  1,
 		ID:             runID,
@@ -285,10 +298,19 @@ func AbandonedRunRecord(runID, description, branch, head, now string) Record {
 		UpdatedAt:      now,
 		GitHead:        head,
 		Branch:         branch,
+		RunUpdated:     updated,
 	}
 }
 
 // IsRunClosure reports whether a ledger row is an abandoned FSM run's closure row.
 func IsRunClosure(record Record) bool {
 	return strings.HasPrefix(record.Fingerprint, AbandonedRunFingerprintPrefix) && record.ID == strings.TrimPrefix(record.Fingerprint, AbandonedRunFingerprintPrefix)
+}
+
+// staleClosure reports whether record is a granted run closure (#179) whose run has moved on since — resumed, and left
+// again — so it may be requested or granted afresh: the old grant no longer closes the run, and without this the row
+// could never be reopened.
+func staleClosure(record Record, subject *Record) bool {
+	return IsRunClosure(record) && record.Status == StatusOverridden && subject != nil && subject.ID == record.ID &&
+		subject.RunUpdated != record.RunUpdated
 }

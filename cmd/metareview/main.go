@@ -1508,11 +1508,23 @@ func abandonedLines(root string, all bool) []string {
 		if a.Branch != "" { // a stacked branch inherits its base's runs: say whose each one is
 			line += "  (branch " + a.Branch + ")"
 		}
+		if a.CloseRequestedBy != "" { // #179: a request does not close it; say who is waiting on a grant
+			line += "  (close requested by " + a.CloseRequestedBy + ")"
+		}
 		lines = append(lines, line)
 	}
 	if !all {
-		if len(elsewhere) > 0 {
-			lines = append(lines, fmt.Sprintf("abandoned runs elsewhere: %d (metareview status --all lists them)", len(elsewhere)))
+		closed := 0
+		for _, a := range elsewhere {
+			if a.Scope == status.ClosedScope {
+				closed++
+			}
+		}
+		if n := len(elsewhere) - closed; n > 0 {
+			lines = append(lines, fmt.Sprintf("abandoned runs elsewhere: %d (metareview status --all lists them)", n))
+		}
+		if closed > 0 {
+			lines = append(lines, fmt.Sprintf("closed runs: %d (metareview status --all lists them)", closed))
 		}
 		return lines
 	}
@@ -1526,7 +1538,14 @@ func abandonedLines(root string, all bool) []string {
 			lines = append(lines, "branch "+name+":")
 			last = a.Branch
 		}
-		lines = append(lines, "  "+a.RunID+"  "+a.Workflow+" @ "+a.State+"  ["+a.Scope+"]  "+a.Dir)
+		line := "  " + a.RunID + "  " + a.Workflow + " @ " + a.State + "  [" + a.Scope + "]  " + a.Dir
+		switch {
+		case a.ClosedBy != "": // #179: who closed it and why
+			line += "  closed by " + a.ClosedBy + " at " + a.ClosedAt + ": " + a.CloseReason
+		case a.CloseRequestedBy != "":
+			line += "  (close requested by " + a.CloseRequestedBy + ")"
+		}
+		lines = append(lines, line)
 	}
 	return lines
 }

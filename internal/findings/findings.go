@@ -106,6 +106,9 @@ type Record struct {
 	// Branch is the branch the finding was recorded on (#178), empty on a detached HEAD and on rows from before
 	// branches were recorded. With GitHead it scopes the finding to its branch (see ScopedBlocking).
 	Branch string `json:"branch,omitempty"`
+	// RunUpdated is an abandoned FSM run's closure (#179) snapshot: the run's last event when it was requested or
+	// granted. A grant closes the run only while the run is still there — a run resumed since is open again.
+	RunUpdated string `json:"runUpdated,omitempty"`
 }
 
 type Result struct {
@@ -536,8 +539,9 @@ func readCommittedIndex(path string) ([]byte, error) {
 
 // carryOverLine matches both shapes the index renders — unresolved-blocker bullets
 // ("- mrvf-… [high] Title (reviewer)") and Process Overrides entries ("- mrvf-… [granted] …") —
-// keyed by the leading finding ID, which is unique and stable across worktrees and sessions.
-var carryOverLine = regexp.MustCompile(`^- (mrvf-[A-Za-z0-9-]+) \[`)
+// keyed by the leading finding ID, which is unique and stable across worktrees and sessions — or, for an abandoned FSM
+// run's closure (#179), the run's own ID (mrv-…).
+var carryOverLine = regexp.MustCompile(`^- (mrvf?-[A-Za-z0-9-]+) \[`)
 
 // carryOverLines returns the committed FINDINGS.md's blocker and override lines whose finding
 // IDs the rendering records do not know (issue #151).
