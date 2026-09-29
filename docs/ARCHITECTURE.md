@@ -332,7 +332,9 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   authentication. An override is never a fix (`fixedInRunId` stays empty). An ID with no ledger row is looked up in the
   committed review logs (#188): every log listing it under `## Blocking Findings` supplies it **and all its other
   blockers** (pr-ready clears a log once every ID the ledger knows is resolved, so importing one alone would let its
-  grant retire the rest). Each is imported as this branch's open row at HEAD — its run is the one its ID names, taken
+  grant retire the rest). The scan runs on every override, not only for an unknown ID — a finding imported as one log's
+  sibling may be listed by another log whose own blockers are still unknown — and never takes pr-ready's derived
+  "Unresolved review blockers" summary as a sibling (every pr-ready run re-derives it). Each is imported as this branch's open row at HEAD — its run is the one its ID names, taken
   from that run's own log where committed, else from a log that carries it forward; header fields are read above the
   first `## ` only — with fingerprint `imported-review-log:<id>` (never a live finding's) and the log as evidence. A
   `--previous-run` chain naming its run closes it as fixed. An ID found nowhere exits 1. Unscoped `status` still

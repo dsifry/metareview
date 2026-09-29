@@ -27,24 +27,26 @@ var (
 	headOf         = gitcontext.Head
 )
 
-// committedFindings finds a blocking finding that exists only in committed review logs — written on another clone, or
-// whose ledger row is gone — so the override commands reach the blockers the gates read from those logs (#188). It
-// returns the finding and every other blocking finding of each log that lists it under "## Blocking Findings", as open
-// ledger rows: pr-ready clears a log once every finding the ledger KNOWS is resolved, so importing one ID alone would let
-// its grant retire the log's other, unaddressed blockers. A finding is taken as its raising run's log states it where
-// that log is committed, else as a later log carries it forward; its run is the one its ID names. The rows belong to the
-// branch in hand (the branch whose gate the logs block), at HEAD, and record the log they came from. known holds the
-// ledger's IDs, which are never re-imported.
-func committedFindings(root, findingID, now string, known map[string]bool) ([]Record, bool, error) {
+// committedFindings reaches the blockers the gates read from committed review logs (#188) — written on another clone,
+// or whose ledger rows are gone. It returns, as open ledger rows, every blocking finding the ledger lacks (known holds its
+// IDs) of each log that lists findingID under "## Blocking Findings", the finding itself first: pr-ready clears a log
+// once every finding the ledger KNOWS is resolved, so an override that left a log's other blockers unknown would let its
+// grant retire them. It is asked on every override, not only for an unknown ID — a finding imported as another's sibling
+// may also be listed by a log whose other blockers are still unknown. A finding is taken as its raising run's log states
+// it where that log is committed, else as a later log carries it forward; its run is the one its ID names. pr-ready's
+// own "Unresolved review blockers" summary is never a sibling: every pr-ready run re-derives it from the logs it
+// summarises, which gate on their own. The rows belong to the branch in hand (the branch whose gate the logs block), at
+// HEAD, and record the log they came from.
+func committedFindings(root, findingID, now string, known map[string]bool) ([]Record, error) {
 	if _, ok := runOfFinding(findingID); !ok {
-		return nil, false, nil
+		return nil, nil
 	}
 	entries, err := readReviewsDir(filepath.Join(root, filepath.FromSlash(committedReviewsDir)))
 	if os.IsNotExist(err) {
-		return nil, false, nil
+		return nil, nil
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -59,14 +61,14 @@ func committedFindings(root, findingID, now string, known map[string]bool) ([]Re
 		rel := committedReviewsDir + "/" + name
 		raw, err := readReviewLog(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		blockers := parseCommittedBlockers(string(raw))
 		if !listsFinding(blockers, findingID) {
 			continue
 		}
 		for _, entry := range blockers {
-			if known[entry.record.ID] {
+			if known[entry.record.ID] || entry.record.ID != findingID && derivedSummary(entry.record) {
 				continue
 			}
 			entry.record.Evidence = []Evidence{{Type: "review-log", Path: rel}}
@@ -79,16 +81,19 @@ func committedFindings(root, findingID, now string, known map[string]bool) ([]Re
 			}
 		}
 	}
-	if _, ok := chosen[findingID]; !ok {
-		return nil, false, nil
+	if len(order) == 0 {
+		return nil, nil
 	}
 	head, err := headOf(root)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	branch := loadScope(root).Current
 	// The requested finding first, then its siblings in the order the logs list them.
-	records := []Record{chosen[findingID].record}
+	var records []Record
+	if entry, ok := chosen[findingID]; ok {
+		records = append(records, entry.record)
+	}
 	for _, id := range order {
 		if id != findingID {
 			records = append(records, chosen[id].record)
@@ -103,7 +108,12 @@ func committedFindings(root, findingID, now string, known map[string]bool) ([]Re
 		records[i].GitHead = head
 		records[i].Branch = branch
 	}
-	return records, true, nil
+	return records, nil
+}
+
+// derivedSummary reports whether a finding is pr-ready's "Unresolved review blockers" summary of other logs' blockers.
+func derivedSummary(record Record) bool {
+	return record.Scope == "pr-ready" && record.Reviewer == "pr-readiness-reviewer" && record.Title == "Unresolved review blockers"
 }
 
 // committedEntry is one blocking finding a committed log lists; raisedHere is true in the log of the run that raised it.

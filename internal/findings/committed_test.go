@@ -138,18 +138,20 @@ func TestOverrideImportsACarriedForwardBlocker(t *testing.T) {
 			t.Fatalf("the carrying log's own blocker %+v", own)
 		}
 	})
-	t.Run("the raising log wins", func(t *testing.T) {
-		root := t.TempDir()
-		stubImportGit(t, "h", nil)
-		writeCommittedLog(t, root, "a-carrier.md", carrier)
-		writeCommittedLog(t, root, "b-raising.md", committedLog(committedRunID))
-		if err := RequestOverride(root, committedID, goodRequest); err != nil {
-			t.Fatal(err)
-		}
-		if got := loadAll(t, root)[committedID]; got.Title != "No adjudicated lens review recorded" || got.Evidence[0].Path != "docs/metareview/reviews/b-raising.md" {
-			t.Fatalf("got %+v", got)
-		}
-	})
+	for _, names := range [][2]string{{"a-carrier.md", "b-raising.md"}, {"b-carrier.md", "a-raising.md"}} {
+		t.Run("the raising log wins over "+names[0], func(t *testing.T) {
+			root := t.TempDir()
+			stubImportGit(t, "h", nil)
+			writeCommittedLog(t, root, names[0], carrier)
+			writeCommittedLog(t, root, names[1], committedLog(committedRunID))
+			if err := RequestOverride(root, committedID, goodRequest); err != nil {
+				t.Fatal(err)
+			}
+			if got := loadAll(t, root)[committedID]; got.Title != "No adjudicated lens review recorded" || got.Evidence[0].Path != "docs/metareview/reviews/"+names[1] {
+				t.Fatalf("got %+v", got)
+			}
+		})
+	}
 }
 
 // The header is read above the first "## " heading only: a Run ID in the body never makes a log the raising one.
@@ -309,4 +311,56 @@ func TestCommittedImportFailuresSurface(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+}
+
+// The P1 of the #188 re-review: a finding first imported as one log's sibling may also be listed by a second log whose
+// own blocker is still unknown. Overriding it — now a ledger hit — must still import that blocker, or pr-ready (which
+// clears a log once every ID the ledger knows is resolved) would retire it unseen.
+func TestAnOverrideOnAKnownFindingImportsTheBlockersOfEveryLogThatListsIt(t *testing.T) {
+	root := t.TempDir()
+	stubImportGit(t, "h", nil)
+	writeCommittedLog(t, root, "l1.md", committedLog(committedRunID))
+	other := "mrvf-20260906-000000000000000-task-done-help2-1-001"
+	writeCommittedLog(t, root, "l2.md", "# metareview: task-done review\n\nRun ID: `mrv-20260906-000000000000000-task-done-help2-1`\n\n"+
+		"## Blocking Findings\n\n### "+other+": its own blocker\n\n- Severity: high\n- Classification: blocking\n\n"+
+		"### "+committedID+": carried forward\n\n- Severity: high\n- Classification: blocking\n")
+	grant := OverrideGrant{By: "maintainer", Reason: "accepted: the reviewed head is gone", Now: "t"}
+	if err := GrantOverride(root, siblingID, grant); err != nil {
+		t.Fatal(err)
+	}
+	if rows := loadAll(t, root); len(rows) != 2 {
+		t.Fatalf("l1's two blockers only: %v", rows)
+	}
+	if err := GrantOverride(root, committedID, grant); err != nil {
+		t.Fatal(err)
+	}
+	rows := loadAll(t, root)
+	if got := rows[other]; got.Status != "open" || got.RunID != "mrv-20260906-000000000000000-task-done-help2-1" {
+		t.Fatalf("l2's own blocker must be imported open, got %+v (rows %d)", got, len(rows))
+	}
+	if rows[committedID].Status != StatusOverridden || rows[committedID].Title != "No adjudicated lens review recorded" {
+		t.Fatalf("the known row is the one granted: %+v", rows[committedID])
+	}
+}
+
+// pr-ready's "Unresolved review blockers" summary is never imported as a sibling (pr-ready re-derives it from the logs it
+// summarises), so overriding the real blocker beside it leaves nothing that blocks pr-ready on itself. Asked for by ID,
+// it is imported like any other finding.
+func TestTheDerivedPRReadySummaryIsNeverASibling(t *testing.T) {
+	summaryID := "mrvf-20260929-010000000000000-pr-ready-branch-1-001"
+	realID := "mrvf-20260929-010000000000000-pr-ready-branch-1-002"
+	log := "# metareview: pr-ready review\n\nRun ID: `mrv-20260929-010000000000000-pr-ready-branch-1`\n\nTarget: `feature`\n\n" +
+		"## Blocking Findings\n\n### " + summaryID + ": Unresolved review blockers\n\n- Reviewer: pr-readiness-reviewer\n- Severity: high\n- Classification: blocking\n\n" +
+		"### " + realID + ": Missing validation evidence\n\n- Reviewer: pr-readiness-reviewer\n- Severity: high\n- Classification: blocking\n"
+	for id, want := range map[string]int{realID: 1, summaryID: 2} {
+		root := t.TempDir()
+		stubImportGit(t, "h", nil)
+		writeCommittedLog(t, root, "log.md", log)
+		if err := RequestOverride(root, id, goodRequest); err != nil {
+			t.Fatal(err)
+		}
+		if rows := loadAll(t, root); len(rows) != want || rows[id].Status != StatusOverridePending {
+			t.Fatalf("override %s: rows %v", id, rows)
+		}
+	}
 }
