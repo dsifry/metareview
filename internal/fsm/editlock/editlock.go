@@ -76,10 +76,12 @@ func (l Lock) Acquire(runID string) error {
 	})
 }
 
-// fresh reports whether h was taken within Grace. A hold whose time does not parse is not fresh: its run decides.
+// fresh reports whether h was taken within Grace. A hold whose time does not parse, or lies further in the future
+// than Grace (a clock stepped back, a hand-edited file), is not fresh: its run decides, so it cannot pin the lock.
 func (l Lock) fresh(h hold) bool {
 	since, err := time.Parse(time.RFC3339, h.Since)
-	return err == nil && l.Now().Sub(since) < Grace
+	age := l.Now().Sub(since)
+	return err == nil && age > -Grace && age < Grace
 }
 
 // Release drops runID's hold. Releasing a lock another run holds, or none, is a no-op.

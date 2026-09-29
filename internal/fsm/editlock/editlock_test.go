@@ -73,6 +73,29 @@ func TestAcquireTakesOverAStaleHold(t *testing.T) {
 	}
 }
 
+// A hold dated beyond the grace into the future (a clock stepped back, a hand-edited file) has no grace either.
+func TestAFutureDatedHoldHasNoGrace(t *testing.T) {
+	l := lockAt(t, map[string]bool{"run-a": false})
+	if err := os.MkdirAll(filepath.Dir(l.Path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	far := l.Now().Add(Grace + time.Second).UTC().Format(time.RFC3339)
+	if err := os.WriteFile(l.Path, []byte(`{"run_id":"run-a","since":"`+far+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Acquire("run-b"); err != nil {
+		t.Fatalf("a future-dated dead hold must be taken over: %v", err)
+	}
+	// A little skew within the grace still counts as fresh.
+	near := l.Now().Add(Grace / 2).UTC().Format(time.RFC3339)
+	if err := os.WriteFile(l.Path, []byte(`{"run_id":"run-a","since":"`+near+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Acquire("run-b"); !errs.Is(err, CodeEditLocked) {
+		t.Fatalf("got %v", err)
+	}
+}
+
 // A hold whose time does not parse has no grace: its run alone decides.
 func TestAHoldWithoutATimeHasNoGrace(t *testing.T) {
 	l := lockAt(t, map[string]bool{"run-a": false})
