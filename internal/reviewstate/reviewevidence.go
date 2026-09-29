@@ -121,7 +121,9 @@ func IsGateArtifact(path string) bool {
 	if strings.Contains(path, "..") {
 		return false
 	}
-	if strings.HasPrefix(path, fsmBundleDir) && strings.HasSuffix(path, "/workflow.yaml") {
+	// Exactly a bundle's own workflow.yaml (docs/metareview/fsm/<run>/workflow.yaml), nowhere deeper.
+	if run, ok := strings.CutSuffix(strings.TrimPrefix(path, fsmBundleDir), "/workflow.yaml"); ok && strings.HasPrefix(path, fsmBundleDir) &&
+		run != "" && !strings.Contains(run, "/") {
 		return true
 	}
 	for _, dir := range gateArtifactDirs {

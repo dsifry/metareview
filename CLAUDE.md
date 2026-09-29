@@ -47,9 +47,10 @@ required — name the lenses that actually ran. The marker is scoped to the exac
 after any new commit that changes code, tests or docs **and** whenever the gate's `--base` differs from the one you
 reviewed — committing only the gate's own artifacts (review logs, context packs, shard results, FSM bundles,
 `FINDINGS.md` under `docs/metareview/`) keeps the marker current (#161). `--mode subagent-adjudicated` requires
-`--from-run` naming a real FSM run that reviewed the same base..head — its init, or, for a fix loop, the head its
-final `clean`/`reviewed` transition passed at (mr-1ad) — (it cannot be hand-typed to fake independent review); for a self-attested in-session review use `--mode
-in-session-emulated` (no `--from-run`), which passes but is flagged advisory. To opt a single run out of the
+`--from-run` naming a real FSM run that reviewed the same base..head: its init, or, for a fix loop, the head at which
+its final `clean`/`reviewed` transition passed (mr-1ad). It cannot be hand-typed to fake independent review. For a
+self-attested in-session review use `--mode in-session-emulated` (no `--from-run`), which passes but is flagged
+advisory. To opt a single run out of the
 requirement (structural-only pass), set `METAREVIEW_ALLOW_MECHANICAL_PASS=1`.
 
 **epic-ready specifics.** epic-ready reviews the epic's **integration diff** (base..HEAD — the union of the

@@ -15,6 +15,8 @@ func TestIsGateArtifact(t *testing.T) {
 		"docs/metareview/learning/mrv-2-accepted.md":                true,
 		"docs/metareview/fsm/mrv-run/workflow.yaml":                 true,  // every `fsm export` bundle carries one
 		"docs/metareview/reviews/x.yaml":                            false, // only a bundle does
+		"docs/metareview/fsm/a/b/workflow.yaml":                     false, // at a bundle's own depth only
+		"docs/metareview/fsm/workflow.yaml":                         false,
 		"docs/metareview/fsm/mrv-run/sneak.go":                      false, // compiled, whatever folder it sits in
 		"docs/metareview/notes.md":                                  false, // beside the gate's folders, not in one
 		"docs/metareview/reviews/../../../src/x.md":                 false,

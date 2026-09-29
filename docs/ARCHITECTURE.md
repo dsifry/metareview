@@ -76,7 +76,7 @@ base..HEAD diff** via `reviewstate.CurrentReviewEvidence`; a marker for a stale 
 does not count (a review of a narrow `HEAD~1..HEAD` must not be credited for a wider `main..HEAD`) — except that a
 marker at an ancestor head still counts when every commit since it adds only gate artifacts
 (`reviewstate.IsGateArtifact`: `.md`/`.json`/`.jsonl` files under `docs/metareview/{reviews,context,shards,fsm,learning}/`,
-and `docs/metareview/FINDINGS.md`), so committing a passing gate's own output does not strand the review (#161). Any
+each FSM bundle's own `docs/metareview/fsm/<run>/workflow.yaml`, and `docs/metareview/FINDINGS.md`), so committing a passing gate's own output does not strand the review (#161). Any
 other change — code, tests, another doc, a `.go` file placed in those folders — still invalidates it, and a git
 failure never counts the marker. It blocks
 with `adversarial-review-reviewer` when no current marker is present, blocks when the adjudicated verdict is

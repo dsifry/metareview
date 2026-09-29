@@ -2,6 +2,7 @@ package taskdone
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -51,6 +52,46 @@ func TestTaskDoneRequireLensesSatisfiedByMarker(t *testing.T) {
 	}
 	if result.Blocking {
 		t.Fatal("with shards satisfied, evidence present, and a passing marker, the run must not block")
+	}
+}
+
+// #161 on task-done: committing the gate's own review log after recording the marker keeps it current.
+func TestTaskDoneMarkerCarriesOverGateArtifactCommits(t *testing.T) {
+	root := shardedTaskRepo(t)
+	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "")
+	base, head := diffEndpoints(t, root)
+	if err := reviewstate.RecordReviewEvidence(root, reviewstate.ReviewEvidence{
+		ReviewedScope: "task-done", BaseSHA: base, HeadSHA: head,
+		AdjudicatedVerdict: "PASS", ExecutionMode: reviewstate.ReviewModeSubagentAdjudicated,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(root, "docs", "metareview", "reviews", "mrv-task.md")
+	if err := os.MkdirAll(filepath.Dir(log), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(log, []byte("# review\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-f", "docs/metareview/reviews/mrv-task.md"}, {"commit", "-q", "-m", "review log"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	result, err := Create(root, "docs/tasks/big-task.md", Options{
+		Base: "main", ShardWriter: &fakeWriter{satisfy: true}, EvidencePath: writeEvidence(t, root),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(result.ReviewRel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "adversarial-review-reviewer") {
+		t.Fatalf("a marker must carry over a review-log commit on task-done:\n%s", body)
 	}
 }
 
