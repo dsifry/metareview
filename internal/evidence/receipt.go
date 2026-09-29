@@ -96,12 +96,16 @@ var (
 	//     "# fail 0", "Errors: 0" — never "Error: 0 is not a valid port". A following "key=" is kept (${1}), so
 	//     "failed=0 errors=3" still reads the errors.
 	zeroClause = regexp.MustCompile(`(?im)(^|[,;(|])[ \t]*(0|no|none)([ \t]+of([ \t]+the)?([ \t]+[0-9]+)?|/[0-9]+)?[ \t]+((tests?|checks?|specs?|examples?|cases?|suites?)[ \t]+)?(fail|failed|failing|failures?|errors?)([ \t]+in[ \t]+[0-9.]+[mµn]?s|[ \t]+out of[ \t]+[0-9]+)?[ \t]*([,;.)(|!]|\r?$)`)
-	zeroLabel  = regexp.MustCompile(`(?m)\b(?:(?i:failed|failures?|errors)|fail)[ \t]*[:=]?[ \t]*0(?:[ \t]*(?:[,;)|]|\r?$)|[ \t]+(\w+=))`)
-	// proseFail is the one exemption the base reader lacked (mr-r3y): "fail" in a prose sentence — after a modal, as in a
-	// test's name or a hypothetical ("should fail (3 ms)", "must fail"), or before a preposition ("the new tests fail
-	// against origin/main", "fail on the old code"). It is neutralized after a counted "fail" ("2 tests fail on
-	// windows") has already been read as a failure.
-	proseFail = regexp.MustCompile(`(?i)\b(should|shall|will|would|must|can|could|may|might|to|does|did|do|doesn't|don't|won't|cannot)[ \t]+fail\b|\bfail([ \t]+(against|on|before|without|when|if|under|until|unless)\b)`)
+	zeroLabel  = regexp.MustCompile(`(?m)\b(?:(?i:failed|failures?|errors)[ \t]*[:=]|fail[ \t]*[:=]?)[ \t]*0(?:[ \t]*(?:[,;)|]|\r?$)|[ \t]+(\w+=))`)
+	// proseFail is the one exemption the base reader lacked (mr-r3y): a lower-case "fail" in a prose sentence — after a
+	// hypothetical or negated modal, as in a test's name ("should fail (3 ms)", "must fail", "doesn't fail"), or after a
+	// subject word and before against/without/before ("the new tests fail against origin/main", "fail without the fix").
+	// Never "did/does fail" (a report, rewritten to "failed" first),
+	// never upper or title case (a verdict), never after ":" or "=" ("Status: fail on windows"). It is neutralized after
+	// a counted "fail" ("2 tests fail on windows") has already been read as a failure.
+	proseFail = regexp.MustCompile(`\b(should|shall|will|would|must|can|could|may|might|to|doesn't|don't|didn't|won't|cannot|never)[ \t]+fail\b|(\w[ \t]+)fail[ \t]+(against|without|before)\b`)
+	// reportedFail is "did/does/do fail": a report that something failed, never prose to exempt.
+	reportedFail = regexp.MustCompile(`(?i)\b(did|does|do)[ \t]+fail\b`)
 	// countFail is a counted "fail" ("3 tests fail and 9 pass", "1 test fails"): read before proseFail neutralizes.
 	countFail = regexp.MustCompile(`(?i)\b[1-9][0-9]*[ \t]+(\w+[ \t]+)?fails?\b`)
 	// ansiEscape is a terminal colour/control sequence: removed first, since "\x1b[31mFAIL" has no word boundary.
@@ -221,7 +225,8 @@ func hasFailureSignal(text string) bool {
 	if countFail.MatchString(text) {
 		return true
 	}
-	text = proseFail.ReplaceAllString(text, " ")
+	text = reportedFail.ReplaceAllString(text, " failed")
+	text = proseFail.ReplaceAllString(text, "${2} ")
 	for _, pattern := range failurePatterns {
 		if pattern.MatchString(text) {
 			return true
