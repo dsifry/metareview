@@ -78,6 +78,35 @@ func TestMarkdownRendersOptionalSections(t *testing.T) {
 	}
 }
 
+// Every heading the manifest renders is followed by a blank line (markdownlint MD022, #155).
+func TestMarkdownHeadingsAreFollowedByABlankLine(t *testing.T) {
+	m := Manifest{
+		SourcePaths:      []string{"src/a.go"},
+		LocalPaths:       []string{"src/local.go"},
+		PathDispositions: []PathDisposition{{Path: "docs/x.md", Disposition: DispositionGenerated, Rationale: "generated review artifact excluded"}},
+		ShardPlan:        contextprofile.ShardPlan{Shards: []contextprofile.Shard{{ID: "1", Chunks: []contextprofile.Chunk{{Path: "src/a.go", Part: 1, Parts: 1}}}}},
+		ShardResults:     []ReviewResult{{ShardID: "shard-1", Verdict: VerdictPass, Reviewer: "r"}},
+		CrossShardResult: &ReviewResult{Verdict: VerdictPass, Reviewer: "r"},
+	}
+	agg := AggregateResult{Verdict: VerdictNeedsRevision, Blockers: []string{"b"}, Ignored: []IgnoredResult{{Path: "old.json", Reason: "stale"}}}
+	for _, out := range []string{Markdown(m, agg), Markdown(Manifest{}, AggregateResult{})} {
+		lines := strings.Split(out, "\n")
+		headings := 0
+		for i, line := range lines {
+			if !strings.HasPrefix(line, "#") {
+				continue
+			}
+			headings++
+			if i+1 >= len(lines) || lines[i+1] != "" {
+				t.Errorf("heading %q is not followed by a blank line:\n%s", line, out)
+			}
+		}
+		if headings < 3 {
+			t.Fatalf("expected the manifest headings, got %d:\n%s", headings, out)
+		}
+	}
+}
+
 func TestPathDispositionBlockersEdgeCases(t *testing.T) {
 	m := Manifest{
 		// The blank-path disposition is itself INVALID (bogus disposition): without the blank-path

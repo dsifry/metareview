@@ -199,7 +199,14 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
 - **Durable, committed** under `docs/metareview/`: review logs (`reviews/`), context packs (`context/`),
   shard results (`shards/`), FSM export bundles (`fsm/`), findings render (`FINDINGS.md`). ⚠️ Context packs
   can leak an absolute `cwd` (issue #80) — do not commit a leaking context artifact; the review `.md` is
-  clean.
+  clean. A gate log's `## Reviewer Results` has a row for every reviewer a finding names (the fixed set, then
+  e.g. `adversarial-review-reviewer`), and a blocker carried in from the ledger is tagged `Carried forward
+  from: <run>` under `## Blocking Findings` (#143) — both rendered by `findings.ReviewerTable` /
+  `ClassifiedMarkdown`, shared by task-done, pr-ready and epic-ready.
+- **Gate rollback** (`internal/rollback`, #152): a failed task-done / pr-ready / epic-ready / learning run puts
+  back the files it touched — write-temp-then-rename with the file's own mode, never a truncating write — and
+  removes what it created, except the shared `FINDINGS.md` render, which it leaves (a concurrent render may own
+  it; it heals from the ledger at the next render).
 - **Transient, local (git-ignored)** under `.metareview/`: `findings.jsonl`, `runs.jsonl` (review records),
   `shards/` (and `git-hooks/`, from before #173). A `mock: true` FSM run never satisfies a gate.
 - **The shared store is in git's common directory (#173).** `repo.StoreDir` = `<git rev-parse --git-common-dir>/
@@ -406,7 +413,7 @@ list below is illustrative, omitting e.g. `judge`, `gate`, `converge`, `export`)
   rejection buckets; see `internal/lensoutput`'s package doc and the conformance corpus in
   `tests/go/test-lens-conformance.sh`).
 - **Review state & logs:** `reviewlog` (parse/discover `.md` logs), `reviewstate`, `reviewmanifest`,
-  `findings`, `runchain` (lineage), `state`/`jsonl` (append/scan), `reviewprompt`.
+  `findings`, `runchain` (lineage), `state`/`jsonl` (append/scan), `reviewprompt`, `rollback` (gate-run restore).
 - **Gate & install:** `setup` (mode/prereqs + hook install), `status` (branch scope, `CommitGate`/`PushGate`,
   `BuildForBranch`, coverage/unreviewed), `session` (binds a host session to the worktree its work is in, so
   the Stop hook `hooks/pre-finish.sh` evaluates that worktree rather than the checkout the host launched in —

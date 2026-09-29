@@ -180,32 +180,6 @@ func TestVerdictForCounts(t *testing.T) {
 	}
 }
 
-func TestRestoreSnapshots(t *testing.T) {
-	dir := t.TempDir()
-	existing := filepath.Join(dir, "keep.txt")
-	if err := os.WriteFile(existing, []byte("current"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	created := filepath.Join(dir, "sub", "new.txt")
-	if err := os.MkdirAll(filepath.Dir(created), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(created, []byte("should be removed"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	restoreSnapshots(map[string]fileSnapshot{
-		existing: {existed: true, content: []byte("ORIGINAL")},
-		created:  {existed: false},
-	})
-	got, err := os.ReadFile(existing)
-	if err != nil || string(got) != "ORIGINAL" {
-		t.Fatalf("existing file not restored to original: %q, %v", got, err)
-	}
-	if _, err := os.Stat(created); !os.IsNotExist(err) {
-		t.Fatalf("a file absent in the snapshot must be removed, stat err=%v", err)
-	}
-}
-
 func TestMarkdownList(t *testing.T) {
 	if got := markdownList(nil, "EMPTY"); got != "EMPTY" {
 		t.Errorf("nil list should be the empty sentinel, got %q", got)
@@ -335,7 +309,7 @@ func TestCreateMkdirReviewsError(t *testing.T) {
 }
 
 // A write failure on the context pack triggers the rollback path: with no shard plan the pack
-// rollback is the default no-op closure, so this also exercises that closure and restoreSnapshots.
+// rollback is the default no-op closure, so this also exercises that closure and the rollback restore.
 func TestCreateWriteContextErrorRollsBack(t *testing.T) {
 	root := smallTaskRepo(t)
 	orig := writeFile
@@ -491,22 +465,5 @@ func TestCreateGitContextError(t *testing.T) {
 	root := smallTaskRepo(t)
 	if _, err := Create(root, smallTarget, Options{Base: "no-such-base-ref"}); err == nil {
 		t.Fatal("expected an error for an invalid base ref")
-	}
-}
-
-func TestClassForDisplay(t *testing.T) {
-	cases := []struct {
-		classification, severity, want string
-	}{
-		{"blocking", "high", "blocking"},
-		{"advisory", "", "advisory"},
-		{"follow-up", "", "follow-up"},
-		{"warning", "", "warning"},
-	}
-	for _, c := range cases {
-		got := classForDisplay(findings.Record{Classification: c.classification, Severity: c.severity})
-		if got != c.want {
-			t.Errorf("classForDisplay(%q,%q) = %q, want %q", c.classification, c.severity, got, c.want)
-		}
 	}
 }

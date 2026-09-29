@@ -88,7 +88,7 @@ func RenderEvidence(input EvidenceInput) string {
 	builder.WriteString(reviewList(epicReviews, "No epic review evidence discovered."))
 	builder.WriteString("\n\n")
 	builder.WriteString("### Recorded-Evidence Blocker Status\n\n")
-	builder.WriteString("_Blockers carried forward from recorded review evidence; findings this gate run raised are under `## Blocking Findings` above._\n\n")
+	builder.WriteString("_Blockers carried forward from recorded review evidence; findings this gate run raised are in its review log's `## Blocking Findings` section._\n\n")
 	builder.WriteString(blockerList(input.Blockers))
 	builder.WriteString("\n\n")
 	if input.CurrentReview != nil {

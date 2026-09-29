@@ -44,7 +44,7 @@ func TestRenderEvidenceIncludesRequiredSections(t *testing.T) {
 		// to the live gate's own findings, so a clear status can't be misread as the
 		// gate verdict (#135).
 		"### Recorded-Evidence Blocker Status",
-		"findings this gate run raised are under `## Blocking Findings` above.",
+		"findings this gate run raised are in its review log's `## Blocking Findings` section.",
 	} {
 		if !strings.Contains(markdown, required) {
 			t.Fatalf("rendered evidence missing %q:\n%s", required, markdown)
