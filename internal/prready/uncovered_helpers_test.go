@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/knowledge"
 	"github.com/dsifry/metareview/internal/reviewlog"
@@ -73,28 +72,6 @@ func TestKnowledgeMarkdown(t *testing.T) {
 	}
 	if strings.Contains(full, "No service inventory found.") || strings.Contains(full, "No Beads knowledge facts found.") {
 		t.Fatalf("populated knowledge markdown must not show the empty fallbacks:\n%s", full)
-	}
-}
-
-func TestClassForDisplay(t *testing.T) {
-	cases := []struct {
-		name   string
-		record findings.Record
-		want   string
-	}{
-		{name: "blocking", record: findings.Record{Classification: "blocking", Severity: "high"}, want: "blocking"},
-		{name: "spec-contract blocks regardless of severity", record: findings.Record{Classification: "spec-contract", Severity: "low"}, want: "blocking"},
-		{name: "advisory", record: findings.Record{Classification: "advisory", Severity: "low"}, want: "advisory"},
-		{name: "follow-up", record: findings.Record{Classification: "follow-up", Severity: "low"}, want: "follow-up"},
-		{name: "unknown class is a warning", record: findings.Record{Classification: "novel", Severity: "high"}, want: "warning"},
-		{name: "demoted low-severity blocking is a warning", record: findings.Record{Classification: "blocking", Severity: "low"}, want: "warning"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := classForDisplay(tc.record); got != tc.want {
-				t.Fatalf("classForDisplay = %q, want %q", got, tc.want)
-			}
-		})
 	}
 }
 

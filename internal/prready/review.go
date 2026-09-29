@@ -27,6 +27,7 @@ import (
 	"github.com/dsifry/metareview/internal/reviewlog"
 	"github.com/dsifry/metareview/internal/reviewmanifest"
 	"github.com/dsifry/metareview/internal/reviewstate"
+	"github.com/dsifry/metareview/internal/rollback"
 	"github.com/dsifry/metareview/internal/runchain"
 	"github.com/dsifry/metareview/internal/shardpack"
 	"github.com/dsifry/metareview/internal/state"
@@ -101,18 +102,13 @@ type runRecord struct {
 	ReusedFromRunID      string              `json:"reusedFromRunId,omitempty"`
 }
 
-type fileSnapshot struct {
-	existed bool
-	content []byte
-}
-
 var reviewerNames = []string{"pr-readiness-reviewer", "validation-reviewer", "security-reviewer", "code-quality-reviewer", "architecture-reviewer", "external-reviewer"}
 var runPRReadyReviewers = reviewers.RunPRReady
 
 // Collaborator seams. Each defaults to the real function so production is
 // unchanged; a test overrides one (with a t.Cleanup restore) to exercise a
 // cross-package error branch in Create that is otherwise unreachable through
-// realistic inputs. restoreSnapshots/snapshot deliberately keep os.* directly so
+// realistic inputs. Rollback (internal/rollback) keeps its own seams, never these, so
 // a mkdirAll/writeFile override in a Create-error test cannot corrupt rollback.
 var (
 	marshalJSON       = json.Marshal
@@ -350,10 +346,7 @@ func Create(root string, options Options) (Result, error) {
 	runsPath := filepath.Join(root, ".metareview", "runs.jsonl")
 	findingsPath := filepath.Join(root, ".metareview", "findings.jsonl")
 	findingsIndexPath := filepath.Join(root, "docs", "metareview", "FINDINGS.md")
-	snapshots := map[string]fileSnapshot{}
-	for _, path := range []string{contextPath, reviewPath, runsPath, findingsPath, findingsIndexPath} {
-		snapshots[path] = snapshot(path)
-	}
+	snapshots := rollback.GateOutputs(contextPath, reviewPath, runsPath, findingsPath, findingsIndexPath)
 
 	gateEffect := "advisory"
 	if report.Capabilities.Beads || report.Capabilities.Metaswarm {
@@ -577,7 +570,7 @@ func Create(root string, options Options) (Result, error) {
 		return writeFile(reviewPath, []byte(reviewMarkdown(runID, contextRel, options.PreviousRunID, gateEffect, verdict, reviewGit.ChangedFiles, reconciled.OpenFindings, prEvidence, joinSections(reviewmanifest.ShardedReviewMarkdown(manifest, aggregate), mutationContext.FreshnessSection), meta)), 0o644)
 	}()
 	if err != nil {
-		restoreSnapshots(snapshots)
+		snapshots.Restore()
 		removeEmptyDirs(root)
 		// The rollback error must not replace the error that caused the rollback.
 		if rollbackErr := packRollback(); rollbackErr != nil {
@@ -1444,7 +1437,7 @@ func reviewMarkdown(runID, contextRel, previousRun, gateEffect, verdict string, 
 	executionMode := "deterministic-local"
 	reuseHeader := ""
 	reviewerResults := "## Reviewer Results\n\n| Reviewer | Verdict | Blocking | Notes |\n| --- | --- | ---: | --- |\n" +
-		reviewerTable(records) + "\n\n" + findingsMarkdown(records) + "\n"
+		findings.ReviewerTable(reviewerNames, records) + "\n\n" + findings.ClassifiedMarkdown(records, runID) + "\n"
 	if meta.ReusedFromRunID != "" {
 		executionMode = "deterministic-local-reused"
 		reuseHeader = "Reused verdict from: " + markdown.InlineCode(meta.ReusedFromRunID) + "\n\n"
@@ -1525,91 +1518,6 @@ func knowledgeMarkdown(context knowledge.Context) string {
 	return service + "\n\nKnowledge facts:\n\n" + facts
 }
 
-func reviewerTable(records []findings.Record) string {
-	lines := make([]string, 0, len(reviewerNames))
-	for _, reviewer := range reviewerNames {
-		var blockers, nonBlockers []string
-		for _, record := range records {
-			if record.Reviewer != reviewer {
-				continue
-			}
-			counts := findings.CountByClass([]findings.Record{record})
-			if counts.Blocking > 0 {
-				blockers = append(blockers, record.Title)
-			} else {
-				nonBlockers = append(nonBlockers, record.Title)
-			}
-		}
-		verdict := "PASS"
-		note := "No blocking findings."
-		if len(blockers) > 0 {
-			verdict = "NEEDS_REVISION"
-			note = strings.Join(blockers, "; ")
-		} else if len(nonBlockers) > 0 {
-			verdict = "PASS_ADVISORY"
-			note = strings.Join(nonBlockers, "; ")
-		}
-		lines = append(lines, fmt.Sprintf("| %s | %s | %d | %s |", reviewer, verdict, len(blockers), note))
-	}
-	return strings.Join(lines, "\n")
-}
-
-func findingsMarkdown(records []findings.Record) string {
-	return classifiedFindingsMarkdown(records)
-}
-
-func classifiedFindingsMarkdown(records []findings.Record) string {
-	sections := []struct {
-		title string
-		label string
-	}{
-		{title: "## Blocking Findings", label: "blocking"},
-		{title: "## Advisory Findings", label: "advisory"},
-		{title: "## Follow-up Findings", label: "follow-up"},
-		{title: "## Warnings", label: "warning"},
-	}
-	var output []string
-	for _, section := range sections {
-		var items []string
-		for _, record := range records {
-			if classForDisplay(record) != section.label {
-				continue
-			}
-			items = append(items, "### "+record.ID+": "+record.Title+"\n\n"+
-				"- Reviewer: "+record.Reviewer+"\n"+
-				"- Severity: "+record.Severity+"\n"+
-				"- Classification: "+record.Classification+"\n"+
-				"- Finding: "+record.Finding+"\n"+
-				"- Expected: "+record.Expected+"\n"+
-				"- Found: "+record.Found+"\n"+
-				"- Recommendation: "+record.Recommendation+"\n")
-		}
-		body := "No findings in this class.\n"
-		if len(items) > 0 {
-			body = strings.Join(items, "\n")
-		}
-		output = append(output, section.title+"\n\n"+body)
-	}
-	return strings.Join(output, "\n\n")
-}
-
-func classForDisplay(record findings.Record) string {
-	counts := findings.CountByClass([]findings.Record{record})
-	// An if-chain rather than a tagless `switch {}`: Go's coverage tool emits no counter for a
-	// tagless-switch case expression, so its guards read as permanently uncovered and mutation testing
-	// can never exercise them. As plain `if` conditions they are both covered and mutation-killable.
-	if counts.Blocking > 0 {
-		return "blocking"
-	}
-	if counts.Advisory > 0 {
-		return "advisory"
-	}
-	if counts.FollowUp > 0 {
-		return "follow-up"
-	}
-	return "warning"
-}
-
 func runChainMarkdown(runID, verdict string, meta reviewMetadata) string {
 	if verdict != "ESCALATED" {
 		return ""
@@ -1623,25 +1531,6 @@ func runChainMarkdown(runID, verdict string, meta reviewMetadata) string {
 	builder.WriteString("\n## Unresolved Blocker Summary\n\n")
 	fmt.Fprintf(&builder, "- Blocking: %d\n- Advisory: %d\n- Follow-up: %d\n- Warnings: %d\n", meta.BlockingFindingCount, meta.AdvisoryFindingCount, meta.FollowUpFindingCount, meta.WarningFindingCount)
 	return builder.String()
-}
-
-func snapshot(path string) fileSnapshot {
-	bytes, err := os.ReadFile(path)
-	if err != nil {
-		return fileSnapshot{existed: false}
-	}
-	return fileSnapshot{existed: true, content: bytes}
-}
-
-func restoreSnapshots(snapshots map[string]fileSnapshot) {
-	for path, snapshot := range snapshots {
-		if snapshot.existed {
-			_ = os.MkdirAll(filepath.Dir(path), 0o755)
-			_ = os.WriteFile(path, snapshot.content, 0o644)
-			continue
-		}
-		_ = os.Remove(path)
-	}
 }
 
 func removeEmptyDirs(root string) {

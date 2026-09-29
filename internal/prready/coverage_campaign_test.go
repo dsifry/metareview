@@ -248,27 +248,6 @@ func TestRepositoryHealthMarkdownDefaultsEmptyTitle(t *testing.T) {
 	}
 }
 
-func TestRestoreSnapshotsWritesAndRemoves(t *testing.T) {
-	dir := t.TempDir()
-	existing := filepath.Join(dir, "nested", "existing.md")
-	created := filepath.Join(dir, "created.md")
-	// A file that "did not exist" before the run must be removed on restore.
-	if err := os.WriteFile(created, []byte("should be removed"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	restoreSnapshots(map[string]fileSnapshot{
-		existing: {existed: true, content: []byte("restored")},
-		created:  {existed: false},
-	})
-	body, err := os.ReadFile(existing)
-	if err != nil || string(body) != "restored" {
-		t.Fatalf("an existed snapshot must be rewritten: body=%q err=%v", body, err)
-	}
-	if _, err := os.Stat(created); !os.IsNotExist(err) {
-		t.Fatal("a not-existed snapshot must be removed")
-	}
-}
-
 func TestMarkdownList(t *testing.T) {
 	if got := markdownList(nil, "none"); got != "none" {
 		t.Fatalf("empty slice must render the empty fallback, got %q", got)

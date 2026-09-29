@@ -223,7 +223,30 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
 - **Durable, committed** under `docs/metareview/`: review logs (`reviews/`), context packs (`context/`),
   shard results (`shards/`), FSM export bundles (`fsm/`), findings render (`FINDINGS.md`). ⚠️ Context packs
   can leak an absolute `cwd` (issue #80) — do not commit a leaking context artifact; the review `.md` is
-  clean.
+  clean. A gate log's `## Reviewer Results` has a row for every reviewer a finding names (the fixed set, then
+  e.g. `adversarial-review-reviewer`), and a blocker carried in from the ledger is tagged `Carried forward
+  from: <run>` under `## Blocking Findings` (#143) — both rendered by `findings.ReviewerTable` /
+  `ClassifiedMarkdown`, shared by task-done, pr-ready and epic-ready.
+- **Gate rollback** (`internal/rollback`, #152): a failed task-done / pr-ready / epic-ready / learning run puts
+  back the files it touched — write-temp-then-rename with the file's own mode, never a truncating write; a
+  symlinked output keeps its link — and removes what it created, the `FINDINGS.md` render included. A concurrent
+  render removed in that window is re-derived from its writer's ledger at that writer's next render; a render
+  left behind would outlive the restored ledger, and the carry-over would keep its unknown lines forever.
+- **`FINDINGS.md` merges as a union (#181).** Two branches that each regenerate it (a new blocker, a new
+  override) conflict on a plain merge — both append to the end of the same lists — and a hand-resolved conflict
+  in a generated file can silently drop a line. `.gitattributes` marks it `merge=union` (git's built-in driver,
+  no per-clone config) for a local `git merge`/`rebase`/`cherry-pick`: both sides' lines are kept, no conflict
+  marker. The trade is deliberate: a union never drops a line, but it can keep one a side removed — a blocker
+  fixed on one branch next to a line the other branch added comes back — and it keeps both versions of a line
+  two branches edited (`[pending]` beside `[granted]`, or a hand-maintained section's line). `FINDINGS.md` is
+  display only — no gate reads it; they read the ledger and the review logs — so the residue is a stale line
+  shown, never a live one lost, and the next render in a checkout whose ledger knows the finding retires it
+  (`TestFindingsIndexUnionResurrectionRetiresAtTheNextInformedRender`); a line no ledger knows stays until it is
+  edited out by hand, the carry-over's standing limit. Pinned by
+  `TestFindingsIndexMergesWithoutConflictUnderTheRepositoryAttributes` (and the plain-merge conflict by
+  `TestFindingsIndexConflictsOnAPlainMerge`). GitHub's web merge is not documented to honor merge drivers: if a
+  PR shows a `FINDINGS.md` conflict there, merge `main` into the branch locally, where the union applies. An
+  adopting repository gets the same by adding the line to its own `.gitattributes`.
 - **Transient, local (git-ignored)** under `.metareview/`: `findings.jsonl`, `runs.jsonl` (review records),
   `shards/` (and `git-hooks/`, from before #173). A `mock: true` FSM run never satisfies a gate.
 - **The shared store is in git's common directory (#173).** `repo.StoreDir` = `<git rev-parse --git-common-dir>/
@@ -430,7 +453,7 @@ list below is illustrative, omitting e.g. `judge`, `gate`, `converge`, `export`)
   rejection buckets; see `internal/lensoutput`'s package doc and the conformance corpus in
   `tests/go/test-lens-conformance.sh`).
 - **Review state & logs:** `reviewlog` (parse/discover `.md` logs), `reviewstate`, `reviewmanifest`,
-  `findings`, `runchain` (lineage), `state`/`jsonl` (append/scan), `reviewprompt`.
+  `findings`, `runchain` (lineage), `state`/`jsonl` (append/scan), `reviewprompt`, `rollback` (gate-run restore).
 - **Gate & install:** `setup` (mode/prereqs + hook install), `status` (branch scope, `CommitGate`/`PushGate`,
   `BuildForBranch`, coverage/unreviewed), `session` (binds a host session to the worktree its work is in, so
   the Stop hook `hooks/pre-finish.sh` evaluates that worktree rather than the checkout the host launched in —

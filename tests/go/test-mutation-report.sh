@@ -83,7 +83,8 @@ grep -q "mutation-gremlins" "$repo/$review"
 review="$(run 1 review task-done task-1 --base "$base" --mutation-report "$TMP/timeouts.json")"
 grep -q "Mutation run did not decide every mutant" "$repo/$review"
 grep -q "2 mutant(s) undecided" "$repo/$review"
-test "$(grep -c "did not decide every mutant" "$repo/$review")" -eq 1
+# One finding heading; the title's other occurrence is the mutation reviewer's row in Reviewer Results (#143).
+test "$(grep -c "^### mrvf-.*: Mutation run did not decide every mutant" "$repo/$review")" -eq 1
 
 # 3. The cross-language schema is read without being told which engine wrote it.
 review="$(run 1 review task-done task-1 --base "$base" --mutation-report "$TMP/stryker.json")"

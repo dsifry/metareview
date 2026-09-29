@@ -260,6 +260,7 @@ func Aggregate(manifest Manifest) AggregateResult {
 }
 
 func Markdown(manifest Manifest, aggregate AggregateResult) string {
+	// Every heading is followed by a blank line (markdownlint MD022, #155).
 	lines := []string{
 		"## Review Manifest",
 		"",
@@ -268,26 +269,27 @@ func Markdown(manifest Manifest, aggregate AggregateResult) string {
 		"- Runtime assessment: " + firstNonEmpty(manifest.RuntimeAssessment, "static-only; runtime not assessed"),
 		"",
 		"### Source Paths",
+		"",
 	}
 	lines = append(lines, markdownList(manifest.SourcePaths, "No source paths recorded.")...)
 	if len(manifest.LocalPaths) > 0 {
-		lines = append(lines, "", "### Local changes (not sharded)")
+		lines = append(lines, "", "### Local changes (not sharded)", "")
 		lines = append(lines, markdownList(manifest.LocalPaths, "None.")...)
 	}
 	if len(manifest.PathDispositions) > 0 {
-		lines = append(lines, "", "### Path Dispositions")
+		lines = append(lines, "", "### Path Dispositions", "")
 		for _, disposition := range manifest.PathDispositions {
 			lines = append(lines, "- "+disposition.Path+": "+disposition.Disposition+" ("+disposition.Rationale+")")
 		}
 	}
 	if len(manifest.ShardPlan.Shards) > 0 {
-		lines = append(lines, "", "### Shards")
+		lines = append(lines, "", "### Shards", "")
 		for _, shard := range manifest.ShardPlan.Shards {
 			lines = append(lines, "- shard-"+shard.ID+": "+strings.Join(contextprofile.ShardPaths(shard), ", "))
 		}
 	}
 	if len(manifest.ShardResults) > 0 || manifest.CrossShardResult != nil {
-		lines = append(lines, "", "### Shard Results")
+		lines = append(lines, "", "### Shard Results", "")
 		for _, result := range manifest.ShardResults {
 			lines = append(lines, "- "+resultLine(result))
 		}
@@ -296,12 +298,12 @@ func Markdown(manifest Manifest, aggregate AggregateResult) string {
 		}
 	}
 	if len(aggregate.Ignored) > 0 {
-		lines = append(lines, "", "### Ignored Result Files")
+		lines = append(lines, "", "### Ignored Result Files", "")
 		for _, ignored := range aggregate.Ignored {
 			lines = append(lines, "- "+ingestedCode(ignored.Path)+": "+ingested(ignored.Reason))
 		}
 	}
-	lines = append(lines, "", "### Manifest Blockers")
+	lines = append(lines, "", "### Manifest Blockers", "")
 	lines = append(lines, markdownList(aggregate.Blockers, "No manifest blockers.")...)
 	return strings.Join(lines, "\n")
 }

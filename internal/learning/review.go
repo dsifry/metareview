@@ -9,6 +9,7 @@ import (
 	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/learnsource"
 	"github.com/dsifry/metareview/internal/markdown"
+	"github.com/dsifry/metareview/internal/rollback"
 	"github.com/dsifry/metareview/internal/sessionhistory"
 	"github.com/dsifry/metareview/internal/state"
 )
@@ -52,12 +53,6 @@ type learningRunRecord struct {
 	SourceRefs         []string `json:"sourceRefs"`
 }
 
-type fileSnapshot struct {
-	existed bool
-	isDir   bool
-	content []byte
-}
-
 // readFindings is a seam over the findings-ledger read. Its error branch is otherwise unreachable:
 // learnsource.Collect (via reviewlog) reads the same .metareview/findings.jsonl earlier in the run,
 // so a genuinely broken ledger always fails there first.
@@ -98,10 +93,7 @@ func RunPostMerge(root string, options ReviewOptions) (ReviewResult, error) {
 	calibrationRel := ".metareview/calibration.jsonl"
 	calibrationPath := filepath.Join(root, filepath.FromSlash(calibrationRel))
 	gitignorePath := filepath.Join(root, ".gitignore")
-	snapshots := map[string]fileSnapshot{}
-	for _, path := range []string{acceptedPath, discardPath, runsPath, knowledgePath, calibrationPath, gitignorePath} {
-		snapshots[path] = snapshot(path)
-	}
+	snapshots := rollback.Take(acceptedPath, discardPath, runsPath, knowledgePath, calibrationPath, gitignorePath)
 
 	result := ReviewResult{RunID: runID, AcceptedRel: acceptedRel, DiscardRel: discardRel}
 	err = func() error {
@@ -152,7 +144,7 @@ func RunPostMerge(root string, options ReviewOptions) (ReviewResult, error) {
 		return state.AppendJSONL(runsPath, record)
 	}()
 	if err != nil {
-		restoreSnapshots(snapshots)
+		snapshots.Restore()
 		removeEmptyLearningDirs(root)
 		return ReviewResult{}, err
 	}
@@ -258,36 +250,6 @@ func availability(available bool, reason string) string {
 		return "available"
 	}
 	return "unavailable (" + firstNonEmpty(reason, "unknown") + ")"
-}
-
-func snapshot(path string) fileSnapshot {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fileSnapshot{existed: false}
-	}
-	if info.IsDir() {
-		return fileSnapshot{existed: true, isDir: true}
-	}
-	bytes, err := os.ReadFile(path)
-	if err != nil {
-		return fileSnapshot{existed: false}
-	}
-	return fileSnapshot{existed: true, content: bytes}
-}
-
-func restoreSnapshots(snapshots map[string]fileSnapshot) {
-	for path, snapshot := range snapshots {
-		if snapshot.existed {
-			if snapshot.isDir {
-				_ = os.MkdirAll(path, 0o755)
-				continue
-			}
-			_ = os.MkdirAll(filepath.Dir(path), 0o755)
-			_ = os.WriteFile(path, snapshot.content, 0o644)
-			continue
-		}
-		_ = os.Remove(path)
-	}
 }
 
 func removeEmptyLearningDirs(root string) {

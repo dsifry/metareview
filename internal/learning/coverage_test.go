@@ -215,49 +215,6 @@ func TestAcceptedMarkdownRendersAllSections(t *testing.T) {
 	}
 }
 
-func TestSnapshotBranches(t *testing.T) {
-	dir := t.TempDir()
-	if s := snapshot(filepath.Join(dir, "missing")); s.existed {
-		t.Fatalf("a missing path must snapshot as not existing")
-	}
-	if s := snapshot(dir); !s.existed || !s.isDir {
-		t.Fatalf("a directory must snapshot as an existing dir")
-	}
-	f := filepath.Join(dir, "f.txt")
-	if err := os.WriteFile(f, []byte("body"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if s := snapshot(f); !s.existed || s.isDir || string(s.content) != "body" {
-		t.Fatalf("a file must snapshot its content")
-	}
-}
-
-func TestRestoreSnapshots(t *testing.T) {
-	dir := t.TempDir()
-	toRemove := filepath.Join(dir, "remove.txt")
-	if err := os.WriteFile(toRemove, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	dirToRecreate := filepath.Join(dir, "made", "dir")
-	fileToRewrite := filepath.Join(dir, "nested", "file.txt")
-
-	restoreSnapshots(map[string]fileSnapshot{
-		toRemove:      {existed: false},             // was absent -> remove it
-		dirToRecreate: {existed: true, isDir: true}, // restore a directory
-		fileToRewrite: {existed: true, content: []byte("restored")},
-	})
-
-	if _, err := os.Stat(toRemove); !os.IsNotExist(err) {
-		t.Fatalf("an absent-in-snapshot path must be removed")
-	}
-	if info, err := os.Stat(dirToRecreate); err != nil || !info.IsDir() {
-		t.Fatalf("a dir snapshot must be recreated as a dir")
-	}
-	if body, err := os.ReadFile(fileToRewrite); err != nil || string(body) != "restored" {
-		t.Fatalf("a file snapshot must be rewritten with its content")
-	}
-}
-
 func TestRemoveEmptyLearningDirs(t *testing.T) {
 	root := t.TempDir()
 	learningDir := filepath.Join(root, "docs", "metareview", "learning")
@@ -324,20 +281,6 @@ func TestGitSectionsNonGitText(t *testing.T) {
 	}
 	if secs := gitSections("   "); secs != nil {
 		t.Fatalf("whitespace-only diff should be nil, got %v", secs)
-	}
-}
-
-func TestSnapshotReadError(t *testing.T) {
-	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
-		t.Skip("unreadable-file case needs a non-root POSIX host")
-	}
-	f := filepath.Join(t.TempDir(), "secret")
-	if err := os.WriteFile(f, []byte("x"), 0o000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(f, 0o644) })
-	if s := snapshot(f); s.existed {
-		t.Fatalf("an unreadable file must snapshot as not existing (read failed)")
 	}
 }
 
