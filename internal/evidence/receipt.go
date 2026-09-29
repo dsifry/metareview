@@ -68,11 +68,9 @@ var (
 	// regression); "fail" as a verdict — upper case, or followed by a line end, punctuation or a digit ("Result: Fail",
 	// "status":"fail", "# fail 1") — counts. A clause reporting that nothing failed is neutralized first (zeroFailures).
 	failurePatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\b(exit(ed)?|exit[ _-]?code|exit[ _-]?status|return[ _-]?code|exited with( code| status)?|exit (code|status) (was|is))[ \t]*[:=]?[ \t]*-?[1-9][0-9]*\b|\brc[ \t]*[:=][ \t]*-?[1-9]`),
+		regexp.MustCompile(`(?i)\b(exit(ed)?|exit[ _-]?code|exit[ _-]?status|return[ _-]?code|exited with( code| status)?|exit (code|status) (was|is))\s*[:=]?\s*-?[1-9][0-9]*\b|\brc[ \t]*[:=][ \t]*-?[1-9]`),
 		regexp.MustCompile(`\bFAIL(URES?)?\b`),                                                                                              // FAIL, BUILD FAILURE, FAILURES! (upper case)
-		regexp.MustCompile(`(?m)(^|[^/.\w-])[Ff]ail\b[ \t]*([^ \ta-zA-Z\r\n(/.-]|\.([^\w]|$)|\r?$)`),                                        // a "fail" verdict, not a sentence
-		regexp.MustCompile(`(?m)(^|[^/.\w-])[Ff]ail[ \t]*\r?$`),                                                                             // "fail" ending a line
-		regexp.MustCompile(`(?i)\b[1-9][0-9]*[ \t]+(\w+[ \t]+)?fails?\b`),                                                                   // a counted "fail": "3 tests fail and 9 pass", "1 test fails"
+		regexp.MustCompile(`(?im)(^|[^/.\w-])fail($|[^-.\w]|-($|\W)|\.($|\W))`),                                                             // "fail" in any case — not a path segment (TestX/fail), file (fail.test.ts) or compound (Fail-safe); prose is neutralized first (proseFail)
 		regexp.MustCompile(`(?i)\bfailed\b`),                                                                                                // any form: "Failed: 1", "Command failed.", "go vet failed"
 		regexp.MustCompile(`(?i)\b(failures?|errors?)[ \t]*[:=][ \t]*[1-9]`),                                                                // junit/maven "Failures: 1", "Errors: 2"
 		regexp.MustCompile(`(?i)\b[1-9][0-9]*[ \t]+(\w+[ \t]+)?(failing|failures?)\b`),                                                      // mocha "1 failing", "2 tests failing", "1 failure"
@@ -98,7 +96,14 @@ var (
 	//     "# fail 0", "Errors: 0" — never "Error: 0 is not a valid port". A following "key=" is kept (${1}), so
 	//     "failed=0 errors=3" still reads the errors.
 	zeroClause = regexp.MustCompile(`(?im)(^|[,;(|])[ \t]*(0|no|none)([ \t]+of([ \t]+the)?([ \t]+[0-9]+)?|/[0-9]+)?[ \t]+((tests?|checks?|specs?|examples?|cases?|suites?)[ \t]+)?(fail|failed|failing|failures?|errors?)([ \t]+in[ \t]+[0-9.]+[mµn]?s|[ \t]+out of[ \t]+[0-9]+)?[ \t]*([,;.)(|!]|\r?$)`)
-	zeroLabel  = regexp.MustCompile(`(?im)\b(?:failed|failures?|errors?|fail)[ \t]*[:=]?[ \t]*0(?:[ \t]*(?:[,;)|]|\r?$)|[ \t]+(\w+=))`)
+	zeroLabel  = regexp.MustCompile(`(?m)\b(?:(?i:failed|failures?|errors)|fail)[ \t]*[:=]?[ \t]*0(?:[ \t]*(?:[,;)|]|\r?$)|[ \t]+(\w+=))`)
+	// proseFail is the one exemption the base reader lacked (mr-r3y): "fail" in a prose sentence — after a modal, as in a
+	// test's name or a hypothetical ("should fail (3 ms)", "must fail"), or before a preposition ("the new tests fail
+	// against origin/main", "fail on the old code"). It is neutralized after a counted "fail" ("2 tests fail on
+	// windows") has already been read as a failure.
+	proseFail = regexp.MustCompile(`(?i)\b(should|shall|will|would|must|can|could|may|might|to|does|did|do|doesn't|don't|won't|cannot)[ \t]+fail\b|\bfail([ \t]+(against|on|before|without|when|if|under|until|unless)\b)`)
+	// countFail is a counted "fail" ("3 tests fail and 9 pass", "1 test fails"): read before proseFail neutralizes.
+	countFail = regexp.MustCompile(`(?i)\b[1-9][0-9]*[ \t]+(\w+[ \t]+)?fails?\b`)
 	// ansiEscape is a terminal colour/control sequence: removed first, since "\x1b[31mFAIL" has no word boundary.
 	ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 )
@@ -213,6 +218,10 @@ func hasSuccessSignal(text string) bool {
 func hasFailureSignal(text string) bool {
 	text = zeroClause.ReplaceAllString(text, "${1} ")
 	text = zeroLabel.ReplaceAllString(text, " ${1}")
+	if countFail.MatchString(text) {
+		return true
+	}
+	text = proseFail.ReplaceAllString(text, " ")
 	for _, pattern := range failurePatterns {
 		if pattern.MatchString(text) {
 			return true

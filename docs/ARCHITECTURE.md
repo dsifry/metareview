@@ -335,8 +335,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   and, pytest `ERROR` lines, `Traceback`, `TypeError:`-style exception lines, `panicked at`, `Segmentation fault`,
   `Killed`, TAP `not ok` (indented too), make `Error N`, `error TS…`/`error CS…`/`error[E…]`, `npm ERR!`, go
   `file.go:L:C:` diagnostics, golangci-lint `N issues:`, `error:`, and a nonzero or negative exit in any common shape.
-  Exempt (mr-r3y): only an uncounted "fail" continuing a prose sentence ("the new tests fail against origin/main") or
-  naming a test or path ("should fail (3 ms)", `TestX/fail`, `fail.test.ts`) — a counted one ("3 tests fail") counts — a clause-initial zero report ("…, 0 failed", "no tests failed", bun "0 fail",
+  "fail" in any case counts as the base reader's `(?i)\bFAIL\b` did ("Status: Fail because timeout", "lint: fail (3
+  warnings)", "3 tests fail"), except a path segment, file name or compound (`TestX/fail`, `fail.test.ts`, Fail-safe).
+  Exempt (mr-r3y): "fail" in prose — after a modal ("should fail (3 ms)") or before against/on/before/without/when/if/
+  under/until/unless ("the new tests fail against origin/main"), unless counted ("2 tests fail on windows") — a clause-initial zero report ("…, 0 failed", "no tests failed", bun "0 fail",
   ctest "0 tests failed out of 5") and a zero label that ends there ("Failed: 0, Passed: 5", "# fail 0",
   "failed=0 skipped=0"). A zero that does not start a clause ("shard 0 failed", "Passed: 0 Failed: 3") is a failure,
   and so is prose such as "TestX failed before the fix" — prefer receipts.
