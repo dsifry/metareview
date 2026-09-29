@@ -492,7 +492,7 @@ func TestValidateFromRunDiff(t *testing.T) {
 	}
 	writeAudit("loop-clean", initEvent("b", "h0", "sdlc-loop-clean"), needsInput("discover", "h0"), transitionAt("", "h0"),
 		needsInput("fix", "h0"), transitionAt("", "h1"), needsInput("recheck", "h1"), transitionAt("", "h1"),
-		needsInput("discover", "h2"), nodeOutput("discover"), transitionAt("", "h2"), transitionAt(fsmrun.OutcomeClean, "h2"))
+		needsInput("discover", "h2"), nodeOutput("discover"), transitionAt("", "h2"), needsInput("adjudicate", "h2"), transitionAt(fsmrun.OutcomeClean, "h2"))
 	writeWorkflow("loop-clean")
 	if err := validateFromRunDiff(runs, "loop-clean", "b", "h2", ""); err != nil {
 		t.Errorf("a clean review at the final head must back it: %v", err)
@@ -528,6 +528,20 @@ func TestValidateFromRunDiff(t *testing.T) {
 	writeWorkflow("moved-after")
 	if err := validateFromRunDiff(runs, "moved-after", "b", "h7", ""); err == nil {
 		t.Error("a head that moved between the last review and the ending is not accepted")
+	}
+	// A driver may record a review node's output without asking for it first (at an unchanged head): the review is
+	// taken at the head the run last recorded — real sdlc-loop-clean runs do this.
+	writeAudit("output-only", initEvent("b", "h0", "sdlc-loop-clean"), needsInput("fix", "h0"), transitionAt("", "h11"),
+		nodeOutput("recheck"), transitionAt("", "h11"), nodeOutput("discover"), transitionAt(fsmrun.OutcomeClean, "h11"))
+	writeWorkflow("output-only")
+	if err := validateFromRunDiff(runs, "output-only", "b", "h11", ""); err != nil {
+		t.Errorf("a review recorded without needs_input at the final head backs it: %v", err)
+	}
+	// The review's own head decides even when the ending transition sits at the wanted head: reviewed h12, ended h13.
+	writeAudit("review-elsewhere", initEvent("b", "h0", "review-loop"), needsInput("discover", "h12"), transitionAt(fsmrun.OutcomeClean, "h13"))
+	writeWorkflow("review-elsewhere")
+	if err := validateFromRunDiff(runs, "review-elsewhere", "b", "h13", ""); err == nil {
+		t.Error("a final head the last review was not at is not accepted")
 	}
 	writeAudit("no-workflow", initEvent("b", "h0", "review-loop"), needsInput("discover", "h9"), transitionAt(fsmrun.OutcomeClean, "h9"))
 	if err := validateFromRunDiff(runs, "no-workflow", "b", "h9", ""); err == nil {

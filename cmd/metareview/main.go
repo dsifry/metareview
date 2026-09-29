@@ -25,6 +25,7 @@ import (
 	"github.com/dsifry/metareview/internal/epicready"
 	"github.com/dsifry/metareview/internal/evidence"
 	"github.com/dsifry/metareview/internal/findings"
+	"github.com/dsifry/metareview/internal/fsm/machine"
 	"github.com/dsifry/metareview/internal/gitcontext"
 	"github.com/dsifry/metareview/internal/learning"
 	"github.com/dsifry/metareview/internal/mutation"
@@ -916,13 +917,14 @@ func validateFromRunDiff(runsDir, runID, wantBase, wantHead, wantWorkflow string
 	return errors.New("its final outcome is not a passing review (clean|reviewed|fixed)")
 }
 
-// lensesReviewedFinalHead reports whether the run's lenses reviewed head itself: the last time a review-lenses node was
-// asked for its output (needs_input) it was at head, and no transition since moved away from it. The head a transition
+// lensesReviewedFinalHead reports whether the run's lenses reviewed head itself: the last review-lenses node event — its
+// needs_input, or a node_output a driver recorded without asking (which carries no head, so it is taken at the head the
+// run last recorded) — was at head, and no transition since moved away from it. The head a transition
 // stamps is only git's HEAD when it fired — a commit made after the last review (discover at H1, commit H2, adjudicate
 // to done) would otherwise launder unreviewed code into a marker for H2. The node kinds come from the workflow the run
 // stored at init; without it nothing shows which node reviewed what, so the final head is not accepted (fail closed).
 func lensesReviewedFinalHead(runDir string, events []fsmrun.Event, head string) bool {
-	raw, err := os.ReadFile(filepath.Join(runDir, "workflow.yaml")) // #nosec G304 -- runDir is the validated run's own directory
+	raw, err := os.ReadFile(filepath.Join(runDir, machine.SidecarWorkflow)) // #nosec G304 -- runDir is the validated run's own directory
 	if err != nil {
 		return false
 	}
@@ -934,19 +936,23 @@ func lensesReviewedFinalHead(runDir string, events []fsmrun.Event, head string) 
 	if yaml.Unmarshal(raw, &wf) != nil {
 		return false
 	}
-	last := -1
+	// The run's head as its events recorded it (needs_input, transition and tree events carry one); an unreadable
+	// payload leaves it empty, which matches nothing: fail closed.
+	last, current, reviewed := -1, "", ""
 	for i, ev := range events {
-		if ev.Type == fsmrun.TypeNeedsInput && wf.Nodes[ev.Node].Kind == "review-lenses" {
-			last = i
+		var h struct {
+			Head string `json:"head"`
+		}
+		switch ev.Type {
+		case fsmrun.TypeNeedsInput, fsmrun.TypeTransition, fsmrun.TypeTree:
+			_ = json.Unmarshal(ev.Data, &h)
+			current = h.Head
+		}
+		if (ev.Type == fsmrun.TypeNeedsInput || ev.Type == fsmrun.TypeNodeOutput) && wf.Nodes[ev.Node].Kind == "review-lenses" {
+			last, reviewed = i, current
 		}
 	}
-	if last < 0 {
-		return false
-	}
-	// An unreadable payload leaves the head empty, which matches nothing: fail closed.
-	var ni fsmrun.NeedsInputData
-	_ = json.Unmarshal(events[last].Data, &ni)
-	if ni.Head != head {
+	if last < 0 || reviewed != head {
 		return false
 	}
 	for _, ev := range events[last+1:] {
