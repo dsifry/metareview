@@ -337,12 +337,15 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   `file.go:L:C:` diagnostics, golangci-lint `N issues:`, `error:`, and a nonzero or negative exit in any common shape.
   "fail" in any case counts as the base reader's `(?i)\bFAIL\b` did ("Status: Fail because timeout", "lint: fail (3
   warnings)", "3 tests fail"), except a path segment, file name or compound (`TestX/fail`, `fail.test.ts`, Fail-safe).
-  Exempt (mr-r3y): a lower-case "fail" in prose — after a hypothetical or negated modal ("should fail (3 ms)", "doesn't
-  fail") or after a subject word and before against/without/before ("the new tests fail against origin/main") —
-  never upper or title case, never "did/does fail", never after ":"/"=", and never when counted ("2 tests fail") — a clause-initial zero report ("…, 0 failed", "no tests failed", bun "0 fail",
-  ctest "0 tests failed out of 5") and a zero label that ends there ("Failed: 0, Passed: 5", "# fail 0",
-  "failed=0 skipped=0"). A zero that does not start a clause ("shard 0 failed", "Passed: 0 Failed: 3") is a failure,
-  and so is prose such as "TestX failed before the fix" — prefer receipts.
+  Exempt (mr-r3y), and nothing else:
+  (1) a lower-case "fail" in prose — after a hypothetical or negated modal ("should fail (3 ms)", "doesn't fail",
+  "expected to fail") or after a subject word and before against/without ("the new tests fail against origin/main");
+  never upper or title case, never "did/does/continues to fail", never after ":"/"=", never when counted ("2 tests
+  fail");
+  (2) a clause-initial zero report ("…, 0 failed", "no tests failed", bun "0 fail", ctest "0 tests failed out of 5");
+  (3) a zero label that ends there ("Failed: 0, Passed: 5", "# fail 0", "failed=0 skipped=0").
+  A zero that does not start a clause ("shard 0 failed", "Passed: 0 Failed: 3") is a failure, and so is prose such
+  as "TestX failed before the fix" — prefer receipts. Tool shapes neither reader recognizes are tracked in mr-b08.
 - **Sharded review** (exclude-filtered diff > 120 KB): the gate writes prompt packs under
   `.metareview/shards/…/plan.json`; review one subagent per shard + a cross-shard pack, write results, re-run
   with `--previous-run`. Editing a file invalidates only its own shard.

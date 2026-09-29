@@ -63,10 +63,11 @@ var (
 		regexp.MustCompile(`(?i)\b(npm run build|build|tsc --noEmit|typecheck|coverage).*\b(pass|passed|ok|success|exited 0)\b`),
 		regexp.MustCompile(`(?i)\bexited 0\b`),
 	}
-	// failurePatterns read a failure fail-closed: any "failed", and the shapes tools print, count. The one exemption is
-	// the word "fail" continuing a prose sentence (mr-r3y: "the new tests fail against origin/main" means they CATCH the
-	// regression); "fail" as a verdict — upper case, or followed by a line end, punctuation or a digit ("Result: Fail",
-	// "status":"fail", "# fail 1") — counts. A clause reporting that nothing failed is neutralized first (zeroFailures).
+	// failurePatterns read a failure fail-closed: any "fail"/"failed" (as the base reader's (?i)\bFAIL\b did), and the
+	// shapes tools print, count. hasFailureSignal first strips ANSI escapes and neutralizes zero reports (zeroClause,
+	// zeroLabel); then a counted "fail" (countFail) counts; then "did/does fail" becomes "failed" (reportedFail); and only
+	// then is prose "fail" neutralized (proseFail, mr-r3y) — that order is what keeps the exemption from hiding a count
+	// or a report.
 	failurePatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\b(exit(ed)?|exit[ _-]?code|exit[ _-]?status|return[ _-]?code|exited with( code| status)?|exit (code|status) (was|is))\s*[:=]?\s*-?[1-9][0-9]*\b|\brc[ \t]*[:=][ \t]*-?[1-9]`),
 		regexp.MustCompile(`\bFAIL(URES?)?\b`),                                                                                              // FAIL, BUILD FAILURE, FAILURES! (upper case)
@@ -99,11 +100,12 @@ var (
 	zeroLabel  = regexp.MustCompile(`(?m)\b(?:(?i:failed|failures?|errors)[ \t]*[:=]|fail[ \t]*[:=]?)[ \t]*0(?:[ \t]*(?:[,;)|]|\r?$)|[ \t]+(\w+=))`)
 	// proseFail is the one exemption the base reader lacked (mr-r3y): a lower-case "fail" in a prose sentence — after a
 	// hypothetical or negated modal, as in a test's name ("should fail (3 ms)", "must fail", "doesn't fail"), or after a
-	// subject word and before against/without/before ("the new tests fail against origin/main", "fail without the fix").
+	// subject word and before against/without ("the new tests fail against origin/main", "fail without the fix"). Not
+	// "to fail" ("continues to fail" reports a failure; only "expected to fail" is hypothetical), nor "fail before".
 	// Never "did/does fail" (a report, rewritten to "failed" first),
 	// never upper or title case (a verdict), never after ":" or "=" ("Status: fail on windows"). It is neutralized after
 	// a counted "fail" ("2 tests fail on windows") has already been read as a failure.
-	proseFail = regexp.MustCompile(`\b(should|shall|will|would|must|can|could|may|might|to|doesn't|don't|didn't|won't|cannot|never)[ \t]+fail\b|(\w[ \t]+)fail[ \t]+(against|without|before)\b`)
+	proseFail = regexp.MustCompile(`\b(should|shall|will|would|must|can|could|may|might|expected to|doesn't|don't|didn't|won't|cannot|never)[ \t]+fail\b|(\w[ \t]+)fail[ \t]+(against|without)\b`)
 	// reportedFail is "did/does/do fail": a report that something failed, never prose to exempt.
 	reportedFail = regexp.MustCompile(`(?i)\b(did|does|do)[ \t]+fail\b`)
 	// countFail is a counted "fail" ("3 tests fail and 9 pass", "1 test fails"): read before proseFail neutralizes.
