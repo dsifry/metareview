@@ -1365,14 +1365,17 @@ func handleOverride(args []string) {
 			by = defaultActor()
 		}
 		now := time.Now().UTC().Format(time.RFC3339)
+		// An abandoned FSM run is closed through the same flow (#179): its ID takes a closure row when nothing else
+		// knows it.
+		subject, _ := status.RunClosureSubject(root, id, now)
 		if args[0] == "request" {
 			exitOnErr(findings.RequestOverride(root, id, findings.OverrideRequest{
-				By: by, Reason: reason, Escalation: escalation, Now: now,
+				By: by, Reason: reason, Escalation: escalation, Now: now, Subject: subject,
 			}))
 			_, _ = fmt.Fprintf(stdout, "%s: override requested by %s (still blocking until granted)\n", id, by)
 			return
 		}
-		exitOnErr(findings.GrantOverride(root, id, findings.OverrideGrant{By: by, Reason: reason, Now: now}))
+		exitOnErr(findings.GrantOverride(root, id, findings.OverrideGrant{By: by, Reason: reason, Now: now, Subject: subject}))
 		_, _ = fmt.Fprintf(stdout, "%s: override granted by %s\n", id, by)
 	default:
 		_, _ = fmt.Fprintln(stderr, "Usage: metareview override request|grant|list")

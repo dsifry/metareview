@@ -606,3 +606,50 @@ func TestRequestOverrideAcceptsAFixedFindingWithAnEscalationReference(t *testing
 		t.Fatal("a fixed finding without an escalation reference must stay refused")
 	}
 }
+
+// #179: an ID nothing knows takes the subject row the caller supplies — an abandoned FSM run's closure — and only when
+// the subject names that ID; the row then goes through the ordinary two-phase flow.
+func TestAnOverrideTakesItsSubjectOnlyForTheIDItNames(t *testing.T) {
+	root := t.TempDir()
+	subject := AbandonedRunRecord("mrv-run-1", "(t @ fix)", "feat", "abc", "t0")
+	request := OverrideRequest{By: "claude-agent", Reason: "a run nobody will finish", Now: "t1", Subject: &subject}
+	if err := RequestOverride(root, "mrv-run-2", request); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("a subject for another ID must not be taken: %v", err)
+	}
+	request.Subject = nil
+	if err := RequestOverride(root, "mrv-run-1", request); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("no subject, no row: %v", err)
+	}
+	request.Subject = &subject
+	if err := RequestOverride(root, "mrv-run-1", request); err != nil {
+		t.Fatal(err)
+	}
+	got := loadOne(t, root)
+	if got.ID != "mrv-run-1" || got.Status != StatusOverridePending || got.Scope != "fsm-run" || got.Branch != "feat" ||
+		got.GitHead != "abc" || got.Title != "Abandoned FSM run (t @ fix)" || got.CreatedAt != "t0" || IsBlockingClass(got) || !IsRunClosure(got) {
+		t.Fatalf("got %+v", got)
+	}
+	if err := GrantOverride(root, "mrv-run-1", OverrideGrant{By: "claude-agent", Reason: "self-granted exception", Now: "t2", Subject: &subject}); err == nil {
+		t.Fatal("the requester cannot grant")
+	}
+	if err := GrantOverride(root, "mrv-run-1", OverrideGrant{By: "maintainer", Reason: "accepted exception here", Now: "t2", Subject: &subject}); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadOne(t, root); got.Status != StatusOverridden || got.OverrideGrantedBy != "maintainer" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestIsRunClosure(t *testing.T) {
+	row := AbandonedRunRecord("mrv-run-1", "x", "", "", "t")
+	if !IsRunClosure(row) {
+		t.Fatal("a closure row")
+	}
+	row.ID = "mrv-run-2"
+	if IsRunClosure(row) {
+		t.Fatal("a row whose ID is not the run its fingerprint names is not a closure")
+	}
+	if IsRunClosure(openBlocker("mrvf-1")) {
+		t.Fatal("a finding is not a closure")
+	}
+}

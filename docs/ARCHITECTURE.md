@@ -229,7 +229,7 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   are in scope unless git shows their head belongs nowhere here: out of the range, not one of the current branch's
   past reflog heads, and unreachable from HEAD (`merge-base --is-ancestor` exit 1) or pruned — so an upgrade never
   silently clears one, but a pre-#177 run abandoned on main now blocks every branch forked after it until its
-  directory is deleted. `scope.Load` makes a fixed number of git calls however many runs there are (AC-4.9); only
+  directory is deleted or it is closed (#179, below). `scope.Load` makes a fixed number of git calls however many runs there are (AC-4.9); only
   legacy runs ask more, up to two calls per distinct head. **Known trade-offs:** a deleted branch name recreated for
   unrelated work inherits the old name's runs (the name leg), and after a rename, recreating the old name hands the
   runs recorded under it to the new branch, where they still block; `git checkout -b new` after a rewrite leaves the run
@@ -329,7 +329,14 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   with `--previous-run`. Editing a file invalidates only its own shard.
 - **Overrides** (`override request` / `grant`): requesting does NOT clear the gate; granting must come from
   **outside** the workflow (a human/authority) — the requester cannot grant. `--by` is audit metadata, not
-  authentication. An override is never a fix (`fixedInRunId` stays empty). An ID with no ledger row is looked up in the
+  authentication. An override is never a fix (`fixedInRunId` stays empty). **Closing an abandoned FSM run (#179):**
+  `override request|grant <run-id>` on a run of the store left in a non-terminal state files a closure row
+  (`findings.AbandonedRunRecord`: fingerprint `fsm:abandoned-run:<id>`, the run's own branch and init head, advisory —
+  bookkeeping no review gate counts). A request alone leaves the run blocking `status` (it names who asked); once
+  granted by another actor, `status` drops it for every branch and `--all` lists it with Scope `closed`, actor and
+  reason, and the closure renders under Process Overrides. `fsm record stopped` stays an annotation that never removes
+  a run. The ledger is per checkout, so a closure granted in one worktree does not close the run in another. An ID with
+  no ledger row is looked up in the
   committed review logs (#188): every log listing it under `## Blocking Findings` supplies it **and all its other
   blockers** (pr-ready clears a log once every ID the ledger knows is resolved, so importing one alone would let its
   grant retire the rest). The scan runs on every override, not only for an unknown ID — a finding imported as one log's

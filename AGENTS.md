@@ -78,7 +78,7 @@ instead of working around it:
   environment when it matters.
 
 A blocker that exists only in a committed review log (no local ledger row) can be overridden too: the command
-imports it, with the other blockers of the logs that list it (#188). An ID found nowhere exits 1.
+imports it, with the other blockers of the logs that list it (#188). An ID found nowhere exits 1. An abandoned FSM run is closed the same way: `override request|grant <run-id>` (#179).
 
 Both halves record actor, timestamp and reason and are rendered under "Process Overrides" in
 `docs/metareview/FINDINGS.md`. An override is never a fix: `fixedInRunId` stays empty, so exceptions can be

@@ -38,6 +38,9 @@ type OverrideRequest struct {
 	Reason     string
 	Escalation string
 	Now        string
+	// Subject is the row to add when neither the ledger nor a committed review log knows the ID: an abandoned FSM run's
+	// closure (#179, AbandonedRunRecord). Nil for a finding.
+	Subject *Record
 }
 
 // OverrideGrant is the acknowledgement from outside the workflow.
@@ -45,6 +48,8 @@ type OverrideGrant struct {
 	By     string
 	Reason string
 	Now    string
+	// Subject is as OverrideRequest's.
+	Subject *Record
 }
 
 // Blocks reports whether a status still holds a gate closed. A pending override
@@ -66,7 +71,7 @@ func RequestOverride(root, findingID string, request OverrideRequest) error {
 	if now == "" {
 		return fmt.Errorf("override request needs a timestamp")
 	}
-	return mutateFinding(root, findingID, now, func(record *Record) error {
+	return mutateFinding(root, findingID, now, request.Subject, func(record *Record) error {
 		// A FIXED finding enters the two-phase flow only when the request references the
 		// escalation whose hard stop it asks to lift (request.Escalation — issue #147):
 		// the run-level stop can outlive the finding-level fix, and the recorded request
@@ -108,7 +113,7 @@ func GrantOverride(root, findingID string, grant OverrideGrant) error {
 	if now == "" {
 		return fmt.Errorf("override grant needs a timestamp")
 	}
-	return mutateFinding(root, findingID, now, func(record *Record) error {
+	return mutateFinding(root, findingID, now, grant.Subject, func(record *Record) error {
 		// A FIXED finding enters the two-phase flow only when a REQUEST referencing the
 		// escalation was already filed (record.OverrideEscalation — issue #147): the
 		// run-level stop can outlive the finding-level fix, and lifting it is the human
@@ -164,8 +169,8 @@ func PendingOverrides(root string) ([]Record, error) {
 // mutateFinding applies an override transition to one ledger row. The blockers of the committed review logs that list the
 // finding and are missing from the ledger — the finding itself, when it exists only in those logs — are imported first
 // (#188), so the escalation path reaches every blocker the gates read and no grant retires a blocker nobody saw; nothing
-// is written unless the transition applies.
-func mutateFinding(root, findingID, now string, apply func(*Record) error) error {
+// is written unless the transition applies. An ID nothing knows takes subject, when it names that ID.
+func mutateFinding(root, findingID, now string, subject *Record, apply func(*Record) error) error {
 	path := findingsPath(root)
 	records, err := loadRecords(path)
 	if err != nil {
@@ -187,7 +192,10 @@ func mutateFinding(root, findingID, now string, apply func(*Record) error) error
 		return err
 	}
 	if index < 0 && (len(imported) == 0 || imported[0].ID != findingID) {
-		return fmt.Errorf("finding %s not found", findingID)
+		if subject == nil || subject.ID != findingID {
+			return fmt.Errorf("finding %s not found", findingID)
+		}
+		imported = []Record{*subject}
 	}
 	if index < 0 {
 		index = len(records)
@@ -250,4 +258,37 @@ func withEscalation(detail string, record Record) string {
 		return detail
 	}
 	return detail + fmt.Sprintf(" [escalation: %s]", singleLine(record.OverrideEscalation))
+}
+
+// AbandonedRunFingerprintPrefix marks the ledger row that closes an abandoned FSM run (#179).
+const AbandonedRunFingerprintPrefix = "fsm:abandoned-run:"
+
+// AbandonedRunRecord is the ledger row through which an abandoned FSM run is closed (#179): the run's ID, taken through
+// the ordinary override flow — a request does not close it, the requester cannot grant it, a grant needs a reason — and
+// rendered under Process Overrides. It is bookkeeping, not a finding: advisory, so no review gate counts it, while the
+// run itself keeps blocking `status` until the grant. Branch and head are the run's own (its init), so the row is
+// scoped with the run.
+func AbandonedRunRecord(runID, description, branch, head, now string) Record {
+	return Record{
+		SchemaVersion:  1,
+		ID:             runID,
+		RunID:          runID,
+		Scope:          "fsm-run",
+		Reviewer:       "fsm",
+		Severity:       "low",
+		Classification: "advisory",
+		Status:         "open",
+		Title:          "Abandoned FSM run " + description,
+		Fingerprint:    AbandonedRunFingerprintPrefix + runID,
+		Target:         map[string]string{"type": "fsm-run", "id": runID},
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		GitHead:        head,
+		Branch:         branch,
+	}
+}
+
+// IsRunClosure reports whether a ledger row is an abandoned FSM run's closure row.
+func IsRunClosure(record Record) bool {
+	return strings.HasPrefix(record.Fingerprint, AbandonedRunFingerprintPrefix) && record.ID == strings.TrimPrefix(record.Fingerprint, AbandonedRunFingerprintPrefix)
 }

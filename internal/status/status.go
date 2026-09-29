@@ -58,6 +58,9 @@ type Report struct {
 	// never block here; `status --all` lists them in Elsewhere.
 	OtherBranchRuns int `json:"otherBranchRuns,omitempty"`
 	OrphanedRuns    int `json:"orphanedRuns,omitempty"`
+	// ClosedRuns counts the abandoned runs closed by a granted override (#179). They never block; `status --all` lists
+	// them in Elsewhere with who closed them and why.
+	ClosedRuns int `json:"closedRuns,omitempty"`
 	// Elsewhere lists those runs, grouped by branch, when --all asked for them. It never changes the verdict.
 	Elsewhere []AbandonedRun `json:"elsewhere,omitempty"`
 	// Warnings say why an answer may be narrower or wider than asked for — a scope that could
@@ -232,9 +235,12 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 	}
 	r.Abandoned, r.Elsewhere = ScanAbandonedRuns(root)
 	for _, e := range r.Elsewhere {
-		if e.Scope == scope.OtherBranch.String() {
+		switch e.Scope {
+		case ClosedScope:
+			r.ClosedRuns++
+		case scope.OtherBranch.String():
 			r.OtherBranchRuns++
-		} else {
+		default:
 			r.OrphanedRuns++
 		}
 	}

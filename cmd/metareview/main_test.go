@@ -1259,6 +1259,44 @@ func TestOverrideUnknownFindingExitsNonzero(t *testing.T) {
 	}
 }
 
+// #179 end to end: `override request|grant <run-id>` closes an abandoned FSM run. The request keeps `status` blocked, the
+// requester's grant is refused, and another actor's grant clears it; `status --all` lists it as closed.
+func TestOverrideClosesAnAbandonedRun(t *testing.T) {
+	root := gitRepo(t)
+	dir := filepath.Join(root, ".git", "metareview", "runs", "mrv-20260929-000000000000000-fsm-t-1")
+	must(t, os.MkdirAll(dir, 0o700))
+	must(t, os.WriteFile(filepath.Join(dir, "workflow.yaml"), []byte("workflow: t\nversion: 1\nvars: {}\nstates: [discover, fix, done, failed]\n"+
+		"transitions:\n  - {from: discover, to: fix, gate: findings_nonempty}\n  - {from: fix, to: done, gate: commit_exists, outcome: fixed}\n"+
+		"nodes:\n  discover: {kind: review-lenses, exec: subagent, lenses: 2}\n  fix: {kind: agent-edit}\nconvergence:\n  any: [{max_iterations: 2}]\n"), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "audit.jsonl"), []byte(`{"type":"init","at":"2026-09-29T00:00:00Z","state":"discover","data":{"workflow":"t"}}`+"\n"+
+		`{"type":"transition","at":"2026-09-29T00:00:01Z","state":"discover","data":{"to":"fix","to_kind":"agent-edit"}}`+"\n"), 0o600))
+	id := "mrv-20260929-000000000000000-fsm-t-1"
+	blocked := func() bool {
+		t.Helper()
+		code, out, _ := runCLI(t, root, nil, "status", "--json", "--all")
+		return code != 0 && strings.Contains(out, `"runId": "`+id+`"`) && strings.Contains(out, `"abandoned"`)
+	}
+	if !blocked() {
+		t.Fatal("the abandoned run blocks status")
+	}
+	if code, _, e := runCLI(t, root, nil, "override", "request", id, "--by", "claude-agent", "--reason", "nobody will finish this run"); code != 0 {
+		t.Fatalf("request: %d %s", code, e)
+	}
+	if !blocked() {
+		t.Fatal("a request alone does not clear the run")
+	}
+	if code, _, e := runCLI(t, root, nil, "override", "grant", id, "--by", "claude-agent", "--reason", "granting my own request"); code != 1 || !strings.Contains(e, "cannot also grant") {
+		t.Fatalf("self-grant: %d %s", code, e)
+	}
+	if code, _, e := runCLI(t, root, nil, "override", "grant", id, "--by", "maintainer", "--reason", "accepted: abandoned for good"); code != 0 {
+		t.Fatalf("grant: %d %s", code, e)
+	}
+	code, out, _ := runCLI(t, root, nil, "status", "--json", "--all")
+	if code != 0 || !strings.Contains(out, `"closedBy": "maintainer"`) || !strings.Contains(out, `"closeReason": "accepted: abandoned for good"`) {
+		t.Fatalf("status after the grant: %d %s", code, out)
+	}
+}
+
 // After a passing pr-ready review over the branch, branch-scoped status --json has nothing to clear
 // and exits 0, covering the clean-return in the branch-scope path.
 func TestStatusJSONBranchClean(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dsifry/metareview/internal/findings"
 	"github.com/dsifry/metareview/internal/fsm/kind"
 	"github.com/dsifry/metareview/internal/fsm/run"
 	"github.com/dsifry/metareview/internal/fsm/workflow"
@@ -39,10 +40,8 @@ import (
 //
 // An annotation needs none of that machinery, because it takes nothing away. A reader learns why
 // a loop was abandoned; the loop still counts as abandoned and still blocks. There is nothing to
-// gain by forging one. If suppression is ever genuinely wanted it should arrive as an FSM
-// operation that makes the run terminal — the machine already owns run.Outcomes and StopReason —
-// carrying the override system's separation of actor, not as a string a consumer package greps
-// for.
+// gain by forging one. Suppression arrived as #179 instead: `override request|grant <run-id>` closes a
+// run through the override system's separation of actor (closeRuns), never through an append here.
 const StopNote = "stopped"
 
 type AbandonedRun struct {
@@ -60,6 +59,14 @@ type AbandonedRun struct {
 	Branch string `json:"branch,omitempty"`
 	// Scope is where the run belongs relative to the branch in hand (#177): in-scope, other-branch or orphaned.
 	Scope string `json:"scope,omitempty"`
+	// CloseRequestedBy is who asked, through `override request <run-id>` (#179), for this run to be closed. A request
+	// does not close it: the run keeps blocking until someone else grants it.
+	CloseRequestedBy string `json:"closeRequestedBy,omitempty"`
+	// ClosedBy, ClosedAt and CloseReason record the granted override that closed the run (#179): it no longer blocks
+	// any branch, and `status --all` lists it with Scope "closed".
+	ClosedBy    string `json:"closedBy,omitempty"`
+	ClosedAt    string `json:"closedAt,omitempty"`
+	CloseReason string `json:"closeReason,omitempty"`
 	// Dir is the run's directory (the shared store, or the 0.13.x legacy one): what an operator deletes to clear a
 	// run nobody will finish.
 	Dir string `json:"dir,omitempty"`
@@ -81,7 +88,80 @@ func DiscoverAbandonedRuns(root string) []AbandonedRun {
 // that belong to another live branch, or to no live branch (orphaned), come back in elsewhere — listed by
 // `status --all`, never a blocker here.
 func ScanAbandonedRuns(root string) (inScope, elsewhere []AbandonedRun) {
-	return scanAbandonedRuns(root, kind.Deps{}, scope.Load(root, nil))
+	return closeRuns(root)(scanAbandonedRuns(root, kind.Deps{}, scope.Load(root, nil)))
+}
+
+// ClosedScope is the Scope of an abandoned run closed by a granted override (#179).
+const ClosedScope = "closed"
+
+// closeRuns applies the ledger's run closures (#179): a run whose closure row is granted leaves the blockers and is
+// listed elsewhere as closed; one with a pending request stays a blocker, naming who asked. An unreadable ledger closes
+// nothing — the runs keep blocking.
+func closeRuns(root string) func(inScope, elsewhere []AbandonedRun) ([]AbandonedRun, []AbandonedRun) {
+	closures := map[string]findings.Record{}
+	if ledger, err := loadFindings(root); err == nil {
+		for _, record := range ledger {
+			if findings.IsRunClosure(record) {
+				closures[record.ID] = record
+			}
+		}
+	}
+	return func(inScope, elsewhere []AbandonedRun) ([]AbandonedRun, []AbandonedRun) {
+		if inScope == nil && elsewhere == nil {
+			return nil, nil
+		}
+		blocking := []AbandonedRun{}
+		var closed []AbandonedRun
+		mark := func(r AbandonedRun) (AbandonedRun, bool) {
+			c, ok := closures[r.RunID]
+			switch {
+			case ok && c.Status == findings.StatusOverridden:
+				r.Scope, r.ClosedBy, r.ClosedAt, r.CloseReason = ClosedScope, c.OverrideGrantedBy, c.OverrideGrantedAt, c.OverrideGrantReason
+				r.CloseRequestedBy = c.OverrideRequestedBy
+				return r, true
+			case ok && c.Status == findings.StatusOverridePending:
+				r.CloseRequestedBy = c.OverrideRequestedBy
+			}
+			return r, false
+		}
+		for _, r := range inScope {
+			if r, isClosed := mark(r); isClosed {
+				closed = append(closed, r)
+			} else {
+				blocking = append(blocking, r)
+			}
+		}
+		rest := make([]AbandonedRun, 0, len(elsewhere)+len(closed))
+		for _, r := range elsewhere {
+			r, _ = mark(r)
+			rest = append(rest, r)
+		}
+		rest = append(rest, closed...)
+		sort.SliceStable(rest, func(i, j int) bool {
+			if rest[i].Branch != rest[j].Branch {
+				return rest[i].Branch < rest[j].Branch
+			}
+			return rest[i].RunID < rest[j].RunID
+		})
+		if len(rest) == 0 {
+			rest = nil
+		}
+		return blocking, rest
+	}
+}
+
+// RunClosureSubject is the ledger row through which `override request|grant <run-id>` closes an abandoned FSM run
+// (#179), for any run of the store left in a non-terminal state, whichever branch it belongs to. false for anything
+// else: a finished or mock run, or an ID that names no run.
+func RunClosureSubject(root, runID, now string) (*findings.Record, bool) {
+	inScope, elsewhere := scanAbandonedRuns(root, kind.Deps{}, scope.Load(root, nil))
+	for _, r := range append(inScope, elsewhere...) {
+		if r.RunID == runID {
+			record := findings.AbandonedRunRecord(r.RunID, "("+abandonedTarget(r)+")", r.Branch, r.head, now)
+			return &record, true
+		}
+	}
+	return nil, false
 }
 
 // discoverAbandonedRuns takes the registry deps so the misconfigured case is reachable from a
@@ -89,7 +169,7 @@ func ScanAbandonedRuns(root string) (inScope, elsewhere []AbandonedRun) {
 // disagrees with the judge type, and the caller above supplies neither — and an untestable
 // branch in a gate is the shape this repository keeps finding defects in.
 func discoverAbandonedRuns(root string, deps kind.Deps) []AbandonedRun {
-	out, _ := scanAbandonedRuns(root, deps, scope.Load(root, nil))
+	out, _ := closeRuns(root)(scanAbandonedRuns(root, deps, scope.Load(root, nil)))
 	return out
 }
 
