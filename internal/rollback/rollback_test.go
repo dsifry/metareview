@@ -182,23 +182,61 @@ func TestRestoreRecreatesAFilesParentDirectory(t *testing.T) {
 	}
 }
 
-// A symlinked output path is restored through the link: the link stays, and its target gets the content back.
-func TestRestoreWritesThroughASymlink(t *testing.T) {
+// A symlinked output path gets its target's content back and stays a link, whether the run wrote through
+// the link or replaced it with a regular file (the gates' write-temp-then-rename writers do the latter).
+func TestRestorePutsASymlinkedPathBack(t *testing.T) {
+	for name, runWrites := range map[string]func(t *testing.T, link, target string){
+		"through the link": func(t *testing.T, link, target string) { write(t, target, "run output", 0o644) },
+		"over the link": func(t *testing.T, link, target string) {
+			tmp := link + ".new"
+			write(t, tmp, "run output", 0o644)
+			if err := os.Rename(tmp, link); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "elsewhere", "FINDINGS.md")
+			link := filepath.Join(dir, "FINDINGS.md")
+			write(t, target, "before", 0o644)
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			set := Take(link)
+			runWrites(t, link, target)
+			set.Restore()
+			if got, err := os.Readlink(link); err != nil || got != target {
+				t.Fatalf("the path must be the link again: %q %v", got, err)
+			}
+			if got := read(t, link); got != "before" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	}
+}
+
+// Relinking fails safe: a failed symlink or rename leaves no temp link behind.
+func TestRelinkFailures(t *testing.T) {
+	boom := errors.New("boom")
+	savedSymlink, savedRename := symlink, rename
+	t.Cleanup(func() { symlink, rename = savedSymlink, savedRename })
 	dir := t.TempDir()
-	target := filepath.Join(dir, "elsewhere", "FINDINGS.md")
-	link := filepath.Join(dir, "FINDINGS.md")
-	write(t, target, "before", 0o644)
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
+	path := filepath.Join(dir, "FINDINGS.md")
+	write(t, path, "regular", 0o644)
+	symlink = func(string, string) error { return boom }
+	if err := relink(path, "target"); !errors.Is(err, boom) {
+		t.Fatalf("symlink: %v", err)
 	}
-	set := Take(link)
-	write(t, target, "run output", 0o644)
-	set.Restore()
-	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("the link must stay a link: %v %v", info, err)
+	symlink, rename = savedSymlink, func(string, string) error { return boom }
+	if err := relink(path, "target"); !errors.Is(err, boom) {
+		t.Fatalf("rename: %v", err)
 	}
-	if got := read(t, target); got != "before" {
-		t.Fatalf("the link's target must be restored, got %q", got)
+	if _, err := os.Lstat(filepath.Join(dir, ".FINDINGS.md.link-tmp")); !os.IsNotExist(err) {
+		t.Fatalf("temp link left behind: %v", err)
+	}
+	if got := read(t, path); got != "regular" {
+		t.Fatalf("a failed relink must leave the path alone: %q", got)
 	}
 }
 

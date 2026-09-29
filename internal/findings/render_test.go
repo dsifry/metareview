@@ -71,3 +71,11 @@ func TestClassifiedMarkdownTagsCarriedFindings(t *testing.T) {
 		}
 	}
 }
+
+// Reviewer names and titles are free text: each stays inside its own cell.
+func TestReviewerTableKeepsFreeTextInItsCell(t *testing.T) {
+	got := ReviewerTable(nil, []Record{{Reviewer: "odd|reviewer", Title: "a | b\nnext line", Classification: "blocking", Severity: "high"}})
+	if want := `| odd\|reviewer | NEEDS_REVISION | 1 | a \| b next line |`; got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}

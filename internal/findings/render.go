@@ -49,9 +49,14 @@ func ReviewerTable(fixed []string, records []Record) string {
 			verdict = "PASS_ADVISORY"
 			note = strings.Join(nonBlockers, "; ")
 		}
-		lines = append(lines, fmt.Sprintf("| %s | %s | %d | %s |", reviewer, verdict, len(blockers), note))
+		lines = append(lines, fmt.Sprintf("| %s | %s | %d | %s |", tableCell(reviewer), verdict, len(blockers), tableCell(note)))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// tableCell keeps free text inside one Markdown table cell: one physical line, and no bare "|".
+func tableCell(text string) string {
+	return strings.ReplaceAll(singleLine(text), "|", `\|`)
 }
 
 // ClassifiedMarkdown renders a gate log's four finding sections, each always present ("No findings in this
