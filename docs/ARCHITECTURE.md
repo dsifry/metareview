@@ -200,6 +200,15 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   shard results (`shards/`), FSM export bundles (`fsm/`), findings render (`FINDINGS.md`). ⚠️ Context packs
   can leak an absolute `cwd` (issue #80) — do not commit a leaking context artifact; the review `.md` is
   clean.
+- **`FINDINGS.md` merges as a union (#181).** Two branches that each regenerate it (a new blocker, a new
+  override) conflict on a plain merge — both append to the end of the same lists — and a hand-resolved conflict
+  in a generated file can silently drop a line. `.gitattributes` marks it `merge=union` (git's built-in driver,
+  no per-clone config): both sides' lines are kept, never a conflict marker. What a union can leave — the empty
+  placeholder beside a blocker, a duplicated section header, or two states of one finding (`[pending]` beside
+  `[granted]`) — is normalized by the next render from the ledger; until then a stale `[pending]` still blocks,
+  which fails closed. Pinned by `TestFindingsIndexMergesWithoutConflictUnderTheRepositoryAttributes` (and the
+  plain-merge conflict by `TestFindingsIndexConflictsOnAPlainMerge`). An adopting repository gets the same by
+  adding the line to its own `.gitattributes`.
 - **Transient, local (git-ignored)** under `.metareview/`: `findings.jsonl`, `runs.jsonl` (review records),
   `shards/` (and `git-hooks/`, from before #173). A `mock: true` FSM run never satisfies a gate.
 - **The shared store is in git's common directory (#173).** `repo.StoreDir` = `<git rev-parse --git-common-dir>/

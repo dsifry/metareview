@@ -1,2 +1,6 @@
 internal/fsm/judge/testdata/prompts/* -text
 testdata/fsm/** -text
+# The rendered findings index merges as a union of both sides: two long-lived branches that each add
+# a blocker or an override never conflict, and no line is dropped by a hand-resolved conflict (#181).
+# Duplicates or stale lines a union leaves are normalized by the next render.
+docs/metareview/FINDINGS.md merge=union
