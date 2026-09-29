@@ -382,7 +382,7 @@ func Create(root string, options Options) (Result, error) {
 	// A corrupt runs.jsonl never reaches here silently: the run projection above reads the same file and
 	// fails the whole review loudly with the parse error first (fail-closed). So a read error here can only
 	// mean "no marker" — treat it as absent.
-	if ev, ok, evErr := reviewstate.LatestReviewEvidence(root, "pr-ready", git.BaseSHA, git.HeadSHA); evErr == nil && ok {
+	if ev, ok, evErr := reviewstate.CurrentReviewEvidence(root, "pr-ready", git.BaseSHA, git.HeadSHA, gitcontext.ChangedSince(root)); evErr == nil && ok {
 		reviewerCtx.Adversarial.Present = true
 		reviewerCtx.Adversarial.Verdict = ev.AdjudicatedVerdict
 		reviewerCtx.Adversarial.Emulated = ev.IsEmulated()

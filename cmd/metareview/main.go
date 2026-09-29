@@ -873,20 +873,11 @@ func validateFromRunDiff(runsDir, runID, wantBase, wantHead, wantWorkflow string
 			return errors.New("it is mock-tainted (it carries a mock-stamped event); a mock run never satisfies a gate")
 		}
 	}
-	if d.Head != wantHead || d.BaseSHA != wantBase {
-		return fmt.Errorf("it reviewed a different diff (run base..head %s..%s, marker %s..%s)", short(d.BaseSHA), short(d.Head), short(wantBase), short(wantHead))
-	}
-	// For a scope whose lenses must apply a scope-specific rubric (epic-ready), the run must have been produced
-	// by that scope's review workflow — otherwise a generic review-loop run (task-done rubric) over the same
-	// diff could be recorded as subagent-adjudicated evidence for the epic gate, silently crediting a review
-	// that never applied the epic lenses. wantWorkflow is empty for pr-ready/task-done (no constraint).
-	if wantWorkflow != "" && d.Workflow != wantWorkflow {
-		return fmt.Errorf("it was produced by workflow %q, but this scope requires %q (whose lenses apply the scope's rubric)", d.Workflow, wantWorkflow)
-	}
 	// The LAST outcome-bearing transition is the run's verdict: a run that was `reviewed` and then looped and
 	// came out `failed` must be rejected, so we cannot accept the first passing outcome we see. Unreadable
 	// transition payloads are rejected rather than skipped (a run we cannot parse is not a run we can trust).
 	var lastOutcome fsmrun.Outcome
+	var lastOutcomeHead string
 	sawOutcome := false
 	for _, ev := range events {
 		if ev.Type != fsmrun.TypeTransition {
@@ -897,8 +888,23 @@ func validateFromRunDiff(runsDir, runID, wantBase, wantHead, wantWorkflow string
 			return errors.New("its audit.jsonl has an unreadable transition event")
 		}
 		if td.Outcome != "" {
-			lastOutcome, sawOutcome = td.Outcome, true
+			lastOutcome, lastOutcomeHead, sawOutcome = td.Outcome, td.Head, true
 		}
+	}
+	// The run reviewed its init head; a fix loop that ended with a fresh review passing (clean, or adjudicated) at a
+	// head it committed reviewed that head too (mr-1ad). A `fixed` ending verified its fix without re-reviewing it, so
+	// only its init head counts. The base is the run's either way.
+	reviewedHead := d.Head == wantHead ||
+		lastOutcomeHead == wantHead && (lastOutcome == fsmrun.OutcomeClean || lastOutcome == fsmrun.OutcomeReviewed)
+	if !reviewedHead || d.BaseSHA != wantBase {
+		return fmt.Errorf("it reviewed a different diff (run base..head %s..%s, marker %s..%s)", short(d.BaseSHA), short(d.Head), short(wantBase), short(wantHead))
+	}
+	// For a scope whose lenses must apply a scope-specific rubric (epic-ready), the run must have been produced
+	// by that scope's review workflow — otherwise a generic review-loop run (task-done rubric) over the same
+	// diff could be recorded as subagent-adjudicated evidence for the epic gate, silently crediting a review
+	// that never applied the epic lenses. wantWorkflow is empty for pr-ready/task-done (no constraint).
+	if wantWorkflow != "" && d.Workflow != wantWorkflow {
+		return fmt.Errorf("it was produced by workflow %q, but this scope requires %q (whose lenses apply the scope's rubric)", d.Workflow, wantWorkflow)
 	}
 	if sawOutcome && isPassingReviewOutcome(lastOutcome) {
 		return nil // the run's final verdict was a passing review over the right diff

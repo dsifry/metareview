@@ -151,6 +151,9 @@ func TestReviewEvidenceReadErrorPropagates(t *testing.T) {
 	if _, err := DiscoverReviewEvidence(root); err == nil {
 		t.Fatal("a malformed runs.jsonl must surface a read error")
 	}
+	if _, ok, err := CurrentReviewEvidence(root, "pr-ready", "base", "abc", nil); err == nil || ok {
+		t.Fatal("CurrentReviewEvidence must surface the read error too")
+	}
 	if _, ok, err := LatestReviewEvidence(root, "pr-ready", "base", "abc"); err == nil || ok {
 		t.Fatalf("the read error must propagate (not present-false); ok=%v err=%v", ok, err)
 	}

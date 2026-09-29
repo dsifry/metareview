@@ -465,6 +465,29 @@ func TestValidateFromRunDiff(t *testing.T) {
 	if err := validateFromRunDiff(filepath.Join(root, ".metareview", "runs"), "ok", "b", "h", ""); err != nil {
 		t.Errorf("passing: %v", err)
 	}
+
+	// mr-1ad: a fix loop that ends with a fresh review passing at the head it committed backs a marker for THAT head
+	// (the review ran there), not only its init head; a run whose last pass was a fix it did not re-review does not.
+	transitionAt := func(outcome fsmrun.Outcome, head string) string {
+		d, _ := json.Marshal(fsmrun.TransitionData{Outcome: outcome, Head: head})
+		e, _ := json.Marshal(fsmrun.Event{Type: fsmrun.TypeTransition, Data: d})
+		return string(e)
+	}
+	runs := filepath.Join(root, ".metareview", "runs")
+	writeAudit("loop-clean", initEvent("b", "h0", "sdlc-loop-clean"), transitionAt("", "h1"), transitionAt(fsmrun.OutcomeClean, "h2"))
+	if err := validateFromRunDiff(runs, "loop-clean", "b", "h2", ""); err != nil {
+		t.Errorf("a clean review at the final head must back it: %v", err)
+	}
+	if err := validateFromRunDiff(runs, "loop-clean", "b", "h1", ""); err == nil || !strings.Contains(err.Error(), "different diff") {
+		t.Errorf("an intermediate head was never reviewed clean: %v", err)
+	}
+	if err := validateFromRunDiff(runs, "loop-clean", "other", "h2", ""); err == nil || !strings.Contains(err.Error(), "different diff") {
+		t.Errorf("the base still has to match: %v", err)
+	}
+	writeAudit("loop-fixed", initEvent("b", "h0", "sdlc-loop"), transitionAt(fsmrun.OutcomeFixed, "h3"))
+	if err := validateFromRunDiff(runs, "loop-fixed", "b", "h3", ""); err == nil || !strings.Contains(err.Error(), "different diff") {
+		t.Errorf("a fix verified but never re-reviewed must not back its head: %v", err)
+	}
 }
 
 func TestSmallHelpers(t *testing.T) {

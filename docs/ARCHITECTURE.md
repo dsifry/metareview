@@ -72,8 +72,13 @@ review by default. After a real review the agent records a **review-evidence mar
 `.metareview/runs.jsonl` (`scope="review-evidence"`, `Kind="review-evidence"`) carrying the adjudicated
 verdict, confirmed finding IDs, lens set, execution mode, and the **base..HEAD SHAs it reviewed**. The gate
 (`internal/reviewers/adversarial.go`) looks up the latest marker for the scope over the **exact
-base..HEAD diff** via `reviewstate.LatestReviewEvidence`; a marker for a stale HEAD *or a different base*
-does not count (a review of a narrow `HEAD~1..HEAD` must not be credited for a wider `main..HEAD`). It blocks
+base..HEAD diff** via `reviewstate.CurrentReviewEvidence`; a marker for a stale HEAD *or a different base*
+does not count (a review of a narrow `HEAD~1..HEAD` must not be credited for a wider `main..HEAD`) — except that a
+marker at an ancestor head still counts when every commit since it adds only gate artifacts
+(`reviewstate.IsGateArtifact`: `.md`/`.json`/`.jsonl` files under `docs/metareview/{reviews,context,shards,fsm,learning}/`,
+and `docs/metareview/FINDINGS.md`), so committing a passing gate's own output does not strand the review (#161). Any
+other change — code, tests, another doc, a `.go` file placed in those folders — still invalidates it, and a git
+failure never counts the marker. It blocks
 with `adversarial-review-reviewer` when no current marker is present, blocks when the adjudicated verdict is
 not `PASS`/`PASS_ADVISORY`, and emits an **advisory** finding (not a block) when the marker is
 `in-session-emulated` rather than `subagent-adjudicated`. Of several markers over one base..head, the
@@ -82,7 +87,9 @@ not `PASS`/`PASS_ADVISORY`, and emits an **advisory** finding (not a block) when
 The FSM stays scope-agnostic: the **agent** bridges its run into a marker with `--from-run`, rather than the
 FSM emitting scope-specific markers. Because a CLI seam cannot witness that independent subagents actually
 ran, `record-lenses --mode subagent-adjudicated` is admitted **only** when `--from-run` names an FSM run that
-reviewed the same `base..head` (its init) AND reached a passing terminal transition (`clean|reviewed|fixed`);
+reviewed the same `base..head` — its init, or the head at which its final `clean`/`reviewed` transition passed, so
+a fix loop whose last review was clean backs the commit it made clean (mr-1ad; a `fixed` ending was not
+re-reviewed and counts only for its init) — AND reached a passing terminal transition (`clean|reviewed|fixed`);
 an empty, wrong-diff, incomplete, failed, or **mock** run is rejected (a run initialised with `--mock-ai`, or one
 carrying a mock-stamped event, is test infrastructure and never evidence — #185), and a self-attested review has no such run and
 must record the labeled, advisory `in-session-emulated` mode. This keeps a hand-typed one-liner from
@@ -248,8 +255,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   `--previous-run` chain closes any row it names, whichever branch recorded it (as before #178: the chain is the
   explicit repair path, so a fix, stacked or epic branch can close what it inherits, and a deleted branch's row is
   never stranded) — and `findings.ScopedBlocking` / `UnresolvedBlocking` classify every unresolved blocker, so after `git
-  switch` branch B's pr-ready no longer blocks on branch A's open findings (it lists them as "Open on other branches: N"
-  under Repository Health Advisory). Epic-ready names its child tasks explicitly and reads their blockers across
+  switch` branch B's pr-ready no longer blocks on branch A's open findings — unless B is stacked on A and still carries
+  the commits they were raised on (the range leg) — and lists them as "Open on other branches: N" under Repository
+  Health Advisory. Fresh mutation evidence supersedes a stale freshness row of this branch or of none (orphaned: its
+  branch merged and deleted), never another live branch's. Epic-ready names its child tasks explicitly and reads their blockers across
   branches (`UnresolvedBlockingAllBranches`): a child reviewed on its own branch and squash-merged into the epic's would
   otherwise be dropped. Rows from before #178 carry no branch and take the legacy rule; so does a row an older binary
   rewrote (it drops the field it does not know — version skew is #180). A NEEDS_REVISION review *log* merged into main is committed

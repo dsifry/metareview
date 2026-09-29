@@ -277,7 +277,7 @@ func adversarialStatus(root string, git, reviewGit gitcontext.Context) reviewers
 		// default review-loop (task-done rubric) that would then be credited for epic-ready.
 		WorkflowHint: "epic-review-loop",
 	}
-	if ev, ok, err := reviewstate.LatestReviewEvidence(root, "epic-ready", git.BaseSHA, git.HeadSHA); err == nil && ok {
+	if ev, ok, err := reviewstate.CurrentReviewEvidence(root, "epic-ready", git.BaseSHA, git.HeadSHA, gitcontext.ChangedSince(root)); err == nil && ok {
 		status.Present = true
 		status.Verdict = ev.AdjudicatedVerdict
 		status.Emulated = ev.IsEmulated()

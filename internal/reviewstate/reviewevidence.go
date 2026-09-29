@@ -3,6 +3,7 @@ package reviewstate
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dsifry/metareview/internal/state"
@@ -96,6 +97,83 @@ func LatestReviewEvidence(root, reviewedScope, baseSHA, headSHA string) (ReviewE
 		}
 	}
 	return best, found, nil
+}
+
+// gateArtifactDirs are the folders under docs/metareview/ the gates write for committing (review logs, context packs,
+// shard results, FSM export bundles, post-merge learning), and gateArtifactExts the only kinds of file they write there.
+var (
+	gateArtifactDirs = []string{"docs/metareview/reviews/", "docs/metareview/context/", "docs/metareview/shards/",
+		"docs/metareview/fsm/", "docs/metareview/learning/"}
+	gateArtifactExts = []string{".md", ".json", ".jsonl"}
+)
+
+// IsGateArtifact reports whether path (repository-relative, slash-separated) is a file the review gates write and ask
+// to have committed after they pass: a Markdown or JSON(L) file in one of their folders, or the rendered
+// docs/metareview/FINDINGS.md. Nothing else is — not a .go file dropped into those folders (it would be compiled), nor
+// another document beside them.
+func IsGateArtifact(path string) bool {
+	if path == "docs/metareview/FINDINGS.md" {
+		return true
+	}
+	if strings.Contains(path, "..") {
+		return false
+	}
+	for _, dir := range gateArtifactDirs {
+		if strings.HasPrefix(path, dir) {
+			for _, ext := range gateArtifactExts {
+				if strings.HasSuffix(path, ext) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// CurrentReviewEvidence is LatestReviewEvidence that also counts a marker recorded at an earlier head when every
+// commit since it only added gate artifacts (IsGateArtifact) — committing a passing gate's review log, shard results,
+// FSM bundles or FINDINGS.md must not strand the review of the code, which is unchanged (#161). changed reports whether
+// a marker's head is an ancestor of head and which paths changed since; a failure there never counts the marker (fail
+// closed). Code, tests or any other document committed after the marker still invalidate it. As in the exact match,
+// the last-recorded eligible marker wins, so a later NEEDS_REVISION withdraws an earlier PASS.
+func CurrentReviewEvidence(root, reviewedScope, baseSHA, headSHA string, changed func(from, to string) ([]string, bool, error)) (ReviewEvidence, bool, error) {
+	markers, err := DiscoverReviewEvidence(root)
+	if err != nil {
+		return ReviewEvidence{}, false, err
+	}
+	carried := map[string]bool{}
+	var best ReviewEvidence
+	found := false
+	for _, m := range markers {
+		if m.ReviewedScope != reviewedScope || m.BaseSHA != baseSHA || m.HeadSHA == "" {
+			continue
+		}
+		if m.HeadSHA != headSHA {
+			ok, seen := carried[m.HeadSHA]
+			if !seen {
+				ok = onlyGateArtifactsSince(m.HeadSHA, headSHA, changed)
+				carried[m.HeadSHA] = ok
+			}
+			if !ok {
+				continue
+			}
+		}
+		best, found = m, true
+	}
+	return best, found, nil
+}
+
+func onlyGateArtifactsSince(from, to string, changed func(from, to string) ([]string, bool, error)) bool {
+	paths, ancestor, err := changed(from, to)
+	if err != nil || !ancestor {
+		return false
+	}
+	for _, p := range paths {
+		if !IsGateArtifact(p) {
+			return false
+		}
+	}
+	return true
 }
 
 // RequireAdjudicatedReview reports whether the gate must require a real adjudicated lens review (build B).

@@ -19,7 +19,7 @@ Run metareview before claiming completion:
 
 `task-done`, `pr-ready`, and `epic-ready` **require an adjudicated adversarial lens review** (the structural
 checks no longer PASS alone). After the real review, record a HEAD-scoped marker so the gate sees it —
-re-record after any new commit:
+re-record after any new commit other than the gate's own artifacts under `docs/metareview/`:
 
 ```bash
 metareview review record-lenses --scope pr-ready --base <base-ref> \
