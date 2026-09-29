@@ -690,6 +690,7 @@ func sameDiffPRReadyRunIDs(logs []reviewlog.Summary, targetRecord map[string]str
 	want := reviewstate.TargetKey("pr-ready", targetRecord)
 	same := func(log reviewlog.Summary) bool {
 		return log.Kind == "pr-ready" && log.RunID != "" && log.HeadSHA != "" && log.BaseSHA != "" &&
+			log.RunRecordAuthenticated &&
 			reviewstate.TargetKey("pr-ready", log.TargetRecord) == want
 	}
 	diffs := map[[2]string]bool{}

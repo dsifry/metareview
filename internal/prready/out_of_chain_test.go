@@ -43,7 +43,7 @@ func TestChainAdoptsSameDiffRunsOutsideIt(t *testing.T) {
 func TestSameDiffPRReadyRunIDs(t *testing.T) {
 	target := map[string]string{"type": "branch", "id": "feature"}
 	log := func(id, kind, base, head, targetID string) reviewlog.Summary {
-		return reviewlog.Summary{RunID: id, Kind: kind, BaseSHA: base, HeadSHA: head, TargetRecord: map[string]string{"type": "branch", "id": targetID}}
+		return reviewlog.Summary{RunID: id, Kind: kind, BaseSHA: base, HeadSHA: head, TargetRecord: map[string]string{"type": "branch", "id": targetID}, RunRecordAuthenticated: true}
 	}
 	logs := []reviewlog.Summary{
 		log("chain-1", "pr-ready", "b", "h1", "feature"),
@@ -55,6 +55,9 @@ func TestSameDiffPRReadyRunIDs(t *testing.T) {
 		log("task-review", "task-done", "b", "h1", "feature"), // not a pr-ready run
 		log("same-diff", "pr-ready", "b", "h1", "feature"),    // listed twice: adopted once
 	}
+	edited := log("edited", "pr-ready", "b", "h1", "feature") // a log no local run record vouches for
+	edited.RunRecordAuthenticated = false
+	logs = append(logs, edited)
 	if got := sameDiffPRReadyRunIDs(logs, target, []string{"chain-1"}); strings.Join(got, ",") != "same-diff" {
 		t.Fatalf("adopted %v", got)
 	}
