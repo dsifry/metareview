@@ -240,7 +240,7 @@ func buildFor(root, target string, current map[string]bool) (Report, error) {
 	}
 	if n := r.OtherBranchRuns + r.OrphanedRuns; n > 0 {
 		r.Warnings = append(r.Warnings, fmt.Sprintf("%d abandoned FSM run(s) belong elsewhere (%d on other branches, %d orphaned); "+
-			"they do not block this branch — `metareview status --all` lists them with the directory to delete once nobody will finish one", n, r.OtherBranchRuns, r.OrphanedRuns))
+			"they do not block this branch — "+elsewhereHint, n, r.OtherBranchRuns, r.OrphanedRuns))
 	}
 	if LegacyRunsPending(root) {
 		r.Warnings = append(r.Warnings, "0.13.x FSM runs are still in "+filepath.Join(repo.RunStoreRoot(root), ".metareview", "runs")+
@@ -637,6 +637,13 @@ func EmitForBranch(root, base string, run RunGit, w io.Writer) (int, error) {
 	return emitForBranch(root, base, run, w, false)
 }
 
+// elsewhereHint ends the belongs-elsewhere warning of a plain status; elsewhereListed replaces it under --all, which
+// already lists those runs.
+const (
+	elsewhereHint   = "`metareview status --all` lists them with the directory to delete once nobody will finish one"
+	elsewhereListed = "they are listed under `elsewhere`, each with the directory to delete once nobody will finish one"
+)
+
 // EmitForBranchAll is EmitForBranch with every abandoned run listed (`--all`, #177): the exit code is the same.
 func EmitForBranchAll(root, base string, run RunGit, w io.Writer) (int, error) {
 	return emitForBranch(root, base, run, w, true)
@@ -678,6 +685,13 @@ func emitFor(root, target string, w io.Writer, all bool) (int, error) {
 func emit(r Report, w io.Writer, all bool) (int, error) {
 	if !all {
 		r.Elsewhere = nil // the counts stay; the list is --all's
+	} else {
+		// --all was given: point at the list it printed, not at itself (mr-as8).
+		warnings := make([]string, len(r.Warnings))
+		for i, s := range r.Warnings {
+			warnings[i] = strings.Replace(s, elsewhereHint, elsewhereListed, 1)
+		}
+		r.Warnings = warnings
 	}
 	out, _ := json.MarshalIndent(r, "", "  ")
 	if _, err := fmt.Fprintln(w, string(out)); err != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/dsifry/metareview/internal/scope"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -185,6 +186,7 @@ func TestReconcileDoesNotResetDifferentScopeSameTarget(t *testing.T) {
 
 func TestReconcileUpdatesRepeatedOpenFindingHead(t *testing.T) {
 	root := t.TempDir()
+	stubScope(t, scope.Scope{}) // outside a repository, wherever TMPDIR sits
 	target := map[string]string{"type": "beads-task", "id": "task-1"}
 	runA := Run{ID: "mrv-a", Scope: "task-done", Target: target, RepoRoot: root, GitHead: "aaa"}
 	blocker := unsafeEval("eval is introduced.")

@@ -120,7 +120,7 @@ func TestCanonical(t *testing.T) {
 
 // Only a configured remote's own main/master is a remote default branch — the remote name may contain a slash.
 func TestRemoteDefaultRefs(t *testing.T) {
-	refs := remoteDefaultRefs([]string{"origin", "team/alice"})
+	refs := remoteDefaultRefs([]string{"origin", "team/alice"}, nil)
 	for ref, want := range map[string]bool{
 		"refs/remotes/origin/main": true, "refs/remotes/origin/master": true, "refs/remotes/team/alice/main": true,
 		"refs/remotes/origin/alice/main": false, "refs/remotes/team/main": false, "refs/heads/main": false,
@@ -138,7 +138,7 @@ func TestRemoteDefaultRefs(t *testing.T) {
 	git := func(dir string, args ...string) (string, error) {
 		switch args[0] {
 		case "for-each-ref":
-			return "refs/heads/feat\nrefs/remotes/origin/main\nrefs/remotes/origin/alice/main\nrefs/remotes/origin/HEAD\nrefs/remotes/team/alice/master", nil
+			return "refs/heads/feat\nrefs/remotes/origin/main\nrefs/remotes/origin/alice/main\nrefs/remotes/origin/HEAD\n\nrefs/remotes/team/alice/master", nil
 		case "rev-list":
 			rangeArgs = strings.Join(args, " ")
 		}

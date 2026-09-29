@@ -104,9 +104,12 @@ func TestScopedBlockingFollowsTheBranch(t *testing.T) {
 func TestScopedBlockingFailsClosedAndAsksGitOnlyWhenNeeded(t *testing.T) {
 	root := t.TempDir()
 	seedRecords(t, root, blockerOn("x", "elsewhere", "abc"))
+	// An unreadable scope, stubbed: a bare temp dir is not one wherever TMPDIR sits inside a checkout.
+	restore := stubScope(t, scope.Scope{})
 	if in, elsewhere, err := ScopedBlocking(root); err != nil || ids(in) != "x" || len(elsewhere) != 0 {
-		t.Fatalf("outside a repository everything stays in scope: in=%s elsewhere=%s err=%v", ids(in), ids(elsewhere), err)
+		t.Fatalf("an unreadable scope keeps everything in scope: in=%s elsewhere=%s err=%v", ids(in), ids(elsewhere), err)
 	}
+	restore()
 
 	loads := 0
 	orig := loadScope
@@ -679,5 +682,45 @@ func TestPartlyReadScopeIgnoresAnotherBranchsGrantedOverride(t *testing.T) {
 	restore()
 	if in, _, _ := ScopedBlocking(root); ids(in) != "mrvf-b-001" {
 		t.Fatalf("branch-b's re-raise must get its own row despite branch-a's granted override: in=%s", ids(in))
+	}
+}
+
+// TestFreshEvidenceSupersedesAnOrphanedFreshnessRow is a #178 final-review deferral (mr-as8 c): a stale-mutation row
+// recorded on a child branch that was merged and deleted is orphaned — no live branch owns it — yet epic-ready reads
+// child blockers across branches, so fresh evidence must still supersede it (only another live branch's row is
+// left alone).
+func TestFreshEvidenceSupersedesAnOrphanedFreshnessRow(t *testing.T) {
+	root, git := scopeRepo(t)
+	engines := Options{MutationEngines: []string{"stryker"}}
+	target := map[string]string{"type": "advisory", "id": "t"}
+	git("switch", "-q", "-c", "child")
+	git("commit", "-q", "--allow-empty", "-m", "C")
+	if _, err := Reconcile(root, Run{ID: "r-child", Scope: "task-done", Target: target, GitHead: git("rev-parse", "HEAD")}, []Input{staleInput()}, engines); err != nil {
+		t.Fatal(err)
+	}
+	git("switch", "-q", "-c", "epic", "main")
+	git("commit", "-q", "--allow-empty", "-m", "E")
+	git("branch", "-q", "-D", "child")
+	if _, err := Reconcile(root, Run{ID: "r-epic", Scope: "task-done", Target: target, GitHead: git("rev-parse", "HEAD")}, nil, engines); err != nil {
+		t.Fatal(err)
+	}
+	if got := statusOf(t, root, staleFP); len(got) != 1 || got[0] != StatusSuperseded+"/" {
+		t.Fatalf("fresh evidence must supersede the orphaned child's stale row: %v", got)
+	}
+}
+
+// TestFallbackRefreshNeverRestampsANamedRow is a #178 final-review deferral (mr-as8 d): where the scope is unreadable
+// and no branch is checked out, rows are refreshed as before #178 — but a named row keeps the branch it records.
+func TestFallbackRefreshNeverRestampsANamedRow(t *testing.T) {
+	root := t.TempDir()
+	stubScope(t, scope.Scope{})
+	named := openBlocker("named")
+	named.Branch, named.GitHead, named.Scope = "feat", "h-old", "task-done"
+	named.Target = map[string]string{"type": "advisory", "id": "t"}
+	named.Fingerprint = unsafeEval("eval").Fingerprint
+	seedRecords(t, root, named)
+	reconcileOn(t, root, "mrv-fallback", "h-new", unsafeEval("eval"))
+	if got := loadOne(t, root); got.Branch != "feat" || got.GitHead != "h-new" {
+		t.Fatalf("the fallback refresh moves the head and keeps the named row's branch: %+v", got)
 	}
 }

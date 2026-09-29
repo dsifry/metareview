@@ -205,7 +205,8 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   one rule in one package: a run recorded on branch N at head H is **in scope** when N is the current branch or one
   of its former names — the `git branch -m` / `-c` entries its reflog carries, while no live branch holds that name —
   (the name leg: survives rebase, amend and rename; mid-rebase the branch being rebased is current; a rebase begun detached is no branch), or when H lies in
-  `merge-base(HEAD, main|master)..HEAD`, less anything a remote's own `main` or `master` (`refs/remotes/<remote>/main`) already has (the range leg:
+  `merge-base(HEAD, main|master)..HEAD`, less anything a remote's default branch already has — the branch its `refs/remotes/<remote>/HEAD` names, else
+  its `main` and `master` (the range leg:
   detached snapshots, stacked branches; the exclusion keeps a stale local main from pulling merged branches' runs
   into a branch cut from a fresh origin/main). Otherwise it is
   **other-branch** while N exists, else **orphaned**; neither blocks, and `status --all` lists both, each with the
@@ -240,7 +241,8 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   scope is unreadable and no branch is checked out — outside a repository, or a detached HEAD after a git failure — are
   rows refreshed as before #178, never re-stamped). A named run
   deduplicates against a branchless row only when that row's head is one of its own reflog heads (`scope.PastHead`),
-  else it records its own row; a granted override that gates the branch absorbs a re-raise. A finding raised
+  else it records its own row; a granted override that gates the branch absorbs a re-raise (only with a readable scope,
+  where "gates" means something). A finding raised
   again on a stacked or throwaway branch is that branch's own row and never takes the first branch's. Its verdict (the
   open findings task-done and epic-ready count) holds only rows that gate this branch (`Classify`), and a
   `--previous-run` chain closes any row it names, whichever branch recorded it (as before #178: the chain is the

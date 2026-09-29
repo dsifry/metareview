@@ -582,5 +582,10 @@ func TestTheAllEmittersChangeTheListNeverTheExit(t *testing.T) {
 		if strings.Contains(plain.String(), "mrv-emit-main001") || !strings.Contains(all.String(), "mrv-emit-main001") {
 			t.Fatalf("%s: only --all lists main's run:\n%s\n---\n%s", name, plain.String(), all.String())
 		}
+		// mr-as8 (6): the warning points at --all only where --all was not given.
+		if !strings.Contains(plain.String(), "status --all` lists them") || strings.Contains(all.String(), "status --all` lists them") ||
+			!strings.Contains(all.String(), "listed under `elsewhere`") {
+			t.Fatalf("%s: the --all output must not suggest --all:\n%s\n---\n%s", name, plain.String(), all.String())
+		}
 	}
 }

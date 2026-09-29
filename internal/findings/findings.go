@@ -203,7 +203,9 @@ func Reconcile(root string, run Run, current []Input, options Options) (Result, 
 			record.UpdatedAt = now
 			record.GitHead = run.GitHead
 		}
-		if supersedesFreshness(record, run, options, currentFingerprints) && blocksHere(record) {
+		// Never another live branch's row; an orphaned one (its branch merged and deleted) is no branch's, and epic-ready
+		// still reads it across branches, so fresh evidence clears it.
+		if supersedesFreshness(record, run, options, currentFingerprints) && sc.Classify(record.Branch, record.GitHead) != scope.OtherBranch {
 			record.Status = StatusSuperseded
 			record.UpdatedAt = now
 			record.GitHead = run.GitHead
