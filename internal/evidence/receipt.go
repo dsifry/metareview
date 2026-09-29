@@ -63,17 +63,24 @@ var (
 		regexp.MustCompile(`(?i)\b(npm run build|build|tsc --noEmit|typecheck|coverage).*\b(pass|passed|ok|success|exited 0)\b`),
 		regexp.MustCompile(`(?i)\bexited 0\b`),
 	}
-	// failurePatterns read a failure from the shapes tools print and from a stated failed check — never from the word
-	// "fail" in prose (mr-r3y): evidence routinely says the new tests "fail against origin/main", meaning they catch
-	// the regression, or that a test "failed before the fix".
+	// failurePatterns read a failure fail-closed: any "failed" counts, as do the shapes tools print — except the word
+	// "fail" in prose (mr-r3y: "the new tests fail against origin/main" means they CATCH the regression). Only the
+	// upper-case FAIL marker counts, and reports of zero failures are neutralized first (zeroFailures).
 	failurePatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\b(exit(ed)?|exit code)\s+[1-9][0-9]*\b`),
-		regexp.MustCompile(`\bFAIL(ED)?\b`),                         // go test, jest, pytest markers (upper case)
-		regexp.MustCompile(`(?i)\b[1-9][0-9]*\s+(\w+\s+)?failed\b`), // a nonzero count: "2 failed", "1 test failed"
-		regexp.MustCompile(`(?i)\bfailures?:\s*[1-9]`),              // junit/maven "Failures: 1"
-		regexp.MustCompile(`(?i)\b(tests?|test suite|suite|build|lint|linter|typecheck|checks?|ci|coverage)\s+(has\s+|have\s+)?failed\b`), // a stated failed check
+		regexp.MustCompile(`(?i)\b(exit(ed)?|exit code|exit status)\s+[1-9][0-9]*\b`),
+		regexp.MustCompile(`\bFAIL\b`),                                          // go test, jest, pytest markers (upper case only)
+		regexp.MustCompile(`(?i)\bfailed\b`),                                    // "failed" in any form: "Failed: 1", "Command failed.", "go vet failed"
+		regexp.MustCompile(`(?i)\bfailures?\s*[:=]\s*[1-9]`),                    // junit/maven "Failures: 1"
+		regexp.MustCompile(`(?i)\b[1-9][0-9]*\s+(failing|failures?|errors?)\b`), // mocha "1 failing", rspec "1 failure", "2 errors"
+		regexp.MustCompile(`(?m)^not ok\b`),                                     // TAP
+		regexp.MustCompile(`\bError\s+[1-9][0-9]*\b`),                           // make "*** [test] Error 2"
+		regexp.MustCompile(`\berror TS[0-9]+`),                                  // tsc
 		regexp.MustCompile(`(?i)\berror:`),
 	}
+	// zeroFailures are reports that nothing failed — "0 failed", "no tests failed", "none of the checks failed",
+	// "0 of 10 failed", "Failures: 0" — removed before failurePatterns run, so a success stated that way never reads
+	// as a failure. Within one line only: a "0" ending one line ("exited 0") never pairs with a failure on the next.
+	zeroFailures = regexp.MustCompile(`(?i)\b(0|no|zero|none)[ \t]+(of[ \t]+(the[ \t]+)?[0-9]*[ \t]*)?([\w()]+[ \t]+){0,2}(have[ \t]+|has[ \t]+)?(failed|failing|failures?|errors?)\b|\bfail(ed|ures?)[ \t]*[:=][ \t]*0\b`)
 )
 
 func Parse(data []byte) (Bundle, error) {
@@ -183,6 +190,7 @@ func hasSuccessSignal(text string) bool {
 }
 
 func hasFailureSignal(text string) bool {
+	text = zeroFailures.ReplaceAllString(text, "")
 	for _, pattern := range failurePatterns {
 		if pattern.MatchString(text) {
 			return true
