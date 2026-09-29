@@ -46,6 +46,7 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"fail without the fix":                      {passing + "- the new tests fail without the fix", 0},
 		"expected to fail":                          {passing + "- TestBadInput is expected to fail on malformed input", 0},
 
+		"unittest expected failures": {passing + "Ran 5 tests in 0.01s\n\nOK (skipped=1, expected failures=1)", 0},
 		// failures: any "failed", the shapes tools print, and a zero that sits beside a real count
 		"go test FAIL line":           {"ok  \tgithub.com/a\t0.1s\nFAIL\tgithub.com/b\t0.2s", 1},
 		"go test --- FAIL":            {passing + "--- FAIL: TestY (0.00s)", 1},
@@ -118,9 +119,17 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"FAIL without cache":          {passing + "lint FAIL without flags", 1},
 		"did fail to apply":           {"ok\nmigration did fail to apply", 1},
 		"did fail against":            {"tests passed\nthe deploy did fail against staging", 1},
-		"continues to fail":           {"go test ./... ok\nthe integration test continues to fail", 1},
-		"started to fail":             {"tests passed; TestX started to fail", 1},
-		"still fail before timeout":   {"tests passed\nthey still fail before 5s timeout", 1},
+		"build-fail":                  {"ok\nbuild-fail", 1},
+		"step-fail":                   {"ok\nci: unit-tests-fail", 1},
+		"result.fail":                 {"ok\nresult.fail", 1},
+		"unittest real failures":      {passing + "Ran 5 tests in 0.01s\n\nFAILED (failures=1, expected failures=1)", 1},
+		"cannot fail is prose":        {passing + "- this path cannot fail", 0},
+		"never fail is prose":         {passing + "- retries never fail silently", 0},
+		"must fail is prose":          {passing + "- the negative case must fail", 0},
+
+		"continues to fail":         {"go test ./... ok\nthe integration test continues to fail", 1},
+		"started to fail":           {"tests passed; TestX started to fail", 1},
+		"still fail before timeout": {"tests passed\nthey still fail before 5s timeout", 1},
 
 		"Build failed 0":           {"ok\nBuild failed 0", 1},
 		"FAILED 0":                 {"ok\nFAILED 0", 1},
