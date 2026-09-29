@@ -12,6 +12,7 @@ import (
 
 // fakeLock is one worktree's edit lock: it records its calls and refuses a second holder.
 type fakeLock struct {
+	off        bool // a lock that does nothing: a run begun before the lock existed
 	holder     string
 	calls      []string
 	dirs       []string
@@ -19,6 +20,9 @@ type fakeLock struct {
 }
 
 func (f *fakeLock) Acquire(runID string) error {
+	if f.off {
+		return nil
+	}
 	f.calls = append(f.calls, "acquire "+runID)
 	if f.holder != "" && f.holder != runID {
 		return errs.E("ERR_EDIT_LOCKED", "held", "holder", f.holder)
@@ -183,5 +187,23 @@ func TestInitTakesTheNextIDWhenOneIsTaken(t *testing.T) {
 	h.deps.Store = store
 	if _, err := h.init(InitOptions{Workflow: "sdlc-loop", Vars: sdlcVars}); err == nil || store.creates != maxIDAttempts {
 		t.Fatalf("the retry is bounded: %v after %d creates", err, store.creates)
+	}
+}
+
+// A run already in its fix node without the lock — begun before 0.14, or started in a fix state — takes it at its
+// next advance, or is refused while another run holds it (#180).
+func TestARunInItsFixNodeTakesTheLockAtItsNextAdvance(t *testing.T) {
+	h := newHarness(t)
+	lock := withLock(h)
+	lock.off = true
+	a := toFix(t, h) // it entered fix holding nothing: an in-flight run from before the lock existed
+	lock.off = false
+	lock.holder = "another-run"
+	if _, err := a.Advance(context.Background()); !errs.Is(err, "ERR_EDIT_LOCKED") {
+		t.Fatalf("a run in fix must not be handed the node while another holds the lock: %v", err)
+	}
+	lock.holder = ""
+	if r := h.advance(a); r.Status != StatusNeedsInput || lock.holder != a.runID {
+		t.Fatalf("it takes the lock and gets its node: %+v %+v", r, lock)
 	}
 }

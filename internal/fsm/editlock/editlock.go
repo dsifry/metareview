@@ -31,9 +31,15 @@ type Lock struct {
 	// Live reports whether holder is still in an agent-edit node. An error counts as live: a lock is never
 	// stolen on a guess.
 	Live func(holder string) (bool, error)
-	// Now stamps a new hold.
+	// Now stamps a new hold, and dates it.
 	Now func() time.Time
 }
+
+// Grace is how long a new hold counts as live whatever its run's state says. A run takes the lock before it
+// appends its transition into the fix state (and a fork before its child exists), so for that moment its run does
+// not yet look like a holder; without the grace a second run arriving then would judge the hold stale and take it
+// over, and both would edit the tree (#180).
+const Grace = 2 * time.Minute
 
 // hold is the lock file's content.
 type hold struct {
@@ -57,7 +63,7 @@ func (l Lock) Acquire(runID string) error {
 		}
 		if current.RunID != "" && current.RunID != runID {
 			live, err := l.Live(current.RunID)
-			if err != nil || live {
+			if err != nil || live || l.fresh(current) {
 				return errs.E(CodeEditLocked, "another run is fixing in this worktree; run one fix loop per worktree (or use another worktree) and retry once it leaves its fix node",
 					"holder", current.RunID, "since", current.Since, "lock", l.Path)
 			}
@@ -68,6 +74,12 @@ func (l Lock) Acquire(runID string) error {
 		data, _ := json.Marshal(hold{RunID: runID, Since: l.Now().UTC().Format(time.RFC3339)})
 		return writeHold(l.Path, append(data, '\n'))
 	})
+}
+
+// fresh reports whether h was taken within Grace. A hold whose time does not parse is not fresh: its run decides.
+func (l Lock) fresh(h hold) bool {
+	since, err := time.Parse(time.RFC3339, h.Since)
+	return err == nil && l.Now().Sub(since) < Grace
 }
 
 // Release drops runID's hold. Releasing a lock another run holds, or none, is a no-op.

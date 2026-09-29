@@ -147,11 +147,16 @@ and a default `fsm export` bundle is written under the checkout that ran `export
   run in the same worktree fails fast with `ERR_EDIT_LOCKED` naming the holder and stays where it was — and drops
   it when it leaves that state or ends. Every read-decide-write of the lock is under an flock on `edit.lock.guard`.
   A hold is live while its run exists, is unfinished, sits in an agent-edit state and has no granted closure
-  (#179); a stale hold is taken over, a live one never, and an unreadable holder counts as live.
+  (#179) — and, whatever its run's state, for `editlock.Grace` (2 min) after it was taken, since the run takes it
+  just before its transition into the fix state is appended (a fork, before its child exists). A stale hold is
+  taken over, a live one never, and an unreadable holder counts as live. A run already in its fix node takes the
+  lock at its next `advance` (a run begun before 0.14, a workflow that starts in a fix). A host that dies mid-fix
+  leaves its run holding the lock until the run is finished, stopped or closed (#179): the refusal names it.
 - *Locked appends.* `state.AppendJSONL` takes the advisory flock `internal/fsm/record` takes on the same files.
 - *Version skew.* A run's init records its `writer` version. A reader older than the writer's major.minor refuses the
   run with `ERR_AUDIT_VERSION` (`newer_writer`); a reader from before 0.14 refuses it already, its strict decoder
-  rejecting the unknown field (`tests/go/test-version-skew.sh` builds the previous release tag to prove it).
+  rejecting the unknown field (`tests/go/test-version-skew.sh` builds the previous release tag, and this tree as a
+  future 99.0.0, to prove both directions).
 - The shared store's first-use `.gitignore` is written through a unique temp file: five first runs at once used
   to collide on one name (`tests/go/test-fsm-concurrency.sh`, AC-5.1–5.3).
 

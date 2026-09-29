@@ -7,6 +7,8 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 PREV_TAG="${METAREVIEW_PREV_TAG:-v0.12.0}"
 if ! git rev-parse -q --verify "refs/tags/$PREV_TAG" >/dev/null; then
+  # In CI the tag must be there (the checkout fetches full history): a missing tag there is a failure, never a pass.
+  if [ -n "${CI:-}" ]; then echo "FAIL: $PREV_TAG is not in this clone" >&2; exit 1; fi
   echo "test-version-skew: skipped ($PREV_TAG is not in this clone; fetch tags to run it)"
   exit 0
 fi
@@ -52,7 +54,12 @@ mkdir -p .metareview/runs && cp -R "$STORE/$ID" .metareview/runs/
 got="$(read_with_prev)"
 case "$got" in ERR_AUDIT_INVALID|ERR_AUDIT_VERSION) ;; *) fail "the previous binary must refuse the run's audit, got: $got" ;; esac
 
-# This binary's side — a run from a newer minor release is refused with ERR_AUDIT_VERSION — is pinned in-process by
-# internal/fsm/run TestFoldRefusesARunFromANewerWriter (an edited audit here would fail its hash chain first).
+# This binary's side, end to end: a run written by a newer minor release (this tree built as 99.0.0) is refused
+# with ERR_AUDIT_VERSION — never folded, never misread.
+go build -C "$ROOT" -ldflags "-X github.com/dsifry/metareview/internal/fsm/run.ReaderVersion=99.0.0" -o "$WORK/future" ./cmd/metareview
+FUTURE="$("$WORK/future" fsm init --workflow sdlc-loop --var JUDGE=gpt-5.2 --var JUDGE_EFFORT=medium --mock-ai scenarios/sdlc-loop/happy --base HEAD~1 | field run_id)"
+grep -q '"writer":"99.0.0"' "$STORE/$FUTURE/audit.jsonl" || fail "the future binary must record its version"
+set +e; out="$("$WORK/new" fsm state --run "$FUTURE" 2>/dev/null)"; set -e
+[ "$(printf '%s' "$out" | field code)" = ERR_AUDIT_VERSION ] || fail "a run from a newer writer must be ERR_AUDIT_VERSION: $out"
 
 echo "test-version-skew: ok"

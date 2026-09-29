@@ -52,17 +52,38 @@ func TestAcquireRefusesALiveHolder(t *testing.T) {
 	}
 }
 
-// AC-5.3: a stale lock (holder gone) is taken over.
+// AC-5.3: a stale lock (holder gone) is taken over — once its grace has passed.
 func TestAcquireTakesOverAStaleHold(t *testing.T) {
 	l := lockAt(t, map[string]bool{"run-a": false})
 	if err := l.Acquire("run-a"); err != nil {
 		t.Fatal(err)
 	}
+	// Within the grace a hold is live whatever its run's state: its run may not have appended its transition
+	// into the fix state yet (or, forked, may not exist yet).
+	if err := l.Acquire("run-b"); !errs.Is(err, CodeEditLocked) {
+		t.Fatalf("a fresh hold must not be taken over: %v", err)
+	}
+	taken := l.Now()
+	l.Now = func() time.Time { return taken.Add(Grace) }
 	if err := l.Acquire("run-b"); err != nil {
 		t.Fatalf("a stale hold must be taken over: %v", err)
 	}
 	if h, _ := l.Holder(); h != "run-b" {
 		t.Fatalf("holder %q", h)
+	}
+}
+
+// A hold whose time does not parse has no grace: its run alone decides.
+func TestAHoldWithoutATimeHasNoGrace(t *testing.T) {
+	l := lockAt(t, map[string]bool{"run-a": false})
+	if err := os.MkdirAll(filepath.Dir(l.Path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(l.Path, []byte(`{"run_id":"run-a","since":"yesterday"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Acquire("run-b"); err != nil {
+		t.Fatalf("got %v", err)
 	}
 }
 

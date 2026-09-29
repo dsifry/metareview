@@ -607,6 +607,14 @@ func (s *session) advance() (AdvanceResult, error) {
 		}
 		return AdvanceResult{}, errs.E(CodeRunTerminal, "run is terminal", "outcome", string(snap.Outcome))
 	}
+	// A run already in its fix node holds its worktree's edit lock before the host is handed that node again
+	// (re-entrant for the run that took it on the way in). This also covers a run that never took it: one begun
+	// before 0.14, or a workflow whose first state is a fix (#180).
+	if snap.StateKind == run.KindAgentEdit {
+		if err := s.editLock(func(l EditLocker) error { return l.Acquire(s.m.runID) }); err != nil {
+			return AdvanceResult{}, err
+		}
+	}
 	// 4. tree
 	head, err := s.git.Head(s.ctx)
 	if err != nil {
