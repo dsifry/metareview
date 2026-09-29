@@ -335,8 +335,8 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   and, pytest `ERROR` lines, `Traceback`, `TypeError:`-style exception lines, `panicked at`, `Segmentation fault`,
   `Killed`, TAP `not ok` (indented too), make `Error N`, `error TS…`/`error CS…`/`error[E…]`, `npm ERR!`, go
   `file.go:L:C:` diagnostics, golangci-lint `N issues:`, `error:`, and a nonzero or negative exit in any common shape.
-  Exempt (mr-r3y): only "fail" continuing a prose sentence ("the new tests fail against origin/main") or ending a
-  test's name ("should fail (3 ms)"), a clause-initial zero report ("…, 0 failed", "no tests failed", bun "0 fail",
+  Exempt (mr-r3y): only an uncounted "fail" continuing a prose sentence ("the new tests fail against origin/main") or
+  naming a test or path ("should fail (3 ms)", `TestX/fail`, `fail.test.ts`) — a counted one ("3 tests fail") counts — a clause-initial zero report ("…, 0 failed", "no tests failed", bun "0 fail",
   ctest "0 tests failed out of 5") and a zero label that ends there ("Failed: 0, Passed: 5", "# fail 0",
   "failed=0 skipped=0"). A zero that does not start a clause ("shard 0 failed", "Passed: 0 Failed: 3") is a failure,
   and so is prose such as "TestX failed before the fix" — prefer receipts.

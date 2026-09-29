@@ -70,8 +70,9 @@ var (
 	failurePatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\b(exit(ed)?|exit[ _-]?code|exit[ _-]?status|return[ _-]?code|exited with( code| status)?|exit (code|status) (was|is))[ \t]*[:=]?[ \t]*-?[1-9][0-9]*\b|\brc[ \t]*[:=][ \t]*-?[1-9]`),
 		regexp.MustCompile(`\bFAIL(URES?)?\b`),                                                                                              // FAIL, BUILD FAILURE, FAILURES! (upper case)
-		regexp.MustCompile(`\b[Ff]ail\b[ \t]*([^ \ta-zA-Z\r\n(-]|\r?$)`),                                                                    // a "fail" verdict, not a sentence
-		regexp.MustCompile(`(?m)\b[Ff]ail[ \t]*\r?$`),                                                                                       // "fail" ending a line
+		regexp.MustCompile(`(?m)(^|[^/.\w-])[Ff]ail\b[ \t]*([^ \ta-zA-Z\r\n(/.-]|\.([^\w]|$)|\r?$)`),                                        // a "fail" verdict, not a sentence
+		regexp.MustCompile(`(?m)(^|[^/.\w-])[Ff]ail[ \t]*\r?$`),                                                                             // "fail" ending a line
+		regexp.MustCompile(`(?i)\b[1-9][0-9]*[ \t]+(\w+[ \t]+)?fails?\b`),                                                                   // a counted "fail": "3 tests fail and 9 pass", "1 test fails"
 		regexp.MustCompile(`(?i)\bfailed\b`),                                                                                                // any form: "Failed: 1", "Command failed.", "go vet failed"
 		regexp.MustCompile(`(?i)\b(failures?|errors?)[ \t]*[:=][ \t]*[1-9]`),                                                                // junit/maven "Failures: 1", "Errors: 2"
 		regexp.MustCompile(`(?i)\b[1-9][0-9]*[ \t]+(\w+[ \t]+)?(failing|failures?)\b`),                                                      // mocha "1 failing", "2 tests failing", "1 failure"
