@@ -54,10 +54,20 @@ func ReviewerTable(fixed []string, records []Record) string {
 	return strings.Join(lines, "\n")
 }
 
-// tableCell keeps free text inside one Markdown table cell: one physical line, backslashes escaped, and no
-// bare "|".
+// tableCell keeps free text inside one Markdown table cell: one physical line, and every pipe escaped. A pipe
+// already escaped is left as it is, and no other backslash is touched, so code spans ("C:\\dir") read as
+// written.
 func tableCell(text string) string {
-	return strings.NewReplacer(`\`, `\\`, "|", `\|`).Replace(singleLine(text))
+	var b strings.Builder
+	prev := rune(0)
+	for _, r := range singleLine(text) {
+		if r == '|' && prev != '\\' {
+			b.WriteRune('\\')
+		}
+		b.WriteRune(r)
+		prev = r
+	}
+	return b.String()
 }
 
 // ClassifiedMarkdown renders a gate log's four finding sections, each always present ("No findings in this
