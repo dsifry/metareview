@@ -54,18 +54,23 @@ func ReviewerTable(fixed []string, records []Record) string {
 	return strings.Join(lines, "\n")
 }
 
-// tableCell keeps free text inside one Markdown table cell: one physical line, and every pipe escaped. A pipe
-// already escaped is left as it is, and no other backslash is touched, so code spans ("C:\\dir") read as
-// written.
+// tableCell keeps free text inside one Markdown table cell: one physical line, and no bare pipe. GFM splits a
+// row at a pipe that is not escaped, and a backslash escapes the character after it, so backslashes pair up: a
+// pipe after an odd run of backslashes is already escaped, one after an even run (none included) gets one
+// more. No other backslash is touched, so code spans ("C:\\dir") read as written.
 func tableCell(text string) string {
 	var b strings.Builder
-	prev := rune(0)
+	run := 0
 	for _, r := range singleLine(text) {
-		if r == '|' && prev != '\\' {
+		if r == '|' && run%2 == 0 {
 			b.WriteRune('\\')
 		}
+		if r == '\\' {
+			run++
+		} else {
+			run = 0
+		}
 		b.WriteRune(r)
-		prev = r
 	}
 	return b.String()
 }
