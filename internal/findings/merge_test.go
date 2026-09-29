@@ -48,7 +48,7 @@ func pendingOverride(id string) Record {
 
 // divergeAndMerge renders a base FINDINGS.md on main, then on two branches that each add a blocker and an
 // override, and merges one into the other. It returns the merge's error and the merged file.
-func divergeAndMerge(t *testing.T, attributes string) (error, string) {
+func divergeAndMerge(t *testing.T, attributes string) (string, error) {
 	t.Helper()
 	root, git := mergeRepo(t, attributes)
 	must := func(args ...string) {
@@ -78,7 +78,7 @@ func divergeAndMerge(t *testing.T, attributes string) (error, string) {
 	if rerr != nil {
 		t.Fatal(rerr)
 	}
-	return err, string(merged)
+	return string(merged), err
 }
 
 var mergeIDs = []string{
@@ -91,7 +91,7 @@ var mergeIDs = []string{
 // a new override conflict on a plain merge — both insert at the end of the same two lists — and a human
 // resolving the markers by hand can drop either side's line.
 func TestFindingsIndexConflictsOnAPlainMerge(t *testing.T) {
-	err, merged := divergeAndMerge(t, "")
+	merged, err := divergeAndMerge(t, "")
 	if err == nil || !strings.Contains(merged, "<<<<<<<") {
 		t.Fatalf("expected a conflict on a plain merge (the #181 report); got err=%v\n%s", err, merged)
 	}
@@ -104,7 +104,7 @@ func TestFindingsIndexMergesWithoutConflictUnderTheRepositoryAttributes(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	err, merged := divergeAndMerge(t, string(attributes))
+	merged, err := divergeAndMerge(t, string(attributes))
 	if err != nil || strings.Contains(merged, "<<<<<<<") {
 		t.Fatalf("the merge must complete without conflict: err=%v\n%s", err, merged)
 	}
