@@ -34,6 +34,14 @@ func TestPathsSince(t *testing.T) {
 	if _, _, err := PathsSince(root, strings.Repeat("1", 40), head); err == nil {
 		t.Fatal("a commit git does not have must be an error")
 	}
+	// A submodule pointer bump is listed even where configuration hides submodule changes from a plain diff.
+	runGitCmd(t, root, "config", "diff.ignoreSubmodules", "all")
+	runGitCmd(t, root, "update-index", "--add", "--cacheinfo", "160000,"+base+",vendor/sub")
+	runGitCmd(t, root, "commit", "-qm", "bump submodule")
+	sub, _ := gitReal(root, "rev-parse", "HEAD")
+	if paths, ok, err := PathsSince(root, head, sub); err != nil || !ok || strings.Join(paths, "|") != "vendor/sub" {
+		t.Fatalf("a submodule bump must be listed: %q %v %v", paths, ok, err)
+	}
 	orig := git
 	t.Cleanup(func() { git = orig })
 	git = func(root string, args ...string) (string, error) {

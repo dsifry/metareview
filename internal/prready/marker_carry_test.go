@@ -67,7 +67,9 @@ func TestPRReadyMarkerSurvivesGateArtifactCommits(t *testing.T) {
 		mark(t, root)
 		commitFile(t, root, "docs/metareview/reviews/mrv-1-pr-ready.md", "# review\n")
 		commitFile(t, root, "docs/metareview/context/mrv-1-pr-ready-context.md", "# context\n")
-		commitFile(t, root, "docs/metareview/fsm/mrv-run/audit.redacted.jsonl", "{}\n")
+		for _, f := range []string{"audit.redacted.jsonl", "manifest.json", "snapshot.json", "workflow.yaml"} { // an `fsm export` bundle
+			commitFile(t, root, "docs/metareview/fsm/mrv-run/"+f, "{}\n")
+		}
 		commitFile(t, root, "docs/metareview/shards/pr-ready/x/shard-0.abc.result.json", "{}\n")
 		commitFile(t, root, "docs/metareview/FINDINGS.md", "# findings\n")
 		if blocked(t, root) {

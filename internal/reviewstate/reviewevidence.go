@@ -100,12 +100,15 @@ func LatestReviewEvidence(root, reviewedScope, baseSHA, headSHA string) (ReviewE
 }
 
 // gateArtifactDirs are the folders under docs/metareview/ the gates write for committing (review logs, context packs,
-// shard results, FSM export bundles, post-merge learning), and gateArtifactExts the only kinds of file they write there.
+// shard results, FSM export bundles, post-merge learning), and gateArtifactExts the only kinds of file they write there
+// — plus the workflow.yaml every `fsm export` bundle carries (fsmBundleDir).
 var (
 	gateArtifactDirs = []string{"docs/metareview/reviews/", "docs/metareview/context/", "docs/metareview/shards/",
-		"docs/metareview/fsm/", "docs/metareview/learning/"}
+		fsmBundleDir, "docs/metareview/learning/"}
 	gateArtifactExts = []string{".md", ".json", ".jsonl"}
 )
+
+const fsmBundleDir = "docs/metareview/fsm/"
 
 // IsGateArtifact reports whether path (repository-relative, slash-separated) is a file the review gates write and ask
 // to have committed after they pass: a Markdown or JSON(L) file in one of their folders, or the rendered
@@ -117,6 +120,9 @@ func IsGateArtifact(path string) bool {
 	}
 	if strings.Contains(path, "..") {
 		return false
+	}
+	if strings.HasPrefix(path, fsmBundleDir) && strings.HasSuffix(path, "/workflow.yaml") {
+		return true
 	}
 	for _, dir := range gateArtifactDirs {
 		if strings.HasPrefix(path, dir) {
@@ -141,10 +147,10 @@ func CurrentReviewEvidence(root, reviewedScope, baseSHA, headSHA string, changed
 	if err != nil {
 		return ReviewEvidence{}, false, err
 	}
+	// Newest first: the first eligible marker is the last-recorded one, and older heads are never asked about.
 	carried := map[string]bool{}
-	var best ReviewEvidence
-	found := false
-	for _, m := range markers {
+	for i := len(markers) - 1; i >= 0; i-- {
+		m := markers[i]
 		if m.ReviewedScope != reviewedScope || m.BaseSHA != baseSHA || m.HeadSHA == "" {
 			continue
 		}
@@ -158,9 +164,9 @@ func CurrentReviewEvidence(root, reviewedScope, baseSHA, headSHA string, changed
 				continue
 			}
 		}
-		best, found = m, true
+		return m, true, nil
 	}
-	return best, found, nil
+	return ReviewEvidence{}, false, nil
 }
 
 func onlyGateArtifactsSince(from, to string, changed func(from, to string) ([]string, bool, error)) bool {

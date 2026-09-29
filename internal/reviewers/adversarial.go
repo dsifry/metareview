@@ -46,7 +46,7 @@ func adversarialReviewFindings(require bool, s AdversarialReviewStatus) []Findin
 			Finding:        "This gate requires an adversarial lens review adjudicated over this exact diff; none is recorded for HEAD " + head + ".",
 			Expected:       "A recorded, adjudicated review-lenses run over base..HEAD, or an explicitly-labeled in-session-emulated review.",
 			Found:          "No review-evidence marker matches this head.",
-			Recommendation: "Run `metareview fsm --workflow " + workflow + " --base <ref>` to review the diff and record the result, then re-run this gate; or record an in-session review with `metareview review record-lenses` when subagents are unavailable.",
+			Recommendation: "Run `metareview fsm --workflow " + workflow + " --base <ref>` to review the diff and record the result, then re-run this gate; or record an in-session review with `metareview review record-lenses` when subagents are unavailable. A marker recorded at an earlier head stays current only while every commit since adds just the gate's own artifacts under docs/metareview/ (review logs, context packs, shard results, FSM bundles, FINDINGS.md); any other commit needs a fresh review.",
 			Fingerprint:    "review:no-adjudicated-review",
 		})}
 	}

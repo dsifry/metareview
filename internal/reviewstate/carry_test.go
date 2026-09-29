@@ -13,6 +13,8 @@ func TestIsGateArtifact(t *testing.T) {
 		"docs/metareview/shards/pr-ready/x/shard-0.abc.result.json": true,
 		"docs/metareview/fsm/mrv-run/audit.redacted.jsonl":          true,
 		"docs/metareview/learning/mrv-2-accepted.md":                true,
+		"docs/metareview/fsm/mrv-run/workflow.yaml":                 true,  // every `fsm export` bundle carries one
+		"docs/metareview/reviews/x.yaml":                            false, // only a bundle does
 		"docs/metareview/fsm/mrv-run/sneak.go":                      false, // compiled, whatever folder it sits in
 		"docs/metareview/notes.md":                                  false, // beside the gate's folders, not in one
 		"docs/metareview/reviews/../../../src/x.md":                 false,
@@ -36,11 +38,13 @@ func TestCurrentReviewEvidenceCarriesOnlyOverGateArtifacts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	record("h-artifacts", "PASS")
+	// Newest first: every newer ineligible marker is passed over (h-code asked once though recorded twice), and the
+	// newest eligible one — h-artifacts — wins.
+	record("h-artifacts", "PASS_ADVISORY")
 	record("h-code", "PASS")
 	record("h-gone", "PASS")
 	record("h-other", "PASS")
-	record("h-artifacts", "PASS_ADVISORY") // same head again: asked once
+	record("h-code", "PASS")
 	asked := map[string]int{}
 	changed := func(from, to string) ([]string, bool, error) {
 		asked[from]++
@@ -58,8 +62,8 @@ func TestCurrentReviewEvidenceCarriesOnlyOverGateArtifacts(t *testing.T) {
 	if err != nil || !ok || got.HeadSHA != "h-artifacts" || got.AdjudicatedVerdict != "PASS_ADVISORY" {
 		t.Fatalf("got %+v ok=%v err=%v", got, ok, err)
 	}
-	if asked["h-artifacts"] != 1 {
-		t.Errorf("a marker head is asked about once, asked %d", asked["h-artifacts"])
+	if asked["h-code"] != 1 || asked["h-artifacts"] != 1 {
+		t.Errorf("a marker head is asked about once: %v", asked)
 	}
 	// An exact marker recorded later still wins; a different scope or base never counts.
 	record("HEAD", "NEEDS_REVISION")

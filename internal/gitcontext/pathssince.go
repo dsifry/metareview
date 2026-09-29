@@ -17,7 +17,8 @@ func PathsSince(root, from, to string) ([]string, bool, error) {
 		}
 		return nil, false, err
 	}
-	out, err := git(root, "diff", "--name-only", "--no-renames", "-z", from, to, "--")
+	// Every submodule pointer counts, whatever diff.ignoreSubmodules or .gitmodules say: a gitlink bump is not an artifact.
+	out, err := git(root, "diff", "--name-only", "--no-renames", "--ignore-submodules=none", "-z", from, to, "--")
 	if err != nil {
 		return nil, false, err
 	}

@@ -27,8 +27,9 @@ metareview review record-lenses --scope pr-ready --base <base-ref> \
 ```
 
 Use `--scope task-done` for task-done and `--scope epic-ready` for epic-ready; `--lenses` is required. The
-marker is scoped to the exact base..HEAD diff — re-record after a new commit or a different `--base`. `--mode
-subagent-adjudicated` requires `--from-run` naming a real FSM run whose init records the same base..head; use
+marker is scoped to the exact base..HEAD diff — re-record after a commit that is not only the gate's own artifacts
+under `docs/metareview/`, or a different `--base`. `--mode subagent-adjudicated` requires `--from-run` naming a real
+FSM run that reviewed the same base..head (its init, or the head its final `clean`/`reviewed` transition passed at); use
 `--mode in-session-emulated` (no `--from-run`) for a self-attested in-session review — it passes but is
 advisory-flagged. `METAREVIEW_ALLOW_MECHANICAL_PASS=1` opts a run out to a structural-only pass.
 
