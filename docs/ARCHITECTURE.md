@@ -329,17 +329,17 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
 - **Evidence receipts:** `evidence run -- <cmd>` records a validation receipt (kind + exitCode + hashes);
   `evidence import --github-checks <pr>` pulls CI. task-done/pr-ready require a passing validation receipt.
   Freeform evidence text (no receipts) passes only with a success signal and no failure signal, and failure reading
-  fails closed (`internal/evidence` failurePatterns): any "failed", upper-case `FAIL`/`FAILURE`/`FAILURES`, a "fail"
-  verdict ("Result: Fail", `"status":"fail"`, `# fail 1`), `Failures:`/`Errors:` with a nonzero count, `N failing`,
-  `N errors` ending a clause or followed by in/during/generated/found ("1 error in 0.5s"), pytest `ERROR` lines,
-  `Traceback`, `Segmentation fault`, `Killed`, TAP `not ok`, make `Error N`, `error TS…`/`error CS…`/`error[E…]`,
-  `npm ERR!`, `error:`, and a nonzero (or negative) exit in any common shape (`exited 1`, `exit code: -1`, `exited
-  with code 1`, `exit=1`, `rc=1`, `return code: 1`). A test merely named "…fail (3 ms)" is not a verdict.
-  Exempt (mr-r3y): only "fail" continuing a prose sentence ("the new tests fail against origin/main"), and a clause
-  reporting that nothing failed — clause-initial "0 failed" / "no tests failed" / "none of the checks failed" / "0 of
-  10 failed" (optionally "in 1.2s"), or a zero label (`Failed: 0`, `failed=0`). A zero that does not start a clause
-  ("shard 0 failed", "Passed: 0 Failed: 3", "0 passed 3 failed") is a failure. Prose such as "TestX failed before the
-  fix" or "Result: 0 tests failed" still reads as a failure — prefer receipts.
+  fails closed (`internal/evidence` failurePatterns, run after ANSI escapes are stripped): any "failed", upper-case
+  `FAIL`/`FAILURE`/`FAILURES`, a "fail" verdict ("Result: Fail", `"status":"fail"`, `# fail 1`), `Failures:`/
+  `Errors:` with a nonzero count, `N failing`, `N errors` ending a clause or followed by in/during/generated/found/
+  and, pytest `ERROR` lines, `Traceback`, `TypeError:`-style exception lines, `panicked at`, `Segmentation fault`,
+  `Killed`, TAP `not ok` (indented too), make `Error N`, `error TS…`/`error CS…`/`error[E…]`, `npm ERR!`, go
+  `file.go:L:C:` diagnostics, golangci-lint `N issues:`, `error:`, and a nonzero or negative exit in any common shape.
+  Exempt (mr-r3y): only "fail" continuing a prose sentence ("the new tests fail against origin/main") or ending a
+  test's name ("should fail (3 ms)"), a clause-initial zero report ("…, 0 failed", "no tests failed", bun "0 fail",
+  ctest "0 tests failed out of 5") and a zero label that ends there ("Failed: 0, Passed: 5", "# fail 0",
+  "failed=0 skipped=0"). A zero that does not start a clause ("shard 0 failed", "Passed: 0 Failed: 3") is a failure,
+  and so is prose such as "TestX failed before the fix" — prefer receipts.
 - **Sharded review** (exclude-filtered diff > 120 KB): the gate writes prompt packs under
   `.metareview/shards/…/plan.json`; review one subagent per shard + a cross-shard pack, write results, re-run
   with `--previous-run`. Editing a file invalidates only its own shard.
