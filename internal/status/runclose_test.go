@@ -243,3 +243,27 @@ func TestAMockRunTakesNoClosureRow(t *testing.T) {
 		t.Fatal("a mock run must not take a closure row")
 	}
 }
+
+// #179 review: a pending request names the run as it stood. Once the run is resumed, the request no longer describes it,
+// so status stops reporting it as close-requested (the run blocks either way).
+func TestAPendingRequestDoesNotOutliveTheRunStateItNamed(t *testing.T) {
+	root, common := newRepo(t)
+	head := gitOut(t, root, "rev-parse", "HEAD")
+	const id = "mrv-main-0000001"
+	writeStoreRun(t, common, id, "main", head)
+	if err := closeRequest(t, root, id, "claude-agent"); err != nil {
+		t.Fatal(err)
+	}
+	if got := DiscoverAbandonedRuns(root); len(got) != 1 || got[0].CloseRequestedBy != "claude-agent" {
+		t.Fatalf("pending: %+v", got)
+	}
+	f, err := os.OpenFile(filepath.Join(common, "metareview", "runs", id, "audit.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString(`{"type":"transition","at":"2026-09-29T10:00:00Z","state":"fix","data":{"to":"discover","to_kind":"review-lenses"}}` + "\n")
+	_ = f.Close()
+	if got := DiscoverAbandonedRuns(root); len(got) != 1 || got[0].CloseRequestedBy != "" {
+		t.Fatalf("a request made before the resume must not be reported against the new state: %+v", got)
+	}
+}

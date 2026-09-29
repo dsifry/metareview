@@ -120,7 +120,8 @@ func closeRuns(root string) func(inScope, elsewhere []AbandonedRun) ([]Abandoned
 				r.Scope, r.ClosedBy, r.ClosedAt, r.CloseReason = ClosedScope, c.OverrideGrantedBy, c.OverrideGrantedAt, c.OverrideGrantReason
 				r.CloseRequestedBy = c.OverrideRequestedBy
 				return r, true
-			case ok && c.Status == findings.StatusOverridePending:
+			case ok && c.Status == findings.StatusOverridePending && c.RunUpdated == r.Updated:
+				// A request names the run as it stood; one made before the run was resumed is not about this state.
 				r.CloseRequestedBy = c.OverrideRequestedBy
 			}
 			return r, false
