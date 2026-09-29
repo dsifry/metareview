@@ -47,7 +47,7 @@ func pendingOverride(id string) Record {
 }
 
 // divergeAndMerge renders a base FINDINGS.md on main, then on two branches that each add a blocker and an
-// override, and merges one into the other. It returns the merge's error and the merged file.
+// override, and merges one into the other. It returns the merged file and the merge's error.
 func divergeAndMerge(t *testing.T, attributes string) (string, error) {
 	t.Helper()
 	root, git := mergeRepo(t, attributes)
