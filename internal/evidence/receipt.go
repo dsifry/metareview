@@ -65,7 +65,7 @@ var (
 	}
 	// failurePatterns read a failure fail-closed: any "fail"/"failed" (as the base reader's (?i)\bFAIL\b did), and the
 	// shapes tools print, count. hasFailureSignal first strips ANSI escapes and neutralizes zero reports (zeroClause,
-	// zeroLabel); then a counted "fail" (countFail) counts; then "did/does fail" becomes "failed" (reportedFail); and only
+	// zeroLabel); then a counted "fail" (countFail, a modal "1 should fail" aside) counts; then "did/does fail" becomes "failed" (reportedFail); and only
 	// then is prose "fail" neutralized (proseFail, mr-r3y) — that order is what keeps the exemption from hiding a count
 	// or a report.
 	failurePatterns = []*regexp.Regexp{
@@ -106,6 +106,8 @@ var (
 	// never upper or title case (a verdict), never after ":" or "=" ("Status: fail on windows"). It is neutralized after
 	// a counted "fail" ("2 tests fail on windows") has already been read as a failure.
 	proseFail = regexp.MustCompile(`\b(should|shall|will|would|must|can|could|may|might|expected to|doesn't|don't|didn't|won't|cannot|never)[ \t]+fail\b|(\w[ \t]+)fail[ \t]+(against|without)\b`)
+	// modalFail is proseFail's modal half, removed before countFail reads a count: "1 should fail on main" counts nothing.
+	modalFail = regexp.MustCompile(`\b(should|shall|will|would|must|can|could|may|might|expected to|doesn't|don't|didn't|won't|cannot|never)[ \t]+fail\b`)
 	// reportedFail is "did/does/do fail": a report that something failed, never prose to exempt.
 	reportedFail = regexp.MustCompile(`(?i)\b(did|does|do)[ \t]+fail\b`)
 	// countFail is a counted "fail" ("3 tests fail and 9 pass", "1 test fails"): read before proseFail neutralizes.
@@ -113,7 +115,7 @@ var (
 	// expectedFailures is Python unittest's passing "OK (expected failures=1)": a count of failures that were expected.
 	expectedFailures = regexp.MustCompile(`(?i)\bexpected failures?[ \t]*=[ \t]*[0-9]+`)
 	// ansiEscape is a terminal colour/control sequence: removed first, since "\x1b[31mFAIL" has no word boundary.
-	ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+	ansiEscape = regexp.MustCompile(`\x1b\[[0-9;:?]*[ -/]*[@-~]`) // ";" or ":" separates parameters ("\x1b[38:2:255:0:0m")
 )
 
 func Parse(data []byte) (Bundle, error) {
@@ -227,7 +229,7 @@ func hasFailureSignal(text string) bool {
 	text = expectedFailures.ReplaceAllString(text, " ")
 	text = zeroClause.ReplaceAllString(text, "${1} ")
 	text = zeroLabel.ReplaceAllString(text, " ${1}")
-	if countFail.MatchString(text) {
+	if countFail.MatchString(modalFail.ReplaceAllString(text, " ")) {
 		return true
 	}
 	text = reportedFail.ReplaceAllString(text, " failed")
