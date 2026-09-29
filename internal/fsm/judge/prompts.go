@@ -460,6 +460,9 @@ func Parse(kind, raw string) (parsed json.RawMessage, decision bool, confidence 
 		if err := json.Unmarshal([]byte(body), &v); err != nil {
 			return fail(err.Error())
 		}
+		if strings.TrimSpace(v.Reasoning) == "" {
+			return fail("missing reasoning")
+		}
 		if v.Match == nil {
 			return fail("missing match")
 		}
@@ -470,6 +473,9 @@ func Parse(kind, raw string) (parsed json.RawMessage, decision bool, confidence 
 		if err := json.Unmarshal([]byte(body), &v); err != nil {
 			return fail(err.Error())
 		}
+		if strings.TrimSpace(v.Reasoning) == "" {
+			return fail("missing reasoning")
+		}
 		if v.IsReal == nil {
 			return fail("missing is_real")
 		}
@@ -479,6 +485,9 @@ func Parse(kind, raw string) (parsed json.RawMessage, decision bool, confidence 
 		var v symptomVerdict
 		if err := json.Unmarshal([]byte(body), &v); err != nil {
 			return fail(err.Error()) // fail-closed: a parse error vetoes (decision false)
+		}
+		if strings.TrimSpace(v.Reasoning) == "" {
+			return fail("missing reasoning")
 		}
 		p := run.MarshalCanonical(parsedSymptom{Reasoning: v.Reasoning, Matches: v.Matches, Confidence: confOf(v.Confidence)})
 		if len(p) > run.MaxDetail {
@@ -493,6 +502,9 @@ func Parse(kind, raw string) (parsed json.RawMessage, decision bool, confidence 
 		var v stillPresentVerdict
 		if err := json.Unmarshal([]byte(body), &v); err != nil {
 			return fail(err.Error())
+		}
+		if strings.TrimSpace(v.Reasoning) == "" {
+			return fail("missing reasoning")
 		}
 		p := run.MarshalCanonical(parsedStillPresent{Reasoning: v.Reasoning, StillPresent: v.StillPresent, Confidence: confOf(v.Confidence)})
 		if len(p) > run.MaxDetail {

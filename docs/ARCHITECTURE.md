@@ -192,7 +192,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   with metareview's git gate installed but no opt-in is never *silently* ungated: the Stop hook says so on stderr
   and the SessionStart notice names `--enable-stop-gate`. `setup --check` reports `optedIn`, and `active` is false
   for a registered hook that does not gate the repository. Unrelated projects, non-repositories and the FSM
-  judge's `codex exec` sessions are never gated (a gate there corrupted judge reasoning, #193).
+  judge's `codex exec` sessions are never gated (a gate there corrupted judge reasoning, #193). The judge also
+  runs with the user's hooks and plugins off (`-c features.hooks=false -c features.plugins=false`), a turn that
+  goes on past a complete verdict is retried and then failed closed, and a verdict with empty reasoning is a
+  parse error for every judge kind and provider: a judgment nobody can audit is not recorded.
 
 ## 6. State, evidence & storage
 
