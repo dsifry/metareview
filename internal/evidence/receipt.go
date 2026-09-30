@@ -115,7 +115,7 @@ var (
 		// A shell's crash line: "<shell>: [line N: |N:] PID <signal> ..." (Aborted, Abort trap, Bus error,
 		// Illegal instruction, Floating point exception, Segmentation fault, Killed, Terminated, Quit), plus
 		// zsh's PID-less lowercase names.
-		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ (?:Aborted|Abort trap|Bus error|Illegal instruction|Floating point exception|Segmentation fault|Killed|Terminated|Quit)\b`),
+		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[ \t]*[0-9]+ (?:Aborted|Abort trap|Bus error|Illegal instruction|Floating point exception|Segmentation fault|Killed|Terminated|Quit)\b`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:abort|bus error|illegal instruction|segmentation fault|floating point exception|killed|terminated|quit)\b`),
 		regexp.MustCompile(`(?m)^\s*Terminated\s*\r?$`),            // bare SIGTERM line
 		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `), // make fatal ("No rule to make target")
@@ -139,7 +139,7 @@ var (
 		regexp.MustCompile(`(?m)^No tests found, exiting with code [1-9]`),                   // jest (NOT passWithNoTests code 0)
 		regexp.MustCompile(`(?m)^Jest: [^\n]*coverage threshold[^\n]*not met`),               // jest coverage gate
 		regexp.MustCompile(`(?m)^(?:ESLint found )?too many warnings \(maximum: [0-9]+\)`),   // eslint --max-warnings N
-		regexp.MustCompile(`(?m)^would reformat \S+[ \t]*\r?$`),                              // black --check
+		regexp.MustCompile(`(?m)^would reformat [^\r\n]+[ \t]*\r?$`),                         // black --check (path may contain spaces)
 		regexp.MustCompile(`(?m)^\[warn\] Code style issues found\b`),                        // prettier --check
 		regexp.MustCompile(`(?m)^[0-9]+ files? inspected, [1-9][0-9]* offenses? detected\b`), // rubocop summary
 		regexp.MustCompile(`(?m)^\s*Failures?:\s*\r?$`),                                      // rspec bare "Failures:" header
