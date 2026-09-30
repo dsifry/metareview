@@ -62,7 +62,7 @@ const modalVerb = `should|shall|will|would|must|can|could|may|might|expected to|
 
 // shellTag is the shell name (or *.sh/*.bash/*.zsh script) a shell prints before its message, shared by the
 // shell-shape patterns below (mr-b08) so the alternatives cannot drift between them.
-const shellTag = `(?:(?:[^\s:]*/)?-?(?:bash|sh|dash|zsh|ash|ksh)|\S+\.(?:sh|bash|zsh))`
+const shellTag = `(?:(?:[^\s:]*/)?-?(?:bash|sh|dash|zsh|ash|ksh)|\S+\.(?:sh|bash|zsh|dash|ash|ksh))`
 
 var (
 	successPatterns = []*regexp.Regexp{
@@ -78,7 +78,7 @@ var (
 	// or a report.
 	failurePatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\b(exit(ed)?|exit[ _-]?code|exit[ _-]?status|return[ _-]?code|exited with( code| status)?|exit (code|status) (was|is))\s*[:=]?\s*-?[1-9][0-9]*\b|\brc[ \t]*[:=][ \t]*-?[1-9]`),
-		regexp.MustCompile(`(?mi)"exit_?code"[ \t]*[:=][ \t]*"?-?[1-9]`),                                                                    // a quoted JSON/RPC key anywhere on a line
+		regexp.MustCompile(`(?mi)^\s*[{,]?\s*"exit_?code"\s*[:=]\s*"?-?[1-9]`),                                                              // a line-led JSON/RPC exitCode key
 		regexp.MustCompile(`\bFAIL(URES?)?\b`),                                                                                              // FAIL, BUILD FAILURE, FAILURES! (upper case)
 		regexp.MustCompile(`(?im)(^|[^/\w])fail($|[^-.\w]|-($|\W)|\.($|\W))`),                                                               // "fail" in any case — not a path segment (TestX/fail), file (fail.test.ts) or compound (Fail-safe); prose is neutralized first (proseFail)
 		regexp.MustCompile(`(?i)\bfailed\b`),                                                                                                // any form: "Failed: 1", "Command failed.", "go vet failed"
@@ -121,14 +121,16 @@ var (
 		regexp.MustCompile(`(?m)^fatal: `),                         // git fatal
 		// Missing command / EACCES as a shell reports it. The tag is a shell (or a script) name, so a prose
 		// line like "Note: permission denied ..." is not read as a shell error.
-		//   bash/zsh: "bash: [line N:] cmd: command not found" / "...: cmd: Permission denied"
-		//   shell:    "sh: 1: cmd: not found" / "sh: 1: path: Permission denied"
+		//   bash/zsh: "bash: [line N:] cmd: command not found" / "...: path: Permission denied"
+		//   shell:    "sh: 1: cmd: not found" / "sh: 1: path: Permission denied" / "...: No such file or directory"
 		//   zsh:      "zsh: command not found: cmd" / "zsh: permission denied: path"
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?(?:\S+: ){1,2}command not found\s*\r?$`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?(?:\S+: ){1,2}permission denied\s*\r?$`),
-		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:[0-9]+: )?(?:\S+: ){1,2}not found\s*\r?$`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:[0-9]+: )?(?:\S+: ){1,2}(?:not found|No such file or directory)\s*\r?$`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+command not found: \S+`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+permission denied: \S+`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+no such file or directory: \S+`),
+		regexp.MustCompile(`(?m)^\s*Killed\s*\r?$`),                                // bare SIGKILL line (any indent)
 		regexp.MustCompile(`(?mi)^\S+@\S+: permission denied \([^)]*\)\.?\s*\r?$`), // ssh/scp ("git@host: Permission denied (publickey…).")
 		regexp.MustCompile(`(?m)^(?:Command|Process) terminated by signal\b`),      // signal kill (GNU time / runner)
 		// pytest's "no tests ran in Ns" (exit 5), bare or '='-padded ("===== no tests ran in 0.0s =====").

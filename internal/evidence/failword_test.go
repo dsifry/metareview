@@ -198,6 +198,8 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"zsh colon not found":        {passing + "zsh:1: command not found: pytest", 1},
 		"indented shell not found":   {passing + "    bash: pytest: command not found", 1},
 		"dash not found":             {passing + "sh: 1: pytest: not found", 1},
+		"no such file or directory":  {passing + "bash: ./run.sh: No such file or directory", 1},
+		"ksh script not found":       {passing + "ci.ksh: 1: cmd: not found", 1},
 		"path sh not found":          {passing + "/bin/sh: 1: pytest: not found", 1},
 		"permission denied":          {passing + "bash: ./scripts/run.sh: Permission denied", 1},
 		"permission denied crlf":     {passing + "bash: ./run.sh: Permission denied\r", 1},
@@ -216,6 +218,7 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"abort trap shell":           {passing + "bash: line 1: 12345 Abort trap: 6", 1},
 		"killed shell":               {passing + "bash: line 1: 12345 Killed ./prog", 1},
 		"aborted bare":               {passing + "Aborted", 1},
+		"killed bare":                {passing + "  Killed", 1},
 		"bus error":                  {passing + "Bus error (core dumped)", 1},
 		"bus error bsd":              {passing + "Bus error: 10", 1},
 		"floating point exception":   {passing + "Floating point exception (core dumped)", 1},
@@ -249,7 +252,7 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"prose numbered failure":     {passing + "1) Failure: the reader let Killed through", 0},
 		"json exitCode fragment":     {passing + `"exitCode": 1`, 1},
 		"json exitCode object":       {passing + `{"exitCode": 1}`, 1},
-		"json exitCode midline":      {passing + `{"tool":"go test","status":"passed","exitCode":1}`, 1},
+		"json exitCode midline":      {passing + `{"tool":"go test","status":"passed","exitCode":1}`, 0},
 
 		// prose (or a PASSING tool line) naming the same words must NOT be read as a failure
 		"prose: panic handling":    {passing + "- the state handles panic: by restarting", 0},

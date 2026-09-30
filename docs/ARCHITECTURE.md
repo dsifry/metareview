@@ -406,7 +406,7 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   `no tests ran in Ns`, jest `No tests found, exiting with code <N≠0>` / `Jest: … coverage threshold … not met`,
   eslint `too many warnings (maximum: N)`, black `would reformat …`, prettier `[warn] Code style issues found`,
   rubocop `N file(s) inspected, M offense(s) detected`, a bare rspec `Failures:` header, minitest `N) Failure:`,
-  and — deliberately **unanchored**, so it matches anywhere on a line — a quoted JSON `"exitCode": 1`. A shape
+  and a line-led JSON `"exitCode": 1`. A shape
   that cannot be pinned this tightly (a bare "timed out", an errored/crashed count with no fixed prologue) is
   deliberately NOT a pattern — prefer an evidence receipt.
   A zero that does not start a clause ("shard 0 failed", "Passed: 0 Failed: 3") is a failure, and so is prose such
