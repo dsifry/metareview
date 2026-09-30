@@ -397,16 +397,28 @@ func TestClaudeJudgeRejectsATurnContinuedPastItsVerdict(t *testing.T) {
 	// single answer, so it fails closed (retried, then unparseable), not accepted.
 	f = &fakeClaude{stdout: claudeJSONNoTurns(`{"reasoning":"line 3 derefs a nil map","is_real":true,"confidence":0.9}`)}
 	j = &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
-	if v, err := j.Call(context.Background(), claudeRequest()); err != nil || v.Parsed != nil || !strings.Contains(v.ParseError, "no turn count") || v.Decision {
-		t.Fatalf("an absent num_turns must fail closed: %+v err=%v", v, err)
+	if v, err := j.Call(context.Background(), claudeRequest()); err != nil || v.Parsed != nil || v.Decision ||
+		!strings.Contains(v.ParseError, "no turn count") || f.calls != MaxAttempts || v.Attempts != MaxAttempts {
+		t.Fatalf("an absent num_turns must fail closed after retries: %+v err=%v calls=%d", v, err, f.calls)
 	}
 
 	// A present num_turns of 0 is likewise not a verifiable single answer (a real envelope never
-	// reports zero for a clean answer) and fails closed.
+	// reports zero for a clean answer) and fails closed, with a message that does not blame a hook.
 	f = &fakeClaude{stdout: claudeJSONTurns(`{"reasoning":"line 3 derefs a nil map","is_real":true,"confidence":0.9}`, 0)}
 	j = &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
-	if v, err := j.Call(context.Background(), claudeRequest()); err != nil || v.Parsed != nil || !strings.Contains(v.ParseError, "continued past") || v.Decision {
-		t.Fatalf("a zero num_turns must fail closed: %+v err=%v", v, err)
+	if v, err := j.Call(context.Background(), claudeRequest()); err != nil || v.Parsed != nil || v.Decision ||
+		!strings.Contains(v.ParseError, "zero turns") || f.calls != MaxAttempts {
+		t.Fatalf("a zero num_turns must fail closed with an accurate message: %+v err=%v", v, err)
+	}
+
+	// A still-present check fails closed (decision true) on an absent envelope too: a false decision
+	// would read as "finding gone" and silently close a finding.
+	f = &fakeClaude{stdout: claudeJSONNoTurns(`{"reasoning":"r","still_present":false,"confidence":0.9}`)}
+	j = &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
+	req := Request{Kind: KindStillPresent, Model: "claude-cli/opus", Effort: "medium",
+		Input: StillPresentInput{Bug: run.Bug{ID: "b", Desc: "the bug"}, Diff: "d"}}
+	if v, err := j.Call(context.Background(), req); err != nil || v.Parsed != nil || !v.Decision || !strings.Contains(v.ParseError, "no turn count") {
+		t.Fatalf("a still-present verdict with no turn count must fail closed (decision true): %+v err=%v", v, err)
 	}
 }
 

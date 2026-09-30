@@ -156,17 +156,22 @@ func (j *claudeJudge) Call(ctx context.Context, r Request) (v Verdict, err error
 			// Only a reported count of exactly one is a verifiable single answer. The JSON envelope
 			// exposes only the final result, so the turn count is the one signature of a continuation
 			// (#193: a Stop hook or plugin spoke after the judge answered and the turn went on to a
-			// second answer). A count above one is that continuation; a count of zero, or no count at
-			// all, is not a trustworthy single answer either. All three are retried, then returned as
-			// unparseable, which every caller treats fail-closed.
+			// second answer). Any other value is not that single answer and is retried, then returned as
+			// unparseable, which every caller treats fail-closed. The supported CLI reports num_turns in
+			// every --output-format json envelope (live-verified at claude 2.1.285, 2026-09-30), so an
+			// absent or zero count means an envelope this transport does not recognise - refusing it is
+			// the safe reading, not accepting a verdict whose provenance cannot be checked.
 			if turns != nil && *turns == 1 {
 				return v, nil
 			}
 			capped, _ := run.CapText(text, run.MaxShort)
 			v.Parsed, v.Decision, v.Confidence = nil, r.Kind == KindStillPresent, 0
-			if turns == nil {
+			switch {
+			case turns == nil:
 				v.ParseError = "the claude result reported no turn count, so a hook or plugin continuation cannot be ruled out; raw: " + capped
-			} else {
+			case *turns == 0:
+				v.ParseError = "the claude result reported zero turns, which is not a single answer; raw: " + capped
+			default:
 				v.ParseError = "the turn continued past a complete verdict (a hook or plugin spoke in the judge's session); raw: " + capped
 			}
 			lastErr = nil
