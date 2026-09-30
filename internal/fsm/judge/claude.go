@@ -86,10 +86,8 @@ func (j *claudeJudge) Call(ctx context.Context, r Request) (v Verdict, err error
 		"--setting-sources", "user",
 		// The user's hooks and plugins run in every claude session, this one included: a Stop hook
 		// that blocked after the verdict made the judge answer the hook's notice instead of the
-		// finding (#193). --bare would skip hooks too, but skips the keychain with them and drops
-		// the OAuth session this transport exists to use, so disable them through a settings
-		// overlay instead. disableAllHooks wins for hooks defined in settings and by installed
-		// plugins alike, and the overlay adds nothing else.
+		// finding (#193). Disable them through a settings overlay (--bare is not an option, for the
+		// reason above); disableAllHooks covers hooks defined in settings and by installed plugins.
 		"--settings", `{"disableAllHooks":true}`,
 		"--strict-mcp-config",
 		// A judge call is not a session: nothing to resume, and with a fresh directory per

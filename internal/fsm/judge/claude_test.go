@@ -407,35 +407,30 @@ func TestClaudeJudgeRejectsATurnContinuedPastItsVerdict(t *testing.T) {
 	f = &fakeClaude{stdout: claudeJSONTurns(`{"reasoning":"line 3 derefs a nil map","is_real":true,"confidence":0.9}`, 0)}
 	j = &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
 	if v, err := j.Call(context.Background(), claudeRequest()); err != nil || v.Parsed != nil || v.Decision ||
-		!strings.Contains(v.ParseError, "zero turns") || f.calls != MaxAttempts {
-		t.Fatalf("a zero num_turns must fail closed with an accurate message: %+v err=%v", v, err)
+		!strings.Contains(v.ParseError, "zero turns") || strings.Contains(v.ParseError, "hook") || f.calls != MaxAttempts {
+		t.Fatalf("a zero num_turns must fail closed with an accurate, hook-free message: %+v err=%v", v, err)
 	}
 
-	// A still-present check fails closed (decision true) on an absent envelope too: a false decision
-	// would read as "finding gone" and silently close a finding.
-	f = &fakeClaude{stdout: claudeJSONNoTurns(`{"reasoning":"r","still_present":false,"confidence":0.9}`)}
-	j = &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
-	req := Request{Kind: KindStillPresent, Model: "claude-cli/opus", Effort: "medium",
-		Input: StillPresentInput{Bug: run.Bug{ID: "b", Desc: "the bug"}, Diff: "d"}}
-	if v, err := j.Call(context.Background(), req); err != nil || v.Parsed != nil || !v.Decision || !strings.Contains(v.ParseError, "no turn count") {
-		t.Fatalf("a still-present verdict with no turn count must fail closed (decision true): %+v err=%v", v, err)
-	}
-}
-
-// A continued turn on a still-present check must fail closed with decision TRUE: the parse error for
-// KindStillPresent reads as "finding still present", so a false decision would silently close a finding.
-func TestClaudeJudgeContinuedTurnFailsClosedForStillPresent(t *testing.T) {
-	hooked := claudeJSONTurns(`{"reasoning":"The metareview hook spoke.","still_present":false,"confidence":0.9}`, 2)
-	f := &fakeClaude{stdout: hooked}
-	j := &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
-	req := Request{Kind: KindStillPresent, Model: "claude-cli/opus", Effort: "medium",
-		Input: StillPresentInput{Bug: run.Bug{ID: "b", Desc: "the bug"}, Diff: "d"}}
-	v, err := j.Call(context.Background(), req)
-	if err != nil {
-		t.Fatalf("a continued turn is a verdict that fails closed, not a transport error: %v", err)
-	}
-	if v.Parsed != nil || !strings.Contains(v.ParseError, "continued past") || !v.Decision {
-		t.Fatalf("a continued still-present verdict must fail closed (decision true): %+v", v)
+	// A still-present check fails closed (decision true) on every non-single-answer envelope: the
+	// parse error for KindStillPresent reads as "finding still present", so a false decision would
+	// silently close a finding.
+	for _, tc := range []struct {
+		name string
+		doc  string
+		msg  string
+	}{
+		{"absent", claudeJSONNoTurns(`{"reasoning":"r","still_present":false,"confidence":0.9}`), "no turn count"},
+		{"zero", claudeJSONTurns(`{"reasoning":"r","still_present":false,"confidence":0.9}`, 0), "zero turns"},
+		{"continued", claudeJSONTurns(`{"reasoning":"r","still_present":false,"confidence":0.9}`, 2), "continued past"},
+	} {
+		f = &fakeClaude{stdout: tc.doc}
+		j = &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
+		req := Request{Kind: KindStillPresent, Model: "claude-cli/opus", Effort: "medium",
+			Input: StillPresentInput{Bug: run.Bug{ID: "b", Desc: "the bug"}, Diff: "d"}}
+		v, err := j.Call(context.Background(), req)
+		if err != nil || v.Parsed != nil || !v.Decision || !strings.Contains(v.ParseError, tc.msg) {
+			t.Fatalf("%s: a still-present verdict must fail closed (decision true, %q): %+v err=%v", tc.name, tc.msg, v, err)
+		}
 	}
 }
 
