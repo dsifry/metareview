@@ -90,31 +90,30 @@ var (
 		regexp.MustCompile(`(?i)\bnpm (ERR!|error)`),
 		regexp.MustCompile(`(?i)\berror:`),
 	}
-	// lineFailurePatterns are anchored tool-output shapes: each must match from the START of a line
-	// (multiline ^) in a specific format a tool prints, so prose that merely names the phrase - "covers the
-	// permission-denied path", "panic handling" - never reads as a failure. A shape that cannot be pinned
-	// this tightly is deliberately NOT a pattern: prefer an evidence receipt (mr-b08).
+	// lineFailurePatterns are anchored tool-output shapes (mr-b08): each matches from the START of a line
+	// (multiline ^) in a fixed format a tool prints, and pins the phrase's own bounds, so prose that merely
+	// names the phrase - "covers the permission-denied path", "handles terminated by signal cases" - never
+	// reads as a failure. A shape that cannot be pinned this tightly (a bare "timed out", an errored/crashed
+	// count with no fixed prologue) is deliberately NOT a pattern: prefer an evidence receipt.
 	lineFailurePatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?m)^panic: `),                                      // Go runtime panic
-		regexp.MustCompile(`(?m)^fatal error: `),                                // Go runtime fatal error (deadlock, ...)
-		regexp.MustCompile(`(?m)^WARNING: DATA RACE\b`),                         // Go race detector
-		regexp.MustCompile(`(?m)^\s*Aborted(?:\s+\(core dumped\))?\s*$`),        // SIGABRT
-		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `),              // make fatal (e.g. "No rule to make target")
-		regexp.MustCompile(`(?m)^fatal: `),                                      // git fatal
-		regexp.MustCompile(`(?m)^[^\n]*: command not found[ \t]*$`),             // shell: missing command
-		regexp.MustCompile(`(?m)^[^\n]*: Permission denied[ \t]*$`),             // shell: EACCES
-		regexp.MustCompile(`(?m)^[^\n]*\bterminated by signal\b`),               // signal kill
-		regexp.MustCompile(`(?m)^[^\n]*\btimed out after [0-9]`),                // hard timeout with a duration
-		regexp.MustCompile(`(?m)^no tests ran\b`),                               // pytest "no tests ran" (exit 5)
-		regexp.MustCompile(`(?m)^No tests found\b`),                             // jest "No tests found, exiting with code 1"
-		regexp.MustCompile(`(?m)^Jest: [^\n]*coverage threshold[^\n]*not met`),  // jest coverage gate
-		regexp.MustCompile(`(?m)^[^\n]*too many warnings \(maximum: 0\)`),       // eslint --max-warnings 0
-		regexp.MustCompile(`(?m)^would reformat \S`),                            // black --check
-		regexp.MustCompile(`(?m)^\[warn\] Code style issues found\b`),           // prettier --check
-		regexp.MustCompile(`(?m)^[^\n]*\b[1-9][0-9]* offenses? detected\b`),     // rubocop
-		regexp.MustCompile(`(?m)^\s*Failures?:\s*$`),                            // rspec/minitest failure header (bare)
-		regexp.MustCompile(`(?m)^[^\n]*\b[1-9][0-9]* (errored|crashed)\b`),      // xdist "2 errored"
-		regexp.MustCompile(`(?mi)^\s*[{,]?\s*"?exit_?code"?\s*[:=]\s*"?-?[1-9]`), // JSON/pretty `"exitCode": 1`
+		regexp.MustCompile(`(?m)^panic: `),                                                 // Go panic ("panic: send on closed channel")
+		regexp.MustCompile(`(?m)^WARNING: DATA RACE\b`),                                    // Go race detector
+		regexp.MustCompile(`(?m)^\s*Aborted(?:\s+\(core dumped\))?\s*\r?$`),                // SIGABRT
+		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `),                         // make fatal ("No rule to make target")
+		regexp.MustCompile(`(?m)^fatal: `),                                                 // git fatal
+		regexp.MustCompile(`(?m)^(?:[^\s:]+: ){1,2}command not found(?:: [^\n]*)?\s*\r?$`), // bash/zsh/sh missing command
+		regexp.MustCompile(`(?m)^(?:[^\s:]+: ){1,2}Permission denied(?:: [^\n]*)?\s*\r?$`), // bash/zsh/sh EACCES
+		regexp.MustCompile(`(?m)^(?:Command|Process) terminated by signal\b`),              // signal kill (GNU time / runner)
+		regexp.MustCompile(`(?m)^no tests ran\b`),                                          // pytest "no tests ran" (exit 5)
+		regexp.MustCompile(`(?m)^No tests found, exiting with code [1-9]`),                 // jest (NOT passWithNoTests code 0)
+		regexp.MustCompile(`(?m)^Jest: [^\n]*coverage threshold[^\n]*not met`),             // jest coverage gate
+		regexp.MustCompile(`(?m)^(?:ESLint found )?too many warnings \(maximum: [0-9]+\)`), // eslint --max-warnings N
+		regexp.MustCompile(`(?m)^would reformat \S`),                                       // black --check
+		regexp.MustCompile(`(?m)^\[warn\] Code style issues found\b`),                      // prettier --check
+		regexp.MustCompile(`(?m)^[^\n]*files inspected, [1-9][0-9]* offenses? detected\b`), // rubocop summary
+		regexp.MustCompile(`(?m)^\s*Failures?:\s*\r?$`),                                    // rspec bare "Failures:" header
+		regexp.MustCompile(`(?m)^\s*[0-9]+\) Failure:`),                                    // minitest numbered "1) Failure:"
+		regexp.MustCompile(`(?mi)^\s*[{,]?\s*"?exit_?code"?\s*[:=]\s*"?-?[1-9]`),           // JSON/pretty `"exitCode": 1`
 	}
 	// zeroClause and zeroLabel report that nothing failed; they are neutralized before failurePatterns run. Both are
 	// narrow on purpose, so they can never swallow a real failure:
