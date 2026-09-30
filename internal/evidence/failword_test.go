@@ -211,6 +211,8 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"aborted shell form":         {passing + "bash: line 1: 12345 Aborted (core dumped) ./prog", 1},
 		"abort trap":                 {passing + "Abort trap: 6", 1},
 		"aborted bare":               {passing + "Aborted", 1},
+		"bus error":                  {passing + "Bus error (core dumped)", 1},
+		"illegal instruction":        {passing + "Illegal instruction (core dumped)", 1},
 		"aborted dash form":          {passing + "sh: 1: 12345 Aborted (core dumped)", 1},
 		"zsh abort":                  {passing + "zsh: abort ./prog", 1},
 		"rubocop single file":        {passing + "1 file inspected, 1 offense detected", 1},
@@ -228,6 +230,7 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"minitest Failure header":    {passing + "  1) Failure:", 1},
 		"json exitCode fragment":     {passing + `"exitCode": 1`, 1},
 		"json exitCode object":       {passing + `{"exitCode": 1}`, 1},
+		"json exitCode midline":      {passing + `{"tool":"go test","status":"passed","exitCode":1}`, 1},
 
 		// prose (or a PASSING tool line) naming the same words must NOT be read as a failure
 		"prose: panic handling":    {passing + "- the state handles panic: by restarting", 0},
@@ -237,6 +240,7 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"prose: offenses detected": {passing + "- a line with 5 files inspected, 3 offenses detected in prose", 0},
 		// bare (unbulleted) prose naming a phrase must also stay passing - the anchors, not the '- ' prefix, do the work
 		"prose bare not found":        {passing + "command not found handling is covered", 0},
+		"prose not fail":              {passing + "- the suite does not fail on a clean checkout", 0},
 		"prose bare denied":           {passing + "permission denied is handled by the sandbox", 0},
 		"prose bare fatal":            {passing + "the fatal: handling is covered", 0},
 		"prose bare no tests":         {passing + "no tests ran for the docs package", 0},

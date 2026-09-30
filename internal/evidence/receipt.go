@@ -58,7 +58,7 @@ type ParseOptions struct {
 
 // modalVerb gates a hypothetical or negated "fail" ("should fail", "doesn't fail"). One source behind both
 // proseFail and modalFail, so the two lists can never drift apart (mr-b08).
-const modalVerb = `should|shall|will|would|must|can|could|may|might|expected to|doesn't|don't|didn't|won't|cannot|never`
+const modalVerb = `should|shall|will|would|must|can|could|may|might|expected to|not|doesn't|don't|didn't|won't|cannot|never`
 
 // shellTag is the shell name (or *.sh/*.bash/*.zsh script) a shell prints before its message, shared by the
 // shell-shape patterns below (mr-b08) so the alternatives cannot drift between them.
@@ -78,6 +78,7 @@ var (
 	// or a report.
 	failurePatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\b(exit(ed)?|exit[ _-]?code|exit[ _-]?status|return[ _-]?code|exited with( code| status)?|exit (code|status) (was|is))\s*[:=]?\s*-?[1-9][0-9]*\b|\brc[ \t]*[:=][ \t]*-?[1-9]`),
+		regexp.MustCompile(`(?mi)"exit_?code"[ \t]*[:=][ \t]*"?-?[1-9]`),                                                                    // a quoted JSON/RPC key anywhere on a line
 		regexp.MustCompile(`\bFAIL(URES?)?\b`),                                                                                              // FAIL, BUILD FAILURE, FAILURES! (upper case)
 		regexp.MustCompile(`(?im)(^|[^/\w])fail($|[^-.\w]|-($|\W)|\.($|\W))`),                                                               // "fail" in any case — not a path segment (TestX/fail), file (fail.test.ts) or compound (Fail-safe); prose is neutralized first (proseFail)
 		regexp.MustCompile(`(?i)\bfailed\b`),                                                                                                // any form: "Failed: 1", "Command failed.", "go vet failed"
@@ -109,6 +110,8 @@ var (
 		// "<shell>: [line N: |N:] PID Aborted ...".
 		regexp.MustCompile(`(?m)^\s*Aborted(?:\s+\(core dumped\))?\s*\r?$`),
 		regexp.MustCompile(`(?mi)^\s*Abort trap\b`),
+		regexp.MustCompile(`(?mi)^\s*Bus error(?:\s+\(core dumped\))?\s*\r?$`),           // SIGBUS
+		regexp.MustCompile(`(?mi)^\s*Illegal instruction(?:\s+\(core dumped\))?\s*\r?$`), // SIGILL
 		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ Aborted\b`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): abort\b`), // zsh's lowercase SIGABRT ("zsh: abort ./prog")
 		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `),   // make fatal ("No rule to make target")
