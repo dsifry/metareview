@@ -393,15 +393,16 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   (3) a zero label that ends there ("Failed: 0, Passed: 5", "# fail 0", "failed=0 skipped=0");
   (4) unittest's `expected failures=N` ("OK (skipped=1, expected failures=1)").
   ANSI colour codes (";"- or ":"-separated) are stripped first. A second set of shapes (mr-b08) is matched
-  **anchored to the start of a line** in a fixed format and with its phrase bounds pinned, so prose that merely
-  names the phrase ("covers the permission-denied path", "handles terminated by signal cases") never reads as a
-  failure: Go `panic:` / `WARNING: DATA RACE`, `Aborted (core dumped)`, make `…: *** …`, git `fatal:`, bash/zsh/sh
-  `…: command not found` / `…: Permission denied` (incl. CRLF), `Command terminated by signal`, pytest `no tests
-  ran`, jest `No tests found, exiting with code <N≠0>` / `Jest: … coverage threshold … not met`, eslint `too many
-  warnings (maximum: N)`, black `would reformat …`, prettier `[warn] Code style issues found`, rubocop `N files
-  inspected, M offenses detected`, a bare rspec `Failures:` header, minitest `N) Failure:`, and a JSON
-  `"exitCode": 1`. A shape that cannot be pinned this tightly (a bare "timed out", an errored/crashed count with no
-  fixed prologue) is deliberately NOT a pattern — prefer an evidence receipt.
+  **anchored to the start of a line** in a fixed format, the phrase preceded by a fixed token, so prose that
+  merely names the phrase ("covers the permission-denied path", "command not found handling is covered") never
+  reads as a failure: Go `panic:` / `WARNING: DATA RACE`, `Aborted (core dumped)` (bare or a shell's
+  `…: line N: P Aborted …`), make `…: *** …`, git `fatal:`, bash/zsh/sh `…: command not found` /
+  `…: Permission denied` (incl. `line N:` and CRLF), `Command`/`Process terminated by signal`, pytest `no tests
+  ran in Ns`, jest `No tests found, exiting with code <N≠0>` / `Jest: … coverage threshold … not met`, eslint
+  `too many warnings (maximum: N)`, black `would reformat …`, prettier `[warn] Code style issues found`, rubocop
+  `N file(s) inspected, M offense(s) detected`, a bare rspec `Failures:` header, minitest `N) Failure:`, and a
+  JSON `"exitCode": 1`. A shape that cannot be pinned this tightly (a bare "timed out", an errored/crashed count
+  with no fixed prologue) is deliberately NOT a pattern — prefer an evidence receipt.
   A zero that does not start a clause ("shard 0 failed", "Passed: 0 Failed: 3") is a failure, and so is prose such
   as "TestX failed before the fix" — prefer receipts.
 - **Sharded review** (exclude-filtered diff > 120 KB): the gate writes prompt packs under

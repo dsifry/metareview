@@ -201,6 +201,10 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"bash script not found":      {passing + "bash: line 1: pytest: command not found", 1},
 		"script permission denied":   {passing + "script.sh: line 3: /x/y: Permission denied", 1},
 		"ssh permission denied":      {passing + "git@github.com: Permission denied (publickey).", 1},
+		"zsh permission denied":      {passing + "zsh: permission denied: ./run.sh", 1},
+		"aborted shell form":         {passing + "bash: line 1: 12345 Aborted (core dumped) ./prog", 1},
+		"rubocop single file":        {passing + "1 file inspected, 1 offense detected", 1},
+		"pytest no tests ran padded": {passing + "============================ no tests ran in 0.00s ============================", 1},
 		"terminated by signal":       {passing + "Command terminated by signal 11", 1},
 		"pytest no tests ran":        {passing + "no tests ran in 0.01s", 1},
 		"jest no tests found code 1": {passing + "No tests found, exiting with code 1", 1},
@@ -216,11 +220,17 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"json exitCode object":       {passing + `{"exitCode": 1}`, 1},
 
 		// prose (or a PASSING tool line) naming the same words must NOT be read as a failure
-		"prose: panic handling":       {passing + "- covers the panic-handling path", 0},
-		"prose: permission denied":    {passing + "- tests the Permission denied path", 0},
-		"prose: no tests ran":         {passing + "- the fixture exercises the no tests ran branch", 0},
-		"prose: terminated signal":    {passing + "- the worker handles terminated by signal cases", 0},
-		"prose: offenses detected":    {passing + "- a doc line about offenses detected", 0},
+		"prose: panic handling":    {passing + "- covers the panic-handling path", 0},
+		"prose: permission denied": {passing + "- tests the Permission denied path", 0},
+		"prose: no tests ran":      {passing + "- the fixture exercises the no tests ran branch", 0},
+		"prose: terminated signal": {passing + "- the worker handles terminated by signal cases", 0},
+		"prose: offenses detected": {passing + "- a doc line about offenses detected", 0},
+		// bare (unbulleted) prose naming a phrase must also stay passing - the anchors, not the '- ' prefix, do the work
+		"prose bare not found":        {passing + "command not found handling is covered", 0},
+		"prose bare denied":           {passing + "permission denied is handled by the sandbox", 0},
+		"prose bare fatal":            {passing + "git fatal handling is covered", 0},
+		"prose bare no tests":         {passing + "no tests ran for the docs package", 0},
+		"prose bare offenses":         {passing + "files inspected, 3 offenses detected", 0},
 		"jest passWithNoTests code 0": {passing + "No tests found, exiting with code 0", 0},
 		"prose: timed out":            {passing + "- the request can be timed out by the caller", 0},
 
