@@ -62,7 +62,7 @@ const modalVerb = `should|shall|will|would|must|can|could|may|might|expected to|
 
 // shellTag is the shell name (or *.sh/*.bash/*.zsh script) a shell prints before its message, shared by the
 // shell-shape patterns below (mr-b08) so the alternatives cannot drift between them.
-const shellTag = `(?:[^\s:]*/)?-?(?:bash|sh|dash|zsh|ash|ksh)|\S+\.(?:sh|bash|zsh)`
+const shellTag = `(?:(?:[^\s:]*/)?-?(?:bash|sh|dash|zsh|ash|ksh)|\S+\.(?:sh|bash|zsh))`
 
 var (
 	successPatterns = []*regexp.Regexp{
@@ -110,8 +110,8 @@ var (
 		// "<shell>: [line N: |N:] PID Aborted ...".
 		regexp.MustCompile(`(?m)^\s*Aborted(?:\s+\(core dumped\))?\s*\r?$`),
 		regexp.MustCompile(`(?mi)^\s*Abort trap\b`),
-		regexp.MustCompile(`(?mi)^\s*Bus error(?:\s+\(core dumped\))?\s*\r?$`),           // SIGBUS
-		regexp.MustCompile(`(?mi)^\s*Illegal instruction(?:\s+\(core dumped\))?\s*\r?$`), // SIGILL
+		regexp.MustCompile(`(?m)^\s*(?:Bus error|Illegal instruction)(?:\s+\(core dumped\)|: [0-9]+)?\s*\r?$`), // SIGBUS/SIGILL (glibc; BSD "Bus error: 10")
+		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ (?:Bus error|Illegal instruction)\b`),
 		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ Aborted\b`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): abort\b`), // zsh's lowercase SIGABRT ("zsh: abort ./prog")
 		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `),   // make fatal ("No rule to make target")
@@ -138,7 +138,6 @@ var (
 		regexp.MustCompile(`(?m)^[0-9]+ files? inspected, [1-9][0-9]* offenses? detected\b`), // rubocop summary
 		regexp.MustCompile(`(?m)^\s*Failures?:\s*\r?$`),                                      // rspec bare "Failures:" header
 		regexp.MustCompile(`(?m)^\s*[0-9]+\) Failure:`),                                      // minitest numbered "1) Failure:"
-		regexp.MustCompile(`(?mi)^\s*[{,]?\s*"exit_?code"\s*[:=]\s*"?-?[1-9]`),               // JSON `"exitCode": 1`
 	}
 	// zeroClause and zeroLabel report that nothing failed; they are neutralized before failurePatterns run. Both are
 	// narrow on purpose, so they can never swallow a real failure:

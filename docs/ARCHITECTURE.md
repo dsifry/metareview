@@ -393,14 +393,14 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   (3) a zero label that ends there ("Failed: 0, Passed: 5", "# fail 0", "failed=0 skipped=0");
   (4) unittest's `expected failures=N` ("OK (skipped=1, expected failures=1)").
   ANSI colour codes (";"- or ":"-separated) are stripped first. A second set of shapes (mr-b08) is matched
-  **anchored to the start of a line** in a fixed format, the phrase preceded by a fixed token, so prose that
-  merely names the phrase ("covers the permission-denied path", "command not found handling is covered") never
-  reads as a failure: Go `panic:` / `WARNING: DATA RACE`, `Aborted (core dumped)` / `Abort trap` (bare or a
-  shell's `…: line N: P Aborted …`), make `…: *** …`, git `fatal:`, a shell's missing-command/EACCES line —
-  `bash: [line N:] cmd: command not found`, `…: cmd: Permission denied`, `sh: 1: cmd: not found`,
-  `zsh: [N:] command not found: cmd`, `zsh: [N:] permission denied: path` — ssh's
-  `git@host: Permission denied (publickey…)`,
-  `Command`/`Process terminated by signal`, pytest `no tests
+  **anchored to the start of a line** in a fixed tool format: either the phrase alone on the line, or the phrase
+  pinned by a fixed token (a shell tag, a program/path), so prose that merely names the phrase ("covers the
+  permission-denied path", "command not found handling is covered") never reads as a failure: Go `panic:` /
+  `WARNING: DATA RACE`, `Aborted` / `Aborted (core dumped)` / `Abort trap` / `Bus error[: N]` /
+  `Illegal instruction` (bare or a shell's `…: [line N: |N:] P <signal> …`), make `…: *** …`, git `fatal:`, a
+  shell's missing-command/EACCES line — `bash: [line N:] cmd: command not found`, `…: cmd: Permission denied`,
+  `sh: 1: cmd: not found`, `zsh: [N:] command not found: cmd`, `zsh: [N:] permission denied: path` — ssh's
+  `git@host: Permission denied (publickey…)`, `Command`/`Process terminated by signal`, pytest `no tests
   ran in Ns`, jest `No tests found, exiting with code <N≠0>` / `Jest: … coverage threshold … not met`, eslint
   `too many warnings (maximum: N)`, black `would reformat …`, prettier `[warn] Code style issues found`, rubocop
   `N file(s) inspected, M offense(s) detected`, a bare rspec `Failures:` header, minitest `N) Failure:`, and a
