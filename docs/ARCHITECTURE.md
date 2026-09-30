@@ -396,8 +396,9 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   **anchored to the start of a line** in a fixed tool format: either the phrase alone on the line, or the phrase
   pinned by a fixed token (a shell tag, a program/path), so prose that merely names the phrase ("covers the
   permission-denied path", "command not found handling is covered") never reads as a failure: Go `panic:` /
-  `WARNING: DATA RACE`, `Aborted` / `Aborted (core dumped)` / `Abort trap` / `Bus error[: N]` /
-  `Illegal instruction` (bare or a shell's `…: [line N: |N:] P <signal> …`), make `…: *** …`, git `fatal:`, a
+  `WARNING: DATA RACE`, a crash line — `Aborted[: (core dumped)]` / `Abort trap: N` / `Bus error[: N]` /
+  `Illegal instruction[: (core dumped)]` / `Killed`, bare or a shell's `…: [line N: |N:] P <signal> …` or zsh's
+  lowercase `abort` / `bus error` / `illegal instruction` — make `…: *** …`, git `fatal:`, a
   shell's missing-command/EACCES line — `bash: [line N:] cmd: command not found`, `…: cmd: Permission denied`,
   `sh: 1: cmd: not found`, `zsh: [N:] command not found: cmd`, `zsh: [N:] permission denied: path` — ssh's
   `git@host: Permission denied (publickey…)`, `Command`/`Process terminated by signal`, pytest `no tests
