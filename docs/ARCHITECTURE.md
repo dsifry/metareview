@@ -392,9 +392,17 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   (2) a clause-initial zero report ("…, 0 failed", "no tests failed", bun "0 fail", ctest "0 tests failed out of 5");
   (3) a zero label that ends there ("Failed: 0, Passed: 5", "# fail 0", "failed=0 skipped=0");
   (4) unittest's `expected failures=N` ("OK (skipped=1, expected failures=1)").
-  ANSI colour codes (";"- or ":"-separated) are stripped first.
+  ANSI colour codes (";"- or ":"-separated) are stripped first. A second set of shapes (mr-b08) is matched
+  **anchored to the start of a line** in a fixed format, so prose that merely names the phrase ("covers the
+  permission-denied path", "panic handling") never reads as a failure: Go `panic:`/`fatal error:`/
+  `WARNING: DATA RACE`, `Aborted (core dumped)`, make `<make>: *** ` (e.g. "No rule to make target"), git `fatal:`,
+  shell `…: command not found` / `…: Permission denied`, `… terminated by signal`, `… timed out after N`, pytest
+  `no tests ran`, jest `No tests found` / `Jest: … coverage threshold … not met`, eslint `too many warnings
+  (maximum: 0)`, black `would reformat …`, prettier `[warn] Code style issues found`, rubocop `N offenses detected`,
+  a bare rspec/minitest `Failure(s):` header, `N errored`/`N crashed`, and a JSON `"exitCode": 1`. A shape that
+  cannot be pinned this tightly is deliberately NOT a pattern — prefer an evidence receipt.
   A zero that does not start a clause ("shard 0 failed", "Passed: 0 Failed: 3") is a failure, and so is prose such
-  as "TestX failed before the fix" — prefer receipts. Tool shapes neither reader recognizes are tracked in mr-b08.
+  as "TestX failed before the fix" — prefer receipts.
 - **Sharded review** (exclude-filtered diff > 120 KB): the gate writes prompt packs under
   `.metareview/shards/…/plan.json`; review one subagent per shard + a cross-shard pack, write results, re-run
   with `--previous-run`. Editing a file invalidates only its own shard.

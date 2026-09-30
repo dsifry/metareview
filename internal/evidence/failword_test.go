@@ -185,13 +185,51 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"exit=1":                 {passing + "exit=1", 1},
 		"return code":            {passing + "return code: 3", 1},
 		"found errors":           {passing + "Found 2 errors.", 1},
+
+		// mr-b08: anchored tool-output shapes the reader did not recognize. Each is pinned to the START
+		// of a line in a specific format, so prose that merely names the phrase must NOT trip it (below).
+		"go panic":                 {passing + "panic: runtime error: invalid memory address or nil pointer dereference", 1},
+		"go fatal error":           {passing + "fatal error: all goroutines are asleep - deadlock!", 1},
+		"go data race":             {"ok  \tpkg\t0.1s\nWARNING: DATA RACE", 1},
+		"aborted core dumped":      {passing + "Aborted (core dumped)", 1},
+		"make no rule":             {passing + "make: *** No rule to make target 'test'.  Stop.", 1},
+		"git fatal":                {passing + "fatal: not a git repository (or any parent up to mount point /x)", 1},
+		"command not found":        {passing + "bash: pytest: command not found", 1},
+		"permission denied":        {passing + "bash: ./scripts/run.sh: Permission denied", 1},
+		"terminated by signal":     {passing + "Process terminated by signal SIGSEGV", 1},
+		"timed out after":          {passing + "step 'build' timed out after 10m0s", 1},
+		"pytest no tests ran":      {passing + "no tests ran in 0.01s", 1},
+		"jest no tests found":      {passing + "No tests found, exiting with code 1", 1},
+		"jest coverage threshold":  {passing + `Jest: "global" coverage threshold for branches (80%) not met: 66%`, 1},
+		"eslint too many warnings": {passing + "too many warnings (maximum: 0)", 1},
+		"prettier code style":      {passing + "[warn] Code style issues found in 2 files. Run Prettier with --write to fix.", 1},
+		"black would reformat":     {passing + "would reformat src/a.py", 1},
+		"rubocop offenses":         {passing + "5 files inspected, 3 offenses detected", 1},
+		"rspec Failures header":    {passing + "Failures:", 1},
+		"minitest Failure header":  {passing + "Failure:", 1},
+		"xdist errored":            {passing + "3 passed, 2 errored", 1},
+		"json exitCode fragment":   {passing + `"exitCode": 1`, 1},
+		"json exitCode object":     {passing + `{"exitCode": 1}`, 1},
+
+		// prose naming the same words stays passing (the shapes are anchored, so these must not match)
+		"prose: panic handling":    {passing + "- covers the panic-handling path", 0},
+		"prose: permission denied": {passing + "- tests the Permission denied path", 0},
+		"prose: timed out":         {passing + "- the request can be timed out by the caller", 0},
+		"prose: no tests ran":      {passing + "- the fixture exercises the no tests ran branch", 0},
+
+		// expectedFailures failing side: a real failure count beside a passing expected-failures count
+		"failures beside expected": {passing + "Ran 5 tests\n\nfailures=1, expected failures=1", 1},
+		"expected failures alone":  {passing + "Ran 5 tests\n\nOK (expected failures=2)", 0},
 	} {
-		bundle, err := Parse([]byte(tc.text))
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if got := bundle.Receipts[0].ExitCode; got != tc.want {
-			t.Errorf("%s: exit %d, want %d", name, got, tc.want)
-		}
+		tc := tc
+		t.Run(name, func(t *testing.T) {
+			bundle, err := Parse([]byte(tc.text))
+			if err != nil {
+				t.Fatalf("%v", err)
+			}
+			if got := bundle.Receipts[0].ExitCode; got != tc.want {
+				t.Errorf("exit %d, want %d", got, tc.want)
+			}
+		})
 	}
 }

@@ -287,7 +287,7 @@ func TestValidationSummariesLabelsFreeformFallback(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	summaries := bundle.ValidationSummaries()
-	if len(summaries) != 1 || !strings.HasPrefix(summaries[0], "freeform fallback validation:") {
+	if len(summaries) != 1 || !strings.HasPrefix(summaries[0], "freeform fallback validation (best-effort; prefer an evidence receipt):") {
 		t.Fatalf("expected a freeform-fallback-labeled summary, got %v", summaries)
 	}
 }

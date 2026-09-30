@@ -56,6 +56,10 @@ type ParseOptions struct {
 	MaxAge time.Duration
 }
 
+// modalVerb gates a hypothetical or negated "fail" ("should fail", "doesn't fail"). One source behind both
+// proseFail and modalFail, so the two lists can never drift apart (mr-b08).
+const modalVerb = `should|shall|will|would|must|can|could|may|might|expected to|doesn't|don't|didn't|won't|cannot|never`
+
 var (
 	successPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?m)^ok\s+\S+`),
@@ -86,6 +90,32 @@ var (
 		regexp.MustCompile(`(?i)\bnpm (ERR!|error)`),
 		regexp.MustCompile(`(?i)\berror:`),
 	}
+	// lineFailurePatterns are anchored tool-output shapes: each must match from the START of a line
+	// (multiline ^) in a specific format a tool prints, so prose that merely names the phrase - "covers the
+	// permission-denied path", "panic handling" - never reads as a failure. A shape that cannot be pinned
+	// this tightly is deliberately NOT a pattern: prefer an evidence receipt (mr-b08).
+	lineFailurePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?m)^panic: `),                                      // Go runtime panic
+		regexp.MustCompile(`(?m)^fatal error: `),                                // Go runtime fatal error (deadlock, ...)
+		regexp.MustCompile(`(?m)^WARNING: DATA RACE\b`),                         // Go race detector
+		regexp.MustCompile(`(?m)^\s*Aborted(?:\s+\(core dumped\))?\s*$`),        // SIGABRT
+		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `),              // make fatal (e.g. "No rule to make target")
+		regexp.MustCompile(`(?m)^fatal: `),                                      // git fatal
+		regexp.MustCompile(`(?m)^[^\n]*: command not found[ \t]*$`),             // shell: missing command
+		regexp.MustCompile(`(?m)^[^\n]*: Permission denied[ \t]*$`),             // shell: EACCES
+		regexp.MustCompile(`(?m)^[^\n]*\bterminated by signal\b`),               // signal kill
+		regexp.MustCompile(`(?m)^[^\n]*\btimed out after [0-9]`),                // hard timeout with a duration
+		regexp.MustCompile(`(?m)^no tests ran\b`),                               // pytest "no tests ran" (exit 5)
+		regexp.MustCompile(`(?m)^No tests found\b`),                             // jest "No tests found, exiting with code 1"
+		regexp.MustCompile(`(?m)^Jest: [^\n]*coverage threshold[^\n]*not met`),  // jest coverage gate
+		regexp.MustCompile(`(?m)^[^\n]*too many warnings \(maximum: 0\)`),       // eslint --max-warnings 0
+		regexp.MustCompile(`(?m)^would reformat \S`),                            // black --check
+		regexp.MustCompile(`(?m)^\[warn\] Code style issues found\b`),           // prettier --check
+		regexp.MustCompile(`(?m)^[^\n]*\b[1-9][0-9]* offenses? detected\b`),     // rubocop
+		regexp.MustCompile(`(?m)^\s*Failures?:\s*$`),                            // rspec/minitest failure header (bare)
+		regexp.MustCompile(`(?m)^[^\n]*\b[1-9][0-9]* (errored|crashed)\b`),      // xdist "2 errored"
+		regexp.MustCompile(`(?mi)^\s*[{,]?\s*"?exit_?code"?\s*[:=]\s*"?-?[1-9]`), // JSON/pretty `"exitCode": 1`
+	}
 	// zeroClause and zeroLabel report that nothing failed; they are neutralized before failurePatterns run. Both are
 	// narrow on purpose, so they can never swallow a real failure:
 	//   - zeroClause: 0/no/none, optionally "of N" or "/N", one noun from a fixed list, then fail, failed, failing,
@@ -105,9 +135,9 @@ var (
 	// Never "did/does fail" (a report, rewritten to "failed" first),
 	// never upper or title case (a verdict), never after ":" or "=" ("Status: fail on windows"). It is neutralized after
 	// a counted "fail" ("2 tests fail on windows") has already been read as a failure.
-	proseFail = regexp.MustCompile(`\b(should|shall|will|would|must|can|could|may|might|expected to|doesn't|don't|didn't|won't|cannot|never)[ \t]+fail\b|(\w[ \t]+)fail[ \t]+(against|without)\b`)
+	proseFail = regexp.MustCompile(`\b(` + modalVerb + `)[ \t]+fail\b|(\w[ \t]+)fail[ \t]+(against|without)\b`)
 	// modalFail is proseFail's modal half, removed before countFail reads a count: "1 should fail on main" counts nothing.
-	modalFail = regexp.MustCompile(`\b(should|shall|will|would|must|can|could|may|might|expected to|doesn't|don't|didn't|won't|cannot|never)[ \t]+fail\b`)
+	modalFail = regexp.MustCompile(`\b(` + modalVerb + `)[ \t]+fail\b`)
 	// reportedFail is "did/does/do fail": a report that something failed, never prose to exempt.
 	reportedFail = regexp.MustCompile(`(?i)\b(did|does|do)[ \t]+fail\b`)
 	// countFail is a counted "fail" ("3 tests fail and 9 pass", "1 test fails"): read before proseFail neutralizes.
@@ -239,6 +269,11 @@ func hasFailureSignal(text string) bool {
 			return true
 		}
 	}
+	for _, pattern := range lineFailurePatterns {
+		if pattern.MatchString(text) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -310,7 +345,7 @@ func (bundle Bundle) ValidationSummaries() []string {
 		}
 		prefix := "structured validation"
 		if bundle.Fallback {
-			prefix = "freeform fallback validation"
+			prefix = "freeform fallback validation (best-effort; prefer an evidence receipt)"
 		}
 		status := fmt.Sprintf("exit %d", receipt.ExitCode)
 		if receipt.Kind == ReceiptKindCICheck {
