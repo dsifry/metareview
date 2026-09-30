@@ -93,3 +93,18 @@ func TestConcurrentFirstRunsInAFreshStore(t *testing.T) {
 		}
 	}
 }
+
+// A newer writer that also adds init fields is still refused as newer, not as a malformed payload (#180 review):
+// the version is read before the strict decode.
+func TestANewerWriterWithNewInitFieldsIsRefusedAsNewer(t *testing.T) {
+	saved := ReaderVersion
+	t.Cleanup(func() { ReaderVersion = saved })
+	ReaderVersion = "0.14.0"
+	b := NewBuilder(runA)
+	b.Init(baseInit(), WithRawData(`{"run_id":"`+runA+`","writer":"0.15.0","a_field_from_the_future":true}`))
+	_, err := Fold(b.Events())
+	var fe *FoldError
+	if !errors.As(err, &fe) || fe.Code != CodeAuditVersion || fe.Reason != ReasonNewerWriter {
+		t.Fatalf("want %s/%s, got %v", CodeAuditVersion, ReasonNewerWriter, err)
+	}
+}

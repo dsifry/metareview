@@ -257,28 +257,35 @@ func (m *Machine) Fork(ctx context.Context, o ForkOptions) (*Machine, ForkResult
 		return nil, ForkResult{}, err
 	}
 	// A child forked into an agent-edit state starts fixing at once, so it takes its worktree's edit lock
-	// before it exists (#180). A fork that fails after this leaves a hold whose run never came to be: stale,
-	// and taken over by the next run.
+	// before it exists (#180), and gives it back if it is not written in full: a child left half-built in its
+	// fix state would otherwise hold the lock as live.
+	release := func() {}
 	if fromNode != nil && run.Kind(fromNode.Kind) == run.KindAgentEdit && deps.EditLock != nil {
-		if err := deps.EditLock(workDir).Acquire(childID); err != nil {
+		lock := deps.EditLock(workDir)
+		if err := lock.Acquire(childID); err != nil {
 			return nil, ForkResult{}, err
 		}
+		release = func() { _ = lock.Release(childID) }
 	}
 	// 8. write the child
 	st, err := deps.Store.Create(childID, events[0])
 	if err != nil {
+		release()
 		return nil, ForkResult{}, err
 	}
 	if err := deps.Sidecar.Write(childID, SidecarWorkflow, raw); err != nil {
+		release()
 		return nil, ForkResult{}, err
 	}
 	unlockChild, err := deps.Store.Lock(childID)
 	if err != nil {
+		release()
 		return nil, ForkResult{}, err
 	}
 	for _, ev := range events[1:] {
 		if st, err = deps.Store.Append(childID, st, ev); err != nil {
 			unlockChild()
+			release()
 			return nil, ForkResult{}, err
 		}
 	}

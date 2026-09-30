@@ -256,3 +256,35 @@ func TestWriteAtomic(t *testing.T) {
 		t.Fatalf("temp left behind: %v", err)
 	}
 }
+
+// A hold whose acquiring process is still running is live whatever its run's state and however old: that process
+// may be paused between taking the lock and publishing its fix state (#180 review). Once it is gone, its run decides.
+func TestAHoldIsLiveWhileItsAcquiringProcessRuns(t *testing.T) {
+	savedPID, savedAlive := getpid, alive
+	t.Cleanup(func() { getpid, alive = savedPID, savedAlive })
+	l := lockAt(t, map[string]bool{"run-a": false})
+	getpid = func() int { return 1111 } // run-a's process
+	if err := l.Acquire("run-a"); err != nil {
+		t.Fatal(err)
+	}
+	taken := l.Now()
+	l.Now = func() time.Time { return taken.Add(time.Hour) } // long past the grace
+	getpid = func() int { return 2222 }                      // run-b's process
+	alive = func(pid int) bool { return pid == 1111 }
+	if err := l.Acquire("run-b"); !errs.Is(err, CodeEditLocked) {
+		t.Fatalf("a hold whose process still runs must not be taken over: %v", err)
+	}
+	alive = func(int) bool { return false }
+	if err := l.Acquire("run-b"); err != nil {
+		t.Fatalf("once that process is gone, the dead hold is taken over: %v", err)
+	}
+}
+
+func TestAliveChecksTheProcess(t *testing.T) {
+	if !alive(os.Getpid()) {
+		t.Fatal("this process is alive")
+	}
+	if alive(1 << 30) {
+		t.Fatal("no such process")
+	}
+}

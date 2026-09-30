@@ -45,12 +45,20 @@ const Grace = 2 * time.Minute
 type hold struct {
 	RunID string `json:"run_id"`
 	Since string `json:"since"`
+	// PID is the process that took the hold. While it is alive the hold is live whatever its run's state: the
+	// process is between taking the lock and publishing its fix state (#180).
+	PID int `json:"pid,omitempty"`
 }
 
-// Seams over the guard's flock and the hold's write, so their failure branches are testable.
+// Seams over the guard's flock, the hold's write and the process checks, so their branches are testable.
 var (
 	flock     = syscall.Flock
 	writeHold = writeAtomic
+	getpid    = os.Getpid
+	alive     = func(pid int) bool {
+		err := syscall.Kill(pid, 0)
+		return err == nil || errors.Is(err, syscall.EPERM)
+	}
 )
 
 // Acquire takes the lock for runID, or fails fast with CodeEditLocked naming the live holder. It is re-entrant:
@@ -63,7 +71,7 @@ func (l Lock) Acquire(runID string) error {
 		}
 		if current.RunID != "" && current.RunID != runID {
 			live, err := l.Live(current.RunID)
-			if err != nil || live || l.fresh(current) {
+			if err != nil || live || l.fresh(current) || acquiring(current) {
 				return errs.E(CodeEditLocked, "another run is fixing in this worktree; run one fix loop per worktree (or use another worktree) and retry once it leaves its fix node",
 					"holder", current.RunID, "since", current.Since, "lock", l.Path)
 			}
@@ -71,7 +79,7 @@ func (l Lock) Acquire(runID string) error {
 		if current.RunID == runID {
 			return nil
 		}
-		data, _ := json.Marshal(hold{RunID: runID, Since: l.Now().UTC().Format(time.RFC3339)})
+		data, _ := json.Marshal(hold{RunID: runID, Since: l.Now().UTC().Format(time.RFC3339), PID: getpid()})
 		return writeHold(l.Path, append(data, '\n'))
 	})
 }
@@ -82,6 +90,13 @@ func (l Lock) fresh(h hold) bool {
 	since, err := time.Parse(time.RFC3339, h.Since)
 	age := l.Now().Sub(since)
 	return err == nil && age > -Grace && age < Grace
+}
+
+// acquiring reports whether the process that took h is another one still running: it may be paused between
+// taking the lock and appending its transition into the fix state, and no grace bounds how long that takes. A
+// reused PID only keeps a dead hold a little longer — never steals one.
+func acquiring(h hold) bool {
+	return h.PID > 0 && h.PID != getpid() && alive(h.PID)
 }
 
 // Release drops runID's hold. Releasing a lock another run holds, or none, is a no-op.

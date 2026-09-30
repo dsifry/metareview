@@ -56,8 +56,8 @@ if [ -f tests/go/test-learning-render.sh ]; then bash tests/go/test-learning-ren
 if [ -f tests/go/test-learning-writers.sh ]; then bash tests/go/test-learning-writers.sh; fi
 if [ -f tests/go/test-learn-post-merge.sh ]; then bash tests/go/test-learn-post-merge.sh; fi
 if [ -f tests/go/test-fsm.sh ]; then bash tests/go/test-fsm.sh; fi
-if [ -f tests/go/test-fsm-concurrency.sh ]; then bash tests/go/test-fsm-concurrency.sh; fi
-if [ -f tests/go/test-version-skew.sh ]; then bash tests/go/test-version-skew.sh; fi
+bash tests/go/test-fsm-concurrency.sh
+bash tests/go/test-version-skew.sh
 # The Stop hook's ONLY test. run-all.sh is a hand-maintained list, so a new suite that nobody adds
 # here never runs in CI — and this is the suite for the shim the whole enforcement layer rests on.
 # It passed by hand and would have merged untested, which is the same silent failure the hook

@@ -207,3 +207,34 @@ func TestARunInItsFixNodeTakesTheLockAtItsNextAdvance(t *testing.T) {
 		t.Fatalf("it takes the lock and gets its node: %+v %+v", r, lock)
 	}
 }
+
+// A fork whose child is not written in full gives the child's hold back (a half-built child left in its fix state
+// would otherwise hold the lock as live).
+func TestAForkThatFailsReleasesItsChildsHold(t *testing.T) {
+	for _, op := range []string{"Create", "Lock", "append"} {
+		t.Run(op, func(t *testing.T) {
+			h := newHarness(t)
+			lock := withLock(h)
+			a := toFix(t, h)
+			h.git.def.Counts = nil
+			h.advance(a)
+			h.record(a, "fix", `{"commit":"`+shaHead+`","summary":"no commit"}`)
+			h.advance(a) // GATE_FAILED: the run ends, releasing its hold
+			h.store.err = errors.New("store refused")
+			switch op {
+			case "append":
+				h.store.failType = run.TypeFixBaseline
+			case "Lock":
+				h.store.firstLock, h.store.failLockRun = a.runID, "child"
+			default:
+				h.store.failOp = op
+			}
+			if _, _, err := a.Fork(context.Background(), ForkOptions{From: "fix"}); err == nil {
+				t.Fatal("the fork must fail")
+			}
+			if lock.holder != "" {
+				t.Fatalf("a failed fork must give the child's hold back: %+v", lock)
+			}
+		})
+	}
+}
