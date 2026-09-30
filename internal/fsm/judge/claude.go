@@ -84,6 +84,13 @@ func (j *claudeJudge) Call(ctx context.Context, r Request) (v Verdict, err error
 		// (none is). --bare would also skip hooks but skips the keychain, and with it the OAuth
 		// session this transport exists to use.
 		"--setting-sources", "user",
+		// The user's hooks and plugins run in every claude session, this one included: a Stop hook
+		// that blocked after the verdict made the judge answer the hook's notice instead of the
+		// finding (#193). --bare would skip hooks too, but skips the keychain with them and drops
+		// the OAuth session this transport exists to use, so disable them through a settings
+		// overlay instead. disableAllHooks wins for hooks defined in settings and by installed
+		// plugins alike, and the overlay adds nothing else.
+		"--settings", `{"disableAllHooks":true}`,
 		"--strict-mcp-config",
 		// A judge call is not a session: nothing to resume, and with a fresh directory per
 		// attempt a saved transcript would leave one project directory behind per call.
@@ -126,7 +133,7 @@ func (j *claudeJudge) Call(ctx context.Context, r Request) (v Verdict, err error
 			return j.exec(actx, dir, args, user)
 		}()
 
-		text, tokens, found, transient := parseClaudeResult(stdout)
+		text, turns, tokens, found, transient := parseClaudeResult(stdout)
 		v.Tokens = v.Tokens.Add(tokens)
 		switch {
 		case execErr != nil:
@@ -146,7 +153,18 @@ func (j *claudeJudge) Call(ctx context.Context, r Request) (v Verdict, err error
 		default:
 			v.Raw = text
 			v.Parsed, v.Decision, v.Confidence, v.ParseError = Parse(r.Kind, text)
-			return v, nil
+			if turns <= 1 {
+				return v, nil
+			}
+			// More than one assistant turn means something spoke after the judge had answered and the
+			// turn went on to another answer: a verdict that answers the interruption, not the finding
+			// (#193). The JSON envelope exposes only the final result, so the turn count is the
+			// signature (the codex arm inspects the message stream instead). Retried; if every attempt
+			// continues, it is returned as unparseable, which every caller treats fail-closed.
+			capped, _ := run.CapText(text, run.MaxShort)
+			v.Parsed, v.Decision, v.Confidence = nil, r.Kind == KindStillPresent, 0
+			v.ParseError = "the turn continued past a complete verdict (a hook or plugin spoke in the judge's session); raw: " + capped
+			lastErr = nil
 		}
 	}
 	return v, lastErr
@@ -171,9 +189,10 @@ func validateClaude(model, effort string, calibration bool) error {
 // claudeResult is the subset of the --output-format json document this provider
 // reads: the result text, the error flag, and the turn's usage.
 type claudeResult struct {
-	IsError bool   `json:"is_error"`
-	Result  string `json:"result"`
-	Usage   *struct {
+	IsError  bool   `json:"is_error"`
+	NumTurns int    `json:"num_turns"`
+	Result   string `json:"result"`
+	Usage    *struct {
 		Input      int64 `json:"input_tokens"`
 		CacheCre   int64 `json:"cache_creation_input_tokens"`
 		CacheRead  int64 `json:"cache_read_input_tokens"`
@@ -184,7 +203,7 @@ type claudeResult struct {
 	} `json:"usage"`
 }
 
-// parseClaudeResult pulls the result text and the turn's token usage out of the
+// parseClaudeResult pulls the result text, the turn count and the turn's token usage out of the
 // CLI's JSON document. found is false for a body that is not JSON, carries no
 // result text, or declares is_error. transient is true when the result string
 // is a server-side "API Error: 5.." report (see Call) — checked independently
@@ -197,10 +216,10 @@ type claudeResult struct {
 // subset of it. TokenTotals.Total() sums every field, so the categories are
 // made disjoint here exactly as the codex arm does; summing only input+output
 // would report the scaffolding tax as zero and undercount ~4000x.
-func parseClaudeResult(stdout []byte) (text string, tokens run.TokenTotals, found, transient bool) {
+func parseClaudeResult(stdout []byte) (text string, turns int, tokens run.TokenTotals, found, transient bool) {
 	var r claudeResult
 	if json.Unmarshal(stdout, &r) != nil {
-		return "", run.TokenTotals{}, false, false
+		return "", 0, run.TokenTotals{}, false, false
 	}
 	if r.Usage != nil {
 		var thinking int64
@@ -222,5 +241,5 @@ func parseClaudeResult(stdout []byte) (text string, tokens run.TokenTotals, foun
 	// attempt (is_error + "API Error: 5..") still costs tokens and is still a
 	// retryable transport error, and is_error's tokens still count toward the
 	// attempt that spent them.
-	return text, tokens, text != "" && !r.IsError, strings.HasPrefix(strings.TrimSpace(text), "API Error: 5")
+	return text, r.NumTurns, tokens, text != "" && !r.IsError, strings.HasPrefix(strings.TrimSpace(text), "API Error: 5")
 }

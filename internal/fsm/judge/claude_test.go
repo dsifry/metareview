@@ -36,6 +36,14 @@ func claudeJSON(text string) string {
 		`"output_tokens":153,"output_tokens_details":{"thinking_tokens":145}}}` + "\n"
 }
 
+// claudeJSONTurns is claudeJSON with an explicit num_turns, the envelope field
+// that counts how many assistant turns the CLI ran.
+func claudeJSONTurns(text string, turns int) string {
+	return `{"type":"result","subtype":"success","is_error":false,"num_turns":` + itoa(turns) + `,"result":` + quote(text) + "," +
+		`"usage":{"input_tokens":9,"cache_creation_input_tokens":10306,"cache_read_input_tokens":13572,` +
+		`"output_tokens":153,"output_tokens_details":{"thinking_tokens":145}}}` + "\n"
+}
+
 func claudeRequest() Request {
 	return Request{Kind: KindAdjudicate, Model: "claude-cli/opus", Effort: "medium",
 		Input: AdjudicateInput{Diff: "diff --git a/a.go b/a.go", Candidate: run.Finding{IssueText: "nil deref"}}}
@@ -83,9 +91,10 @@ func TestClaudeJudgeBuildsASafeInvocation(t *testing.T) {
 		"--model opus", // the claude-cli/ prefix is stripped for the wire; aliases pass through
 		"--effort medium",
 		"--output-format json",
-		"--max-turns 1",             // a judge answers; it must never start a tool loop
-		"--disallowed-tools *",      // the judge's tool surface is empty by construction
-		"--permission-mode dontAsk", // headless: a permission prompt must deny, not hang
+		"--max-turns 1",                       // a judge answers; it must never start a tool loop
+		"--disallowed-tools *",                // the judge's tool surface is empty by construction
+		"--permission-mode dontAsk",           // headless: a permission prompt must deny, not hang
+		`--settings {"disableAllHooks":true}`, // the user's hooks must not run in the judge's session (#193)
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args %q missing %q", joined, want)
@@ -181,7 +190,7 @@ func TestParseClaudeResultIsErrorKeepsUsageAndTransient(t *testing.T) {
 	doc := `{"is_error":true,"subtype":"success","result":"API Error: 529 Overloaded.",` +
 		`"usage":{"input_tokens":4,"cache_creation_input_tokens":10,"cache_read_input_tokens":20,` +
 		`"output_tokens":6,"output_tokens_details":{"thinking_tokens":2}}}` + "\n"
-	text, tok, found, transient := parseClaudeResult([]byte(doc))
+	text, _, tok, found, transient := parseClaudeResult([]byte(doc))
 	if found {
 		t.Fatal("is_error must force found false")
 	}
@@ -339,6 +348,45 @@ func TestClaudeCLIRouting(t *testing.T) {
 	}
 }
 
+// The claude arm's #193 audit. The JSON envelope exposes only the FINAL result, not the earlier
+// agent messages the codex arm inspects, so num_turns is the signature of a turn that continued
+// past the judge's first answer: a Stop hook blocked, the CLI ran another turn, and the recorded
+// verdict answered the hook instead of the finding. A continued turn is retried, and fails closed
+// if it never stops continuing.
+func TestClaudeJudgeRejectsATurnContinuedPastItsVerdict(t *testing.T) {
+	hooked := claudeJSONTurns(`{"reasoning":"The metareview hook could not run because metareview is not installed.","is_real":false,"confidence":0.9}`, 2)
+	f := &fakeClaude{stdout: hooked}
+	j := &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
+	v, err := j.Call(context.Background(), claudeRequest())
+	if err != nil {
+		t.Fatalf("a continued turn is a verdict that fails closed, not a transport error: %v", err)
+	}
+	if f.calls != MaxAttempts || v.Attempts != MaxAttempts {
+		t.Fatalf("a continued turn is retried: calls=%d attempts=%d", f.calls, v.Attempts)
+	}
+	if !strings.Contains(v.ParseError, "continued past") || v.Parsed != nil || v.Decision {
+		t.Fatalf("the hook's verdict must not be recorded: %+v", v)
+	}
+
+	// A retry that answers in a single turn is taken.
+	docs := []string{hooked, claudeJSON(`{"reasoning":"line 3 derefs a nil map","is_real":true,"confidence":0.9}`)}
+	calls := 0
+	j.exec = func(context.Context, string, []string, string) ([]byte, int, error) {
+		calls++
+		return []byte(docs[min(calls-1, len(docs)-1)]), 0, nil
+	}
+	if v, err := j.Call(context.Background(), claudeRequest()); err != nil || v.ParseError != "" || !v.Decision || v.Attempts != 2 {
+		t.Fatalf("the clean retry must be recorded: %+v err=%v", v, err)
+	}
+
+	// A single turn with a valid verdict is a normal answer: no false positive.
+	f = &fakeClaude{stdout: claudeJSON(`{"reasoning":"line 3 derefs a nil map","is_real":true,"confidence":0.9}`)}
+	j = &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
+	if v, err := j.Call(context.Background(), claudeRequest()); err != nil || v.ParseError != "" || !v.Decision || f.calls != 1 {
+		t.Fatalf("a single-turn verdict is one answer: %+v err=%v calls=%d", v, err, f.calls)
+	}
+}
+
 // The empty-model guard must match the prefix stripping's case-insensitivity
 // (the codex twin's trap): "CLAUDE-CLI/" must be refused, not spawned empty.
 func TestValidateClaudeRejectsAnEmptyModelInAnyCase(t *testing.T) {
@@ -412,7 +460,7 @@ func TestClaudeAttemptTimeoutOverride(t *testing.T) {
 func TestParseClaudeResultClampsInconsistentUsage(t *testing.T) {
 	doc := `{"is_error":false,"result":"{}","usage":{"input_tokens":10,"cache_creation_input_tokens":0,` +
 		`"cache_read_input_tokens":99,"output_tokens":3,"output_tokens_details":{"thinking_tokens":50}}}` + "\n"
-	_, tok, found, transient := parseClaudeResult([]byte(doc))
+	_, _, tok, found, transient := parseClaudeResult([]byte(doc))
 	if !found || transient {
 		t.Fatalf("found=%v transient=%v, want true/false", found, transient)
 	}
@@ -442,7 +490,7 @@ func TestParseClaudeResultTransientDetection(t *testing.T) {
 		{"", false},
 	} {
 		doc := `{"is_error":false,"result":` + quote(tc.result) + `,"usage":{}}` + "\n"
-		_, _, _, transient := parseClaudeResult([]byte(doc))
+		_, _, _, _, transient := parseClaudeResult([]byte(doc))
 		if transient != tc.transient {
 			t.Errorf("result %q: transient=%v want %v", tc.result, transient, tc.transient)
 		}
@@ -452,14 +500,14 @@ func TestParseClaudeResultTransientDetection(t *testing.T) {
 // A missing usage block (a future CLI shape or a truncated document) must not
 // fabricate counters, and a missing output_tokens_details must not eat output.
 func TestParseClaudeResultWithoutUsage(t *testing.T) {
-	_, tok, found, _ := parseClaudeResult([]byte(`{"is_error":false,"result":"text"}`))
+	_, _, tok, found, _ := parseClaudeResult([]byte(`{"is_error":false,"result":"text"}`))
 	if !found {
 		t.Fatal("result text not found")
 	}
 	if tok != (run.TokenTotals{}) {
 		t.Fatalf("tokens fabricated: %+v", tok)
 	}
-	_, tok, _, _ = parseClaudeResult([]byte(`{"is_error":false,"result":"t","usage":{"input_tokens":5,"output_tokens":7}}`))
+	_, _, tok, _, _ = parseClaudeResult([]byte(`{"is_error":false,"result":"t","usage":{"input_tokens":5,"output_tokens":7}}`))
 	if tok.Output != 7 || tok.Reasoning != 0 {
 		t.Fatalf("output without thinking details: %+v", tok)
 	}
