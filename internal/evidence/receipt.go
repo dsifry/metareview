@@ -109,19 +109,20 @@ var (
 		// "<shell>: [line N: |N:] PID Aborted ...".
 		regexp.MustCompile(`(?m)^\s*Aborted(?:\s+\(core dumped\))?\s*\r?$`),
 		regexp.MustCompile(`(?mi)^\s*Abort trap\b`),
-		regexp.MustCompile(`(?m)^(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ Aborted\b`),
-		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `), // make fatal ("No rule to make target")
-		regexp.MustCompile(`(?m)^fatal: `),                         // git fatal
+		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ Aborted\b`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): abort\b`), // zsh's lowercase SIGABRT ("zsh: abort ./prog")
+		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `),   // make fatal ("No rule to make target")
+		regexp.MustCompile(`(?m)^fatal: `),                           // git fatal
 		// Missing command / EACCES as a shell reports it. The tag is a shell (or a script) name, so a prose
 		// line like "Note: permission denied ..." is not read as a shell error.
 		//   bash/zsh: "bash: [line N:] cmd: command not found" / "...: cmd: Permission denied"
 		//   shell:    "sh: 1: cmd: not found" / "sh: 1: path: Permission denied"
 		//   zsh:      "zsh: command not found: cmd" / "zsh: permission denied: path"
-		regexp.MustCompile(`(?mi)^(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?\S+: command not found\s*\r?$`),
-		regexp.MustCompile(`(?mi)^(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?\S+: permission denied\b`),
-		regexp.MustCompile(`(?mi)^(?:` + shellTag + `): (?:[0-9]+: )?\S+: not found\s*\r?$`),
-		regexp.MustCompile(`(?mi)^(?:` + shellTag + `):(?:[0-9]+:)?\s+command not found: \S+`),
-		regexp.MustCompile(`(?mi)^(?:` + shellTag + `):(?:[0-9]+:)?\s+permission denied: \S+`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?\S+: command not found\s*\r?$`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?\S+: permission denied\b`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:[0-9]+: )?\S+: not found\s*\r?$`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+command not found: \S+`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+permission denied: \S+`),
 		regexp.MustCompile(`(?mi)^\S+@\S+: permission denied \(publickey[^)]*\)`), // ssh/scp
 		regexp.MustCompile(`(?m)^(?:Command|Process) terminated by signal\b`),     // signal kill (GNU time / runner)
 		// pytest's "no tests ran in Ns" (exit 5), bare or '='-padded ("===== no tests ran in 0.0s =====").
