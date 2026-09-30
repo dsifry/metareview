@@ -113,8 +113,9 @@ var (
 		regexp.MustCompile(`(?m)^\s*(?:Bus error|Illegal instruction|Floating point exception)(?:\s+\(core dumped\)|: [0-9]+)?\s*\r?$`), // SIGBUS/SIGILL/SIGFPE (glibc; BSD "Bus error: 10")
 		// A shell's crash line: "<shell>: [line N: |N:] PID <signal> ..." (Aborted, Abort trap, Bus error,
 		// Illegal instruction, Killed), plus zsh's PID-less lowercase names.
-		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ (?:Aborted|Abort trap|Bus error|Illegal instruction|Floating point exception|Killed)\b`),
-		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:abort|bus error|illegal instruction|segmentation fault|floating point exception|killed)\b`),
+		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ (?:Aborted|Abort trap|Bus error|Illegal instruction|Floating point exception|Killed|Terminated)\b`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:abort|bus error|illegal instruction|segmentation fault|floating point exception|killed|terminated)\b`),
+		regexp.MustCompile(`(?m)^\s*Terminated\s*\r?$`),            // bare SIGTERM line
 		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `), // make fatal ("No rule to make target")
 		regexp.MustCompile(`(?m)^fatal: `),                         // git fatal
 		// Missing command / EACCES as a shell reports it. The tag is a shell (or a script) name, so a prose
@@ -122,9 +123,9 @@ var (
 		//   bash/zsh: "bash: [line N:] cmd: command not found" / "...: cmd: Permission denied"
 		//   shell:    "sh: 1: cmd: not found" / "sh: 1: path: Permission denied"
 		//   zsh:      "zsh: command not found: cmd" / "zsh: permission denied: path"
-		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?\S+: command not found\s*\r?$`),
-		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?\S+: permission denied\b`),
-		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:[0-9]+: )?\S+: not found\s*\r?$`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?(?:\S+: ){1,2}command not found\s*\r?$`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?(?:\S+: ){1,2}permission denied\b`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:[0-9]+: )?(?:\S+: ){1,2}not found\s*\r?$`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+command not found: \S+`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+permission denied: \S+`),
 		regexp.MustCompile(`(?mi)^\S+@\S+: permission denied \([^)]*\)\.?\s*\r?$`), // ssh/scp ("git@host: Permission denied (publickey…).")
@@ -138,7 +139,7 @@ var (
 		regexp.MustCompile(`(?m)^\[warn\] Code style issues found\b`),                        // prettier --check
 		regexp.MustCompile(`(?m)^[0-9]+ files? inspected, [1-9][0-9]* offenses? detected\b`), // rubocop summary
 		regexp.MustCompile(`(?m)^\s*Failures?:\s*\r?$`),                                      // rspec bare "Failures:" header
-		regexp.MustCompile(`(?m)^\s*[0-9]+\) Failure:`),                                      // minitest numbered "1) Failure:"
+		regexp.MustCompile(`(?m)^\s*[0-9]+\) Failure:\s*\r?$`),                               // minitest numbered "1) Failure:" (whole line)
 	}
 	// zeroClause and zeroLabel report that nothing failed; they are neutralized before failurePatterns run. Both are
 	// narrow on purpose, so they can never swallow a real failure:

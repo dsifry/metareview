@@ -396,18 +396,18 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   **anchored to the start of a line** in a fixed tool format: either the phrase alone on the line, or the phrase
   pinned by a fixed token (a shell tag, a program/path), so prose that merely names the phrase ("covers the
   permission-denied path", "command not found handling is covered") never reads as a failure: Go `panic:` /
-  `WARNING: DATA RACE`, a crash line — `Aborted[: (core dumped)]` / `Abort trap: N` / `Bus error[: N]` /
-  `Illegal instruction[: (core dumped)]` / `Floating point exception` / `Killed`, bare or a shell's
-  `…: [line N: |N:] P <signal> …` or zsh's lowercase `abort` / `bus error` / `illegal instruction` /
-  `segmentation fault` / `floating point exception` / `killed` — make `…: *** …`, git `fatal:`, a
-  shell's missing-command/EACCES line — `bash: [line N:] cmd: command not found`, `…: cmd: Permission denied`,
-  `sh: 1: cmd: not found`, `zsh: [N:] command not found: cmd`, `zsh: [N:] permission denied: path` — ssh's
-  `git@host: Permission denied (publickey…)`, `Command`/`Process terminated by signal`, pytest `no tests
-  ran in Ns`, jest `No tests found, exiting with code <N≠0>` / `Jest: … coverage threshold … not met`, eslint
-  `too many warnings (maximum: N)`, black `would reformat …`, prettier `[warn] Code style issues found`, rubocop
-  `N file(s) inspected, M offense(s) detected`, a bare rspec `Failures:` header, minitest `N) Failure:`, and a
-  JSON `"exitCode": 1`. A shape that cannot be pinned this tightly (a bare "timed out", an errored/crashed count
-  with no fixed prologue) is deliberately NOT a pattern — prefer an evidence receipt.
+  `WARNING: DATA RACE`, a crash line — `Aborted[ (core dumped)]` / `Abort trap: N` / `Bus error[ (core dumped)
+  |: N]` / `Illegal instruction[ (core dumped)]` / `Floating point exception` / `Killed` / `Terminated`, bare or
+  a shell's `…: [line N: |N:] P <signal> …` or zsh's lowercase signal names — make `…: *** …`, git `fatal:`, a
+  shell's missing-command/EACCES line — `bash: [line N:] [builtin:] cmd: command not found` / `…: path:
+  Permission denied`, `sh: 1: cmd: not found`, `zsh: [N:] command not found: cmd`, `zsh: [N:] permission denied:
+  path` — ssh's `git@host: Permission denied (publickey…)`, `Command`/`Process terminated by signal`, pytest
+  `no tests ran in Ns`, jest `No tests found, exiting with code <N≠0>` / `Jest: … coverage threshold … not met`,
+  eslint `too many warnings (maximum: N)`, black `would reformat …`, prettier `[warn] Code style issues found`,
+  rubocop `N file(s) inspected, M offense(s) detected`, a bare rspec `Failures:` header, minitest `N) Failure:`,
+  and — deliberately **unanchored**, so it matches anywhere on a line — a quoted JSON `"exitCode": 1`. A shape
+  that cannot be pinned this tightly (a bare "timed out", an errored/crashed count with no fixed prologue) is
+  deliberately NOT a pattern — prefer an evidence receipt.
   A zero that does not start a clause ("shard 0 failed", "Passed: 0 Failed: 3") is a failure, and so is prose such
   as "TestX failed before the fix" — prefer receipts.
 - **Sharded review** (exclude-filtered diff > 120 KB): the gate writes prompt packs under
