@@ -58,7 +58,7 @@ type ParseOptions struct {
 
 // modalVerb gates a hypothetical or negated "fail" ("should fail", "doesn't fail"). One source behind both
 // proseFail and modalFail, so the two lists can never drift apart (mr-b08).
-const modalVerb = `should|shall|will|would|must|can|could|may|might|expected to|not|doesn't|don't|didn't|won't|cannot|never`
+const modalVerb = `should|shall|will|would|must|can|could|may|might|expected to|not|shouldn't|wouldn't|couldn't|mustn't|can't|doesn't|don't|didn't|won't|cannot|never`
 
 // shellTag is the shell name (or *.sh/*.bash/*.zsh script) a shell prints before its message, shared by the
 // shell-shape patterns below (mr-b08) so the alternatives cannot drift between them.
@@ -126,7 +126,7 @@ var (
 		//   zsh:      "zsh: command not found: cmd" / "zsh: permission denied: path"
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?(?:\S+: ){1,2}command not found\s*\r?$`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?(?:\S+: ){1,2}permission denied\s*\r?$`),
-		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:[0-9]+: )?(?:\S+: ){1,2}(?:not found|No such file or directory)\s*\r?$`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?(?:\S+: ){1,2}(?:not found|No such file or directory)\s*\r?$`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+command not found: \S+`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+permission denied: \S+`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+no such file or directory: \S+`),
