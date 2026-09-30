@@ -100,22 +100,23 @@ var (
 	lineFailurePatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?m)^panic: `),              // Go panic ("panic: send on closed channel")
 		regexp.MustCompile(`(?m)^WARNING: DATA RACE\b`), // Go race detector
-		// SIGABRT, bare or as a shell reports it ("Aborted (core dumped)", "bash: line 1: 12345 Aborted ...").
-		regexp.MustCompile(`(?m)^(?:\S+: )?(?:line [0-9]+: )?(?:[0-9]+ )?Aborted(?:\s+\(core dumped\))?\b`),
+		// SIGABRT: glibc's bare line, macOS/BSD's "Abort trap", or a shell's "<shell>: line N: PID Aborted ...".
+		regexp.MustCompile(`(?m)^\s*Aborted \(core dumped\)\s*\r?$`),
+		regexp.MustCompile(`(?mi)^\s*Abort trap\b`),
+		regexp.MustCompile(`(?m)^(?:bash|sh|dash|zsh|ash|ksh|\S+\.sh): (?:line [0-9]+: )?[0-9]+ Aborted\b`),
 		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `), // make fatal ("No rule to make target")
 		regexp.MustCompile(`(?m)^fatal: `),                         // git fatal
-		// zsh missing command ("zsh: command not found: cmd", "zsh:1: command not found: cmd").
-		regexp.MustCompile(`(?mi)^\S+: command not found: \S+`),
-		// bash/sh missing command, phrase ending the line ("bash: cmd: command not found",
-		// "bash: line 1: cmd: command not found", "cmd: command not found").
-		regexp.MustCompile(`(?mi)^(?:\S+: )?(?:line [0-9]+: )?\S+: command not found\s*\r?$`),
-		// zsh EACCES ("zsh: permission denied: path").
-		regexp.MustCompile(`(?mi)^\S+: permission denied: \S+`),
-		// bash/sh EACCES after a program token ("bash: path: Permission denied",
-		// "script.sh: line 3: path: Permission denied").
-		regexp.MustCompile(`(?mi)^(?:\S+: )?(?:line [0-9]+: )?\S+: permission denied\b`),
-		// ssh/scp ("git@host: Permission denied (publickey).").
-		regexp.MustCompile(`(?mi)^\S+@\S+: permission denied\b`),
+		// Missing command / EACCES as a shell reports it. The tag is a shell (or a *.sh script), so a prose
+		// line like "Note: permission denied ..." is not read as a shell error.
+		//   bash/sh: "bash: [line N:] cmd: command not found" / "...: cmd: Permission denied"
+		//   dash:    "sh: 1: cmd: not found"
+		//   zsh:     "zsh: command not found: cmd" / "zsh: permission denied: path"
+		regexp.MustCompile(`(?mi)^(?:bash|sh|dash|zsh|ash|ksh|\S+\.(?:sh|bash|zsh)): (?:line [0-9]+: )?\S+: command not found\s*\r?$`),
+		regexp.MustCompile(`(?mi)^(?:bash|sh|dash|zsh|ash|ksh|\S+\.(?:sh|bash|zsh)): (?:line [0-9]+: )?\S+: permission denied\b`),
+		regexp.MustCompile(`(?mi)^(?:bash|sh|dash|zsh|ash|ksh|\S+\.(?:sh|bash|zsh)): (?:[0-9]+: )?\S+: not found\s*\r?$`),
+		regexp.MustCompile(`(?mi)^(?:bash|sh|dash|zsh|ash|ksh): command not found: \S+`),
+		regexp.MustCompile(`(?mi)^(?:bash|sh|dash|zsh|ash|ksh): permission denied: \S+`),
+		regexp.MustCompile(`(?mi)^\S+@\S+: permission denied\b`),              // ssh/scp ("git@host: Permission denied (publickey).")
 		regexp.MustCompile(`(?m)^(?:Command|Process) terminated by signal\b`), // signal kill (GNU time / runner)
 		// pytest's "no tests ran in Ns" (exit 5), bare or '='-padded ("===== no tests ran in 0.0s =====").
 		regexp.MustCompile(`(?m)^=*\s*no tests ran in [0-9]`),

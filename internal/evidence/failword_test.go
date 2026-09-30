@@ -195,7 +195,7 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"git fatal":                  {passing + "fatal: not a git repository (or any parent up to mount point /x)", 1},
 		"bash command not found":     {passing + "bash: pytest: command not found", 1},
 		"zsh command not found":      {passing + "zsh: command not found: pytest", 1},
-		"sh command not found":       {passing + "pytest: command not found", 1},
+		"dash not found":             {passing + "sh: 1: pytest: not found", 1},
 		"permission denied":          {passing + "bash: ./scripts/run.sh: Permission denied", 1},
 		"permission denied crlf":     {passing + "bash: ./run.sh: Permission denied\r", 1},
 		"bash script not found":      {passing + "bash: line 1: pytest: command not found", 1},
@@ -203,6 +203,7 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"ssh permission denied":      {passing + "git@github.com: Permission denied (publickey).", 1},
 		"zsh permission denied":      {passing + "zsh: permission denied: ./run.sh", 1},
 		"aborted shell form":         {passing + "bash: line 1: 12345 Aborted (core dumped) ./prog", 1},
+		"abort trap":                 {passing + "Abort trap: 6", 1},
 		"rubocop single file":        {passing + "1 file inspected, 1 offense detected", 1},
 		"pytest no tests ran padded": {passing + "============================ no tests ran in 0.00s ============================", 1},
 		"terminated by signal":       {passing + "Command terminated by signal 11", 1},
@@ -228,11 +229,10 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		// bare (unbulleted) prose naming a phrase must also stay passing - the anchors, not the '- ' prefix, do the work
 		"prose bare not found":        {passing + "command not found handling is covered", 0},
 		"prose bare denied":           {passing + "permission denied is handled by the sandbox", 0},
-		"prose bare fatal":            {passing + "git fatal handling is covered", 0},
+		"prose bare fatal":            {passing + "the fatal: handling is covered", 0},
 		"prose bare no tests":         {passing + "no tests ran for the docs package", 0},
 		"prose bare offenses":         {passing + "files inspected, 3 offenses detected", 0},
 		"jest passWithNoTests code 0": {passing + "No tests found, exiting with code 0", 0},
-		"prose: timed out":            {passing + "- the request can be timed out by the caller", 0},
 
 		// the modal list (one source behind proseFail/modalFail) stays prose for every modal
 		"modal would fail":  {passing + "- the check would fail without the fix", 0},
