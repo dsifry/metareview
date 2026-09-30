@@ -195,6 +195,7 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"git fatal":                  {passing + "fatal: not a git repository (or any parent up to mount point /x)", 1},
 		"bash command not found":     {passing + "bash: pytest: command not found", 1},
 		"zsh command not found":      {passing + "zsh: command not found: pytest", 1},
+		"zsh colon not found":        {passing + "zsh:1: command not found: pytest", 1},
 		"dash not found":             {passing + "sh: 1: pytest: not found", 1},
 		"permission denied":          {passing + "bash: ./scripts/run.sh: Permission denied", 1},
 		"permission denied crlf":     {passing + "bash: ./run.sh: Permission denied\r", 1},
@@ -206,6 +207,7 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"login shell not found":      {passing + "-bash: pytest: command not found", 1},
 		"aborted shell form":         {passing + "bash: line 1: 12345 Aborted (core dumped) ./prog", 1},
 		"abort trap":                 {passing + "Abort trap: 6", 1},
+		"aborted bare":               {passing + "Aborted", 1},
 		"rubocop single file":        {passing + "1 file inspected, 1 offense detected", 1},
 		"pytest no tests ran padded": {passing + "============================ no tests ran in 0.00s ============================", 1},
 		"terminated by signal":       {passing + "Command terminated by signal 11", 1},
@@ -223,11 +225,11 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"json exitCode object":       {passing + `{"exitCode": 1}`, 1},
 
 		// prose (or a PASSING tool line) naming the same words must NOT be read as a failure
-		"prose: panic handling":    {passing + "- covers the panic-handling path", 0},
+		"prose: panic handling":    {passing + "- the state handles panic: by restarting", 0},
 		"prose: permission denied": {passing + "- tests the Permission denied path", 0},
-		"prose: no tests ran":      {passing + "- the fixture exercises the no tests ran branch", 0},
+		"prose: no tests ran":      {passing + "- note: no tests ran in 0.00s was expected", 0},
 		"prose: terminated signal": {passing + "- the worker handles terminated by signal cases", 0},
-		"prose: offenses detected": {passing + "- a doc line about offenses detected", 0},
+		"prose: offenses detected": {passing + "- a line with 5 files inspected, 3 offenses detected in prose", 0},
 		// bare (unbulleted) prose naming a phrase must also stay passing - the anchors, not the '- ' prefix, do the work
 		"prose bare not found":        {passing + "command not found handling is covered", 0},
 		"prose bare denied":           {passing + "permission denied is handled by the sandbox", 0},
@@ -235,6 +237,7 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"prose bare no tests":         {passing + "no tests ran for the docs package", 0},
 		"prose bare offenses":         {passing + "files inspected, 3 offenses detected", 0},
 		"prose colon tag denied":      {passing + "Note: permission denied is exercised by the test", 0},
+		"prose ssh denied":            {passing + "user@host: permission denied is covered", 0},
 		"jest passWithNoTests code 0": {passing + "No tests found, exiting with code 0", 0},
 
 		// the modal list (one source behind proseFail/modalFail) stays prose for every modal

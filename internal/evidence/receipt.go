@@ -105,10 +105,11 @@ var (
 	lineFailurePatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?m)^panic: `),              // Go panic ("panic: send on closed channel")
 		regexp.MustCompile(`(?m)^WARNING: DATA RACE\b`), // Go race detector
-		// SIGABRT: glibc's bare line, macOS/BSD's "Abort trap", or a shell's "<shell>: line N: PID Aborted ...".
-		regexp.MustCompile(`(?m)^\s*Aborted \(core dumped\)\s*\r?$`),
+		// SIGABRT: glibc's bare "Aborted" / "Aborted (core dumped)", macOS/BSD's "Abort trap", or a shell's
+		// "<shell>: [line N: |N:] PID Aborted ...".
+		regexp.MustCompile(`(?m)^\s*Aborted(?:\s+\(core dumped\))?\s*\r?$`),
 		regexp.MustCompile(`(?mi)^\s*Abort trap\b`),
-		regexp.MustCompile(`(?m)^(?:` + shellTag + `): (?:line [0-9]+: )?[0-9]+ Aborted\b`),
+		regexp.MustCompile(`(?m)^(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ Aborted\b`),
 		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `), // make fatal ("No rule to make target")
 		regexp.MustCompile(`(?m)^fatal: `),                         // git fatal
 		// Missing command / EACCES as a shell reports it. The tag is a shell (or a script) name, so a prose
@@ -119,9 +120,9 @@ var (
 		regexp.MustCompile(`(?mi)^(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?\S+: command not found\s*\r?$`),
 		regexp.MustCompile(`(?mi)^(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?\S+: permission denied\b`),
 		regexp.MustCompile(`(?mi)^(?:` + shellTag + `): (?:[0-9]+: )?\S+: not found\s*\r?$`),
-		regexp.MustCompile(`(?mi)^(?:` + shellTag + `): command not found: \S+`),
-		regexp.MustCompile(`(?mi)^(?:` + shellTag + `): permission denied: \S+`),
-		regexp.MustCompile(`(?mi)^\S+@\S+: permission denied\b`),              // ssh/scp ("git@host: Permission denied (publickey).")
+		regexp.MustCompile(`(?mi)^(?:` + shellTag + `):(?:[0-9]+:)?\s+command not found: \S+`),
+		regexp.MustCompile(`(?mi)^(?:` + shellTag + `):(?:[0-9]+:)?\s+permission denied: \S+`),
+		regexp.MustCompile(`(?mi)^\S+@\S+: permission denied \(publickey\)`),  // ssh/scp
 		regexp.MustCompile(`(?m)^(?:Command|Process) terminated by signal\b`), // signal kill (GNU time / runner)
 		// pytest's "no tests ran in Ns" (exit 5), bare or '='-padded ("===== no tests ran in 0.0s =====").
 		regexp.MustCompile(`(?m)^=*\s*no tests ran in [0-9]`),
@@ -283,14 +284,13 @@ func hasFailureSignal(text string) bool {
 	}
 	text = reportedFail.ReplaceAllString(text, " failed")
 	text = proseFail.ReplaceAllString(text, "${2} ")
-	for _, pattern := range failurePatterns {
-		if pattern.MatchString(text) {
-			return true
-		}
-	}
-	for _, pattern := range lineFailurePatterns {
-		if pattern.MatchString(text) {
-			return true
+	// The two slices are scanned identically; failurePatterns holds the base shapes (some also line-anchored)
+	// and lineFailurePatterns the mr-b08 anchored shapes.
+	for _, patterns := range [][]*regexp.Regexp{failurePatterns, lineFailurePatterns} {
+		for _, pattern := range patterns {
+			if pattern.MatchString(text) {
+				return true
+			}
 		}
 	}
 	return false
