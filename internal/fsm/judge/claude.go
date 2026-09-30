@@ -153,22 +153,22 @@ func (j *claudeJudge) Call(ctx context.Context, r Request) (v Verdict, err error
 		default:
 			v.Raw = text
 			v.Parsed, v.Decision, v.Confidence, v.ParseError = Parse(r.Kind, text)
-			// A reported count of exactly one is the expected single answer. An ABSENT count is a CLI that
-			// gave no signal to detect a continuation (#193's hook/plugin second turn): the settings overlay
-			// above removes the hook path and --max-turns 1 caps the turn count, so it is accepted rather than
-			// failing every call closed on a CLI that omits the field. Any OTHER present value (zero, or more
-			// than one) is not a trustworthy single answer.
-			if turns == nil || *turns == 1 {
+			// Only a reported count of exactly one is a verifiable single answer. The JSON envelope
+			// exposes only the final result, so the turn count is the one signature of a continuation
+			// (#193: a Stop hook or plugin spoke after the judge answered and the turn went on to a
+			// second answer). A count above one is that continuation; a count of zero, or no count at
+			// all, is not a trustworthy single answer either. All three are retried, then returned as
+			// unparseable, which every caller treats fail-closed.
+			if turns != nil && *turns == 1 {
 				return v, nil
 			}
-			// More than one assistant turn means something spoke after the judge had answered and the
-			// turn went on to another answer: a verdict that answers the interruption, not the finding
-			// (#193). The JSON envelope exposes only the final result, so the turn count is the
-			// signature (the codex arm inspects the message stream instead). Retried; if every attempt
-			// continues, it is returned as unparseable, which every caller treats fail-closed.
 			capped, _ := run.CapText(text, run.MaxShort)
 			v.Parsed, v.Decision, v.Confidence = nil, r.Kind == KindStillPresent, 0
-			v.ParseError = "the turn continued past a complete verdict (a hook or plugin spoke in the judge's session); raw: " + capped
+			if turns == nil {
+				v.ParseError = "the claude result reported no turn count, so a hook or plugin continuation cannot be ruled out; raw: " + capped
+			} else {
+				v.ParseError = "the turn continued past a complete verdict (a hook or plugin spoke in the judge's session); raw: " + capped
+			}
 			lastErr = nil
 		}
 	}
@@ -194,7 +194,7 @@ func validateClaude(model, effort string, calibration bool) error {
 // claudeResult is the subset of the --output-format json document this provider
 // reads: the result text, the error flag, the turn count, and the turn's usage.
 // NumTurns is a pointer so an ABSENT num_turns (no continuation signal) is
-// distinguishable from a present zero.
+// distinguishable from a present zero; neither is a verifiable single answer.
 type claudeResult struct {
 	IsError  bool   `json:"is_error"`
 	NumTurns *int   `json:"num_turns"`

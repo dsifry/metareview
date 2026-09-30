@@ -27,22 +27,28 @@ func (f *fakeClaude) exec(_ context.Context, _ string, args []string, stdin stri
 	return []byte(f.stdout), f.code, f.err
 }
 
-// claudeJSON is one --output-format json document: the shape live-verified
-// against claude 2.1.265 on 2026-09-09 (result, is_error, usage with the four
-// token fields and thinking as a subset of output).
-func claudeJSON(text string) string {
-	return `{"type":"result","subtype":"success","is_error":false,"result":` + quote(text) + "," +
+// claudeEnvelope is one --output-format json document. turns is the num_turns the
+// CLI reports; nil omits the field (the shape the guard must refuse). The other
+// fields are the shape live-verified against claude (result, is_error, usage with
+// the four token fields and thinking as a subset of output).
+func claudeEnvelope(text string, turns *int) string {
+	num := ""
+	if turns != nil {
+		num = `"num_turns":` + itoa(*turns) + ","
+	}
+	return `{"type":"result","subtype":"success","is_error":false,` + num + `"result":` + quote(text) + "," +
 		`"usage":{"input_tokens":9,"cache_creation_input_tokens":10306,"cache_read_input_tokens":13572,` +
 		`"output_tokens":153,"output_tokens_details":{"thinking_tokens":145}}}` + "\n"
 }
 
-// claudeJSONTurns is claudeJSON with an explicit num_turns, the envelope field
-// that counts how many assistant turns the CLI ran.
-func claudeJSONTurns(text string, turns int) string {
-	return `{"type":"result","subtype":"success","is_error":false,"num_turns":` + itoa(turns) + `,"result":` + quote(text) + "," +
-		`"usage":{"input_tokens":9,"cache_creation_input_tokens":10306,"cache_read_input_tokens":13572,` +
-		`"output_tokens":153,"output_tokens_details":{"thinking_tokens":145}}}` + "\n"
-}
+// claudeJSON is the canonical single-answer envelope: num_turns 1.
+func claudeJSON(text string) string { one := 1; return claudeEnvelope(text, &one) }
+
+// claudeJSONTurns is claudeJSON with an explicit num_turns.
+func claudeJSONTurns(text string, turns int) string { return claudeEnvelope(text, &turns) }
+
+// claudeJSONNoTurns omits num_turns: the guard cannot rule out a continuation and must fail closed.
+func claudeJSONNoTurns(text string) string { return claudeEnvelope(text, nil) }
 
 func claudeRequest() Request {
 	return Request{Kind: KindAdjudicate, Model: "claude-cli/opus", Effort: "medium",
@@ -387,12 +393,20 @@ func TestClaudeJudgeRejectsATurnContinuedPastItsVerdict(t *testing.T) {
 		t.Fatalf("a one-turn verdict is one answer: %+v err=%v calls=%d", v, err, f.calls)
 	}
 
-	// An envelope that OMITS num_turns carries no continuation signal; it is accepted (the settings
-	// overlay removes the hook path and --max-turns 1 caps the turn count), not failed closed.
-	f = &fakeClaude{stdout: claudeJSON(`{"reasoning":"line 3 derefs a nil map","is_real":true,"confidence":0.9}`)}
+	// An envelope that OMITS num_turns gives no continuation signal at all: it is not a verifiable
+	// single answer, so it fails closed (retried, then unparseable), not accepted.
+	f = &fakeClaude{stdout: claudeJSONNoTurns(`{"reasoning":"line 3 derefs a nil map","is_real":true,"confidence":0.9}`)}
 	j = &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
-	if v, err := j.Call(context.Background(), claudeRequest()); err != nil || v.ParseError != "" || !v.Decision || f.calls != 1 {
-		t.Fatalf("an absent num_turns must be accepted: %+v err=%v calls=%d", v, err, f.calls)
+	if v, err := j.Call(context.Background(), claudeRequest()); err != nil || v.Parsed != nil || !strings.Contains(v.ParseError, "no turn count") || v.Decision {
+		t.Fatalf("an absent num_turns must fail closed: %+v err=%v", v, err)
+	}
+
+	// A present num_turns of 0 is likewise not a verifiable single answer (a real envelope never
+	// reports zero for a clean answer) and fails closed.
+	f = &fakeClaude{stdout: claudeJSONTurns(`{"reasoning":"line 3 derefs a nil map","is_real":true,"confidence":0.9}`, 0)}
+	j = &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
+	if v, err := j.Call(context.Background(), claudeRequest()); err != nil || v.Parsed != nil || !strings.Contains(v.ParseError, "continued past") || v.Decision {
+		t.Fatalf("a zero num_turns must fail closed: %+v err=%v", v, err)
 	}
 }
 
