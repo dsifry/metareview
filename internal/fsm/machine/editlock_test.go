@@ -238,3 +238,27 @@ func TestAForkThatFailsReleasesItsChildsHold(t *testing.T) {
 		})
 	}
 }
+
+// A fork whose child id is already taken (two forks in one clock tick) leaves that existing child's hold alone.
+func TestAForkWhoseChildIDIsTakenKeepsTheExistingHold(t *testing.T) {
+	h := newHarness(t)
+	lock := withLock(h)
+	a := toFix(t, h)
+	h.git.def.Counts = nil
+	h.advance(a)
+	h.record(a, "fix", `{"commit":"`+shaHead+`","summary":"no commit"}`)
+	h.advance(a)
+	h.store.failOp, h.store.err = "Create", &run.StoreError{Code: run.CodeRunExists, Detail: "taken"}
+	if _, _, err := a.Fork(context.Background(), ForkOptions{From: "fix"}); err == nil {
+		t.Fatal("the fork must fail")
+	}
+	child := lock.holder
+	if child == "" {
+		t.Fatalf("the existing child's hold must be kept: %+v", lock)
+	}
+	for _, c := range lock.calls {
+		if c == "release "+child {
+			t.Fatalf("the fork released a hold it did not create: %v", lock.calls)
+		}
+	}
+}

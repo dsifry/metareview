@@ -270,7 +270,12 @@ func (m *Machine) Fork(ctx context.Context, o ForkOptions) (*Machine, ForkResult
 	// 8. write the child
 	st, err := deps.Store.Create(childID, events[0])
 	if err != nil {
-		release()
+		// A child id that already exists is another fork's child (ids are the fork time): the re-entrant Acquire
+		// above was its hold, which is not this fork's to give back.
+		var se *run.StoreError
+		if !errors.As(err, &se) || se.Code != run.CodeRunExists {
+			release()
+		}
 		return nil, ForkResult{}, err
 	}
 	if err := deps.Sidecar.Write(childID, SidecarWorkflow, raw); err != nil {
