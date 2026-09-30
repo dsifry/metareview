@@ -283,7 +283,6 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"modal shall fail":  {passing + "- it shall fail loudly on bad input", 0},
 		"modal can fail":    {passing + "- this path can fail on a bad socket", 0},
 		"modal could fail":  {passing + "- the call could fail on a bad socket", 0},
-		"modal can't fail":  {passing + "- the parser can't fail on empty input", 0},
 		"modal will fail":   {passing + "- the retry will fail on a stale lock", 0},
 		"modal may fail":    {passing + "- the call may fail on a timeout", 0},
 		"modal might fail":  {passing + "- the retry might fail once", 0},

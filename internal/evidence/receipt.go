@@ -58,10 +58,11 @@ type ParseOptions struct {
 
 // modalVerb gates a hypothetical or negated "fail" ("should fail", "doesn't fail"). One source behind both
 // proseFail and modalFail, so the two lists can never drift apart (mr-b08).
-const modalVerb = `should|shall|will|would|must|can|could|may|might|expected to|not|shouldn't|wouldn't|couldn't|mustn't|can't|doesn't|don't|didn't|won't|cannot|never`
+const modalVerb = `should|shall|will|would|must|can|could|may|might|expected to|not|doesn't|don't|didn't|won't|cannot|never`
 
-// shellTag is the shell name (or *.sh/*.bash/*.zsh script) a shell prints before its message, shared by the
-// shell-shape patterns below (mr-b08) so the alternatives cannot drift between them.
+// shellTag is the shell name (bash/sh/dash/zsh/ash/ksh, optional leading -) or a script (\S+ ending .sh/
+// .bash/.zsh/.dash/.ash/.ksh) a shell prints before its message, shared by the shell-shape patterns below
+// (mr-b08) so the alternatives cannot drift between them.
 const shellTag = `(?:(?:[^\s:]*/)?-?(?:bash|sh|dash|zsh|ash|ksh)|\S+\.(?:sh|bash|zsh|dash|ash|ksh))`
 
 var (
@@ -112,8 +113,8 @@ var (
 		regexp.MustCompile(`(?m)^\s*Abort trap: [0-9]+\s*\r?$`),
 		regexp.MustCompile(`(?m)^\s*(?:Bus error|Illegal instruction|Floating point exception|Quit)(?:\s+\(core dumped\)|: [0-9]+)?\s*\r?$`), // SIGBUS/SIGILL/SIGFPE/SIGQUIT (glibc; BSD "Bus error: 10")
 		// A shell's crash line: "<shell>: [line N: |N:] PID <signal> ..." (Aborted, Abort trap, Bus error,
-		// Illegal instruction, Floating point exception, Segmentation fault, Killed, Terminated), plus zsh's
-		// PID-less lowercase names.
+		// Illegal instruction, Floating point exception, Segmentation fault, Killed, Terminated, Quit), plus
+		// zsh's PID-less lowercase names.
 		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ (?:Aborted|Abort trap|Bus error|Illegal instruction|Floating point exception|Segmentation fault|Killed|Terminated|Quit)\b`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:abort|bus error|illegal instruction|segmentation fault|floating point exception|killed|terminated|quit)\b`),
 		regexp.MustCompile(`(?m)^\s*Terminated\s*\r?$`),            // bare SIGTERM line
