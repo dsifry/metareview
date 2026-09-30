@@ -1,5 +1,183 @@
 # Changelog
 
+## 0.14.0 - 2026-09-30
+
+### Added
+
+- **Abandoned FSM runs block only the branch they were for.** `status`, and so the Stop hook, used to
+  scope an abandoned run by the worktree holding its work dir, so the main checkout was blocked on
+  every worktree's runs. `fsm init` now records the run's `branch` (on a detached HEAD,
+  `--for-branch <local branch>` is required), and one rule in `internal/scope` decides where a run
+  belongs: its own branch (surviving rebase, amend and `git branch -m`), or a head inside this
+  branch's `merge-base(HEAD, main|master)..HEAD` range, which covers detached snapshots and stacked
+  branches. A run for another branch never blocks; `status --all` (plain or `--json`) lists those
+  runs by branch with their run directory, without changing the exit code. Any git failure leaves the
+  scope unknown and keeps everything in scope. Runs created before this change carry no branch and
+  keep blocking unless git shows their head belongs nowhere here. Reported in #177.
+- **Open findings on one branch no longer block another.** The findings ledger is shared by every
+  branch of a checkout, so a blocker raised on branch A blocked branch B's `pr-ready` after
+  `git switch`. Every finding now records the branch it was raised on and goes through the same
+  scope rule as abandoned runs. `pr-ready` blocks only on this branch's rows and lists the rest as
+  `Open on other branches: N` under Repository Health Advisory; `epic-ready` still reads its named
+  child tasks' blockers across branches, so a child squash-merged into the epic is not dropped. The
+  range leg also excludes each remote's HEAD-named default branch (`refs/remotes/<r>/HEAD`) beside
+  its `main` and `master`, so a gitflow `develop` default or a stale `origin/HEAD` cannot pull merged
+  work into a branch's range. Reported in #178 (follow-ups: mr-as8).
+- **`--base last-reviewed` reviews only what is new since the last passing review.** Accepted by
+  `review task-done`, `epic-ready`, `pr-ready` and `record-lenses`; `review checkpoint --scope <s>`
+  prints the commit it resolves to, which is what to pass to `fsm init --base`. The checkpoint is the
+  nearest strict ancestor of HEAD whose latest marker of that scope passed and whose review coverage
+  reaches the branch's fork point, derived from the existing markers with no new state. With no fork
+  point (no local `main`/`master`, or a branch with no commits of its own) the token is refused with
+  exit 2. An incremental `pr-ready` still scopes blockers to the whole branch, so an open finding on a
+  file changed before the checkpoint keeps blocking. Reported in #176.
+- **`override request|grant <run-id>` closes an abandoned FSM run.** A non-mock run left in a
+  non-terminal state on any branch can now be closed through the normal two-phase override. A request
+  alone leaves the run blocking `status`, which names who asked; a grant from another actor closes it,
+  and `status --all` lists it with scope `closed`, the actor and the reason. A closure covers the run
+  as it stood: a run resumed afterwards blocks again. The findings ledger is per checkout, so a
+  closure granted in one worktree does not close the run in another. Reported in #179.
+- **`override` reaches blockers that exist only in committed review logs.** A blocker from a log
+  written in another clone had no row in the local ledger, so it could not be overridden and kept
+  blocking. `override request|grant` now imports it from `docs/metareview/reviews/`, together with
+  every other blocker of the logs that list it, so granting one cannot retire a log's other blockers
+  unseen. An ID found nowhere exits 1. Reported in #188.
+- **`fsm` works in the bare-clone + worktrees layout.** Every `fsm` command failed there with
+  `ERR_NOT_A_REPO "the main worktree is bare"`. A run is now anchored on the linked worktree the
+  command runs in; the bare directory itself still refuses. Reported in #174.
+
+### Changed
+
+- **The plugin's Stop gate is opt-in per repository.** Installing or updating the plugin registered a
+  blocking Stop hook in every host session on the machine: unrelated projects, non-repositories, and
+  the FSM judge's throwaway `codex exec` sessions, where its notice replaced the judge's reasoning.
+  `hooks/pre-finish.sh` now exits 0 silently unless the repository's local git config has
+  `metareview.stopGate=true`. `setup --install-hooks` records the opt-in (`--uninstall-hooks` removes
+  it), and `setup --enable-stop-gate` / `--disable-stop-gate` toggle only the opt-in, for a repository
+  whose `core.hooksPath` belongs to another tool (husky, lefthook, beads). A lost opt-in is never
+  silent: the Stop hook warns on stderr when metareview's git gate is installed without it, and
+  `setup --check` reports `optedIn` and `active`. Reported in #194.
+- **`--base <branch>` resolves to `merge-base(HEAD, <branch>)` in every command.** An explicit
+  `--base main` meant main's tip, while the default base was the merge-base, so once main advanced its
+  new commits were pulled, inverted, into the reviewed diff, and `epic-ready`, `fsm init` and
+  `record-lenses` could disagree on the base. One resolver (`internal/baseref`) now serves every gate,
+  `record-lenses`, `context diff`, `status`, the pre-push scope, `learn` and `fsm init`: a branch name
+  resolves to its merge-base with HEAD, and a SHA, tag or revision expression (`a1b2c3d`, `HEAD~2`) to
+  exactly that commit. A shallow clone with no merge-base fails with a hint to fetch full history.
+  The base as typed is recorded beside the resolved SHA (`requestedBase`, `requested_base`) and never
+  matched on; `review prompt` now labels files against the resolved base. Reported in #175.
+- **FSM runs live in git's common directory.** The run store and its terminal-row ledger moved from
+  the main checkout's `.metareview/runs/` to `<git-common-dir>/metareview/`, one directory shared by
+  every worktree and never tracked. A moved main checkout, `git clean -fdX`, `git gc` and
+  `git maintenance` all leave it alone. Review and gate rows stay in each checkout's
+  `.metareview/runs.jsonl`. `status` names any 0.13.x runs still waiting to migrate, and
+  `record-lenses --from-run` falls back to the legacy location, with a warning, for one release.
+  Reported in #173.
+- **Git hooks install to a user-level, per-repository directory.** `core.hooksPath` pointed at an
+  absolute `<checkout>/.metareview/git-hooks`, so after moving the main checkout git silently ran no
+  hook and pushes from linked worktrees went ungated. Hooks now live in
+  `${XDG_DATA_HOME:-~/.local/share}/metareview/git-hooks/<id>/`, with the id kept in the repository's
+  local config so it moves with the repository; a copied or re-cloned repository gets its own
+  directory. Uninstall unsets `core.hooksPath` and the Stop-gate opt-in but never empties the
+  directory. `setup --install-hooks` migrates a pre-0.14 location, refusing if it holds hooks of other
+  tools, and `setup --check` reports the `location` and any `stale` one. Reported in #173.
+- **Parallel metareview runs are safe by construction.** A fix loop now takes a per-worktree lock
+  (`<worktree git dir>/metareview/edit.lock`) on entering its fix node, so a second fix loop in the
+  same worktree fails fast with `ERR_EDIT_LOCKED` naming the holder instead of editing the tree the
+  first one is re-reviewing. A live lock is never taken over; a stale one (holder finished, gone, left
+  its fix node or closed via #179) is. JSONL appends now take an advisory flock. Each run's init
+  records its `writer` version, and a reader older than the writer's major.minor refuses the run with
+  `ERR_AUDIT_VERSION`. Two races found by the new concurrency test are fixed: the shared store's
+  first-use `.gitignore` write, and generated run IDs colliding across worktrees. Reported in #180.
+- **A lens marker survives commits of the gate's own artifacts.** Committing review logs, context
+  packs, shard results, FSM bundles or `docs/metareview/FINDINGS.md` after `record-lenses` moved HEAD
+  off the marker, and the pr-ready chain burned attempts to ESCALATED. A marker at an ancestor head
+  now still counts when every change since is a gate artifact; code, tests, other docs or a submodule
+  bump still invalidate it. `record-lenses --from-run` also accepts the head at which a fix loop's
+  final `clean`/`reviewed` transition passed, when its last review-lenses node reviewed that very head,
+  so a fix loop can back the marker for the commit it made clean. Reported in #161 (and mr-1ad).
+- **`docs/metareview/FINDINGS.md` merges as a union.** Two long-lived branches that both regenerated
+  it conflicted on every merge. `.gitattributes` now marks it `merge=union`. A union never drops a
+  line but can keep one a side removed; the file is display-only, and the next render from a ledger
+  that knows the finding retires it. GitHub's web merge may not honour the driver; merge `main`
+  locally instead. Reported in #181.
+- **A pr-ready repair chain adopts same-diff runs outside it.** Earlier pr-ready runs of the same
+  target over the same base..head that sat outside the `--previous-run` chain left their blockers
+  open. The chained run now re-checks and closes them. A run without `--previous-run` still adopts
+  nothing, and attempt counting is unchanged. (mr-mrf)
+- **Review logs: the reviewer table adds up, carried-forward blockers are labelled, and rollback is
+  atomic.** The reviewer table now has a row for every reviewer a listed finding names, and a blocker
+  raised by an earlier run is tagged `Carried forward from: <run>`. Context-pack headings are followed
+  by a blank line (markdownlint MD022), and the PR-evidence note no longer points at a heading the
+  pack does not have. The four gates' rollback copies are one `internal/rollback`, which restores a
+  file write-temp-then-rename with its mode and keeps a symlinked output's link. (#155, #143, #152)
+
+### Fixed
+
+- **`fsm export` from a linked worktree writes into that worktree.** A default export landed in the
+  main checkout's `docs/metareview/fsm/<id>/`, on the wrong branch. The FSM now separates the store
+  root (shared run state) from the work root (the checkout the command runs in), and `fsm init`'s
+  "runs.jsonl is not ignored" warning checks the store root, where the row is appended. Reported in
+  #172.
+- **An all-rejected lens output fails the node instead of ending clean.** When every entry of a
+  review-lenses output failed the lens contract (bad schema, an out-of-set value, a citation outside
+  the diff), the run routed discover to done and ended `DONE`/`clean`, indistinguishable from a real
+  review that found nothing, and could back a `record-lenses --from-run` marker. It now gate-fails
+  with `lens_all_rejected` and a `resume_hint`. An empty findings list, or one suppressed only below
+  the confidence floor, is still a genuine "nothing to raise". (mr-0vk)
+- **The freeform evidence reader counts failures, not the word "fail".** Prose such as "new tests
+  fail against origin/main" marked a passing receipt `exit 1`. Modal and prepositional uses and
+  zero-count summaries (`0 failed`, `failures: 0`) now pass, and more real failure shapes are caught
+  (`N failing`, `exit status N`, `Traceback`, `panicked at`, TAP `not ok`, `npm ERR!`, go
+  diagnostics). Every signal the previous reader counted still counts. (mr-r3y)
+- **Key-prefix redaction no longer corrupts `task-done` paths.** `sk-` inside `task-done-…` was
+  redacted, so pr-ready logs listed evidence as `…-ta[REDACTED].md`, which does not resolve. A
+  key-prefix match is skipped only when it is lowercase text continuing a lowercase word; real
+  mixed-case keys, and keys after `=`, `:`, whitespace, quotes, escapes or percent-encoding, are
+  always redacted. An all-lowercase key glued onto a lowercase word is not. Reported in #184.
+- **Stale `--help`/`-h` task and epic reviews no longer block.** Logs left by an earlier bug,
+  whose target is exactly `--help` or `-h`, are retired by `pr-ready` and `status`. `review task-done`
+  and `review epic-ready` now refuse any target starting with `-` (exit 2, no log written). A shard
+  pack's re-run command now includes the task target. Reported in #187.
+
+### Security
+
+- **`record-lenses` rejects a mock FSM run as adjudicated evidence.** `--mode subagent-adjudicated
+  --from-run` accepted a scripted `--mock-ai` run over the right diff as a full-strength PASS marker,
+  contrary to the rule that a `mock: true` run never satisfies a gate. A run whose init names a mock
+  scenario, or that carries any mock-stamped event, is now refused. Markers recorded under 0.13.4 are
+  not re-validated, but they expire at the next commit or base change. Reported in #185.
+- **The Codex judge runs without user hooks or plugins, and rejects unreasoned or continued
+  verdicts.** A Stop hook in the judge's `codex exec` session continued the turn after the judge
+  answered, and the hook's notice was recorded as the verdict's reasoning. The judge now passes
+  `-c features.hooks=false -c features.plugins=false`. A turn that continues past a complete verdict
+  is retried and then fails closed, and a verdict with empty reasoning is a parse error for every judge
+  provider. Reported in #193.
+
+### Upgrade notes
+
+- The FSM run store migrates from the main checkout's `.metareview/runs/` into
+  `<git-common-dir>/metareview/` on the first `fsm` command, announced once with `STORE_MIGRATED`.
+  Runs move whole and are never overwritten; a colliding id keeps both copies and warns
+  `STORE_COLLISION`.
+- Git hooks move to a user-level, per-repository directory. Re-run `metareview setup --install-hooks`
+  in each repository to migrate a checkout-local install.
+- The Stop gate is now opt-in per repository. `setup --install-hooks` records the opt-in; a repository
+  whose hooks another tool manages can run `metareview setup --enable-stop-gate`.
+- `fsm init` on a detached HEAD now requires `--for-branch <local branch>`.
+- Abandoned runs from before #177 record no branch, so one left on main may block every branch forked
+  after it. `status --all` shows them. Clear one by deleting its run directory, or close it with
+  `metareview override request|grant <run-id>` (#179).
+- Runs written by 0.14 carry a `writer` version. A binary from before 0.14 refuses them with an error
+  (never a verdict), and a later binary refuses a run from a newer minor release (`ERR_AUDIT_VERSION`).
+  Use one metareview version per repository.
+- One fix loop per worktree is now enforced: a second one fails with `ERR_EDIT_LOCKED`. Run parallel
+  fix loops in separate worktrees.
+- A marker recorded with `--base <branch>` after that branch had advanced holds the branch's tip, no
+  longer matches under the merge-base rule, and must be re-recorded.
+- `docs/metareview/FINDINGS.md` merges as a union. An adopting repository gets the same by adding
+  `docs/metareview/FINDINGS.md merge=union` to its own `.gitattributes`.
+
 ## 0.13.4 - 2026-09-26
 
 ### Fixed
