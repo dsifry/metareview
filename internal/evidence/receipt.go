@@ -132,11 +132,11 @@ var (
 		regexp.MustCompile(`(?mi)^\S+@\S+: permission denied \([^)]*\)\.?\s*\r?$`), // ssh/scp ("git@host: Permission denied (publickey…).")
 		regexp.MustCompile(`(?m)^(?:Command|Process) terminated by signal\b`),      // signal kill (GNU time / runner)
 		// pytest's "no tests ran in Ns" (exit 5), bare or '='-padded ("===== no tests ran in 0.0s =====").
-		regexp.MustCompile(`(?m)^=*\s*no tests ran in [0-9]`),
+		regexp.MustCompile(`(?m)^(?:=+[ \t]*)?no tests ran in [0-9.]+s(?:[ \t]*=+)?[ \t]*\r?$`),
 		regexp.MustCompile(`(?m)^No tests found, exiting with code [1-9]`),                   // jest (NOT passWithNoTests code 0)
 		regexp.MustCompile(`(?m)^Jest: [^\n]*coverage threshold[^\n]*not met`),               // jest coverage gate
 		regexp.MustCompile(`(?m)^(?:ESLint found )?too many warnings \(maximum: [0-9]+\)`),   // eslint --max-warnings N
-		regexp.MustCompile(`(?m)^would reformat \S`),                                         // black --check
+		regexp.MustCompile(`(?m)^would reformat \S+[ \t]*\r?$`),                              // black --check
 		regexp.MustCompile(`(?m)^\[warn\] Code style issues found\b`),                        // prettier --check
 		regexp.MustCompile(`(?m)^[0-9]+ files? inspected, [1-9][0-9]* offenses? detected\b`), // rubocop summary
 		regexp.MustCompile(`(?m)^\s*Failures?:\s*\r?$`),                                      // rspec bare "Failures:" header

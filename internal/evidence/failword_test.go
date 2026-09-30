@@ -246,7 +246,7 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"rubocop offenses":           {passing + "5 files inspected, 3 offenses detected", 1},
 		"rspec Failures header":      {passing + "Failures:", 1},
 		"minitest Failure header":    {passing + "  1) Failure:", 1},
-		"prose numbered failure":     {passing + "1) Failure mode: the reader let Killed through", 0},
+		"prose numbered failure":     {passing + "1) Failure: the reader let Killed through", 0},
 		"json exitCode fragment":     {passing + `"exitCode": 1`, 1},
 		"json exitCode object":       {passing + `{"exitCode": 1}`, 1},
 		"json exitCode midline":      {passing + `{"tool":"go test","status":"passed","exitCode":1}`, 1},
