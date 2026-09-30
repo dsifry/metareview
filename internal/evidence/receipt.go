@@ -62,7 +62,7 @@ const modalVerb = `should|shall|will|would|must|can|could|may|might|expected to|
 
 // shellTag is the shell name (or *.sh/*.bash/*.zsh script) a shell prints before its message, shared by the
 // shell-shape patterns below (mr-b08) so the alternatives cannot drift between them.
-const shellTag = `-?(?:bash|sh|dash|zsh|ash|ksh)|\S+\.(?:sh|bash|zsh)`
+const shellTag = `(?:[^\s:]*/)?-?(?:bash|sh|dash|zsh|ash|ksh)|\S+\.(?:sh|bash|zsh)`
 
 var (
 	successPatterns = []*regexp.Regexp{
@@ -122,8 +122,8 @@ var (
 		regexp.MustCompile(`(?mi)^(?:` + shellTag + `): (?:[0-9]+: )?\S+: not found\s*\r?$`),
 		regexp.MustCompile(`(?mi)^(?:` + shellTag + `):(?:[0-9]+:)?\s+command not found: \S+`),
 		regexp.MustCompile(`(?mi)^(?:` + shellTag + `):(?:[0-9]+:)?\s+permission denied: \S+`),
-		regexp.MustCompile(`(?mi)^\S+@\S+: permission denied \(publickey\)`),  // ssh/scp
-		regexp.MustCompile(`(?m)^(?:Command|Process) terminated by signal\b`), // signal kill (GNU time / runner)
+		regexp.MustCompile(`(?mi)^\S+@\S+: permission denied \(publickey[^)]*\)`), // ssh/scp
+		regexp.MustCompile(`(?m)^(?:Command|Process) terminated by signal\b`),     // signal kill (GNU time / runner)
 		// pytest's "no tests ran in Ns" (exit 5), bare or '='-padded ("===== no tests ran in 0.0s =====").
 		regexp.MustCompile(`(?m)^=*\s*no tests ran in [0-9]`),
 		regexp.MustCompile(`(?m)^No tests found, exiting with code [1-9]`),                   // jest (NOT passWithNoTests code 0)

@@ -398,7 +398,8 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   reads as a failure: Go `panic:` / `WARNING: DATA RACE`, `Aborted (core dumped)` / `Abort trap` (bare or a
   shell's `…: line N: P Aborted …`), make `…: *** …`, git `fatal:`, a shell's missing-command/EACCES line —
   `bash: [line N:] cmd: command not found`, `…: cmd: Permission denied`, `sh: 1: cmd: not found`,
-  `zsh: command not found: cmd`, `zsh: permission denied: path` — ssh's `git@host: Permission denied`,
+  `zsh: [N:] command not found: cmd`, `zsh: [N:] permission denied: path` — ssh's
+  `git@host: Permission denied (publickey…)`,
   `Command`/`Process terminated by signal`, pytest `no tests
   ran in Ns`, jest `No tests found, exiting with code <N≠0>` / `Jest: … coverage threshold … not met`, eslint
   `too many warnings (maximum: N)`, black `would reformat …`, prettier `[warn] Code style issues found`, rubocop
