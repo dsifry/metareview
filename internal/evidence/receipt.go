@@ -110,12 +110,12 @@ var (
 		// "<shell>: [line N: |N:] PID Aborted ...".
 		regexp.MustCompile(`(?m)^\s*Aborted(?:\s+\(core dumped\))?\s*\r?$`),
 		regexp.MustCompile(`(?m)^\s*Abort trap: [0-9]+\s*\r?$`),
-		regexp.MustCompile(`(?m)^\s*(?:Bus error|Illegal instruction|Floating point exception)(?:\s+\(core dumped\)|: [0-9]+)?\s*\r?$`), // SIGBUS/SIGILL/SIGFPE (glibc; BSD "Bus error: 10")
+		regexp.MustCompile(`(?m)^\s*(?:Bus error|Illegal instruction|Floating point exception|Quit)(?:\s+\(core dumped\)|: [0-9]+)?\s*\r?$`), // SIGBUS/SIGILL/SIGFPE/SIGQUIT (glibc; BSD "Bus error: 10")
 		// A shell's crash line: "<shell>: [line N: |N:] PID <signal> ..." (Aborted, Abort trap, Bus error,
 		// Illegal instruction, Floating point exception, Segmentation fault, Killed, Terminated), plus zsh's
 		// PID-less lowercase names.
-		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ (?:Aborted|Abort trap|Bus error|Illegal instruction|Floating point exception|Segmentation fault|Killed|Terminated)\b`),
-		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:abort|bus error|illegal instruction|segmentation fault|floating point exception|killed|terminated)\b`),
+		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ (?:Aborted|Abort trap|Bus error|Illegal instruction|Floating point exception|Segmentation fault|Killed|Terminated|Quit)\b`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:abort|bus error|illegal instruction|segmentation fault|floating point exception|killed|terminated|quit)\b`),
 		regexp.MustCompile(`(?m)^\s*Terminated\s*\r?$`),            // bare SIGTERM line
 		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `), // make fatal ("No rule to make target")
 		regexp.MustCompile(`(?m)^fatal: `),                         // git fatal
@@ -130,9 +130,9 @@ var (
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+command not found: \S+`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+permission denied: \S+`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+no such file or directory: \S+`),
-		regexp.MustCompile(`(?m)^\s*Killed\s*\r?$`),                                // bare SIGKILL line (any indent)
-		regexp.MustCompile(`(?mi)^\S+@\S+: permission denied \([^)]*\)\.?\s*\r?$`), // ssh/scp ("git@host: Permission denied (publickey…).")
-		regexp.MustCompile(`(?m)^(?:Command|Process) terminated by signal\b`),      // signal kill (GNU time / runner)
+		regexp.MustCompile(`(?m)^\s*Killed\s*\r?$`),                                       // bare SIGKILL line (any indent)
+		regexp.MustCompile(`(?mi)^\S+@\S+: permission denied \([^)]*\)\.?\s*\r?$`),        // ssh/scp ("git@host: Permission denied (publickey…).")
+		regexp.MustCompile(`(?m)^(?:Command|Process) terminated by signal \S+[ \t]*\r?$`), // signal kill (GNU time / runner)
 		// pytest's "no tests ran in Ns" (exit 5), bare or '='-padded ("===== no tests ran in 0.0s =====").
 		regexp.MustCompile(`(?m)^(?:=+[ \t]*)?no tests ran in [0-9.]+s(?:[ \t]*=+)?[ \t]*\r?$`),
 		regexp.MustCompile(`(?m)^No tests found, exiting with code [1-9]`),                   // jest (NOT passWithNoTests code 0)
