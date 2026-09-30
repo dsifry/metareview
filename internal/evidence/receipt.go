@@ -112,8 +112,9 @@ var (
 		regexp.MustCompile(`(?m)^\s*Abort trap: [0-9]+\s*\r?$`),
 		regexp.MustCompile(`(?m)^\s*(?:Bus error|Illegal instruction|Floating point exception)(?:\s+\(core dumped\)|: [0-9]+)?\s*\r?$`), // SIGBUS/SIGILL/SIGFPE (glibc; BSD "Bus error: 10")
 		// A shell's crash line: "<shell>: [line N: |N:] PID <signal> ..." (Aborted, Abort trap, Bus error,
-		// Illegal instruction, Killed), plus zsh's PID-less lowercase names.
-		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ (?:Aborted|Abort trap|Bus error|Illegal instruction|Floating point exception|Killed|Terminated)\b`),
+		// Illegal instruction, Floating point exception, Segmentation fault, Killed, Terminated), plus zsh's
+		// PID-less lowercase names.
+		regexp.MustCompile(`(?m)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?[0-9]+ (?:Aborted|Abort trap|Bus error|Illegal instruction|Floating point exception|Segmentation fault|Killed|Terminated)\b`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:abort|bus error|illegal instruction|segmentation fault|floating point exception|killed|terminated)\b`),
 		regexp.MustCompile(`(?m)^\s*Terminated\s*\r?$`),            // bare SIGTERM line
 		regexp.MustCompile(`(?m)^\s*make(?:\[[0-9]+\])?: \*\*\* `), // make fatal ("No rule to make target")
@@ -124,7 +125,7 @@ var (
 		//   shell:    "sh: 1: cmd: not found" / "sh: 1: path: Permission denied"
 		//   zsh:      "zsh: command not found: cmd" / "zsh: permission denied: path"
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?(?:\S+: ){1,2}command not found\s*\r?$`),
-		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?(?:\S+: ){1,2}permission denied\b`),
+		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:line [0-9]+: |[0-9]+: )?(?:\S+: ){1,2}permission denied\s*\r?$`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `): (?:[0-9]+: )?(?:\S+: ){1,2}not found\s*\r?$`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+command not found: \S+`),
 		regexp.MustCompile(`(?mi)^\s*(?:` + shellTag + `):(?:[0-9]+:)?\s+permission denied: \S+`),

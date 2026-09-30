@@ -397,7 +397,8 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   pinned by a fixed token (a shell tag, a program/path), so prose that merely names the phrase ("covers the
   permission-denied path", "command not found handling is covered") never reads as a failure: Go `panic:` /
   `WARNING: DATA RACE`, a crash line — `Aborted[ (core dumped)]` / `Abort trap: N` / `Bus error[ (core dumped)
-  |: N]` / `Illegal instruction[ (core dumped)]` / `Floating point exception` / `Killed` / `Terminated`, bare or
+  |: N]` / `Illegal instruction[ (core dumped)]` / `Floating point exception` / `Segmentation fault` / `Killed` /
+  `Terminated`, bare or
   a shell's `…: [line N: |N:] P <signal> …` or zsh's lowercase signal names — make `…: *** …`, git `fatal:`, a
   shell's missing-command/EACCES line — `bash: [line N:] [builtin:] cmd: command not found` / `…: path:
   Permission denied`, `sh: 1: cmd: not found`, `zsh: [N:] command not found: cmd`, `zsh: [N:] permission denied:
