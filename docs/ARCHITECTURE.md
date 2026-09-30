@@ -396,9 +396,10 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   **anchored to the start of a line** in a fixed format, the phrase preceded by a fixed token, so prose that
   merely names the phrase ("covers the permission-denied path", "command not found handling is covered") never
   reads as a failure: Go `panic:` / `WARNING: DATA RACE`, `Aborted (core dumped)` / `Abort trap` (bare or a
-  shell's `…: line N: P Aborted …`), make `…: *** …`, git `fatal:`, a shell tag (bash/sh/dash/zsh/…) then
-  `…: [line N:] cmd: command not found` / `…: cmd: Permission denied` / `sh: 1: cmd: not found`, ssh's
-  `git@host: Permission denied`, `Command`/`Process terminated by signal`, pytest `no tests
+  shell's `…: line N: P Aborted …`), make `…: *** …`, git `fatal:`, a shell's missing-command/EACCES line —
+  `bash: [line N:] cmd: command not found`, `…: cmd: Permission denied`, `sh: 1: cmd: not found`,
+  `zsh: command not found: cmd`, `zsh: permission denied: path` — ssh's `git@host: Permission denied`,
+  `Command`/`Process terminated by signal`, pytest `no tests
   ran in Ns`, jest `No tests found, exiting with code <N≠0>` / `Jest: … coverage threshold … not met`, eslint
   `too many warnings (maximum: N)`, black `would reformat …`, prettier `[warn] Code style issues found`, rubocop
   `N file(s) inspected, M offense(s) detected`, a bare rspec `Failures:` header, minitest `N) Failure:`, and a

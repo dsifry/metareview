@@ -202,6 +202,8 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"script permission denied":   {passing + "script.sh: line 3: /x/y: Permission denied", 1},
 		"ssh permission denied":      {passing + "git@github.com: Permission denied (publickey).", 1},
 		"zsh permission denied":      {passing + "zsh: permission denied: ./run.sh", 1},
+		"dash permission denied":     {passing + "sh: 1: ./run.sh: Permission denied", 1},
+		"login shell not found":      {passing + "-bash: pytest: command not found", 1},
 		"aborted shell form":         {passing + "bash: line 1: 12345 Aborted (core dumped) ./prog", 1},
 		"abort trap":                 {passing + "Abort trap: 6", 1},
 		"rubocop single file":        {passing + "1 file inspected, 1 offense detected", 1},
@@ -232,6 +234,7 @@ func TestFreeformFailureReadsFailuresNotTheWordFail(t *testing.T) {
 		"prose bare fatal":            {passing + "the fatal: handling is covered", 0},
 		"prose bare no tests":         {passing + "no tests ran for the docs package", 0},
 		"prose bare offenses":         {passing + "files inspected, 3 offenses detected", 0},
+		"prose colon tag denied":      {passing + "Note: permission denied is exercised by the test", 0},
 		"jest passWithNoTests code 0": {passing + "No tests found, exiting with code 0", 0},
 
 		// the modal list (one source behind proseFail/modalFail) stays prose for every modal
