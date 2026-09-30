@@ -368,8 +368,9 @@ func TestClaudeJudgeRejectsATurnContinuedPastItsVerdict(t *testing.T) {
 		t.Fatalf("the hook's verdict must not be recorded: %+v", v)
 	}
 
-	// A retry that answers in a single turn is taken.
-	docs := []string{hooked, claudeJSON(`{"reasoning":"line 3 derefs a nil map","is_real":true,"confidence":0.9}`)}
+	// A retry that answers in exactly one turn (num_turns 1, the value the live envelope reports) is
+	// taken: this pins the accepting boundary, so a guard tightened to reject 1 (e.g. `turns == 0`) fails here.
+	docs := []string{hooked, claudeJSONTurns(`{"reasoning":"line 3 derefs a nil map","is_real":true,"confidence":0.9}`, 1)}
 	calls := 0
 	j.exec = func(context.Context, string, []string, string) ([]byte, int, error) {
 		calls++
@@ -379,11 +380,36 @@ func TestClaudeJudgeRejectsATurnContinuedPastItsVerdict(t *testing.T) {
 		t.Fatalf("the clean retry must be recorded: %+v err=%v", v, err)
 	}
 
-	// A single turn with a valid verdict is a normal answer: no false positive.
+	// num_turns 1 on the first try is a normal answer: no false positive.
+	f = &fakeClaude{stdout: claudeJSONTurns(`{"reasoning":"line 3 derefs a nil map","is_real":true,"confidence":0.9}`, 1)}
+	j = &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
+	if v, err := j.Call(context.Background(), claudeRequest()); err != nil || v.ParseError != "" || !v.Decision || f.calls != 1 {
+		t.Fatalf("a one-turn verdict is one answer: %+v err=%v calls=%d", v, err, f.calls)
+	}
+
+	// An envelope that OMITS num_turns carries no continuation signal; it is accepted (the settings
+	// overlay removes the hook path and --max-turns 1 caps the turn count), not failed closed.
 	f = &fakeClaude{stdout: claudeJSON(`{"reasoning":"line 3 derefs a nil map","is_real":true,"confidence":0.9}`)}
 	j = &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
 	if v, err := j.Call(context.Background(), claudeRequest()); err != nil || v.ParseError != "" || !v.Decision || f.calls != 1 {
-		t.Fatalf("a single-turn verdict is one answer: %+v err=%v calls=%d", v, err, f.calls)
+		t.Fatalf("an absent num_turns must be accepted: %+v err=%v calls=%d", v, err, f.calls)
+	}
+}
+
+// A continued turn on a still-present check must fail closed with decision TRUE: the parse error for
+// KindStillPresent reads as "finding still present", so a false decision would silently close a finding.
+func TestClaudeJudgeContinuedTurnFailsClosedForStillPresent(t *testing.T) {
+	hooked := claudeJSONTurns(`{"reasoning":"The metareview hook spoke.","still_present":false,"confidence":0.9}`, 2)
+	f := &fakeClaude{stdout: hooked}
+	j := &claudeJudge{exec: f.exec, nonce: func() string { return "n0" }, clock: codexClock()}
+	req := Request{Kind: KindStillPresent, Model: "claude-cli/opus", Effort: "medium",
+		Input: StillPresentInput{Bug: run.Bug{ID: "b", Desc: "the bug"}, Diff: "d"}}
+	v, err := j.Call(context.Background(), req)
+	if err != nil {
+		t.Fatalf("a continued turn is a verdict that fails closed, not a transport error: %v", err)
+	}
+	if v.Parsed != nil || !strings.Contains(v.ParseError, "continued past") || !v.Decision {
+		t.Fatalf("a continued still-present verdict must fail closed (decision true): %+v", v)
 	}
 }
 

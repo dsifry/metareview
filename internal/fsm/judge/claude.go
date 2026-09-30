@@ -153,7 +153,12 @@ func (j *claudeJudge) Call(ctx context.Context, r Request) (v Verdict, err error
 		default:
 			v.Raw = text
 			v.Parsed, v.Decision, v.Confidence, v.ParseError = Parse(r.Kind, text)
-			if turns <= 1 {
+			// A reported count of exactly one is the expected single answer. An ABSENT count is a CLI that
+			// gave no signal to detect a continuation (#193's hook/plugin second turn): the settings overlay
+			// above removes the hook path and --max-turns 1 caps the turn count, so it is accepted rather than
+			// failing every call closed on a CLI that omits the field. Any OTHER present value (zero, or more
+			// than one) is not a trustworthy single answer.
+			if turns == nil || *turns == 1 {
 				return v, nil
 			}
 			// More than one assistant turn means something spoke after the judge had answered and the
@@ -187,10 +192,12 @@ func validateClaude(model, effort string, calibration bool) error {
 }
 
 // claudeResult is the subset of the --output-format json document this provider
-// reads: the result text, the error flag, and the turn's usage.
+// reads: the result text, the error flag, the turn count, and the turn's usage.
+// NumTurns is a pointer so an ABSENT num_turns (no continuation signal) is
+// distinguishable from a present zero.
 type claudeResult struct {
 	IsError  bool   `json:"is_error"`
-	NumTurns int    `json:"num_turns"`
+	NumTurns *int   `json:"num_turns"`
 	Result   string `json:"result"`
 	Usage    *struct {
 		Input      int64 `json:"input_tokens"`
@@ -216,10 +223,10 @@ type claudeResult struct {
 // subset of it. TokenTotals.Total() sums every field, so the categories are
 // made disjoint here exactly as the codex arm does; summing only input+output
 // would report the scaffolding tax as zero and undercount ~4000x.
-func parseClaudeResult(stdout []byte) (text string, turns int, tokens run.TokenTotals, found, transient bool) {
+func parseClaudeResult(stdout []byte) (text string, turns *int, tokens run.TokenTotals, found, transient bool) {
 	var r claudeResult
 	if json.Unmarshal(stdout, &r) != nil {
-		return "", 0, run.TokenTotals{}, false, false
+		return "", nil, run.TokenTotals{}, false, false
 	}
 	if r.Usage != nil {
 		var thinking int64
