@@ -217,18 +217,26 @@ func TestGateReviewLogsKeepsOpenCurrentAndPRLinkedFindings(t *testing.T) {
 
 func TestGateReviewLogsKeepsUnknownBlockers(t *testing.T) {
 	logs := []reviewlog.Summary{
+		// A BLOCKING id the ledger does not know keeps the log a gate input, even though the blocker the
+		// ledger DOES know is resolved (#188/mr-ik7).
 		{Target: "TASK-mixed", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true,
-			FindingIDs: []string{"mrvf-known-001", "mrvf-unknown-001"}},
-		// Every blocker this log raised is known AND resolved: the gate still retires it.
+			FindingIDs:         []string{"mrvf-known-001", "mrvf-unknown-001"},
+			BlockingFindingIDs: []string{"mrvf-known-001", "mrvf-unknown-001"}, BlockingFindingCount: 2},
+		// An ADVISORY id the ledger does not know must NOT block: the log's blocker is resolved.
+		{Target: "TASK-advisory", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true,
+			FindingIDs:         []string{"mrvf-known-001", "mrvf-advisory-001"},
+			BlockingFindingIDs: []string{"mrvf-known-001"}, BlockingFindingCount: 1},
+		// Every blocker known AND resolved: retired.
 		{Target: "TASK-clean", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true,
-			FindingIDs: []string{"mrvf-known-001"}},
+			FindingIDs:         []string{"mrvf-known-001"},
+			BlockingFindingIDs: []string{"mrvf-known-001"}, BlockingFindingCount: 1},
 	}
 	ledger := []findings.Record{
 		{ID: "mrvf-known-001", Status: "fixed", Classification: "blocking", Severity: "high"},
 	}
 	got := gateReviewLogs(logs, ledger)
 	if len(got) != 1 || got[0].Target != "TASK-mixed" {
-		t.Fatalf("only the log with a ledger-unknown blocker must stay a gate input: %+v", got)
+		t.Fatalf("only the log with a ledger-unknown BLOCKER must stay a gate input: %+v", got)
 	}
 }
 

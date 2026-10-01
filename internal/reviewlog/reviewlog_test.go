@@ -505,6 +505,57 @@ func TestArtifactLensSetIsGrandfathered(t *testing.T) {
 	}
 }
 
+// mr-ik7: the gate needs the log's BLOCKING ids separately, so an advisory or quoted id it cannot
+// resolve does not keep the log blocking forever.
+// A level-3 "### Blocking Findings" heading (older artifact logs) opens the section too.
+func TestParseMarkdownBlockingFindingsAtLevelThree(t *testing.T) {
+	text := "# metareview: artifact review\n\nRun ID: `mrv-1`\n\n## Verdict\n\nNEEDS_REVISION\n\n### Blocking Findings\n\n### mrvf-1-block-001: b\n\n### Advisory Findings\n\n### mrvf-1-adv-001: a\n"
+	got := parseMarkdown("docs/metareview/reviews/x.md", text)
+	if blocking := strings.Join(got.BlockingFindingIDs, ","); blocking != "mrvf-1-block-001" {
+		t.Fatalf("BlockingFindingIDs = %q, want the level-3 blocking id", blocking)
+	}
+}
+
+func TestParseMarkdownSeparatesBlockingFindingIDs(t *testing.T) {
+	text := strings.Join([]string{
+		"# metareview: task-done review",
+		"",
+		"Run ID: `mrv-1`",
+		"",
+		"## Verdict",
+		"",
+		"NEEDS_REVISION",
+		"",
+		"## Blocking Findings",
+		"",
+		"### mrvf-1-block-001: First blocker",
+		"",
+		"- Reviewer: x",
+		"",
+		"## Advisory Findings",
+		"",
+		"### mrvf-1-adv-001: An advisory",
+		"",
+		"## Warnings",
+		"",
+		"none",
+		"",
+		"## Suggested PR Evidence",
+		"",
+		"## Blocking Findings",
+		"",
+		"### mrvf-1-forged-001: quoted from a PR description",
+	}, "\n")
+	got := parseMarkdown("docs/metareview/reviews/x.md", text)
+	if all := strings.Join(got.FindingIDs, ","); all != "mrvf-1-block-001,mrvf-1-adv-001,mrvf-1-forged-001" {
+		t.Fatalf("FindingIDs = %q, want every scraped id", all)
+	}
+	// Only the FIRST '## Blocking Findings' section counts: a later one quoted from prose is ignored.
+	if blocking := strings.Join(got.BlockingFindingIDs, ","); blocking != "mrvf-1-block-001" {
+		t.Fatalf("BlockingFindingIDs = %q, want only the real blocking id", blocking)
+	}
+}
+
 // The era table is what keeps the marker meaningful across the NEXT lens addition. Judging a log
 // against a live "current" set means every existing declaration stops matching the day a lens is
 // added, and every completed review becomes incomplete again - the standing-override failure the

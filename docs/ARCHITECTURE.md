@@ -429,12 +429,14 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   a run. The ledger is per checkout, so a closure granted in one worktree does not close the run in another. An ID with
   no ledger row is looked up in the
   committed review logs (#188): every log listing it under `## Blocking Findings` supplies it **and all its other
-  blockers** (the pr-ready gate clears a log only when the ledger vouches for every ID it lists — an ID the ledger
-  does not know is an unvouched blocker, mr-ik7 — so importing one alone would leave the rest unknown). The gate's
-  `gateReviewLogs` uses the same strict `reviewstate.LogResolvedInLedger` predicate `status` uses (status also
-  requires an authenticated run record, #147; the gate clears a genuinely-resolved log regardless, so the #188
-  override path still clears a committed log); only the rendered evidence keeps a lenient reading, and it renders, it
-  does not gate. The scan runs on every override, not only for an unknown ID — a finding imported as one log's
+  blockers** (the pr-ready gate clears a log only when the ledger vouches for every ID under its `## Blocking
+  Findings` section, up to the run's `BlockingFindingCount` — an unknown blocking ID is an unvouched blocker,
+  mr-ik7 — so importing one alone would leave the rest unknown). The gate's `gateReviewLogs` uses
+  `reviewstate.LogBlockersResolvedInLedger`, strict about the log's BLOCKING IDs but deliberately not about the
+  advisory/quoted IDs that also land in `FindingIDs` (those would otherwise block a log forever on something no
+  one can act on); `status` uses the stricter `LogResolvedInLedger`, which requires EVERY id to be ledger-known
+  and an authenticated run record (#147). The rendered evidence keeps a plain lenient reading — it renders, it does
+  not gate. The scan runs on every override, not only for an unknown ID — a finding imported as one log's
   sibling may be listed by another log whose own blockers are still unknown — and never takes pr-ready's derived
   "Unresolved review blockers" summary as a sibling (every pr-ready run re-derives it). Each is imported as this branch's open row at HEAD — its run is the one its ID names, taken
   from that run's own log where committed, else from a log that carries it forward; header fields are read above the

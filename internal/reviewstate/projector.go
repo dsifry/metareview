@@ -574,6 +574,53 @@ func LogResolvedInLedger(log reviewlog.Summary, byID map[string]findings.Record)
 	return !anyBlocking && len(resolvers) > 0
 }
 
+// LogBlockersResolvedInLedger reports whether every BLOCKING finding a log raised is resolved in the
+// ledger — the pr-ready gate's predicate (mr-ik7). Unlike LogResolvedInLedger it is strict only about
+// the ids under the log's "## Blocking Findings" section: an advisory or quoted id the ledger does not
+// hold is not a blocker, so it must not keep the log unresolved forever (which would block a branch on
+// something it cannot act on). The run record's BlockingFindingCount is the tripwire that keeps an
+// unknown BLOCKER from being skipped: fewer vouched blockers than the run raised means one is
+// unaccounted for (unknown to the ledger, or pruned from the markdown). A log with no BlockingFindingIDs
+// (no such section — an artifact log, or a legacy log) falls back to the strict LogResolvedInLedger, so
+// nothing is cleared on a missing parse.
+func LogBlockersResolvedInLedger(log reviewlog.Summary, byID map[string]findings.Record) bool {
+	if len(log.BlockingFindingIDs) == 0 {
+		return LogResolvedInLedger(log, byID)
+	}
+	if !log.HasUnresolvedBlockers {
+		return false
+	}
+	// A blocker-class row the ledger KNOWS is still blocking keeps the log blocking, wherever the log
+	// lists it (the blocking section, or a carried-forward id in FindingIDs).
+	if _, anyBlocking := ClassifyReviewFindings(log.FindingIDs, byID); anyBlocking {
+		return false
+	}
+	vouched := 0
+	for _, id := range log.BlockingFindingIDs {
+		record, ok := byID[id]
+		if !ok {
+			return false // a blocking id the ledger does not know is an unvouched blocker
+		}
+		if !findings.IsBlockingClass(record) {
+			continue // listed under Blocking Findings, but classed advisory: it never held the gate
+		}
+		if findings.Blocks(record.Status) {
+			return false
+		}
+		if !findings.IsResolvedTerminal(record.Status) {
+			return false // an unrecognized status is unvouched, never resolved
+		}
+		vouched++
+	}
+	if vouched == 0 {
+		return false
+	}
+	if log.BlockingFindingCount > 0 && vouched < log.BlockingFindingCount {
+		return false
+	}
+	return true
+}
+
 // EscalationLiftedByOverrides reports whether an ESCALATED log's hard stop is lifted by
 // an explicit recorded human decision: EVERY blocker-class finding it references carries
 // an override grant (grantor recorded). Fixes and superseded rows never lift an

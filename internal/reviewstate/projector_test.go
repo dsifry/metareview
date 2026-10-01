@@ -679,6 +679,75 @@ func TestLogResolvedInLedger(t *testing.T) {
 	}
 }
 
+// mr-ik7: the gate is strict about the log's BLOCKING ids only. An advisory/quoted id the ledger does
+// not hold must not keep the log unresolved (which would block a branch forever), while an unknown
+// BLOCKING id — or fewer vouched blockers than the run raised — must.
+func TestLogBlockersResolvedInLedger(t *testing.T) {
+	ledger := map[string]findings.Record{
+		"f": {ID: "f", Status: "fixed", Classification: "blocking", Severity: "high"},
+	}
+	log := func(blocking []string, count int) reviewlog.Summary {
+		return reviewlog.Summary{RunID: "mrv-x", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true,
+			FindingIDs: []string{"f", "adv"}, BlockingFindingIDs: blocking, BlockingFindingCount: count}
+	}
+	if !LogBlockersResolvedInLedger(log([]string{"f"}, 1), ledger) {
+		t.Error("a log whose only blocker resolved must clear despite an unknown advisory id")
+	}
+	if LogBlockersResolvedInLedger(log([]string{"f", "unknown"}, 2), ledger) {
+		t.Error("an unknown blocking id must keep the log blocking")
+	}
+	if LogBlockersResolvedInLedger(log([]string{"f"}, 2), ledger) {
+		t.Error("fewer vouched blockers than BlockingFindingCount must keep the log blocking")
+	}
+	// a known blocker-class row still open ANYWHERE keeps the log blocking
+	if LogBlockersResolvedInLedger(log([]string{"f"}, 1), map[string]findings.Record{
+		"f":   ledger["f"],
+		"adv": {ID: "adv", Status: "open", Classification: "blocking", Severity: "high"},
+	}) {
+		t.Error("a known-open blocker in FindingIDs must keep the log blocking")
+	}
+	// a blocking section mixing a resolved blocker and an advisory-class row resolves
+	if !LogBlockersResolvedInLedger(log([]string{"f", "adv"}, 1), map[string]findings.Record{
+		"f":   ledger["f"],
+		"adv": {ID: "adv", Status: "open", Classification: "advisory", Severity: "low"},
+	}) {
+		t.Error("an advisory-class row under Blocking Findings must not keep the log blocking")
+	}
+	fallback := reviewlog.Summary{RunID: "mrv-x", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true, FindingIDs: []string{"f", "adv"}}
+	if LogBlockersResolvedInLedger(fallback, ledger) {
+		t.Error("a log with no BlockingFindingIDs must fall back to the strict predicate")
+	}
+	// ...and the fallback itself must still CLEAR a section-less log whose blockers all resolve
+	if !LogBlockersResolvedInLedger(reviewlog.Summary{RunID: "mrv-x", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true, FindingIDs: []string{"f"}}, ledger) {
+		t.Error("a section-less legacy log whose blockers all resolve must clear via the fallback")
+	}
+	// a log that never blocked is not "resolved"
+	if LogBlockersResolvedInLedger(reviewlog.Summary{BlockingFindingIDs: []string{"f"}, Verdict: "PASS"}, ledger) {
+		t.Error("a log that never blocked must not be reported as ledger-resolved")
+	}
+	// a blocking-section id classed advisory never held the gate, and vouches for nothing: fail closed
+	if LogBlockersResolvedInLedger(log([]string{"adv"}, 1), map[string]findings.Record{
+		"adv": {ID: "adv", Status: "fixed", Classification: "advisory", Severity: "low"},
+	}) {
+		t.Error("a log whose blocking section holds only advisory rows has no vouched blocker")
+	}
+	// a blocker listed directly under Blocking Findings (not in FindingIDs) blocks in the predicate's loop
+	inSection := func(status string) (reviewlog.Summary, map[string]findings.Record) {
+		return reviewlog.Summary{RunID: "mrv-x", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true,
+				FindingIDs: []string{"f"}, BlockingFindingIDs: []string{"f", "b2"}},
+			map[string]findings.Record{
+				"f":  ledger["f"],
+				"b2": {ID: "b2", Status: status, Classification: "blocking", Severity: "high"},
+			}
+	}
+	if s, m := inSection("open"); LogBlockersResolvedInLedger(s, m) {
+		t.Error("an open blocker under Blocking Findings must keep the log blocking")
+	}
+	if s, m := inSection("typo"); LogBlockersResolvedInLedger(s, m) {
+		t.Error("an unrecognized status under Blocking Findings must keep the log blocking")
+	}
+}
+
 // ClassifyReviewFindings is the classification half: resolver phrases for cleared
 // blocker-class rows, anyBlocking for rows that still hold the gate.
 func TestClassifyReviewFindings(t *testing.T) {

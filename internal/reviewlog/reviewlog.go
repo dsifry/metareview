@@ -19,14 +19,18 @@ import (
 )
 
 type Summary struct {
-	Path                  string   `json:"path"`
-	RunID                 string   `json:"runId"`
-	Target                string   `json:"target"`
-	Verdict               string   `json:"verdict"`
-	Kind                  string   `json:"kind"`
-	PreviousRunID         string   `json:"previousRunId,omitempty"`
-	ContextRel            string   `json:"contextRel,omitempty"`
-	FindingIDs            []string `json:"findingIds"`
+	Path          string   `json:"path"`
+	RunID         string   `json:"runId"`
+	Target        string   `json:"target"`
+	Verdict       string   `json:"verdict"`
+	Kind          string   `json:"kind"`
+	PreviousRunID string   `json:"previousRunId,omitempty"`
+	ContextRel    string   `json:"contextRel,omitempty"`
+	FindingIDs    []string `json:"findingIds"`
+	// BlockingFindingIDs are the finding ids under the log's "## Blocking Findings" section. The pr-ready
+	// gate is strict about THESE (mr-ik7); the advisory/quoted ids that also land in FindingIDs must not
+	// keep a log unresolved forever. Empty for a log with no such section.
+	BlockingFindingIDs    []string `json:"blockingFindingIds,omitempty"`
 	HasUnresolvedBlockers bool     `json:"hasUnresolvedBlockers"`
 	AttemptNumber         int      `json:"attemptNumber,omitempty"`
 	MaxAttempts           int      `json:"maxAttempts,omitempty"`
@@ -165,11 +169,28 @@ func parseMarkdown(rel, text string) Summary {
 	var declaredLenses []string
 	lines := strings.Split(text, "\n")
 	inHeader := true
+	inBlockingFindings := false
+	blockingSectionSeen := false
 	for i, line := range lines {
 		// Everything from the first section heading on is content — findings, evidence, and text
 		// copied from a pull request — and none of it may set a header field.
 		if strings.HasPrefix(line, "## ") {
 			inHeader = false
+		}
+		// Track the Blocking Findings section so the gate can be strict about the log's BLOCKING ids
+		// (mr-ik7) without blocking on an advisory/quoted id the ledger may not hold. A finding heading
+		// ("### mrvf-…") is not a section heading, so it does not end the section; any other level-2/3
+		// heading does (headingTitle recognizes only "## " and "### ").
+		// Only the FIRST "## Blocking Findings" (or "### Blocking Findings", the level old artifact logs
+		// use) opens the section — a later one quoted from a PR description the log embeds must not
+		// re-open it and leak foreign ids into the blocking set.
+		if title, ok := headingTitle(line); ok && !strings.HasPrefix(title, "mrvf-") {
+			switch {
+			case title == "Blocking Findings" && !blockingSectionSeen:
+				inBlockingFindings, blockingSectionSeen = true, true
+			case inBlockingFindings:
+				inBlockingFindings = false
+			}
 		}
 		// EVERY header field is header-only and first-match-wins, not just the two added most
 		// recently. Bounding those two and leaving the rest fixed an instance and not the class:
@@ -247,6 +268,9 @@ func parseMarkdown(rel, text string) Summary {
 		}
 		for _, id := range findingIDPattern.FindAllString(line, -1) {
 			summary.FindingIDs = appendUnique(summary.FindingIDs, id)
+			if inBlockingFindings {
+				summary.BlockingFindingIDs = appendUnique(summary.BlockingFindingIDs, id)
+			}
 		}
 	}
 	if verdictIsUnresolved(summary.Verdict) {
@@ -256,6 +280,20 @@ func parseMarkdown(rel, text string) Summary {
 		summary.HasUnresolvedBlockers = true
 	}
 	return summary
+}
+
+// headingTitle returns the text of a level-2 or level-3 markdown section heading ("## Foo" or
+// "### Foo"), trimming the leading hashes and surrounding space. ok is false for any other line.
+func headingTitle(line string) (title string, ok bool) {
+	t := strings.TrimSpace(line)
+	n := 0
+	for n < len(t) && t[n] == '#' {
+		n++
+	}
+	if n < 2 || n > 3 || n >= len(t) || t[n] != ' ' {
+		return "", false
+	}
+	return strings.TrimSpace(t[n:]), true
 }
 
 func previousRunID(value string) string {
