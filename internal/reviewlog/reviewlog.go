@@ -171,10 +171,18 @@ func parseMarkdown(rel, text string) Summary {
 	inHeader := true
 	inBlockingFindings := false
 	blockingSectionSeen := false
+	inFence := false
 	for i, line := range lines {
+		// A fenced code block is literal text, not markdown structure: the headings and finding ids
+		// inside it (a finding's evidence often carries a fenced example) must not change the section
+		// state. Toggle on a fence line and skip the rest of the structure handling while inside one.
+		fenceLine := strings.HasPrefix(strings.TrimSpace(line), "```")
+		if fenceLine {
+			inFence = !inFence
+		}
 		// Everything from the first section heading on is content — findings, evidence, and text
 		// copied from a pull request — and none of it may set a header field.
-		if strings.HasPrefix(line, "## ") {
+		if !inFence && strings.HasPrefix(line, "## ") {
 			inHeader = false
 		}
 		// Track the Blocking Findings section so the gate can be strict about the log's BLOCKING ids
@@ -184,7 +192,7 @@ func parseMarkdown(rel, text string) Summary {
 		// Only the FIRST "## Blocking Findings" (or "### Blocking Findings", the level old artifact logs
 		// use) opens the section — a later one quoted from a PR description the log embeds must not
 		// re-open it and leak foreign ids into the blocking set.
-		if title, ok := headingTitle(line); ok && !strings.HasPrefix(title, "mrvf-") {
+		if title, ok := headingTitle(line); ok && !inFence && !strings.HasPrefix(title, "mrvf-") {
 			switch {
 			case title == "Blocking Findings" && !blockingSectionSeen:
 				inBlockingFindings, blockingSectionSeen = true, true
@@ -268,8 +276,15 @@ func parseMarkdown(rel, text string) Summary {
 		}
 		for _, id := range findingIDPattern.FindAllString(line, -1) {
 			summary.FindingIDs = appendUnique(summary.FindingIDs, id)
-			if inBlockingFindings {
-				summary.BlockingFindingIDs = appendUnique(summary.BlockingFindingIDs, id)
+		}
+		// A log's blocking SET is its DECLARED blocking findings, not every mrvf- id its prose (or a
+		// fenced evidence block) mentions: a quoted reference must not become an unvouched blocker that
+		// the gate can never retire (mr-ik7).
+		if inBlockingFindings && !inFence {
+			if title, ok := headingTitle(line); ok && strings.HasPrefix(title, "mrvf-") {
+				if id := findingIDPattern.FindString(line); id != "" {
+					summary.BlockingFindingIDs = appendUnique(summary.BlockingFindingIDs, id)
+				}
 			}
 		}
 	}

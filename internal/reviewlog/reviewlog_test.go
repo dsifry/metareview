@@ -531,6 +531,12 @@ func TestParseMarkdownSeparatesBlockingFindingIDs(t *testing.T) {
 		"### mrvf-1-block-001: First blocker",
 		"",
 		"- Reviewer: x",
+		"- Evidence: upstream reported mrvf-1-quoted-001",
+		"",
+		"```markdown",
+		"## Example",
+		"### mrvf-1-fenced-001: fenced",
+		"```",
 		"",
 		"## Advisory Findings",
 		"",
@@ -547,12 +553,13 @@ func TestParseMarkdownSeparatesBlockingFindingIDs(t *testing.T) {
 		"### mrvf-1-forged-001: quoted from a PR description",
 	}, "\n")
 	got := parseMarkdown("docs/metareview/reviews/x.md", text)
-	if all := strings.Join(got.FindingIDs, ","); all != "mrvf-1-block-001,mrvf-1-adv-001,mrvf-1-forged-001" {
+	if all := strings.Join(got.FindingIDs, ","); all != "mrvf-1-block-001,mrvf-1-quoted-001,mrvf-1-fenced-001,mrvf-1-adv-001,mrvf-1-forged-001" {
 		t.Fatalf("FindingIDs = %q, want every scraped id", all)
 	}
-	// Only the FIRST '## Blocking Findings' section counts: a later one quoted from prose is ignored.
+	// Only the DECLARED blocking finding counts: a quoted id in a finding's evidence, an id inside a
+	// fenced block, and a later quoted '## Blocking Findings' section must none of them join the set.
 	if blocking := strings.Join(got.BlockingFindingIDs, ","); blocking != "mrvf-1-block-001" {
-		t.Fatalf("BlockingFindingIDs = %q, want only the real blocking id", blocking)
+		t.Fatalf("BlockingFindingIDs = %q, want only the declared blocking id", blocking)
 	}
 }
 
