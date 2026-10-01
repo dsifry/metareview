@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.14.1 - 2026-10-01
+
+### Fixed
+
+- **The `claude-cli/*` judge runs without the user's hooks, and rejects a turn continued past its
+  verdict.** The codex arm already ran with the user's hooks and plugins off (#193), but the claude
+  arm still loaded the user's settings, so a Stop hook could speak in the judge's session and the
+  recorded verdict could answer the hook instead of the finding. It now passes
+  `--settings '{"disableAllHooks":true}'` (`--bare` would skip the keychain and with it the OAuth
+  session this transport exists to use), and a turn that continues past the verdict is retried and
+  then failed closed — the `--output-format json` envelope exposes only the final result, so the
+  reported turn count (`num_turns`) is the continuation signature. Reported in #193 (bead `mr-bq4`).
+- **Freeform evidence recognizes the tool-failure shapes it was missing.** A text with a success
+  phrase and any failure shape the reader did not enumerate read as *passing* — pytest `no tests ran`
+  (exit 5), `make: *** No rule to make target`, Go `panic:` / `WARNING: DATA RACE`, a shell's
+  `command not found` / `Permission denied` / `Aborted` / `Killed`, `N offenses detected`, and more.
+  The reader now matches a second, **line-anchored** set of shapes: each must start the line in a
+  fixed tool format, with a fixed token before the phrase where the phrase could otherwise appear in
+  prose, so prose that merely names a phrase never reads as a failure. A shape that cannot be pinned
+  that tightly is deliberately not a pattern — prefer an evidence receipt. Tracked as bead `mr-b08`.
+- **`pr-ready` clears a committed review log only when the ledger vouches for every ID under its
+  `## Blocking Findings` section.** The gate used a lenient reading that skipped finding IDs the
+  ledger did not know, so resolving the IDs a local ledger happened to hold retired a log that also
+  listed a blocker nobody's ledger ever held — while `status` still reported it blocking. The gate
+  now uses a strict, blocker-only predicate (an unknown blocking ID is unvouched; the run's
+  `BlockingFindingCount` is the tripwire against a pruned or unknown blocker), and is deliberately
+  **not** strict about the advisory or quoted IDs that would otherwise pin a log unresolved forever.
+  Tracked as bead `mr-ik7`.
+- **The Stop hook breaks its own refusal loop instead of trusting the host's `stop_hook_active`.**
+  Codex reports that flag `false` during hook-driven continuations, so a session blocked on
+  something it could not clear was refused on every turn — a hang, which teaches operators to remove
+  the hook. The hook now counts consecutive refusals per session — a small limit on the *same*
+  blocker set, and a larger session-wide cap for a set that keeps changing — and stands down loudly
+  at either, exactly as the host-driven second pass does, clearing the record on a pass or a
+  stand-down. Its state lives in a private, ownership-checked cache directory and is best-effort: it
+  fails toward blocking, never toward a silent pass. Tracked as bead `mr-j30`.
+
+### Changed
+
+- `.pi/` (pi subagent scratch) is gitignored, and the `.claude/settings.json` review-gate note names
+  the post-#173 user-level hook directory rather than the old per-checkout path.
+
 ## 0.14.0 - 2026-09-30
 
 ### Added
