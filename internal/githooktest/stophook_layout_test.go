@@ -1,7 +1,9 @@
 package githooktest
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -404,6 +406,31 @@ func TestStopHookDifferentBlockersRestartTheCount(t *testing.T) {
 	l.abandon(repo) // a second abandoned run changes the blocker set
 	if out, errText := l.runStopHook(repo, payload, limits...); !blockDecision(out) {
 		t.Fatalf("a different blocker set must block afresh: stdout %q stderr %q", out, errText)
+	}
+}
+
+// mr-j30: a counter planted in a state directory the user does not own or that others can write to must not
+// force an early stand-down. The guard rejects such a directory and falls back, so a poisoned world-writable
+// cache dir still leaves the gate blocking.
+func TestStopHookIgnoresAPoisonedStateDir(t *testing.T) {
+	l, home := newLayout(t)
+	repo := l.blockedRepo(home)
+	payload := `{"session_id":"sess-poison"}`
+	guardDir := filepath.Join(home, ".cache", "metareview", "stop-gate")
+	if err := os.MkdirAll(guardDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A world-writable dir another local user could have created, holding a spent counter at the session's key.
+	key := fmt.Sprintf("%x", sha256.Sum256([]byte("sess-poison")))[:32]
+	if err := os.WriteFile(filepath.Join(guardDir, key), []byte("99 deadbeef 99"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(guardDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	// The planted count (99) would stand the gate down at once; the guard must instead ignore the dir.
+	if out, errText := l.runStopHook(repo, payload); !blockDecision(out) {
+		t.Fatalf("a poisoned state dir must not stand the gate down: stdout %q stderr %q", out, errText)
 	}
 }
 

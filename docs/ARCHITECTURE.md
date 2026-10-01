@@ -215,10 +215,11 @@ Enforces review-before-push **in git**, not in a command-string parser (which is
   for a registered hook that does not gate the repository. Unrelated projects, non-repositories and the FSM
   judge's `codex exec` sessions are never gated (a gate there corrupted judge reasoning, #193). The hook breaks
   its OWN loop rather than trusting the host's `stop_hook_active` (Codex reports it false during hook-driven
-  continuations, mr-j30): it counts consecutive refusals per session — a small limit on the SAME blocker set,
-  and a larger session-wide cap for a set that keeps changing — and stands down loudly at either, as the
-  missing-binary path does too; a pass, or a stand-down, clears the count, so a later session never inherits
-  a spent one. The judge also
+  continuations, mr-j30): it counts consecutive refusals and stands down loudly once that reaches a limit —
+  a small limit on the SAME blocker set, and a larger session-wide cap for a set that keeps changing — as the
+  broken-gate and missing-binary paths do too; a pass, or a stand-down, clears the count. The count is keyed
+  by the host's session id, or (when it sends none) by the directory it reports, so sessions there share one; and it
+  bounds the loop only while it can PERSIST its state — the guard is best-effort and fails toward blocking. The judge also
   runs with the user's hooks and plugins off (`-c features.hooks=false -c features.plugins=false`), a turn that
   goes on past a complete verdict is retried and then failed closed, and a verdict with empty reasoning is a
   parse error for every judge kind and provider: a judgment nobody can audit is not recorded.

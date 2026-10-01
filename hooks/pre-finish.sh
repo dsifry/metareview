@@ -88,7 +88,9 @@ fi
 # does. Two counts, because "the same blocker" is not the only way to loop: the SAME blocker set trips
 # the small per-set limit, and ANY blocker set that keeps coming back trips a larger session-wide cap
 # (a session that perturbs its blockers every turn would otherwise never repeat one). A pass clears the
-# record, and a stand-down clears it too, so a later session never inherits a spent count. State lives
+# record, and a stand-down clears it too — so a later session is judged on its own blockers, never a spent
+# count (a host that sends NO session id is the one exception: its key is the directory it reports, so
+# sessions there share a count — still bounded, just shared). State lives
 # in the user's PRIVATE cache dir (below), not the shared temp dir. The whole mechanism is best-effort: a failure to read or write it never changes the
 # gate's decision beyond skipping the guard, so it can only ever fail toward blocking.
 STOP_GUARD_LIMIT="${METAREVIEW_STOP_GUARD_LIMIT:-3}"
@@ -126,19 +128,32 @@ if [ -n "$SESSION_ID" ] || [ -n "$HOST_CWD" ] || [ -n "$ORIG_PWD" ]; then
   [ -z "$STOP_KEY" ] && STOP_KEY="$(printf '%s' "$STOP_KEY_SEED" | cksum 2>/dev/null | tr -d ' \t' || true)"
 fi
 
+# stop_guard_writable reports whether dir is a directory the current user OWNS and that no group or other
+# can write to. umask 077 sets that on creation; this rejects a PRE-EXISTING directory (the shared temp-dir
+# fallback is the attack) that another local user could have created to plant or rewrite a counter.
+stop_guard_writable() {
+  if ! { [ -d "$1" ] && [ -O "$1" ] && [ -w "$1" ]; }; then return 1; fi
+  local mode
+  mode="$(stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null || true)"
+  case "$mode" in ''|*[!0-7]*) return 1 ;; esac
+  case "${mode: -1}" in 2|3|6|7) return 1 ;; esac  # other-writable
+  case "${mode: -2:1}" in 2|3|6|7) return 1 ;; esac # group-writable
+  return 0
+}
+
 # stop_guard_file prints this session's state file, creating its directory in the first WRITABLE location
-# (private cache dir, else the repository's git dir, else the temp dir). It is created lazily — a session
-# that never blocks leaves nothing behind — and returns 1 when no location is writable, so the caller skips
-# the guard (which fails toward blocking).
+# the current user owns (private cache dir, else the repository's git dir, else the temp dir). It is created
+# lazily — a session that never blocks leaves nothing behind — and returns 1 when no location qualifies, so
+# the caller skips the guard (which fails toward blocking).
 stop_guard_file() {
   local dir
   [ -n "$STOP_KEY" ] || return 1
   for dir in "$STOP_STATE_DIR" "${GIT_COMMON_DIR:+$GIT_COMMON_DIR/metareview/stop-gate}" "${TMPDIR:-/tmp}/metareview/stop-gate"; do
     [ -n "$dir" ] || continue
-    if (umask 077; mkdir -p "$dir") 2>/dev/null && [ -w "$dir" ]; then
-      printf '%s/%s' "$dir" "$STOP_KEY"
-      return 0
-    fi
+    (umask 077; mkdir -p "$dir") 2>/dev/null || continue
+    stop_guard_writable "$dir" || continue
+    printf '%s/%s' "$dir" "$STOP_KEY"
+    return 0
   done
   return 1
 }
