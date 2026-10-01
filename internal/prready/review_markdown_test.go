@@ -215,6 +215,23 @@ func TestGateReviewLogsKeepsOpenCurrentAndPRLinkedFindings(t *testing.T) {
 	t.Fatalf("open current and PR-linked findings must block PR-ready: %+v", results)
 }
 
+func TestGateReviewLogsKeepsUnknownBlockers(t *testing.T) {
+	logs := []reviewlog.Summary{
+		{Target: "TASK-mixed", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true,
+			FindingIDs: []string{"mrvf-known-001", "mrvf-unknown-001"}},
+		// Every blocker this log raised is known AND resolved: the gate still retires it.
+		{Target: "TASK-clean", Verdict: "NEEDS_REVISION", HasUnresolvedBlockers: true,
+			FindingIDs: []string{"mrvf-known-001"}},
+	}
+	ledger := []findings.Record{
+		{ID: "mrvf-known-001", Status: "fixed", Classification: "blocking", Severity: "high"},
+	}
+	got := gateReviewLogs(logs, ledger)
+	if len(got) != 1 || got[0].Target != "TASK-mixed" {
+		t.Fatalf("only the log with a ledger-unknown blocker must stay a gate input: %+v", got)
+	}
+}
+
 func TestChangedReviewerInputsStartFreshReview(t *testing.T) {
 	root := smallPRReadyRepo(t)
 	t.Setenv("METAREVIEW_ALLOW_MECHANICAL_PASS", "1")
