@@ -80,6 +80,101 @@ if [ -n "$HOST_CWD" ] && [ -d "$HOST_CWD" ]; then
   cd "$HOST_CWD" 2>/dev/null || true
 fi
 
+# Host-independent loop guard (mr-j30). The host's `stop_hook_active` is the documented loop breaker,
+# but Codex reports it FALSE during hook-driven continuations (captured 2026-09-26: dozens of block
+# reasons, only four yields), so a host that never flips it would refuse this gate FOREVER — a hang,
+# and a hang teaches operators to remove the hook. Remember, per session, how many times IN A ROW the
+# gate has refused, and stand down once that reaches a limit, exactly as the host-driven second pass
+# does. Two counts, because "the same blocker" is not the only way to loop: the SAME blocker set trips
+# the small per-set limit, and ANY blocker set that keeps coming back trips a larger session-wide cap
+# (a session that perturbs its blockers every turn would otherwise never repeat one). A pass clears the
+# record, and a stand-down clears it too, so a later session never inherits a spent count. State lives
+# in the user's PRIVATE cache dir (below), not the shared temp dir. The whole mechanism is best-effort: a failure to read or write it never changes the
+# gate's decision beyond skipping the guard, so it can only ever fail toward blocking.
+STOP_GUARD_LIMIT="${METAREVIEW_STOP_GUARD_LIMIT:-3}"
+case "$STOP_GUARD_LIMIT" in ''|*[!0-9]*) STOP_GUARD_LIMIT=3 ;; esac
+[ "$STOP_GUARD_LIMIT" -ge 1 ] 2>/dev/null || STOP_GUARD_LIMIT=3
+STOP_GUARD_TOTAL="${METAREVIEW_STOP_GUARD_TOTAL:-6}"
+case "$STOP_GUARD_TOTAL" in ''|*[!0-9]*) STOP_GUARD_TOTAL=6 ;; esac
+[ "$STOP_GUARD_TOTAL" -ge 1 ] 2>/dev/null || STOP_GUARD_TOTAL=6
+# Per-user PRIVATE location, not the shared temp dir: on a multi-user host /tmp is writable by others, who
+# could plant or rewrite a counter file and force an early stand-down (a fail-open). If that cache dir is
+# not writable (a read-only home), fall back to the repository's OWN git dir — writable wherever the session
+# can commit — and only then to the temp dir, so an unwritable cache never leaves the guard inert.
+if [ -n "${XDG_CACHE_HOME:-}" ]; then
+  STOP_STATE_BASE="$XDG_CACHE_HOME"
+elif [ -n "${HOME:-}" ]; then
+  STOP_STATE_BASE="$HOME/.cache"
+else
+  STOP_STATE_BASE="${TMPDIR:-/tmp}"
+fi
+STOP_STATE_DIR="$STOP_STATE_BASE/metareview/stop-gate"
+GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+if [ -z "$GIT_COMMON_DIR" ]; then
+  GIT_COMMON_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+  [ -n "$GIT_COMMON_DIR" ] && [ "${GIT_COMMON_DIR#/}" = "$GIT_COMMON_DIR" ] && GIT_COMMON_DIR="$PWD/$GIT_COMMON_DIR"
+fi
+# The per-session key: the host's session id when it gives one. Otherwise the directory the host reported —
+# the one stable handle a no-session host gives us — so the counter persists across a session's turns and the
+# guard still bounds a loop there. Two sessions in one checkout then share a counter (a rare, no-session host
+# is the only case); the alternative, keying on a process id, changes every turn and leaves the guard inert
+# exactly where mr-j30 needs it. python3 hashes it; cksum is a dependency-free fallback.
+STOP_KEY=""
+if [ -n "$SESSION_ID" ] || [ -n "$HOST_CWD" ] || [ -n "$ORIG_PWD" ]; then
+  STOP_KEY_SEED="${SESSION_ID:-${HOST_CWD:-$ORIG_PWD}}"
+  STOP_KEY="$(printf '%s' "$STOP_KEY_SEED" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:32])' 2>/dev/null || true)"
+  [ -z "$STOP_KEY" ] && STOP_KEY="$(printf '%s' "$STOP_KEY_SEED" | cksum 2>/dev/null | tr -d ' \t' || true)"
+fi
+
+# stop_guard_file prints this session's state file, creating its directory in the first WRITABLE location
+# (private cache dir, else the repository's git dir, else the temp dir). It is created lazily — a session
+# that never blocks leaves nothing behind — and returns 1 when no location is writable, so the caller skips
+# the guard (which fails toward blocking).
+stop_guard_file() {
+  local dir
+  [ -n "$STOP_KEY" ] || return 1
+  for dir in "$STOP_STATE_DIR" "${GIT_COMMON_DIR:+$GIT_COMMON_DIR/metareview/stop-gate}" "${TMPDIR:-/tmp}/metareview/stop-gate"; do
+    [ -n "$dir" ] || continue
+    if (umask 077; mkdir -p "$dir") 2>/dev/null && [ -w "$dir" ]; then
+      printf '%s/%s' "$dir" "$STOP_KEY"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# block_is_repeat SIG returns 0 when this refusal repeats one too many times for this session —
+# STOP_GUARD_LIMIT times in a row on the SAME SIG, or STOP_GUARD_TOTAL refusals of ANY kind in a row —
+# and the caller then stands down. Otherwise it records the running counts and returns 1. An empty SIG
+# (the blocker set could not be read, e.g. no python3) is its own signature '-': consecutive unreadable
+# refusals are treated as the SAME set, so the per-set limit bounds them like any other. The mechanism
+# only ever fails toward blocking (a SIG it cannot compute still counts).
+block_is_repeat() {
+  local sig="${1:--}" file prev_n=0 prev_sig="" prev_total=0 n total
+  file="$(stop_guard_file)" || return 1
+  if [ -f "$file" ]; then read -r prev_n prev_sig prev_total < "$file" 2>/dev/null || true; fi
+  case "$prev_n" in ''|*[!0-9]*) prev_n=0 ;; esac
+  case "$prev_total" in ''|*[!0-9]*) prev_total=0 ;; esac
+  if [ "$prev_sig" = "$sig" ]; then n=$((prev_n + 1)); else n=1; fi
+  total=$((prev_total + 1))
+  printf '%s %s %s' "$n" "$sig" "$total" > "$file" 2>/dev/null || true
+  [ "$n" -ge "$STOP_GUARD_LIMIT" ] || [ "$total" -ge "$STOP_GUARD_TOTAL" ]
+}
+
+# stop_guard_clear removes this session's record: on a pass (the gate cleared) and on a stand-down (the
+# count is spent), so a later session or a later clean run is judged on its own blockers, never this one's.
+# It never CREATES the state directory, so a session that never blocks leaves nothing behind.
+stop_guard_clear() {
+  local dir file
+  [ -n "$STOP_KEY" ] || return 0
+  for dir in "$STOP_STATE_DIR" "${GIT_COMMON_DIR:+$GIT_COMMON_DIR/metareview/stop-gate}" "${TMPDIR:-/tmp}/metareview/stop-gate"; do
+    [ -n "$dir" ] || continue
+    file="$dir/$STOP_KEY"
+    [ -f "$file" ] && rm -f "$file" 2>/dev/null
+  done
+  return 0
+}
+
 # Opt-in (#194). The plugin registers this hook in EVERY session on the machine — unrelated projects,
 # directories that are not repositories, the FSM judge's throwaway `codex exec` sessions. It gates only
 # a repository that asked for it: `metareview setup --install-hooks` records metareview.stopGate=true in
@@ -133,9 +228,10 @@ esac
 if ! command -v "$BIN" >/dev/null 2>&1; then
   # Absent tooling is reported, never treated as a pass: a check that did not run must not read
   # as a check that found nothing wrong.
-  if [ -n "$LOOPING" ]; then
+  if [ -n "$LOOPING" ] || block_is_repeat "metareview-not-installed"; then
     # The repeat pass. A missing binary is the ONE blocker a session can never clear from inside,
     # so refusing forever here is precisely the hang this yield exists to prevent.
+    stop_guard_clear
     printf 'metareview: yielding after a repeated block — metareview is not installed, so the gate could not run.\n' >&2
     exit 0
   fi
@@ -188,10 +284,30 @@ else
 fi
 CODE=$?
 
-# Exit 1 means "something must be cleared". Any other nonzero code means the gate itself failed,
-# and a broken gate must NEVER be yielded past: yielding on every nonzero code meant a status that
-# crashed on the second pass silently bypassed completion enforcement altogether.
-if [ "$CODE" -eq 1 ] && [ -n "$LOOPING" ]; then
+# A stable signature of the blocker set this refusal is about: the same blockers on the next turn are
+# the livelock the guard exists to break, a different set means the session made progress. Bounded and
+# fail-safe: any parse trouble yields an empty signature, which the guard treats as the empty set (its
+# own signature, so it still counts toward both limits) — never a silent pass.
+BLOCK_SIG=""
+if [ "$CODE" -eq 1 ]; then
+  BLOCK_SIG="$(printf '%s' "$OUT" | python3 -c '
+import hashlib, json, sys
+try:
+    items = json.load(sys.stdin).get("must_clear") or []
+except Exception:
+    sys.exit(1)
+rows = sorted((str(i.get("target", "")), str(i.get("verdict", ""))) for i in items if isinstance(i, dict))
+sys.stdout.write(hashlib.sha256("\n".join("\t".join(r) for r in rows).encode()).hexdigest())
+' 2>/dev/null || true)"
+fi
+
+# Exit 1 means "something must be cleared". Any other nonzero code means the gate itself failed, and a
+# broken gate is NOT yielded on a host flag alone — a status that crashed on the second pass must not
+# silently bypass enforcement — but the same host-independent guard bounds it (below), so a PERSISTENT
+# failure stands down loudly instead of hanging the session forever.
+if [ "$CODE" -eq 1 ] && { [ -n "$LOOPING" ] || block_is_repeat "$BLOCK_SIG"; }; then
+  # Stand down: clear the record so a later session (or a later clean run) starts fresh.
+  stop_guard_clear
   # Second pass: the host is already continuing because of this hook. Yield, loudly.
   printf 'metareview: yielding after a repeated block — the gate was not satisfied in %s.\n' "$CHECKED" >&2
   printf '%s' "$OUT" | python3 -c '
@@ -212,7 +328,10 @@ print("metareview: clear them, or record one with `metareview override request`.
 fi
 
 if [ "$CODE" -eq 0 ]; then
-  # Nothing to clear: the host proceeds. A pass in a BOUND worktree is still announced — a binding
+  # Nothing to clear: the host proceeds. Clear the loop-guard record too, so a session that later
+  # blocks afresh is judged on that blocker set, not this one's stale count.
+  stop_guard_clear
+  # A pass in a BOUND worktree is still announced — a binding
   # moves the gate off the launch checkout, and one chosen to dodge its blockers must be visible.
   if [ -n "$BOUND" ]; then
     printf 'metareview: passed in bound worktree %s%s for session %s; the launch checkout %s was not evaluated.\n' \
@@ -284,6 +403,16 @@ print(json.dumps({
   fi
   printf '%s\n' "$RESPONSE"
 else
+  # A broken gate blocks — status failed to answer, and "did not run" is never "found nothing". But it
+  # must not block FOREVER: a persistent failure (a corrupt ledger, a half-installed binary) is exactly the
+  # unactionable-from-inside refusal the loop guard exists to bound, so the same best-effort guard applies,
+  # keyed on the exit code. A transient failure recovers and a pass clears the record; only a persistent
+  # one stands down, loudly.
+  if block_is_repeat "broken-gate-$CODE"; then
+    stop_guard_clear
+    printf 'metareview: yielding after a repeated block — metareview status kept failing (exit %s), so the gate could not answer.\n' "$CODE" >&2
+    exit 0
+  fi
   printf '{"decision":"block","reason":"metareview status failed (exit %s), so the review gate could not answer. This is a broken gate, not a clean tree."}\n' "$CODE"
 fi
 exit 0

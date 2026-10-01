@@ -263,7 +263,8 @@
 - Under Codex, the Stop payload was observed with `stop_hook_active: false` during a run of
   repeated hook-driven continuations. The hook relies on that flag to stop blocking on its second
   pass, so under Codex a blocker the session genuinely cannot clear may block repeatedly.
-  Tracked separately (beads `mr-j30`).
+  Tracked separately (beads `mr-j30`; fixed after 0.13.2 — the Stop hook no longer trusts the flag
+  to break its own refusal loop; see the Stop-gate bullet in `docs/ARCHITECTURE.md`).
 
 ## 0.13.1 - 2026-09-24
 

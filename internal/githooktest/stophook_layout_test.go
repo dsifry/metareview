@@ -70,12 +70,15 @@ func (b *buildFailure) Error() string { return "go build: " + b.out }
 func layoutEnv(t *testing.T, home string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "GIT_") && !strings.HasPrefix(kv, "METAREVIEW_") && !strings.HasPrefix(kv, "XDG_DATA_HOME=") && !strings.HasPrefix(kv, "HOME=") {
+		if !strings.HasPrefix(kv, "GIT_") && !strings.HasPrefix(kv, "METAREVIEW_") && !strings.HasPrefix(kv, "XDG_DATA_HOME=") && !strings.HasPrefix(kv, "XDG_CACHE_HOME=") && !strings.HasPrefix(kv, "HOME=") && !strings.HasPrefix(kv, "TMPDIR=") {
 			env = append(env, kv)
 		}
 	}
 	// OPENAI_API_KEY: init checks the judge is configured; a run left at its first node never calls it.
-	return append(env, "HOME="+home, "XDG_DATA_HOME="+filepath.Join(home, "xdg"), "GIT_CONFIG_GLOBAL=/dev/null",
+	// TMPDIR: private, so the Stop hook's loop-guard state (mr-j30) never leaks between tests or runs.
+	tmp := filepath.Join(home, "tmp")
+	_ = os.MkdirAll(tmp, 0o700)
+	return append(env, "HOME="+home, "XDG_DATA_HOME="+filepath.Join(home, "xdg"), "TMPDIR="+tmp, "GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_NOSYSTEM=1", "OPENAI_API_KEY=unused", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
 }
 
@@ -207,6 +210,200 @@ func (l layout) optIn(dir string) {
 	l.t.Helper()
 	if out, code := l.run(dir, l.bin, "setup", "--enable-stop-gate"); code != 0 {
 		l.t.Fatalf("setup --enable-stop-gate exited %d: %s", code, out)
+	}
+}
+
+// runStopHook runs the Stop hook in dir with payload on stdin and returns its stdout and stderr.
+func (l layout) runStopHook(dir, payload string, extra ...string) (string, string) {
+	l.t.Helper()
+	c := exec.Command("bash", filepath.Join(repoRoot(l.t), "hooks", "pre-finish.sh"))
+	c.Dir = dir
+	c.Env = append(append(append([]string{}, l.env...), "METAREVIEW_BIN="+l.bin), extra...)
+	c.Stdin = strings.NewReader(payload)
+	var out, errText strings.Builder
+	c.Stdout, c.Stderr = &out, &errText
+	_ = c.Run()
+	return strings.TrimSpace(out.String()), strings.TrimSpace(errText.String())
+}
+
+func (l layout) hookStderr(dir, payload string) (string, string) { return l.runStopHook(dir, payload) }
+
+func blockDecision(out string) bool {
+	var d struct{ Decision string }
+	return json.Unmarshal([]byte(out), &d) == nil && d.Decision == "block"
+}
+
+// blockedRepo seeds a repository on branch feat with an abandoned run — a blocker its session cannot
+// clear by itself — so the Stop hook refuses it.
+func (l layout) blockedRepo(home string) string {
+	l.t.Helper()
+	repo := filepath.Join(home, "repo")
+	if err := os.Mkdir(repo, 0o700); err != nil {
+		l.t.Fatal(err)
+	}
+	l.seed(repo)
+	l.optIn(repo)
+	l.git(repo, "checkout", "-q", "-b", "feat")
+	l.abandon(repo)
+	return repo
+}
+
+// mr-j30: a host that never sets `stop_hook_active` (Codex reports it false during hook-driven
+// continuations) must still not livelock — the hook blocks a few times, then stands down loudly on
+// the SAME blockers. A pass clears the record, so a session that clears its blockers gates afresh.
+func TestStopHookBreaksAContinuationLoopWithoutTheHostFlag(t *testing.T) {
+	l, home := newLayout(t)
+	repo := l.blockedRepo(home)
+	// The payload carries no stop_hook_active, exactly as the captured Codex continuations did.
+	payload := `{"session_id":"sess-loop"}`
+	for i := 1; i <= 3; i++ {
+		out, errText := l.hookStderr(repo, payload)
+		if i < 3 {
+			if !blockDecision(out) {
+				t.Fatalf("attempt %d must block, got stdout %q stderr %q", i, out, errText)
+			}
+			continue
+		}
+		if out != "" || !strings.Contains(errText, "yielding after a repeated block") {
+			t.Fatalf("attempt %d must stand down loudly, got stdout %q stderr %q", i, out, errText)
+		}
+	}
+	// A pass clears the record: after the blockers clear, the gate blocks afresh rather than yielding at once.
+	l.git(repo, "checkout", "-q", "-b", "clean", "main")
+	if out, errText := l.hookStderr(repo, payload); out != "" || errText != "" {
+		t.Fatalf("a clean branch must pass silently, got stdout %q stderr %q", out, errText)
+	}
+	l.git(repo, "checkout", "-q", "feat")
+	if out, _ := l.hookStderr(repo, payload); !blockDecision(out) {
+		t.Fatalf("after a pass the gate must block afresh, got %q", out)
+	}
+}
+
+// The session-wide cap bounds a loop even when the per-set count never trips: the blocker set CHANGES
+// between refusals (so n resets), and only the total cap can stand the gate down.
+func TestStopHookSessionWideCapStandsDownTheGate(t *testing.T) {
+	l, home := newLayout(t)
+	repo := l.blockedRepo(home)
+	payload := `{"session_id":"sess-total"}`
+	limits := []string{"METAREVIEW_STOP_GUARD_LIMIT=100", "METAREVIEW_STOP_GUARD_TOTAL=2"}
+	if out, _ := l.runStopHook(repo, payload, limits...); !blockDecision(out) {
+		t.Fatalf("the first refusal must block, got %q", out)
+	}
+	l.abandon(repo) // a second abandoned run CHANGES the blocker set, so the per-set count resets
+	out, errText := l.runStopHook(repo, payload, limits...)
+	if out != "" || !strings.Contains(errText, "yielding after a repeated block") {
+		t.Fatalf("the session-wide cap must stand the gate down on a changing set, got stdout %q stderr %q", out, errText)
+	}
+}
+
+// A persistently BROKEN gate (status exits neither 0 nor 1) must also be bounded, not refuse forever.
+func TestStopHookBreaksABrokenGateLoop(t *testing.T) {
+	l, home := newLayout(t)
+	repo := filepath.Join(home, "repo")
+	if err := os.Mkdir(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	l.seed(repo)
+	l.optIn(repo)
+	broken := filepath.Join(home, "broken-metareview")
+	if err := os.WriteFile(broken, []byte("#!/bin/sh\nexit 2\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"session_id":"sess-broken"}`
+	brokenBin := "METAREVIEW_BIN=" + broken
+	for i := 1; i <= 3; i++ {
+		out, errText := l.runStopHook(repo, payload, brokenBin)
+		if i < 3 {
+			if !blockDecision(out) {
+				t.Fatalf("attempt %d must block on a broken gate, got stdout %q stderr %q", i, out, errText)
+			}
+			continue
+		}
+		if out != "" || !strings.Contains(errText, "yielding after a repeated block") {
+			t.Fatalf("attempt %d must stand down loudly, got stdout %q stderr %q", i, out, errText)
+		}
+	}
+}
+
+// A pass clears the record: with the per-set limit at 2, a block, a clean pass, then the same block again
+// must BLOCK (if the pass had not cleared the count, the second refusal would stand the gate down).
+func TestStopHookPassClearsTheLoopGuard(t *testing.T) {
+	l, home := newLayout(t)
+	repo := l.blockedRepo(home)
+	payload := `{"session_id":"sess-pass"}`
+	limits := []string{"METAREVIEW_STOP_GUARD_LIMIT=2", "METAREVIEW_STOP_GUARD_TOTAL=2"}
+	if out, _ := l.runStopHook(repo, payload, limits...); !blockDecision(out) {
+		t.Fatalf("the first refusal must block, got %q", out)
+	}
+	// A pass on a branch with nothing to clear.
+	l.git(repo, "checkout", "-q", "-b", "clean", "main")
+	if out, errText := l.runStopHook(repo, payload, limits...); out != "" || errText != "" {
+		t.Fatalf("a clean branch must pass silently, got stdout %q stderr %q", out, errText)
+	}
+	// Back on the blocked branch: with the count cleared this is refusal 1, so it must BLOCK, not stand down.
+	l.git(repo, "checkout", "-q", "feat")
+	if out, errText := l.runStopHook(repo, payload, limits...); !blockDecision(out) {
+		t.Fatalf("a pass must clear the loop-guard count, so the next refusal blocks: stdout %q stderr %q", out, errText)
+	}
+}
+
+// The missing-binary path is the other refusal a session cannot clear from inside, and it carries the
+// same guard: it blocks a few times, then stands down loudly.
+func TestStopHookBreaksAMissingBinaryLoop(t *testing.T) {
+	l, home := newLayout(t)
+	repo := filepath.Join(home, "repo")
+	if err := os.Mkdir(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	l.seed(repo)
+	l.optIn(repo)
+	payload := `{"session_id":"sess-missing"}`
+	missing := "METAREVIEW_BIN=" + filepath.Join(home, "absent")
+	for i := 1; i <= 3; i++ {
+		out, errText := l.runStopHook(repo, payload, missing)
+		if i < 3 {
+			if !blockDecision(out) {
+				t.Fatalf("attempt %d must block, got stdout %q stderr %q", i, out, errText)
+			}
+			continue
+		}
+		if out != "" || !strings.Contains(errText, "yielding after a repeated block") {
+			t.Fatalf("attempt %d must stand down loudly, got stdout %q stderr %q", i, out, errText)
+		}
+	}
+}
+
+// A stand-down clears the record too: after it, the gate is NOT permanently off — the next Stop with the
+// same blockers blocks afresh (with LIMIT=2, a stale count would stand it down immediately).
+func TestStopHookStandDownClearsTheRecord(t *testing.T) {
+	l, home := newLayout(t)
+	repo := l.blockedRepo(home)
+	payload := `{"session_id":"sess-resume"}`
+	limits := []string{"METAREVIEW_STOP_GUARD_LIMIT=2", "METAREVIEW_STOP_GUARD_TOTAL=2"}
+	if out, _ := l.runStopHook(repo, payload, limits...); !blockDecision(out) {
+		t.Fatalf("refusal 1 must block, got %q", out)
+	}
+	if out, errText := l.runStopHook(repo, payload, limits...); out != "" || !strings.Contains(errText, "yielding after a repeated block") {
+		t.Fatalf("refusal 2 must stand down, got stdout %q stderr %q", out, errText)
+	}
+	if out, errText := l.runStopHook(repo, payload, limits...); !blockDecision(out) {
+		t.Fatalf("after a stand-down the next refusal must block afresh: stdout %q stderr %q", out, errText)
+	}
+}
+
+// A DIFFERENT blocker set restarts the per-set count: with LIMIT=2, a second refusal about NEW work must
+// block, not stand down (only the session-wide cap bounds a set that keeps changing).
+func TestStopHookDifferentBlockersRestartTheCount(t *testing.T) {
+	l, home := newLayout(t)
+	repo := l.blockedRepo(home)
+	payload := `{"session_id":"sess-progress"}`
+	limits := []string{"METAREVIEW_STOP_GUARD_LIMIT=2", "METAREVIEW_STOP_GUARD_TOTAL=100"}
+	if out, _ := l.runStopHook(repo, payload, limits...); !blockDecision(out) {
+		t.Fatalf("refusal 1 must block, got %q", out)
+	}
+	l.abandon(repo) // a second abandoned run changes the blocker set
+	if out, errText := l.runStopHook(repo, payload, limits...); !blockDecision(out) {
+		t.Fatalf("a different blocker set must block afresh: stdout %q stderr %q", out, errText)
 	}
 }
 

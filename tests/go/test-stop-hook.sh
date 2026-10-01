@@ -8,6 +8,13 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 HOOK="$ROOT/hooks/pre-finish.sh"
+# Isolate the Stop hook's loop-guard state (mr-j30): it lives under XDG_CACHE_HOME, so without this the
+# test would write into the operator's real cache directory and a leftover counter could leak between runs.
+export XDG_CACHE_HOME="$TMP/cache"
+# Set the loop guard aside for this suite: it exercises each refusal as an INDEPENDENT first pass, and the
+# guard's own counting is covered by internal/githooktest's real-CLI tests. Without this the suite's several
+# blocking cases would share one counter and a later one would stand down for a reason the case is not about.
+export METAREVIEW_STOP_GUARD_LIMIT=100 METAREVIEW_STOP_GUARD_TOTAL=100
 
 (cd "$ROOT" && go build -o "$TMP/mrv" ./cmd/metareview)
 
@@ -169,7 +176,8 @@ grep -q "override request" "$TMP/err" || {
   echo "FAIL: the yield must name the recorded way out:"; cat "$TMP/err" >&2; exit 1; }
 
 # 11. The FIRST pass still blocks, and so does an absent, false, or unparseable payload. Yielding
-#     is for a repeat; a gate that stands down on every session is bypassed by ignoring it once.
+#     is for a repeat; a gate that stands down on every session is bypassed by ignoring it once. (The loop
+#     guard is set aside suite-wide above, so each of these is an independent first pass.)
 for payload in '{"stop_hook_active":false}' '{}' 'not json at all' ''; do
   out="$(printf '%s' "$payload" | METAREVIEW_BIN="$TMP/blocking" bash "$HOOK")"
   assert_json_block "$out" "internal/thing.go"
