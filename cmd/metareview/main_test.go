@@ -86,6 +86,17 @@ func TestRunHelpAndVersion(t *testing.T) {
 	}
 }
 
+func TestRunSourceReviewHelp(t *testing.T) {
+	code, out, errOut := runCLI(t, t.TempDir(), nil, "source-review", "--help")
+	if code != 0 || !strings.Contains(out, "source-review --model astra|opus|grok --output <dir>") || errOut != "" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
+	}
+	code, help, _ := runCLI(t, t.TempDir(), nil, "--help")
+	if code != 0 || !strings.Contains(help, "metareview source-review --model astra|opus|grok --output <dir> [--jobs <n>] [--call-timeout <duration>] [--path <path>]... [<repo>]") {
+		t.Fatalf("top-level help missing source-review: %q", help)
+	}
+}
+
 func TestRunUnknownCommand(t *testing.T) {
 	code, _, errOut := runCLI(t, t.TempDir(), nil, "bogus")
 	if code != 2 || !strings.Contains(errOut, "Unknown command") {

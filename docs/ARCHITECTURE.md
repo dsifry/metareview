@@ -39,6 +39,28 @@ abbreviated — task-done/epic-ready/pr-ready also take `--evidence <file>` (a v
 | **epic-ready** | `review epic-ready <id>` | the epic's **integration diff** (base..HEAD, the union of the children's changes), **with the roll-up as context** — child evidence present? contradictions? intent drift? registry coverage? | deterministic heuristics (roll-up freshness) **+ a required adjudicated review** over the integration diff (base..HEAD) via the `epic-review-loop` workflow — same require-lenses gate as pr-ready/task-done |
 | **learn** | `learn --post-merge <pr>` | what the merged PR + bot findings teach us | learning extraction |
 
+`source-review` is a separate command (`source-review --model astra|opus|grok --output <dir> [--jobs <n>]
+[--call-timeout <duration>] [--path <path>]... [<repo>]`).
+It reviews the first-party source at HEAD — code `Classify` keeps, minus tests, vendored trees,
+generated files, and non-UTF-8, narrowed to `--path` when given (a sample of the real checkout) — by calling the logged-in `claude`, `codex`, or `grok` CLI, up to `--jobs`
+prompts at once (default 8), each call killed with its process group past `--call-timeout` (default 30m).
+Every model gets the same setup — one system prompt, one findings JSON schema, no tools, one answer — so they
+are compared on the same job: `claude -p --tools "" --system-prompt --json-schema --strict-mcp-config`,
+`grok --prompt-file --verbatim --json-schema --tools read_file --disallowed-tools read_file,search_tool,use_tool
+--max-turns 1 --system-prompt-override --reasoning-effort medium`
+(`grok --tools ""` retains the default tools; a nonempty allowlist followed by denial actually removes them;
+`grok -p` hands a large prompt to its agent as an excerpt it re-reads with tools), and
+`codex exec -s read-only --skip-git-repo-check --output-schema`
+(Codex has no switch to remove its tools or replace its system prompt, so it is the one that differs).
+Calls start in an empty temporary working directory, cleaned after success or failure, so the host project's
+rules are not injected. Per-process settings disable Claude customizations and Grok's Claude/Cursor compatibility
+instructions. Native provider context can still differ. Grok's requested model is also set as its initial
+default: switching models after initialization otherwise replaces the supplied system prompt. Claude's effort
+environment override is set explicitly because it takes precedence over the CLI flag. Neither provider's
+global configuration is edited. Explicit token-limit stops and Grok structured-output failures fail the call,
+even if response text happens to parse as findings JSON.
+It does not use the diff-review anchor gate, `ValidatePayload`, `internal/shardpack`, or `review-lenses`.
+
 `epic-ready` runs *after* every child task is task-done-reviewed. It reviews the epic's **integration diff**
 (base..HEAD, the union of the children's changes) **with the roll-up — child review logs, evidence, parent
 intent — as context**; the roll-up's own freshness is guarded by the deterministic pre-checks (re-read every
@@ -489,7 +511,8 @@ list below is illustrative, omitting e.g. `judge`, `gate`, `converge`, `export`)
   (floor gate).
 - **Context & evidence:** `gitcontext` (exclude-filtered diff), `githubcontext`, `contextpack`,
   `contextprofile`, `shardpack` (shard packs), `evidence`, `mutation` (Stryker/gremlins report), `knowledge`,
-  `markdown`, `classify` (file class), `testconv` (test-file convention).
+  `markdown`, `classify` (file class), `testconv` (test-file convention),
+  `sourcereview` (whole-repo first-party source review; not the diff gate).
 - **FSM:** `fsm/{cli,machine,workflow,run,record,sandbox,kind}`.
 - **Sources & learning:** `tasksource`, `epicsource` (Beads etc.), `learning`, `learnsource`,
   `sessionhistory`, `integration` (metaswarm).

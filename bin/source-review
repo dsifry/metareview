@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  printf 'Usage: %s --model <grok|opus|astra> --repo <path>\n' "$0"
+}
+
+model=""
+repo=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --model|--repo)
+      if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+        printf 'Missing value for %s\n' "$1" >&2
+        usage >&2
+        exit 2
+      fi
+      case "$1" in
+        --model) model="$2" ;;
+        --repo) repo="$2" ;;
+      esac
+      shift 2
+      ;;
+    --help|-h) usage; exit 0 ;;
+    *) printf 'Unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if [[ -z "$model" || -z "$repo" ]]; then
+  printf 'Both --model and --repo are required\n' >&2
+  usage >&2
+  exit 2
+fi
+case "$model" in
+  grok|opus|astra) ;;
+  *) printf 'Unknown model: %s\n' "$model" >&2; usage >&2; exit 2 ;;
+esac
+
+# Resolve the caller's repo before moving into the metareview checkout to build.
+repo="$(cd -- "$repo" && pwd -P)"
+root="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd -- "$root"
+go build -o bin/metareview ./cmd/metareview
+
+# Each run gets its own reports, outside the repository being reviewed.
+output="$(mktemp -d "/tmp/metareview-${model}-XXXXXX")"
+printf 'Reports: %s\n' "$output" >&2
+exec "$root/bin/metareview" source-review --model "$model" --output "$output" "$repo"

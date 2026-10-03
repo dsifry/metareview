@@ -36,6 +36,7 @@ import (
 	"github.com/dsifry/metareview/internal/reviewprompt"
 	"github.com/dsifry/metareview/internal/reviewstate"
 	"github.com/dsifry/metareview/internal/setup"
+	"github.com/dsifry/metareview/internal/sourcereview"
 	"github.com/dsifry/metareview/internal/status"
 	"github.com/dsifry/metareview/internal/taskdone"
 	"github.com/dsifry/metareview/internal/version"
@@ -128,6 +129,7 @@ Usage:
   metareview review record-lenses [--scope pr-ready|task-done|epic-ready] [--base <ref>] [--verdict <v>] [--mode subagent-adjudicated|in-session-emulated] [--lenses a,b,c] [--from-run <fsm-run-id>]
   metareview review checkpoint --scope pr-ready|task-done|epic-ready
   metareview learn --post-merge <pr-number> [--base <ref>] [--github-pr <number>] [--session-root <path>]
+  metareview source-review --model astra|opus|grok --output <dir> [--jobs <n>] [--call-timeout <duration>] [--path <path>]... [<repo>]
 
   --base last-reviewed (task-done, epic-ready, pr-ready, record-lenses) reviews only what is new since the
   last passing review of that scope: the head printed by 'review checkpoint'.
@@ -158,6 +160,7 @@ Commands:
   review record-lenses       Record an adjudicated lens review over HEAD (satisfies the require-lenses gate)
   review checkpoint          Print the head of the last passing review of a scope on an ancestor of HEAD
   learn --post-merge         Curate post-merge repository learning
+  source-review              Review first-party source with Astra, Opus, or Grok
 `, version.Version)
 }
 
@@ -180,6 +183,11 @@ func dispatch(args []string) {
 
 	if args[0] == "--version" || args[0] == "-v" {
 		_, _ = fmt.Fprintln(stdout, version.Version)
+		return
+	}
+
+	if args[0] == "source-review" {
+		exit(sourcereview.CLI(args[1:], workdir, stdout, stderr))
 		return
 	}
 
