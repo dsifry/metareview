@@ -88,7 +88,7 @@ a deliberate human reset, not something the agent decides.
   names (values never persisted); stdout/stderr are capped and audited.
 - Agent-satisfiable knobs — `--allow-custom-cmds`, `--accept-workflow-change`, `--workflow <path>`, `--var JUDGE` /
   `JUDGE_EFFORT`, `--judge-model`/`--judge-effort` and `METAREVIEW_JUDGE_MODEL`/`METAREVIEW_JUDGE_EFFORT` (which
-  retarget the judge exactly as `--var JUDGE` does, and a `codex/` model spawns a local binary),
+  retarget the judge exactly as `--var JUDGE` does, and a `codex/`, `claude-cli/` or `grok/` model spawns a local binary),
   `--mock-ai`/`MOCK_AI`, `--calibration`, `--repo-mode`, `--repair`, `--run-id`, `--include-vars`,
   `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL` — weaken a guardrail; base-URL overrides are not recorded in the audit.
 - The audit chain is integrity-against-accident, not tamper evidence against the host; these are process guarantees

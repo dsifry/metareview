@@ -139,6 +139,54 @@ func TestRealClaudeExec(t *testing.T) {
 	})
 }
 
+// TestRealGrokExec is the grok twin of TestRealCodexExec: the grokBin seam
+// exercises realGrokExec's three exit paths without the Grok CLI installed
+// (the coverage gate holds this package at 100% of statements). Grok reads its
+// prompt from --prompt-file, so stdin is unread and the stdout path is probed
+// with an argv that prints.
+func TestRealGrokExec(t *testing.T) {
+	original := grokBin
+	defer func() { grokBin = original }()
+
+	t.Run("GROK_MEMORY is disabled for the call", func(t *testing.T) {
+		grokBin = "sh"
+		out, code, err := realGrokExec(context.Background(), "", []string{"-c", `printf %s "$GROK_MEMORY"`}, "")
+		if err != nil || code != 0 || string(out) != "0" {
+			t.Fatalf("GROK_MEMORY=%q code=%d err=%v", out, code, err)
+		}
+	})
+
+	t.Run("stdout", func(t *testing.T) {
+		grokBin = "sh"
+		out, code, err := realGrokExec(context.Background(), "", []string{"-c", "printf answer"}, "")
+		if err != nil || code != 0 || string(out) != "answer" {
+			t.Fatalf("out=%q code=%d err=%v", out, code, err)
+		}
+	})
+
+	t.Run("a non-zero exit is an answer, not a failure to run", func(t *testing.T) {
+		grokBin = "sh"
+		out, code, err := realGrokExec(context.Background(), "", []string{"-c", "printf partial; exit 3"}, "")
+		if err != nil {
+			t.Fatalf("a process that ran must not report err: %v", err)
+		}
+		if code != 3 || string(out) != "partial" {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+	})
+
+	t.Run("a missing binary is a failure to run", func(t *testing.T) {
+		grokBin = "metareview-no-such-binary"
+		_, code, err := realGrokExec(context.Background(), "", nil, "")
+		if err == nil {
+			t.Fatal("expected an error when the CLI is not installed")
+		}
+		if code != 0 {
+			t.Fatalf("code must stay 0 when nothing ran, got %d", code)
+		}
+	})
+}
+
 // --calibration pins JUDGE and JUDGE_EFFORT so calibration runs stay comparable,
 // and resolve refuses a run that also supplies them. An explicit flag is a real
 // conflict and must still be refused; an ambient environment variable is not —

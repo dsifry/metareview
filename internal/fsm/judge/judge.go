@@ -136,6 +136,7 @@ const (
 	provOpenAI
 	provCodex
 	provClaudeCLI
+	provGrok
 )
 
 func route(model string) provider {
@@ -150,6 +151,8 @@ func route(model string) provider {
 	// Anthropic HTTP API and demand the very API key the caller is avoiding.
 	case strings.HasPrefix(m, ClaudeCLIPrefix):
 		return provClaudeCLI
+	case strings.HasPrefix(m, GrokPrefix):
+		return provGrok
 	case strings.HasPrefix(m, "claude"), strings.HasPrefix(m, "anthropic/"):
 		return provAnthropic
 	case strings.HasPrefix(m, "gpt"), strings.HasPrefix(m, "openai/"), strings.HasPrefix(m, "glm"), strings.HasPrefix(m, "kimi"):
@@ -201,7 +204,7 @@ func wireModel(model string) string {
 	// Case-insensitive, to match route: it lowercases before comparing, so a
 	// differently-cased prefix routed to a provider and then travelled to the
 	// wire unstripped.
-	return trimPrefixFold(trimPrefixFold(trimPrefixFold(trimPrefixFold(model, ClaudeCLIPrefix), CodexPrefix), "anthropic/"), "openai/")
+	return trimPrefixFold(trimPrefixFold(trimPrefixFold(trimPrefixFold(trimPrefixFold(model, ClaudeCLIPrefix), CodexPrefix), GrokPrefix), "anthropic/"), "openai/")
 }
 
 // trimPrefixFold is strings.TrimPrefix with an ASCII case-insensitive match.
@@ -220,6 +223,7 @@ type realJudge struct {
 	// caller's directory, which is metareview's own repo - read and exec access to all of it.
 	codexWorkDir string
 	claude       ClaudeExec
+	grok         GrokExec
 	// attemptTimeout overrides the per-attempt timeout; zero means the AttemptTimeout default.
 	// Set via WithTimeout so a slow reasoning model (a large-context glm-5.3 call routinely needs
 	// >180s) can be given more room without editing a compile-time constant.
@@ -307,6 +311,14 @@ func NewWithCodex(doer Doer, keys Keys, urls URLs, nonce func() string, clock Cl
 // case a model routed to that CLI is refused rather than silently falling back
 // to HTTP, which would need an API key the caller deliberately did not supply.
 func NewWithCodexAndClaude(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock, codex CodexExec, claude ClaudeExec) (Judge, error) {
+	return NewWithCLIs(doer, keys, urls, nonce, clock, codex, claude, nil)
+}
+
+// NewWithCLIs is the full constructor: New plus all three CLI seams. Any seam
+// may be nil, in which case a model routed to that CLI is refused rather than
+// silently falling back to HTTP, which would need an API key the caller
+// deliberately did not supply.
+func NewWithCLIs(doer Doer, keys Keys, urls URLs, nonce func() string, clock Clock, codex CodexExec, claude ClaudeExec, grok GrokExec) (Judge, error) {
 	if urls.Anthropic == "" {
 		urls.Anthropic = DefaultURLs.Anthropic
 	}
@@ -320,7 +332,7 @@ func NewWithCodexAndClaude(doer Doer, keys Keys, urls URLs, nonce func() string,
 		}
 		*u = clean
 	}
-	return &realJudge{doer: doer, keys: keys, urls: urls, nonce: nonce, clock: clock, codex: codex, claude: claude}, nil
+	return &realJudge{doer: doer, keys: keys, urls: urls, nonce: nonce, clock: clock, codex: codex, claude: claude, grok: grok}, nil
 }
 
 // checkURL enforces the base-URL policy and strips a trailing slash.
@@ -401,6 +413,10 @@ func validate(model, effort string, calibration bool, keys Keys) (provider, erro
 		// Delegated whole, for the same reasons as codex: the CLI holds the
 		// credential and accepts the max effort level the API does not.
 		return prov, validateClaude(model, effort, calibration)
+	}
+	if prov == provGrok {
+		// Delegated whole, for the same reasons as codex and claude-cli.
+		return prov, validateGrok(model, effort, calibration)
 	}
 	if !efforts[effort] {
 		return provUnknown, errs.E(CodeJudgeEffortUnsupported, "unknown effort "+effort, "effort", effort)
@@ -671,6 +687,13 @@ func (j *realJudge) Call(ctx context.Context, r Request) (v Verdict, err error) 
 		// No workDir: the escalated materialized-tree path is codex-gated (cli/escalation.go),
 		// so a claude judge always runs in the caller's directory.
 		return (&claudeJudge{exec: j.claude, nonce: j.nonce, clock: j.clock, attemptTimeout: j.attemptTimeout}).Call(ctx, r)
+	}
+	if route(r.Model) == provGrok {
+		if j.grok == nil {
+			return Verdict{Kind: r.Kind, Model: r.Model, Effort: r.Effort, InputHash: InputHash(r.Input)},
+				errs.E(CodeJudgeModel, "no grok runner is wired for "+r.Model, "model", r.Model, "provider", "grok")
+		}
+		return (&grokJudge{exec: j.grok, nonce: j.nonce, clock: j.clock, attemptTimeout: j.attemptTimeout}).Call(ctx, r)
 	}
 	v = Verdict{Kind: r.Kind, Model: r.Model, Effort: r.Effort, InputHash: InputHash(r.Input)}
 	system, user, err := RenderPrompt(r.Kind, r.Input, r.Fence, r.Calibration, j.nonce())

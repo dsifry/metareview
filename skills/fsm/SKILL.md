@@ -70,7 +70,7 @@ ratio. A candidate whose file is not in the diff is never judged: it is kept as
 - These knobs weaken a guardrail; use them only when the human tells you to: `--allow-custom-cmds`,
   `--accept-workflow-change`, `--workflow <path>`, `--var JUDGE`/`JUDGE_EFFORT`,
   `--judge-model`/`--judge-effort` and `METAREVIEW_JUDGE_MODEL`/`METAREVIEW_JUDGE_EFFORT` (they retarget the judge
-  exactly as `--var JUDGE` does, and a `codex/` model spawns a local binary), `--mock-ai`/`MOCK_AI`, `--calibration`,
+  exactly as `--var JUDGE` does, and a `codex/`, `claude-cli/` or `grok/` model spawns a local binary), `--mock-ai`/`MOCK_AI`, `--calibration`,
   `--repo-mode`, `--repair`, `--run-id`, `--include-vars`, `ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL` (base-URL overrides
   are not recorded in the audit).
 - Consent: an `ERR_CMDS_NOT_ALLOWED` `cmds` list and its `cmds_sha256` are for a human — relay them unchanged, stop, and
@@ -86,12 +86,13 @@ ratio. A candidate whose file is not in the diff is never judged: it is kept as
 - The audit chain (`audit.jsonl`) is integrity-against-accident, not tamper evidence against the host; these are
   process guarantees for a cooperating agent.
 - Calibration runs (`--calibration`) are eval-only; judge models are the closed Anthropic family table, plus
-  OpenAI-compatible ids, plus `codex/<model>` ids judged through the Codex CLI; `high` effort is Go-only.
-- A `codex/` model spawns the `codex` binary from `PATH` rather than making an HTTP request. It reads the
-  operator's own OAuth session under `~/.codex`, so metareview never handles that credential and no API key
-  is required for it — but it is a process spawn outside the `allowed_cmds` consent gate, which covers
-  workflow `cmds` only. Each attempt is bounded by `AttemptTimeout` and retried on the same ladder as the
-  HTTP providers.
+  OpenAI-compatible ids, plus `codex/<model>`, `claude-cli/<model>` and `grok/<model>` ids judged through their
+  local CLIs; `high` effort is Go-only.
+- A `codex/`, `claude-cli/` or `grok/` model spawns that CLI binary from `PATH` rather than making an HTTP
+  request. It reads the operator's own logged-in session (under `~/.codex`, `~/.claude` or the grok config home),
+  so metareview never handles that credential and no API key is required for it — but it is a process spawn
+  outside the `allowed_cmds` consent gate, which covers workflow `cmds` only. Each attempt is bounded by
+  `AttemptTimeout` and retried on the same ladder as the HTTP providers.
 - The binary reads exactly these env names: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_BASE_URL`,
   `OPENAI_BASE_URL`, `METAREVIEW_JUDGE_MODEL`, `METAREVIEW_JUDGE_EFFORT`, `MOCK_AI`, `MRV_RUN_ID`, `HOME`
   (plus `PATH` and, on Linux, `SSL_CERT_*` through the Go runtime). No proxy variables are honoured.

@@ -46,6 +46,7 @@ type Deps struct {
 	Exec       gate.Exec
 	CodexExec  judge.CodexExec
 	ClaudeExec judge.ClaudeExec
+	GrokExec   judge.GrokExec
 	HTTP       judge.Doer
 	Store      func(root string) run.RunStore
 	Sidecar    func(root string) machine.Sidecar
@@ -72,6 +73,7 @@ func RealDeps() Deps {
 		Exec:       gate.RealExec,
 		CodexExec:  realCodexExec,
 		ClaudeExec: realClaudeExec,
+		GrokExec:   realGrokExec,
 		HTTP:       newHTTPClient(),
 		Store:      func(common string) run.RunStore { return run.NewCommonDirStore(common, run.Options{}) },
 		Sidecar:    func(common string) machine.Sidecar { return machine.FSSidecar{Root: common, CommonDir: true} },
@@ -105,6 +107,32 @@ var codexBin = judge.CodexBin
 
 // claudeBin is the executable realClaudeExec runs; a seam for the same reason.
 var claudeBin = judge.ClaudeBin
+
+// grokBin is the executable realGrokExec runs; a seam for the same reason.
+var grokBin = judge.GrokBin
+
+// realGrokExec runs the Grok CLI. Unlike claude and codex, the prompt is not on
+// stdin: grok reads it from --prompt-file, so stdin is unused. The environment
+// is inherited (the logged-in session the CLI reads lives under the user's
+// home, and metareview never handles the token itself) plus GROK_MEMORY=0, the
+// documented switch that keeps a judge call out of the user's cross-session
+// memory.
+func realGrokExec(ctx context.Context, dir string, args []string, _ string) ([]byte, int, error) {
+	cmd := exec.CommandContext(ctx, grokBin, args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GROK_MEMORY=0")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return out.Bytes(), ee.ExitCode(), nil
+	}
+	if err != nil {
+		return out.Bytes(), 0, err
+	}
+	return out.Bytes(), 0, nil
+}
 
 // realClaudeExec runs the Claude Code CLI, mirroring realCodexExec: the user
 // prompt goes in on stdin rather than as an argument so it never appears in the
